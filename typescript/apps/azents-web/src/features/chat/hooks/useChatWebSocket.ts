@@ -14,14 +14,106 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-function isChatEventWire(value: unknown): value is ChatEvent {
-  if (!isRecord(value)) {
+function hasStringField(
+  value: Record<string, unknown>,
+  field: string,
+): boolean {
+  return typeof value[field] === "string";
+}
+
+function isSessionFrame(
+  value: Record<string, unknown>,
+  sessionId: string,
+): boolean {
+  return value.session_id === sessionId;
+}
+
+function isEventResponse(value: unknown, sessionId: string): boolean {
+  return (
+    isRecord(value) &&
+    hasStringField(value, "id") &&
+    value.session_id === sessionId &&
+    hasStringField(value, "kind") &&
+    isRecord(value.payload)
+  );
+}
+
+function isChatEventWire(
+  value: unknown,
+  sessionId: string,
+): value is ChatEvent {
+  if (!isRecord(value) || typeof value.type !== "string") {
     return false;
   }
-  if (typeof value.type === "string") {
-    return true;
+
+  switch (value.type) {
+    case "subscribed":
+    case "input_actions_updated":
+      return isSessionFrame(value, sessionId);
+    case "subscription_health_check_ack":
+      return (
+        isSessionFrame(value, sessionId) &&
+        (value.request_id == null || typeof value.request_id === "string")
+      );
+    case "history_event_appended":
+    case "live_event_upserted":
+      return (
+        isSessionFrame(value, sessionId) &&
+        isEventResponse(value.event, sessionId)
+      );
+    case "live_event_removed":
+      return (
+        isSessionFrame(value, sessionId) && hasStringField(value, "event_id")
+      );
+    case "live_run_updated":
+      return isSessionFrame(value, sessionId) && isRecord(value.run);
+    case "live_run_cleared":
+      return (
+        isSessionFrame(value, sessionId) && hasStringField(value, "run_id")
+      );
+    case "action_execution_updated":
+      return (
+        isSessionFrame(value, sessionId) && isRecord(value.action_execution)
+      );
+    case "run_started":
+      return hasStringField(value, "run_id");
+    case "run_phase_changed":
+      return hasStringField(value, "run_id") && hasStringField(value, "phase");
+    case "run_complete":
+      return hasStringField(value, "run_id");
+    case "run_stopped":
+      return hasStringField(value, "run_id");
+    case "runtime_initializing":
+    case "runtime_ready":
+      return true;
+    case "runtime_error":
+      return hasStringField(value, "message");
+    case "authorization_request":
+      return (
+        hasStringField(value, "toolkit_id") &&
+        hasStringField(value, "toolkit_name")
+      );
+    case "account_link_nudge":
+      return (
+        hasStringField(value, "toolkit_id") &&
+        hasStringField(value, "toolkit_name") &&
+        hasStringField(value, "toolkit_type")
+      );
+    case "compaction_started":
+    case "compaction_complete":
+      return value.continuing == null || typeof value.continuing === "boolean";
+    case "session_created":
+      return isSessionFrame(value, sessionId);
+    case "todo_state_changed":
+      return isRecord(value.todo) && Array.isArray(value.todo.items);
+    case "subagent_tree_changed":
+      return (
+        hasStringField(value, "root_session_agent_id") &&
+        hasStringField(value, "changed_session_agent_id")
+      );
+    default:
+      return false;
   }
-  return typeof value.kind === "string" && isRecord(value.payload);
 }
 
 /** reconnect settings */
@@ -44,14 +136,12 @@ interface UseChatWebSocketOptions {
   sessionId: string | null;
   /** received chat event  parent state reducer  with pass */
   onEvent: (event: ChatEvent) => void;
-  /** message reload callback (batch for reload) */
-  onBatchReload?: () => boolean;
+  /** message reload callback for periodic and browser-resume resync */
+  onBatchReload?: (reason: "periodic" | "resume") => boolean;
   /** session subscription ack received callback */
   onSubscribed?: () => void;
   /** auth error when ticket refresh request callback */
   onAuthError?: () => void;
-  /** Buffering notify that live event was held instead of rendered immediately while buffering */
-  onBufferedLiveEvent?: () => void;
 }
 
 interface UseChatWebSocketReturn {
@@ -63,6 +153,8 @@ interface UseChatWebSocketReturn {
   replayBufferedLiveEvents: () => void;
   /** session subscription health check barrier */
   requestSubscriptionHealthCheck: () => Promise<boolean>;
+  /** reconnect after a failed subscription barrier */
+  requestReconnect: () => void;
 }
 
 export function useChatWebSocket({
@@ -73,7 +165,6 @@ export function useChatWebSocket({
   onBatchReload,
   onSubscribed,
   onAuthError,
-  onBufferedLiveEvent,
 }: UseChatWebSocketOptions): UseChatWebSocketReturn {
   const [connectionStatus, setConnectionStatus] =
     useState<ConnectionStatus>("disconnected");
@@ -105,8 +196,6 @@ export function useChatWebSocket({
   onSubscribedRef.current = onSubscribed;
   const onAuthErrorRef = useRef(onAuthError);
   onAuthErrorRef.current = onAuthError;
-  const onBufferedLiveEventRef = useRef(onBufferedLiveEvent);
-  onBufferedLiveEventRef.current = onBufferedLiveEvent;
 
   const clearTimers = useCallback(() => {
     if (reconnectTimerRef.current) {
@@ -120,20 +209,36 @@ export function useChatWebSocket({
   }, []);
 
   const setBufferingLiveEvents = useCallback((buffering: boolean): void => {
-    isBufferingLiveEventsRef.current = buffering;
-    if (buffering) {
+    if (buffering && !isBufferingLiveEventsRef.current) {
       liveEventBufferRef.current = [];
     }
+    isBufferingLiveEventsRef.current = buffering;
   }, []);
+
+  const liveEventBufferingEnabled = useCallback(
+    (): boolean => isBufferingLiveEventsRef.current,
+    [],
+  );
 
   const replayBufferedLiveEvents = useCallback((): void => {
     const buffered = liveEventBufferRef.current;
     liveEventBufferRef.current = [];
     isBufferingLiveEventsRef.current = false;
-    for (const event of buffered) {
-      onEventRef.current(event);
+    for (const [index, event] of buffered.entries()) {
+      if (liveEventBufferingEnabled()) {
+        liveEventBufferRef.current = [
+          ...buffered.slice(index),
+          ...liveEventBufferRef.current,
+        ];
+        return;
+      }
+      try {
+        onEventRef.current(event);
+      } catch (error) {
+        console.error("WebSocket event projection failed", error);
+      }
     }
-  }, []);
+  }, [liveEventBufferingEnabled]);
 
   const requestSubscriptionHealthCheck = useCallback((): Promise<boolean> => {
     const ws = wsRef.current;
@@ -164,7 +269,10 @@ export function useChatWebSocket({
     if (!wsUrl || !ticket || sessionIdRef.current === null) {
       return;
     }
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
+    if (
+      wsRef.current?.readyState === WebSocket.OPEN ||
+      wsRef.current?.readyState === WebSocket.CONNECTING
+    ) {
       return;
     }
 
@@ -191,7 +299,7 @@ export function useChatWebSocket({
       }
       try {
         const raw: unknown = JSON.parse(e.data);
-        if (!isChatEventWire(raw)) {
+        if (!isChatEventWire(raw, currentSessionId)) {
           return;
         }
         if ("type" in raw && raw.type === "subscribed") {
@@ -201,7 +309,7 @@ export function useChatWebSocket({
             clearInterval(batchReloadTimerRef.current);
           }
           batchReloadTimerRef.current = setInterval(() => {
-            onBatchReloadRef.current?.();
+            onBatchReloadRef.current?.("periodic");
           }, BATCH_RELOAD_INTERVAL);
           onSubscribedRef.current?.();
           return;
@@ -216,7 +324,6 @@ export function useChatWebSocket({
         }
         if (isBufferingLiveEventsRef.current) {
           liveEventBufferRef.current = [...liveEventBufferRef.current, raw];
-          onBufferedLiveEventRef.current?.();
           return;
         }
         onEventRef.current(raw);
@@ -239,6 +346,7 @@ export function useChatWebSocket({
         resolve(false);
       }
       healthCheckWaitersRef.current.clear();
+      replayBufferedLiveEvents();
 
       if (e.code === 4001 || e.code === 4003) {
         setConnectionStatus("reconnecting");
@@ -263,7 +371,20 @@ export function useChatWebSocket({
     };
 
     ws.onerror = () => {};
-  }, [wsUrl, ticket]);
+  }, [replayBufferedLiveEvents, ticket, wsUrl]);
+
+  const requestReconnect = useCallback((): void => {
+    replayBufferedLiveEvents();
+    shouldReconnectRef.current = true;
+    reconnectAttemptRef.current = 0;
+    setConnectionStatus("reconnecting");
+    const ws = wsRef.current;
+    if (ws !== null) {
+      ws.close(4000, "Subscription health check failed");
+      return;
+    }
+    connect();
+  }, [connect, replayBufferedLiveEvents]);
 
   const disconnect = useCallback(() => {
     shouldReconnectRef.current = false;
@@ -305,25 +426,12 @@ export function useChatWebSocket({
     resumeResyncInFlightRef.current = true;
     lastResumeResyncAtRef.current = now;
 
-    void requestSubscriptionHealthCheck()
-      .then((ok) => {
-        if (ok) {
-          const reloadStarted = onBatchReloadRef.current?.() ?? false;
-          if (!reloadStarted) {
-            replayBufferedLiveEvents();
-          }
-          return;
-        }
-        replayBufferedLiveEvents();
-        shouldReconnectRef.current = true;
-        reconnectAttemptRef.current = 0;
-        setConnectionStatus("reconnecting");
-        onAuthErrorRef.current?.();
-      })
-      .finally(() => {
-        resumeResyncInFlightRef.current = false;
-      });
-  }, [replayBufferedLiveEvents, requestSubscriptionHealthCheck, wsUrl]);
+    try {
+      onBatchReloadRef.current?.("resume");
+    } finally {
+      resumeResyncInFlightRef.current = false;
+    }
+  }, [wsUrl]);
 
   useEffect(() => {
     const handleVisibilityChange = (): void => {
@@ -371,5 +479,6 @@ export function useChatWebSocket({
     setBufferingLiveEvents,
     replayBufferedLiveEvents,
     requestSubscriptionHealthCheck,
+    requestReconnect,
   };
 }

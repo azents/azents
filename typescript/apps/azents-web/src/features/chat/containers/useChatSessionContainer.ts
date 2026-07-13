@@ -10,8 +10,6 @@
  */
 
 import * as Sentry from "@sentry/nextjs";
-import { useQueryClient } from "@tanstack/react-query";
-import { getQueryKey } from "@trpc/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { trpc } from "@/trpc/client";
 import { applyProviderToolCallItem } from "../hooks/providerToolCallProjection";
@@ -1406,6 +1404,13 @@ interface RestSnapshotRequest {
   liveObservationGeneration: number;
 }
 
+type ResyncReason = "initial" | "periodic" | "resume" | "latest" | "compaction";
+
+interface ResyncOptions {
+  reason: ResyncReason;
+  continuing?: boolean;
+}
+
 interface LiveTaxonomySnapshot {
   partial_history: { items: ChatEventResponse[] };
   input_buffers: ChatEventResponse[];
@@ -1863,6 +1868,8 @@ export function useChatSessionContainer(
   const [chatTimelineState, setChatTimelineState] = useState<ChatTimelineState>(
     { type: "LATEST_FOLLOWING" },
   );
+  const chatTimelineStateRef = useRef(chatTimelineState);
+  chatTimelineStateRef.current = chatTimelineState;
   const [hasMore, setHasMore] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [isLoadingNewer, setIsLoadingNewer] = useState(false);
@@ -1886,7 +1893,10 @@ export function useChatSessionContainer(
   );
   const liveObservationGenerationRef = useRef(0);
   const restSnapshotEpochRef = useRef(0);
-  const eventsQueryRequestRef = useRef<RestSnapshotRequest | null>(null);
+  const hasFreshBaselineRef = useRef(false);
+  const startResyncRef = useRef<(options: ResyncOptions) => boolean>(
+    () => false,
+  );
   const startRestSnapshotRequest = useCallback((): RestSnapshotRequest => {
     restSnapshotEpochRef.current += 1;
     return {
@@ -1894,6 +1904,13 @@ export function useChatSessionContainer(
       liveObservationGeneration: liveObservationGenerationRef.current,
     };
   }, []);
+  const captureRestSnapshotRequest = useCallback(
+    (): RestSnapshotRequest => ({
+      epoch: restSnapshotEpochRef.current,
+      liveObservationGeneration: liveObservationGenerationRef.current,
+    }),
+    [],
+  );
   const canApplyRestSnapshot = useCallback(
     (request: RestSnapshotRequest): boolean =>
       request.epoch === restSnapshotEpochRef.current &&
@@ -1946,37 +1963,49 @@ export function useChatSessionContainer(
     { enabled: isSubscribeReady },
   );
 
-  const queryClient = useQueryClient();
   const utils = trpc.useUtils();
-
-  // Durable historyand current live projection text fetches..
-  const eventsQuery = trpc.chat.listSessionEvents.useQuery(
-    { sessionId },
-    {
-      enabled: isSubscribeReady && chatViewState.type === "LOADING_HISTORY",
-      gcTime: 0,
-      staleTime: 0,
-    },
-  );
-
-  useEffect(() => {
-    const sessionEventsQueryKey = getQueryKey(trpc.chat.listSessionEvents);
-    return () => {
-      void queryClient.invalidateQueries({ queryKey: sessionEventsQueryKey });
-      queryClient.removeQueries({ queryKey: sessionEventsQueryKey });
-    };
-  }, [queryClient]);
 
   useEffect(() => {
     void utils.chat.listAgentSessions.invalidate({ agentId: agent.id });
   }, [agent.id, sessionRunState, utils.chat.listAgentSessions]);
 
-  const batchReloadRef = useRef<() => boolean>(() => false);
+  const batchReloadRef = useRef<(reason: "periodic" | "resume") => boolean>(
+    () => false,
+  );
   const compactionReloadRef = useRef<(continuing: boolean) => void>(() => {});
 
   const handleChatEvent = useCallback(
     (event: ChatEvent): void => {
       liveObservationGenerationRef.current += 1;
+      if (
+        chatTimelineStateRef.current.type === "DETACHED_HISTORY_BROWSING" &&
+        "type" in event
+      ) {
+        if (event.type === "history_event_appended") {
+          setChatTimelineState((prev) =>
+            prev.type === "DETACHED_HISTORY_BROWSING"
+              ? { ...prev, hasNewer: true }
+              : prev,
+          );
+          return;
+        }
+        if (
+          event.type === "live_event_upserted" ||
+          event.type === "live_event_removed" ||
+          event.type === "live_run_updated" ||
+          event.type === "live_run_cleared" ||
+          event.type === "action_execution_updated" ||
+          event.type === "run_started" ||
+          event.type === "run_phase_changed" ||
+          event.type === "run_complete" ||
+          event.type === "run_stopped" ||
+          event.type === "runtime_error" ||
+          event.type === "compaction_started" ||
+          event.type === "compaction_complete"
+        ) {
+          return;
+        }
+      }
       const markRunActive = (phase: AgentRunPhase | null): void => {
         setManagedLiveState((prev) => ({
           ...prev,
@@ -2315,212 +2344,164 @@ export function useChatSessionContainer(
     setBufferingLiveEvents,
     replayBufferedLiveEvents,
     requestSubscriptionHealthCheck,
+    requestReconnect,
   } = useChatWebSocket({
     wsUrl: connectionInfoQuery.data?.wsUrl ?? null,
     ticket: connectionInfoQuery.data?.ticket ?? null,
     sessionId,
     onEvent: handleChatEvent,
-    onBatchReload: () => batchReloadRef.current(),
+    onBatchReload: (reason) => batchReloadRef.current(reason),
     onSubscribed: () => {
-      eventsQueryRequestRef.current = startRestSnapshotRequest();
       setIsSubscribeReady(true);
-      setBufferingLiveEvents(true);
-      setChatViewState({ type: "LOADING_HISTORY" });
+      const reason = hasFreshBaselineRef.current ? "resume" : "initial";
+      if (reason === "initial") {
+        setChatViewState({ type: "LOADING_HISTORY" });
+      }
+      startResyncRef.current({ reason });
     },
     onAuthError: () => void connectionInfoQuery.refetch(),
-    onBufferedLiveEvent: () => {
-      setChatTimelineState((prev) =>
-        prev.type === "DETACHED_HISTORY_BROWSING"
-          ? { ...prev, hasNewer: true }
-          : prev,
-      );
-    },
   });
 
-  const messagesRefetch = useCallback((): boolean => {
-    if (chatViewState.type !== "READY") {
-      return false;
-    }
-    void requestSubscriptionHealthCheck().then((ok) => {
-      if (!ok) {
-        replayBufferedLiveEvents();
-        void connectionInfoQuery.refetch();
-        return;
+  const startResync = useCallback(
+    (options: ResyncOptions): boolean => {
+      if (
+        options.reason !== "initial" &&
+        options.reason !== "latest" &&
+        chatViewState.type !== "READY"
+      ) {
+        return false;
       }
-      setBufferingLiveEvents(true);
-      eventsQueryRequestRef.current = startRestSnapshotRequest();
-      void eventsQuery.refetch().catch(() => replayBufferedLiveEvents());
-    });
-    return true;
-  }, [
-    chatViewState.type,
-    connectionInfoQuery,
-    eventsQuery,
-    replayBufferedLiveEvents,
-    requestSubscriptionHealthCheck,
-    setBufferingLiveEvents,
-    startRestSnapshotRequest,
-  ]);
-  batchReloadRef.current = messagesRefetch;
 
-  const applyLatestSnapshot = useCallback(
-    async (targetSessionId: string): Promise<void> => {
       setBufferingLiveEvents(true);
       const request = startRestSnapshotRequest();
-      const result = await utils.chat.listSessionEvents.fetch({
-        sessionId: targetSessionId,
-      });
-      if (!canApplyRestSnapshot(request)) {
-        if (request.epoch === restSnapshotEpochRef.current) {
+      void (async (): Promise<void> => {
+        let healthy = false;
+        try {
+          healthy = await requestSubscriptionHealthCheck();
+        } catch {
+          healthy = false;
+        }
+        if (request.epoch !== restSnapshotEpochRef.current) {
+          return;
+        }
+        if (!healthy) {
           replayBufferedLiveEvents();
+          if (options.reason === "initial") {
+            setChatViewState({ type: "READY" });
+          }
+          requestReconnect();
+          return;
         }
-        return;
-      }
-      const mapped = mapSessionEvents(result, null);
-      historyNewestCursorRef.current = mapped.newestCursor;
-      setHistoryMessages((prev) =>
-        mergeWithOlderPages(prev, mapped.historyMessages),
-      );
-      latestHumanModelOrderRef.current =
-        mapped.latestDurableInferenceIntent?.modelOrder ?? null;
-      setLatestHumanInferenceProfile(
-        mapped.latestDurableInferenceIntent?.profile ?? null,
-      );
-      setManagedLiveState((prev) => {
-        const next = mapSessionEvents(result, prev);
-        if (next.invalidLiveRun !== null) {
-          reportInvalidLiveRun(next.invalidLiveRun.value);
+
+        let result;
+        try {
+          result = await utils.client.chat.listSessionEvents.query({
+            sessionId,
+          });
+        } catch {
+          if (request.epoch === restSnapshotEpochRef.current) {
+            replayBufferedLiveEvents();
+            if (options.reason === "initial") {
+              setChatViewState({ type: "READY" });
+            }
+          }
+          return;
         }
-        return next.liveState;
-      });
-      setHasMore(mapped.hasMore);
-      setChatTimelineState({ type: "LATEST_FOLLOWING" });
-      replayBufferedLiveEvents();
-      setChatViewState({ type: "READY" });
+        if (!canApplyRestSnapshot(request)) {
+          if (request.epoch === restSnapshotEpochRef.current) {
+            replayBufferedLiveEvents();
+          }
+          return;
+        }
+
+        const mapped = mapSessionEvents(result, null);
+        hasFreshBaselineRef.current = true;
+        const detached = chatTimelineStateRef.current;
+        const preserveDetached =
+          detached.type === "DETACHED_HISTORY_BROWSING" &&
+          options.reason !== "initial" &&
+          options.reason !== "latest";
+        if (preserveDetached) {
+          setChatTimelineState({
+            ...detached,
+            hasNewer:
+              detached.hasNewer ||
+              (mapped.newestCursor !== null &&
+                mapped.newestCursor !== detached.newestCursor),
+          });
+        } else {
+          historyNewestCursorRef.current = mapped.newestCursor;
+          setHistoryMessages((prev) =>
+            options.reason === "initial"
+              ? mapped.historyMessages
+              : mergeWithOlderPages(prev, mapped.historyMessages),
+          );
+          latestHumanModelOrderRef.current =
+            mapped.latestDurableInferenceIntent?.modelOrder ?? null;
+          setLatestHumanInferenceProfile(
+            mapped.latestDurableInferenceIntent?.profile ?? null,
+          );
+          setManagedLiveState((prev) => {
+            const next = mapSessionEvents(result, prev);
+            if (next.invalidLiveRun !== null) {
+              reportInvalidLiveRun(next.invalidLiveRun.value);
+            }
+            return {
+              ...next.liveState,
+              isResponsePending:
+                options.reason === "compaction" && options.continuing === true
+                  ? next.liveState.isResponsePending || prev.isResponsePending
+                  : next.liveState.isResponsePending,
+            };
+          });
+          setHasMore(mapped.hasMore);
+          setChatTimelineState({ type: "LATEST_FOLLOWING" });
+        }
+        setChatViewState({ type: "READY" });
+        replayBufferedLiveEvents();
+      })();
+      return true;
     },
     [
       canApplyRestSnapshot,
+      chatViewState.type,
       replayBufferedLiveEvents,
       reportInvalidLiveRun,
+      requestReconnect,
+      requestSubscriptionHealthCheck,
+      sessionId,
       setBufferingLiveEvents,
       startRestSnapshotRequest,
-      utils.chat.listSessionEvents,
+      utils.client.chat.listSessionEvents,
     ],
+  );
+  startResyncRef.current = startResync;
+  batchReloadRef.current = (reason) => startResync({ reason });
+
+  useEffect(() => {
+    if (connectionStatus !== "connected") {
+      restSnapshotEpochRef.current += 1;
+    }
+  }, [connectionStatus]);
+
+  const applyLatestSnapshot = useCallback(
+    (targetSessionId: string): Promise<void> => {
+      if (targetSessionId === sessionId) {
+        startResync({ reason: "latest" });
+      }
+      return Promise.resolve();
+    },
+    [sessionId, startResync],
   );
 
   compactionReloadRef.current = (continuing) => {
-    const request = startRestSnapshotRequest();
-    void utils.chat.listSessionEvents.fetch({ sessionId }).then((result) => {
-      if (!canApplyRestSnapshot(request)) {
-        return;
-      }
-      const mapped = mapSessionEvents(result, null);
-      historyNewestCursorRef.current = mapped.newestCursor;
-      setHistoryMessages(mapped.historyMessages);
-      latestHumanModelOrderRef.current =
-        mapped.latestDurableInferenceIntent?.modelOrder ?? null;
-      setLatestHumanInferenceProfile(
-        mapped.latestDurableInferenceIntent?.profile ?? null,
-      );
-      setManagedLiveState((prev) => {
-        const next = mapSessionEvents(result, prev);
-        if (next.invalidLiveRun !== null) {
-          reportInvalidLiveRun(next.invalidLiveRun.value);
-        }
-        return {
-          ...next.liveState,
-          isResponsePending: continuing
-            ? next.liveState.isResponsePending || prev.isResponsePending
-            : next.liveState.isResponsePending,
-        };
-      });
-      setHasMore(mapped.hasMore);
-    });
+    startResync({ reason: "compaction", continuing });
   };
 
   // connection status parent with push (sidebar badge so it can reflect)
   useEffect(() => {
     onConnectionStatusChange(connectionStatus);
   }, [connectionStatus, onConnectionStatusChange]);
-
-  // message history  withtext complete when message settings
-  useEffect(() => {
-    if (
-      chatViewState.type === "LOADING_HISTORY" &&
-      eventsQuery.data &&
-      agentSessionQuery.data
-    ) {
-      const request = eventsQueryRequestRef.current;
-      if (request === null || !canApplyRestSnapshot(request)) {
-        return;
-      }
-      const mapped = mapSessionEvents(eventsQuery.data, null);
-      historyNewestCursorRef.current = mapped.newestCursor;
-      setHistoryMessages(mapped.historyMessages);
-      latestHumanModelOrderRef.current =
-        mapped.latestDurableInferenceIntent?.modelOrder ?? null;
-      setLatestHumanInferenceProfile(
-        mapped.latestDurableInferenceIntent?.profile ?? null,
-      );
-      setManagedLiveState((prev) => {
-        const next = mapSessionEvents(eventsQuery.data, prev);
-        if (next.invalidLiveRun !== null) {
-          reportInvalidLiveRun(next.invalidLiveRun.value);
-        }
-        return next.liveState;
-      });
-      setHasMore(mapped.hasMore);
-      setChatTimelineState({ type: "LATEST_FOLLOWING" });
-      setChatViewState({ type: "READY" });
-      replayBufferedLiveEvents();
-    }
-  }, [
-    agentSessionQuery.data,
-    canApplyRestSnapshot,
-    chatViewState.type,
-    eventsQuery.data,
-    replayBufferedLiveEvents,
-    reportInvalidLiveRun,
-  ]);
-
-  // batch text withtext data text. Detached  in live state  textdoes not..
-  useEffect(() => {
-    if (chatViewState.type !== "READY" || !eventsQuery.data) {
-      return;
-    }
-    const request = eventsQueryRequestRef.current;
-    if (request === null || !canApplyRestSnapshot(request)) {
-      return;
-    }
-    const mapped = mapSessionEvents(eventsQuery.data, null);
-    latestHumanModelOrderRef.current =
-      mapped.latestDurableInferenceIntent?.modelOrder ?? null;
-    setLatestHumanInferenceProfile(
-      mapped.latestDurableInferenceIntent?.profile ?? null,
-    );
-    setManagedLiveState((prev) => {
-      const next = mapSessionEvents(eventsQuery.data, prev);
-      if (next.invalidLiveRun !== null) {
-        reportInvalidLiveRun(next.invalidLiveRun.value);
-      }
-      return next.liveState;
-    });
-    if (chatTimelineState.type === "DETACHED_HISTORY_BROWSING") {
-      setChatTimelineState({
-        type: "DETACHED_HISTORY_BROWSING",
-        hasNewer: mapped.hasNewer || chatTimelineState.hasNewer,
-        newestCursor: chatTimelineState.newestCursor,
-      });
-      replayBufferedLiveEvents();
-      return;
-    }
-    historyNewestCursorRef.current = mapped.newestCursor;
-    setHistoryMessages((prev) =>
-      mergeWithOlderPages(prev, mapped.historyMessages),
-    );
-    replayBufferedLiveEvents();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- eventsQuery.dataUpdatedAt change when toonly run
-  }, [eventsQuery.dataUpdatedAt]);
 
   const onLoadMore = useCallback(() => {
     if (isLoadingMore || !hasMore) {
@@ -2720,34 +2701,13 @@ export function useChatSessionContainer(
       }
       writeInFlightRef.current = true;
       setIsWritePending(true);
-      const writeSnapshotRequest = startRestSnapshotRequest();
+      const writeSnapshotRequest = captureRestSnapshotRequest();
       try {
         const response = await run();
         failedWriteRequestRef.current = null;
         applyWriteResponse(response, writeSnapshotRequest);
         if (response.history_reload_required) {
-          const reloadRequest = startRestSnapshotRequest();
-          const result = await utils.chat.listSessionEvents.fetch({
-            sessionId: response.session_id,
-          });
-          if (canApplyRestSnapshot(reloadRequest)) {
-            const mapped = mapSessionEvents(result, null);
-            historyNewestCursorRef.current = mapped.newestCursor;
-            setHistoryMessages(mapped.historyMessages);
-            latestHumanModelOrderRef.current =
-              mapped.latestDurableInferenceIntent?.modelOrder ?? null;
-            setLatestHumanInferenceProfile(
-              mapped.latestDurableInferenceIntent?.profile ?? null,
-            );
-            setManagedLiveState((prev) => {
-              const next = mapSessionEvents(result, prev);
-              if (next.invalidLiveRun !== null) {
-                reportInvalidLiveRun(next.invalidLiveRun.value);
-              }
-              return next.liveState;
-            });
-            setHasMore(mapped.hasMore);
-          }
+          startResync({ reason: "periodic" });
         }
         return true;
       } catch {
@@ -2758,13 +2718,7 @@ export function useChatSessionContainer(
         setIsWritePending(false);
       }
     },
-    [
-      applyWriteResponse,
-      canApplyRestSnapshot,
-      reportInvalidLiveRun,
-      startRestSnapshotRequest,
-      utils.chat.listSessionEvents,
-    ],
+    [applyWriteResponse, captureRestSnapshotRequest, startResync],
   );
 
   const onSendInput = useCallback(
@@ -2933,7 +2887,7 @@ export function useChatSessionContainer(
                   hasVisibleRunActivity,
               };
             });
-            void applyLatestSnapshot(sessionId);
+            startResync({ reason: "periodic" });
           },
           onError: () => {
             setManagedLiveState((prev) => ({
@@ -2948,7 +2902,7 @@ export function useChatSessionContainer(
         },
       );
     },
-    [applyLatestSnapshot, deleteInputBufferMutation, sessionId],
+    [deleteInputBufferMutation, sessionId, startResync],
   );
 
   const onUpdateGoal = useCallback(
