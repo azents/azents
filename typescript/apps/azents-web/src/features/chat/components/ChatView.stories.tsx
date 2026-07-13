@@ -305,6 +305,46 @@ export const WithLiveRunRetry = {
   },
 } satisfies Story;
 
+export const StreamingModelWithPartialOutput = {
+  args: {
+    ...baseArgs,
+    messages: [
+      createChatMessage({
+        id: "streaming-user-input",
+        role: "user",
+        content: "Explain the current model call state.",
+      }),
+      createChatMessage({
+        id: "streaming-assistant-output",
+        content: "The model is still streaming this response",
+        status: "partial",
+      }),
+    ],
+    isResponsePending: true,
+    isModelResponsePending: true,
+    liveRun: {
+      run_id: "run-streaming-story",
+      phase: "streaming_model",
+      status: "running",
+      inferenceProfile: {
+        model_target_label: "default",
+        model_display_name: "GPT 5.5",
+        reasoning_effort: null,
+      },
+      retry: null,
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.getByText("The model is still streaming this response"),
+    ).toBeVisible();
+    await expect(
+      canvas.getByRole("status", { name: "Agent is working" }),
+    ).toBeVisible();
+  },
+} satisfies Story;
+
 export const WithActionExecutionFailure = {
   args: {
     ...baseArgs,
