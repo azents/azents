@@ -41,7 +41,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ChatView.tsx
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
 last_verified_at: 2026-07-13
-spec_version: 76
+spec_version: 78
 ---
 
 # Agent Execution Loop
@@ -489,20 +489,21 @@ a WebSocket publication failure is logged and does not change the success of the
 write or delete.
 
 `WorkerEventPublisher.dispatch_event()` preserves the durable/live handoff order. For `Event`, the
-publisher first flushes pending partials, broadcasts the durable history action, and then removes and
-broadcasts matching live projections. Explicitly public controls (`runtime_error`, authorization and
-account-link controls, compaction controls, `todo_state_changed`, and `subagent_tree_changed`) retain
-their direct wire frames. Internal provider deltas and Run/runtime lifecycle telemetry update the live
-projector without being broadcast directly; the projector emits canonical live actions where
-applicable. Live-store mutation, partial flush, active-tool projection, live Run publication, and
-WebSocket broadcast are non-authoritative UI projection boundaries: they preserve
-`asyncio.CancelledError`, log other projection failures, and do not fail provider execution, durable
-event append, Run phase/terminal persistence, or subsequent cleanup.
+publisher broadcasts the durable history action and then removes and broadcasts matching live
+projections. Explicitly public controls (`runtime_error`, authorization and account-link controls,
+compaction controls, `todo_state_changed`, and `subagent_tree_changed`) retain their direct wire
+frames. Internal provider deltas and Run/runtime lifecycle telemetry update the live projector without
+being broadcast directly; the projector emits canonical live actions where applicable. Live-store
+mutation, active-tool projection, live Run publication, and WebSocket broadcast are non-authoritative
+UI projection boundaries: they preserve `asyncio.CancelledError`, log other projection failures, and
+do not fail provider execution, durable event append, Run phase/terminal persistence, or subsequent
+cleanup.
 
-`ContentDelta` and `ReasoningDelta` are live projection events only. The worker batches them in a
-session-local `LivePartialBatcher` before Redis live store upsert and `live_event_upserted` broadcast.
-Pending batches flush before durable event handling and before terminal `RunComplete` / `RunStopped`
-handling, so finalized durable assistant/reasoning events do not overtake buffered live text.
+`ContentDelta` and `ReasoningDelta` are live projection events only. The worker applies every delta to
+the Redis live projection and emits `live_event_upserted` immediately. There is no time- or
+character-based partial batching layer. Engine emit ordering therefore keeps each live update ahead
+of a later durable assistant/reasoning event, whose history action is published before the matching
+live projection is removed.
 
 The old `GET /chat/v1/sessions/{session_id}/messages` aggregate endpoint is removed. The POST
 `/chat/v1/sessions/{session_id}/messages` write endpoint is a separate REST commit boundary and does
@@ -616,6 +617,8 @@ updated by the user.
 
 ## Changelog
 
+- **2026-07-13** (spec_version 78) — Reverted incremental native-stream normalization from version 77 and removed time- and character-based live partial batching so every existing content and reasoning delta updates Redis and WebSocket projection immediately.
+- **2026-07-13** (spec_version 77) — Made native model stream normalization incremental so text and reasoning projections are emitted before provider completion without retaining the full native event sequence.
 - **2026-07-13** (spec_version 76) — Clarified that the LLM running indicator remains visible through the complete model streaming phase, including after partial output appears.
 - **2026-07-13** (spec_version 75) — Promoted immutable requested input intent, non-fatal live projection boundaries, essential wake-up ordering, and explicit public WebSocket delivery boundaries.
 - **2026-07-12** (spec_version 74) — Added atomic tool-call admission/completion, deterministic cancellation and result identity, ownership-generation recovery, and PostgreSQL-backed active-call state.

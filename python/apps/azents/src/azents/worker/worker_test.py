@@ -1269,8 +1269,8 @@ async def test_boundary_poll_broadcasts_input_buffer_taxonomy_actions(
 
 
 @pytest.mark.asyncio
-async def test_dispatch_flushes_live_partial_batch_during_event_update() -> None:
-    """Event update flushes pending content delta batch."""
+async def test_dispatch_projects_each_content_delta_before_durable_event() -> None:
+    """Each content delta is projected before the later durable event."""
     broadcast = _Broadcast()
     broker = _Broker()
     live_store = _LiveEventStore(before=[], after=[])
@@ -1302,19 +1302,23 @@ async def test_dispatch_flushes_live_partial_batch_during_event_update() -> None
     )
     await event_publisher.dispatch_event("session-1", durable_result)
 
-    assert live_store.assistant_deltas == [("session-1", "hello", 0)]
+    assert live_store.assistant_deltas == [
+        ("session-1", "hel", 0),
+        ("session-1", "lo", 0),
+    ]
     event_types = [
         event.get("kind") or event.get("type") for _, event in broadcast.events
     ]
     assert event_types == [
+        "live_event_upserted",
         "live_event_upserted",
         "history_event_appended",
     ]
 
 
 @pytest.mark.asyncio
-async def test_dispatch_flushes_reasoning_batch_during_event_update() -> None:
-    """Event update flushes pending reasoning delta batch."""
+async def test_dispatch_projects_each_reasoning_delta_before_durable_event() -> None:
+    """Each reasoning delta is projected before the later durable event."""
     broadcast = _Broadcast()
     broker = _Broker()
     live_store = _LiveEventStore(before=[], after=[])
@@ -1353,11 +1357,15 @@ async def test_dispatch_flushes_reasoning_batch_during_event_update() -> None:
     )
     await event_publisher.dispatch_event("session-1", durable_reasoning)
 
-    assert live_store.reasoning_deltas == [("session-1", "thinking")]
+    assert live_store.reasoning_deltas == [
+        ("session-1", "think"),
+        ("session-1", "ing"),
+    ]
     event_types = [
         event.get("kind") or event.get("type") for _, event in broadcast.events
     ]
     assert event_types == [
+        "live_event_upserted",
         "live_event_upserted",
         "history_event_appended",
     ]
