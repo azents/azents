@@ -84,6 +84,12 @@ async def _assert_live_store_contract(store: LiveEventStore) -> None:
         content_index=0,
         now=now + datetime.timedelta(seconds=1),
     )
+    await store.append_assistant_delta(
+        session_id,
+        delta="secondary",
+        content_index=1,
+        now=now + datetime.timedelta(seconds=1),
+    )
     await store.append_reasoning_delta(session_id, delta="think", now=now)
     await store.append_reasoning_delta(session_id, delta="ing", now=now)
     events = await store.list_by_session_id(session_id)
@@ -92,11 +98,15 @@ async def _assert_live_store_contract(store: LiveEventStore) -> None:
         EventKind.REASONING,
     }
 
-    assistant_payload = next(
-        event.payload for event in events if event.kind == EventKind.ASSISTANT_MESSAGE
-    )
-    assert isinstance(assistant_payload, AssistantMessagePayload)
-    assert assistant_payload.content == "hello world"
+    assistant_payloads = [
+        event.payload
+        for event in events
+        if isinstance(event.payload, AssistantMessagePayload)
+    ]
+    assistant_contents = [payload.content for payload in assistant_payloads]
+    assert len(assistant_contents) == 2
+    assert "hello world" in assistant_contents
+    assert "secondary" in assistant_contents
 
     reasoning_payload = next(
         event.payload for event in events if event.kind == EventKind.REASONING

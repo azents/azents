@@ -76,6 +76,11 @@ class UserStopFinalizer:
             run_id=effective_run_id,
             active_tool_calls=effective_tool_calls,
         )
+        await self.live_event_projector.replace_active_tool_calls(
+            session_id,
+            [],
+            removed_call_ids={call.call_id for call in effective_tool_calls},
+        )
         if effective_run_id is not None:
             await self._append_user_stop_events(session_id, effective_run_id)
         if effective_run_id is None:

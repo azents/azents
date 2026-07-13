@@ -4,6 +4,7 @@ WebSocket chat and REST message lookup endpoints.
 """
 
 import asyncio
+import dataclasses
 import io
 import logging
 import re
@@ -32,7 +33,6 @@ from azents.broker.broadcast import (
     WebSocketBroadcastPublishError,
 )
 from azents.broker.deps import get_broker
-from azents.broker.serialization import serialize_event
 from azents.broker.types import (
     SessionBroker,
     SessionStopSignal,
@@ -337,20 +337,46 @@ def _parse_timezone(timezone: str | None) -> ZoneInfo:
         return ZoneInfo("UTC")
 
 
+@dataclasses.dataclass
+class _SubscriptionRegistration:
+    """Track the Redis subscription generation owned by one send loop."""
+
+    confirmed_generation: object | None = None
+
+    def confirm(self, generation: object) -> None:
+        """Mark one send-loop generation as Redis-confirmed."""
+        self.confirmed_generation = generation
+
+    def clear(self, generation: object) -> None:
+        """Clear registration only when the same generation still owns it."""
+        if self.confirmed_generation is generation:
+            self.confirmed_generation = None
+
+    def confirmed(self, generation: object) -> bool:
+        """Return whether the generation still owns a confirmed registration."""
+        return self.confirmed_generation is generation
+
+
 async def _run_session_loops(
     websocket: WebSocket,
     broadcast: WebSocketBroadcast,
     *,
     session_id: str,
     send_lock: asyncio.Lock,
+    registration: _SubscriptionRegistration,
+    generation: object,
 ) -> None:
-    """Run broadcast subscription and send loop for existing sessions."""
-    async with broadcast.subscribe(session_id) as events:
-        async with send_lock:
-            await websocket.send_json(chat_subscription_ack_dump(session_id))
-        async for event_json in events:
+    """Run the confirmed broadcast subscription and send loop."""
+    try:
+        async with broadcast.subscribe(session_id) as events:
+            registration.confirm(generation)
             async with send_lock:
-                await websocket.send_json(event_json)
+                await websocket.send_json(chat_subscription_ack_dump(session_id))
+            async for event_json in events:
+                async with send_lock:
+                    await websocket.send_json(event_json)
+    finally:
+        registration.clear(generation)
 
 
 async def _run_session_receive_loop(
@@ -358,16 +384,22 @@ async def _run_session_receive_loop(
     *,
     session_id: str,
     send_lock: asyncio.Lock,
+    registration: _SubscriptionRegistration,
+    generation: object,
 ) -> None:
-    """Handle client session control messages."""
+    """Handle client controls for the confirmed subscription generation."""
     while True:
         message = await websocket.receive_json()
         if not isinstance(message, dict):
             continue
         if message.get("type") != "subscription_health_check":
             continue
+        if not registration.confirmed(generation):
+            continue
         request_id = message.get("request_id")
         async with send_lock:
+            if not registration.confirmed(generation):
+                continue
             await websocket.send_json(
                 chat_subscription_health_check_ack_dump(
                     session_id,
@@ -420,12 +452,16 @@ async def chat_websocket(
     await websocket.accept()
 
     send_lock = asyncio.Lock()
+    registration = _SubscriptionRegistration()
+    generation = object()
     send_task = asyncio.create_task(
         _run_session_loops(
             websocket,
             broadcast,
             session_id=session_id,
             send_lock=send_lock,
+            registration=registration,
+            generation=generation,
         )
     )
     receive_task = asyncio.create_task(
@@ -433,6 +469,8 @@ async def chat_websocket(
             websocket,
             session_id=session_id,
             send_lock=send_lock,
+            registration=registration,
+            generation=generation,
         )
     )
     try:
@@ -812,11 +850,6 @@ async def update_session_goal(
                 await _publish_chat_event_best_effort(
                     broadcast,
                     session_id=session_id,
-                    event=serialize_event(update_result.event),
-                )
-                await _publish_chat_event_best_effort(
-                    broadcast,
-                    session_id=session_id,
                     event=chat_history_event_appended_dump(update_result.event),
                 )
             return GoalStateResponse.from_domain(update_result.goal)
@@ -878,11 +911,6 @@ async def update_session_goal_status(
                     )
                 )
             if update_result.event is not None:
-                await _publish_chat_event_best_effort(
-                    broadcast,
-                    session_id=session_id,
-                    event=serialize_event(update_result.event),
-                )
                 await _publish_chat_event_best_effort(
                     broadcast,
                     session_id=session_id,

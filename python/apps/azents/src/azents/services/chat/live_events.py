@@ -177,6 +177,11 @@ def _tool_call_live_event(
     )
 
 
+def active_tool_call_live_event_id(session_id: str, call_id: str) -> str:
+    """Return the deterministic live projection ID for one active tool call."""
+    return _stable_live_id(session_id, "tool", call_id)
+
+
 def active_tool_call_to_live_event(
     session_id: str,
     active_tool_call: ActiveToolCall,
@@ -184,7 +189,7 @@ def active_tool_call_to_live_event(
     """Project one PostgreSQL active call into the stable live event shape."""
     return _tool_call_live_event(
         session_id=session_id,
-        event_id=_stable_live_id(session_id, "tool", active_tool_call.call_id),
+        event_id=active_tool_call_live_event_id(session_id, active_tool_call.call_id),
         call_id=active_tool_call.call_id,
         name=active_tool_call.name,
         arguments=active_tool_call.arguments or "",
@@ -411,10 +416,13 @@ class BaseLiveEventStore:
     async def remove_live_counterpart(self, event: Event) -> None:
         """Remove corresponding live projection after durable event append."""
         if event.kind == EventKind.ASSISTANT_MESSAGE:
-            await self.remove(
-                event.session_id,
-                _stable_live_id(event.session_id, "assistant", 0),
-            )
+            live_events = await self.list_by_session_id(event.session_id)
+            for live_event in live_events:
+                if (
+                    live_event.kind == EventKind.ASSISTANT_MESSAGE
+                    and live_event.adapter == "azents-live"
+                ):
+                    await self.remove(event.session_id, live_event.id)
         elif event.kind == EventKind.REASONING:
             await self.remove(
                 event.session_id,

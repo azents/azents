@@ -1,7 +1,8 @@
 """Chat v1 public endpoint tests."""
 
+import asyncio
 import datetime
-from typing import cast
+from typing import Any, cast
 from unittest.mock import AsyncMock
 from zoneinfo import ZoneInfo
 
@@ -10,6 +11,8 @@ from fastapi import BackgroundTasks, HTTPException
 from pydantic import ValidationError
 
 from azents.api.public.chat.v1 import (
+    _run_session_receive_loop,  # pyright: ignore[reportPrivateUsage]  # Pin health-check generation behavior.
+    _SubscriptionRegistration,  # pyright: ignore[reportPrivateUsage]  # Pin subscription generation semantics.
     _validate_rest_session,  # pyright: ignore[reportPrivateUsage]  # Pin the REST session validation helper directly.
     _write_command_via_rest,  # pyright: ignore[reportPrivateUsage]  # Pin the REST write boundary helper directly.
     _write_edit_message_via_rest,  # pyright: ignore[reportPrivateUsage]  # Pin the REST write boundary helper directly.
@@ -165,6 +168,22 @@ class _MemoryBroadcast:
         self.events.append((session_id, event_json))
 
 
+class _WebSocket:
+    """WebSocket control-loop test double."""
+
+    def __init__(self) -> None:
+        self.messages: asyncio.Queue[dict[str, object]] = asyncio.Queue()
+        self.sent: list[dict[str, object]] = []
+
+    async def receive_json(self) -> dict[str, object]:
+        """Return the next queued client control frame."""
+        return await self.messages.get()
+
+    async def send_json(self, event: dict[str, object]) -> None:
+        """Record one server control frame."""
+        self.sent.append(event)
+
+
 class _FailingBroadcast:
     """WebSocket broadcast that simulates unavailable Redis publication."""
 
@@ -182,6 +201,44 @@ def _exchange_file_service() -> AsyncMock:
 def _model_file_service() -> AsyncMock:
     """ModelFileService double for route helper calls without attachments."""
     return AsyncMock()
+
+
+async def test_health_check_ack_requires_current_confirmed_generation() -> None:
+    """A stale or unconfirmed send-loop generation cannot acknowledge health."""
+    websocket = _WebSocket()
+    registration = _SubscriptionRegistration()
+    generation = object()
+    task = asyncio.create_task(
+        _run_session_receive_loop(
+            cast(Any, websocket),
+            session_id="session-1",
+            send_lock=asyncio.Lock(),
+            registration=registration,
+            generation=generation,
+        )
+    )
+    await websocket.messages.put(
+        {"type": "subscription_health_check", "request_id": "stale"}
+    )
+    await asyncio.sleep(0)
+    assert websocket.sent == []
+
+    registration.confirm(generation)
+    await websocket.messages.put(
+        {"type": "subscription_health_check", "request_id": "current"}
+    )
+    while not websocket.sent:
+        await asyncio.sleep(0)
+
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+    assert websocket.sent == [
+        {
+            "type": "subscription_health_check_ack",
+            "session_id": "session-1",
+            "request_id": "current",
+        }
+    ]
 
 
 class _BufferedInputService:
@@ -1222,7 +1279,8 @@ class TestUpdateSessionGoalStatus:
         ]
         assert len(broker.messages) == 1
         assert isinstance(broker.messages[0], SessionWakeUp)
-        assert len(broadcast.events) == 2
+        assert len(broadcast.events) == 1
+        assert broadcast.events[0][1]["type"] == "history_event_appended"
 
     async def test_resume_wakes_session_when_broadcast_fails(self) -> None:
         """Goal resume wake-up does not depend on UI publication."""
