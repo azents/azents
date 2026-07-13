@@ -10,7 +10,7 @@ Name | Type | Description | Notes
 **keyword** | **str** | Slash search keyword | 
 **label** | **str** | Action label | 
 **description** | **str** | Action description | 
-**action** | [**Action1**](Action1.md) |  | 
+**action** | [**Action**](Action.md) |  | 
 **category** | **str** | Action category | 
 **message** | [**InputActionMessagePolicyResponse**](InputActionMessagePolicyResponse.md) | Message policy | 
 **attachments** | [**InputActionAttachmentPolicyResponse**](InputActionAttachmentPolicyResponse.md) | Attachment policy | 

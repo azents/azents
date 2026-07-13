@@ -102,10 +102,7 @@ from azents.engine.tools.subagent import SubagentToolkitProvider
 from azents.engine.tools.todo import TodoToolkitProvider
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
-from azents.repos.action_execution.data import (
-    ActionExecution,
-    ActionExecutionProjection,
-)
+from azents.repos.action_execution.data import ActionExecution
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution import EventTranscriptRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
@@ -138,7 +135,6 @@ from azents.services.session_git_worktree import (
 )
 from azents.services.session_title import SessionTitleService
 from azents.transport.chat import (
-    chat_action_execution_updated_dump,
     chat_history_event_appended_dump,
     chat_live_event_removed_dump,
 )
@@ -1878,23 +1874,6 @@ class RunExecutor:
     ) -> GitWorktreeActionExecutionResult:
         """Execute one durably claimed operation action."""
 
-        async def publish_projection(
-            projection: ActionExecutionProjection,
-        ) -> None:
-            try:
-                await self.broadcast.publish(
-                    session_id,
-                    chat_action_execution_updated_dump(projection),
-                )
-            except Exception:
-                logger.exception(
-                    "Failed to broadcast action execution projection",
-                    extra={
-                        "session_id": session_id,
-                        "action_execution_id": projection.execution.id,
-                    },
-                )
-
         async def publish_history_event(event: Event) -> None:
             try:
                 await self.broadcast.publish(
@@ -1912,7 +1891,6 @@ class RunExecutor:
             session_id=session_id,
             execution=execution,
             action=action,
-            on_projection_updated=publish_projection,
             on_history_event_appended=publish_history_event,
         )
 

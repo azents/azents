@@ -71,10 +71,6 @@ function isChatEventWire(
       return (
         isSessionFrame(value, sessionId) && hasStringField(value, "run_id")
       );
-    case "action_execution_updated":
-      return (
-        isSessionFrame(value, sessionId) && isRecord(value.action_execution)
-      );
     case "run_started":
       return hasStringField(value, "run_id");
     case "run_phase_changed":

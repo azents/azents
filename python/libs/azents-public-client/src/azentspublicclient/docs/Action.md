@@ -1,6 +1,6 @@
 # Action
 
-Durable action payload
+Action payload
 
 ## Properties
 

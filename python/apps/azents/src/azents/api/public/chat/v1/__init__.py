@@ -171,7 +171,6 @@ from azents.utils.appctx import AppContext
 from azents.utils.fastapi.route import RouteMounter
 
 from .data import (
-    ActionExecutionProjectionResponse,
     AgentProjectPresetListResponse,
     AgentProjectPresetResponse,
     AgentSessionCreateRequest,
@@ -575,10 +574,6 @@ async def _build_chat_write_snapshot(
                     if live.goal is not None
                     else None
                 ),
-                action_executions=[
-                    ActionExecutionProjectionResponse.from_domain(projection)
-                    for projection in live.action_executions
-                ],
             )
         case Failure(error):
             match error:
@@ -2285,10 +2280,6 @@ async def list_live_events(
                     if value.goal is not None
                     else None
                 ),
-                action_executions=[
-                    ActionExecutionProjectionResponse.from_domain(projection)
-                    for projection in value.action_executions
-                ],
             )
         case Failure(error):
             match error:

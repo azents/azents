@@ -12,7 +12,6 @@ Name | Type | Description | Notes
 **session_run_state** | [**AgentSessionRunState**](AgentSessionRunState.md) | Authoritative run_state for the current session | 
 **todo** | [**TodoStateResponse**](TodoStateResponse.md) |  | [optional] 
 **goal** | [**GoalStateResponse**](GoalStateResponse.md) |  | [optional] 
-**action_executions** | [**List[ActionExecutionProjectionResponse]**](ActionExecutionProjectionResponse.md) | Current action execution projections | [optional] 
 
 ## Example
 

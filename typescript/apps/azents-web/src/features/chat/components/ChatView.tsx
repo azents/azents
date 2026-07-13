@@ -43,7 +43,6 @@ import {
 } from "react";
 import { type UploadedFile, useFileUpload } from "../hooks/useFileUpload";
 import { WorkspacePanel } from "../workspace/components/WorkspacePanel";
-import { ActionExecutionTimelineCard } from "./ActionExecutionTimelineCard";
 import { AgentRunIndicator } from "./AgentRunIndicator";
 import { AuthorizationRequestBubble } from "./AuthorizationRequestBubble";
 import { ChatInput } from "./ChatInput";
@@ -55,7 +54,6 @@ import { PendingInputBufferBubble } from "./PendingInputBufferBubble";
 import { RunRetryCard } from "./RunRetryCard";
 import { TurnDivider } from "./TurnDivider";
 import type {
-  ActionExecutionProjection,
   AuthorizationRequest,
   ChatAction,
   ChatLiveRunState,
@@ -177,123 +175,17 @@ function getLatestCompactionIndex(messages: ChatMessage[]): number {
   return -1;
 }
 
-function shouldRenderActionExecution(
-  actionExecution: ActionExecutionProjection,
-): boolean {
-  return (
-    actionExecution.execution.status !== "completed" ||
-    actionExecution.events.length > 0
-  );
-}
-
-function actionExecutionTimelineItemId(
-  actionExecution: ActionExecutionProjection,
-): string {
-  return `action:${actionExecution.execution.id}:${actionExecution.execution.status}`;
-}
-
-function shouldRenderUnanchoredActionExecution(
-  actionExecution: ActionExecutionProjection,
-): boolean {
-  return shouldRenderActionExecution(actionExecution);
-}
-
-function groupActionExecutionsByAnchor(
-  actionExecutions: ActionExecutionProjection[],
-): Map<string, ActionExecutionProjection[]> {
-  const grouped = new Map<string, ActionExecutionProjection[]>();
-  for (const actionExecution of actionExecutions.filter(
-    shouldRenderActionExecution,
-  )) {
-    const anchorId = actionExecution.execution.input_buffer_id;
-    const existing = grouped.get(anchorId) ?? [];
-    grouped.set(anchorId, [...existing, actionExecution]);
-  }
-  return grouped;
-}
-
-function actionExecutionSortTime(
-  actionExecution: ActionExecutionProjection,
-): string {
-  const { execution } = actionExecution;
-  return (
-    execution.started_at ??
-    execution.completed_at ??
-    execution.failed_at ??
-    execution.updated_at
-  );
-}
-
-function unanchoredActionExecutions(
-  actionExecutions: ActionExecutionProjection[],
-  anchorIds: Set<string>,
-): ActionExecutionProjection[] {
-  return actionExecutions
-    .filter(shouldRenderUnanchoredActionExecution)
-    .filter(
-      (actionExecution) =>
-        !anchorIds.has(actionExecution.execution.input_buffer_id),
-    )
-    .sort((left, right) => {
-      const byTime = actionExecutionSortTime(left).localeCompare(
-        actionExecutionSortTime(right),
-      );
-      return byTime === 0
-        ? left.execution.id.localeCompare(right.execution.id)
-        : byTime;
-    });
-}
-
-function pushActionExecutionTimelineItemIds(
-  ids: string[],
-  groupedActionExecutions: Map<string, ActionExecutionProjection[]>,
-  anchorId: string,
-): void {
-  for (const actionExecution of groupedActionExecutions.get(anchorId) ?? []) {
-    ids.push(actionExecutionTimelineItemId(actionExecution));
-  }
-}
-
 /** Build scroll-tracking IDs in the same order as rendered timeline items. */
 function getTimelineItemIds(
   messages: ChatMessage[],
   pendingInputBuffers: PendingInputBuffer[],
   liveRun: ChatLiveRunState | null,
-  actionExecutions: ActionExecutionProjection[],
 ): string[] {
-  const groupedActionExecutions =
-    groupActionExecutionsByAnchor(actionExecutions);
-  const anchorIds = new Set<string>();
-  const ids: string[] = [];
-
-  for (const message of messages) {
-    ids.push(`message:${message.id}`);
-    anchorIds.add(message.id);
-    pushActionExecutionTimelineItemIds(
-      ids,
-      groupedActionExecutions,
-      message.id,
-    );
-  }
-
-  if (hasLiveRetry(liveRun)) {
-    ids.push(`live-run-retry:${liveRun.run_id}`);
-  }
-
-  for (const buffer of pendingInputBuffers) {
-    ids.push(`pending:${buffer.id}`);
-    anchorIds.add(buffer.id);
-    pushActionExecutionTimelineItemIds(ids, groupedActionExecutions, buffer.id);
-  }
-
-  for (const actionExecution of unanchoredActionExecutions(
-    actionExecutions,
-    anchorIds,
-  )) {
-    ids.push(actionExecutionTimelineItemId(actionExecution));
-  }
-
-  return ids;
+  return [
+    ...messages.map((message) => `message:${message.id}`),
+    ...(hasLiveRetry(liveRun) ? [`live-run-retry:${liveRun.run_id}`] : []),
+    ...pendingInputBuffers.map((buffer) => `pending:${buffer.id}`),
+  ];
 }
 
 /** display message bar with after to text completion marker UI control with collects.. */
@@ -389,8 +281,6 @@ interface ChatViewProps {
   authorizationRequests: AuthorizationRequest[];
   /** auth complete when remove corresponding request */
   onAuthorizationComplete: (toolkitId: string) => void;
-  /** current operation TurnAction execution projections */
-  actionExecutions: ActionExecutionProjection[];
   /** Workspace panel container output */
   workspacePanel: WorkspacePanelContainerOutput;
   /** current session goal snapshot */
@@ -435,7 +325,6 @@ export function ChatView({
   inputActions,
   authorizationRequests,
   onAuthorizationComplete,
-  actionExecutions,
   workspacePanel,
   goal,
   todo,
@@ -503,27 +392,8 @@ export function ChatView({
       ? liveRun
       : null;
   const liveRetryVisible = liveRetryRun !== null;
-  const visibleActionExecutionsByAnchor = useMemo(
-    () => groupActionExecutionsByAnchor(actionExecutions),
-    [actionExecutions],
-  );
-  const timelineAnchorIds = useMemo(
-    () =>
-      new Set([
-        ...messages.map((message) => message.id),
-        ...pendingInputBuffers.map((buffer) => buffer.id),
-      ]),
-    [messages, pendingInputBuffers],
-  );
-  const fallbackActionExecutions = useMemo(
-    () => unanchoredActionExecutions(actionExecutions, timelineAnchorIds),
-    [actionExecutions, timelineAnchorIds],
-  );
   const hasTimelineItems =
-    messages.length > 0 ||
-    pendingInputBuffers.length > 0 ||
-    liveRetryVisible ||
-    fallbackActionExecutions.length > 0;
+    messages.length > 0 || pendingInputBuffers.length > 0 || liveRetryVisible;
   const editingMessageIndex = useMemo(() => {
     if (!editingMessage) {
       return null;
@@ -764,19 +634,13 @@ export function ChatView({
       }
       savedScrollRef.current = null;
       prevMessageIdsRef.current = new Set(
-        getTimelineItemIds(
-          messages,
-          pendingInputBuffers,
-          liveRun,
-          actionExecutions,
-        ),
+        getTimelineItemIds(messages, pendingInputBuffers, liveRun),
       );
     }
   }, [
     messages,
     pendingInputBuffers,
     liveRun,
-    actionExecutions,
     hasMore,
     isLoadingMore,
     markProgrammaticScroll,
@@ -864,12 +728,7 @@ export function ChatView({
     }
     isInitialScrollRef.current = false;
     prevMessageIdsRef.current = new Set(
-      getTimelineItemIds(
-        messages,
-        pendingInputBuffers,
-        liveRun,
-        actionExecutions,
-      ),
+      getTimelineItemIds(messages, pendingInputBuffers, liveRun),
     );
 
     // text after next frame pagination enable (sectext scroll insidetext waiting)
@@ -881,7 +740,6 @@ export function ChatView({
     messages,
     pendingInputBuffers,
     liveRun,
-    actionExecutions,
     chatViewState.type,
     hasMore,
     loadOlderUntilViewportScrollable,
@@ -892,12 +750,7 @@ export function ChatView({
   useEffect(() => {
     const frame = requestAnimationFrame(loadOlderUntilViewportScrollable);
     return () => cancelAnimationFrame(frame);
-  }, [
-    actionExecutions,
-    loadOlderUntilViewportScrollable,
-    messages,
-    pendingInputBuffers,
-  ]);
+  }, [loadOlderUntilViewportScrollable, messages, pendingInputBuffers]);
 
   useEffect(() => {
     const el = contentRef.current;
@@ -957,7 +810,6 @@ export function ChatView({
       messages,
       pendingInputBuffers,
       liveRun,
-      actionExecutions,
     );
     const hasNewMessage = timelineItemIds.some((id) => !prevIds.has(id));
 
@@ -978,13 +830,7 @@ export function ChatView({
     } else {
       setShowNewMessageChip(true);
     }
-  }, [
-    messages,
-    pendingInputBuffers,
-    liveRun,
-    actionExecutions,
-    schedulePinToBottom,
-  ]);
+  }, [messages, pendingInputBuffers, liveRun, schedulePinToBottom]);
 
   // integration scroll handler: bottom detection + new message chip release + older messages  withtext + mobile header hide/display
   useEffect(() => {
@@ -1280,14 +1126,6 @@ export function ChatView({
                         onEdit={() => handleStartEdit(msg)}
                         failedRunRetryAction={failedRunRetryAction}
                       />
-                      {visibleActionExecutionsByAnchor
-                        .get(msg.id)
-                        ?.map((actionExecution) => (
-                          <ActionExecutionTimelineCard
-                            key={actionExecution.execution.id}
-                            actionExecution={actionExecution}
-                          />
-                        ))}
                       <TurnDivider usage={boundaryControls.usage} />
                     </Fragment>
                   );
@@ -1326,22 +1164,8 @@ export function ChatView({
                           onDelete={onDeletePendingInputBuffer}
                         />
                       )}
-                      {visibleActionExecutionsByAnchor
-                        .get(buffer.id)
-                        ?.map((actionExecution) => (
-                          <ActionExecutionTimelineCard
-                            key={actionExecution.execution.id}
-                            actionExecution={actionExecution}
-                          />
-                        ))}
                     </Fragment>
                   ))}
-                {fallbackActionExecutions.map((actionExecution) => (
-                  <ActionExecutionTimelineCard
-                    key={actionExecution.execution.id}
-                    actionExecution={actionExecution}
-                  />
-                ))}
               </Stack>
             )}
           </Box>

@@ -19,7 +19,7 @@ import json
 
 from pydantic import BaseModel, ConfigDict, Field, StrictStr, field_validator
 from typing import Any, ClassVar, Dict, List, Optional
-from azentspublicclient.models.action1 import Action1
+from azentspublicclient.models.action import Action
 from azentspublicclient.models.input_action_attachment_policy_response import InputActionAttachmentPolicyResponse
 from azentspublicclient.models.input_action_availability_hint_response import InputActionAvailabilityHintResponse
 from azentspublicclient.models.input_action_message_policy_response import InputActionMessagePolicyResponse
@@ -34,7 +34,7 @@ class InputActionDefinitionResponse(BaseModel):
     keyword: StrictStr = Field(description="Slash search keyword")
     label: StrictStr = Field(description="Action label")
     description: StrictStr = Field(description="Action description")
-    action: Action1
+    action: Action
     category: StrictStr = Field(description="Action category")
     message: InputActionMessagePolicyResponse = Field(description="Message policy")
     attachments: InputActionAttachmentPolicyResponse = Field(description="Attachment policy")
@@ -140,7 +140,7 @@ class InputActionDefinitionResponse(BaseModel):
             "keyword": obj.get("keyword"),
             "label": obj.get("label"),
             "description": obj.get("description"),
-            "action": Action1.from_dict(obj["action"]) if obj.get("action") is not None else None,
+            "action": Action.from_dict(obj["action"]) if obj.get("action") is not None else None,
             "category": obj.get("category"),
             "message": InputActionMessagePolicyResponse.from_dict(obj["message"]) if obj.get("message") is not None else None,
             "attachments": InputActionAttachmentPolicyResponse.from_dict(obj["attachments"]) if obj.get("attachments") is not None else None,

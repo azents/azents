@@ -299,7 +299,6 @@ export function ChatSessionView({
           inputActions={output.inputActions}
           authorizationRequests={output.authorizationRequests}
           onAuthorizationComplete={output.onAuthorizationComplete}
-          actionExecutions={output.actionExecutions}
           workspacePanel={workspacePanel}
           goal={output.goal}
           todo={output.todo}

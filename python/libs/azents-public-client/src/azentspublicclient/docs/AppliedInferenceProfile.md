@@ -6,9 +6,9 @@ Resolved user-visible inference settings applied by one message.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**model_target_label** | **str** | Agent-owned model target label applied by the message |
-**model_display_name** | **str** |  | [optional]
-**reasoning_effort** | **str** |  |
+**model_target_label** | **str** | Agent-owned model target label applied by the message | 
+**model_display_name** | **str** |  | [optional] 
+**reasoning_effort** | **str** |  | 
 
 ## Example
 
