@@ -12,6 +12,7 @@ dependencies = [
     "testcontainers[postgres]==4.14.0",
     "docker==7.1.0",
     "python-on-whales==0.81.0",
+    "selenium==4.46.0",
     "redis==7.1.0",
     # local dependencies
     "az-common",

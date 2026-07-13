@@ -5,12 +5,14 @@ import os
 import re
 import secrets
 import socket
+import subprocess
 import sys
 import tempfile
 import time
 from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import Any, cast
 
 import azentsadminclient
 import azentspublicclient
@@ -22,6 +24,9 @@ from azcommon.testing.images import get_docker_hub_image
 from docker.errors import APIError, NotFound
 from docker.models.containers import Container
 from python_on_whales import docker as pow_docker
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options as ChromeOptions
+from selenium.webdriver.remote.webdriver import WebDriver
 from testcontainers.core.container import DockerContainer
 from testcontainers.core.network import Network
 from testcontainers.postgres import PostgresContainer
@@ -38,6 +43,12 @@ _ECR_CACHE_PREFIX = "azents-production-server"
 _DOCKER_BUILDER_ENV = "AZENTS_E2E_DOCKER_BUILDER"
 _LOCAL_DOCKER_CACHE_ROOT_ENV = "AZENTS_E2E_DOCKER_CACHE_ROOT"
 _LOCAL_DOCKER_CACHE_WRITE_ROOT_ENV = "AZENTS_E2E_DOCKER_CACHE_WRITE_ROOT"
+_SELENIUM_IMAGE = "selenium/standalone-chromium:4.45.0-20260606"
+_MAIN_WEB_UPSTREAM_URL = "http://azents-web:3000"
+_ADMIN_WEB_UPSTREAM_URL = "http://azents-admin-web:3000"
+_MAIN_WEB_BROWSER_URL = "https://azents-web-gateway:8443"
+_ADMIN_WEB_GATEWAY_URL = "https://azents-web-gateway:8444/console"
+_ADMIN_WEB_BROWSER_URL = "https://azents-web-gateway:8445"
 
 
 class _RedactedSecret(str):
@@ -258,6 +269,53 @@ def azents_server_image() -> str:
     return image_tag
 
 
+def _build_e2e_web_image(
+    *,
+    image_tag: str,
+    dockerfile: Path,
+    cache_repository: str,
+) -> None:
+    """Build a Next.js image with the required empty cache context."""
+    with tempfile.TemporaryDirectory(prefix="azents-next-cache-") as cache_root:
+        (Path(cache_root) / "next-cache").mkdir()
+        _build_e2e_image(
+            image_tag=image_tag,
+            dockerfile=dockerfile,
+            cache_repository=cache_repository,
+            build_contexts={"next-cache": cache_root},
+        )
+
+
+@pytest.fixture(scope="session")
+def azents_web_image() -> str:
+    """Build or reuse the Main Web image for browser E2E."""
+    if image := os.environ.get("AZENTS_E2E_WEB_IMAGE"):
+        return image
+
+    image_tag = f"azents-web-e2e:{random_secret(8)}"
+    _build_e2e_web_image(
+        image_tag=image_tag,
+        dockerfile=REPOSITORY_ROOT / "azents-web.Dockerfile",
+        cache_repository="azents-web",
+    )
+    return image_tag
+
+
+@pytest.fixture(scope="session")
+def azents_admin_web_image() -> str:
+    """Build or reuse the Admin Web image for browser E2E."""
+    if image := os.environ.get("AZENTS_E2E_ADMIN_WEB_IMAGE"):
+        return image
+
+    image_tag = f"azents-admin-web-e2e:{random_secret(8)}"
+    _build_e2e_web_image(
+        image_tag=image_tag,
+        dockerfile=REPOSITORY_ROOT / "azents-admin-web.Dockerfile",
+        cache_repository="azents-admin-web",
+    )
+    return image_tag
+
+
 @pytest.fixture(scope="session")
 def azents_runtime_runner_image() -> str:
     """azents Runtime Runner Docker t t."""
@@ -294,6 +352,7 @@ def _build_e2e_image(
     image_tag: str,
     dockerfile: Path,
     cache_repository: str,
+    build_contexts: dict[str, str] | None = None,
 ) -> None:
     """E2E container image t registry/local cache t t t."""
     cache_from: list[dict[str, str]] = []
@@ -329,6 +388,7 @@ def _build_e2e_image(
         builder=builder,
         cache_from=cache_from or None,
         cache_to=cache_to,
+        build_contexts=cast(Any, build_contexts or {}),
         load=True,
     )
 
@@ -454,6 +514,20 @@ def _wait_for_tcp_ready(
                 f"stdout: {stdout.decode()}\n\nstderr: {stderr.decode()}"
             )
         time.sleep(1)
+
+
+def _read_sanitized_container_logs(
+    container: DockerContainer,
+    *,
+    secret_values: tuple[str, ...],
+) -> str:
+    """Read container logs while guaranteeing supplied secrets remain redacted."""
+    stdout, stderr = container.get_logs()
+    logs = stdout.decode(errors="replace") + stderr.decode(errors="replace")
+    for secret_value in secret_values:
+        if secret_value:
+            logs = logs.replace(secret_value, "<redacted>")
+    return logs
 
 
 def _log_server_output(container: DockerContainer, server_name: str) -> None:
@@ -822,7 +896,14 @@ def system_bootstrap_evidence(
         timeout=5,
     )
     if status_response.status_code != 200:
-        pytest.fail(f"bootstrap status failed with HTTP {status_response.status_code}")
+        admin_logs = _read_sanitized_container_logs(
+            azents_admin_server_container,
+            secret_values=(system_bootstrap_setup_token,),
+        )
+        pytest.fail(
+            f"bootstrap status failed with HTTP {status_response.status_code}\n"
+            f"sanitized Admin API logs:\n{admin_logs[-12000:]}"
+        )
     initial_available = status_response.json().get("available") is True
 
     invalid_response = requests.post(
@@ -852,9 +933,10 @@ def system_bootstrap_evidence(
     statuses = sorted(response.status_code for response in responses)
     if statuses != [201, 403]:
         pytest.fail(f"concurrent bootstrap returned unexpected statuses: {statuses}")
-    success_payload = next(
+    success_response = next(
         response for response in responses if response.status_code == 201
-    ).json()
+    )
+    success_payload = success_response.json()
     access_token = success_payload.get("access_token")
     refresh_token = success_payload.get("refresh_token")
     if not isinstance(access_token, str) or not isinstance(refresh_token, str):
@@ -889,6 +971,359 @@ def system_bootstrap_evidence(
         concurrent_attempt_statuses=(statuses[0], statuses[1]),
         final_available=final_available,
     )
+
+
+# =============================================================================
+# Web and Browser E2E
+# =============================================================================
+
+
+def _wait_for_web_ready(
+    container: DockerContainer,
+    *,
+    port: int,
+    path: str,
+    name: str,
+) -> None:
+    """Wait until a web container serves a non-error response."""
+    host = container.get_container_host_ip()
+    exposed_port = container.get_exposed_port(port)
+    url = f"http://{host}:{exposed_port}{path}"
+    for _ in range(60):
+        if container.get_wrapped_container().status == "exited":
+            stdout, stderr = container.get_logs()
+            pytest.fail(
+                f"{name} exited\n\n"
+                f"stdout: {stdout.decode()}\n\nstderr: {stderr.decode()}"
+            )
+        try:
+            response = requests.get(url, timeout=2, allow_redirects=False)
+            if response.status_code < 500:
+                return
+        except requests.exceptions.RequestException:
+            pass
+        time.sleep(1)
+    stdout, stderr = container.get_logs()
+    pytest.fail(
+        f"{name} did not start in time\n\n"
+        f"stdout: {stdout.decode()}\n\nstderr: {stderr.decode()}"
+    )
+
+
+@pytest.fixture(scope="session")
+def azents_main_web_container(
+    container_network: Network,
+    azents_web_image: str,
+    azents_public_server_container: DockerContainer,
+) -> Generator[DockerContainer, None, None]:
+    """Run Main Web with the Admin Web gateway URL configured."""
+    del azents_public_server_container
+    container = (
+        DockerContainer(
+            image=azents_web_image,
+            docker_client_kw={"timeout": _DOCKER_CLIENT_TIMEOUT_SECONDS},
+        )
+        .with_name(f"azents-web-{random_secret(4)}")
+        .with_network(container_network)
+        .with_network_aliases("azents-web")
+        .with_env("PUBLIC_API_URL", "http://azents-public-server:8010")
+        .with_env("INTERNAL_API_URL", "http://azents-public-server:8010")
+        .with_env("ADMIN_WEB_URL", _ADMIN_WEB_GATEWAY_URL)
+        .with_exposed_ports(3000)
+    )
+    with container:
+        _wait_for_web_ready(
+            container,
+            port=3000,
+            path="/login",
+            name="azents-web",
+        )
+        yield container
+        _log_server_output(container, "azents-web")
+
+
+@pytest.fixture(scope="session")
+def azents_admin_web_container(
+    container_network: Network,
+    azents_admin_web_image: str,
+    azents_public_server_container: DockerContainer,
+    azents_admin_server_container: DockerContainer,
+) -> Generator[DockerContainer, None, None]:
+    """Run Admin Web on a dedicated internal host."""
+    del azents_public_server_container, azents_admin_server_container
+    container = (
+        DockerContainer(
+            image=azents_admin_web_image,
+            docker_client_kw={"timeout": _DOCKER_CLIENT_TIMEOUT_SECONDS},
+        )
+        .with_name(f"azents-admin-web-{random_secret(4)}")
+        .with_network(container_network)
+        .with_network_aliases("azents-admin-web")
+        .with_env("PUBLIC_BASE_URL", _ADMIN_WEB_BROWSER_URL)
+        .with_env("INTERNAL_PUBLIC_API_URL", "http://azents-public-server:8010")
+        .with_env("INTERNAL_ADMIN_API_URL", "http://azents-admin-server:8011")
+        .with_env("PUBLIC_WEB_URL", _MAIN_WEB_BROWSER_URL)
+        .with_exposed_ports(3000)
+    )
+    with container:
+        _wait_for_web_ready(
+            container,
+            port=3000,
+            path="/login",
+            name="azents-admin-web",
+        )
+        yield container
+        _log_server_output(container, "azents-admin-web")
+
+
+@pytest.fixture(scope="session")
+def azents_admin_web_path_container(
+    container_network: Network,
+    azents_admin_web_image: str,
+    azents_public_server_container: DockerContainer,
+    azents_admin_server_container: DockerContainer,
+) -> Generator[DockerContainer, None, None]:
+    """Run Admin Web behind a path-stripping gateway profile."""
+    del azents_public_server_container, azents_admin_server_container
+    container = (
+        DockerContainer(
+            image=azents_admin_web_image,
+            docker_client_kw={"timeout": _DOCKER_CLIENT_TIMEOUT_SECONDS},
+        )
+        .with_name(f"azents-admin-web-path-{random_secret(4)}")
+        .with_network(container_network)
+        .with_network_aliases("azents-admin-web-path")
+        .with_env("PUBLIC_BASE_URL", _ADMIN_WEB_GATEWAY_URL)
+        .with_env("INTERNAL_PUBLIC_API_URL", "http://azents-public-server:8010")
+        .with_env("INTERNAL_ADMIN_API_URL", "http://azents-admin-server:8011")
+        .with_env("PUBLIC_WEB_URL", _MAIN_WEB_BROWSER_URL)
+        .with_exposed_ports(3000)
+    )
+    with container:
+        _wait_for_web_ready(
+            container,
+            port=3000,
+            path="/login",
+            name="azents-admin-web-path",
+        )
+        yield container
+        _log_server_output(container, "azents-admin-web-path")
+
+
+@pytest.fixture(scope="session")
+def azents_admin_gateway_container(
+    container_network: Network,
+    azents_main_web_container: DockerContainer,
+    azents_admin_web_container: DockerContainer,
+    azents_admin_web_path_container: DockerContainer,
+) -> Generator[DockerContainer, None, None]:
+    """Expose Main and Admin Web profiles through a TLS gateway."""
+    del (
+        azents_main_web_container,
+        azents_admin_web_container,
+        azents_admin_web_path_container,
+    )
+    config = """
+server {
+    listen 8443 ssl;
+    ssl_certificate /etc/nginx/tls/tls.crt;
+    ssl_certificate_key /etc/nginx/tls/tls.key;
+
+    location / {
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Forwarded-Host $http_host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_pass http://azents-web:3000;
+    }
+}
+
+server {
+    listen 8444 ssl;
+    ssl_certificate /etc/nginx/tls/tls.crt;
+    ssl_certificate_key /etc/nginx/tls/tls.key;
+
+    location = /console {
+        return 308 /console/;
+    }
+
+    location /console/ {
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Forwarded-Host $http_host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_pass http://azents-admin-web-path:3000/;
+    }
+
+    location /_next/ {
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Forwarded-Host $http_host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_pass http://azents-admin-web-path:3000;
+    }
+}
+
+server {
+    listen 8445 ssl;
+    ssl_certificate /etc/nginx/tls/tls.crt;
+    ssl_certificate_key /etc/nginx/tls/tls.key;
+
+    location / {
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Forwarded-Host $http_host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_pass http://azents-admin-web:3000;
+    }
+}
+""".strip()
+    with tempfile.TemporaryDirectory(prefix="azents-web-gateway-") as temp_dir:
+        temp_path = Path(temp_dir)
+        config_path = temp_path / "default.conf"
+        certificate_path = temp_path / "tls.crt"
+        key_path = temp_path / "tls.key"
+        config_path.write_text(config, encoding="utf-8")
+        subprocess.run(
+            [
+                "openssl",
+                "req",
+                "-x509",
+                "-nodes",
+                "-newkey",
+                "rsa:2048",
+                "-keyout",
+                str(key_path),
+                "-out",
+                str(certificate_path),
+                "-days",
+                "1",
+                "-subj",
+                "/CN=azents-web-gateway",
+                "-addext",
+                "subjectAltName=DNS:azents-web-gateway",
+            ],
+            check=True,
+            capture_output=True,
+        )
+        container = (
+            DockerContainer(
+                image=get_docker_hub_image("nginx:1.29-alpine"),
+                docker_client_kw={"timeout": _DOCKER_CLIENT_TIMEOUT_SECONDS},
+            )
+            .with_name(f"azents-web-gateway-{random_secret(4)}")
+            .with_network(container_network)
+            .with_network_aliases("azents-web-gateway")
+            .with_volume_mapping(
+                str(config_path),
+                "/etc/nginx/conf.d/default.conf",
+                "ro",
+            )
+            .with_volume_mapping(str(certificate_path), "/etc/nginx/tls/tls.crt", "ro")
+            .with_volume_mapping(str(key_path), "/etc/nginx/tls/tls.key", "ro")
+            .with_exposed_ports(8443, 8444, 8445)
+        )
+        with container:
+            host = container.get_container_host_ip()
+            port = container.get_exposed_port(8443)
+            for _ in range(30):
+                try:
+                    response = requests.get(
+                        f"https://{host}:{port}/login",
+                        timeout=2,
+                        verify=False,
+                    )
+                    if response.status_code < 500:
+                        break
+                except requests.exceptions.RequestException:
+                    pass
+                time.sleep(1)
+            else:
+                pytest.fail("azents web TLS gateway did not start in time")
+            yield container
+            _log_server_output(container, "azents-web-gateway")
+
+
+@pytest.fixture(scope="session")
+def selenium_container(
+    container_network: Network,
+    azents_main_web_container: DockerContainer,
+    azents_admin_web_container: DockerContainer,
+) -> Generator[DockerContainer, None, None]:
+    """Run a remote Chromium browser on the E2E container network."""
+    del azents_main_web_container, azents_admin_web_container
+    container = (
+        DockerContainer(
+            image=get_docker_hub_image(_SELENIUM_IMAGE),
+            docker_client_kw={"timeout": _DOCKER_CLIENT_TIMEOUT_SECONDS},
+        )
+        .with_name(f"azents-selenium-{random_secret(4)}")
+        .with_network(container_network)
+        .with_env("SE_NODE_SESSION_TIMEOUT", "120")
+        .with_exposed_ports(4444)
+        .with_kwargs(shm_size="2g")
+    )
+    with container:
+        host = container.get_container_host_ip()
+        port = container.get_exposed_port(4444)
+        status_url = f"http://{host}:{port}/status"
+        for _ in range(60):
+            try:
+                payload = cast(
+                    dict[str, object],
+                    requests.get(status_url, timeout=2).json(),
+                )
+                value = payload.get("value")
+                if isinstance(value, dict):
+                    status = cast(dict[str, object], value)
+                    if status.get("ready") is True:
+                        break
+            except requests.exceptions.RequestException:
+                pass
+            except ValueError:
+                pass
+            time.sleep(1)
+        else:
+            pytest.fail("Selenium did not become ready")
+        yield container
+        _log_server_output(container, "selenium")
+
+
+@pytest.fixture(scope="function")
+def browser_driver(
+    selenium_container: DockerContainer,
+) -> Generator[WebDriver, None, None]:
+    """Create an isolated headless Chromium session."""
+    host = selenium_container.get_container_host_ip()
+    port = selenium_container.get_exposed_port(4444)
+    options = ChromeOptions()
+    options.accept_insecure_certs = True
+    options.add_argument("--headless=new")
+    options.add_argument("--window-size=1440,1000")
+    driver = webdriver.Remote(
+        command_executor=f"http://{host}:{port}",
+        options=options,
+    )
+    try:
+        yield driver
+    finally:
+        driver.quit()
+
+
+@pytest.fixture(scope="session")
+def azents_main_web_url(azents_admin_gateway_container: DockerContainer) -> str:
+    """Return the Main Web URL reachable from the remote browser."""
+    return _MAIN_WEB_BROWSER_URL
+
+
+@pytest.fixture(scope="session")
+def azents_admin_web_url(azents_admin_gateway_container: DockerContainer) -> str:
+    """Return the dedicated-host Admin Web URL reachable from the browser."""
+    return _ADMIN_WEB_BROWSER_URL
+
+
+@pytest.fixture(scope="session")
+def azents_admin_web_gateway_url(
+    azents_admin_gateway_container: DockerContainer,
+) -> str:
+    """Return the path-prefix Admin Web URL reachable from the browser."""
+    return _ADMIN_WEB_GATEWAY_URL
 
 
 # =============================================================================
