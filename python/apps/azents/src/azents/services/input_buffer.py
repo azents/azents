@@ -789,6 +789,7 @@ class InputBufferService:
             file_parts=file_parts,
             external_id=external_id or buffer.id,
             attachment_source="input_buffer",
+            requested_inference_profile=requested_profile,
         )
         return dataclasses.replace(
             user_message,
@@ -1054,10 +1055,15 @@ def _requested_inference_profile(
 def _user_message_payload_json(
     user_message: RunUserMessage,
 ) -> dict[str, JSONValue]:
-    """Serialize a UserMessage while preserving explicit Default effort."""
+    """Serialize a UserMessage while preserving explicit nullable efforts."""
     payload = _JSON_OBJECT_ADAPTER.validate_python(
         user_message.payload.model_dump(mode="json", exclude_none=True)
     )
+    requested_profile = user_message.payload.requested_inference_profile
+    if requested_profile is not None:
+        payload["requested_inference_profile"] = _JSON_OBJECT_ADAPTER.validate_python(
+            requested_profile.model_dump(mode="json")
+        )
     applied_profile = user_message.payload.applied_inference_profile
     if applied_profile is not None:
         payload["applied_inference_profile"] = _JSON_OBJECT_ADAPTER.validate_python(

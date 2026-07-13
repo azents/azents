@@ -6,7 +6,10 @@ import pytest
 from pydantic import ValidationError
 
 from azents.core.enums import EventKind
-from azents.core.inference_profile import AppliedInferenceProfile
+from azents.core.inference_profile import (
+    AppliedInferenceProfile,
+    RequestedInferenceProfile,
+)
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.engine.events.types import (
     AssistantMessagePayload,
@@ -136,6 +139,21 @@ def test_user_message_decodes_historical_profile_without_display_name() -> None:
 
     assert payload.applied_inference_profile is not None
     assert payload.applied_inference_profile.model_display_name is None
+
+
+def test_user_message_preserves_requested_inference_profile() -> None:
+    payload = UserMessagePayload(
+        content="use quality",
+        requested_inference_profile=RequestedInferenceProfile(
+            model_target_label="Quality",
+            reasoning_effort=None,
+        ),
+    )
+
+    assert payload.model_dump(mode="json")["requested_inference_profile"] == {
+        "model_target_label": "Quality",
+        "reasoning_effort": None,
+    }
 
 
 def test_user_message_preserves_applied_inference_profile() -> None:

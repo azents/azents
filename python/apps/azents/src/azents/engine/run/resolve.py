@@ -584,6 +584,7 @@ async def resolve_invoke_input_with_model_source(
                 file_parts=msg_file_parts,
                 external_id=uuid7().hex,
                 attachment_source="user_upload",
+                requested_inference_profile=requested_profile,
             )
         )
 

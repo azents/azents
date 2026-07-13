@@ -47,6 +47,7 @@ import type {
   ToolResultStatus,
 } from "../types";
 import type {
+  ActionExecutionProjectionResponse,
   AgentResponse,
   AppliedInferenceProfile,
   ChatEventResponse,
@@ -231,8 +232,7 @@ function eventRequestedInferenceProfile(
   event: ChatEventResponse,
 ): RequestedInferenceProfile | null {
   return requestedInferenceProfileFromValue(
-    event.payload.requested_inference_profile ??
-      event.payload.applied_inference_profile,
+    event.payload.requested_inference_profile,
   );
 }
 
@@ -265,14 +265,6 @@ function appliedInferenceProfileFromValue(
       typeof modelDisplayName === "string" ? modelDisplayName : null,
     reasoning_effort: reasoningEffort,
   };
-}
-
-function eventAppliedInferenceProfile(
-  event: ChatEventResponse,
-): AppliedInferenceProfile | null {
-  return appliedInferenceProfileFromValue(
-    event.payload.applied_inference_profile,
-  );
 }
 
 function chatActionFromValue(value: unknown): ChatAction | null {
@@ -893,7 +885,7 @@ function mapEvents(
             createdAt: event.created_at,
             status: "complete",
             metadata: eventMetadata(event),
-            inferenceProfile: eventAppliedInferenceProfile(event),
+            inferenceProfile: eventRequestedInferenceProfile(event),
             ...(attachments.length > 0 ? { attachments } : {}),
           },
         ];
@@ -1314,6 +1306,12 @@ function upsertActionExecutionProjection(
   if (index === -1) {
     return [...actionExecutions, actionExecution];
   }
+  if (
+    actionExecutions[index]?.provenance === "durable" &&
+    actionExecution.provenance !== "durable"
+  ) {
+    return actionExecutions;
+  }
   return actionExecutions.map((item, itemIndex) =>
     itemIndex === index ? actionExecution : item,
   );
@@ -1321,7 +1319,7 @@ function upsertActionExecutionProjection(
 
 function isActionExecutionProjectionValue(
   value: unknown,
-): value is ActionExecutionProjection {
+): value is ActionExecutionProjectionResponse {
   if (!isRecord(value) || !isRecord(value.execution)) {
     return false;
   }
@@ -1340,7 +1338,7 @@ function actionExecutionResultFromEvent(
     return null;
   }
   return isActionExecutionProjectionValue(event.payload.action_execution)
-    ? event.payload.action_execution
+    ? { ...event.payload.action_execution, provenance: "durable" }
     : null;
 }
 
@@ -1458,7 +1456,7 @@ interface LiveTaxonomySnapshot {
   session_run_state: LiveEventListResponse["session_run_state"];
   todo?: TodoStateSnapshot | null;
   goal?: Partial<GoalStateSnapshot> | null;
-  action_executions?: ActionExecutionProjection[] | null;
+  action_executions?: ActionExecutionProjectionResponse[] | null;
 }
 
 function emptyPartialHistoryState(): PartialHistoryState {
@@ -1669,7 +1667,10 @@ function replaceLiveStateFromSnapshot(
           : false,
       todo: live.todo ?? emptyTodoState(),
       goal: normalizeGoalState(live.goal),
-      actionExecutions: live.action_executions ?? [],
+      actionExecutions: (live.action_executions ?? []).map((projection) => ({
+        ...projection,
+        provenance: "live",
+      })),
     },
     invalidLiveRun:
       runSnapshot.type === "INVALID" ? { value: runSnapshot.value } : null,
@@ -1712,6 +1713,8 @@ function mapSessionEvents(
       items: ChatEventResponse[];
       has_more: boolean;
       has_newer?: boolean;
+      next_cursor?: string | null;
+      previous_cursor?: string | null;
     };
     live: LiveEventListResponse;
   },
@@ -1722,23 +1725,19 @@ function mapSessionEvents(
   invalidLiveRun: InvalidLiveRunSnapshot | null;
   hasMore: boolean;
   hasNewer: boolean;
+  oldestCursor: string | null;
   newestCursor: string | null;
   latestDurableInferenceIntent: DurableInferenceIntent | null;
 } {
   const mappedLive = replaceLiveStateFromSnapshot(data.live, previousLiveState);
   return {
     historyEvents: data.history.items,
-    liveState: {
-      ...mappedLive.state,
-      actionExecutions: mergeActionExecutionProjections(
-        actionExecutionResultsFromEvents(data.history.items),
-        mappedLive.state.actionExecutions,
-      ),
-    },
+    liveState: mappedLive.state,
     invalidLiveRun: mappedLive.invalidLiveRun,
     hasMore: data.history.has_more,
     hasNewer: data.history.has_newer ?? false,
-    newestCursor: data.history.items.at(-1)?.id ?? null,
+    oldestCursor: data.history.next_cursor ?? null,
+    newestCursor: data.history.previous_cursor ?? null,
     latestDurableInferenceIntent: latestDurableInferenceIntent([
       ...data.history.items,
       ...data.live.partial_history.items,
@@ -1833,6 +1832,30 @@ function mergeHistoryEventPages(
     : [...retained, ...incoming];
 }
 
+function renderableTimelineMessageCount(events: ChatEventResponse[]): number {
+  return mapEvents(events, { renderIncompleteToolCalls: false }).filter(
+    (message) =>
+      message.role !== "turn_complete" &&
+      message.role !== "run_complete" &&
+      message.role !== "compaction_started",
+  ).length;
+}
+
+function pageAdvancesVisibleTimeline(
+  existing: ChatEventResponse[],
+  incoming: ChatEventResponse[],
+  direction: "prepend" | "append",
+): boolean {
+  if (actionExecutionResultsFromEvents(incoming).length > 0) {
+    return true;
+  }
+  const merged = mergeHistoryEventPages(existing, incoming, direction);
+  return (
+    renderableTimelineMessageCount(merged) >
+    renderableTimelineMessageCount(existing)
+  );
+}
+
 function mergeLatestHistoryEvents(
   existing: ChatEventResponse[],
   serverLatest: ChatEventResponse[],
@@ -1892,6 +1915,8 @@ export function useChatSessionContainer(
   const [isWritePending, setIsWritePending] = useState(false);
   const [wasRestCommandBlocked, setWasRestCommandBlocked] = useState(false);
   const [historyEvents, setHistoryEvents] = useState<ChatEventResponse[]>([]);
+  const historyEventsRef = useRef(historyEvents);
+  historyEventsRef.current = historyEvents;
   const [transientMessages, setTransientMessages] = useState<ChatMessage[]>([]);
   const [latestHumanInferenceProfile, setLatestHumanInferenceProfile] =
     useState<RequestedInferenceProfile | null>(null);
@@ -1899,6 +1924,7 @@ export function useChatSessionContainer(
     () => emptyManagedLiveState(),
   );
   const [isSubscribeReady, setIsSubscribeReady] = useState(false);
+  const historyOldestCursorRef = useRef<string | null>(null);
   const historyNewestCursorRef = useRef<string | null>(null);
   const latestHumanModelOrderRef = useRef<number | null>(null);
   const writeInFlightRef = useRef(false);
@@ -1977,6 +2003,14 @@ export function useChatSessionContainer(
     managedLiveState.partialHistory,
     transientMessages,
   ]);
+  const actionExecutions = useMemo(
+    () =>
+      mergeActionExecutionProjections(
+        actionExecutionResultsFromEvents(historyEvents),
+        managedLiveState.actionExecutions,
+      ),
+    [historyEvents, managedLiveState.actionExecutions],
+  );
   const defaultInferenceProfile =
     latestHumanInferenceProfile ??
     sessionCurrentInferenceProfile ??
@@ -2096,7 +2130,10 @@ export function useChatSessionContainer(
       }
 
       if ("type" in event && event.type === "action_execution_updated") {
-        const actionExecution = event.action_execution;
+        const actionExecution: ActionExecutionProjection = {
+          ...event.action_execution,
+          provenance: "live",
+        };
         setManagedLiveState((prev) => ({
           ...prev,
           actionExecutions: upsertActionExecutionProjection(
@@ -2223,8 +2260,11 @@ export function useChatSessionContainer(
           latestHumanModelOrderRef.current = appendedInferenceIntent.modelOrder;
           setLatestHumanInferenceProfile(appendedInferenceIntent.profile);
         }
-        const actionExecution = actionExecutionResultFromEvent(responseEvent);
-        setHistoryEvents((prev) => upsertHistoryEvent(prev, responseEvent));
+        setHistoryEvents((prev) => {
+          const next = upsertHistoryEvent(prev, responseEvent);
+          historyEventsRef.current = next;
+          return next;
+        });
         setManagedLiveState((prev) => ({
           ...prev,
           partialHistory: removePartialHistoryCounterpart(
@@ -2235,13 +2275,6 @@ export function useChatSessionContainer(
             prev.pendingInputBuffers,
             responseEvent,
           ),
-          actionExecutions:
-            actionExecution === null
-              ? prev.actionExecutions
-              : upsertActionExecutionProjection(
-                  prev.actionExecutions,
-                  actionExecution,
-                ),
         }));
         if (responseEvent.kind === "run_marker") {
           const markerRunId = stringField(responseEvent.payload, "run_id");
@@ -2439,12 +2472,16 @@ export function useChatSessionContainer(
                 mapped.newestCursor !== detached.newestCursor),
           });
         } else {
+          historyOldestCursorRef.current = mapped.oldestCursor;
           historyNewestCursorRef.current = mapped.newestCursor;
-          setHistoryEvents((prev) =>
-            options.reason === "initial"
-              ? mapped.historyEvents
-              : mergeLatestHistoryEvents(prev, mapped.historyEvents),
-          );
+          setHistoryEvents((prev) => {
+            const next =
+              options.reason === "initial"
+                ? mapped.historyEvents
+                : mergeLatestHistoryEvents(prev, mapped.historyEvents);
+            historyEventsRef.current = next;
+            return next;
+          });
           latestHumanModelOrderRef.current =
             mapped.latestDurableInferenceIntent?.modelOrder ?? null;
           setLatestHumanInferenceProfile(
@@ -2517,52 +2554,69 @@ export function useChatSessionContainer(
       return;
     }
 
-    const oldestEvent = historyEvents[0];
-    if (!oldestEvent) {
+    const oldestCursor = historyOldestCursorRef.current;
+    if (oldestCursor === null) {
       return;
     }
 
     setIsLoadingMore(true);
-    void utils.chat.listSessionEvents
-      .fetch({
-        sessionId,
-        before: oldestEvent.id,
-      })
-      .then((result) => {
-        setHistoryEvents((prev) =>
-          mergeHistoryEventPages(prev, result.history.items, "prepend"),
-        );
-        const olderActionExecutions = actionExecutionResultsFromEvents(
+    void (async () => {
+      let accumulatedEvents = historyEventsRef.current;
+      let loadedEvents: ChatEventResponse[] = [];
+      let cursor = oldestCursor;
+      let more = true;
+      let visibleTimelineAdvanced = false;
+
+      while (more && !visibleTimelineAdvanced) {
+        const result = await utils.chat.listSessionEvents.fetch({
+          sessionId,
+          before: cursor,
+        });
+        visibleTimelineAdvanced = pageAdvancesVisibleTimeline(
+          accumulatedEvents,
           result.history.items,
+          "prepend",
         );
-        setManagedLiveState((prev) => ({
-          ...prev,
-          actionExecutions: mergeActionExecutionProjections(
-            olderActionExecutions,
-            prev.actionExecutions,
-          ),
-        }));
-        setHasMore(result.history.has_more);
-        if (chatTimelineState.type === "LATEST_FOLLOWING") {
-          setChatTimelineState({
-            type: "DETACHED_HISTORY_BROWSING",
-            hasNewer: false,
-            newestCursor:
-              historyNewestCursorRef.current ??
-              historyEvents.at(-1)?.id ??
-              null,
-          });
+        accumulatedEvents = mergeHistoryEventPages(
+          accumulatedEvents,
+          result.history.items,
+          "prepend",
+        );
+        loadedEvents = mergeHistoryEventPages(
+          loadedEvents,
+          result.history.items,
+          "prepend",
+        );
+        more = result.history.has_more;
+        const nextCursor = result.history.next_cursor ?? null;
+        if (nextCursor === null || nextCursor === cursor) {
+          break;
         }
-      })
-      .finally(() => {
-        setIsLoadingMore(false);
+        cursor = nextCursor;
+      }
+
+      historyOldestCursorRef.current = cursor;
+      setHistoryEvents((prev) => {
+        const next = mergeHistoryEventPages(prev, loadedEvents, "prepend");
+        historyEventsRef.current = next;
+        return next;
       });
+      setHasMore(more);
+      if (chatTimelineState.type === "LATEST_FOLLOWING") {
+        setChatTimelineState({
+          type: "DETACHED_HISTORY_BROWSING",
+          hasNewer: false,
+          newestCursor: historyNewestCursorRef.current,
+        });
+      }
+    })().finally(() => {
+      setIsLoadingMore(false);
+    });
   }, [
     chatTimelineState.type,
     sessionId,
     isLoadingMore,
     hasMore,
-    historyEvents,
     utils.chat.listSessionEvents,
   ]);
 
@@ -2576,44 +2630,68 @@ export function useChatSessionContainer(
       return;
     }
 
+    const initialNewestCursor = chatTimelineState.newestCursor;
     setIsLoadingNewer(true);
-    void utils.chat.listSessionEvents
-      .fetch({
-        sessionId,
-        after: chatTimelineState.newestCursor,
-      })
-      .then((result) => {
-        setHistoryEvents((prev) =>
-          mergeHistoryEventPages(prev, result.history.items, "append"),
-        );
-        const newerActionExecutions = actionExecutionResultsFromEvents(
+    void (async () => {
+      let accumulatedEvents = historyEventsRef.current;
+      let loadedEvents: ChatEventResponse[] = [];
+      let cursor = initialNewestCursor;
+      let hasNewer = true;
+      let hasOlder = hasMore;
+      let visibleTimelineAdvanced = false;
+
+      while (hasNewer && !visibleTimelineAdvanced) {
+        const result = await utils.chat.listSessionEvents.fetch({
+          sessionId,
+          after: cursor,
+        });
+        visibleTimelineAdvanced = pageAdvancesVisibleTimeline(
+          accumulatedEvents,
           result.history.items,
+          "append",
         );
-        setManagedLiveState((prev) => ({
-          ...prev,
-          actionExecutions: mergeActionExecutionProjections(
-            prev.actionExecutions,
-            newerActionExecutions,
-          ),
-        }));
-        const newestCursor = result.history.items.at(-1)?.id ?? null;
-        const hasNewer = result.history.has_newer ?? false;
-        if (hasNewer) {
-          setChatTimelineState({
-            type: "DETACHED_HISTORY_BROWSING",
-            hasNewer,
-            newestCursor: newestCursor ?? chatTimelineState.newestCursor,
-          });
-          return;
+        accumulatedEvents = mergeHistoryEventPages(
+          accumulatedEvents,
+          result.history.items,
+          "append",
+        );
+        loadedEvents = mergeHistoryEventPages(
+          loadedEvents,
+          result.history.items,
+          "append",
+        );
+        hasOlder = result.history.has_more;
+        hasNewer = result.history.has_newer ?? false;
+        const nextCursor = result.history.previous_cursor ?? null;
+        if (nextCursor === null || nextCursor === cursor) {
+          break;
         }
-        void applyLatestSnapshot(sessionId);
-      })
-      .finally(() => {
-        setIsLoadingNewer(false);
+        cursor = nextCursor;
+      }
+
+      historyNewestCursorRef.current = cursor;
+      setHistoryEvents((prev) => {
+        const next = mergeHistoryEventPages(prev, loadedEvents, "append");
+        historyEventsRef.current = next;
+        return next;
       });
+      setHasMore(hasOlder);
+      if (hasNewer) {
+        setChatTimelineState({
+          type: "DETACHED_HISTORY_BROWSING",
+          hasNewer,
+          newestCursor: cursor,
+        });
+        return;
+      }
+      void applyLatestSnapshot(sessionId);
+    })().finally(() => {
+      setIsLoadingNewer(false);
+    });
   }, [
     applyLatestSnapshot,
     chatTimelineState,
+    hasMore,
     isLoadingNewer,
     sessionId,
     utils.chat.listSessionEvents,
@@ -3024,7 +3102,12 @@ export function useChatSessionContainer(
     }),
     authorizationRequests,
     onAuthorizationComplete,
-    actionExecutions: managedLiveState.actionExecutions,
+    actionExecutions:
+      chatTimelineState.type === "DETACHED_HISTORY_BROWSING"
+        ? actionExecutions.filter(
+            (projection) => projection.provenance === "durable",
+          )
+        : actionExecutions,
     tokenUsage,
     goal: managedLiveState.goal,
     todo: managedLiveState.todo,

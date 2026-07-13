@@ -1756,6 +1756,7 @@ async def test_poll_run_inputs_continues_fifo_after_failed_turn_action(
         attachments=[],
         external_id="buffer-user",
         attachment_source="input_buffer",
+        requested_inference_profile=None,
     )
     promoted_batches = [
         PromotedInputBuffers(

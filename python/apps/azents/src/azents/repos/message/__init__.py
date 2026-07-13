@@ -502,15 +502,40 @@ class MessageRepository:
         result = await session.execute(query)
         rows = list(result.scalars())
 
-        has_extra = len(rows) > limit
-        if has_extra:
+        if len(rows) > limit:
             rows = rows[:limit]
 
         if after is None:
             rows.reverse()
 
-        has_more = has_extra if after is None else False
-        has_newer = has_extra if after is not None else False
+        oldest_boundary = rows[0].id if rows else before or after
+        newest_boundary = rows[-1].id if rows else after or before
+        has_more = False
+        if oldest_boundary is not None:
+            has_more = bool(
+                await session.scalar(
+                    sa.select(
+                        sa.exists().where(
+                            RDBEvent.session_id == session_id,
+                            RDBEvent.reverted.is_(False),
+                            RDBEvent.id < oldest_boundary,
+                        )
+                    )
+                )
+            )
+        has_newer = False
+        if newest_boundary is not None:
+            has_newer = bool(
+                await session.scalar(
+                    sa.select(
+                        sa.exists().where(
+                            RDBEvent.session_id == session_id,
+                            RDBEvent.reverted.is_(False),
+                            RDBEvent.id > newest_boundary,
+                        )
+                    )
+                )
+            )
         return [_to_event(row) for row in rows], has_more, has_newer
 
     async def get_latest_retry_visible_event(

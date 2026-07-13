@@ -14,7 +14,10 @@ from pydantic import (
 )
 
 from azents.core.enums import AgentRunPhase, AgentRunStatus, EventKind
-from azents.core.inference_profile import AppliedInferenceProfile
+from azents.core.inference_profile import (
+    AppliedInferenceProfile,
+    RequestedInferenceProfile,
+)
 from azents.engine.events.action_messages import ActionMessagePayload
 from azents.engine.run.failure import (
     FailedRunFailureMetadata,
@@ -206,6 +209,10 @@ class UserMessagePayload(BaseModel):
     content: str | list[UserContentPart] = Field(description="User content")
     attachments: list[Attachment] = Field(default_factory=list)
     metadata: dict[str, str] = Field(default_factory=dict)
+    requested_inference_profile: RequestedInferenceProfile | None = Field(
+        default=None,
+        description="Immutable inference intent requested for this input",
+    )
     applied_inference_profile: AppliedInferenceProfile | None = Field(
         default=None,
         description="Resolved inference settings applied by this message",

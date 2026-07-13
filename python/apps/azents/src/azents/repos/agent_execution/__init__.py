@@ -45,7 +45,7 @@ def _validate_payload(
 
 
 def _serialize_payload(payload: EventPayload) -> dict[str, JSONValue]:
-    """Serialize an event while preserving explicit Default profile effort."""
+    """Serialize an event while preserving explicit nullable profile efforts."""
     serialized = _JSON_OBJECT_ADAPTER.validate_python(
         payload.model_dump(mode="json", exclude_none=True)
     )
@@ -57,7 +57,7 @@ def _serialize_payload(payload: EventPayload) -> dict[str, JSONValue]:
             payload.applied_inference_profile.model_dump(mode="json")
         )
     if (
-        isinstance(payload, ActionMessagePayload)
+        isinstance(payload, (ActionMessagePayload, UserMessagePayload))
         and payload.requested_inference_profile is not None
     ):
         serialized["requested_inference_profile"] = (

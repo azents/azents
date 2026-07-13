@@ -15,7 +15,11 @@ from azents.core.enums import (
     EventKind,
     LLMProvider,
 )
-from azents.core.inference_profile import AppliedInferenceProfile, SessionInferenceState
+from azents.core.inference_profile import (
+    AppliedInferenceProfile,
+    RequestedInferenceProfile,
+    SessionInferenceState,
+)
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.engine.events.action_messages import ActionMessagePayload, GoalAction
 from azents.engine.events.types import (
@@ -130,7 +134,7 @@ class TestEventExecutionRepositories:
         self,
         rdb_session: AsyncSession,
     ) -> None:
-        """Preserve explicit null effort for a requested Default profile."""
+        """Preserve explicit null effort in requested and applied profiles."""
         workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
             rdb_session,
             handle="event-profile-default-ws",
@@ -144,6 +148,10 @@ class TestEventExecutionRepositories:
             ),
         )
         transcript_repo = EventTranscriptRepository()
+        requested_profile = RequestedInferenceProfile(
+            model_target_label="Quality",
+            reasoning_effort=None,
+        )
         applied_profile = AppliedInferenceProfile(
             model_target_label="Quality",
             model_display_name="GPT 5.5",
@@ -157,6 +165,7 @@ class TestEventExecutionRepositories:
                 kind=EventKind.USER_MESSAGE,
                 payload=UserMessagePayload(
                     content="Use the default effort",
+                    requested_inference_profile=requested_profile,
                     applied_inference_profile=applied_profile,
                 ).model_dump(mode="json"),
             ),
@@ -168,9 +177,14 @@ class TestEventExecutionRepositories:
 
         assert loaded is not None
         assert isinstance(loaded.payload, UserMessagePayload)
+        assert loaded.payload.requested_inference_profile == requested_profile
         assert loaded.payload.applied_inference_profile == applied_profile
         stored = await rdb_session.get(RDBEvent, appended.id)
         assert stored is not None
+        assert stored.payload["requested_inference_profile"] == {
+            "model_target_label": "Quality",
+            "reasoning_effort": None,
+        }
         assert stored.payload["applied_inference_profile"] == {
             "model_target_label": "Quality",
             "model_display_name": "GPT 5.5",

@@ -40,6 +40,7 @@ from azents.engine.tools.skill import (
     SkillStateStore,
 )
 from azents.rdb.models.agent import RDBAgent
+from azents.rdb.models.event import RDBEvent
 from azents.rdb.models.input_buffer import RDBInputBuffer
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.session import SessionManager
@@ -616,6 +617,10 @@ class TestInputBufferService:
         assert result.events[0].external_id == f"{buffer_id}:user_message"
         event_payload = result.events[0].payload
         assert isinstance(event_payload, UserMessagePayload)
+        assert event_payload.requested_inference_profile == RequestedInferenceProfile(
+            model_target_label="Quality",
+            reasoning_effort=None,
+        )
         assert event_payload.applied_inference_profile == AppliedInferenceProfile(
             model_target_label="Quality",
             model_display_name=None,
@@ -624,6 +629,13 @@ class TestInputBufferService:
         promoted = result.user_messages[0]
         assert promoted.external_id == f"{buffer_id}:user_message"
         assert promoted.payload.content == "buffered message"
+        assert (
+            promoted.payload.requested_inference_profile
+            == RequestedInferenceProfile(
+                model_target_label="Quality",
+                reasoning_effort=None,
+            )
+        )
         assert promoted.payload.applied_inference_profile == AppliedInferenceProfile(
             model_target_label="Quality",
             model_display_name=None,
@@ -635,7 +647,13 @@ class TestInputBufferService:
                 .select_from(RDBInputBuffer)
                 .where(RDBInputBuffer.id == buffer_id)
             )
+            stored_event = await session.get(RDBEvent, result.events[0].id)
         assert remaining == 0
+        assert stored_event is not None
+        assert stored_event.payload["requested_inference_profile"] == {
+            "model_target_label": "Quality",
+            "reasoning_effort": None,
+        }
 
     async def test_flush_rejects_stale_preparation_snapshot(
         self,

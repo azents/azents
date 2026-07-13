@@ -1187,6 +1187,7 @@ async def test_boundary_poll_broadcasts_input_buffer_taxonomy_actions(
         attachments=[],
         external_id="buffer-1",
         attachment_source="input_buffer",
+        requested_inference_profile=None,
     )
     event = Event(
         id="1123456789abcdef0123456789abcdeb",

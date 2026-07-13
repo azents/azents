@@ -759,6 +759,10 @@ class _EventService:
                 content="hello",
                 attachments=[],
                 metadata={"source": "chat"},
+                requested_inference_profile=RequestedInferenceProfile(
+                    model_target_label="quality",
+                    reasoning_effort=None,
+                ),
             ),
             model_order=1000,
             external_id="input-1",
@@ -1483,6 +1487,10 @@ class TestEventRoutes:
                         "content": "hello",
                         "attachments": [],
                         "metadata": {"source": "chat"},
+                        "requested_inference_profile": {
+                            "model_target_label": "quality",
+                            "reasoning_effort": None,
+                        },
                     },
                     "model_order": 1000,
                     "external_id": "input-1",
