@@ -3,6 +3,7 @@
  * - 모든 서브 라우터를 통합
  */
 import { router } from "../init";
+import { bootstrapRouter } from "./bootstrap";
 import { debugRouter } from "./debug";
 import { modelCatalogRouter } from "./modelCatalog";
 import { signupTokenRouter } from "./signupToken";
@@ -13,6 +14,7 @@ import { workspaceRouter } from "./workspace";
 import { workspaceMemberRouter } from "./workspaceMember";
 
 export const appRouter = router({
+  bootstrap: bootstrapRouter,
   debug: debugRouter,
   workspace: workspaceRouter,
   user: userRouter,

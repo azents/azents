@@ -57,7 +57,9 @@ class Settings(BaseSettings):
     auth_registration_mode: RegistrationMode = "signup_token"
     auth_signup_token_default_expire_hours: int = 168
     auth_signup_token_default_max_uses: int = 1
-    auth_first_owner_bootstrap_enabled: bool = True
+
+    # Initial system administrator bootstrap
+    system_bootstrap_setup_token: str | None = None
 
     # Email; disabled when email_sender is None
     email_sender: str | None = None
@@ -260,7 +262,12 @@ class AuthConfig(BaseModel):
     refresh_token: RefreshTokenConfig
     registration_mode: RegistrationMode = "signup_token"
     signup_token: SignupTokenConfig
-    first_owner_bootstrap_enabled: bool = True
+
+
+class SystemBootstrapConfig(BaseModel):
+    """Initial system administrator bootstrap settings."""
+
+    setup_token: str | None
 
 
 class GitHubConfig(BaseModel):
@@ -340,6 +347,7 @@ class Config(BaseModel):
     sentry_dsn: str | None
     rdb: PostgreSQLConfig
     auth: AuthConfig
+    system_bootstrap: SystemBootstrapConfig
     email: EmailConfig | None
     credential_encryption: CredentialEncryptionConfig
     redis: RedisConfig
@@ -390,7 +398,9 @@ class Config(BaseModel):
                     default_expire_hours=settings.auth_signup_token_default_expire_hours,
                     default_max_uses=settings.auth_signup_token_default_max_uses,
                 ),
-                first_owner_bootstrap_enabled=settings.auth_first_owner_bootstrap_enabled,
+            ),
+            system_bootstrap=SystemBootstrapConfig(
+                setup_token=settings.system_bootstrap_setup_token,
             ),
             email=EmailConfig(
                 sender=settings.email_sender,

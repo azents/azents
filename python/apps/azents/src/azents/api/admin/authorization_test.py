@@ -3,7 +3,12 @@
 from azents.app import create_dummy_admin_app
 
 _HTTP_METHODS = {"get", "put", "post", "delete", "options", "head", "patch", "trace"}
-_HEALTH_PREFIX = "/health/v1/"
+_UNAUTHENTICATED_OPERATIONS = {
+    ("get", "/health/v1/readiness"),
+    ("get", "/health/v1/liveness"),
+    ("get", "/system/v1/bootstrap/status"),
+    ("post", "/system/v1/bootstrap/first-admin"),
+}
 
 
 def test_every_operational_admin_api_declares_bearer_security() -> None:
@@ -14,7 +19,7 @@ def test_every_operational_admin_api_declares_bearer_security() -> None:
         for method, operation in path_item.items():
             if method not in _HTTP_METHODS:
                 continue
-            if path.startswith(_HEALTH_PREFIX):
+            if (method, path) in _UNAUTHENTICATED_OPERATIONS:
                 assert "security" not in operation, f"{method.upper()} {path}"
                 continue
             assert operation.get("security") == [{"HTTPBearer": []}], (

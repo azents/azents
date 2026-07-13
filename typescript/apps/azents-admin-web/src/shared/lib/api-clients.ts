@@ -32,6 +32,14 @@ export function createAuthenticatedPublicApiClient(
   );
 }
 
+export function createBootstrapAdminApiClient(): AdminApiClient {
+  return createAdminClient(
+    createAdminConfig({
+      baseUrl: getServerConfig().adminApiUrl,
+    }),
+  );
+}
+
 export function createAdminApiClient(accessToken: string): AdminApiClient {
   return createAdminClient(
     createAdminConfig({

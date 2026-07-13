@@ -13,6 +13,7 @@ from azents.utils.fastapi.route import RouteMounter
 
 from . import (
     auth,
+    bootstrap,
     debug,
     health,
     invitation,
@@ -57,5 +58,6 @@ def mount(mounter: RouteMounter) -> None:
         )
 
     health.mount(mounter)
+    bootstrap.mount(mounter)
     for module in protected_modules:
         module.mount(protected_mounter)

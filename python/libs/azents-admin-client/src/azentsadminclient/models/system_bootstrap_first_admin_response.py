@@ -17,18 +17,20 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr
 from typing import Any, ClassVar, Dict, List
 from typing import Optional, Set
 from typing_extensions import Self
 
-class BootstrapStatusResponse(BaseModel):
+class SystemBootstrapFirstAdminResponse(BaseModel):
     """
-    First owner bootstrap status response.
+    Initial system administrator session response.
     """ # noqa: E501
-    available: StrictBool = Field(description="bootstrap availability flag")
+    access_token: StrictStr = Field(description="JWT access token")
+    refresh_token: StrictStr = Field(description="Refresh token")
+    expires_in: StrictInt = Field(description="Access token expiration time in seconds")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["available"]
+    __properties: ClassVar[List[str]] = ["access_token", "refresh_token", "expires_in"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -48,7 +50,7 @@ class BootstrapStatusResponse(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of BootstrapStatusResponse from a JSON string"""
+        """Create an instance of SystemBootstrapFirstAdminResponse from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -80,7 +82,7 @@ class BootstrapStatusResponse(BaseModel):
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of BootstrapStatusResponse from a dict"""
+        """Create an instance of SystemBootstrapFirstAdminResponse from a dict"""
         if obj is None:
             return None
 
@@ -88,7 +90,9 @@ class BootstrapStatusResponse(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "available": obj.get("available")
+            "access_token": obj.get("access_token"),
+            "refresh_token": obj.get("refresh_token"),
+            "expires_in": obj.get("expires_in")
         })
         # store additional fields in additional_properties
         for _key in obj.keys():
@@ -96,5 +100,3 @@ class BootstrapStatusResponse(BaseModel):
                 _obj.additional_properties[_key] = obj.get(_key)
 
         return _obj
-
-

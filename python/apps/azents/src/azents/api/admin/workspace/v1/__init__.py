@@ -11,16 +11,9 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from azents.repos.workspace.data import HandleConflict, NotFound
 from azents.services.workspace import WorkspaceService
-from azents.services.workspace.data import (
-    BootstrapNotAvailable,
-    WeakBootstrapPassword,
-)
 from azents.utils.fastapi.route import RouteMounter
 
 from .data import (
-    BootstrapFirstOwnerRequest,
-    BootstrapFirstOwnerResponse,
-    BootstrapStatusResponse,
     WorkspaceCreateRequest,
     WorkspaceListResponse,
     WorkspaceResponse,
@@ -28,48 +21,6 @@ from .data import (
 )
 
 router = APIRouter()
-
-
-@router.get("/bootstrap/status")
-async def get_bootstrap_status(
-    workspace_service: Annotated[WorkspaceService, Depends()],
-) -> BootstrapStatusResponse:
-    """Get whether first owner bootstrap is available."""
-    output = await workspace_service.get_bootstrap_status()
-    return BootstrapStatusResponse.model_validate(output.model_dump())
-
-
-@router.post("/bootstrap/first-owner", status_code=status.HTTP_201_CREATED)
-async def bootstrap_first_owner(
-    workspace_service: Annotated[WorkspaceService, Depends()],
-    request: BootstrapFirstOwnerRequest,
-) -> BootstrapFirstOwnerResponse:
-    """Create the first Owner and Workspace."""
-    result = await workspace_service.bootstrap_first_owner(request)
-    match result:
-        case Success(value):
-            return BootstrapFirstOwnerResponse.model_validate(value.model_dump())
-        case Failure(error):
-            match error:
-                case BootstrapNotAvailable():
-                    raise HTTPException(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        detail="First owner bootstrap is not available.",
-                    )
-                case HandleConflict():
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail="Workspace handle already exists.",
-                    )
-                case WeakBootstrapPassword(message):
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=message,
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
 
 
 @router.post("/workspaces", status_code=status.HTTP_201_CREATED)

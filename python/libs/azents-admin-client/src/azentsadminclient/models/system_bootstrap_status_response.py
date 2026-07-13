@@ -17,19 +17,18 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, Field, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 from typing import Any, ClassVar, Dict, List
 from typing import Optional, Set
 from typing_extensions import Self
 
-class BootstrapFirstOwnerResponse(BaseModel):
+class SystemBootstrapStatusResponse(BaseModel):
     """
-    First owner bootstrap response.
+    Initial system bootstrap availability response.
     """ # noqa: E501
-    workspace_handle: StrictStr = Field(description="Created Workspace handle")
-    user_id: StrictStr = Field(description="Created Owner User ID")
+    available: StrictBool = Field(description="Whether initial bootstrap is available")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["workspace_handle", "user_id"]
+    __properties: ClassVar[List[str]] = ["available"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -49,7 +48,7 @@ class BootstrapFirstOwnerResponse(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of BootstrapFirstOwnerResponse from a JSON string"""
+        """Create an instance of SystemBootstrapStatusResponse from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -81,7 +80,7 @@ class BootstrapFirstOwnerResponse(BaseModel):
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of BootstrapFirstOwnerResponse from a dict"""
+        """Create an instance of SystemBootstrapStatusResponse from a dict"""
         if obj is None:
             return None
 
@@ -89,8 +88,7 @@ class BootstrapFirstOwnerResponse(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "workspace_handle": obj.get("workspace_handle"),
-            "user_id": obj.get("user_id")
+            "available": obj.get("available")
         })
         # store additional fields in additional_properties
         for _key in obj.keys():
@@ -98,5 +96,3 @@ class BootstrapFirstOwnerResponse(BaseModel):
                 _obj.additional_properties[_key] = obj.get(_key)
 
         return _obj
-
-
