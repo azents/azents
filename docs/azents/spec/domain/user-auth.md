@@ -4,14 +4,18 @@ spec_type: domain
 domain: user-auth
 owner: "@Hardtack"
 created: 2026-04-20
-updated: 2026-07-08
+updated: 2026-07-13
 tags: [backend, security, api]
 code_paths:
   - python/apps/azents/src/azents/core/auth/**
   - python/apps/azents/src/azents/core/email/**
   - python/apps/azents/src/azents/api/public/auth/v1/**
   - python/apps/azents/src/azents/api/admin/auth/v1/**
-  - python/apps/azents/src/azents/api/admin/workspace/v1/**
+  - python/apps/azents/src/azents/api/admin/system/v1/**
+  - python/apps/azents/src/azents/api/admin/bootstrap/v1/**
+  - python/apps/azents/src/azents/api/admin/__init__.py
+  - python/apps/azents/src/azents/app.py
+  - python/apps/azents/src/azents/api/public/user/v1/**
   - python/apps/azents/src/azents/rdb/models/user.py
   - python/apps/azents/src/azents/rdb/models/user_email.py
   - python/apps/azents/src/azents/rdb/models/session.py
@@ -19,6 +23,7 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/email_verification.py
   - python/apps/azents/src/azents/rdb/models/signup_token.py
   - python/apps/azents/src/azents/rdb/models/password_reset_token.py
+  - python/apps/azents/src/azents/rdb/models/system_user_role.py
   - python/apps/azents/src/azents/repos/user/**
   - python/apps/azents/src/azents/repos/user_email/**
   - python/apps/azents/src/azents/repos/session/**
@@ -26,31 +31,50 @@ code_paths:
   - python/apps/azents/src/azents/repos/email_verification/**
   - python/apps/azents/src/azents/repos/signup_token/**
   - python/apps/azents/src/azents/repos/password_reset_token/**
+  - python/apps/azents/src/azents/repos/system_user_role/**
+  - python/apps/azents/src/azents/repos/system_bootstrap/**
   - python/apps/azents/src/azents/services/auth/**
   - python/apps/azents/src/azents/services/email_verification/**
   - python/apps/azents/src/azents/services/signup_token/**
   - python/apps/azents/src/azents/services/credential/**
   - python/apps/azents/src/azents/services/password_reset_token/**
+  - python/apps/azents/src/azents/services/system_user_role/**
+  - python/apps/azents/src/azents/services/system_bootstrap/**
   - python/apps/azents/src/azents/services/security/**
   - python/apps/azents/src/azents/services/user/**
   - python/apps/azents/src/azents/services/user_email/**
   - python/apps/azents/src/azents/services/workspace/**
   - python/apps/azents/src/azents/services/workspace_invitation/**
+  - python/apps/azents/src/cli/system_admin.py
+  - typescript/apps/azents-admin-web/src/app/api/session/**
+  - typescript/apps/azents-admin-web/src/config.ts
+  - typescript/apps/azents-admin-web/src/config/server.ts
+  - typescript/apps/azents-admin-web/src/features/login/**
+  - typescript/apps/azents-admin-web/src/providers/auth-provider.ts
+  - typescript/apps/azents-admin-web/src/shared/lib/auth-cookies.ts
+  - typescript/apps/azents-admin-web/src/trpc/**
   - typescript/apps/azents-web/src/features/auth/**
   - typescript/apps/azents-web/src/features/signup/**
   - typescript/apps/azents-web/src/features/password-reset/**
-  - typescript/apps/azents-web/src/features/bootstrap/**
+  - typescript/apps/azents-web/src/config/server.ts
+  - typescript/apps/azents-web/src/shared/components/AppBar.tsx
+  - typescript/apps/azents-web/src/shared/lib/admin-access.ts
   - typescript/apps/azents-web/src/trpc/routers/auth.ts
-  - typescript/apps/azents-web/src/trpc/routers/workspace.ts
+  - typescript/apps/azents-web/src/trpc/routers/user.ts
+  - infra/charts/azents/templates/admin-web/**
+  - infra/charts/azents/templates/server/adminserver-deployment.yaml.tpl
+  - infra/charts/azents/templates/web/configmap.yaml.tpl
+  - infra/charts/azents/values.yaml
+  - infra/charts/azents/values.schema.json
 api_routes:
   - /auth/v1
   - /user/v1
   - /security/v1
   - /workspace/v1
-  - /admin/auth/v1
-  - /admin/workspace/v1
-last_verified_at: 2026-07-08
-spec_version: 6
+  - /system/v1
+  - /debug/v1
+last_verified_at: 2026-07-13
+spec_version: 7
 ---
 
 # User & Authentication
@@ -61,11 +85,14 @@ This domain covers azents user accounts, email, signup, login, session, and secu
 
 Core characteristics:
 
-- **Signup token controlled registration** — New account creation is performed only by email-bound signup token redeem, except first-owner bootstrap exception.
+- **Signup token controlled registration** — Normal new account creation is performed only by email-bound signup token redeem. The only zero-user exception is one-time Admin bootstrap.
 - **Email OTP is login/elevation, not public signup** — Email OTP verify is used for existing user login and elevation. Under default setting other than `registration_mode=open`, new email OTP verify does not auto-create user.
 - **Email-bound signup token** — Every signup token is fixed to normalized email. On successful redeem, corresponding primary `UserEmail.verified_at` is filled.
 - **Workspace invitation remains membership intent** — invitation is not account creation authority, and pending invitation can be created for email without existing user. If email sending is available, invitation email can include signup token link.
-- **First owner bootstrap** — Creates first owner user/workspace only when user count is 0 and `first_owner_bootstrap_enabled` is true.
+- **Admin bootstrap** — A one-time setup token can create the first verified password user, `system_admin` assignment, and session only while the instance has zero users. It does not create a Workspace.
+- **Persisted system authorization** — Admin API operations authenticate the ordinary Azents user JWT and require a live database-backed `system_admin` assignment. Workspace roles never imply system access.
+- **Independent Admin Web session** — Admin Web signs in through the Public API but stores separately named HTTP-only cookies and forwards the current user access token to the Admin API.
+- **Explicit existing-install promotion** — Existing users gain initial or recovery access only through the exact-email operator CLI; startup and migrations never auto-promote a user.
 - **Credential provider projection** — email/password are summarized by credential provider abstraction and exposed differently for public login projection and authenticated security projection.
 - **SMTP-gated email credential** — email credential is valid login/elevation credential only when SMTP is configured, even if verified primary email exists. When SMTP disabled, other valid credential such as password is needed.
 - **Password is one login method** — password login is stored as bcrypt hash. Security setting changes require elevated access token.
@@ -87,6 +114,8 @@ erDiagram
     User ||--o{ PasswordResetToken : "reset target"
     PasswordResetToken ||--o{ PasswordResetTokenRedemption : "redeemed by"
     PasswordResetTokenRedemption }o--|| User : "recovers"
+    User ||--o{ SystemUserRole : "receives"
+    User ||--o{ SystemUserRole : "grants"
 
     User {
         string id PK
@@ -158,6 +187,18 @@ erDiagram
         datetime expires_at
         datetime verified_at
     }
+    SystemUserRole {
+        string user_id PK_FK
+        enum role PK "system_admin"
+        string granted_by_user_id FK
+        datetime granted_at
+    }
+    SystemBootstrapState {
+        int id PK "always 1"
+        string token_hash
+        datetime created_at
+        datetime consumed_at
+    }
 ```
 
 ## 3. Signup and Login Behavior
@@ -221,24 +262,41 @@ Token preview validates hash, expiry, `used_at`, and `revoked_at`. A valid previ
 
 Token redeem validates password policy before consuming the token. On success it atomically marks the token used, creates or updates the target user's password credential, revokes all existing sessions for the user, and writes a `PasswordResetTokenRedemption` audit row. Redeem returns success only; it does not issue login tokens.
 
-### 3.7 First owner bootstrap
+### 3.7 System roles and Admin API authorization
 
-`GET /workspace/v1/bootstrap/status` returns first owner bootstrap availability.
+`system_user_roles` stores instance-wide assignments separately from Workspace membership. The only current role is `system_admin`. Every operational Admin API request decodes the ordinary Azents access token, verifies its live Session/User, and reads the current assignment from PostgreSQL. Role state is not embedded in the JWT, so grant or revoke applies immediately to an already-issued access token.
 
-`POST /workspace/v1/bootstrap/first-owner` succeeds only under following conditions.
+All Admin routers are protected by this dependency except health probes and the two bootstrap operations. Debug, global User/Workspace management, token administration, and model-catalog operations use the same boundary. Missing or invalid identity returns `401`; an authenticated user without the live role receives `403`.
 
-- `first_owner_bootstrap_enabled=true`
-- total user count is 0
-- password policy passes
-- workspace handle does not conflict
+Role revoke and User deletion share one serialized transaction boundary. An operation that would remove the final `system_admin` fails with stable `409 Conflict`, while deleting a non-final administrator cascades that user's assignment. `GET /user/v1/me/system-roles` exposes only the authenticated user's current roles for Main Web navigation. UI visibility is not an authorization control.
 
-On success, creates owner user with verified primary email, password login, workspace, and owner membership. If user count is 1 or more, subsequent call is rejected.
+The operator CLI grants `system_admin` to one normalized exact email. It is the only initial-promotion and recovery path after users exist. It neither creates a user nor issues a session, and migrations, startup, Workspace ownership, and environment configuration do not auto-promote users.
 
-### 3.8 Workspace invitation integration
+### 3.8 Admin bootstrap
+
+`GET /system/v1/bootstrap/status` returns only `{ available }`. `POST /system/v1/bootstrap/first-admin` accepts the setup token in `X-Azents-Setup-Token` and succeeds only when the total User count is zero and the singleton token hash is active and unconsumed.
+
+The setup token is either operator-configured or generated with at least 256 bits of entropy. Only its hash is stored. A generated plaintext token is logged once after durable persistence; a configured plaintext token is never logged. While the instance remains empty, a configured token can replace an unconsumed generated token.
+
+Bootstrap serializes concurrent attempts and atomically creates the first User, verified primary email, password login, `system_admin` assignment, normal refresh Session, and consumed marker. It creates no Workspace or Workspace membership. Validation and rolled-back failures do not consume the token; after any User exists, bootstrap cannot reopen.
+
+### 3.9 Admin Web session
+
+Admin Web uses Public API password login and refresh, but stores its own `az-admin-token`, `az-admin-refresh`, and `az-admin-token-expires-at` HTTP-only cookies. Production cookies are `Secure`, `SameSite=Lax`, and scoped to the configured Admin Web public base path. Admin Web and Main Web sessions are independent even on the same host.
+
+Protected Admin Web tRPC procedures refresh the user session through the Public API when needed, enforce same-origin mutation requests, and forward the resulting user bearer token to the Admin API. Login and session checks require a live `system_admin` assignment. Refresh rejection, logout, or self-revocation clears Admin cookies and returns the browser to Admin login. No machine credential, GitHub organization login, shared cookie, or unauthenticated fallback remains.
+
+### 3.10 Workspace invitation integration
 
 Workspace invitation remains email-bound membership intent. Invitation can be created for email without user, and after signup token redeem with same email and login, pending invitation API returns it.
 
 When sending invitation email, if target email is not yet registered as user email and email service is configured, invitation email includes signup token URL. If email service is not configured, invitation is created as-is and signup token is not created.
+
+### 3.11 Surface routing and deployment configuration
+
+Main Web, Admin Web, Public API, and Admin API use explicit public or internal URLs instead of deriving topology from hard-coded prefixes. Admin Web's public base URL may include a gateway path and controls redirects plus cookie path. Server-to-server calls use separately configured Public/Admin API internal URLs. Main Web receives only an optional public Admin Web URL.
+
+Helm keeps Admin Web public routing separate from internal API services. An operator-provided bootstrap token is referenced through an existing Kubernetes Secret and injected only into the Admin API/server boundary; chart defaults contain no secret literal. Obsolete GitHub Admin login and Admin API OAuth2 client-credential settings are not part of the chart contract.
 
 ## 4. Session / Refresh Token Lifecycle
 
@@ -284,8 +342,14 @@ Sensitive operations require `elv=true` access token. Elevation is acquired by e
 - `[email-verification-single-use]` — email verification row cannot be reused after being verified once.
 - `[login-method-lookup-no-leak]` — unregistered email also responds `has_password=false`.
 - `[login-invalid-no-leak]` — password login failure does not distinguish existence.
-- `[first-owner-bootstrap-user-count-zero]` — first owner bootstrap is possible only when user count is 0.
-- `[first-owner-bootstrap-config-gate]` — bootstrap is impossible when `first_owner_bootstrap_enabled=false`.
+- `[admin-bootstrap-user-count-zero]` — Admin bootstrap is available only while total User count is zero and an active setup-token hash exists.
+- `[admin-bootstrap-no-workspace]` — successful bootstrap creates identity, password, system role, and Session state but no Workspace or Workspace membership.
+- `[admin-bootstrap-single-winner]` — concurrent attempts are serialized and exactly one successful transaction can consume the setup token.
+- `[admin-bootstrap-secret-hash-only]` — configured setup-token plaintext is never stored or logged; generated plaintext is emitted only once after hash persistence.
+- `[system-admin-live-lookup]` — Admin authorization reads the persisted role for every protected request rather than trusting JWT role claims.
+- `[system-admin-final-assignment]` — role revoke and User deletion cannot leave the instance with zero system administrators.
+- `[system-admin-distinct-from-workspace]` — OWNER/MANAGER Workspace roles do not grant Admin API access.
+- `[system-admin-existing-install-cli]` — users-first installations and recovery require explicit exact-email CLI grant; no automatic promotion path exists.
 - `[workspace-invitation-membership-intent]` — invitation has no signup authority.
 - `[credential-email-smtp-gated]` — verified email credential is valid login/elevation credential only when SMTP/email delivery is configured.
 - `[credential-last-valid-required]` — credential deletion is allowed only when at least one valid credential remains after deletion.
@@ -312,12 +376,20 @@ Sensitive operations require `elv=true` access token. Elevation is acquired by e
 - `POST /password-reset-tokens/preview` → `{ valid, email, expires_at }` (`email` is a masked current email hint)
 - `POST /password-reset-tokens/redeem` → `{ success }`
 
-### Public — `/workspace/v1`
+### Public — `/user/v1`
 
-- `GET /bootstrap/status` → `{ available }`
-- `POST /bootstrap/first-owner` → `{ workspace_handle, user_id }`
+- `GET /me/system-roles` → current authenticated user's live instance-role projection
 
-### Admin — `/admin/auth/v1`
+### Admin bootstrap — `/system/v1`
+
+- `GET /bootstrap/status` → `{ available }` (unauthenticated)
+- `POST /bootstrap/first-admin` → ordinary access/refresh session response (unauthenticated, setup-token header required)
+- `GET /me` → current authenticated system-administrator projection
+- `GET /role-assignments` → paged current role assignments
+- `PUT /users/{user_id}/roles/system_admin` → idempotent grant
+- `DELETE /users/{user_id}/roles/system_admin` → revoke with final-admin invariant
+
+### Admin API — `/auth/v1`
 
 - `POST /signup-tokens` → token metadata + one-time plaintext token
 - `GET /signup-tokens` → token metadata list, plaintext token excluded
@@ -327,9 +399,7 @@ Sensitive operations require `elv=true` access token. Elevation is acquired by e
 - `DELETE /password-reset-tokens/{token_id}` → 204
 - Existing E2E helpers: `/email-verifications*`
 
-### Admin — `/admin/workspace/v1`
-
-- Retains first-owner bootstrap endpoints for the separate Admin API surface. Main web must use the public `/workspace/v1/bootstrap/*` endpoints instead of calling Admin API directly.
+All other Admin API operations, including `/auth/v1` token operations and Debug routes, require the same user bearer token plus live `system_admin` assignment. Health probes and the two bootstrap operations above are the complete unauthenticated Admin allowlist.
 
 ### Public — `/security/v1`
 
@@ -348,12 +418,15 @@ Sensitive operations require `elv=true` access token. Elevation is acquired by e
 - `/login` — existing login page. Existing users continue with password or email OTP. It exposes a signup-link request action only when registration policy and email delivery allow it.
 - `/signup?token=...` — previews a signup token, shows a masked email hint, and redeems it with user-entered email and password.
 - `/reset-password?token=...` — previews an admin-issued reset token and submits a new password. Success does not auto-login; user signs in separately.
-- `/setup` — first owner bootstrap UI. It calls public bootstrap status/first-owner endpoints and only succeeds when server-side bootstrap is available.
+Main Web has no setup route. It shows the configured Admin Web URL only when the authenticated Public API self-role projection includes `system_admin`; it never imports or calls the Admin API client.
 
-Main web does not expose admin-issued signup token or password reset token management. Those operations remain on the separate Admin API until a product-level system admin permission model is defined.
+Admin Web `/login` selects one of two modes from Admin bootstrap status. An empty instance shows first-administrator setup with email, password, and one-time setup token. After bootstrap is consumed, the same route shows normal password login. Protected Admin resource routes require Admin cookies and authoritative downstream role checks.
+
+Admin-issued signup/password-reset token management and other instance-wide operations remain on Admin Web/Admin API. Workspace-scoped product administration remains on Main Web/Public API.
 
 ## 9. Changelog
 
+- **2026-07-13** (v7) — Replaced public first-owner Workspace bootstrap with one-time Admin bootstrap, added persisted live system-administrator authorization and CLI recovery, and documented independent Admin Web user sessions.
 - **2026-04-20** (v1) — Initial living spec.
 - **2026-05-09** (v2) — Refresh/session/elevation behavior verified.
 - **2026-06-17** (v3) — Signup-on-first-verify replaced by signup-token controlled registration. Added signup token model/service/API, email signup delivery, invitation signup-link integration, first owner bootstrap, and frontend `/signup`/`/setup` routes.

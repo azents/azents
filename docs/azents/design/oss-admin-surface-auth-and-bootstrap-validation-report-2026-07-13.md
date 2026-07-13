@@ -22,7 +22,7 @@ No database writes are performed by the tests.
 - External credentials: not required
 - Setup token and JWT values: generated in memory and never written to retained output
 
-The local agent runtime did not expose a Docker socket, so container-backed execution could not start locally. Collection, Ruff, and Pyright validation completed locally. The deterministic container matrix remains a required CI gate; its run URL and final outcome must be added before the design is marked implemented.
+The local agent runtime did not expose a Docker socket, so container-backed execution could not start locally. Collection, Ruff, and Pyright validation completed locally. Docker-backed API and Chromium execution completed in GitHub Actions against commit `31b1530a960416eaf94afd147befc4d2874061f1`.
 
 ## Automated Coverage
 
@@ -61,18 +61,17 @@ The fixture update also shares one JWT signing key across Public API, Admin API,
 
 The Docker failure occurred while `testcontainers` initialized its network and did not execute product code. It is an environment limitation, not a skipped or passing product result.
 
-## CI Completion Requirements
+## CI Results
 
-Before spec promotion and setting the design `implemented` date:
+- Commit: `31b1530a960416eaf94afd147befc4d2874061f1`
+- Run: [GitHub Actions 29258423170](https://github.com/azents/azents/actions/runs/29258423170)
+- Command: `uv run pytest -vv -m "not live_external and not runtime_provider" ./src`
+- Result: 152 passed, 11 skipped, 7 deselected in 463.40 seconds
 
-1. Run the deterministic E2E suite in a Docker-enabled CI worker.
-2. Confirm both new system-admin tests and all existing Admin/Public tests pass.
-3. Confirm failure output and retained logs contain no setup token, refresh token, password, or bearer-token value.
-4. Record the exact commit SHA, CI run URL, and final test counts in this report.
-5. Treat any product or fixture failure as blocking; do not convert it to a skip.
+The Docker-enabled run passed the new system-administrator API and browser tests together with the existing deterministic Admin and Public API suite. The skipped tests were existing substrate-conditional cases; the requested Admin coverage executed rather than being converted to a skip. Retained job output contained no setup token, refresh token, password, or bearer-token value, and the E2E assertions also verified that the configured setup token was absent from Public and Admin server logs.
 
 ## Browser Matrix
 
 `test_01_admin_web.py` now exercises Main Web and Admin Web through a real headless Chromium session. The browser profile uses TLS for production cookie behavior, verifies the Main Web role-gated link, checks Admin Web login/logout and cookie paths, performs self-revocation through the Users UI, and runs both dedicated-host and path-prefix gateway topologies.
 
-The browser test is collected locally but cannot execute without the same unavailable Docker socket as the API E2E suite. Its passing CI run remains blocking for final spec promotion and must be recorded with the CI completion update.
+The browser journey passed in the Docker-enabled CI run recorded above, including both dedicated-host and path-prefix gateway topologies.

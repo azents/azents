@@ -18,8 +18,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/agents/containers/useAgentFormContainer.ts
   - typescript/apps/azents-web/src/features/llm-settings/containers/useLlmSettingsContainer.ts
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
-last_verified_at: 2026-07-12
-spec_version: 5
+last_verified_at: 2026-07-13
+spec_version: 6
 ---
 
 # Model Catalog Domain Spec
@@ -95,7 +95,7 @@ Starting sync while the latest attempt for the catalog is still running returns 
 
 The deterministic E2E fixture integration can sync a deterministic test catalog for stable product tests. This fixture support is not a production provider behavior.
 
-System catalog sync is not user-triggered from the public picker. It is invoked by periodic execution infrastructure and can be operated separately from normal user reads. Admin model catalog operations can list system catalog states, refresh all supported system catalogs, or refresh one supported provider catalog, including the stable `xai` catalog.
+System catalog sync is not user-triggered from the public picker. It is invoked by periodic execution infrastructure and can be operated separately from normal user reads. Admin model catalog operations can list system catalog states, refresh all supported system catalogs, or refresh one supported provider catalog, including the stable `xai` catalog. Every Admin model-catalog operation requires an authenticated Azents user bearer token with a live persisted `system_admin` assignment; no shared machine credential or unauthenticated mode is supported.
 
 ## Submit normalization
 
@@ -121,6 +121,7 @@ For user-scoped integration catalogs, the picker can trigger integration sync. F
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-07-13 | 6 | Documented live system-administrator authorization for Admin model-catalog operations |
 | 2026-07-12 | 5 | Added account-scoped ChatGPT OAuth integration catalogs and backend-authoritative Responses Lite capability projection |
 | 2026-07-10 | 4 | Documented canonical LiteLLM reasoning-effort capability projection and strict empty-list semantics |
 | 2026-07-10 | 3 | Added the separate xAI API-key system catalog projected from the shared LiteLLM xAI family |
