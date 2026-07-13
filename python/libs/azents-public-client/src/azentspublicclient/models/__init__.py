@@ -185,6 +185,7 @@ from azentspublicclient.models.model_reasoning_capabilities import ModelReasonin
 from azentspublicclient.models.model_reasoning_effort import ModelReasoningEffort
 from azentspublicclient.models.model_tool_calling_capabilities import ModelToolCallingCapabilities
 from azentspublicclient.models.my_join_request_response import MyJoinRequestResponse
+from azentspublicclient.models.my_system_roles_response import MySystemRolesResponse
 from azentspublicclient.models.o_auth_authorize_response import OAuthAuthorizeResponse
 from azentspublicclient.models.o_auth_exchange_request import OAuthExchangeRequest
 from azentspublicclient.models.partial_history_response import PartialHistoryResponse
@@ -244,6 +245,7 @@ from azentspublicclient.models.skill_action import SkillAction
 from azentspublicclient.models.subagent_settings import SubagentSettings
 from azentspublicclient.models.subagent_tree_node_response import SubagentTreeNodeResponse
 from azentspublicclient.models.subagent_tree_response import SubagentTreeResponse
+from azentspublicclient.models.system_user_role import SystemUserRole
 from azentspublicclient.models.test_connection_request import TestConnectionRequest
 from azentspublicclient.models.test_connection_response import TestConnectionResponse
 from azentspublicclient.models.todo_item_response import TodoItemResponse
@@ -280,4 +282,3 @@ from azentspublicclient.models.xai_o_auth_device_start_response import XaiOAuthD
 from azentspublicclient.models.xai_o_auth_device_status_response import XaiOAuthDeviceStatusResponse
 from azentspublicclient.models.xai_o_auth_secrets import XaiOAuthSecrets
 from azentspublicclient.models.xai_o_auth_session_status import XaiOAuthSessionStatus
-

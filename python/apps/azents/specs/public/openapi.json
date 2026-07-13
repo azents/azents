@@ -7165,6 +7165,33 @@
         ]
       }
     },
+    "/user/v1/me/system-roles": {
+      "get": {
+        "tags": [
+          "User v1"
+        ],
+        "summary": "Get My System Roles",
+        "description": "Return system roles assigned to the current User.",
+        "operationId": "user_v1_get_my_system_roles",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MySystemRolesResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/workspace/v1/bootstrap/status": {
       "get": {
         "tags": [
@@ -14311,6 +14338,24 @@
         "title": "MyJoinRequestResponse",
         "description": "My join request response schema."
       },
+      "MySystemRolesResponse": {
+        "properties": {
+          "roles": {
+            "items": {
+              "$ref": "#/components/schemas/SystemUserRole"
+            },
+            "type": "array",
+            "title": "Roles",
+            "description": "Current User system roles"
+          }
+        },
+        "type": "object",
+        "required": [
+          "roles"
+        ],
+        "title": "MySystemRolesResponse",
+        "description": "Current User system role response."
+      },
       "OAuthAuthorizeResponse": {
         "properties": {
           "authorization_url": {
@@ -16049,6 +16094,14 @@
         ],
         "title": "SubagentTreeResponse",
         "description": "Subagent Tree response."
+      },
+      "SystemUserRole": {
+        "type": "string",
+        "enum": [
+          "system_admin"
+        ],
+        "title": "SystemUserRole",
+        "description": "Instance-wide User role."
       },
       "TestConnectionRequest": {
         "properties": {

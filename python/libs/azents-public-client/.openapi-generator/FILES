@@ -201,6 +201,7 @@ azentspublicclient/docs/ModelReasoningCapabilities.md
 azentspublicclient/docs/ModelReasoningEffort.md
 azentspublicclient/docs/ModelToolCallingCapabilities.md
 azentspublicclient/docs/MyJoinRequestResponse.md
+azentspublicclient/docs/MySystemRolesResponse.md
 azentspublicclient/docs/OAuthAuthorizeResponse.md
 azentspublicclient/docs/OAuthExchangeRequest.md
 azentspublicclient/docs/PartialHistoryResponse.md
@@ -261,6 +262,7 @@ azentspublicclient/docs/SkillAction.md
 azentspublicclient/docs/SubagentSettings.md
 azentspublicclient/docs/SubagentTreeNodeResponse.md
 azentspublicclient/docs/SubagentTreeResponse.md
+azentspublicclient/docs/SystemUserRole.md
 azentspublicclient/docs/TestConnectionRequest.md
 azentspublicclient/docs/TestConnectionResponse.md
 azentspublicclient/docs/TodoItemResponse.md
@@ -478,6 +480,7 @@ azentspublicclient/models/model_reasoning_capabilities.py
 azentspublicclient/models/model_reasoning_effort.py
 azentspublicclient/models/model_tool_calling_capabilities.py
 azentspublicclient/models/my_join_request_response.py
+azentspublicclient/models/my_system_roles_response.py
 azentspublicclient/models/o_auth_authorize_response.py
 azentspublicclient/models/o_auth_exchange_request.py
 azentspublicclient/models/partial_history_response.py
@@ -537,6 +540,7 @@ azentspublicclient/models/skill_action.py
 azentspublicclient/models/subagent_settings.py
 azentspublicclient/models/subagent_tree_node_response.py
 azentspublicclient/models/subagent_tree_response.py
+azentspublicclient/models/system_user_role.py
 azentspublicclient/models/test_connection_request.py
 azentspublicclient/models/test_connection_response.py
 azentspublicclient/models/todo_item_response.py
@@ -756,6 +760,7 @@ azentspublicclient/test/test_model_reasoning_capabilities.py
 azentspublicclient/test/test_model_reasoning_effort.py
 azentspublicclient/test/test_model_tool_calling_capabilities.py
 azentspublicclient/test/test_my_join_request_response.py
+azentspublicclient/test/test_my_system_roles_response.py
 azentspublicclient/test/test_o_auth_authorize_response.py
 azentspublicclient/test/test_o_auth_exchange_request.py
 azentspublicclient/test/test_partial_history_response.py
@@ -816,6 +821,7 @@ azentspublicclient/test/test_skill_action.py
 azentspublicclient/test/test_subagent_settings.py
 azentspublicclient/test/test_subagent_tree_node_response.py
 azentspublicclient/test/test_subagent_tree_response.py
+azentspublicclient/test/test_system_user_role.py
 azentspublicclient/test/test_test_connection_request.py
 azentspublicclient/test/test_test_connection_response.py
 azentspublicclient/test/test_todo_item_response.py

@@ -23,6 +23,7 @@ __all__ = [
     "HealthV1Api",
     "InvitationV1Api",
     "ModelCatalogV1Api",
+    "SystemV1Api",
     "UserEmailV1Api",
     "UserV1Api",
     "WorkspaceUserV1Api",
@@ -60,11 +61,15 @@ __all__ = [
     "SignupTokenDeliveryMethod",
     "SignupTokenListResponse",
     "SignupTokenResponse",
+    "SystemAdminMeResponse",
     "SystemModelCatalogListResponse",
     "SystemModelCatalogRefreshListResponse",
     "SystemModelCatalogRefreshResponse",
     "SystemModelCatalogResponse",
     "SystemModelCatalogSyncAttemptResponse",
+    "SystemUserRole",
+    "SystemUserRoleAssignmentListResponse",
+    "SystemUserRoleAssignmentResponse",
     "TransferOwnershipRequest",
     "UserEmailCreateRequest",
     "UserEmailListResponse",
@@ -90,6 +95,7 @@ from azentsadminclient.api.debug_v1_api import DebugV1Api as DebugV1Api
 from azentsadminclient.api.health_v1_api import HealthV1Api as HealthV1Api
 from azentsadminclient.api.invitation_v1_api import InvitationV1Api as InvitationV1Api
 from azentsadminclient.api.model_catalog_v1_api import ModelCatalogV1Api as ModelCatalogV1Api
+from azentsadminclient.api.system_v1_api import SystemV1Api as SystemV1Api
 from azentsadminclient.api.user_email_v1_api import UserEmailV1Api as UserEmailV1Api
 from azentsadminclient.api.user_v1_api import UserV1Api as UserV1Api
 from azentsadminclient.api.workspace_user_v1_api import WorkspaceUserV1Api as WorkspaceUserV1Api
@@ -131,11 +137,15 @@ from azentsadminclient.models.sentry_diagnostics import SentryDiagnostics as Sen
 from azentsadminclient.models.signup_token_delivery_method import SignupTokenDeliveryMethod as SignupTokenDeliveryMethod
 from azentsadminclient.models.signup_token_list_response import SignupTokenListResponse as SignupTokenListResponse
 from azentsadminclient.models.signup_token_response import SignupTokenResponse as SignupTokenResponse
+from azentsadminclient.models.system_admin_me_response import SystemAdminMeResponse as SystemAdminMeResponse
 from azentsadminclient.models.system_model_catalog_list_response import SystemModelCatalogListResponse as SystemModelCatalogListResponse
 from azentsadminclient.models.system_model_catalog_refresh_list_response import SystemModelCatalogRefreshListResponse as SystemModelCatalogRefreshListResponse
 from azentsadminclient.models.system_model_catalog_refresh_response import SystemModelCatalogRefreshResponse as SystemModelCatalogRefreshResponse
 from azentsadminclient.models.system_model_catalog_response import SystemModelCatalogResponse as SystemModelCatalogResponse
 from azentsadminclient.models.system_model_catalog_sync_attempt_response import SystemModelCatalogSyncAttemptResponse as SystemModelCatalogSyncAttemptResponse
+from azentsadminclient.models.system_user_role import SystemUserRole as SystemUserRole
+from azentsadminclient.models.system_user_role_assignment_list_response import SystemUserRoleAssignmentListResponse as SystemUserRoleAssignmentListResponse
+from azentsadminclient.models.system_user_role_assignment_response import SystemUserRoleAssignmentResponse as SystemUserRoleAssignmentResponse
 from azentsadminclient.models.transfer_ownership_request import TransferOwnershipRequest as TransferOwnershipRequest
 from azentsadminclient.models.user_email_create_request import UserEmailCreateRequest as UserEmailCreateRequest
 from azentsadminclient.models.user_email_list_response import UserEmailListResponse as UserEmailListResponse
@@ -153,4 +163,3 @@ from azentsadminclient.models.workspace_user_list_response import WorkspaceUserL
 from azentsadminclient.models.workspace_user_response import WorkspaceUserResponse as WorkspaceUserResponse
 from azentsadminclient.models.workspace_user_role import WorkspaceUserRole as WorkspaceUserRole
 from azentsadminclient.models.workspace_user_update_request import WorkspaceUserUpdateRequest as WorkspaceUserUpdateRequest
-
