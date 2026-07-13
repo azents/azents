@@ -5,7 +5,10 @@ from typing import cast
 
 import pytest
 
-from azents.broker.broadcast import WebSocketBroadcast
+from azents.broker.broadcast import (
+    WebSocketBroadcast,
+    WebSocketBroadcastPublishError,
+)
 from azents.core.enums import AgentRunPhase, AgentRunStatus
 from azents.core.inference_profile import AppliedInferenceProfile
 from azents.engine.events.engine_events import RunComplete
@@ -35,11 +38,14 @@ class _LiveEventStore:
 class _Broadcast:
     """WebSocket broadcast test double."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, fail: bool = False) -> None:
         self.events: list[tuple[str, dict[str, object]]] = []
+        self.fail = fail
 
     async def publish(self, session_id: str, event: dict[str, object]) -> None:
-        """Record a broadcast event."""
+        """Record a broadcast event or simulate Redis failure."""
+        if self.fail:
+            raise WebSocketBroadcastPublishError
         self.events.append((session_id, event))
 
 
@@ -112,3 +118,28 @@ async def test_active_tool_calls_broadcast_without_redis_storage() -> None:
     assert isinstance(payload, dict)
     assert payload["call_id"] == "call-1"
     assert broadcast.events[1][1]["event_id"] == upserted["id"]
+
+
+@pytest.mark.asyncio
+async def test_live_run_broadcast_failure_is_non_fatal() -> None:
+    """Redis UI publication failure does not escape the projection boundary."""
+    projector = LiveEventProjector(
+        live_event_store=cast(RedisLiveEventStore, _LiveEventStore()),
+        broadcast=cast(WebSocketBroadcast, _Broadcast(fail=True)),
+    )
+
+    await projector.publish_live_run_updated(
+        "session-001",
+        ChatLiveRunState(
+            run_id="run-a",
+            phase=AgentRunPhase.WAITING_FOR_MODEL,
+            status=AgentRunStatus.RUNNING,
+            inference_profile=AppliedInferenceProfile(
+                model_target_label="main",
+                model_display_name="Test model",
+                reasoning_effort=None,
+            ),
+            retry=None,
+        ),
+    )
+    await projector.publish_live_run_cleared("session-001", run_id="run-a")

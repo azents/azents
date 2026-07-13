@@ -70,6 +70,7 @@ class _AgentRunRepository:
         self.running_run = running_run
         self.terminal_sessions: list[tuple[str, AgentRunStatus]] = []
         self.terminal_runs: list[tuple[str, AgentRunStatus]] = []
+        self.fail_terminal = False
 
     async def lock_by_id(
         self,
@@ -129,6 +130,8 @@ class _AgentRunRepository:
     ) -> object:
         """Record run-level terminal transition request."""
         del session, ended_at
+        if self.fail_terminal:
+            raise RuntimeError("terminal persistence unavailable")
         self.terminal_runs.append((run_id, status))
         return object()
 
@@ -386,6 +389,35 @@ async def test_finalize_persists_live_events_and_marks_run_terminal() -> None:
     stopped_event = event_publisher.dispatched[0][1]
     assert isinstance(stopped_event, RunStopped)
     assert stopped_event.run_id == "11111111111111111111111111111111"
+
+
+@pytest.mark.asyncio
+async def test_finalize_preserves_recovery_state_when_terminal_persistence_fails() -> (
+    None
+):
+    """Stop intent and activity remain available for retry after DB failure."""
+    session_id = "session-001"
+    (
+        finalizer,
+        run_repository,
+        session_repository,
+        _,
+        _,
+        broker,
+        event_publisher,
+    ) = _finalizer(running_run=_running_run(session_id), live_events=[])
+    run_repository.fail_terminal = True
+
+    with pytest.raises(RuntimeError, match="terminal persistence unavailable"):
+        await finalizer.finalize(
+            session_id,
+            run_id=None,
+            active_tool_calls=[],
+        )
+
+    assert session_repository.cleared_stop_request_session_ids == []
+    assert broker.cleared_session_ids == []
+    assert event_publisher.dispatched == []
 
 
 @pytest.mark.asyncio

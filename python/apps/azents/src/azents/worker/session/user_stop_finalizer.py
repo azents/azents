@@ -1,9 +1,7 @@
 """User stop finalization."""
 
-import asyncio
 import dataclasses
 import datetime
-import logging
 from collections.abc import Awaitable, Callable, Sequence
 from contextlib import AbstractAsyncContextManager
 from typing import Annotated
@@ -35,8 +33,6 @@ from azents.services.chat.live_events import RedisLiveEventStore
 from azents.worker.deps import get_live_event_store, get_worker_broker
 from azents.worker.events.publisher import WorkerEventPublisher
 from azents.worker.live.event_projector import LiveEventProjector
-
-logger = logging.getLogger(__name__)
 
 SessionManagerFactory = Callable[[], AbstractAsyncContextManager[AsyncSession]]
 
@@ -189,11 +185,7 @@ class UserStopFinalizer:
                     ),
                 )
 
-        await self._run_short_db(
-            append,
-            error_log="Failed to append live partial events for user stop",
-            session_id=session_id,
-        )
+        await self._run_short_db(append)
 
     async def _append_user_stop_events(
         self,
@@ -248,11 +240,7 @@ class UserStopFinalizer:
                 ),
             )
 
-        await self._run_short_db(
-            append,
-            error_log="Failed to append user stop events",
-            session_id=session_id,
-        )
+        await self._run_short_db(append)
 
     async def _clear_stop_request(self, session_id: str) -> None:
         """Remove consumed durable stop intent."""
@@ -263,11 +251,7 @@ class UserStopFinalizer:
                 session_id=session_id,
             )
 
-        await self._run_short_db(
-            clear,
-            error_log="Failed to clear user stop request",
-            session_id=session_id,
-        )
+        await self._run_short_db(clear)
 
     async def _append_cancelled_tool_results(
         self,
@@ -308,11 +292,7 @@ class UserStopFinalizer:
                     result=payload,
                 )
 
-        await self._run_short_db(
-            append,
-            error_log="Failed to append cancelled tool results for user stop",
-            session_id=session_id,
-        )
+        await self._run_short_db(append)
 
     async def _remove_persisted_stop_live_events(
         self,
@@ -340,9 +320,7 @@ class UserStopFinalizer:
                 session_id=session_id,
                 status=status,
                 ended_at=datetime.datetime.now(datetime.UTC),
-            ),
-            error_log="Failed to mark session agent runs terminal",
-            session_id=session_id,
+            )
         )
 
     async def _mark_agent_run_terminal_if_running(
@@ -359,23 +337,13 @@ class UserStopFinalizer:
                 run_id,
                 status,
                 ended_at=datetime.datetime.now(datetime.UTC),
-            ),
-            error_log="Failed to mark agent run terminal",
-            session_id=session_id,
+            )
         )
 
     async def _run_short_db(
         self,
         action: Callable[[AsyncSession], Awaitable[object]],
-        *,
-        error_log: str,
-        session_id: str,
     ) -> None:
-        """Run ``action`` in short-lived DB transaction."""
-        try:
-            async with self.session_manager() as db_session:
-                await action(db_session)
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.exception(error_log, extra={"session_id": session_id})
+        """Run ``action`` in a short-lived DB transaction."""
+        async with self.session_manager() as db_session:
+            await action(db_session)

@@ -27,7 +27,10 @@ from fastapi import (
 )
 from fastapi.responses import StreamingResponse
 
-from azents.broker.broadcast import WebSocketBroadcast
+from azents.broker.broadcast import (
+    WebSocketBroadcast,
+    WebSocketBroadcastPublishError,
+)
 from azents.broker.deps import get_broker
 from azents.broker.serialization import serialize_event
 from azents.broker.types import (
@@ -268,6 +271,22 @@ async def get_ws_broadcast(
             await redis.aclose()
 
     return await appctx.get_variable(f"{__name__}.get_ws_broadcast", create)
+
+
+async def _publish_chat_event_best_effort(
+    broadcast: WebSocketBroadcast,
+    *,
+    session_id: str,
+    event: dict[str, object],
+) -> None:
+    """Publish a WebSocket projection without failing a committed REST write."""
+    try:
+        await broadcast.publish(session_id, event)
+    except WebSocketBroadcastPublishError:
+        logger.exception(
+            "Failed to publish committed Chat state to WebSocket",
+            extra={"session_id": session_id},
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -633,7 +652,6 @@ async def _finalize_message_write_response(
     live_event_upserted = chat_live_event_upserted_dump(
         input_buffer_to_live_event(input_buffer)
     )
-    await broadcast.publish(session_id, live_event_upserted)
     broker_message = SessionWakeUp(
         agent_id=agent_id,
         session_id=session_id,
@@ -644,6 +662,11 @@ async def _finalize_message_write_response(
         workspace_handle=None,
     )
     await broker.send_message(broker_message)
+    await _publish_chat_event_best_effort(
+        broadcast,
+        session_id=session_id,
+        event=live_event_upserted,
+    )
     snapshot = await _build_chat_write_snapshot(
         chat_service,
         live_event_store,
@@ -773,13 +796,6 @@ async def update_session_goal(
     )
     match result:
         case Success(update_result):
-            if update_result.event is not None:
-                await broadcast.publish(
-                    session_id, serialize_event(update_result.event)
-                )
-                await broadcast.publish(
-                    session_id, chat_history_event_appended_dump(update_result.event)
-                )
             if update_result.wake_up:
                 await broker.send_message(
                     SessionWakeUp(
@@ -791,6 +807,17 @@ async def update_session_goal(
                         workspace_id=update_result.workspace_id,
                         workspace_handle=None,
                     )
+                )
+            if update_result.event is not None:
+                await _publish_chat_event_best_effort(
+                    broadcast,
+                    session_id=session_id,
+                    event=serialize_event(update_result.event),
+                )
+                await _publish_chat_event_best_effort(
+                    broadcast,
+                    session_id=session_id,
+                    event=chat_history_event_appended_dump(update_result.event),
                 )
             return GoalStateResponse.from_domain(update_result.goal)
         case Failure(error):
@@ -838,13 +865,6 @@ async def update_session_goal_status(
     )
     match result:
         case Success(update_result):
-            if update_result.event is not None:
-                await broadcast.publish(
-                    session_id, serialize_event(update_result.event)
-                )
-                await broadcast.publish(
-                    session_id, chat_history_event_appended_dump(update_result.event)
-                )
             if update_result.wake_up:
                 await broker.send_message(
                     SessionWakeUp(
@@ -856,6 +876,17 @@ async def update_session_goal_status(
                         workspace_id=update_result.workspace_id,
                         workspace_handle=None,
                     )
+                )
+            if update_result.event is not None:
+                await _publish_chat_event_best_effort(
+                    broadcast,
+                    session_id=session_id,
+                    event=serialize_event(update_result.event),
+                )
+                await _publish_chat_event_best_effort(
+                    broadcast,
+                    session_id=session_id,
+                    event=chat_history_event_appended_dump(update_result.event),
                 )
             return GoalStateResponse.from_domain(update_result.goal)
         case Failure(error):
@@ -2288,9 +2319,10 @@ async def delete_input_buffer(
     )
     match result:
         case Success():
-            await broadcast.publish(
-                session_id,
-                chat_live_event_removed_dump(session_id, buffer_id),
+            await _publish_chat_event_best_effort(
+                broadcast,
+                session_id=session_id,
+                event=chat_live_event_removed_dump(session_id, buffer_id),
             )
             return
         case Failure(error):
