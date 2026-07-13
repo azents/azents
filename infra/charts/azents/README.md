@@ -39,10 +39,10 @@ Chart consumers create Kubernetes Secrets with the keys below and reference thei
 | Values key | Required Secret keys | Used by |
 | --- | --- | --- |
 | `secrets.existingSecrets.auth` | `jwt-secret-key`, `credential-encryption-key`, `sentry-dsn`, `oauth-secret-key` | `apiserver`, `adminserver`, `worker`, `scheduler` |
-| `secrets.existingSecrets.adminAuth` | `AUTH_SECRET`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, or any admin web env keys required by the selected auth mode | `adminWeb` `envFrom` |
+| `server.systemBootstrap.existingSecret` | `setup-token`, or the key selected by `server.systemBootstrap.tokenKey` | `adminserver` during zero-user bootstrap |
 | `server.runtimeControl.auth.existingSecret` | `runtime-control-token`, or the key selected by `server.runtimeControl.auth.tokenKey` | `server.runtimeControl`, `runtimeProviderKubernetes` when Runtime Control auth is enabled |
 
-`adminAuth` injects the whole Secret into the `adminWeb` container environment. Installations that do not use GitHub OAuth only need to provide the keys required by their admin web settings. Runtime Control auth is disabled by default; installations that enable it must provide an existing Secret reference through `server.runtimeControl.auth.existingSecret`.
+The bootstrap Secret is optional. Without it, a zero-user installation generates a setup token and logs the plaintext once after persisting only its hash. With it, the configured token is never logged. Runtime Control auth is disabled by default; installations that enable it must provide an existing Secret reference through `server.runtimeControl.auth.existingSecret`.
 
 ## External Service Policy
 
@@ -61,6 +61,20 @@ The chart currently renders:
 - Opt-in `server.mcpEgressProxy`
 
 Ingress is disabled by default. Use `server.apiserver.ingress`, `web.ingress`, and `adminWeb.ingress` for component-specific host, class, and TLS settings.
+
+### Admin Surface Routing And Bootstrap
+
+Admin Web and Main Web are independently routable. Configure these values for the selected host, path-prefix, port-forward, or gateway topology:
+
+- `adminWeb.publicUrl`: the browser-visible Admin Web base URL. Its URL path prefixes Admin navigation and browser API calls and scopes Admin session cookies.
+- `adminWeb.publicWebUrl`: browser-visible Main Web URL used in signup and password-reset links created by operators.
+- `adminWeb.publicApi.internalUrl`: optional Admin Web server-to-Public API URL. It defaults to the chart-managed `apiserver` Service.
+- `adminWeb.adminApi.internalUrl`: optional Admin Web server-to-Admin API URL. It defaults to the chart-managed `adminserver` Service.
+- `web.adminWebUrl`: optional browser-visible Admin Web URL. Main Web shows it only when the signed-in User has `system_admin`.
+
+For a fresh installation, open Admin Web and complete setup with the one-time token. Bootstrap creates the first User and `system_admin` assignment without creating a Workspace. Configure `server.systemBootstrap.existingSecret` to supply the token from a Kubernetes Secret, or retrieve the generated token once from `adminserver` startup logs.
+
+For an upgrade with existing Users, bootstrap is unavailable. Grant the initial role explicitly with the exact-email system-admin CLI before using Admin Web. The same CLI is the recovery path if all role assignments are lost; no User or Workspace owner is promoted automatically.
 
 By default, application resources render into the Helm release namespace. Use `helm install --namespace ... --create-namespace` or the ArgoCD Application destination namespace to choose it. Component-specific namespace overrides exist only for deployments that intentionally split components across namespaces. `runtimeProviderKubernetes.workloadNamespace.name` remains separate for Runtime Pods and PVCs, and that namespace must be created by the consumer-owned deployment layer.
 
@@ -123,7 +137,7 @@ Warning: ArgoCD `Application.spec.source.helm.valuesObject` is opaque to Kustomi
 | --- | --- | --- |
 | `infra/argocd/azents-server/base/*` | `server.*`, `templates/server/*` | Secret handling is normalized through `existingSecret` references. |
 | `infra/argocd/azents-web/base/*` | `web.*`, `templates/web/*` | Labels use common chart labels plus component labels. |
-| `infra/argocd/azents-admin-web/base/*` | `adminWeb.*`, `templates/admin-web/*` | Production env Secret injection is represented by `secrets.existingSecrets.adminAuth`. |
+| `infra/argocd/azents-admin-web/base/*` | `adminWeb.*`, `templates/admin-web/*` | Admin Web receives explicit public and internal URLs and authenticates with Azents User sessions. |
 | `infra/argocd/azents-runtime-provider-kubernetes/base/*` | `runtimeProviderKubernetes.*`, `templates/runtime-provider-kubernetes/*` | Provider and workload namespace RBAC are split. |
 | `infra/argocd/azents-server/base/mcp-egress-proxy-*` | `server.mcpEgressProxy.*`, `templates/server/mcp-egress-proxy.yaml.tpl` | The proxy is represented as a server-level opt-in feature gate. |
 

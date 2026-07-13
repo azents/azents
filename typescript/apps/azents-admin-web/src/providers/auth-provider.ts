@@ -1,6 +1,10 @@
 "use client";
 
 import { z } from "zod/v4";
+import {
+  getPublicRoutePath,
+  getPublicRouteUrl,
+} from "@/shared/lib/auth-policy";
 import type { AuthProvider } from "@refinedev/core";
 
 const LoginInputSchema = z.object({
@@ -25,79 +29,85 @@ async function readErrorMessage(response: Response): Promise<string> {
   return "Admin authentication failed.";
 }
 
-export const authProvider: AuthProvider = {
-  login: async (input) => {
-    const parsedInput = LoginInputSchema.safeParse(input);
-    if (!parsedInput.success) {
-      return {
-        success: false,
-        error: {
-          name: "InvalidCredentials",
-          message: "A valid email and password are required.",
-        },
-      };
-    }
+export function createAuthProvider(publicBaseUrl: string): AuthProvider {
+  const sessionUrl = getPublicRouteUrl(publicBaseUrl, "/api/session");
+  const homePath = getPublicRoutePath(publicBaseUrl, "/");
+  const loginPath = getPublicRoutePath(publicBaseUrl, "/login");
 
-    const response = await fetch("/api/session", {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(parsedInput.data),
-    });
-    if (!response.ok) {
+  return {
+    login: async (input) => {
+      const parsedInput = LoginInputSchema.safeParse(input);
+      if (!parsedInput.success) {
+        return {
+          success: false,
+          error: {
+            name: "InvalidCredentials",
+            message: "A valid email and password are required.",
+          },
+        };
+      }
+
+      const response = await fetch(sessionUrl, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(parsedInput.data),
+      });
+      if (!response.ok) {
+        return {
+          success: false,
+          error: {
+            name: response.status === 403 ? "Forbidden" : "LoginFailed",
+            message: await readErrorMessage(response),
+          },
+        };
+      }
+      return { success: true, redirectTo: homePath };
+    },
+    logout: async () => {
+      const response = await fetch(sessionUrl, {
+        method: "DELETE",
+        credentials: "same-origin",
+      });
+      if (!response.ok) {
+        return {
+          success: false,
+          error: {
+            name: "LogoutFailed",
+            message: await readErrorMessage(response),
+          },
+        };
+      }
+      return { success: true, redirectTo: loginPath };
+    },
+    check: async () => {
+      const response = await fetch(sessionUrl, {
+        method: "GET",
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+      if (response.ok) {
+        return { authenticated: true };
+      }
+      return { authenticated: false, redirectTo: loginPath, logout: true };
+    },
+    getPermissions: () => Promise.resolve(["system_admin"]),
+    getIdentity: async () => {
+      const response = await fetch(sessionUrl, {
+        method: "GET",
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+      if (!response.ok) {
+        return null;
+      }
+      const session = SessionSchema.parse(await response.json());
       return {
-        success: false,
-        error: {
-          name: response.status === 403 ? "Forbidden" : "LoginFailed",
-          message: await readErrorMessage(response),
-        },
+        id: session.user_id,
+        name: "System administrator",
+        avatar: "",
       };
-    }
-    return { success: true, redirectTo: "/" };
-  },
-  logout: async () => {
-    const response = await fetch("/api/session", {
-      method: "DELETE",
-      credentials: "same-origin",
-    });
-    if (!response.ok) {
-      return {
-        success: false,
-        error: {
-          name: "LogoutFailed",
-          message: await readErrorMessage(response),
-        },
-      };
-    }
-    return { success: true, redirectTo: "/login" };
-  },
-  check: async () => {
-    const response = await fetch("/api/session", {
-      method: "GET",
-      credentials: "same-origin",
-      cache: "no-store",
-    });
-    if (response.ok) {
-      return { authenticated: true };
-    }
-    return { authenticated: false, redirectTo: "/login", logout: true };
-  },
-  getPermissions: () => Promise.resolve(["system_admin"]),
-  getIdentity: async () => {
-    const response = await fetch("/api/session", {
-      method: "GET",
-      credentials: "same-origin",
-      cache: "no-store",
-    });
-    if (!response.ok) {
-      return null;
-    }
-    const session = SessionSchema.parse(await response.json());
-    return {
-      id: session.user_id,
-      name: "System administrator",
-      avatar: "",
-    };
-  },
-  onError: (error: Error) => Promise.resolve({ error }),
-};
+    },
+    onError: (error: Error) => Promise.resolve({ error }),
+  };
+}

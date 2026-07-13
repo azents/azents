@@ -7,6 +7,7 @@ import { bootstrapRouter } from "./bootstrap";
 import { debugRouter } from "./debug";
 import { modelCatalogRouter } from "./modelCatalog";
 import { signupTokenRouter } from "./signupToken";
+import { systemRoleRouter } from "./systemRole";
 import { userRouter } from "./user";
 import { userEmailRouter } from "./userEmail";
 import { verificationRouter } from "./verification";
@@ -23,6 +24,7 @@ export const appRouter = router({
   verification: verificationRouter,
   signupToken: signupTokenRouter,
   modelCatalog: modelCatalogRouter,
+  systemRole: systemRoleRouter,
 });
 
 // 클라이언트용 타입 export

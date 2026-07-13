@@ -131,6 +131,7 @@
   "appBar": {
     "logout": "Se déconnecter",
     "account": "Paramètres du compte",
+    "admin": "Administration système",
     "backToWorkspaces": "Retour aux espaces"
   },
   "account": {

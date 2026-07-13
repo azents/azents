@@ -87,7 +87,7 @@ export function setAdminAuthCookies(
     httpOnly: true,
     secure: getServerConfig().nodeEnv === "production",
     sameSite: "lax",
-    path: getAuthCookiePath(getPublicConfig().baseUrl),
+    path: getAuthCookiePath(getPublicConfig().publicBaseUrl),
   };
   const expiresAt = Date.now() + tokens.expiresInSeconds * 1000;
 
@@ -125,7 +125,7 @@ export function clearAdminAuthCookies(responseHeaders: Headers): void {
     httpOnly: true,
     secure: getServerConfig().nodeEnv === "production",
     sameSite: "lax",
-    path: getAuthCookiePath(getPublicConfig().baseUrl),
+    path: getAuthCookiePath(getPublicConfig().publicBaseUrl),
     maxAge: 0,
   };
 

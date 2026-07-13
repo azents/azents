@@ -8,8 +8,14 @@
  * - Authenticated: logo (→ /workspaces) + ColorModeSwitcher + user menu
  * - Inside workspace: logo + @handle + ColorModeSwitcher + user menu
  */
-import { ActionIcon, Box, Burger, Group, Menu, Text } from "@mantine/core";
-import { IconLogout, IconUser, IconUserCircle } from "@tabler/icons-react";
+import { ActionIcon, Box, Burger, Group, Menu, rem, Text } from "@mantine/core";
+import {
+  IconExternalLink,
+  IconLogout,
+  IconShieldLock,
+  IconUser,
+  IconUserCircle,
+} from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback } from "react";
@@ -34,6 +40,13 @@ export function AppBar({ authStatus }: AppBarProps): React.ReactElement {
   const pathname = usePathname();
   const { opened: sidebarOpened, toggle: toggleSidebar } = useSidebar();
   const isAuthenticated = authStatus === "authenticated";
+  const { data: adminAccess } = trpc.user.adminAccess.useQuery(
+    {},
+    {
+      enabled: isAuthenticated,
+      retry: false,
+    },
+  );
   const workspaceHandle = extractWorkspaceHandle(pathname);
   const isAgentDetailRoute = /^\/w\/[^/]+\/agents\/(?!new(?:\/|$))[^/]+/.test(
     pathname,
@@ -87,19 +100,31 @@ export function AppBar({ authStatus }: AppBarProps): React.ReactElement {
           <Menu shadow="md" width={200} position="bottom-end">
             <Menu.Target>
               <ActionIcon variant="subtle" size="lg" radius="xl">
-                <IconUserCircle size={24} />
+                <IconUserCircle size={rem(24)} />
               </ActionIcon>
             </Menu.Target>
             <Menu.Dropdown>
               <Menu.Item
-                leftSection={<IconUser size={16} />}
+                leftSection={<IconUser size={rem(16)} />}
                 onClick={onAccount}
               >
                 {t("account")}
               </Menu.Item>
+              {adminAccess?.url && (
+                <Menu.Item
+                  component="a"
+                  href={adminAccess.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  leftSection={<IconShieldLock size={rem(16)} />}
+                  rightSection={<IconExternalLink size={rem(14)} />}
+                >
+                  {t("admin")}
+                </Menu.Item>
+              )}
               <Menu.Divider />
               <Menu.Item
-                leftSection={<IconLogout size={16} />}
+                leftSection={<IconLogout size={rem(16)} />}
                 onClick={onLogout}
                 disabled={logoutMutation.isPending}
               >

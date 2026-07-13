@@ -42,10 +42,6 @@ spec:
           envFrom:
             - configMapRef:
                 name: {{ include "azents.adminWebConfigMapName" . | quote }}
-            {{- if .Values.secrets.existingSecrets.adminAuth }}
-            - secretRef:
-                name: {{ .Values.secrets.existingSecrets.adminAuth | quote }}
-            {{- end }}
           readinessProbe:
             httpGet:
               path: /

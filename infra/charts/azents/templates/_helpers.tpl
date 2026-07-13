@@ -193,13 +193,46 @@ Return the apiserver public URL.
 {{- end -}}
 
 {{/*
-Return the adminserver URL.
+Return the Admin Web internal Public API URL.
+*/}}
+{{- define "azents.adminWebPublicApiUrl" -}}
+{{- if .Values.adminWeb.publicApi.internalUrl -}}
+{{- .Values.adminWeb.publicApi.internalUrl -}}
+{{- else -}}
+{{- printf "http://apiserver.%s.svc.cluster.local:8010" (include "azents.serverNamespace" .) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Return the Admin Web internal Admin API URL.
 */}}
 {{- define "azents.adminserverUrl" -}}
-{{- if .Values.adminWeb.api.adminUrl -}}
-{{- .Values.adminWeb.api.adminUrl -}}
+{{- if .Values.adminWeb.adminApi.internalUrl -}}
+{{- .Values.adminWeb.adminApi.internalUrl -}}
 {{- else -}}
 {{- printf "http://adminserver.%s.svc.cluster.local:8011" (include "azents.serverNamespace" .) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Return the externally visible Admin Web URL, falling back to its cluster Service.
+*/}}
+{{- define "azents.adminWebPublicUrl" -}}
+{{- if .Values.adminWeb.publicUrl -}}
+{{- .Values.adminWeb.publicUrl -}}
+{{- else -}}
+{{- printf "http://admin-web.%s.svc.cluster.local:3000" (include "azents.adminWebNamespace" .) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Return the browser-visible Main Web URL used in operator-created links.
+*/}}
+{{- define "azents.adminWebPublicWebUrl" -}}
+{{- if .Values.adminWeb.publicWebUrl -}}
+{{- .Values.adminWeb.publicWebUrl -}}
+{{- else -}}
+{{- printf "http://web.%s.svc.cluster.local:3000" (include "azents.webNamespace" .) -}}
 {{- end -}}
 {{- end -}}
 
@@ -340,6 +373,19 @@ Render environment variables injected from the server auth Secret.
     secretKeyRef:
       name: {{ .Values.secrets.existingSecrets.auth | quote }}
       key: github-platform-client-secret
+{{- end }}
+{{- end -}}
+
+{{/*
+Render the optional one-time system bootstrap token Secret reference.
+*/}}
+{{- define "azents.systemBootstrapSecretEnv" -}}
+{{- if .Values.server.systemBootstrap.existingSecret }}
+- name: AZ_SYSTEM_BOOTSTRAP_SETUP_TOKEN
+  valueFrom:
+    secretKeyRef:
+      name: {{ .Values.server.systemBootstrap.existingSecret | quote }}
+      key: {{ .Values.server.systemBootstrap.tokenKey | quote }}
 {{- end }}
 {{- end -}}
 

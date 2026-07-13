@@ -10,5 +10,8 @@ data:
   {{- range $key, $value := .Values.adminWeb.env }}
   {{ $key }}: {{ $value | quote }}
   {{- end }}
-  ADMIN_API_URL: {{ include "azents.adminserverUrl" . | quote }}
+  PUBLIC_BASE_URL: {{ include "azents.adminWebPublicUrl" . | quote }}
+  INTERNAL_PUBLIC_API_URL: {{ include "azents.adminWebPublicApiUrl" . | quote }}
+  INTERNAL_ADMIN_API_URL: {{ include "azents.adminserverUrl" . | quote }}
+  PUBLIC_WEB_URL: {{ include "azents.adminWebPublicWebUrl" . | quote }}
 {{- end }}

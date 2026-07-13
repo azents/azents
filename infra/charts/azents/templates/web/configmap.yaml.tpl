@@ -12,4 +12,5 @@ data:
   {{- end }}
   PUBLIC_API_URL: {{ include "azents.apiserverPublicUrl" . | quote }}
   INTERNAL_API_URL: {{ include "azents.apiserverInternalUrl" . | quote }}
+  ADMIN_WEB_URL: {{ .Values.web.adminWebUrl | quote }}
 {{- end }}

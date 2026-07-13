@@ -5,6 +5,7 @@ import { httpLink } from "@trpc/client";
 import { useState } from "react";
 import superjson from "superjson";
 import { useConfig } from "@/config/client";
+import { getPublicRouteUrl } from "@/shared/lib/auth-policy";
 import { trpc } from "@/trpc/client";
 
 export function TRPCProvider({ children }: { children: React.ReactNode }) {
@@ -26,10 +27,7 @@ export function TRPCProvider({ children }: { children: React.ReactNode }) {
     trpc.createClient({
       links: [
         httpLink({
-          url:
-            typeof window !== "undefined"
-              ? "/api/trpc" // 브라우저에서는 상대 경로
-              : `${config.baseUrl}/api/trpc`, // SSR 시에는 절대 경로
+          url: getPublicRouteUrl(config.publicBaseUrl, "/api/trpc"),
           transformer: superjson,
         }),
       ],

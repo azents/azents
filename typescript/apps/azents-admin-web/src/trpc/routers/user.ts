@@ -10,6 +10,7 @@ import {
   userV1ListUsers,
 } from "@azents/admin-client";
 import { z } from "zod/v4";
+import { mapExpectedError } from "../api-error";
 import { protectedProcedure, router } from "../init";
 
 // --- Router ---
@@ -49,12 +50,20 @@ export const userRouter = router({
   delete: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      await userV1DeleteUser({
-        client: ctx.adminApiClient,
-        path: { user_id: input.id },
-        throwOnError: true,
-      });
-
-      return { success: true };
+      try {
+        await userV1DeleteUser({
+          client: ctx.adminApiClient,
+          path: { user_id: input.id },
+          throwOnError: true,
+        });
+        return { success: true };
+      } catch (error) {
+        throw mapExpectedError(error, {
+          401: "UNAUTHORIZED",
+          403: "FORBIDDEN",
+          404: "NOT_FOUND",
+          409: "CONFLICT",
+        });
+      }
     }),
 });

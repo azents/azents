@@ -131,6 +131,7 @@
   "appBar": {
     "logout": "ログアウト",
     "account": "アカウント設定",
+    "admin": "システム管理",
     "backToWorkspaces": "ワークスペース一覧"
   },
   "account": {
