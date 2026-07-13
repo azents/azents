@@ -196,8 +196,9 @@ _14 documents_
 - [ADR-0141: Correlate Terminal Run Events by Run ID](adr/0141-correlate-terminal-run-events.md)
 - [ADR-0142: Persist Inference Provenance on Turn Usage Markers](adr/0142-persist-turn-usage-inference-provenance.md)
 - [ADR-0143: Make PostgreSQL Authoritative for Tool Call Ownership](adr/0143-make-postgresql-authoritative-for-tool-call-ownership.md)
+- [ADR-0144: OSS Admin Surface Authentication and Bootstrap](adr/0144-oss-admin-surface-auth-and-bootstrap.md)
 
-_147 documents_
+_148 documents_
 
 ## Issues (Bug Tracking)
 
@@ -230,4 +231,4 @@ _3 documents_
 
 ## Statistics
 
-- Total documents: 427
+- Total documents: 429
