@@ -888,6 +888,28 @@
     {
       "match": {
         "endpoint": "chat",
+        "userMessage": "Timeline reliability first turn",
+        "hasToolResult": false
+      },
+      "response": {
+        "reasoning": "Timeline reliability first reasoning.",
+        "content": "Timeline reliability first response."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Timeline reliability second turn",
+        "hasToolResult": false
+      },
+      "response": {
+        "reasoning": "Timeline reliability second reasoning.",
+        "content": "Timeline reliability second response."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
         "userMessage": "Per prompt quality profile",
         "hasToolResult": false
       },

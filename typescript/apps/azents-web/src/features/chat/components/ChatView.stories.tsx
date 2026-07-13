@@ -1,4 +1,5 @@
 import { Box, rem } from "@mantine/core";
+import { expect, fn, userEvent, within } from "storybook/test";
 import { createChatMessage, storySessionId } from "../story-fixtures";
 import { ChatView } from "./ChatView";
 import type { ProjectDirectoryPickerState } from "../workspace/components/WorkspaceDirectoryPickerModal";
@@ -356,6 +357,26 @@ export const WithActionExecutionFailure = {
         ],
       },
     ],
+  },
+} satisfies Story;
+
+export const DetachedLatestResetIsKeyboardAccessible = {
+  args: {
+    ...baseArgs,
+    chatTimelineState: {
+      type: "DETACHED_HISTORY_BROWSING",
+      hasNewer: true,
+      newestCursor: "detached-latest-cursor",
+    },
+    onResetToLatest: fn(),
+  },
+  play: async ({ args, canvasElement }) => {
+    const canvas = within(canvasElement);
+    const latestButton = canvas.getByRole("button", { name: "New message" });
+    await expect(latestButton).toBeVisible();
+    latestButton.focus();
+    await userEvent.keyboard("{Enter}");
+    await expect(args.onResetToLatest).toHaveBeenCalledOnce();
   },
 } satisfies Story;
 
