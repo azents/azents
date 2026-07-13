@@ -41,9 +41,13 @@ The local agent runtime did not expose a Docker socket, so container-backed exec
 - exact-email operator CLI promotion and invalid-email failure;
 - final-system-admin role revoke rejection;
 - final-system-admin User deletion rejection;
-- safe deletion and role cascade when another administrator remains.
+- safe deletion and role cascade when another administrator remains;
+- Main Web password login and role-gated Admin link visibility in a real Chromium session;
+- Admin Web password login and logout with isolated secure HTTP-only cookies;
+- self-role revocation through the Users UI followed by immediate sign-out and API denial;
+- dedicated-host and gateway path-prefix routing through a TLS reverse proxy.
 
-The fixture update also shares one JWT signing key across Public API, Admin API, worker, and runtime-control processes. Existing Admin API E2E clients now authenticate as the bootstrapped administrator. Raw Admin API support requests forward that bearer token instead of relying on the removed no-auth mode.
+The fixture update also shares one JWT signing key across Public API, Admin API, worker, and runtime-control processes. Existing Admin API E2E clients now authenticate as the bootstrapped administrator. Raw Admin API support requests forward that bearer token instead of relying on the removed no-auth mode. Browser E2E builds both web images from the tested worktree and runs Chromium on the same isolated container network.
 
 ## Local Results
 
@@ -52,7 +56,7 @@ The fixture update also shares one JWT signing key across Public API, Admin API,
 | `uv run ruff format ...` | Passed; changed files formatted |
 | `uv run ruff check ...` | Passed |
 | `uv run pyright` | Passed with 0 errors |
-| `uv run pytest --collect-only -q -m 'not live_external' ./src` | Passed; 167 selected and 2 deselected tests collected |
+| `uv run pytest --collect-only -q -m 'not live_external' ./src` | Passed; 168 selected and 2 deselected tests collected |
 | `uv run pytest -vv -s src/tests/azents/admin/test_00_system_admin.py` | Infrastructure unavailable before test setup: Docker socket absent |
 
 The Docker failure occurred while `testcontainers` initialized its network and did not execute product code. It is an environment limitation, not a skipped or passing product result.
@@ -67,6 +71,8 @@ Before spec promotion and setting the design `implemented` date:
 4. Record the exact commit SHA, CI run URL, and final test counts in this report.
 5. Treat any product or fixture failure as blocking; do not convert it to a skip.
 
-## Remaining Browser Matrix
+## Browser Matrix
 
-Main Web link visibility, Admin Web password login/logout, self-revocation navigation, and dedicated-host/path-prefix browser routing remain covered by the PR 6 TypeScript unit/build and Helm render contracts but still require real dual-web browser execution. That browser evidence is blocking for final spec promotion and must be recorded with the CI completion update.
+`test_01_admin_web.py` now exercises Main Web and Admin Web through a real headless Chromium session. The browser profile uses TLS for production cookie behavior, verifies the Main Web role-gated link, checks Admin Web login/logout and cookie paths, performs self-revocation through the Users UI, and runs both dedicated-host and path-prefix gateway topologies.
+
+The browser test is collected locally but cannot execute without the same unavailable Docker socket as the API E2E suite. Its passing CI run remains blocking for final spec promotion and must be recorded with the CI completion update.
