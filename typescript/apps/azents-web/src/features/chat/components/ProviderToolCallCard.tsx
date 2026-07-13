@@ -15,6 +15,7 @@ import {
   IconChevronRight,
   IconTool,
 } from "@tabler/icons-react";
+import { FileAttachmentList } from "./FileAttachmentList";
 import type { ProviderToolCall } from "../types";
 
 interface ProviderToolCallCardProps {
@@ -39,6 +40,9 @@ export function ProviderToolCallCard({
 }: ProviderToolCallCardProps): React.ReactElement {
   const [opened, { toggle }] = useDisclosure(false);
   const hasArguments = toolCall.arguments.trim().length > 0;
+  const hasOutput = (toolCall.output?.trim().length ?? 0) > 0;
+  const hasAttachments = (toolCall.attachments?.length ?? 0) > 0;
+  const hasDetails = hasArguments || hasOutput || hasAttachments;
 
   return (
     <Paper withBorder radius="md" p="sm" mb="xs" bg="var(--mantine-color-body)">
@@ -65,8 +69,13 @@ export function ProviderToolCallCard({
             >
               {toolCall.status}
             </Badge>
-            {hasArguments ? (
-              <ActionIcon size="sm" variant="subtle" onClick={toggle}>
+            {hasDetails ? (
+              <ActionIcon
+                size="sm"
+                variant="subtle"
+                onClick={toggle}
+                aria-label={opened ? "Hide tool details" : "Show tool details"}
+              >
                 {opened ? (
                   <IconChevronDown size={14} />
                 ) : (
@@ -76,8 +85,28 @@ export function ProviderToolCallCard({
             ) : null}
           </Group>
         </Group>
-        {hasArguments && opened ? (
-          <Code block>{toolCall.arguments}</Code>
+        {opened ? (
+          <Stack gap="xs">
+            {hasArguments ? (
+              <Box>
+                <Text size="xs" c="dimmed" mb="xs">
+                  Arguments
+                </Text>
+                <Code block>{toolCall.arguments}</Code>
+              </Box>
+            ) : null}
+            {hasOutput ? (
+              <Box>
+                <Text size="xs" c="dimmed" mb="xs">
+                  Output
+                </Text>
+                <Code block>{toolCall.output}</Code>
+              </Box>
+            ) : null}
+            {hasAttachments && toolCall.attachments ? (
+              <FileAttachmentList files={toolCall.attachments} />
+            ) : null}
+          </Stack>
         ) : null}
       </Stack>
     </Paper>

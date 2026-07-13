@@ -711,6 +711,8 @@ export interface ProviderToolCall {
   name: string;
   arguments: string;
   status: "completed" | "failed" | "running" | "unknown";
+  output?: string;
+  attachments?: FileAttachment[];
 }
 
 /** message status — WS streamingand REST common */
