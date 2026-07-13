@@ -5,10 +5,20 @@ from typing import Any, cast
 import pytest
 
 from azents.broker.broadcast import WebSocketBroadcast
+from azents.broker.serialization import serialize_event
 from azents.broker.types import SessionBroker
 from azents.engine.events.builders import make_system_error_event
-from azents.engine.events.engine_events import RunStarted
-from azents.worker.events.publisher import WorkerEventPublisher
+from azents.engine.events.engine_events import (
+    AccountLinkNudgeEvent,
+    AuthorizationRequestEvent,
+    CompactionComplete,
+    CompactionStarted,
+    RunStarted,
+    RuntimeErrorEvent,
+    SubagentTreeChanged,
+    TodoStateChanged,
+)
+from azents.worker.events.publisher import PublicChatControlEvent, WorkerEventPublisher
 from azents.worker.live.event_projector import LiveEventProjector
 
 
@@ -36,6 +46,10 @@ class _Projector:
     def __init__(self) -> None:
         self.events: list[tuple[str, object]] = []
 
+    async def flush_session(self, session_id: str) -> None:
+        """Accept durable handoff flush."""
+        del session_id
+
     async def update(self, session_id: str, event: object) -> None:
         """Record projection attempts."""
         self.events.append((session_id, event))
@@ -50,7 +64,7 @@ async def test_projection_transport_failures_do_not_interrupt_dispatch() -> None
         broadcast=cast(WebSocketBroadcast, _FailingBroadcast()),
         live_event_projector=cast(LiveEventProjector, projector),
     )
-    event = RunStarted(run_id="run-1", phase=None)
+    event = make_system_error_event(session_id="session-1", content="failed")
 
     await publisher.dispatch_event("session-1", event)
 
@@ -92,6 +106,66 @@ class _TrackingProjector:
     async def update(self, session_id: str, event: object) -> None:
         """Record post-history counterpart removal."""
         self.calls.append(("update", session_id, event))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "event",
+    [
+        RuntimeErrorEvent(message="runtime failed"),
+        AuthorizationRequestEvent(toolkit_id="toolkit-1", toolkit_name="GitHub"),
+        AccountLinkNudgeEvent(
+            toolkit_name="GitHub",
+            toolkit_type="github",
+            toolkit_id="toolkit-1",
+        ),
+        CompactionStarted(),
+        CompactionComplete(),
+        TodoStateChanged(todo={"items": []}),
+        SubagentTreeChanged(
+            root_session_agent_id="root-1",
+            changed_session_agent_id="child-1",
+        ),
+    ],
+)
+async def test_public_control_event_retains_direct_wire_delivery(
+    event: PublicChatControlEvent,
+) -> None:
+    """Canonical public controls retain direct WebSocket delivery."""
+    calls: list[object] = []
+    publisher = WorkerEventPublisher(
+        broker=cast(SessionBroker, cast(Any, _TrackingBroker(calls))),
+        broadcast=cast(WebSocketBroadcast, _TrackingBroadcast(calls)),
+        live_event_projector=cast(LiveEventProjector, _TrackingProjector(calls)),
+    )
+
+    await publisher.dispatch_event("session-1", event)
+
+    assert calls == [
+        ("publish", "session-1", serialize_event(event)),
+        ("ttl", "session-1"),
+        ("update", "session-1", event),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_internal_runtime_event_is_not_publicly_broadcast() -> None:
+    """Internal runtime telemetry feeds projection without becoming public frames."""
+    calls: list[object] = []
+    publisher = WorkerEventPublisher(
+        broker=cast(SessionBroker, cast(Any, _TrackingBroker(calls))),
+        broadcast=cast(WebSocketBroadcast, _TrackingBroadcast(calls)),
+        live_event_projector=cast(LiveEventProjector, _TrackingProjector(calls)),
+    )
+    event = RunStarted(run_id="run-1", phase=None)
+
+    await publisher.dispatch_event("session-1", event)
+
+    assert not any(isinstance(call, tuple) and call[0] == "publish" for call in calls)
+    assert calls == [
+        ("ttl", "session-1"),
+        ("update", "session-1", event),
+    ]
 
 
 @pytest.mark.asyncio

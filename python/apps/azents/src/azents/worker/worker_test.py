@@ -1306,8 +1306,6 @@ async def test_dispatch_flushes_live_partial_batch_during_event_update() -> None
         event.get("kind") or event.get("type") for _, event in broadcast.events
     ]
     assert event_types == [
-        "content_delta",
-        "content_delta",
         "live_event_upserted",
         "history_event_appended",
     ]
@@ -1359,8 +1357,6 @@ async def test_dispatch_flushes_reasoning_batch_during_event_update() -> None:
         event.get("kind") or event.get("type") for _, event in broadcast.events
     ]
     assert event_types == [
-        "reasoning_delta",
-        "reasoning_delta",
         "live_event_upserted",
         "history_event_appended",
     ]
