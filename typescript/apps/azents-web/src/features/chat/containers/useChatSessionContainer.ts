@@ -134,8 +134,8 @@ export interface ChatSessionContainerOutput {
   onPauseGoal: () => Promise<boolean>;
   /** Goal text */
   onResumeGoal: (hint?: string) => Promise<boolean>;
-  /** older messages  withtext */
-  onLoadMore: () => void;
+  /** load older events, optionally preserving latest-follow state */
+  onLoadMore: (options?: { detachFromLatest?: boolean }) => void;
   /** newer messages  withtext */
   onLoadNewer: () => void;
   /** latest reset */
@@ -1908,6 +1908,7 @@ export function useChatSessionContainer(
   chatTimelineStateRef.current = chatTimelineState;
   const [hasMore, setHasMore] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const loadMoreInFlightRef = useRef(false);
   const [isLoadingNewer, setIsLoadingNewer] = useState(false);
   const [authorizationRequests, setAuthorizationRequests] = useState<
     AuthorizationRequest[]
@@ -2549,76 +2550,79 @@ export function useChatSessionContainer(
     onConnectionStatusChange(connectionStatus);
   }, [connectionStatus, onConnectionStatusChange]);
 
-  const onLoadMore = useCallback(() => {
-    if (isLoadingMore || !hasMore) {
-      return;
-    }
+  const onLoadMore = useCallback(
+    (options?: { detachFromLatest?: boolean }): void => {
+      if (loadMoreInFlightRef.current || !hasMore) {
+        return;
+      }
 
-    const oldestCursor = historyOldestCursorRef.current;
-    if (oldestCursor === null) {
-      return;
-    }
+      const oldestCursor = historyOldestCursorRef.current;
+      if (oldestCursor === null) {
+        return;
+      }
 
-    setIsLoadingMore(true);
-    void (async () => {
-      let accumulatedEvents = historyEventsRef.current;
-      let loadedEvents: ChatEventResponse[] = [];
-      let cursor = oldestCursor;
-      let more = true;
-      let visibleTimelineAdvanced = false;
+      loadMoreInFlightRef.current = true;
+      setIsLoadingMore(true);
+      void (async () => {
+        let accumulatedEvents = historyEventsRef.current;
+        let loadedEvents: ChatEventResponse[] = [];
+        let cursor = oldestCursor;
+        let more = true;
+        let visibleTimelineAdvanced = false;
 
-      while (more && !visibleTimelineAdvanced) {
-        const result = await utils.chat.listSessionEvents.fetch({
-          sessionId,
-          before: cursor,
-        });
-        visibleTimelineAdvanced = pageAdvancesVisibleTimeline(
-          accumulatedEvents,
-          result.history.items,
-          "prepend",
-        );
-        accumulatedEvents = mergeHistoryEventPages(
-          accumulatedEvents,
-          result.history.items,
-          "prepend",
-        );
-        loadedEvents = mergeHistoryEventPages(
-          loadedEvents,
-          result.history.items,
-          "prepend",
-        );
-        more = result.history.has_more;
-        const nextCursor = result.history.next_cursor ?? null;
-        if (nextCursor === null || nextCursor === cursor) {
-          break;
+        while (more && !visibleTimelineAdvanced) {
+          const result = await utils.chat.listSessionEvents.fetch({
+            sessionId,
+            before: cursor,
+          });
+          visibleTimelineAdvanced = pageAdvancesVisibleTimeline(
+            accumulatedEvents,
+            result.history.items,
+            "prepend",
+          );
+          accumulatedEvents = mergeHistoryEventPages(
+            accumulatedEvents,
+            result.history.items,
+            "prepend",
+          );
+          loadedEvents = mergeHistoryEventPages(
+            loadedEvents,
+            result.history.items,
+            "prepend",
+          );
+          more = result.history.has_more;
+          const nextCursor = result.history.next_cursor ?? null;
+          if (nextCursor === null || nextCursor === cursor) {
+            more = false;
+            break;
+          }
+          cursor = nextCursor;
         }
-        cursor = nextCursor;
-      }
 
-      historyOldestCursorRef.current = cursor;
-      setHistoryEvents((prev) => {
-        const next = mergeHistoryEventPages(prev, loadedEvents, "prepend");
-        historyEventsRef.current = next;
-        return next;
-      });
-      setHasMore(more);
-      if (chatTimelineState.type === "LATEST_FOLLOWING") {
-        setChatTimelineState({
-          type: "DETACHED_HISTORY_BROWSING",
-          hasNewer: false,
-          newestCursor: historyNewestCursorRef.current,
+        historyOldestCursorRef.current = cursor;
+        setHistoryEvents((prev) => {
+          const next = mergeHistoryEventPages(prev, loadedEvents, "prepend");
+          historyEventsRef.current = next;
+          return next;
         });
-      }
-    })().finally(() => {
-      setIsLoadingMore(false);
-    });
-  }, [
-    chatTimelineState.type,
-    sessionId,
-    isLoadingMore,
-    hasMore,
-    utils.chat.listSessionEvents,
-  ]);
+        setHasMore(more);
+        if (
+          options?.detachFromLatest !== false &&
+          chatTimelineState.type === "LATEST_FOLLOWING"
+        ) {
+          setChatTimelineState({
+            type: "DETACHED_HISTORY_BROWSING",
+            hasNewer: false,
+            newestCursor: historyNewestCursorRef.current,
+          });
+        }
+      })().finally(() => {
+        loadMoreInFlightRef.current = false;
+        setIsLoadingMore(false);
+      });
+    },
+    [chatTimelineState.type, sessionId, hasMore, utils.chat.listSessionEvents],
+  );
 
   const onLoadNewer = useCallback((): void => {
     if (
