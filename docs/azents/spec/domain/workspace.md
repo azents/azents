@@ -54,15 +54,17 @@ api_routes:
   - /chat/v1/agents/{agent_id}/workspace/project-browser-manifest/preview
   - /chat/v1/agents/{agent_id}/git-refs
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
-last_verified_at: 2026-07-12
-spec_version: 38
+last_verified_at: 2026-07-13
+spec_version: 39
 ---
 
 # Workspace & Membership
 
 ## Overview
 
-Workspace is the top-level unit of Azents service. It is the space where users create agents and collaborate, and it is the permission boundary that shares almost every resource such as agents, sessions, toolkits, and shell environments. It is used in URLs and external references through globally unique identifier called handle. Users belonging to Workspace are represented as `WorkspaceUser` and have one of three roles: OWNER/MANAGER/MEMBER.
+Workspace is the top-level product collaboration unit in Azents. It is the permission boundary that shares agents, sessions, toolkits, shell environments, and other workspace-scoped resources. It is used in URLs and external references through a globally unique handle. Users belonging to Workspace are represented as `WorkspaceUser` and have one of three roles: OWNER/MANAGER/MEMBER.
+
+Workspace roles are unrelated to the instance-wide `system_admin` role. OWNER or MANAGER membership grants no Admin Web or Admin API access, and system-administrator assignment grants no implicit Workspace membership. Fresh Admin bootstrap creates no Workspace; a bootstrapped administrator creates or joins Workspaces later through ordinary Public API product flows.
 
 In this document, **Workspace** refers only to the organization unit above. Runtime working storage owned by AgentRuntime is called **Agent Workspace**. Agent Workspace absolute path is Runtime metadata reported by Provider, and server stores and uses this value in `agent_runtimes.workspace_path`. The `workspace` naming in code/API paths may remain for compatibility, but documents distinguish organization-level Workspace from Agent Workspace.
 
@@ -217,13 +219,15 @@ Membership UI has these routes:
 
 Membership is created through three paths.
 
-1. **Workspace creation (automatic OWNER)** — `WorkspaceService.create_with_owner()` creates Workspace + OWNER role WorkspaceUser + default ShellEnvironment ("Default", WORKSPACE scope) in one transaction. Creator automatically becomes OWNER and this is not selectable in UI.
+1. **Explicit Workspace creation (automatic OWNER)** — `WorkspaceService.create_with_owner()` creates Workspace + OWNER role WorkspaceUser + default ShellEnvironment ("Default", WORKSPACE scope) in one transaction. Creator automatically becomes OWNER and this is not selectable in UI. Account or Admin bootstrap does not call this path.
 2. **Invitation acceptance** — existing member (manager or higher) invites by email. When invited user accepts, WorkspaceUser is created with that role (except OWNER). Display name is automatically set to prefix before `@` of invitation email.
 3. **JoinRequest approval** — user requests to join by handle. When existing member approves, WorkspaceUser is created with role=MEMBER. Display name is automatically set to first 8 chars of `user_id[:8]` (drift candidate — needs better default).
 
 Membership is removed by `WorkspaceUserService.delete()`. When Workspace is deleted, CASCADE cleans all WorkspaceUser, Invitation, and JoinRequest rows.
 
 ### Role Invariants
+
+These OWNER/MANAGER/MEMBER invariants apply only inside one Workspace. Instance-wide `system_admin` authorization is stored and enforced separately.
 
 `WorkspaceUserService.update_role()` and `delete()` enforce these invariants.
 
@@ -283,6 +287,8 @@ Each created worktree is prompt-eligible only through its session-owned `Session
 
 At least 7 rules — all actually verified in code:
 
+- `[admin-bootstrap-no-workspace]` — Admin bootstrap never creates a Workspace or WorkspaceUser; Workspace creation remains an explicit product action.
+- `[workspace-role-not-system-role]` — Workspace OWNER/MANAGER/MEMBER state never grants instance-wide system-administrator access.
 - `[unique-handle]` — Workspace `handle` is globally unique. DB-level `UQ_HANDLE`.
 - `[unique-membership]` — one WorkspaceUser per `(workspace_id, user_id)`. `UQ_WORKSPACE_USER`.
 - `[owner-required]` — `create_with_owner` atomically creates Workspace + OWNER, guaranteeing Workspace without OWNER cannot exist.
@@ -434,6 +440,7 @@ stateDiagram-v2
 
 ## Changelog
 
+- **2026-07-13** — v39. Separated instance-wide system administration from Workspace roles and documented that Admin bootstrap creates no Workspace or membership.
 - **2026-07-12** — v38. Clarified buffer-keyed worktree claims, buffer-only action transport, same-run context rebuilding, and terminal result history.
 - **2026-07-12** — v37. Removed failed operation action retry/discard endpoints; operation failures are terminal and durable history preserves the result.
 - **2026-07-08** — v36. Clarified worktree TurnAction context-boundary and failed-action FIFO continuation behavior.

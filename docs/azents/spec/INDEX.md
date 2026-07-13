@@ -16,10 +16,10 @@ Details of all living specs. Synchronized from frontmatter.
 | conversation | [Conversation & Events](domain/conversation.md) | @Hardtack | 2026-07-13 | 99 |
 | goal | [Goal Domain Spec](domain/goal.md) | - | 2026-07-01 | 8 |
 | memory | [Memory](domain/memory.md) | @Hardtack | 2026-07-09 | 4 |
-| model-catalog | [Model Catalog Domain Spec](domain/model-catalog.md) | - | 2026-07-12 | 5 |
+| model-catalog | [Model Catalog Domain Spec](domain/model-catalog.md) | - | 2026-07-13 | 6 |
 | toolkit | [Toolkit](domain/toolkit.md) | @Hardtack | 2026-07-10 | 54 |
-| user-auth | [User & Authentication](domain/user-auth.md) | @Hardtack | 2026-07-08 | 6 |
-| workspace | [Workspace & Membership](domain/workspace.md) | @Hardtack | 2026-07-12 | 38 |
+| user-auth | [User & Authentication](domain/user-auth.md) | @Hardtack | 2026-07-13 | 7 |
+| workspace | [Workspace & Membership](domain/workspace.md) | @Hardtack | 2026-07-13 | 39 |
 
 ## Flow Specs
 
@@ -36,6 +36,6 @@ Details of all living specs. Synchronized from frontmatter.
 | [Periodic Execution Flow Spec](flow/periodic-execution.md) | - | 2026-06-27 | 2 |
 | [Run Resume](flow/run-resume.md) | @Hardtack | 2026-07-12 | 18 |
 | [Session Context Inspector](flow/session-context-inspector.md) | @Hardtack | 2026-07-12 | 14 |
-| [E2E Primary Test Strategy](flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-07-10 | 6 |
+| [E2E Primary Test Strategy](flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-07-13 | 7 |
 | [xAI API Key Provider Flow](flow/xai-api-key.md) | @Hardtack | 2026-07-10 | 1 |
 | [xAI OAuth Flow](flow/xai-oauth.md) | @Hardtack | 2026-07-10 | 3 |

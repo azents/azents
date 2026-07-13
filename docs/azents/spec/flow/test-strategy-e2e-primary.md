@@ -24,8 +24,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-07-10
-spec_version: 6
+last_verified_at: 2026-07-13
+spec_version: 7
 ---
 
 # E2E Primary Test Strategy
@@ -97,6 +97,7 @@ Always-on deterministic CI does not depend on external credential.
 
 - Python lint/type/unit and other deterministic checks.
 - `uv run pytest -vv -m "not live_external" ./src` in `testenv/azents/e2e`.
+- Deterministic browser journeys run in the same pytest suite through a pinned remote Chromium container. Web images are built from the tested worktree, TLS gateways reproduce production secure-cookie behavior, and browser tests remain free of external credentials.
 - testenv fixture/prerequisite unit, contract lint.
 
 Live/external verification runs only conditionally.
@@ -124,6 +125,7 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
+- **2026-07-13** — v7. Added deterministic containerized Chromium journeys and worktree-built web images to the always-on E2E policy.
 - **2026-07-08** — v6. Added the no-direct-DB-write E2E scenario boundary used by subagent validation.
 
 ## Related Records

@@ -19,10 +19,10 @@ Design documents are accumulated records and are not listed individually in this
 | [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-13 | 99 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-01 | 8 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-09 | 4 |
-| [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-07-12 | 5 |
+| [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-07-13 | 6 |
 | [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-07-10 | 54 |
-| [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-07-08 | 6 |
-| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-07-12 | 38 |
+| [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-07-13 | 7 |
+| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-07-13 | 39 |
 
 _8 documents_
 
@@ -41,7 +41,7 @@ _8 documents_
 | [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-06-27 | 2 |
 | [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-07-12 | 18 |
 | [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-07-12 | 14 |
-| [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-07-10 | 6 |
+| [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-07-13 | 7 |
 | [xAI API Key Provider Flow](spec/flow/xai-api-key.md) | @Hardtack | 2026-07-10 | 1 |
 | [xAI OAuth Flow](spec/flow/xai-oauth.md) | @Hardtack | 2026-07-10 | 3 |
 
