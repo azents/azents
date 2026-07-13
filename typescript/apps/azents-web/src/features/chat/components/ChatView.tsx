@@ -15,8 +15,8 @@
  */
 
 import {
+  Badge,
   Box,
-  Button,
   Center,
   Group,
   Loader,
@@ -138,30 +138,6 @@ interface EditingMessageState {
 /** message row with directly not rendered as completion markerwhether checks.. */
 function isBoundaryMessage(message: ChatMessage): boolean {
   return message.role === "turn_complete" || message.role === "run_complete";
-}
-
-/** un partial text/tool running display existstextwhen peralso run indicator hides.. */
-function shouldShowPendingIndicator(messages: ChatMessage[]): boolean {
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const previous = messages[i];
-    if (!previous) {
-      continue;
-    }
-    if (previous.role === "user" || isBoundaryMessage(previous)) {
-      break;
-    }
-    if (previous.role !== "assistant") {
-      continue;
-    }
-    if (previous.status === "partial") {
-      return false;
-    }
-    if (previous.toolCalls?.some((toolCall) => toolCall.status === "running")) {
-      return false;
-    }
-  }
-
-  return true;
 }
 
 /** aftertext completion marker can attach actual display messagewhether checks.. */
@@ -1336,8 +1312,7 @@ export function ChatView({
                 )}
                 {chatTimelineState.type === "LATEST_FOLLOWING" &&
                   !liveRetryVisible &&
-                  isModelResponsePending &&
-                  shouldShowPendingIndicator(messages) && <AgentRunIndicator />}
+                  isModelResponsePending && <AgentRunIndicator />}
                 {chatTimelineState.type === "LATEST_FOLLOWING" &&
                   isCompacting && <CompactionIndicator />}
                 {chatTimelineState.type === "LATEST_FOLLOWING" &&
@@ -1385,17 +1360,22 @@ export function ChatView({
                 pointerEvents: "auto",
               }}
             >
-              <Button
-                size="xs"
+              <Badge
+                component="button"
+                type="button"
+                size="lg"
                 variant="filled"
                 color="blue"
                 rightSection={<IconArrowDown size={14} />}
                 onClick={scrollToBottom}
                 aria-label={t("newMessage")}
-                style={{ boxShadow: "var(--mantine-shadow-md)" }}
+                style={{
+                  cursor: "pointer",
+                  boxShadow: "var(--mantine-shadow-md)",
+                }}
               >
                 {t("newMessage")}
-              </Button>
+              </Badge>
             </Box>
           )}
           {/* input area */}

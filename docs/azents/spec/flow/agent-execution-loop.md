@@ -38,8 +38,10 @@ code_paths:
   - python/apps/azents/src/azents/worker/worker.py
   - python/apps/azents/src/azents/worker/run/**
   - python/apps/azents/src/azents/worker/session/**
+  - typescript/apps/azents-web/src/features/chat/components/ChatView.tsx
+  - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
 last_verified_at: 2026-07-13
-spec_version: 75
+spec_version: 76
 ---
 
 # Agent Execution Loop
@@ -90,8 +92,7 @@ Phase enum:
 - `stopping`
 
 `active_tool_calls` contains `call_id`, `name`, redacted/summarized `arguments`, `started_at`,
-and the admitting `owner_generation`. PostgreSQL is the execution and live-state authority for this set. The UI LLM running indicator uses `waiting_for_model` / `streaming_model`, and
-tool activity uses `executing_tools` and `active_tool_calls`.
+and the admitting `owner_generation`. PostgreSQL is the execution and live-state authority for this set. The UI LLM running indicator is derived only from the active Run phase: it appears in `waiting_for_model`, remains visible for the entire `streaming_model` phase even after partial model output becomes visible, and disappears when the phase advances beyond `streaming_model`. Tool activity uses `executing_tools` and `active_tool_calls`.
 
 A newly selected run begins as `pending`. For normal buffered input, the worker resolves the
 Agent-owned target label and optional effort before transactionally preparing the FIFO head. Successful
@@ -615,6 +616,7 @@ updated by the user.
 
 ## Changelog
 
+- **2026-07-13** (spec_version 76) — Clarified that the LLM running indicator remains visible through the complete model streaming phase, including after partial output appears.
 - **2026-07-13** (spec_version 75) — Promoted immutable requested input intent, non-fatal live projection boundaries, essential wake-up ordering, and explicit public WebSocket delivery boundaries.
 - **2026-07-12** (spec_version 74) — Added atomic tool-call admission/completion, deterministic cancellation and result identity, ownership-generation recovery, and PostgreSQL-backed active-call state.
 - **2026-07-12** (spec_version 72) — Restored durable sent-message model label, resolved display name, and reasoning effort metadata from the prepared Session snapshot.

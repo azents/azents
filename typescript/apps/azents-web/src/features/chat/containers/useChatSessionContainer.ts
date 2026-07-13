@@ -1429,7 +1429,6 @@ interface ManagedLiveState {
   liveRunPhase: AgentRunPhase | null;
   sessionRunState: SessionRunState;
   isResponsePending: boolean;
-  isModelResponsePending: boolean;
   isCompacting: boolean;
   isStopPending: boolean;
   todo: TodoStateSnapshot;
@@ -1490,7 +1489,6 @@ function emptyManagedLiveState(): ManagedLiveState {
     liveRunPhase: null,
     sessionRunState: "idle",
     isResponsePending: false,
-    isModelResponsePending: false,
     isCompacting: false,
     isStopPending: false,
     todo: emptyTodoState(),
@@ -1659,7 +1657,6 @@ function replaceLiveStateFromSnapshot(
       isResponsePending:
         isUserBlockingRunPhase(currentLiveRunPhase) ||
         partialHistory.order.length > 0,
-      isModelResponsePending: isModelRunPhase(currentLiveRunPhase),
       isCompacting: currentLiveRunPhase === "compacting",
       isStopPending:
         runSnapshot.type === "INVALID"
@@ -2019,7 +2016,7 @@ export function useChatSessionContainer(
   const pendingInputBuffers = managedLiveState.pendingInputBuffers;
   const liveRun = managedLiveState.liveRun;
   const isResponsePending = managedLiveState.isResponsePending;
-  const isModelResponsePending = managedLiveState.isModelResponsePending;
+  const isModelResponsePending = isModelRunPhase(managedLiveState.liveRunPhase);
   const sessionRunState = managedLiveState.sessionRunState;
 
   // WebSocket connection text (ticket + wsUrl)
@@ -2084,14 +2081,7 @@ export function useChatSessionContainer(
           isResponsePending:
             isUserBlockingRunPhase(phase) ||
             prev.partialHistory.order.length > 0,
-          isModelResponsePending: isModelRunPhase(phase),
           isCompacting: phase === "compacting",
-        }));
-      };
-      const markModelOutputVisible = (): void => {
-        setManagedLiveState((prev) => ({
-          ...prev,
-          isModelResponsePending: false,
         }));
       };
       const markRunInactive = (runId: string): void => {
@@ -2105,7 +2095,6 @@ export function useChatSessionContainer(
             liveRunPhase: null,
             sessionRunState: "idle",
             isResponsePending: false,
-            isModelResponsePending: false,
             isCompacting: false,
             isStopPending: false,
           };
@@ -2188,7 +2177,6 @@ export function useChatSessionContainer(
           isResponsePending:
             isUserBlockingRunPhase(nextLiveRunPhase) ||
             prev.partialHistory.order.length > 0,
-          isModelResponsePending: isModelRunPhase(nextLiveRunPhase),
           isCompacting: nextLiveRunPhase === "compacting",
         }));
         return;
@@ -2234,7 +2222,6 @@ export function useChatSessionContainer(
           return;
         }
         if (isPartialHistoryEvent(responseEvent)) {
-          markModelOutputVisible();
           setManagedLiveState((prev) => ({
             ...prev,
             partialHistory: upsertPartialHistoryEvent(
@@ -2282,13 +2269,6 @@ export function useChatSessionContainer(
           if (markerRunId !== null) {
             markRunInactive(markerRunId);
           }
-        } else if (
-          responseEvent.kind === "assistant_message" ||
-          responseEvent.kind === "reasoning" ||
-          responseEvent.kind === "client_tool_call" ||
-          responseEvent.kind === "provider_tool_call"
-        ) {
-          markModelOutputVisible();
         }
         return;
       }
@@ -2362,7 +2342,6 @@ export function useChatSessionContainer(
               ? {}
               : {
                   isResponsePending: false,
-                  isModelResponsePending: false,
                   isStopPending: false,
                 }),
           }));
