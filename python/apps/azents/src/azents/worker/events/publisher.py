@@ -1,5 +1,6 @@
 """Worker event publishing orchestration."""
 
+import asyncio
 import dataclasses
 import logging
 from typing import Annotated
@@ -48,7 +49,7 @@ class WorkerEventPublisher:
         session_id: str,
         event: PublishedEvent,
     ) -> None:
-        """Deliver Runtime event to WebSocket broadcast."""
+        """Deliver Runtime event to WebSocket broadcast best-effort."""
         try:
             serialized = serialize_event(event)
             await self.broadcast.publish(session_id, serialized)
@@ -57,11 +58,19 @@ class WorkerEventPublisher:
                     session_id,
                     chat_history_event_appended_dump(event),
                 )
+        except asyncio.CancelledError:
+            raise
         except Exception:
-            # broadcast failure only breaks Web UI sync; runtime processing continues.
-            # Log with stack trace for production root-cause analysis.
             logger.exception(
                 "Failed to broadcast event to WebSocket",
                 extra={"session_id": session_id},
             )
-        await self.broker.renew_session_ttl(session_id)
+        try:
+            await self.broker.renew_session_ttl(session_id)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception(
+                "Failed to renew session TTL after event publication",
+                extra={"session_id": session_id},
+            )

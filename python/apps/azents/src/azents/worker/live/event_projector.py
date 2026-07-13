@@ -1,5 +1,6 @@
 """Web chat live event projection management."""
 
+import asyncio
 import logging
 from typing import Annotated
 
@@ -48,8 +49,16 @@ class LiveEventProjector:
         self._active_tool_events: dict[str, dict[str, Event]] = {}
 
     async def flush_session(self, session_id: str) -> None:
-        """Reflect pending live partial batch of session to store and WebSocket."""
-        await self._partial_batcher.flush_session(session_id)
+        """Reflect pending live partial batches best-effort."""
+        try:
+            await self._partial_batcher.flush_session(session_id)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception(
+                "Failed to flush session live partial batches",
+                extra={"session_id": session_id},
+            )
 
     async def update(
         self,
@@ -95,9 +104,11 @@ class LiveEventProjector:
                         self._active_run_ids.pop(session_id, None)
                 case _:
                     pass
+        except asyncio.CancelledError:
+            raise
         except Exception:
             logger.exception(
-                "Failed to update event live event projection",
+                "Failed to update live event projection",
                 extra={"session_id": session_id},
             )
 
@@ -125,6 +136,8 @@ class LiveEventProjector:
                 self._active_tool_events[session_id] = after
             else:
                 self._active_tool_events.pop(session_id, None)
+        except asyncio.CancelledError:
+            raise
         except Exception:
             logger.exception(
                 "Failed to broadcast live active tool calls",
@@ -145,11 +158,19 @@ class LiveEventProjector:
         session_id: str,
         run: ChatLiveRunState,
     ) -> None:
-        """Broadcast current live run state."""
+        """Broadcast current live run state best-effort."""
         self._active_run_ids[session_id] = run.run_id
-        await self._broadcast.publish(
-            session_id, chat_live_run_updated_dump(session_id, run)
-        )
+        try:
+            await self._broadcast.publish(
+                session_id, chat_live_run_updated_dump(session_id, run)
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception(
+                "Failed to broadcast live run update",
+                extra={"session_id": session_id, "run_id": run.run_id},
+            )
 
     async def publish_live_run_cleared(
         self,
@@ -157,25 +178,41 @@ class LiveEventProjector:
         *,
         run_id: str,
     ) -> None:
-        """Broadcast live run state removal."""
+        """Broadcast live run state removal best-effort."""
         active_run_id = self._active_run_ids.get(session_id)
         if active_run_id is not None and active_run_id != run_id:
             return
         self._active_run_ids.pop(session_id, None)
-        await self._broadcast.publish(
-            session_id,
-            chat_live_run_cleared_dump(session_id, run_id),
-        )
+        try:
+            await self._broadcast.publish(
+                session_id,
+                chat_live_run_cleared_dump(session_id, run_id),
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception(
+                "Failed to broadcast live run removal",
+                extra={"session_id": session_id, "run_id": run_id},
+            )
 
     async def remove_event(self, session_id: str, event_id: str) -> None:
-        """Remove event from streaming or active projection and broadcast removal."""
-        await self._live_event_store.remove(session_id, event_id)
-        active = self._active_tool_events.get(session_id)
-        if active is not None:
-            active.pop(event_id, None)
-            if not active:
-                self._active_tool_events.pop(session_id, None)
-        await self._publish_event_removed(session_id, event_id)
+        """Remove a live event and broadcast the removal best-effort."""
+        try:
+            await self._live_event_store.remove(session_id, event_id)
+            active = self._active_tool_events.get(session_id)
+            if active is not None:
+                active.pop(event_id, None)
+                if not active:
+                    self._active_tool_events.pop(session_id, None)
+            await self._publish_event_removed(session_id, event_id)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception(
+                "Failed to remove live event projection",
+                extra={"session_id": session_id, "event_id": event_id},
+            )
 
     async def _flush_partial_batch(self, batch: LivePartialFlush) -> None:
         """Reflect batched live partial delta to store and broadcast."""

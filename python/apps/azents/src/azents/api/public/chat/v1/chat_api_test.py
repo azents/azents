@@ -42,6 +42,7 @@ from azents.api.public.chat.v1.data import (
     CleanupSessionGitWorktreeRequest,
     GoalStatusUpdateRequest,
 )
+from azents.broker.broadcast import WebSocketBroadcastPublishError
 from azents.broker.types import (
     BrokerMessage,
     PublishedEvent,
@@ -162,6 +163,15 @@ class _MemoryBroadcast:
     async def publish(self, session_id: str, event_json: dict[str, object]) -> None:
         """Record published events."""
         self.events.append((session_id, event_json))
+
+
+class _FailingBroadcast:
+    """WebSocket broadcast that simulates unavailable Redis publication."""
+
+    async def publish(self, session_id: str, event_json: dict[str, object]) -> None:
+        """Fail every publication attempt."""
+        del session_id, event_json
+        raise WebSocketBroadcastPublishError
 
 
 def _exchange_file_service() -> AsyncMock:
@@ -1214,6 +1224,23 @@ class TestUpdateSessionGoalStatus:
         assert isinstance(broker.messages[0], SessionWakeUp)
         assert len(broadcast.events) == 2
 
+    async def test_resume_wakes_session_when_broadcast_fails(self) -> None:
+        """Goal resume wake-up does not depend on UI publication."""
+        broker = _MemoryBroker()
+
+        response = await update_session_goal_status(
+            "1123456789abcdef0123456789abcdef",
+            GoalStatusUpdateRequest(status="active", resume_hint=None),
+            CurrentUser(user_id="user-1", session_id="auth-session"),
+            _GoalStatusChatService(),  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            broker,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            _FailingBroadcast(),  # pyright: ignore[reportArgumentType]  # Test double implements only the required method.
+        )
+
+        assert response.status == "active"
+        assert len(broker.messages) == 1
+        assert isinstance(broker.messages[0], SessionWakeUp)
+
 
 class TestGetSubagentTree:
     """Tests for GET /chat/v1/.../subagents/tree."""
@@ -1506,6 +1533,37 @@ class TestRestMessageWriteContract:
         assert response.snapshot.session_run_state == AgentSessionRunState.IDLE
         assert response.history_reload_required is False
         assert broadcast.events[0][1]["type"] == "live_event_upserted"
+        assert len(broker.messages) == 1
+        assert isinstance(broker.messages[0], SessionWakeUp)
+
+    async def test_existing_session_message_wakes_when_broadcast_fails(self) -> None:
+        """A committed input still wakes the worker when UI publication fails."""
+        broker = _MemoryBroker()
+        chat_service = _RestWriteChatService()
+
+        response = await _write_message_via_rest(
+            chat_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            _BufferedInputService(),  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            _exchange_file_service(),
+            _model_file_service(),
+            broker,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            _FailingBroadcast(),  # pyright: ignore[reportArgumentType]  # Test double implements only the required method.
+            InMemoryLiveEventStore(),
+            ChatMessageWriteRequest(
+                agent_id="agent-1",
+                client_request_id="client-broadcast-failure",
+                message="hello",
+                inference_profile=RequestedInferenceProfile(
+                    model_target_label="Primary",
+                    reasoning_effort=None,
+                ),
+            ),
+            session_id="0123456789abcdef0123456789abcdef",
+            user_id="user-1",
+            tz=ZoneInfo("UTC"),
+        )
+
+        assert response.accepted.type == "input_buffer"
         assert len(broker.messages) == 1
         assert isinstance(broker.messages[0], SessionWakeUp)
 
@@ -1932,3 +1990,13 @@ class TestChatInputBufferContract:
                 },
             ),
         ]
+
+    async def test_delete_input_buffer_succeeds_when_broadcast_fails(self) -> None:
+        """A committed buffer deletion is not failed by UI publication."""
+        await delete_input_buffer(
+            "0123456789abcdef0123456789abcdef",
+            "1123456789abcdef0123456789abcdef",
+            CurrentUser(user_id="user-1", session_id="auth-session"),
+            _DeleteInputBufferService(),  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            _FailingBroadcast(),  # pyright: ignore[reportArgumentType]  # Test double implements only the required method.
+        )
