@@ -121,6 +121,11 @@ async def test_generated_token_is_logged_once_and_bootstraps_without_workspace(
     assert isinstance(setup_token, str)
     assert setup_token not in token_records[0].getMessage()
     assert (await service.get_status()).available
+    async with rdb_session_manager() as session:
+        workspaces_before = {
+            workspace.handle
+            for workspace in (await WorkspaceRepository().list_all(session)).items
+        }
 
     result = await service.bootstrap(_input(setup_token))
 
@@ -139,8 +144,11 @@ async def test_generated_token_is_logged_once_and_bootstraps_without_workspace(
             user.id,
             SystemUserRole.SYSTEM_ADMIN,
         )
-        workspaces = await WorkspaceRepository().list_all(session)
-        assert workspaces.items == []
+        workspaces_after = {
+            workspace.handle
+            for workspace in (await WorkspaceRepository().list_all(session)).items
+        }
+        assert workspaces_after == workspaces_before
 
 
 async def test_invalid_token_and_weak_password_do_not_consume_bootstrap(
