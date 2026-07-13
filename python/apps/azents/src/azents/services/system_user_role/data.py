@@ -9,7 +9,13 @@ from azents.repos.system_user_role.data import SystemUserRoleAssignment
 class SystemUserRoleAssignmentOutput(SystemUserRoleAssignment):
     """System role assignment output."""
 
-    pass
+    @classmethod
+    def convert_from(
+        cls,
+        assignment: SystemUserRoleAssignment,
+    ) -> "SystemUserRoleAssignmentOutput":
+        """Convert repository data to service output."""
+        return cls.model_validate(assignment.model_dump())
 
 
 class SystemUserRoleAssignmentListOutput(BaseModel):

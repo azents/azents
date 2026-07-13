@@ -48,7 +48,7 @@ async def list_system_role_assignments(
     output = await system_role_service.list_all(offset=offset, limit=limit)
     return SystemUserRoleAssignmentListResponse(
         items=[
-            SystemUserRoleAssignmentResponse.model_validate(item)
+            SystemUserRoleAssignmentResponse.convert_output(item)
             for item in output.items
         ],
         total=output.total,
@@ -71,7 +71,7 @@ async def grant_system_admin(
     )
     match result:
         case Success(value):
-            return SystemUserRoleAssignmentResponse.model_validate(value)
+            return SystemUserRoleAssignmentResponse.convert_output(value)
         case Failure(SystemUserNotFound()):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,

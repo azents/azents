@@ -84,7 +84,7 @@ class SystemUserRoleService:
             )
         return SystemUserRoleAssignmentListOutput(
             items=[
-                SystemUserRoleAssignmentOutput.model_validate(assignment)
+                SystemUserRoleAssignmentOutput.convert_from(assignment)
                 for assignment in assignments.items
             ],
             total=assignments.total,
@@ -132,7 +132,7 @@ class SystemUserRoleService:
                 "assignment_created": existing is None,
             },
         )
-        return Success(SystemUserRoleAssignmentOutput.model_validate(assignment))
+        return Success(SystemUserRoleAssignmentOutput.convert_from(assignment))
 
     async def grant_by_email(
         self,

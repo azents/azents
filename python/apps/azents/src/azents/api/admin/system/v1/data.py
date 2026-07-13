@@ -16,7 +16,13 @@ class SystemAdminMeResponse(BaseModel):
 class SystemUserRoleAssignmentResponse(SystemUserRoleAssignmentOutput):
     """System role assignment response."""
 
-    pass
+    @classmethod
+    def convert_output(
+        cls,
+        output: SystemUserRoleAssignmentOutput,
+    ) -> "SystemUserRoleAssignmentResponse":
+        """Convert service output to an API response."""
+        return cls.model_validate(output.model_dump())
 
 
 class SystemUserRoleAssignmentListResponse(BaseModel):
