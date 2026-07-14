@@ -1,7 +1,9 @@
 """Event filter/compaction tests."""
 
+import asyncio
 import datetime
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
+from contextlib import asynccontextmanager
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -43,7 +45,43 @@ from azents.repos.agent_execution.data import EventCreate
 
 
 class _Session(AsyncSession):
-    """AsyncSession for tests."""
+    """AsyncSession tracking explicit compaction transaction boundaries."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.commit_count = 0
+        self.expire_all_count = 0
+
+    async def commit(self) -> None:
+        """Record a transaction boundary without requiring a database bind."""
+        self.commit_count += 1
+
+    def expire_all(self) -> None:
+        """Record caller identity-map invalidation."""
+        self.expire_all_count += 1
+
+
+class _SessionManager:
+    """Create short test sessions and commit them on clean scope exit."""
+
+    def __init__(self) -> None:
+        self.sessions: list[_Session] = []
+        self.active_scopes = 0
+
+    @asynccontextmanager
+    async def __call__(self) -> AsyncIterator[_Session]:
+        """Yield one tracked session scope."""
+        session = _Session()
+        self.sessions.append(session)
+        self.active_scopes += 1
+        try:
+            yield session
+        except BaseException:
+            raise
+        else:
+            await session.commit()
+        finally:
+            self.active_scopes -= 1
 
 
 class _TranscriptRepo:
@@ -119,6 +157,20 @@ class _SessionRepo:
         del session, session_id
         self.head_event_id = event_id
         return object()
+
+
+def _compactor(
+    *,
+    transcript_repo: _TranscriptRepo,
+    session_repo: _SessionRepo,
+    session_manager: _SessionManager | None = None,
+) -> EventCompactor:
+    """Create an EventCompactor with tracked short session scopes."""
+    return EventCompactor(
+        session_manager=session_manager or _SessionManager(),
+        transcript_repo=transcript_repo,
+        session_repo=session_repo,
+    )
 
 
 def _native_artifact() -> NativeArtifact:
@@ -490,11 +542,10 @@ async def test_compactor_appends_summary_and_moves_head() -> None:
         assert [event.id for event in old_events] == [events[0].id, events[1].id]
         return f"summary:{old_events[-1].id}"
 
-    summary = await EventCompactor(
+    summary = await _compactor(
         transcript_repo=transcript_repo,
         session_repo=session_repo,
     ).compact(
-        _Session(),
         session_id="session-1",
         transcript=events,
         compaction_id="compact-1",
@@ -508,8 +559,8 @@ async def test_compactor_appends_summary_and_moves_head() -> None:
     assert [event.model_order for event in transcript_repo.events] == [
         1000,
         2000,
-        2001,
-        2002,
+        3000,
+        3001,
     ]
     model_input_events = sorted(
         (
@@ -533,6 +584,108 @@ async def test_compactor_appends_summary_and_moves_head() -> None:
     assert "2. recent" in payload.content
     assert '"kind"' not in payload.content
     assert '"model_order"' not in payload.content
+
+
+async def test_compactor_commits_before_external_summary_call() -> None:
+    """Compaction does not hold its start transaction during model latency."""
+    events = [
+        _event(
+            "1",
+            EventKind.USER_MESSAGE,
+            UserMessagePayload(content="old"),
+        )
+    ]
+    session_manager = _SessionManager()
+    transcript_repo = _TranscriptRepo(events)
+
+    async def summarize(
+        old_events: Sequence[Event],
+        summary_budget: object,
+    ) -> str:
+        """Verify the started-marker session is already closed."""
+        del old_events, summary_budget
+        assert session_manager.active_scopes == 0
+        assert len(session_manager.sessions) == 1
+        assert session_manager.sessions[0].commit_count == 1
+        return "summary"
+
+    await _compactor(
+        session_manager=session_manager,
+        transcript_repo=transcript_repo,
+        session_repo=_SessionRepo(),
+    ).compact(
+        session_id="session-1",
+        transcript=events,
+        compaction_id="compact-1",
+        summarize=summarize,
+    )
+
+    assert len(session_manager.sessions) == 2
+    assert [session.commit_count for session in session_manager.sessions] == [1, 1]
+
+
+async def test_compactor_preserves_input_appended_during_summary() -> None:
+    """Input appended during summary remains after the new model-input head."""
+    events = [
+        _event(
+            "1",
+            EventKind.USER_MESSAGE,
+            UserMessagePayload(content="old"),
+        )
+    ]
+    session_manager = _SessionManager()
+    concurrent_session = _Session()
+    transcript_repo = _TranscriptRepo(events)
+
+    async def summarize(
+        old_events: Sequence[Event],
+        summary_budget: object,
+    ) -> str:
+        """Append input after the started-marker transaction is released."""
+        del old_events, summary_budget
+        assert session_manager.active_scopes == 0
+        assert session_manager.sessions[0].commit_count == 1
+        await transcript_repo.append(
+            concurrent_session,
+            EventCreate(
+                session_id="session-1",
+                kind=EventKind.USER_MESSAGE,
+                payload=UserMessagePayload(content="during compaction").model_dump(
+                    mode="json",
+                    exclude_none=True,
+                ),
+            ),
+        )
+        return "summary"
+
+    summary = await _compactor(
+        session_manager=session_manager,
+        transcript_repo=transcript_repo,
+        session_repo=_SessionRepo(),
+    ).compact(
+        session_id="session-1",
+        transcript=events,
+        compaction_id="compact-1",
+        summarize=summarize,
+    )
+
+    assert summary is not None
+    started_marker = transcript_repo.events[1]
+    concurrent_input = transcript_repo.events[2]
+    assert summary.model_order == started_marker.model_order + 1
+    assert concurrent_input.model_order > summary.model_order
+    model_input_events = sorted(
+        (
+            event
+            for event in transcript_repo.events
+            if event.model_order >= summary.model_order
+        ),
+        key=lambda event: event.model_order,
+    )
+    assert [event.id for event in model_input_events] == [
+        summary.id,
+        concurrent_input.id,
+    ]
 
 
 async def test_compactor_continuity_uses_concise_transcript_labels() -> None:
@@ -574,11 +727,10 @@ async def test_compactor_continuity_uses_concise_transcript_labels() -> None:
         del old_events, summary_budget
         return "summary"
 
-    summary = await EventCompactor(
+    summary = await _compactor(
         transcript_repo=transcript_repo,
         session_repo=_SessionRepo(),
     ).compact(
-        _Session(),
         session_id="session-1",
         transcript=events,
         compaction_id="compact-1",
@@ -636,11 +788,10 @@ async def test_compactor_summary_enricher_runs_before_continuity_append() -> Non
         captured["covered_until_event_id"] = covered_until_event_id
         return summary + "\n\n## Toolkit Enrichment\n- extra"
 
-    summary = await EventCompactor(
+    summary = await _compactor(
         transcript_repo=transcript_repo,
         session_repo=_SessionRepo(),
     ).compact(
-        _Session(),
         session_id="session-1",
         transcript=events,
         compaction_id="compact-1",
@@ -719,11 +870,10 @@ async def test_compactor_continuity_uses_last_five_completed_turns() -> None:
         assert [event.id for event in old_events] == original_event_ids
         return "summary"
 
-    summary = await EventCompactor(
+    summary = await _compactor(
         transcript_repo=transcript_repo,
         session_repo=_SessionRepo(),
     ).compact(
-        _Session(),
         session_id="session-1",
         transcript=events,
         compaction_id="compact-1",
@@ -791,11 +941,10 @@ async def test_compactor_continuity_user_message_section_uses_last_five_users() 
         del old_events, summary_budget
         return "summary"
 
-    summary = await EventCompactor(
+    summary = await _compactor(
         transcript_repo=transcript_repo,
         session_repo=_SessionRepo(),
     ).compact(
-        _Session(),
         session_id="session-1",
         transcript=events,
         compaction_id="compact-1",
@@ -833,11 +982,10 @@ async def test_compactor_truncates_large_continuity_events() -> None:
         del old_events, summary_budget
         return "summary"
 
-    summary = await EventCompactor(
+    summary = await _compactor(
         transcript_repo=transcript_repo,
         session_repo=_SessionRepo(),
     ).compact(
-        _Session(),
         session_id="session-1",
         transcript=events,
         compaction_id="compact-1",
@@ -877,11 +1025,10 @@ async def test_compactor_propagates_summary_failure() -> None:
         raise RuntimeError("provider unavailable")
 
     with pytest.raises(RuntimeError, match="provider unavailable"):
-        await EventCompactor(
+        await _compactor(
             transcript_repo=transcript_repo,
             session_repo=session_repo,
         ).compact(
-            _Session(),
             session_id="session-1",
             transcript=events,
             compaction_id="compact-1",
@@ -902,6 +1049,151 @@ async def test_compactor_propagates_summary_failure() -> None:
     assert failed_payload.status == "failed"
     assert failed_payload.reason == "summary_failed"
     assert failed_payload.error == "provider unavailable"
+
+
+async def test_compactor_commits_failure_after_summary_enrichment_error() -> None:
+    """Summary enrichment failure records a terminal marker after start commit."""
+    events = [
+        _event(
+            "1",
+            EventKind.USER_MESSAGE,
+            UserMessagePayload(content="old"),
+        )
+    ]
+    session_manager = _SessionManager()
+    transcript_repo = _TranscriptRepo(events)
+
+    async def summarize(
+        old_events: Sequence[Event],
+        summary_budget: object,
+    ) -> str:
+        """Return summary text for enrichment."""
+        del old_events, summary_budget
+        return "summary"
+
+    async def enrich(
+        *,
+        summary: str,
+        continuity_history: str,
+        compaction_id: str,
+        reason: str | None,
+        covered_until_event_id: str,
+    ) -> str:
+        """Simulate an external enrichment failure."""
+        del (
+            summary,
+            continuity_history,
+            compaction_id,
+            reason,
+            covered_until_event_id,
+        )
+        raise RuntimeError("enrichment unavailable")
+
+    with pytest.raises(RuntimeError, match="enrichment unavailable"):
+        await _compactor(
+            session_manager=session_manager,
+            transcript_repo=transcript_repo,
+            session_repo=_SessionRepo(),
+        ).compact(
+            session_id="session-1",
+            transcript=events,
+            compaction_id="compact-1",
+            summarize=summarize,
+            summary_enricher=enrich,
+        )
+
+    assert [session.commit_count for session in session_manager.sessions] == [1, 1]
+    failed = transcript_repo.events[-1].payload
+    assert isinstance(failed, CompactionMarkerPayload)
+    assert failed.status == "failed"
+    assert failed.reason == "summary_enrichment_failed"
+    assert failed.error == "enrichment unavailable"
+
+
+async def test_compactor_records_cancelled_start_callback() -> None:
+    """Cancellation in the start callback follows the durable started marker."""
+    events = [
+        _event(
+            "1",
+            EventKind.USER_MESSAGE,
+            UserMessagePayload(content="old"),
+        )
+    ]
+    session_manager = _SessionManager()
+    transcript_repo = _TranscriptRepo(events)
+
+    async def on_started() -> None:
+        """Simulate Stop while the start lifecycle hook is running."""
+        raise asyncio.CancelledError
+
+    async def summarize(
+        old_events: Sequence[Event],
+        summary_budget: object,
+    ) -> str:
+        """Summary must not start after callback cancellation."""
+        del old_events, summary_budget
+        raise AssertionError("summarize should not be called")
+
+    with pytest.raises(asyncio.CancelledError):
+        await _compactor(
+            session_manager=session_manager,
+            transcript_repo=transcript_repo,
+            session_repo=_SessionRepo(),
+        ).compact(
+            session_id="session-1",
+            transcript=events,
+            compaction_id="compact-1",
+            summarize=summarize,
+            on_started=on_started,
+        )
+
+    assert [session.commit_count for session in session_manager.sessions] == [1, 1]
+    started = transcript_repo.events[-2].payload
+    assert isinstance(started, CompactionMarkerPayload)
+    assert started.status == "started"
+    cancelled = transcript_repo.events[-1].payload
+    assert isinstance(cancelled, CompactionMarkerPayload)
+    assert cancelled.status == "failed"
+    assert cancelled.reason == "cancelled"
+
+
+async def test_compactor_commits_cancelled_marker_after_summary_cancellation() -> None:
+    """Cancellation records a durable outcome in a separate transaction."""
+    events = [
+        _event(
+            "1",
+            EventKind.USER_MESSAGE,
+            UserMessagePayload(content="old"),
+        )
+    ]
+    session_manager = _SessionManager()
+    transcript_repo = _TranscriptRepo(events)
+
+    async def summarize(
+        old_events: Sequence[Event],
+        summary_budget: object,
+    ) -> str:
+        """Simulate Stop cancelling the external summary call."""
+        del old_events, summary_budget
+        raise asyncio.CancelledError
+
+    with pytest.raises(asyncio.CancelledError):
+        await _compactor(
+            session_manager=session_manager,
+            transcript_repo=transcript_repo,
+            session_repo=_SessionRepo(),
+        ).compact(
+            session_id="session-1",
+            transcript=events,
+            compaction_id="compact-1",
+            summarize=summarize,
+        )
+
+    assert [session.commit_count for session in session_manager.sessions] == [1, 1]
+    cancelled = transcript_repo.events[-1].payload
+    assert isinstance(cancelled, CompactionMarkerPayload)
+    assert cancelled.status == "failed"
+    assert cancelled.reason == "cancelled"
 
 
 async def test_compactor_raises_when_summary_is_empty() -> None:
@@ -930,11 +1222,10 @@ async def test_compactor_raises_when_summary_is_empty() -> None:
         return "   "
 
     with pytest.raises(CompactionFailedError, match="summary model returned no text"):
-        await EventCompactor(
+        await _compactor(
             transcript_repo=transcript_repo,
             session_repo=session_repo,
         ).compact(
-            _Session(),
             session_id="session-1",
             transcript=events,
             compaction_id="compact-1",
@@ -979,7 +1270,7 @@ async def test_auto_compaction_runs_when_threshold_is_exceeded() -> None:
 
     result = await EventAutoCompactionFilter(
         session_id="session-1",
-        compactor=EventCompactor(
+        compactor=_compactor(
             transcript_repo=transcript_repo,
             session_repo=session_repo,
         ),
@@ -1019,9 +1310,17 @@ async def test_auto_compaction_emits_started_before_summary_call() -> None:
     ]
     transcript_repo = _TranscriptRepo(events)
     session_repo = _SessionRepo()
+    session_manager = _SessionManager()
+    session = _Session()
     calls: list[str] = []
 
     async def on_compaction_started() -> None:
+        assert session.commit_count == 1
+        assert session_manager.active_scopes == 0
+        assert session_manager.sessions[0].commit_count == 1
+        marker = transcript_repo.events[-1].payload
+        assert isinstance(marker, CompactionMarkerPayload)
+        assert marker.status == "started"
         calls.append("started")
 
     async def summarize(
@@ -1035,7 +1334,8 @@ async def test_auto_compaction_emits_started_before_summary_call() -> None:
 
     await EventAutoCompactionFilter(
         session_id="session-1",
-        compactor=EventCompactor(
+        compactor=_compactor(
+            session_manager=session_manager,
             transcript_repo=transcript_repo,
             session_repo=session_repo,
         ),
@@ -1044,9 +1344,10 @@ async def test_auto_compaction_emits_started_before_summary_call() -> None:
         auto_compaction_threshold_tokens=None,
         compaction_id_factory=lambda: "compact-1",
         on_compaction_started=on_compaction_started,
-    ).apply(_Session(), events)
+    ).apply(session, events)
 
     assert calls == ["started", "summarize"]
+    assert session.expire_all_count == 1
 
 
 async def test_auto_compaction_marks_compacted_only_when_summary_is_created() -> None:
@@ -1076,7 +1377,7 @@ async def test_auto_compaction_marks_compacted_only_when_summary_is_created() ->
 
     filter_ = EventAutoCompactionFilter(
         session_id="session-1",
-        compactor=EventCompactor(
+        compactor=_compactor(
             transcript_repo=transcript_repo,
             session_repo=session_repo,
         ),
@@ -1112,7 +1413,7 @@ async def test_auto_compaction_skips_when_threshold_is_not_exceeded() -> None:
 
     result = await EventAutoCompactionFilter(
         session_id="session-1",
-        compactor=EventCompactor(
+        compactor=_compactor(
             transcript_repo=transcript_repo,
             session_repo=_SessionRepo(),
         ),
@@ -1146,7 +1447,7 @@ async def test_auto_compaction_uses_explicit_threshold_override() -> None:
 
     result = await EventAutoCompactionFilter(
         session_id="session-1",
-        compactor=EventCompactor(
+        compactor=_compactor(
             transcript_repo=transcript_repo,
             session_repo=_SessionRepo(),
         ),
@@ -1190,7 +1491,7 @@ async def test_auto_compaction_uses_latest_turn_marker_usage() -> None:
 
     result = await EventAutoCompactionFilter(
         session_id="session-1",
-        compactor=EventCompactor(
+        compactor=_compactor(
             transcript_repo=transcript_repo,
             session_repo=_SessionRepo(),
         ),
@@ -1230,7 +1531,7 @@ async def test_auto_compaction_counts_events_after_latest_turn_marker() -> None:
 
     result = await EventAutoCompactionFilter(
         session_id="session-1",
-        compactor=EventCompactor(
+        compactor=_compactor(
             transcript_repo=transcript_repo,
             session_repo=session_repo,
         ),

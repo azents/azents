@@ -331,19 +331,20 @@ class _Compactor:
 
     async def compact(
         self,
-        session: AsyncSession,
         *,
         session_id: str,
         transcript: Sequence[Event],
         compaction_id: str,
         summarize: SummaryGenerator,
+        on_started: Callable[[], Awaitable[None]] | None = None,
         summary_context_window_tokens: int | None = None,
         reason: str | None = None,
         summary_enricher: SummaryEnricher | None = None,
     ) -> Event:
         """Call summary generator and return summary event."""
-        del session
         self.reason = reason
+        if on_started is not None:
+            await on_started()
         summary = await summarize(
             transcript,
             compute_summary_budget(summary_context_window_tokens),
@@ -376,23 +377,23 @@ class _FailingCompactor:
 
     async def compact(
         self,
-        session: AsyncSession,
         *,
         session_id: str,
         transcript: Sequence[Event],
         compaction_id: str,
         summarize: SummaryGenerator,
+        on_started: Callable[[], Awaitable[None]] | None = None,
         summary_context_window_tokens: int | None = None,
         reason: str | None = None,
         summary_enricher: SummaryEnricher | None = None,
     ) -> Event | None:
         """Raise compaction failure."""
         del (
-            session,
             session_id,
             transcript,
             compaction_id,
             summarize,
+            on_started,
             summary_context_window_tokens,
             reason,
             summary_enricher,

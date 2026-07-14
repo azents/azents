@@ -16,8 +16,8 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_session.py
   - python/apps/azents/src/azents/rdb/models/agent_run.py
   - python/apps/azents/src/azents/rdb/models/agent.py
-last_verified_at: 2026-07-12
-spec_version: 20
+last_verified_at: 2026-07-14
+spec_version: 21
 ---
 
 # Context Compaction
@@ -40,20 +40,21 @@ back to estimating the full selected transcript.
 
 When compaction is required:
 
-1. Append `compaction_marker` with a new `compaction_id` and a durable reason (`auto_threshold_exceeded` for automatic compaction, `manual_command` for explicit `/compact`).
-2. Select the full model-input transcript slice that will be summarized.
-3. Generate the summary from the full selected transcript slice.
+1. Select the full model-input transcript slice and fixed cutoff that will be summarized.
+2. In a short database session, append `compaction_marker` with a new `compaction_id` and a durable reason (`auto_threshold_exceeded` for automatic compaction, `manual_command` for explicit `/compact`). Commit the marker and reserve the immediately adjacent logical order for the summary.
+3. Close the marker persistence session before dispatching the compaction-start lifecycle hook or generating and enriching the summary. The external model and hook calls run outside compactor-owned database sessions and hold no active transaction or session-row lock used for event ordering.
 4. Render bounded continuity history from the selected transcript, but keep it separate from the generated summary.
 5. Dispatch the compaction summary enrichment hook pipeline with the generated summary and rendered continuity history.
 6. Append the continuity history after the enriched summary.
-7. Append `compaction_summary` with the same `compaction_id` and reason. The payload content contains
-   the enriched checkpoint followed by bounded `Recent User Messages` and `Recent Transcript` sections.
-8. Move `agent_sessions.model_input_head_event_id` and `agent_sessions.model_input_head_model_order` to the summary event.
+7. In another short database session, append `compaction_summary` at the reserved logical order with the same `compaction_id` and reason. The payload content contains the enriched checkpoint followed by bounded `Recent User Messages` and `Recent Transcript` sections.
+8. Move `agent_sessions.model_input_head_event_id` and `agent_sessions.model_input_head_model_order` to the summary event and commit that transaction.
+9. If summary generation or enrichment fails or is cancelled, append and commit a terminal failed/cancelled marker in a separate short database session without moving the model-input head.
 
 Old events remain queryable. The head pointer and event model order only change which
 event range and ordering are used for future model input. Sequential appends leave gaps in
-`model_order` so compaction can assign intermediate logical positions without renumbering the whole
-session transcript.
+`model_order` so compaction can reserve the summary immediately after its marker without renumbering
+the whole session transcript. Input appended while summary generation is running receives a later
+logical order, remains outside the fixed summary cutoff, and stays visible after the summary head.
 
 ## Summary Model
 
@@ -162,6 +163,9 @@ the immediate shape of the recent interaction.
 ## Invariants
 
 - Compaction is append-only.
+- External summary generation and enrichment run after the started-marker session closes and before the summary transaction opens; they do not hold the session-row event-ordering lock.
+- Events appended during external summary work retain a later logical order than the reserved summary order and remain visible after the model-input head moves.
+- Summary failure or cancellation records a committed terminal marker without moving the model-input head.
 - Successful compaction writes the trigger reason to both `compaction_marker.payload.reason` and `compaction_summary.payload.reason` so context/debug views can explain why the checkpoint was created.
 - `model_input_head_event_id` points at the event summary event after successful compaction, and `model_input_head_model_order` stores the same head event model order for scheduler GC cursor comparisons.
 - Future model input is selected and sorted by event model order, not by physical append id.

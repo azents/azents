@@ -241,8 +241,11 @@ class AgentEngineAdapter:
                 session_repo=self.session_head_repo,
                 transcript_repo=self.transcript_repo,
             )
-            hook_dispatcher = RuntimeHookDispatcher()
-            hook_providers = _runtime_hook_provider_refs(request.toolkits)
+
+        hook_dispatcher = RuntimeHookDispatcher()
+        hook_providers = _runtime_hook_provider_refs(request.toolkits)
+
+        async def on_compaction_started() -> None:
             await hook_dispatcher.dispatch_observation(
                 hook_providers,
                 "on_session_compact",
@@ -253,24 +256,25 @@ class AgentEngineAdapter:
                     run_id=context.run_id,
                 ),
             )
-            await self.compactor.compact(
-                session,
-                session_id=request.session_id,
-                transcript=transcript,
-                compaction_id=uuid7().hex,
-                summarize=_event_summary_generator(
-                    request,
-                    summarize=self.summary_model_call,
-                ),
-                summary_context_window_tokens=request.effective_max_input_tokens,
-                reason="manual_command",
-                summary_enricher=_compaction_summary_enricher(
-                    request,
-                    dispatcher=hook_dispatcher,
-                    providers=hook_providers,
-                    run_id=context.run_id,
-                ),
-            )
+
+        await self.compactor.compact(
+            session_id=request.session_id,
+            transcript=transcript,
+            compaction_id=uuid7().hex,
+            summarize=_event_summary_generator(
+                request,
+                summarize=self.summary_model_call,
+            ),
+            on_started=on_compaction_started,
+            summary_context_window_tokens=request.effective_max_input_tokens,
+            reason="manual_command",
+            summary_enricher=_compaction_summary_enricher(
+                request,
+                dispatcher=hook_dispatcher,
+                providers=hook_providers,
+                run_id=context.run_id,
+            ),
+        )
         yield ephemeral(CompactionComplete())
 
     async def run(
