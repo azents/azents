@@ -177,81 +177,75 @@ function getLatestCompactionIndex(messages: ChatMessage[]): number {
   return -1;
 }
 
-function shouldRenderActionExecution(
-  actionExecution: ActionExecutionProjection,
-): boolean {
-  return (
-    actionExecution.execution.status !== "completed" ||
-    actionExecution.events.length > 0
-  );
-}
-
 function actionExecutionTimelineItemId(
   actionExecution: ActionExecutionProjection,
 ): string {
-  return `action:${actionExecution.execution.id}:${actionExecution.execution.status}`;
+  return `action:${actionExecution.execution.id}`;
 }
 
-function shouldRenderUnanchoredActionExecution(
-  actionExecution: ActionExecutionProjection,
-): boolean {
-  return shouldRenderActionExecution(actionExecution);
+function compareTimelineKeys(
+  leftTime: string,
+  leftId: string,
+  rightTime: string,
+  rightId: string,
+): number {
+  const byTime = leftTime.localeCompare(rightTime);
+  return byTime === 0 ? leftId.localeCompare(rightId) : byTime;
 }
 
-function groupActionExecutionsByAnchor(
+interface ActionExecutionTimelinePlacement {
+  durableBeforeMessage: Map<string, ActionExecutionProjection[]>;
+  durableTail: ActionExecutionProjection[];
+  liveTail: ActionExecutionProjection[];
+}
+
+function placeActionExecutions(
+  messages: ChatMessage[],
   actionExecutions: ActionExecutionProjection[],
-): Map<string, ActionExecutionProjection[]> {
-  const grouped = new Map<string, ActionExecutionProjection[]>();
-  for (const actionExecution of actionExecutions.filter(
-    shouldRenderActionExecution,
-  )) {
-    const anchorId = actionExecution.execution.input_buffer_id;
-    const existing = grouped.get(anchorId) ?? [];
-    grouped.set(anchorId, [...existing, actionExecution]);
+): ActionExecutionTimelinePlacement {
+  const durableBeforeMessage = new Map<string, ActionExecutionProjection[]>();
+  const durableTail: ActionExecutionProjection[] = [];
+  const durable = actionExecutions
+    .filter((projection) => projection.provenance === "durable")
+    .sort((left, right) =>
+      compareTimelineKeys(
+        left.historyCreatedAt ?? left.execution.updated_at,
+        left.historyEventId ?? left.execution.id,
+        right.historyCreatedAt ?? right.execution.updated_at,
+        right.historyEventId ?? right.execution.id,
+      ),
+    );
+  const liveTail = actionExecutions
+    .filter((projection) => projection.provenance === "live")
+    .sort((left, right) =>
+      compareTimelineKeys(
+        left.execution.updated_at,
+        left.execution.id,
+        right.execution.updated_at,
+        right.execution.id,
+      ),
+    );
+
+  for (const actionExecution of durable) {
+    const followingMessage = messages.find(
+      (message) =>
+        compareTimelineKeys(
+          actionExecution.historyCreatedAt ??
+            actionExecution.execution.updated_at,
+          actionExecution.historyEventId ?? actionExecution.execution.id,
+          message.createdAt,
+          message.id,
+        ) < 0,
+    );
+    if (!followingMessage) {
+      durableTail.push(actionExecution);
+      continue;
+    }
+    const before = durableBeforeMessage.get(followingMessage.id) ?? [];
+    durableBeforeMessage.set(followingMessage.id, [...before, actionExecution]);
   }
-  return grouped;
-}
 
-function actionExecutionSortTime(
-  actionExecution: ActionExecutionProjection,
-): string {
-  const { execution } = actionExecution;
-  return (
-    execution.started_at ??
-    execution.completed_at ??
-    execution.failed_at ??
-    execution.updated_at
-  );
-}
-
-function unanchoredActionExecutions(
-  actionExecutions: ActionExecutionProjection[],
-  anchorIds: Set<string>,
-): ActionExecutionProjection[] {
-  return actionExecutions
-    .filter(shouldRenderUnanchoredActionExecution)
-    .filter(
-      (actionExecution) =>
-        !anchorIds.has(actionExecution.execution.input_buffer_id),
-    )
-    .sort((left, right) => {
-      const byTime = actionExecutionSortTime(left).localeCompare(
-        actionExecutionSortTime(right),
-      );
-      return byTime === 0
-        ? left.execution.id.localeCompare(right.execution.id)
-        : byTime;
-    });
-}
-
-function pushActionExecutionTimelineItemIds(
-  ids: string[],
-  groupedActionExecutions: Map<string, ActionExecutionProjection[]>,
-  anchorId: string,
-): void {
-  for (const actionExecution of groupedActionExecutions.get(anchorId) ?? []) {
-    ids.push(actionExecutionTimelineItemId(actionExecution));
-  }
+  return { durableBeforeMessage, durableTail, liveTail };
 }
 
 /** Build scroll-tracking IDs in the same order as rendered timeline items. */
@@ -261,36 +255,28 @@ function getTimelineItemIds(
   liveRun: ChatLiveRunState | null,
   actionExecutions: ActionExecutionProjection[],
 ): string[] {
-  const groupedActionExecutions =
-    groupActionExecutionsByAnchor(actionExecutions);
-  const anchorIds = new Set<string>();
+  const placement = placeActionExecutions(messages, actionExecutions);
   const ids: string[] = [];
 
   for (const message of messages) {
-    ids.push(`message:${message.id}`);
-    anchorIds.add(message.id);
-    pushActionExecutionTimelineItemIds(
-      ids,
-      groupedActionExecutions,
+    for (const actionExecution of placement.durableBeforeMessage.get(
       message.id,
-    );
+    ) ?? []) {
+      ids.push(actionExecutionTimelineItemId(actionExecution));
+    }
+    ids.push(`message:${message.id}`);
   }
-
+  for (const actionExecution of placement.durableTail) {
+    ids.push(actionExecutionTimelineItemId(actionExecution));
+  }
   if (hasLiveRetry(liveRun)) {
     ids.push(`live-run-retry:${liveRun.run_id}`);
   }
-
+  for (const actionExecution of placement.liveTail) {
+    ids.push(actionExecutionTimelineItemId(actionExecution));
+  }
   for (const buffer of pendingInputBuffers) {
     ids.push(`pending:${buffer.id}`);
-    anchorIds.add(buffer.id);
-    pushActionExecutionTimelineItemIds(ids, groupedActionExecutions, buffer.id);
-  }
-
-  for (const actionExecution of unanchoredActionExecutions(
-    actionExecutions,
-    anchorIds,
-  )) {
-    ids.push(actionExecutionTimelineItemId(actionExecution));
   }
 
   return ids;
@@ -503,27 +489,24 @@ export function ChatView({
       ? liveRun
       : null;
   const liveRetryVisible = liveRetryRun !== null;
-  const visibleActionExecutionsByAnchor = useMemo(
-    () => groupActionExecutionsByAnchor(actionExecutions),
-    [actionExecutions],
-  );
-  const timelineAnchorIds = useMemo(
+  const visibleActionExecutions = useMemo(
     () =>
-      new Set([
-        ...messages.map((message) => message.id),
-        ...pendingInputBuffers.map((buffer) => buffer.id),
-      ]),
-    [messages, pendingInputBuffers],
+      chatTimelineState.type === "LATEST_FOLLOWING"
+        ? actionExecutions
+        : actionExecutions.filter(
+            (actionExecution) => actionExecution.provenance === "durable",
+          ),
+    [actionExecutions, chatTimelineState.type],
   );
-  const fallbackActionExecutions = useMemo(
-    () => unanchoredActionExecutions(actionExecutions, timelineAnchorIds),
-    [actionExecutions, timelineAnchorIds],
+  const actionExecutionPlacement = useMemo(
+    () => placeActionExecutions(messages, visibleActionExecutions),
+    [messages, visibleActionExecutions],
   );
   const hasTimelineItems =
     messages.length > 0 ||
     pendingInputBuffers.length > 0 ||
     liveRetryVisible ||
-    fallbackActionExecutions.length > 0;
+    visibleActionExecutions.length > 0;
   const editingMessageIndex = useMemo(() => {
     if (!editingMessage) {
       return null;
@@ -768,7 +751,7 @@ export function ChatView({
           messages,
           pendingInputBuffers,
           liveRun,
-          actionExecutions,
+          visibleActionExecutions,
         ),
       );
     }
@@ -776,7 +759,7 @@ export function ChatView({
     messages,
     pendingInputBuffers,
     liveRun,
-    actionExecutions,
+    visibleActionExecutions,
     hasMore,
     isLoadingMore,
     markProgrammaticScroll,
@@ -868,7 +851,7 @@ export function ChatView({
         messages,
         pendingInputBuffers,
         liveRun,
-        actionExecutions,
+        visibleActionExecutions,
       ),
     );
 
@@ -881,7 +864,7 @@ export function ChatView({
     messages,
     pendingInputBuffers,
     liveRun,
-    actionExecutions,
+    visibleActionExecutions,
     chatViewState.type,
     hasMore,
     loadOlderUntilViewportScrollable,
@@ -893,7 +876,7 @@ export function ChatView({
     const frame = requestAnimationFrame(loadOlderUntilViewportScrollable);
     return () => cancelAnimationFrame(frame);
   }, [
-    actionExecutions,
+    visibleActionExecutions,
     loadOlderUntilViewportScrollable,
     messages,
     pendingInputBuffers,
@@ -957,7 +940,7 @@ export function ChatView({
       messages,
       pendingInputBuffers,
       liveRun,
-      actionExecutions,
+      visibleActionExecutions,
     );
     const hasNewMessage = timelineItemIds.some((id) => !prevIds.has(id));
 
@@ -982,7 +965,7 @@ export function ChatView({
     messages,
     pendingInputBuffers,
     liveRun,
-    actionExecutions,
+    visibleActionExecutions,
     schedulePinToBottom,
   ]);
 
@@ -1234,16 +1217,36 @@ export function ChatView({
             ) : (
               <Stack gap={0}>
                 {messages.map((msg, index) => {
+                  const durableBefore =
+                    actionExecutionPlacement.durableBeforeMessage.get(msg.id) ??
+                    [];
                   if (msg.role === "compaction") {
                     return (
-                      <CompactionDivider key={msg.id} content={msg.content} />
+                      <Fragment key={msg.id}>
+                        {durableBefore.map((actionExecution) => (
+                          <ActionExecutionTimelineCard
+                            key={actionExecution.execution.id}
+                            actionExecution={actionExecution}
+                          />
+                        ))}
+                        <CompactionDivider content={msg.content} />
+                      </Fragment>
                     );
                   }
                   if (
                     msg.role === "compaction_started" ||
                     isBoundaryMessage(msg)
                   ) {
-                    return null;
+                    return durableBefore.length > 0 ? (
+                      <Fragment key={msg.id}>
+                        {durableBefore.map((actionExecution) => (
+                          <ActionExecutionTimelineCard
+                            key={actionExecution.execution.id}
+                            actionExecution={actionExecution}
+                          />
+                        ))}
+                      </Fragment>
+                    ) : null;
                   }
                   const boundaryControls = getBoundaryControls(messages, index);
                   const dimmedByEdit =
@@ -1273,6 +1276,12 @@ export function ChatView({
                     : null;
                   return (
                     <Fragment key={msg.id}>
+                      {durableBefore.map((actionExecution) => (
+                        <ActionExecutionTimelineCard
+                          key={actionExecution.execution.id}
+                          actionExecution={actionExecution}
+                        />
+                      ))}
                       <MessageBubble
                         message={msg}
                         dimmed={dimmedByEdit}
@@ -1280,18 +1289,16 @@ export function ChatView({
                         onEdit={() => handleStartEdit(msg)}
                         failedRunRetryAction={failedRunRetryAction}
                       />
-                      {visibleActionExecutionsByAnchor
-                        .get(msg.id)
-                        ?.map((actionExecution) => (
-                          <ActionExecutionTimelineCard
-                            key={actionExecution.execution.id}
-                            actionExecution={actionExecution}
-                          />
-                        ))}
                       <TurnDivider usage={boundaryControls.usage} />
                     </Fragment>
                   );
                 })}
+                {actionExecutionPlacement.durableTail.map((actionExecution) => (
+                  <ActionExecutionTimelineCard
+                    key={actionExecution.execution.id}
+                    actionExecution={actionExecution}
+                  />
+                ))}
                 {authorizationRequests.map((req) => (
                   <AuthorizationRequestBubble
                     key={req.toolkitId}
@@ -1315,33 +1322,24 @@ export function ChatView({
                   isModelResponsePending && <AgentRunIndicator />}
                 {chatTimelineState.type === "LATEST_FOLLOWING" &&
                   isCompacting && <CompactionIndicator />}
-                {chatTimelineState.type === "LATEST_FOLLOWING" &&
-                  pendingInputBuffers.map((buffer) => (
-                    <Fragment key={buffer.id}>
-                      {buffer.id.startsWith("optimistic:") ? (
-                        <OptimisticInputBubble buffer={buffer} />
-                      ) : (
-                        <PendingInputBufferBubble
-                          buffer={buffer}
-                          onDelete={onDeletePendingInputBuffer}
-                        />
-                      )}
-                      {visibleActionExecutionsByAnchor
-                        .get(buffer.id)
-                        ?.map((actionExecution) => (
-                          <ActionExecutionTimelineCard
-                            key={actionExecution.execution.id}
-                            actionExecution={actionExecution}
-                          />
-                        ))}
-                    </Fragment>
-                  ))}
-                {fallbackActionExecutions.map((actionExecution) => (
+                {actionExecutionPlacement.liveTail.map((actionExecution) => (
                   <ActionExecutionTimelineCard
                     key={actionExecution.execution.id}
                     actionExecution={actionExecution}
                   />
                 ))}
+                {chatTimelineState.type === "LATEST_FOLLOWING" &&
+                  pendingInputBuffers.map((buffer) =>
+                    buffer.id.startsWith("optimistic:") ? (
+                      <OptimisticInputBubble key={buffer.id} buffer={buffer} />
+                    ) : (
+                      <PendingInputBufferBubble
+                        key={buffer.id}
+                        buffer={buffer}
+                        onDelete={onDeletePendingInputBuffer}
+                      />
+                    ),
+                  )}
               </Stack>
             )}
           </Box>

@@ -1,6 +1,6 @@
 # ActionExecutionProjectionResponse
 
-Action execution state plus durable progress events.
+Action execution state plus progress events.
 
 ## Properties
 

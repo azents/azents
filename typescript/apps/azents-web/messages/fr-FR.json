@@ -1077,13 +1077,15 @@
         "running": "Création du worktree…",
         "completed": "Worktree Project créé avec succès",
         "failed": "Échec de la création du worktree.",
+        "cancelled": "La création du worktree a été annulée.",
         "registrationFailed": "Échec de l’enregistrement du Project après la création du worktree."
       },
       "status": {
         "pending": "En attente",
         "running": "En cours",
         "completed": "Terminé",
-        "failed": "Échec"
+        "failed": "Échec",
+        "cancelled": "Annulé"
       }
     },
     "copy": "Copier",

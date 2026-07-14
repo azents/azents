@@ -88,7 +88,13 @@ from azents.engine.run.resolve import (
     resolve_invoke_input_with_profile,
     resolve_invoke_input_with_resolved_profile,
 )
-from azents.engine.run.types import CheckStop, PollMessages, PollMessagesResult
+from azents.engine.run.types import (
+    SHUTDOWN_CANCEL_MESSAGE,
+    USER_STOP_CANCEL_MESSAGE,
+    CheckStop,
+    PollMessages,
+    PollMessagesResult,
+)
 from azents.engine.tools.builtin import BuiltinToolkitProvider, RuntimeToolkit
 from azents.engine.tools.claude_rules import ClaudeRulesToolkitProvider
 from azents.engine.tools.deps import (
@@ -138,6 +144,7 @@ from azents.services.session_git_worktree import (
 )
 from azents.services.session_title import SessionTitleService
 from azents.transport.chat import (
+    chat_action_execution_removed_dump,
     chat_action_execution_updated_dump,
     chat_history_event_appended_dump,
     chat_live_event_removed_dump,
@@ -236,6 +243,16 @@ class OperationActionProcessResult:
     context_invalidated: bool
 
 
+def _operation_cancellation_reason(exc: asyncio.CancelledError) -> str:
+    """Map a processing-boundary cancellation to its durable operation reason."""
+    reason = exc.args[0] if exc.args else None
+    if reason == USER_STOP_CANCEL_MESSAGE:
+        return "Operation cancelled by user stop."
+    if reason == SHUTDOWN_CANCEL_MESSAGE:
+        return "Operation cancelled after the worker shutdown wait expired."
+    return "Operation cancelled because the worker processing boundary ended."
+
+
 def _runtime_hook_provider_refs(
     toolkits: list[ToolkitBinding],
 ) -> list[RuntimeHookProviderRef]:
@@ -331,6 +348,51 @@ class RunExecutor:
         init=False,
     )
 
+    async def _cancel_leftover_action_executions(
+        self,
+        session_id: str,
+        *,
+        reason: str,
+    ) -> None:
+        """Cancel live operations left by a processing boundary."""
+
+        async def publish_history_event(event: Event) -> None:
+            try:
+                await self.broadcast.publish(
+                    session_id,
+                    chat_history_event_appended_dump(event),
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to broadcast recovered action execution history event",
+                    extra={"session_id": session_id, "event_id": event.id},
+                )
+
+        async def publish_removal(action_execution_id: str) -> None:
+            try:
+                await self.broadcast.publish(
+                    session_id,
+                    chat_action_execution_removed_dump(
+                        session_id,
+                        action_execution_id,
+                    ),
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to broadcast recovered action execution removal",
+                    extra={
+                        "session_id": session_id,
+                        "action_execution_id": action_execution_id,
+                    },
+                )
+
+        await self.session_git_worktree_service.cancel_live_action_executions(
+            session_id=session_id,
+            reason=reason,
+            on_history_event_appended=publish_history_event,
+            on_action_execution_removed=publish_removal,
+        )
+
     async def finalize_unhandled_active_run(
         self,
         session_id: str,
@@ -404,6 +466,41 @@ class RunExecutor:
         tool_admission_barrier: ToolAdmissionBarrier,
         command: PendingSessionCommand | None = None,
     ) -> RunExecutionResult:
+        """Execute one Session processing boundary with cancellation cleanup."""
+        try:
+            return await self._execute(
+                message,
+                poll_fn=poll_fn,
+                check_stop=check_stop,
+                prepare_toolkits=prepare_toolkits,
+                shutdown_event=shutdown_event,
+                dispatch_event=dispatch_event,
+                owner_generation=owner_generation,
+                tool_admission_barrier=tool_admission_barrier,
+                command=command,
+            )
+        except asyncio.CancelledError as exc:
+            await asyncio.shield(
+                self._cancel_leftover_action_executions(
+                    message.session_id,
+                    reason=_operation_cancellation_reason(exc),
+                )
+            )
+            raise
+
+    async def _execute(
+        self,
+        message: SessionWakeUp,
+        *,
+        poll_fn: PollMessages | None,
+        check_stop: CheckStop | None,
+        prepare_toolkits: PrepareToolkits | None,
+        shutdown_event: asyncio.Event,
+        dispatch_event: Callable[[str, PublishedEvent], Awaitable[None]],
+        owner_generation: int,
+        tool_admission_barrier: ToolAdmissionBarrier,
+        command: PendingSessionCommand | None = None,
+    ) -> RunExecutionResult:
         """Handle one session wake-up.
 
         :param message: Incoming session wake-up.
@@ -415,6 +512,10 @@ class RunExecutor:
         :param command: Pending runtime command to execute instead of normal model run.
         :return: Session-managed toolkits used by execution.
         """
+        await self._cancel_leftover_action_executions(
+            message.session_id,
+            reason="Operation cancelled during Session ownership handover.",
+        )
         command_handler: CommandHandler | None = None
         if command is not None:
             command_handler = self.command_registry.get(command.name)
@@ -531,6 +632,8 @@ class RunExecutor:
                 model=None,
                 required_inference_profile=selected_profile.profile,
                 active_run_id=run_id,
+                owner_generation=owner_generation,
+                tool_admission_barrier=tool_admission_barrier,
                 initial_turn_eligible=(
                     recoverable_run is not None
                     and recoverable_run.status == AgentRunStatus.RUNNING
@@ -1197,6 +1300,8 @@ class RunExecutor:
                             requested_inference_profile=selected_profile.profile,
                             run_id=run_id,
                             poll_fn=poll_fn,
+                            owner_generation=owner_generation,
+                            tool_admission_barrier=tool_admission_barrier,
                             mark_context_invalidated=mark_turn_boundary_context_invalidated,
                         )
                         engine_iter = self.engine.run(
@@ -1684,6 +1789,8 @@ class RunExecutor:
         requested_inference_profile: RequestedInferenceProfile,
         run_id: str,
         poll_fn: PollMessages | None,
+        owner_generation: int,
+        tool_admission_barrier: ToolAdmissionBarrier,
         mark_context_invalidated: Callable[[], None],
     ) -> PollMessages:
         """Combine model-call boundary polling with turn action processing."""
@@ -1695,6 +1802,8 @@ class RunExecutor:
                 model=model,
                 required_inference_profile=requested_inference_profile,
                 active_run_id=run_id,
+                owner_generation=owner_generation,
+                tool_admission_barrier=tool_admission_barrier,
                 initial_turn_eligible=True,
                 poll_fn=poll_fn,
                 process_actions=True,
@@ -1721,6 +1830,8 @@ class RunExecutor:
         model: str | None,
         required_inference_profile: RequestedInferenceProfile | None,
         active_run_id: str | None,
+        owner_generation: int,
+        tool_admission_barrier: ToolAdmissionBarrier,
         initial_turn_eligible: bool,
         poll_fn: PollMessages | None,
         process_actions: bool,
@@ -1770,6 +1881,8 @@ class RunExecutor:
                 await self._process_operation_actions(
                     agent_id=agent_id,
                     session_id=session_id,
+                    owner_generation=owner_generation,
+                    tool_admission_barrier=tool_admission_barrier,
                     worktree_action=promoted.worktree_action,
                 )
                 if process_actions
@@ -1814,19 +1927,23 @@ class RunExecutor:
         *,
         agent_id: str,
         session_id: str,
+        owner_generation: int,
+        tool_admission_barrier: ToolAdmissionBarrier,
         worktree_action: WorktreeActionInput | None,
     ) -> OperationActionProcessResult:
-        """Execute durably claimed operation TurnActions before model dispatch."""
+        """Execute atomically claimed operation TurnActions before model dispatch."""
         context_invalidated = False
         processed_input_buffer_ids: set[str] = set()
         if worktree_action is not None:
             if worktree_action.execution is None:
-                raise RuntimeError("Worktree action has no durable execution claim")
+                raise RuntimeError("Worktree action has no live execution claim")
             result = await self._process_operation_action(
                 agent_id=agent_id,
                 session_id=session_id,
                 execution=worktree_action.execution,
                 action=worktree_action.action,
+                owner_generation=owner_generation,
+                tool_admission_barrier=tool_admission_barrier,
             )
             processed_input_buffer_ids.add(worktree_action.buffer.id)
             context_invalidated = result.context_invalidated
@@ -1858,6 +1975,8 @@ class RunExecutor:
                         session_id=session_id,
                         execution=execution,
                         action=action,
+                        owner_generation=owner_generation,
+                        tool_admission_barrier=tool_admission_barrier,
                     )
                 case _:
                     continue
@@ -1875,8 +1994,10 @@ class RunExecutor:
         session_id: str,
         execution: ActionExecution,
         action: CreateGitWorktreeAction,
+        owner_generation: int,
+        tool_admission_barrier: ToolAdmissionBarrier,
     ) -> GitWorktreeActionExecutionResult:
-        """Execute one durably claimed operation action."""
+        """Execute one atomically claimed operation action."""
 
         async def publish_projection(
             projection: ActionExecutionProjection,
@@ -1906,12 +2027,52 @@ class RunExecutor:
                     "Failed to broadcast action execution history event",
                     extra={"session_id": session_id, "event_id": event.id},
                 )
+            try:
+                await self.broadcast.publish(
+                    session_id,
+                    chat_action_execution_removed_dump(session_id, execution.id),
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to broadcast action execution removal",
+                    extra={
+                        "session_id": session_id,
+                        "action_execution_id": execution.id,
+                    },
+                )
+
+        if execution.owner_generation != owner_generation:
+            await self.session_git_worktree_service.cancel_action_execution(
+                execution=execution,
+                reason="Operation cancelled during Session ownership handover.",
+                on_history_event_appended=publish_history_event,
+            )
+            return GitWorktreeActionExecutionResult(
+                completed=True,
+                context_invalidated=False,
+            )
+
+        async def admit_operation() -> None:
+            """Fence operation admission against worker shutdown."""
+
+        admitted = await tool_admission_barrier.run_if_open(admit_operation)
+        if not admitted:
+            await self.session_git_worktree_service.cancel_action_execution(
+                execution=execution,
+                reason="Operation cancelled before worker shutdown.",
+                on_history_event_appended=publish_history_event,
+            )
+            return GitWorktreeActionExecutionResult(
+                completed=True,
+                context_invalidated=False,
+            )
 
         return await self.session_git_worktree_service.run_git_worktree_action(
             agent_id=agent_id,
             session_id=session_id,
             execution=execution,
             action=action,
+            owner_generation=owner_generation,
             on_projection_updated=publish_projection,
             on_history_event_appended=publish_history_event,
         )

@@ -559,12 +559,20 @@ export interface InputActionsUpdatedEvent {
 
 export type ActionExecutionProjection = ActionExecutionProjectionResponse & {
   provenance: "durable" | "live";
+  historyEventId?: string;
+  historyCreatedAt?: string;
 };
 
 export interface ActionExecutionUpdatedEvent {
   type: "action_execution_updated";
   session_id: string;
   action_execution: ActionExecutionProjection;
+}
+
+export interface ActionExecutionRemovedEvent {
+  type: "action_execution_removed";
+  session_id: string;
+  action_execution_id: string;
 }
 
 export interface SubscriptionHealthCheckAckEvent {
@@ -638,6 +646,7 @@ export type ChatEvent =
   | SubscribedEvent
   | InputActionsUpdatedEvent
   | ActionExecutionUpdatedEvent
+  | ActionExecutionRemovedEvent
   | SubscriptionHealthCheckAckEvent
   | LiveRunUpdatedEvent
   | LiveRunClearedEvent

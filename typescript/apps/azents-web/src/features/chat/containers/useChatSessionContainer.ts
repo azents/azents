@@ -1338,7 +1338,12 @@ function actionExecutionResultFromEvent(
     return null;
   }
   return isActionExecutionProjectionValue(event.payload.action_execution)
-    ? { ...event.payload.action_execution, provenance: "durable" }
+    ? {
+        ...event.payload.action_execution,
+        provenance: "durable",
+        historyEventId: event.id,
+        historyCreatedAt: event.created_at,
+      }
     : null;
 }
 
@@ -2058,6 +2063,7 @@ export function useChatSessionContainer(
           event.type === "live_run_updated" ||
           event.type === "live_run_cleared" ||
           event.type === "action_execution_updated" ||
+          event.type === "action_execution_removed" ||
           event.type === "run_started" ||
           event.type === "run_phase_changed" ||
           event.type === "run_complete" ||
@@ -2144,6 +2150,16 @@ export function useChatSessionContainer(
             utils.chat.listInputActions.invalidate({ sessionId }),
           ]);
         }
+        return;
+      }
+
+      if ("type" in event && event.type === "action_execution_removed") {
+        setManagedLiveState((prev) => ({
+          ...prev,
+          actionExecutions: prev.actionExecutions.filter(
+            (item) => item.execution.id !== event.action_execution_id,
+          ),
+        }));
         return;
       }
 
@@ -2269,6 +2285,24 @@ export function useChatSessionContainer(
           if (markerRunId !== null) {
             markRunInactive(markerRunId);
           }
+        }
+        const durableActionExecution =
+          actionExecutionResultFromEvent(responseEvent);
+        if (
+          durableActionExecution !== null &&
+          isCompletedGitWorktreeActionExecution(durableActionExecution)
+        ) {
+          void Promise.all([
+            utils.chat.listAgentProjects.invalidate({
+              agentId: agent.id,
+              sessionId,
+            }),
+            utils.chat.getSessionProjectBrowserManifest.invalidate({
+              agentId: agent.id,
+              sessionId,
+            }),
+            utils.chat.listInputActions.invalidate({ sessionId }),
+          ]);
         }
         return;
       }

@@ -1077,13 +1077,15 @@
         "running": "Worktree を作成中…",
         "completed": "Worktree Project を作成しました",
         "failed": "Worktree の作成に失敗しました。",
+        "cancelled": "Worktree の作成をキャンセルしました。",
         "registrationFailed": "Worktree 作成後の Project 登録に失敗しました。"
       },
       "status": {
         "pending": "保留中",
         "running": "実行中",
         "completed": "完了",
-        "failed": "失敗"
+        "failed": "失敗",
+        "cancelled": "キャンセル済み"
       }
     },
     "copy": "コピー",

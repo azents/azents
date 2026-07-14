@@ -18,7 +18,7 @@ import re  # noqa: F401
 import json
 
 from datetime import datetime
-from pydantic import BaseModel, ConfigDict, Field, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.action import Action
 from typing import Optional, Set
@@ -33,13 +33,16 @@ class ActionExecutionResponse(BaseModel):
     action_type: StrictStr = Field(description="Action discriminator")
     action: Action
     status: StrictStr = Field(description="Execution status")
+    owner_generation: StrictInt = Field(description="Admitting Session owner generation")
     failure_summary: Optional[StrictStr] = None
+    cancellation_summary: Optional[StrictStr] = None
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     failed_at: Optional[datetime] = None
+    cancelled_at: Optional[datetime] = None
     updated_at: datetime = Field(description="Updated time")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "input_buffer_id", "action_type", "action", "status", "failure_summary", "started_at", "completed_at", "failed_at", "updated_at"]
+    __properties: ClassVar[List[str]] = ["id", "input_buffer_id", "action_type", "action", "status", "owner_generation", "failure_summary", "cancellation_summary", "started_at", "completed_at", "failed_at", "cancelled_at", "updated_at"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -95,6 +98,11 @@ class ActionExecutionResponse(BaseModel):
         if self.failure_summary is None and "failure_summary" in self.model_fields_set:
             _dict['failure_summary'] = None
 
+        # set to None if cancellation_summary (nullable) is None
+        # and model_fields_set contains the field
+        if self.cancellation_summary is None and "cancellation_summary" in self.model_fields_set:
+            _dict['cancellation_summary'] = None
+
         # set to None if started_at (nullable) is None
         # and model_fields_set contains the field
         if self.started_at is None and "started_at" in self.model_fields_set:
@@ -109,6 +117,11 @@ class ActionExecutionResponse(BaseModel):
         # and model_fields_set contains the field
         if self.failed_at is None and "failed_at" in self.model_fields_set:
             _dict['failed_at'] = None
+
+        # set to None if cancelled_at (nullable) is None
+        # and model_fields_set contains the field
+        if self.cancelled_at is None and "cancelled_at" in self.model_fields_set:
+            _dict['cancelled_at'] = None
 
         return _dict
 
@@ -127,10 +140,13 @@ class ActionExecutionResponse(BaseModel):
             "action_type": obj.get("action_type"),
             "action": Action.from_dict(obj["action"]) if obj.get("action") is not None else None,
             "status": obj.get("status"),
+            "owner_generation": obj.get("owner_generation"),
             "failure_summary": obj.get("failure_summary"),
+            "cancellation_summary": obj.get("cancellation_summary"),
             "started_at": obj.get("started_at"),
             "completed_at": obj.get("completed_at"),
             "failed_at": obj.get("failed_at"),
+            "cancelled_at": obj.get("cancelled_at"),
             "updated_at": obj.get("updated_at")
         })
         # store additional fields in additional_properties

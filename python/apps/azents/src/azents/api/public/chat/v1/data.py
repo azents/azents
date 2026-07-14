@@ -484,7 +484,12 @@ class ActionExecutionResponse(BaseModel):
     action_type: str = Field(description="Action discriminator")
     action: ChatAction = Field(description="Durable action payload")
     status: str = Field(description="Execution status")
+    owner_generation: int = Field(description="Admitting Session owner generation")
     failure_summary: str | None = Field(default=None, description="Failure summary")
+    cancellation_summary: str | None = Field(
+        default=None,
+        description="Cancellation summary",
+    )
     started_at: datetime.datetime | None = Field(default=None, description="Start time")
     completed_at: datetime.datetime | None = Field(
         default=None,
@@ -492,6 +497,10 @@ class ActionExecutionResponse(BaseModel):
     )
     failed_at: datetime.datetime | None = Field(
         default=None, description="Failure time"
+    )
+    cancelled_at: datetime.datetime | None = Field(
+        default=None,
+        description="Cancellation time",
     )
     updated_at: datetime.datetime = Field(description="Updated time")
 
@@ -504,16 +513,19 @@ class ActionExecutionResponse(BaseModel):
             action_type=execution.action_type,
             action=_CHAT_ACTION_ADAPTER.validate_python(execution.action),
             status=execution.status.value,
+            owner_generation=execution.owner_generation,
             failure_summary=execution.failure_summary,
+            cancellation_summary=execution.cancellation_summary,
             started_at=execution.started_at,
             completed_at=execution.completed_at,
             failed_at=execution.failed_at,
+            cancelled_at=execution.cancelled_at,
             updated_at=execution.updated_at,
         )
 
 
 class ActionExecutionProjectionResponse(BaseModel):
-    """Action execution state plus durable progress events."""
+    """Action execution state plus progress events."""
 
     execution: ActionExecutionResponse = Field(description="Action execution state")
     events: list[ActionExecutionEventResponse] = Field(

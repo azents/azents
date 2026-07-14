@@ -182,6 +182,18 @@ def chat_action_execution_updated_dump(
     }
 
 
+def chat_action_execution_removed_dump(
+    session_id: str,
+    action_execution_id: str,
+) -> dict[str, object]:
+    """Convert action execution removal to chat WS wire dict."""
+    return {
+        "type": "action_execution_removed",
+        "session_id": session_id,
+        "action_execution_id": action_execution_id,
+    }
+
+
 def chat_input_actions_updated_dump(session_id: str) -> dict[str, object]:
     """Convert composer action list update notification to chat WS wire dict."""
     return {

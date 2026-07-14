@@ -21,8 +21,8 @@ code_paths:
   - python/apps/azents/src/azents/engine/run/types.py
   - python/apps/azents/src/azents/engine/run/errors.py
   - python/apps/azents/src/azents/worker/session/**
-last_verified_at: 2026-07-12
-spec_version: 18
+last_verified_at: 2026-07-14
+spec_version: 19
 ---
 
 # Run Resume
@@ -40,7 +40,7 @@ The event runtime resumes from durable transcript and `agent_runs`, not SDK seri
 | Stale session activity | Worker recovery scan of `agent_sessions.run_state` | Worker enqueues a wake-up signal for the affected session |
 | Active event run | pending/running `agent_runs`, resolved inference provenance, phase, active tools, and retry state | Runtime preserves the run/input boundary, resumes from an activated snapshot, and repairs missing interrupted results |
 | Pending tool call | Event transcript has call without result | Runtime appends one deterministic cancelled result without executing the handler |
-| Pending operation action | Session has a nonterminal buffer-keyed action execution | Worker resumes it from the durable action payload; terminal failure is not retried and does not permanently block later FIFO input. |
+| Leftover operation action | Session has an active buffer-keyed action execution at a new processing boundary | Worker records one cancelled durable snapshot and deletes the live execution before admitting new work; it never invokes the stale handler. |
 
 ## Ownership Lease
 
@@ -72,11 +72,13 @@ Worker shutdown must not partially process a new message. If shutdown wins befor
 message is left for broker redelivery or ownership takeover.
 
 If shutdown is observed while a foreground run is active, the run boundary is a worker handover
-boundary, not an idle boundary. The current worker may wait briefly for `engine.run()` to finish
-cleanly, but even a clean return during shutdown must skip idle hooks, skip Goal continuation
-creation, and skip `AgentSession.run_state=IDLE`. The worker releases the ownership lease and heartbeat; a new
-worker resumes from the durable transcript, `agent_runs`, pending input buffers, and session
-wake-up state.
+boundary, not an idle boundary. The current worker closes foreground tool and operation admission,
+then allows already-admitted work up to 30 seconds to finish cleanly. Timeout cancels the supervised
+task and lets its cancellation finalizers persist terminal state before the worker releases the
+ownership lease and heartbeat. Even a clean return during shutdown must skip idle hooks, skip Goal
+continuation creation, and skip `AgentSession.run_state=IDLE`. A new worker resumes from the durable
+transcript, `agent_runs`, pending input buffers, and session wake-up state, while any leftover active
+operation is cancelled rather than resumed.
 
 Broker wake-up routing uses the ownership lease:
 
@@ -166,24 +168,30 @@ The takeover path must preserve single-session execution:
 - A live owner heartbeat prevents non-owner processing.
 - A stale heartbeat permits lease stealing even if the 30-minute sticky key remains.
 - Wake-up signals remain in the per-session Redis list until a worker with valid ownership drains
-  them. Model input payloads, operation action inputs, and control state remain durable in Postgres. Before an operation input buffer is deleted, its pending `ActionExecution` and typed action payload are committed under the source `input_buffer_id`; takeover recovers the nonterminal execution from that durable claim and its worktree allocation state.
+  them. Model input payloads, operation action inputs, and control state remain durable in Postgres. Before an operation input buffer is deleted, its pending `ActionExecution`, typed action payload, and admitting `owner_generation` are committed under the source `input_buffer_id`. A takeover converts any surviving execution from an older processing boundary into a cancelled durable snapshot before consuming new input.
 - Durable transcript and `agent_runs` remain the execution source of truth after takeover.
 
 ## Operation Action Recovery
 
 Operation TurnActions enter through durable `action_message` InputBuffers, but they do not append an
-`action_message` transcript event. Preparation claims a worktree action by committing an
-`ActionExecution` keyed by `input_buffer_id` with its typed action payload, then deletes the source
-buffer in the same transaction. Takeover resumes pending work and continues a running execution from
-its durable allocation. A `ready` allocation skips duplicate Git creation and resumes remaining
-Project/catalog steps. A `creating` allocation whose Runner result was not durably recorded is
-finalized as an interrupted terminal failure rather than creating a second suffixed worktree. A
-completed action is not duplicated. A failed action is terminal, is not retried or discarded, and
-FIFO processing may continue to later pending input. Running workers process TurnActions at model-call
-turn boundaries instead of waiting for run completion. If a Project-mutating action completes, the
-same active run rebuilds model/tool context before its next model call. Completed and failed worktree
-projections are appended to durable history as `action_execution_result` events, and terminal live
-action state is not kept as a persistent fallback.
+`action_message` transcript event. Preparation claims a worktree action by committing an active
+`ActionExecution` keyed by `input_buffer_id`, with its typed action payload and current Session owner
+generation, then deletes the source buffer in the same transaction. The current worker verifies that
+generation and crosses the foreground admission barrier before invoking a Runner side effect.
+
+`action_executions` and their ordered events are live state only. Normal completion, handled failure,
+user stop, shutdown timeout, and takeover recovery use one terminalization primitive: lock the active
+row, build the terminal projection, append `action_execution_result:{execution_id}`, and delete the
+live row and progress events in the same transaction. The worktree allocation survives through its
+nullable `ON DELETE SET NULL` reference.
+
+Takeover never resumes pending or running operation work. The side effect may have completed before
+the previous worker lost its result, so the new owner conservatively snapshots the leftover operation
+as cancelled and does not call its handler. Running workers process newly admitted TurnActions at
+model-call turn boundaries instead of waiting for run completion. If a Project-mutating action
+completes, the same active run rebuilds model/tool context before its next model call. A failed or
+cancelled action is terminal, is not retried or discarded, and FIFO processing may continue to later
+pending input.
 
 ## Failed-run Retry Recovery
 
@@ -220,9 +228,11 @@ event order for a stopped run is:
 3. `interrupted` with `reason=user_requested`.
 4. `run_marker(status=interrupted)`.
 
-If an input buffer is already pending when stop handling finishes, the warm session runner must
-enqueue or preserve a wake-up so the next run starts immediately. A stale stop request must not cause
-that next run to observe `check_stop()` as true.
+If an operation TurnAction is active, the same preemptive task cancellation first converts it into a
+cancelled durable snapshot and removes its live row; the handler is not left for replay. If an input
+buffer is already pending when stop handling finishes, the warm session runner must enqueue or
+preserve a wake-up so the next run starts immediately. A stale stop request must not cause that next
+run to observe `check_stop()` as true.
 
 ## Invariants
 
@@ -237,12 +247,13 @@ that next run to observe `check_stop()` as true.
   hooks.
 - Completed tool results are not duplicated.
 - User stop intent is consumed by stop finalization and must not interrupt the next wake-up.
-- Nonterminal operation execution resumes from its buffer-keyed durable action payload; terminal failure is never retried.
+- A leftover nonterminal operation is cancelled into one durable snapshot before new work; operation handlers are never resumed or replayed after ownership loss.
 - SDK `RunState` compatibility is not preserved.
 
 
 ## Changelog
 
+- **2026-07-14** (spec_version 19) — Replaced operation resume with owner-generation-fenced live execution, atomic terminal snapshot/delete handover, 30-second graceful shutdown, and cancelled no-reexecution takeover recovery.
 - **2026-07-12** (spec_version 18) — Made ownership generation and durable call/result state authoritative for no-reexecution tool recovery.
 - **2026-07-12** (spec_version 17) — Promoted Session-owned per-turn inference recovery, handled preparation failure, buffer-only action transport, buffer-keyed action recovery, and same-run context rebuild.
 - **2026-07-11** (spec_version 16) — Added recovery semantics for pre-resolved `spawn_override` child runs and later session-last-used re-resolution.

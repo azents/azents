@@ -1,7 +1,12 @@
 "use client";
 
 import { Badge, Box, Group, rem, Stack, Text } from "@mantine/core";
-import { IconAlertCircle, IconCheck, IconLoader2 } from "@tabler/icons-react";
+import {
+  IconAlertCircle,
+  IconCheck,
+  IconLoader2,
+  IconX,
+} from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import type { ActionExecutionProjection } from "../types";
 import type { ReactNode } from "react";
@@ -20,6 +25,8 @@ function statusColor(status: string): string {
       return "green";
     case "failed":
       return "red";
+    case "cancelled":
+      return "gray";
     case "running":
       return "blue";
     default:
@@ -30,11 +37,13 @@ function statusColor(status: string): string {
 function statusIcon(status: string): ReactNode {
   switch (status) {
     case "completed":
-      return <IconCheck size="0.85rem" />;
+      return <IconCheck size={rem(14)} />;
     case "failed":
-      return <IconAlertCircle size="0.85rem" />;
+      return <IconAlertCircle size={rem(14)} />;
+    case "cancelled":
+      return <IconX size={rem(14)} />;
     default:
-      return <IconLoader2 size="0.85rem" />;
+      return <IconLoader2 size={rem(14)} />;
   }
 }
 
@@ -47,6 +56,8 @@ function statusLabel(
       return t("status.completed");
     case "failed":
       return t("status.failed");
+    case "cancelled":
+      return t("status.cancelled");
     case "running":
       return t("status.running");
     default:
@@ -156,6 +167,9 @@ function resultLabel(
       ? t("result.registrationFailed")
       : t("result.failed");
   }
+  if (status === "cancelled") {
+    return t("result.cancelled");
+  }
   if (status === "running") {
     return t("result.running");
   }
@@ -264,6 +278,12 @@ export function ActionExecutionTimelineCard({
         {execution.failure_summary && isFailedStatus(execution.status) ? (
           <Text size="xs" c="red" style={{ whiteSpace: "pre-wrap" }}>
             {execution.failure_summary}
+          </Text>
+        ) : null}
+
+        {execution.cancellation_summary && execution.status === "cancelled" ? (
+          <Text size="xs" c="dimmed" style={{ whiteSpace: "pre-wrap" }}>
+            {execution.cancellation_summary}
           </Text>
         ) : null}
 

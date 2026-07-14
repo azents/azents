@@ -11,10 +11,13 @@ Name | Type | Description | Notes
 **action_type** | **str** | Action discriminator | 
 **action** | [**Action**](Action.md) |  | 
 **status** | **str** | Execution status | 
+**owner_generation** | **int** | Admitting Session owner generation | 
 **failure_summary** | **str** |  | [optional] 
+**cancellation_summary** | **str** |  | [optional] 
 **started_at** | **datetime** |  | [optional] 
 **completed_at** | **datetime** |  | [optional] 
 **failed_at** | **datetime** |  | [optional] 
+**cancelled_at** | **datetime** |  | [optional] 
 **updated_at** | **datetime** | Updated time | 
 
 ## Example

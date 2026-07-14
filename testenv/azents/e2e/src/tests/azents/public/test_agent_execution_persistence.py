@@ -54,6 +54,7 @@ _TIMELINE_SECOND_REASONING = "Timeline reliability second reasoning."
 _TIMELINE_SECOND_RESPONSE = "Timeline reliability second response."
 _CANONICAL_WS_ACTION_TYPES = frozenset(
     {
+        "action_execution_removed",
         "action_execution_updated",
         "history_event_appended",
         "input_actions_updated",

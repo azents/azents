@@ -1,4 +1,4 @@
-"""Durable TurnAction execution models."""
+"""Live TurnAction execution models."""
 
 import datetime
 import enum
@@ -33,7 +33,7 @@ action_execution_event_kind_enum = ENUM(
 
 
 class RDBActionExecution(RDBModel):
-    """Durable execution state for one operation TurnAction event."""
+    """Live execution state for one operation TurnAction event."""
 
     __tablename__ = "action_executions"
 
@@ -70,6 +70,7 @@ class RDBActionExecution(RDBModel):
     )
     action_type: Mapped[str] = mapped_column(sa.Text, nullable=False)
     action: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    owner_generation: Mapped[int] = mapped_column(sa.BigInteger, nullable=False)
     status: Mapped[ActionExecutionStatus] = mapped_column(
         action_execution_status_enum,
         nullable=False,
@@ -93,6 +94,16 @@ class RDBActionExecution(RDBModel):
     )
     failed_at: Mapped[datetime.datetime | None] = mapped_column(
         TimeZoneDateTime,
+        nullable=True,
+        default=None,
+    )
+    cancelled_at: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime,
+        nullable=True,
+        default=None,
+    )
+    cancellation_summary: Mapped[str | None] = mapped_column(
+        sa.Text,
         nullable=True,
         default=None,
     )

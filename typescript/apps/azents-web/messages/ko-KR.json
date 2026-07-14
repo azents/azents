@@ -1077,13 +1077,15 @@
         "running": "Worktree 생성 중…",
         "completed": "Worktree Project가 생성되었습니다",
         "failed": "Worktree 생성에 실패했습니다.",
+        "cancelled": "Worktree 생성이 취소되었습니다.",
         "registrationFailed": "Worktree 생성 후 Project 등록에 실패했습니다."
       },
       "status": {
         "pending": "대기 중",
         "running": "실행 중",
         "completed": "완료됨",
-        "failed": "실패"
+        "failed": "실패",
+        "cancelled": "취소됨"
       }
     },
     "copy": "복사",

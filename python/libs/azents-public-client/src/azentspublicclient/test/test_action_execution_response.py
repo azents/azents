@@ -40,10 +40,13 @@ class TestActionExecutionResponse(unittest.TestCase):
                 action_type = '',
                 action = None,
                 status = '',
+                owner_generation = 56,
                 failure_summary = '',
+                cancellation_summary = '',
                 started_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
                 completed_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
                 failed_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
+                cancelled_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
                 updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f')
             )
         else:
@@ -53,6 +56,7 @@ class TestActionExecutionResponse(unittest.TestCase):
                 action_type = '',
                 action = None,
                 status = '',
+                owner_generation = 56,
                 updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
         )
         """

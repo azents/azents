@@ -26,7 +26,7 @@ from typing_extensions import Self
 
 class ActionExecutionProjectionResponse(BaseModel):
     """
-    Action execution state plus durable progress events.
+    Action execution state plus progress events.
     """ # noqa: E501
     execution: ActionExecutionResponse = Field(description="Action execution state")
     events: List[ActionExecutionEventResponse] = Field(description="Action execution event list")

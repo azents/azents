@@ -301,15 +301,19 @@ def _live_projection(
     )
 
 
-def _action_execution_projection(live: dict[str, object]) -> dict[str, object]:
-    """Return the first action execution projection from a live snapshot."""
-    projections = _object_list(
-        live.get("action_executions"),
-        label="action execution projections",
+def _assert_no_live_action_executions(
+    *,
+    server_url: str,
+    token: str,
+    session_id: str,
+) -> None:
+    """Verify terminal handoff removed the live operation projection."""
+    live = _live_projection(
+        server_url=server_url,
+        token=token,
+        session_id=session_id,
     )
-    if len(projections) != 1:
-        raise AssertionError(f"expected one action execution projection: {live!r}")
-    return projections[0]
+    assert live.get("action_executions") == []
 
 
 def _action_execution_status(projection: dict[str, object]) -> str:
@@ -355,34 +359,26 @@ def _wait_for_action_execution_status(
 ) -> dict[str, object]:
     """Wait for the session action execution to reach a status."""
     deadline = time.monotonic() + 90
-    last_live: dict[str, object] | None = None
+    last_history: dict[str, object] | None = None
     while time.monotonic() < deadline:
-        live = _live_projection(
+        history = _get_json(
             server_url=server_url,
             token=token,
-            session_id=session_id,
+            path=f"/chat/v1/sessions/{session_id}/history",
+            params={"limit": "100"},
         )
-        last_live = live
-        try:
-            projection = _action_execution_projection(live)
-        except AssertionError:
-            history = _get_json(
-                server_url=server_url,
-                token=token,
-                path=f"/chat/v1/sessions/{session_id}/history",
-                params={"limit": "100"},
-            )
-            projection = _terminal_action_execution_projection(history)
-            if projection is None:
-                time.sleep(0.5)
-                continue
+        last_history = history
+        projection = _terminal_action_execution_projection(history)
+        if projection is None:
+            time.sleep(0.5)
+            continue
         current_status = _action_execution_status(projection)
         if current_status == status:
             return projection
         if current_status == "failed" and status != "failed":
             raise AssertionError(f"action execution failed: {projection!r}")
         time.sleep(0.5)
-    raise TimeoutError(f"action execution did not reach {status}: {last_live!r}")
+    raise TimeoutError(f"action execution did not reach {status}: {last_history!r}")
 
 
 def _assert_action_retry_controls_removed(
@@ -524,6 +520,11 @@ class TestSessionGitWorktreeLifecycle:
             status="completed",
         )
         action_execution_id = _action_execution_id(projection)
+        _assert_no_live_action_executions(
+            server_url=azents_public_server_url,
+            token=token,
+            session_id=session_id,
+        )
         _assert_action_retry_controls_removed(
             server_url=azents_public_server_url,
             token=token,
@@ -557,6 +558,11 @@ class TestSessionGitWorktreeLifecycle:
             failed_projection.get("execution")
         )
         assert failed_execution.get("failure_summary")
+        _assert_no_live_action_executions(
+            server_url=azents_public_server_url,
+            token=token,
+            session_id=failed_session_id,
+        )
         assert (
             _list_session_projects(
                 server_url=azents_public_server_url,
@@ -564,14 +570,6 @@ class TestSessionGitWorktreeLifecycle:
                 agent_id=agent_id,
                 session_id=failed_session_id,
             )
-            == []
-        )
-        assert (
-            _live_projection(
-                server_url=azents_public_server_url,
-                token=token,
-                session_id=failed_session_id,
-            ).get("action_executions")
             == []
         )
         _assert_action_retry_controls_removed(

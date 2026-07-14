@@ -18,6 +18,7 @@ from azents.broker.broadcast import WebSocketBroadcast
 from azents.broker.types import PublishedEvent, SessionBroker, SessionWakeUp
 from azents.core.agent import AgentModelSelection
 from azents.core.enums import (
+    ActionExecutionStatus,
     AgentRunPhase,
     AgentRunStatus,
     AgentSessionKind,
@@ -32,6 +33,7 @@ from azents.core.inference_profile import (
 )
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.tools import ToolkitProvider
+from azents.engine.events.action_messages import CreateGitWorktreeAction
 from azents.engine.events.engine_events import (
     RunComplete,
     RunPhaseChanged,
@@ -55,7 +57,12 @@ from azents.engine.run.errors import (
 from azents.engine.run.failure import FailedRunRetryState
 from azents.engine.run.input import AgentNotFound
 from azents.engine.run.resolve import ResolvedInvokeInputProfile
-from azents.engine.run.types import PollMessages, PollMessagesResult
+from azents.engine.run.types import (
+    SHUTDOWN_CANCEL_MESSAGE,
+    USER_STOP_CANCEL_MESSAGE,
+    PollMessages,
+    PollMessagesResult,
+)
 from azents.engine.tools.builtin import BuiltinToolkitProvider
 from azents.engine.tools.claude_rules import ClaudeRulesToolkitProvider
 from azents.engine.tools.goal import GoalToolkitProvider
@@ -63,6 +70,7 @@ from azents.engine.tools.skill import SkillToolkitProvider
 from azents.engine.tools.subagent import SubagentToolkitProvider
 from azents.engine.tools.todo import TodoToolkitProvider
 from azents.rdb.session import SessionManager
+from azents.repos.action_execution.data import ActionExecution
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
@@ -78,7 +86,10 @@ from azents.services.input_buffer import (
     TurnEffect,
 )
 from azents.services.model_file import ModelFileService
-from azents.services.session_git_worktree import SessionGitWorktreeService
+from azents.services.session_git_worktree import (
+    GitWorktreeActionExecutionResult,
+    SessionGitWorktreeService,
+)
 from azents.services.session_title import SessionTitleService
 from azents.testing.model_selection import make_test_model_selection
 from azents.transport.chat import chat_live_run_updated_dump
@@ -702,6 +713,65 @@ class _FailingCommandHandler:
         yield  # pragma: no cover
 
 
+class _SessionGitWorktreeService:
+    """Worktree operation service test double."""
+
+    def __init__(self) -> None:
+        self.reconciled_session_ids: list[str] = []
+        self.cancelled_execution_ids: list[str] = []
+        self.executed_execution_ids: list[str] = []
+
+    async def cancel_live_action_executions(
+        self,
+        *,
+        session_id: str,
+        reason: str,
+        on_history_event_appended: object,
+        on_action_execution_removed: object,
+    ) -> list[Event]:
+        """Record stale-operation reconciliation."""
+        del reason, on_history_event_appended, on_action_execution_removed
+        self.reconciled_session_ids.append(session_id)
+        return []
+
+    async def cancel_action_execution(
+        self,
+        *,
+        execution: ActionExecution,
+        reason: str,
+        on_history_event_appended: object,
+    ) -> None:
+        """Record one operation cancellation."""
+        del reason, on_history_event_appended
+        self.cancelled_execution_ids.append(execution.id)
+
+    async def run_git_worktree_action(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        execution: ActionExecution,
+        action: CreateGitWorktreeAction,
+        owner_generation: int,
+        on_projection_updated: object,
+        on_history_event_appended: object,
+    ) -> GitWorktreeActionExecutionResult:
+        """Record one admitted operation."""
+        del (
+            agent_id,
+            session_id,
+            action,
+            owner_generation,
+            on_projection_updated,
+            on_history_event_appended,
+        )
+        self.executed_execution_ids.append(execution.id)
+        return GitWorktreeActionExecutionResult(
+            completed=True,
+            context_invalidated=True,
+        )
+
+
 class _FailedRunFinalizer:
     """Failed-run finalizer test double."""
 
@@ -728,6 +798,7 @@ def _executor(
     command_registry: dict[str, CommandHandler] | None = None,
     agent_session_repository: _AgentSessionRepository | None = None,
     live_event_projector: _LiveEventProjector | None = None,
+    session_git_worktree_service: _SessionGitWorktreeService | None = None,
     failed_run_max_retries: int = 10,
 ) -> RunExecutor:
     """Create a RunExecutor for resolve-failure tests."""
@@ -767,6 +838,8 @@ def _executor(
         )
     if live_event_projector is None:
         live_event_projector = _LiveEventProjector()
+    if session_git_worktree_service is None:
+        session_git_worktree_service = _SessionGitWorktreeService()
     return RunExecutor(
         broker=cast(SessionBroker, object()),
         session_manager=cast(SessionManager[AsyncSession], _SessionManager()),
@@ -796,7 +869,10 @@ def _executor(
         exchange_file_service=cast(ExchangeFileService, object()),
         model_file_service=cast(ModelFileService, object()),
         input_buffer_service=cast(InputBufferService, _InputBufferService()),
-        session_git_worktree_service=cast(SessionGitWorktreeService, object()),
+        session_git_worktree_service=cast(
+            SessionGitWorktreeService,
+            session_git_worktree_service,
+        ),
         session_title_service=cast(SessionTitleService, _SessionTitleService()),
         live_event_projector=cast(LiveEventProjector, live_event_projector),
         user_stop_finalizer=cast(UserStopFinalizer, object()),
@@ -883,6 +959,32 @@ def _message() -> SessionWakeUp:
     )
 
 
+def _action_execution(*, owner_generation: int = 1) -> ActionExecution:
+    """Create an active operation execution for executor tests."""
+    now = datetime.datetime.now(datetime.UTC)
+    action = CreateGitWorktreeAction(
+        source_project_path="/workspace/agent/repo",
+        starting_ref="main",
+    )
+    return ActionExecution(
+        id="action-execution-001",
+        session_id="session-001",
+        input_buffer_id="input-buffer-001",
+        action_type=action.type,
+        action=action.model_dump(mode="json"),
+        status=ActionExecutionStatus.PENDING,
+        owner_generation=owner_generation,
+        failure_summary=None,
+        cancellation_summary=None,
+        started_at=None,
+        completed_at=None,
+        failed_at=None,
+        cancelled_at=None,
+        created_at=now,
+        updated_at=now,
+    )
+
+
 def _pending_command(name: str = "compact") -> PendingSessionCommand:
     """Create a pending command for executor tests."""
     return PendingSessionCommand(
@@ -892,6 +994,84 @@ def _pending_command(name: str = "compact") -> PendingSessionCommand:
         user_id="user-001",
         created_at=datetime.datetime.now(datetime.UTC),
     )
+
+
+@pytest.mark.parametrize(
+    ("cancel_message", "expected_reason"),
+    [
+        (USER_STOP_CANCEL_MESSAGE, "Operation cancelled by user stop."),
+        (
+            SHUTDOWN_CANCEL_MESSAGE,
+            "Operation cancelled after the worker shutdown wait expired.",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_boundary_cancellation_waits_for_live_action_handoff(
+    monkeypatch: pytest.MonkeyPatch,
+    cancel_message: str,
+    expected_reason: str,
+) -> None:
+    """Cancellation cannot escape after a claim until live actions hand off."""
+    worktree_service = _SessionGitWorktreeService()
+    executor = _executor(session_git_worktree_service=worktree_service)
+    claim_committed = asyncio.Event()
+    cleanup_started = asyncio.Event()
+    cleanup_release = asyncio.Event()
+    cancellation_reasons: list[str] = []
+
+    async def execute_after_claim(
+        *args: object,
+        **kwargs: object,
+    ) -> RunExecutionResult:
+        del args, kwargs
+        claim_committed.set()
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    async def cancel_live_action_executions(
+        *,
+        session_id: str,
+        reason: str,
+        on_history_event_appended: object,
+        on_action_execution_removed: object,
+    ) -> list[Event]:
+        del session_id, on_history_event_appended, on_action_execution_removed
+        cancellation_reasons.append(reason)
+        cleanup_started.set()
+        await cleanup_release.wait()
+        return []
+
+    async def dispatch_event(session_id: str, event: PublishedEvent) -> None:
+        del session_id, event
+
+    monkeypatch.setattr(executor, "_execute", execute_after_claim)
+    monkeypatch.setattr(
+        worktree_service,
+        "cancel_live_action_executions",
+        cancel_live_action_executions,
+    )
+    task = asyncio.create_task(
+        executor.execute(
+            _message(),
+            poll_fn=None,
+            check_stop=None,
+            prepare_toolkits=None,
+            shutdown_event=asyncio.Event(),
+            dispatch_event=dispatch_event,
+            owner_generation=1,
+            tool_admission_barrier=ToolAdmissionBarrier(),
+        )
+    )
+    await claim_committed.wait()
+    task.cancel(cancel_message)
+    await cleanup_started.wait()
+    assert not task.done()
+
+    cleanup_release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert cancellation_reasons == [expected_reason]
 
 
 async def _resolve_success(*args: object, **kwargs: object) -> object:
@@ -1635,6 +1815,54 @@ async def test_execute_enqueues_follow_up_after_context_invalidating_action(
 
 
 @pytest.mark.asyncio
+async def test_operation_admission_closed_by_shutdown_is_cancelled() -> None:
+    """A closed foreground barrier prevents the operation side effect."""
+    service = _SessionGitWorktreeService()
+    executor = _executor(session_git_worktree_service=service)
+    barrier = ToolAdmissionBarrier()
+    await barrier.close()
+    execution = _action_execution()
+    action = CreateGitWorktreeAction.model_validate(execution.action)
+
+    result = await executor._process_operation_action(  # pyright: ignore[reportPrivateUsage]  # Pin operation admission fencing directly.
+        agent_id="agent-001",
+        session_id="session-001",
+        execution=execution,
+        action=action,
+        owner_generation=1,
+        tool_admission_barrier=barrier,
+    )
+
+    assert result.completed is True
+    assert result.context_invalidated is False
+    assert service.cancelled_execution_ids == [execution.id]
+    assert service.executed_execution_ids == []
+
+
+@pytest.mark.asyncio
+async def test_operation_owner_generation_mismatch_is_cancelled() -> None:
+    """A worker cannot execute an operation admitted by another owner."""
+    service = _SessionGitWorktreeService()
+    executor = _executor(session_git_worktree_service=service)
+    execution = _action_execution(owner_generation=2)
+    action = CreateGitWorktreeAction.model_validate(execution.action)
+
+    result = await executor._process_operation_action(  # pyright: ignore[reportPrivateUsage]  # Pin operation admission fencing directly.
+        agent_id="agent-001",
+        session_id="session-001",
+        execution=execution,
+        action=action,
+        owner_generation=3,
+        tool_admission_barrier=ToolAdmissionBarrier(),
+    )
+
+    assert result.completed is True
+    assert result.context_invalidated is False
+    assert service.cancelled_execution_ids == [execution.id]
+    assert service.executed_execution_ids == []
+
+
+@pytest.mark.asyncio
 async def test_boundary_poll_processes_turn_actions(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1666,6 +1894,8 @@ async def test_boundary_poll_processes_turn_actions(
         ),
         run_id="run-001",
         poll_fn=None,
+        owner_generation=1,
+        tool_admission_barrier=ToolAdmissionBarrier(),
         mark_context_invalidated=lambda: None,
     )
 
@@ -1727,6 +1957,8 @@ async def test_boundary_poll_stops_after_context_invalidating_action(
         ),
         run_id="run-001",
         poll_fn=None,
+        owner_generation=1,
+        tool_admission_barrier=ToolAdmissionBarrier(),
         mark_context_invalidated=mark_context_invalidated,
     )
 
@@ -1835,6 +2067,8 @@ async def test_poll_run_inputs_continues_fifo_after_failed_turn_action(
         model="gpt-test",
         required_inference_profile=None,
         active_run_id=None,
+        owner_generation=1,
+        tool_admission_barrier=ToolAdmissionBarrier(),
         initial_turn_eligible=False,
         poll_fn=None,
         process_actions=True,
@@ -1902,6 +2136,8 @@ async def test_poll_run_inputs_completes_run_after_terminal_preparation_failure(
         model="gpt-test",
         required_inference_profile=None,
         active_run_id="run-1",
+        owner_generation=1,
+        tool_admission_barrier=ToolAdmissionBarrier(),
         initial_turn_eligible=False,
         poll_fn=None,
         process_actions=False,

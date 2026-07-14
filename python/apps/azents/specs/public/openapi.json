@@ -7917,7 +7917,7 @@
           "events"
         ],
         "title": "ActionExecutionProjectionResponse",
-        "description": "Action execution state plus durable progress events."
+        "description": "Action execution state plus progress events."
       },
       "ActionExecutionResponse": {
         "properties": {
@@ -7968,6 +7968,11 @@
             "title": "Status",
             "description": "Execution status"
           },
+          "owner_generation": {
+            "type": "integer",
+            "title": "Owner Generation",
+            "description": "Admitting Session owner generation"
+          },
           "failure_summary": {
             "anyOf": [
               {
@@ -7979,6 +7984,18 @@
             ],
             "title": "Failure Summary",
             "description": "Failure summary"
+          },
+          "cancellation_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cancellation Summary",
+            "description": "Cancellation summary"
           },
           "started_at": {
             "anyOf": [
@@ -8019,6 +8036,19 @@
             "title": "Failed At",
             "description": "Failure time"
           },
+          "cancelled_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cancelled At",
+            "description": "Cancellation time"
+          },
           "updated_at": {
             "type": "string",
             "format": "date-time",
@@ -8033,6 +8063,7 @@
           "action_type",
           "action",
           "status",
+          "owner_generation",
           "updated_at"
         ],
         "title": "ActionExecutionResponse",
