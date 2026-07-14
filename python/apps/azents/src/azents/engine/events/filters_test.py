@@ -1278,7 +1278,7 @@ async def test_auto_compaction_runs_when_threshold_is_exceeded() -> None:
         max_input_tokens=10,
         auto_compaction_threshold_tokens=None,
         compaction_id_factory=lambda: "compact-1",
-    ).apply(_Session(), events)
+    ).compact(events)
 
     assert session_repo.head_event_id is not None
     assert len(result) == 1
@@ -1311,11 +1311,9 @@ async def test_auto_compaction_emits_started_before_summary_call() -> None:
     transcript_repo = _TranscriptRepo(events)
     session_repo = _SessionRepo()
     session_manager = _SessionManager()
-    session = _Session()
     calls: list[str] = []
 
     async def on_compaction_started() -> None:
-        assert session.commit_count == 1
         assert session_manager.active_scopes == 0
         assert session_manager.sessions[0].commit_count == 1
         marker = transcript_repo.events[-1].payload
@@ -1344,10 +1342,9 @@ async def test_auto_compaction_emits_started_before_summary_call() -> None:
         auto_compaction_threshold_tokens=None,
         compaction_id_factory=lambda: "compact-1",
         on_compaction_started=on_compaction_started,
-    ).apply(session, events)
+    ).compact(events)
 
     assert calls == ["started", "summarize"]
-    assert session.expire_all_count == 1
 
 
 async def test_auto_compaction_marks_compacted_only_when_summary_is_created() -> None:
@@ -1387,7 +1384,7 @@ async def test_auto_compaction_marks_compacted_only_when_summary_is_created() ->
         compaction_id_factory=lambda: "compact-1",
     )
 
-    await filter_.apply(_Session(), events)
+    await filter_.compact(events)
 
     assert filter_.was_compacted is True
 
@@ -1421,7 +1418,7 @@ async def test_auto_compaction_skips_when_threshold_is_not_exceeded() -> None:
         max_input_tokens=1000,
         auto_compaction_threshold_tokens=None,
         compaction_id_factory=lambda: "compact-1",
-    ).apply(_Session(), events)
+    ).compact(events)
 
     assert result == events
 
@@ -1455,7 +1452,7 @@ async def test_auto_compaction_uses_explicit_threshold_override() -> None:
         max_input_tokens=1000,
         auto_compaction_threshold_tokens=1,
         compaction_id_factory=lambda: "compact-1",
-    ).apply(_Session(), events)
+    ).compact(events)
 
     assert [event.kind for event in result] == [EventKind.COMPACTION_SUMMARY]
 
@@ -1499,7 +1496,7 @@ async def test_auto_compaction_uses_latest_turn_marker_usage() -> None:
         max_input_tokens=1000,
         auto_compaction_threshold_tokens=None,
         compaction_id_factory=lambda: "compact-1",
-    ).apply(_Session(), events)
+    ).compact(events)
 
     assert result == events
 
@@ -1539,7 +1536,7 @@ async def test_auto_compaction_counts_events_after_latest_turn_marker() -> None:
         max_input_tokens=100,
         auto_compaction_threshold_tokens=None,
         compaction_id_factory=lambda: "compact-1",
-    ).apply(_Session(), events)
+    ).compact(events)
 
     assert session_repo.head_event_id is not None
     assert result[0].kind == EventKind.COMPACTION_SUMMARY

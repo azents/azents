@@ -177,7 +177,8 @@ class ResolveContext:
     :param agent_id: Agent ID owning the current AgentSession
     :param session_id: Current AgentSession ID
     :param user_id: User ID; None for system context
-    :param session: DB session
+    :param session: Optional caller-owned DB session. Run-time Toolkit resolution
+        passes None so providers cannot retain a snapshot transaction across I/O.
     :param web_url: Frontend URL for building OAuth redirect_uri
     :param oauth_secret_key: OAuth HMAC signing key
     :param workspace_id: Workspace ID
@@ -191,7 +192,7 @@ class ResolveContext:
     agent_id: str
     session_id: str
     user_id: str | None
-    session: AsyncSession
+    session: AsyncSession | None
     web_url: str
     oauth_secret_key: str
     workspace_id: str

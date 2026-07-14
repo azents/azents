@@ -4,6 +4,8 @@ import asyncio
 import datetime
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from contextlib import asynccontextmanager
+from typing import AsyncContextManager
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -67,6 +69,37 @@ class _Session(AsyncSession):
 
     async def rollback(self) -> None:
         """Accept rollback calls from rejected admission tests."""
+
+
+@asynccontextmanager
+async def _session_context() -> AsyncIterator[AsyncSession]:
+    """Create a recording session for each production-style DB scope."""
+    session = _Session()
+    try:
+        yield session
+    except Exception:
+        await session.rollback()
+        raise
+    else:
+        await session.commit()
+
+
+def _session_manager_for(
+    session: _Session,
+) -> Callable[[], AsyncContextManager[AsyncSession]]:
+    """Return a session manager that reuses one assertion-visible session."""
+
+    @asynccontextmanager
+    async def manager() -> AsyncIterator[AsyncSession]:
+        try:
+            yield session
+        except Exception:
+            await session.rollback()
+            raise
+        else:
+            await session.commit()
+
+    return manager
 
 
 class _OpenToolAdmissionBarrier:
@@ -748,6 +781,7 @@ async def test_text_run_completes() -> None:
         emitted_phases.append((phase, model_call_started_at))
 
     execution = AgentRunExecution(
+        session_manager=_session_context,
         post_lower_filter=_PostFilter(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
@@ -760,7 +794,6 @@ async def test_text_run_completes() -> None:
     )
 
     status = await execution.run(
-        _Session(),
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
@@ -790,6 +823,95 @@ async def test_text_run_completes() -> None:
     assert streaming_started_at == waiting_started_at
 
 
+async def test_external_run_callbacks_observe_no_open_db_session() -> None:
+    """Model, hook, tool, and publish callbacks run after DB scopes close."""
+    open_sessions = 0
+
+    @asynccontextmanager
+    async def session_manager() -> AsyncIterator[AsyncSession]:
+        nonlocal open_sessions
+        open_sessions += 1
+        session = _Session()
+        try:
+            yield session
+        finally:
+            await session.commit()
+            open_sessions -= 1
+
+    class AssertingModelAdapter(_ModelAdapter):
+        async def stream(
+            self, request: NativeModelRequest
+        ) -> AsyncIterator[NativeEvent]:
+            assert open_sessions == 0
+            async for event in super().stream(request):
+                yield event
+
+    class AssertingToolExecutor(_ToolExecutor):
+        async def execute(self, call: ClientToolCallPayload) -> ClientToolResultPayload:
+            assert open_sessions == 0
+            return await super().execute(call)
+
+    tool_executor = AssertingToolExecutor()
+
+    async def prepare_model_call(
+        *, transcript: Sequence[Event], model: str
+    ) -> PreparedModelCall:
+        del transcript
+        assert open_sessions == 0
+
+        async def on_turn_end(reason: TurnEndReason) -> None:
+            del reason
+            assert open_sessions == 0
+
+        return PreparedModelCall(
+            native_request=NativeModelRequest(model=model, input=[]),
+            inference_state=None,
+            system_prompt_analysis=None,
+            tool_executor=tool_executor,
+            on_turn_end=on_turn_end,
+        )
+
+    async def output_sink(
+        normalized: NormalizedAdapterOutput, appended: Sequence[Event]
+    ) -> None:
+        del normalized, appended
+        assert open_sessions == 0
+
+    async def phase_sink(
+        phase: AgentRunPhase,
+        model_call_started_at: datetime.datetime | None,
+    ) -> None:
+        del phase, model_call_started_at
+        assert open_sessions == 0
+
+    execution = AgentRunExecution(
+        session_manager=session_manager,
+        post_lower_filter=_PostFilter(),
+        model_adapter=AssertingModelAdapter(),
+        output_normalizer=_SequenceNormalizer(
+            [[_tool_call_event()], [_assistant_event()]]
+        ),
+        model_call_preparer=prepare_model_call,
+        output_sink=output_sink,
+        phase_sink=phase_sink,
+        run_repo=_RunRepo(),
+        transcript_repo=_TranscriptRepo(),
+    )
+
+    status = await execution.run(
+        AgentRunExecutionRequest(
+            owner_generation=1,
+            tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            run_id="run-1",
+            session_id="session-1",
+            model="gpt-5.1",
+        )
+    )
+
+    assert status == AgentRunStatus.COMPLETED
+    assert open_sessions == 0
+
+
 async def test_model_delta_reaches_output_sink_before_stream_completion() -> None:
     """Project native text while the provider stream remains open."""
     run_repo = _RunRepo()
@@ -806,6 +928,7 @@ async def test_model_delta_reaches_output_sink_before_stream_completion() -> Non
         sink_outputs.append(normalized)
 
     execution = AgentRunExecution(
+        session_manager=_session_context,
         post_lower_filter=_PostFilter(),
         model_adapter=model_adapter,
         output_normalizer=_ProjectingNormalizer([_assistant_event()]),
@@ -816,7 +939,6 @@ async def test_model_delta_reaches_output_sink_before_stream_completion() -> Non
     )
     run_task = asyncio.create_task(
         execution.run(
-            _Session(),
             AgentRunExecutionRequest(
                 owner_generation=1,
                 tool_admission_barrier=_OpenToolAdmissionBarrier(),
@@ -861,6 +983,7 @@ async def test_text_run_commits_durable_events_before_output_sink() -> None:
         committed_event_counts_at_sink.append(session.commits[-1])
 
     execution = AgentRunExecution(
+        session_manager=_session_manager_for(session),
         post_lower_filter=_PostFilter(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
@@ -873,7 +996,6 @@ async def test_text_run_commits_durable_events_before_output_sink() -> None:
     )
 
     status = await execution.run(
-        session,
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
@@ -902,6 +1024,7 @@ async def test_text_run_output_sink_receives_run_marker() -> None:
         sink_kinds.append([event.kind for event in appended])
 
     execution = AgentRunExecution(
+        session_manager=_session_context,
         post_lower_filter=_PostFilter(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
@@ -914,7 +1037,6 @@ async def test_text_run_output_sink_receives_run_marker() -> None:
     )
 
     status = await execution.run(
-        _Session(),
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
@@ -970,6 +1092,7 @@ async def test_model_usage_is_appended_as_turn_marker(
         ),
     )
     execution = AgentRunExecution(
+        session_manager=_session_context,
         post_lower_filter=_PostFilter(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()], usage=usage),
@@ -985,7 +1108,6 @@ async def test_model_usage_is_appended_as_turn_marker(
 
     with caplog.at_level(logging.INFO, logger="azents.engine.events.execution"):
         status = await execution.run(
-            _Session(),
             AgentRunExecutionRequest(
                 owner_generation=1,
                 tool_admission_barrier=_OpenToolAdmissionBarrier(),
@@ -1036,6 +1158,7 @@ async def test_model_input_uses_session_head_event_id() -> None:
     """After compaction, model input is fetched from session head."""
     transcript_repo = _TranscriptRepo()
     execution = AgentRunExecution(
+        session_manager=_session_context,
         post_lower_filter=_PostFilter(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
@@ -1048,7 +1171,6 @@ async def test_model_input_uses_session_head_event_id() -> None:
     )
 
     await execution.run(
-        _Session(),
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
@@ -1067,6 +1189,7 @@ async def test_closed_admission_barrier_prevents_call_and_handler_start() -> Non
     transcript_repo = _TranscriptRepo()
     tool_executor = _ToolExecutor()
     execution = AgentRunExecution(
+        session_manager=_session_context,
         post_lower_filter=_PostFilter(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_tool_call_event()]),
@@ -1079,7 +1202,6 @@ async def test_closed_admission_barrier_prevents_call_and_handler_start() -> Non
     )
 
     status = await execution.run(
-        _Session(),
         AgentRunExecutionRequest(
             owner_generation=2,
             tool_admission_barrier=_ClosedToolAdmissionBarrier(),
@@ -1100,6 +1222,7 @@ async def test_tool_run_with_turn_limit_interrupts_after_tool_result() -> None:
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
     execution = AgentRunExecution(
+        session_manager=_session_context,
         post_lower_filter=_PostFilter(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_tool_call_event(), _assistant_event()]),
@@ -1111,7 +1234,6 @@ async def test_tool_run_with_turn_limit_interrupts_after_tool_result() -> None:
     )
 
     status = await execution.run(
-        _Session(),
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
@@ -1141,6 +1263,7 @@ async def test_parallel_calls_finalize_independently() -> None:
     transcript_repo = _TranscriptRepo()
     tool_executor = _OrderedToolExecutor()
     execution = AgentRunExecution(
+        session_manager=_session_context,
         post_lower_filter=_PostFilter(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer(
@@ -1155,7 +1278,6 @@ async def test_parallel_calls_finalize_independently() -> None:
     )
     run_task = asyncio.create_task(
         execution.run(
-            _Session(),
             AgentRunExecutionRequest(
                 owner_generation=3,
                 tool_admission_barrier=_OpenToolAdmissionBarrier(),
@@ -1201,6 +1323,7 @@ async def test_term_after_admission_keeps_normal_result_and_run_recoverable() ->
     tool_executor = _OrderedToolExecutor()
     barrier = _MutableToolAdmissionBarrier()
     execution = AgentRunExecution(
+        session_manager=_session_context,
         post_lower_filter=_PostFilter(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_tool_call_event("call-2")]),
@@ -1217,7 +1340,6 @@ async def test_term_after_admission_keeps_normal_result_and_run_recoverable() ->
 
     run_task = asyncio.create_task(
         execution.run(
-            _Session(),
             AgentRunExecutionRequest(
                 owner_generation=4,
                 tool_admission_barrier=barrier,
@@ -1251,6 +1373,7 @@ async def test_unlimited_tool_run_executes_tool_then_completes() -> None:
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
     execution = AgentRunExecution(
+        session_manager=_session_context,
         post_lower_filter=_PostFilter(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_SequenceNormalizer(
@@ -1267,7 +1390,6 @@ async def test_unlimited_tool_run_executes_tool_then_completes() -> None:
     )
 
     status = await execution.run(
-        _Session(),
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
@@ -1312,6 +1434,7 @@ async def test_model_call_preparer_runs_for_each_model_turn() -> None:
         )
 
     execution = AgentRunExecution(
+        session_manager=_session_context,
         post_lower_filter=_PostFilter(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_SequenceNormalizer(
@@ -1326,7 +1449,6 @@ async def test_model_call_preparer_runs_for_each_model_turn() -> None:
     )
 
     status = await execution.run(
-        _Session(),
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
@@ -1374,6 +1496,7 @@ async def test_model_call_preparer_turn_end_receives_error_reason() -> None:
         )
 
     execution = AgentRunExecution(
+        session_manager=_session_context,
         post_lower_filter=_PostFilter(),
         model_adapter=_FailingModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
@@ -1384,7 +1507,6 @@ async def test_model_call_preparer_turn_end_receives_error_reason() -> None:
 
     with pytest.raises(ModelCallError, match="Missing scopes"):
         await execution.run(
-            _Session(),
             AgentRunExecutionRequest(
                 owner_generation=1,
                 tool_admission_barrier=_OpenToolAdmissionBarrier(),
@@ -1402,6 +1524,7 @@ async def test_provider_tool_call_completes_without_next_model_turn() -> None:
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
     execution = AgentRunExecution(
+        session_manager=_session_context,
         post_lower_filter=_PostFilter(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_SequenceNormalizer(
@@ -1417,7 +1540,6 @@ async def test_provider_tool_call_completes_without_next_model_turn() -> None:
     )
 
     status = await execution.run(
-        _Session(),
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
@@ -1442,6 +1564,7 @@ async def test_provider_tool_call_with_message_completes_one_turn() -> None:
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
     execution = AgentRunExecution(
+        session_manager=_session_context,
         post_lower_filter=_PostFilter(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_SequenceNormalizer(
@@ -1457,7 +1580,6 @@ async def test_provider_tool_call_with_message_completes_one_turn() -> None:
     )
 
     status = await execution.run(
-        _Session(),
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
@@ -1503,6 +1625,7 @@ async def test_compacted_run_continues_with_summary_without_terminal_marker() ->
     )
 
     execution = AgentRunExecution(
+        session_manager=_session_context,
         post_lower_filter=_PostFilter(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
@@ -1515,7 +1638,6 @@ async def test_compacted_run_continues_with_summary_without_terminal_marker() ->
     )
 
     status = await execution.run(
-        _Session(),
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
@@ -1538,7 +1660,6 @@ async def test_tool_turn_polls_input_before_next_model_call() -> None:
     poll_count = 0
 
     async def poll_input_events(
-        session: AsyncSession,
         session_id: str,
     ) -> InputPollResult:
         """Append queued user input at second turn boundary."""
@@ -1550,24 +1671,25 @@ async def test_tool_turn_polls_input_before_next_model_call() -> None:
                 context_invalidated=False,
                 complete_run=False,
             )
+        async with _session_context() as session:
+            event = await transcript_repo.append(
+                session,
+                EventCreate(
+                    session_id=session_id,
+                    kind=EventKind.USER_MESSAGE,
+                    payload=UserMessagePayload(
+                        content="Is something odd with the grep tool?",
+                    ).model_dump(mode="json", exclude_none=True),
+                ),
+            )
         return InputPollResult(
             context_invalidated=False,
             complete_run=False,
-            events=[
-                await transcript_repo.append(
-                    session,
-                    EventCreate(
-                        session_id=session_id,
-                        kind=EventKind.USER_MESSAGE,
-                        payload=UserMessagePayload(
-                            content="Is something odd with the grep tool?",
-                        ).model_dump(mode="json", exclude_none=True),
-                    ),
-                )
-            ],
+            events=[event],
         )
 
     execution = AgentRunExecution(
+        session_manager=_session_context,
         post_lower_filter=_PostFilter(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_SequenceNormalizer(
@@ -1584,7 +1706,6 @@ async def test_tool_turn_polls_input_before_next_model_call() -> None:
     )
 
     status = await execution.run(
-        _Session(),
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
@@ -1617,11 +1738,10 @@ async def test_context_invalidation_yields_for_request_refresh() -> None:
     poll_count = 0
 
     async def poll_input_events(
-        session: AsyncSession,
         session_id: str,
     ) -> InputPollResult:
         """Request a handoff at the second turn boundary."""
-        del session, session_id
+        del session_id
         nonlocal poll_count
         poll_count += 1
         return InputPollResult(
@@ -1631,6 +1751,7 @@ async def test_context_invalidation_yields_for_request_refresh() -> None:
         )
 
     execution = AgentRunExecution(
+        session_manager=_session_context,
         post_lower_filter=_PostFilter(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_SequenceNormalizer(
@@ -1648,7 +1769,6 @@ async def test_context_invalidation_yields_for_request_refresh() -> None:
     )
 
     status = await execution.run(
-        _Session(),
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
@@ -1676,6 +1796,7 @@ async def test_orphan_tool_call_without_state_is_cancelled_before_lowering() -> 
     transcript_repo.events.append(_tool_call_event())
     lowerer = _RecordingLowerer()
     execution = AgentRunExecution(
+        session_manager=_session_context,
         post_lower_filter=_PostFilter(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
@@ -1687,7 +1808,6 @@ async def test_orphan_tool_call_without_state_is_cancelled_before_lowering() -> 
     )
 
     status = await execution.run(
-        _Session(),
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
@@ -1727,6 +1847,7 @@ async def test_active_unresolved_tool_call_is_cancelled_before_lowering() -> Non
     transcript_repo.events.append(_tool_call_event())
     lowerer = _RecordingLowerer()
     execution = AgentRunExecution(
+        session_manager=_session_context,
         post_lower_filter=_PostFilter(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
@@ -1738,7 +1859,6 @@ async def test_active_unresolved_tool_call_is_cancelled_before_lowering() -> Non
     )
 
     status = await execution.run(
-        _Session(),
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
@@ -1776,6 +1896,7 @@ async def test_stale_active_entry_with_result_is_removed_without_replacement() -
     transcript_repo = _TranscriptRepo()
     transcript_repo.events.extend([_tool_call_event(), _tool_result_event()])
     execution = AgentRunExecution(
+        session_manager=_session_context,
         post_lower_filter=_PostFilter(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
@@ -1785,7 +1906,6 @@ async def test_stale_active_entry_with_result_is_removed_without_replacement() -
     )
 
     status = await execution.run(
-        _Session(),
         AgentRunExecutionRequest(
             owner_generation=2,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
@@ -1821,6 +1941,7 @@ async def test_active_entry_without_call_event_fails_invariant() -> None:
         )
     ]
     execution = AgentRunExecution(
+        session_manager=_session_context,
         post_lower_filter=_PostFilter(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
@@ -1831,7 +1952,6 @@ async def test_active_entry_without_call_event_fails_invariant() -> None:
 
     with pytest.raises(RuntimeError, match="no durable call event"):
         await execution.run(
-            _Session(),
             AgentRunExecutionRequest(
                 owner_generation=2,
                 tool_admission_barrier=_OpenToolAdmissionBarrier(),
@@ -1857,6 +1977,7 @@ async def test_model_stream_user_stop_appends_only_assistant_text() -> None:
         ReasoningPayload(text="hidden", native_artifact=_artifact()),
     )
     execution = AgentRunExecution(
+        session_manager=_session_context,
         post_lower_filter=_PostFilter(),
         model_adapter=_CancellingModelAdapter(),
         output_normalizer=_Normalizer([assistant, reasoning, _tool_call_event()]),
@@ -1868,7 +1989,6 @@ async def test_model_stream_user_stop_appends_only_assistant_text() -> None:
     )
 
     status = await execution.run(
-        _Session(),
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
@@ -1894,6 +2014,7 @@ async def test_model_stream_user_stop_without_text_appends_only_marker() -> None
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
     execution = AgentRunExecution(
+        session_manager=_session_context,
         post_lower_filter=_PostFilter(),
         model_adapter=_CancellingModelAdapter(),
         output_normalizer=_Normalizer([]),
@@ -1905,7 +2026,6 @@ async def test_model_stream_user_stop_without_text_appends_only_marker() -> None
     )
 
     status = await execution.run(
-        _Session(),
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
@@ -1927,6 +2047,7 @@ async def test_shutdown_tool_cancellation_repairs_before_reraising() -> None:
     transcript_repo = _TranscriptRepo()
     tool_executor = _CancellingToolExecutor()
     execution = AgentRunExecution(
+        session_manager=_session_context,
         post_lower_filter=_PostFilter(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_tool_call_event()]),
@@ -1939,7 +2060,6 @@ async def test_shutdown_tool_cancellation_repairs_before_reraising() -> None:
 
     with pytest.raises(asyncio.CancelledError):
         await execution.run(
-            _Session(),
             AgentRunExecutionRequest(
                 owner_generation=1,
                 tool_admission_barrier=_OpenToolAdmissionBarrier(),
@@ -1968,6 +2088,7 @@ async def test_tool_user_stop_appends_cancelled_result_and_interrupts() -> None:
     transcript_repo = _TranscriptRepo()
     tool_executor = _CancellingToolExecutor(user_stop=True)
     execution = AgentRunExecution(
+        session_manager=_session_context,
         post_lower_filter=_PostFilter(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_tool_call_event()]),
@@ -1979,7 +2100,6 @@ async def test_tool_user_stop_appends_cancelled_result_and_interrupts() -> None:
     )
 
     status = await execution.run(
-        _Session(),
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
@@ -2021,6 +2141,7 @@ async def test_tool_result_output_sink_receives_tool_result() -> None:
         sink_kinds.append([event.kind for event in appended])
 
     execution = AgentRunExecution(
+        session_manager=_session_context,
         post_lower_filter=_PostFilter(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_tool_call_event()]),
@@ -2033,7 +2154,6 @@ async def test_tool_result_output_sink_receives_tool_result() -> None:
     )
 
     status = await execution.run(
-        _Session(),
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
@@ -2053,6 +2173,7 @@ async def test_tool_failure_appends_failed_tool_result() -> None:
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
     execution = AgentRunExecution(
+        session_manager=_session_context,
         post_lower_filter=_PostFilter(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_tool_call_event()]),
@@ -2064,7 +2185,6 @@ async def test_tool_failure_appends_failed_tool_result() -> None:
     )
 
     status = await execution.run(
-        _Session(),
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
@@ -2093,6 +2213,7 @@ async def test_tool_failure_appends_failed_tool_result() -> None:
 async def test_run_input_preparation_does_not_run_lifecycle_cleanup() -> None:
     """File lifecycle cleanup is scheduler-owned, not run-loop-owned."""
     execution = AgentRunExecution(
+        session_manager=_session_context,
         post_lower_filter=_PostFilter(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
@@ -2105,7 +2226,6 @@ async def test_run_input_preparation_does_not_run_lifecycle_cleanup() -> None:
     )
 
     status = await execution.run(
-        _Session(),
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
@@ -2135,6 +2255,7 @@ async def test_pre_model_lower_hook_runs_before_lowerer() -> None:
     lowerer = _RecordingLowerer()
     hook = _PreModelLowerHook()
     execution = AgentRunExecution(
+        session_manager=_session_context,
         post_lower_filter=_PostFilter(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
@@ -2148,7 +2269,6 @@ async def test_pre_model_lower_hook_runs_before_lowerer() -> None:
     )
 
     status = await execution.run(
-        _Session(),
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
@@ -2169,6 +2289,7 @@ async def test_empty_model_output_propagates_for_retry() -> None:
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
     execution = AgentRunExecution(
+        session_manager=_session_context,
         post_lower_filter=_PostFilter(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([]),
@@ -2181,7 +2302,6 @@ async def test_empty_model_output_propagates_for_retry() -> None:
 
     with pytest.raises(ModelCallError, match="without assistant output"):
         await execution.run(
-            _Session(),
             AgentRunExecutionRequest(
                 owner_generation=1,
                 tool_admission_barrier=_OpenToolAdmissionBarrier(),
@@ -2205,6 +2325,7 @@ async def test_blank_assistant_message_propagates_for_retry() -> None:
         AssistantMessagePayload(content=" ", native_artifact=_artifact()),
     )
     execution = AgentRunExecution(
+        session_manager=_session_context,
         post_lower_filter=_PostFilter(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([blank_message]),
@@ -2217,7 +2338,6 @@ async def test_blank_assistant_message_propagates_for_retry() -> None:
 
     with pytest.raises(ModelCallError, match="without assistant output"):
         await execution.run(
-            _Session(),
             AgentRunExecutionRequest(
                 owner_generation=1,
                 tool_admission_barrier=_OpenToolAdmissionBarrier(),
@@ -2236,6 +2356,7 @@ async def test_model_call_error_propagates_for_retry() -> None:
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
     execution = AgentRunExecution(
+        session_manager=_session_context,
         post_lower_filter=_PostFilter(),
         model_adapter=_FailingModelAdapter(),
         output_normalizer=_Normalizer([]),
@@ -2248,7 +2369,6 @@ async def test_model_call_error_propagates_for_retry() -> None:
 
     with pytest.raises(ModelCallError, match="Missing scopes"):
         await execution.run(
-            _Session(),
             AgentRunExecutionRequest(
                 owner_generation=1,
                 tool_admission_barrier=_OpenToolAdmissionBarrier(),

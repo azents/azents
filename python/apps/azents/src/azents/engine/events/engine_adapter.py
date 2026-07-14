@@ -133,7 +133,6 @@ class RunExecution(Protocol):
 
     async def run(
         self,
-        session: AsyncSession,
         request: AgentRunExecutionRequest,
         *,
         check_stop: CheckStop | None = None,
@@ -438,29 +437,28 @@ class AgentEngineAdapter:
             [
                 EventAttachmentAvailabilityFilter(),
                 EventFilePartPlaceholderFilter(session_id=request.session_id),
-                EventAutoCompactionFilter(
-                    session_id=request.session_id,
-                    compactor=self.compactor,
-                    summarize=_event_summary_generator(
-                        request,
-                        summarize=self.summary_model_call,
-                    ),
-                    max_input_tokens=request.effective_max_input_tokens,
-                    auto_compaction_threshold_tokens=(
-                        request.auto_compaction_threshold_tokens
-                    ),
-                    compaction_id_factory=lambda: uuid7().hex,
-                    on_compaction_started=on_auto_compaction_started,
-                    summary_enricher=_compaction_summary_enricher(
-                        request,
-                        dispatcher=hook_dispatcher,
-                        providers=run_hook_providers,
-                        run_id=context.run_id,
-                    ),
-                ),
             ]
         )
+        auto_compaction_filter = EventAutoCompactionFilter(
+            session_id=request.session_id,
+            compactor=self.compactor,
+            summarize=_event_summary_generator(
+                request,
+                summarize=self.summary_model_call,
+            ),
+            max_input_tokens=request.effective_max_input_tokens,
+            auto_compaction_threshold_tokens=request.auto_compaction_threshold_tokens,
+            compaction_id_factory=lambda: uuid7().hex,
+            on_compaction_started=on_auto_compaction_started,
+            summary_enricher=_compaction_summary_enricher(
+                request,
+                dispatcher=hook_dispatcher,
+                providers=run_hook_providers,
+                run_id=context.run_id,
+            ),
+        )
         execution = self.execution_factory(
+            session_manager=self.session_manager,
             post_lower_filter=PostLowerFilterPipeline(
                 [
                     NativeRequestSizeGuard(
@@ -474,6 +472,7 @@ class AgentEngineAdapter:
                 model=request.model,
             ),
             pre_lower_filter=pre_lower_filter,
+            auto_compaction_filter=auto_compaction_filter,
             model_call_preparer=prepare_model_call,
             output_sink=emit_queue.extend_from_output,
             phase_sink=lambda phase, model_call_started_at: _emit_phase_change(
@@ -481,7 +480,7 @@ class AgentEngineAdapter:
                 run_id=context.run_id,
                 phase=phase,
                 model_call_started_at=model_call_started_at,
-                pre_lower_filter=pre_lower_filter,
+                pre_lower_filter=auto_compaction_filter,
             ),
             pre_model_lower_hook=model_file_materializer.materialize,
             model_file_pin_repo=self.model_file_pin_repo,
@@ -491,24 +490,23 @@ class AgentEngineAdapter:
         )
 
         async def execute_run() -> AgentRunStatus:
-            async with self.session_manager() as session:
-                return await execution.run(
-                    session,
-                    AgentRunExecutionRequest(
-                        run_id=context.run_id,
-                        session_id=request.session_id,
-                        owner_generation=context.owner_generation,
-                        tool_admission_barrier=context.tool_admission_barrier,
-                        run_index=run_state.run_index,
-                        model=request.model,
-                        max_turns=request.max_turns,
-                    ),
-                    check_stop=check_stop,
-                    poll_input_events=_make_input_poller(
-                        poll_messages,
-                        transcript_repo=self.transcript_repo,
-                    ),
-                )
+            return await execution.run(
+                AgentRunExecutionRequest(
+                    run_id=context.run_id,
+                    session_id=request.session_id,
+                    owner_generation=context.owner_generation,
+                    tool_admission_barrier=context.tool_admission_barrier,
+                    run_index=run_state.run_index,
+                    model=request.model,
+                    max_turns=request.max_turns,
+                ),
+                check_stop=check_stop,
+                poll_input_events=_make_input_poller(
+                    poll_messages,
+                    session_manager=self.session_manager,
+                    transcript_repo=self.transcript_repo,
+                ),
+            )
 
         run_task = asyncio.create_task(execute_run())
         cancel_args: tuple[object, ...] | None = None
@@ -584,7 +582,7 @@ async def _emit_phase_change(
     run_id: str,
     phase: AgentRunPhase,
     model_call_started_at: datetime.datetime | None,
-    pre_lower_filter: EventPreLowerFilterPipeline,
+    pre_lower_filter: EventAutoCompactionFilter,
 ) -> None:
     """Reflect run phase and auto compaction lifecycle in legacy stream."""
     if phase == AgentRunPhase.PREPARING_INPUT:
@@ -715,14 +713,14 @@ def _provider_name(provider: LLMProvider) -> str:
 def _make_input_poller(
     poll_messages: PollMessages | None,
     *,
+    session_manager: SessionManager[AsyncSession],
     transcript_repo: TranscriptRepository,
-) -> Callable[[AsyncSession, str], Awaitable[InputPollResult]] | None:
+) -> Callable[[str], Awaitable[InputPollResult]] | None:
     """Convert boundary poll to event transcript append callback."""
     if poll_messages is None:
         return None
 
     async def poll(
-        session: AsyncSession,
         session_id: str,
     ) -> InputPollResult:
         result = await poll_messages()
@@ -732,12 +730,13 @@ def _make_input_poller(
                 context_invalidated=result.context_invalidated,
                 complete_run=result.complete_run,
             )
-        events = await _append_run_user_messages(
-            session,
-            session_id,
-            result.user_messages,
-            transcript_repo=transcript_repo,
-        )
+        async with session_manager() as session:
+            events = await _append_run_user_messages(
+                session,
+                session_id,
+                result.user_messages,
+                transcript_repo=transcript_repo,
+            )
         return InputPollResult(
             events=events,
             context_invalidated=result.context_invalidated,

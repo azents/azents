@@ -1091,7 +1091,8 @@ class SubagentToolkitProvider(ToolkitProvider[SubagentToolkitConfig]):
     ) -> SubagentToolkit:
         """Resolve per-session subagent collaboration tools."""
         del config
-        agent = await self.agent_repository.get_by_id(context.session, context.agent_id)
+        async with self.session_manager() as session:
+            agent = await self.agent_repository.get_by_id(session, context.agent_id)
         if agent is None:
             raise ValueError("Agent not found while resolving subagent Toolkit")
         subagent_settings = agent.subagent_settings

@@ -37,6 +37,7 @@ from azents.engine.events.execution import (
     PreparedModelCall,
 )
 from azents.engine.events.filters import (
+    EventAutoCompactionFilter,
     EventPreLowerFilterPipeline,
     PostLowerFilterPipeline,
 )
@@ -415,14 +416,13 @@ class _Execution:
 
     async def run(
         self,
-        session: AsyncSession,
         request: AgentRunExecutionRequest,
         *,
         check_stop: CheckStop | None = None,
         poll_input_events: object = None,
     ) -> AgentRunStatus:
         """Record run request and prepare a model call when wired."""
-        del session, check_stop, poll_input_events
+        del check_stop, poll_input_events
         self.request = request
         if self.model_call_preparer is not None:
             self.prepared_model_call = await self.model_call_preparer(
@@ -437,14 +437,13 @@ class _FailingExecution:
 
     async def run(
         self,
-        session: AsyncSession,
         request: AgentRunExecutionRequest,
         *,
         check_stop: CheckStop | None = None,
         poll_input_events: object = None,
     ) -> AgentRunStatus:
         """Propagate ModelCallError."""
-        del session, request, check_stop, poll_input_events
+        del request, check_stop, poll_input_events
         raise ModelCallError("Model call failed (401): Missing scopes")
 
 
@@ -459,14 +458,13 @@ class _StreamingExecution:
 
     async def run(
         self,
-        session: AsyncSession,
         request: AgentRunExecutionRequest,
         *,
         check_stop: CheckStop | None = None,
         poll_input_events: object = None,
     ) -> AgentRunStatus:
         """Send tool call output to sink first, then wait for completion signal."""
-        del session, request, check_stop, poll_input_events
+        del request, check_stop, poll_input_events
         event = Event(
             id="1" * 32,
             session_id="session-1",
@@ -1006,13 +1004,14 @@ async def test_adapter_wires_event_filters_and_session_head_repo() -> None:
     ]
 
     pre_lower_filter = captured["pre_lower_filter"]
+    auto_compaction_filter = captured["auto_compaction_filter"]
     post_lower_filter = captured["post_lower_filter"]
     assert isinstance(pre_lower_filter, EventPreLowerFilterPipeline)
+    assert isinstance(auto_compaction_filter, EventAutoCompactionFilter)
     assert isinstance(post_lower_filter, PostLowerFilterPipeline)
     assert [item.__class__.__name__ for item in pre_lower_filter.filters] == [
         "EventAttachmentAvailabilityFilter",
         "EventFilePartPlaceholderFilter",
-        "EventAutoCompactionFilter",
     ]
     assert [item.__class__.__name__ for item in post_lower_filter.filters] == [
         "NativeRequestSizeGuard",

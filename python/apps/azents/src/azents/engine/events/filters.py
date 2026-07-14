@@ -261,21 +261,12 @@ class EventAutoCompactionFilter:
         self._summary_enricher = summary_enricher
         self.was_compacted = False
 
-    async def apply(
-        self,
-        session: AsyncSession,
-        transcript: Sequence[Event],
-    ) -> list[Event]:
-        """Replace old input with append-only summary when threshold is exceeded."""
+    async def compact(self, transcript: Sequence[Event]) -> list[Event]:
+        """Compact model input without keeping a caller-owned DB session open."""
         self.was_compacted = False
         events = list(transcript)
         if _compaction_input_tokens(events) <= self._threshold_tokens:
             return events
-
-        # End the input-preparation transaction before lifecycle hooks and the
-        # external summary call. Both can take tens of seconds, and keeping the
-        # transaction open would block Stop finalization and concurrent input.
-        await session.commit()
 
         summary = await self._compactor.compact(
             session_id=self._session_id,
@@ -289,9 +280,6 @@ class EventAutoCompactionFilter:
         )
         if summary is None:
             return events
-        # The compactor advances the head through an independent short session.
-        # Expire the caller identity map so the next turn reloads that new head.
-        session.expire_all()
         self.was_compacted = True
         return [summary]
 

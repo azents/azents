@@ -5,6 +5,7 @@ from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock
 
+import pytest
 from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,6 +28,7 @@ from azents.engine.tools.claude_rules import (
 )
 from azents.engine.tools.goal import GoalStateStore, GoalToolkitProvider
 from azents.engine.tools.subagent import SubagentToolkitProvider
+from azents.rdb.session import SessionManager
 from azents.repos.agent.data import Agent
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationWithSecrets
 from azents.runtime.types import RuntimeDomainConfig
@@ -35,6 +37,7 @@ from azents.testing.model_selection import (
     make_test_selectable_model_options,
 )
 
+from . import resolve as resolve_module
 from .resolve import (
     ModelTargetNotFound,
     ReasoningEffortUnsupported,
@@ -44,6 +47,18 @@ from .resolve import (
 )
 
 _NOW = datetime.datetime.now(datetime.timezone.utc)
+
+
+def _session_manager_for(
+    session: AsyncSession,
+) -> SessionManager[AsyncSession]:
+    """Return a session manager yielding one test session."""
+
+    @asynccontextmanager
+    async def manager() -> AsyncGenerator[AsyncSession, None]:
+        yield session
+
+    return manager
 
 
 def _make_agent(
@@ -185,7 +200,7 @@ def _make_subagent_provider() -> SubagentToolkitProvider:
     agent_repository = AsyncMock()
     agent_repository.get_by_id.return_value = _make_agent()
     return SubagentToolkitProvider(
-        session_manager=AsyncMock(),
+        session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
         broker=AsyncMock(),
         input_buffer_service=AsyncMock(),
         agent_repository=agent_repository,
@@ -230,8 +245,74 @@ class TestResolveInvokeInput:
         assert isinstance(result, Success)
         run_request = result.value
         assert run_request.model == "gpt-4o"
-        assert run_request.provider == LLMProvider.OPENAI
-        assert run_request.agent_id == "agent-1"
+
+    async def test_closes_snapshot_session_before_provider_refresh(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Provider token I/O starts only after Agent/Integration reads close."""
+        active_sessions = 0
+        agent_repository = AsyncMock()
+        integration_repository = AsyncMock()
+
+        async def get_agent(session: AsyncSession, agent_id: str) -> Agent:
+            del session, agent_id
+            assert active_sessions == 1
+            return _make_agent()
+
+        async def get_integration(
+            session: AsyncSession, integration_id: str
+        ) -> LLMProviderIntegrationWithSecrets:
+            del session, integration_id
+            assert active_sessions == 1
+            return _make_integration()
+
+        agent_repository.get_by_id.side_effect = get_agent
+        integration_repository.get_by_id_with_secrets.side_effect = get_integration
+
+        @asynccontextmanager
+        async def session_manager() -> AsyncGenerator[AsyncSession, None]:
+            nonlocal active_sessions
+            active_sessions += 1
+            try:
+                yield AsyncMock(spec=AsyncSession)
+            finally:
+                active_sessions -= 1
+
+        async def ensure_tokens(
+            *,
+            integration: LLMProviderIntegrationWithSecrets,
+            integration_repository: object,
+            session_manager: object,
+        ) -> Success[LLMProviderIntegrationWithSecrets]:
+            del integration_repository, session_manager
+            assert active_sessions == 0
+            return Success(integration)
+
+        monkeypatch.setattr(
+            resolve_module,
+            "_ensure_provider_runtime_tokens",
+            ensure_tokens,
+        )
+
+        result = await resolve_invoke_input(
+            InvokeInput(
+                agent_id="agent-1",
+                session_id="session-1",
+                messages=[],
+                user_id="user-1",
+            ),
+            agent_repository=agent_repository,
+            integration_repository=integration_repository,
+            session_manager=session_manager,
+            exchange_file_service=AsyncMock(),
+            model_file_service=AsyncMock(),
+        )
+
+        assert isinstance(result, Success)
+        assert active_sessions == 0
+        assert result.value.provider == LLMProvider.OPENAI
+        assert result.value.agent_id == "agent-1"
 
     async def test_profile_resolution_preserves_explicit_default_effort(self) -> None:
         """Null effort remains visible model Default for the selected target."""
@@ -423,7 +504,7 @@ class TestResolveAgentTools:
             toolkit_registry={},
             agent_toolkit_repository=agent_toolkit_repository,
             toolkit_repository=AsyncMock(),
-            session=session,
+            session_manager=_session_manager_for(session),
             web_url="https://example.test",
             oauth_secret_key="secret",
             mcp_proxy_url=None,
@@ -476,7 +557,7 @@ class TestResolveAgentTools:
             toolkit_registry={},
             agent_toolkit_repository=agent_toolkit_repository,
             toolkit_repository=AsyncMock(),
-            session=session,
+            session_manager=_session_manager_for(session),
             web_url="https://example.test",
             oauth_secret_key="secret",
             mcp_proxy_url=None,
@@ -508,7 +589,7 @@ class TestResolveAgentTools:
             toolkit_registry={},
             agent_toolkit_repository=agent_toolkit_repository,
             toolkit_repository=AsyncMock(),
-            session=session,
+            session_manager=_session_manager_for(session),
             web_url="https://example.test",
             oauth_secret_key="secret",
             mcp_proxy_url=None,
@@ -550,7 +631,7 @@ class TestResolveAgentTools:
             toolkit_registry={},
             agent_toolkit_repository=agent_toolkit_repository,
             toolkit_repository=AsyncMock(),
-            session=session,
+            session_manager=_session_manager_for(session),
             web_url="https://example.test",
             oauth_secret_key="secret",
             mcp_proxy_url=None,
