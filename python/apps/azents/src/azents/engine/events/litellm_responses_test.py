@@ -25,6 +25,7 @@ from azents.core.llm_catalog import (
     ModelCompatibilityCapabilities,
     ModelModalities,
     ModelModality,
+    ModelReasoningEffort,
 )
 from azents.core.xai import XAI_API_BASE_URL
 from azents.engine.events.file_parts import ModelFileLoweringContent
@@ -1908,6 +1909,48 @@ class TestLiteLLMResponsesModelAdapter:
             "x-openai-internal-codex-responses-lite": "true"
         }
         assert captured["stream"] is True
+
+    async def test_stream_accepts_max_reasoning_effort(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Pass the catalog's maximum reasoning effort through the SDK boundary."""
+        captured: dict[str, object] = {}
+
+        async def response_iter() -> AsyncIterator[object]:
+            if False:
+                yield object()
+
+        async def streaming_call(**kwargs: object) -> object:
+            captured.update(kwargs)
+            return response_iter()
+
+        monkeypatch.setattr(
+            "azents.engine.events.litellm_responses.aresponses",
+            streaming_call,
+        )
+        adapter = LiteLLMResponsesModelAdapter()
+
+        _ = [
+            event
+            async for event in adapter.stream(
+                NativeModelRequest(
+                    model="gpt-5.6-sol",
+                    input=[],
+                    kwargs={
+                        "reasoning": {
+                            "effort": ModelReasoningEffort.MAX,
+                            "summary": "auto",
+                        }
+                    },
+                )
+            )
+        ]
+
+        assert captured["reasoning"] == {
+            "effort": ModelReasoningEffort.MAX,
+            "summary": "auto",
+        }
 
     async def test_litellm_bad_request_stays_internal(
         self,
