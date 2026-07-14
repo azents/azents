@@ -30,6 +30,11 @@ from azents.engine.events.action_messages import (
 from azents.engine.events.types import Event, UserMessagePayload
 from azents.engine.tools.goal import GoalStateSnapshot
 from azents.engine.tools.todo import TodoItemSnapshot, TodoStateSnapshot
+from azents.repos.action_execution.data import (
+    ActionExecution,
+    ActionExecutionEvent,
+    ActionExecutionProjection,
+)
 from azents.repos.agent_project_preset.data import AgentProjectPreset
 from azents.repos.agent_session.data import AgentSession
 from azents.repos.session_workspace_project.data import SessionWorkspaceProject
@@ -440,6 +445,105 @@ class GoalStatusUpdateRequest(BaseModel):
     )
 
 
+class ActionExecutionEventResponse(BaseModel):
+    """Action execution event response."""
+
+    id: str = Field(description="Action execution event ID")
+    action_execution_id: str = Field(description="Action execution ID")
+    sequence: int = Field(description="Monotonic event sequence")
+    kind: str = Field(description="Event kind")
+    step_key: str | None = Field(default=None, description="Action-local step key")
+    command_argv: list[str] | None = Field(default=None, description="Command argv")
+    content: str | None = Field(default=None, description="Event content")
+    exit_code: int | None = Field(default=None, description="Command exit code")
+    created_at: datetime.datetime = Field(description="Created time")
+
+    @classmethod
+    def from_domain(cls, event: ActionExecutionEvent) -> Self:
+        """Convert from domain model."""
+        return cls(
+            id=event.id,
+            action_execution_id=event.action_execution_id,
+            sequence=event.sequence,
+            kind=event.kind.value,
+            step_key=event.step_key,
+            command_argv=None
+            if event.command_argv is None
+            else list(event.command_argv),
+            content=event.content,
+            exit_code=event.exit_code,
+            created_at=event.created_at,
+        )
+
+
+class ActionExecutionResponse(BaseModel):
+    """Action execution live projection response."""
+
+    id: str = Field(description="Action execution ID")
+    input_buffer_id: str = Field(description="Durable source input buffer ID")
+    action_type: str = Field(description="Action discriminator")
+    action: ChatAction = Field(description="Durable action payload")
+    status: str = Field(description="Execution status")
+    owner_generation: int = Field(description="Admitting Session owner generation")
+    failure_summary: str | None = Field(default=None, description="Failure summary")
+    cancellation_summary: str | None = Field(
+        default=None,
+        description="Cancellation summary",
+    )
+    started_at: datetime.datetime | None = Field(default=None, description="Start time")
+    completed_at: datetime.datetime | None = Field(
+        default=None,
+        description="Completion time",
+    )
+    failed_at: datetime.datetime | None = Field(
+        default=None, description="Failure time"
+    )
+    cancelled_at: datetime.datetime | None = Field(
+        default=None,
+        description="Cancellation time",
+    )
+    updated_at: datetime.datetime = Field(description="Updated time")
+
+    @classmethod
+    def from_domain(cls, execution: ActionExecution) -> Self:
+        """Convert from domain model."""
+        return cls(
+            id=execution.id,
+            input_buffer_id=execution.input_buffer_id,
+            action_type=execution.action_type,
+            action=_CHAT_ACTION_ADAPTER.validate_python(execution.action),
+            status=execution.status.value,
+            owner_generation=execution.owner_generation,
+            failure_summary=execution.failure_summary,
+            cancellation_summary=execution.cancellation_summary,
+            started_at=execution.started_at,
+            completed_at=execution.completed_at,
+            failed_at=execution.failed_at,
+            cancelled_at=execution.cancelled_at,
+            updated_at=execution.updated_at,
+        )
+
+
+class ActionExecutionProjectionResponse(BaseModel):
+    """Action execution state plus progress events."""
+
+    execution: ActionExecutionResponse = Field(description="Action execution state")
+    events: list[ActionExecutionEventResponse] = Field(
+        description="Action execution event list",
+    )
+
+    @classmethod
+    def from_domain(cls, projection: ActionExecutionProjection) -> Self:
+        """Convert from domain model."""
+        return cls(
+            execution=ActionExecutionResponse.from_domain(projection.execution),
+            events=[
+                ActionExecutionEventResponse.from_domain(event)
+                for event in projection.events
+            ],
+        )
+
+
 class ChatWriteSnapshotResponse(BaseModel):
     """Authoritative live snapshot after REST write."""
 
@@ -463,6 +567,10 @@ class ChatWriteSnapshotResponse(BaseModel):
     goal: GoalStateResponse | None = Field(
         default=None,
         description="Current session goal snapshot",
+    )
+    action_executions: list[ActionExecutionProjectionResponse] = Field(
+        default_factory=list,
+        description="Current action execution projections",
     )
 
 
@@ -1763,6 +1871,10 @@ class LiveEventListResponse(BaseModel):
     goal: GoalStateResponse | None = Field(
         default=None,
         description="Current session goal snapshot",
+    )
+    action_executions: list[ActionExecutionProjectionResponse] = Field(
+        default_factory=list,
+        description="Current action execution projections",
     )
 
 

@@ -1,5 +1,6 @@
 """SessionGitWorktreeService tests."""
 
+import asyncio
 import datetime
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -27,6 +28,7 @@ from azents.engine.events.action_messages import (
 )
 from azents.engine.events.types import ActionExecutionResultPayload
 from azents.engine.run.input import InputMessage
+from azents.engine.run.types import SHUTDOWN_CANCEL_MESSAGE, USER_STOP_CANCEL_MESSAGE
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.models.session_agent_context import RDBSessionAgentContextGitWorktree
@@ -577,6 +579,7 @@ async def _execute_first_setup_action(
         session_id=session_id,
         execution=worktree_action.execution,
         action=worktree_action.action,
+        owner_generation=worktree_action.execution.owner_generation,
     )
     return worktree_action.buffer.id
 
@@ -668,6 +671,7 @@ class TestSessionGitWorktreeService:
                     action_type=action.type,
                     action=action.model_dump(mode="json"),
                     status=ActionExecutionStatus.PENDING,
+                    owner_generation=1,
                 ),
             )
         runner = _RunnerOperations()
@@ -677,6 +681,7 @@ class TestSessionGitWorktreeService:
             session_id=agent_session.id,
             execution=execution,
             action=action,
+            owner_generation=execution.owner_generation,
         )
 
         assert result.completed is True
@@ -696,12 +701,25 @@ class TestSessionGitWorktreeService:
                     input_buffer_id=execution.input_buffer_id,
                 )
             )
+            events = await EventTranscriptRepository().list_recent_by_session_id(
+                session,
+                agent_session.id,
+                limit=20,
+            )
         assert len(allocations) == 1
-        assert allocations[0].action_execution_id is not None
+        assert allocations[0].action_execution_id is None
         assert allocations[0].status is SessionGitWorktreeStatus.READY
         assert [project.path for project in projects] == [allocations[0].worktree_path]
-        assert projection is not None
-        assert projection.execution.status is ActionExecutionStatus.COMPLETED
+        assert projection is None
+        terminal_events = [
+            event for event in events if event.kind is EventKind.ACTION_EXECUTION_RESULT
+        ]
+        assert len(terminal_events) == 1
+        terminal_payload = terminal_events[0].payload
+        assert isinstance(terminal_payload, ActionExecutionResultPayload)
+        terminal_execution = terminal_payload.action_execution["execution"]
+        assert isinstance(terminal_execution, dict)
+        assert terminal_execution["status"] == "completed"
         assert runner.calls == [
             {
                 "operation": "create_git_worktree",
@@ -714,12 +732,12 @@ class TestSessionGitWorktreeService:
             }
         ]
 
-    async def test_running_action_recovers_interrupted_creation_as_terminal_failure(
+    async def test_running_action_handover_cancels_without_reexecution(
         self,
         rdb_session_manager: SessionManager[AsyncSession],
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Recovery avoids duplicate worktrees after uncertain interruption."""
+        """Handover snapshots uncertain work without repeating its side effect."""
         async with rdb_session_manager() as session:
             workspace_id, _, agent_id = await _create_agent_context(
                 session,
@@ -746,6 +764,7 @@ class TestSessionGitWorktreeService:
                     action_type=action.type,
                     action=action.model_dump(mode="json"),
                     status=ActionExecutionStatus.PENDING,
+                    owner_generation=1,
                 ),
             )
         interrupted_runner = _RunnerOperations()
@@ -768,6 +787,7 @@ class TestSessionGitWorktreeService:
                 session_id=agent_session.id,
                 execution=execution,
                 action=action,
+                owner_generation=execution.owner_generation,
             )
 
         async with rdb_session_manager() as session:
@@ -784,29 +804,132 @@ class TestSessionGitWorktreeService:
         assert allocations[0].status is SessionGitWorktreeStatus.CREATING
 
         recovery_runner = _RunnerOperations()
-        result = await _service(
+        recovered_events = await _service(
             rdb_session_manager,
             recovery_runner,
-        ).run_git_worktree_action(
-            agent_id=agent_id,
+        ).cancel_live_action_executions(
             session_id=agent_session.id,
-            execution=interrupted,
-            action=action,
+            reason="Operation cancelled during Session ownership handover.",
+            on_history_event_appended=None,
+            on_action_execution_removed=None,
         )
 
-        assert result.completed is True
-        assert result.context_invalidated is False
+        assert len(recovered_events) == 1
         assert recovery_runner.calls == []
         async with rdb_session_manager() as session:
             recovered = await ActionExecutionRepository().get_by_id(
                 session,
                 action_execution_id=execution.id,
             )
-        assert recovered is not None
-        assert recovered.status is ActionExecutionStatus.FAILED
-        assert recovered.failure_summary == (
-            "Git worktree creation was interrupted before its result could be recorded."
+            recovered_allocations = (
+                await SessionGitWorktreeRepository().list_by_session_id(
+                    session,
+                    session_id=agent_session.id,
+                )
+            )
+        assert recovered is None
+        assert recovered_allocations[0].status is SessionGitWorktreeStatus.FAILED
+        payload = recovered_events[0].payload
+        assert isinstance(payload, ActionExecutionResultPayload)
+        terminal_execution = payload.action_execution["execution"]
+        assert isinstance(terminal_execution, dict)
+        assert terminal_execution["status"] == "cancelled"
+        assert terminal_execution["cancellation_summary"] == (
+            "Operation cancelled during Session ownership handover."
         )
+
+    @pytest.mark.parametrize(
+        ("cancel_message", "expected_summary"),
+        [
+            (USER_STOP_CANCEL_MESSAGE, "Operation cancelled by user stop."),
+            (
+                SHUTDOWN_CANCEL_MESSAGE,
+                "Operation cancelled after the worker shutdown wait expired.",
+            ),
+        ],
+    )
+    async def test_task_cancellation_hands_live_action_to_durable_snapshot(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+        monkeypatch: pytest.MonkeyPatch,
+        cancel_message: str,
+        expected_summary: str,
+    ) -> None:
+        """Stop and shutdown cancellation preserve one terminal snapshot."""
+        async with rdb_session_manager() as session:
+            workspace_id, _, agent_id = await _create_agent_context(
+                session,
+                "action-user-stop",
+            )
+            agent_session = await AgentSessionRepository().create(
+                session,
+                AgentSessionCreate(
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                    title=None,
+                ),
+            )
+            action = CreateGitWorktreeAction(
+                source_project_path="/workspace/agent/repo",
+                starting_ref="main",
+            )
+            execution = await ActionExecutionRepository().create(
+                session,
+                ActionExecutionCreate(
+                    id=None,
+                    session_id=agent_session.id,
+                    input_buffer_id="01900000000070008000000000000004",
+                    action_type=action.type,
+                    action=action.model_dump(mode="json"),
+                    status=ActionExecutionStatus.PENDING,
+                    owner_generation=1,
+                ),
+            )
+        runner = _RunnerOperations()
+        operation_started = asyncio.Event()
+
+        async def block_create(**kwargs: object) -> object:
+            del kwargs
+            operation_started.set()
+            await asyncio.Event().wait()
+            raise AssertionError("unreachable")
+
+        monkeypatch.setattr(runner, "create_git_worktree", block_create)
+        task = asyncio.create_task(
+            _service(rdb_session_manager, runner).run_git_worktree_action(
+                agent_id=agent_id,
+                session_id=agent_session.id,
+                execution=execution,
+                action=action,
+                owner_generation=execution.owner_generation,
+            )
+        )
+        await operation_started.wait()
+        task.cancel(cancel_message)
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        async with rdb_session_manager() as session:
+            live_execution = await ActionExecutionRepository().get_by_id(
+                session,
+                action_execution_id=execution.id,
+            )
+            events = await EventTranscriptRepository().list_recent_by_session_id(
+                session,
+                agent_session.id,
+                limit=20,
+            )
+        assert live_execution is None
+        terminal_events = [
+            event for event in events if event.kind is EventKind.ACTION_EXECUTION_RESULT
+        ]
+        assert len(terminal_events) == 1
+        payload = terminal_events[0].payload
+        assert isinstance(payload, ActionExecutionResultPayload)
+        terminal_execution = payload.action_execution["execution"]
+        assert isinstance(terminal_execution, dict)
+        assert terminal_execution["status"] == "cancelled"
+        assert terminal_execution["cancellation_summary"] == expected_summary
 
     async def test_preview_git_refs_lists_source_project_refs(
         self,
@@ -955,8 +1078,7 @@ class TestSessionGitWorktreeService:
                 result.value.agent_session.id,
                 limit=20,
             )
-        assert projection is not None
-        assert projection.execution.status is ActionExecutionStatus.FAILED
+        assert projection is None
         assert [buffer.content for buffer in buffers] == ["start invalid"]
         terminal_events = [
             event for event in events if event.kind is EventKind.ACTION_EXECUTION_RESULT
@@ -1111,8 +1233,21 @@ class TestSessionGitWorktreeService:
                     input_buffer_id=input_buffer_id,
                 )
             )
-        assert projection is not None
-        assert projection.execution.status is ActionExecutionStatus.FAILED
+            events = await EventTranscriptRepository().list_recent_by_session_id(
+                session,
+                result.value.agent_session.id,
+                limit=20,
+            )
+        assert projection is None
+        terminal_events = [
+            event for event in events if event.kind is EventKind.ACTION_EXECUTION_RESULT
+        ]
+        assert len(terminal_events) == 1
+        payload = terminal_events[0].payload
+        assert isinstance(payload, ActionExecutionResultPayload)
+        execution_value = payload.action_execution["execution"]
+        assert isinstance(execution_value, dict)
+        assert execution_value["status"] == "failed"
 
     async def test_status_refresh_warning_does_not_block_ready(
         self,
@@ -1164,9 +1299,27 @@ class TestSessionGitWorktreeService:
                     input_buffer_id=input_buffer_id,
                 )
             )
-        assert projection is not None
-        assert projection.execution.status is ActionExecutionStatus.COMPLETED
-        assert any(event.kind.value == "warning" for event in projection.events)
+            events = await EventTranscriptRepository().list_recent_by_session_id(
+                session,
+                result.value.agent_session.id,
+                limit=20,
+            )
+        assert projection is None
+        terminal_events = [
+            event for event in events if event.kind is EventKind.ACTION_EXECUTION_RESULT
+        ]
+        assert len(terminal_events) == 1
+        payload = terminal_events[0].payload
+        assert isinstance(payload, ActionExecutionResultPayload)
+        execution_value = payload.action_execution["execution"]
+        event_values = payload.action_execution["events"]
+        assert isinstance(execution_value, dict)
+        assert isinstance(event_values, list)
+        assert execution_value["status"] == "completed"
+        assert any(
+            isinstance(event_value, dict) and event_value.get("kind") == "warning"
+            for event_value in event_values
+        )
 
     async def test_archive_cleanup_request_only_marks_pending(
         self,

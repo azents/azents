@@ -166,16 +166,17 @@ class SessionGitWorktreeBranchCreatedBy(enum.StrEnum):
 
 
 class ActionExecutionStatus(enum.StrEnum):
-    """Durable TurnAction execution status."""
+    """Live TurnAction execution status."""
 
     PENDING = "pending"
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 class ActionExecutionEventKind(enum.StrEnum):
-    """Durable TurnAction execution event kind."""
+    """Live TurnAction execution event kind."""
 
     INFO = "info"
     STEP_STARTED = "step_started"

@@ -781,7 +781,7 @@ async def test_run_stop_controller_user_stop_cancels_active_task_once() -> None:
 
     try:
         assert controller.request_user_stop()
-        assert controller.request_user_stop()
+        assert not controller.request_user_stop()
         await asyncio.wait_for(cancelled.wait(), timeout=1)
     finally:
         task.cancel()
@@ -1248,6 +1248,8 @@ async def test_boundary_poll_broadcasts_input_buffer_taxonomy_actions(
         ),
         run_id="run-001",
         poll_fn=None,
+        owner_generation=1,
+        tool_admission_barrier=ToolAdmissionBarrier(),
         mark_context_invalidated=lambda: None,
     )
 
@@ -1602,8 +1604,8 @@ async def test_durable_stop_request_cancels_blocked_engine_task(
 
 
 @pytest.mark.asyncio
-async def test_user_stop_finalizes_before_cancelled_engine_task_finishes() -> None:
-    """User stop converges to runner boundary before engine task cleanup completes."""
+async def test_user_stop_waits_for_engine_cleanup_before_session_boundary() -> None:
+    """User stop keeps the Session boundary until cancellation cleanup finishes."""
     host = _Host()
     host.block_message_until_cancel = True
     host.block_after_cancel = True
@@ -1621,11 +1623,15 @@ async def test_user_stop_finalizes_before_cancelled_engine_task_finishes() -> No
             ),
             timeout=2,
         )
+        await asyncio.sleep(0)
+        assert host.idle_session_ids == []
+        assert host.released_session_ids == []
+
+        host.cancel_cleanup_release.set()
         await asyncio.wait_for(
             _wait_until(lambda: host.idle_session_ids == ["session-001"]),
             timeout=2,
         )
-        assert host.idle_session_ids == ["session-001"]
     finally:
         host.cancel_cleanup_release.set()
         await runner.shutdown()

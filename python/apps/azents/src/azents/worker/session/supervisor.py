@@ -22,7 +22,7 @@ from azents.worker.session.user_stop_finalizer import UserStopFinalizer
 
 logger = logging.getLogger(__name__)
 
-_SHUTDOWN_TIMEOUT = 5.0  # seconds — graceful completion window before handover
+_SHUTDOWN_TIMEOUT = 30.0  # seconds — foreground completion window before handover
 _EXPLICIT_STOP_POLL_INTERVAL = 0.5  # seconds — user stop detection interval
 
 
@@ -81,6 +81,8 @@ class RunStopController:
 
     def request_user_stop(self) -> bool:
         """Record User stop and immediately cancel active task when present."""
+        if self.user_stop_requested_event.is_set():
+            return False
         self.user_stop_requested_event.set()
         task = self.active_task
         if task is None or task.done():
@@ -241,26 +243,18 @@ class RunTaskSupervisor:
         self,
         task: asyncio.Task[RunExecutionResult],
     ) -> RunExecutionResult:
-        """Send cancel to engine task on explicit stop and return immediately."""
-        task.cancel(USER_STOP_CANCEL_MESSAGE)
-        asyncio.create_task(self._observe_cancelled_engine_task(task))
+        """Cancel the engine task and wait for its durable cancellation handoff."""
+        if not task.done() and task.cancelling() == 0:
+            task.cancel(USER_STOP_CANCEL_MESSAGE)
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
         return RunExecutionResult(
             toolkits=[],
             terminal_event_observed=True,
             no_actionable_work=False,
         )
-
-    async def _observe_cancelled_engine_task(
-        self,
-        task: asyncio.Task[RunExecutionResult],
-    ) -> None:
-        """Collect termination result of fire-and-forget engine task."""
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
-        except Exception:
-            logger.exception("Engine task failed after user stop cancellation")
 
     async def _wait_for_shutdown_completion(
         self,

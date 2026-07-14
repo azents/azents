@@ -126,6 +126,7 @@ class TestActionExecutionRepository:
                 action_type="create_git_worktree",
                 action=action,
                 status=ActionExecutionStatus.PENDING,
+                owner_generation=1,
             ),
         )
         same_execution = await repo.create(
@@ -137,6 +138,7 @@ class TestActionExecutionRepository:
                 action_type="create_git_worktree",
                 action=action,
                 status=ActionExecutionStatus.PENDING,
+                owner_generation=1,
             ),
         )
         started = await repo.append_event(
@@ -163,15 +165,15 @@ class TestActionExecutionRepository:
                 exit_code=0,
             ),
         )
-        marked = await repo.mark_completed(
+        marked = await repo.mark_running(
             rdb_session,
             action_execution_id=execution.id,
-            completed_at=datetime.datetime.now(datetime.UTC),
+            started_at=datetime.datetime.now(datetime.UTC),
         )
 
         assert same_execution.id == execution.id
         assert execution.input_buffer_id == input_buffer_id
-        assert marked.status is ActionExecutionStatus.COMPLETED
+        assert marked.status is ActionExecutionStatus.RUNNING
         assert started.sequence == 1
         assert completed.sequence == 2
         projection = await repo.get_projection_by_input_buffer_id(

@@ -106,7 +106,38 @@ class TestChatWriteResponse(unittest.TestCase):
                     goal = azentspublicclient.models.goal_state_response.GoalStateResponse(
                         objective = '', 
                         created_at = '', 
-                        updated_at = '', ), ),
+                        updated_at = '', ), 
+                    action_executions = [
+                        azentspublicclient.models.action_execution_projection_response.ActionExecutionProjectionResponse(
+                            execution = azentspublicclient.models.action_execution_response.ActionExecutionResponse(
+                                id = '', 
+                                input_buffer_id = '', 
+                                action_type = '', 
+                                action = null, 
+                                status = '', 
+                                owner_generation = 56, 
+                                failure_summary = '', 
+                                cancellation_summary = '', 
+                                started_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                                completed_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                                failed_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                                cancelled_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                                updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), ), 
+                            events = [
+                                azentspublicclient.models.action_execution_event_response.ActionExecutionEventResponse(
+                                    id = '', 
+                                    action_execution_id = '', 
+                                    sequence = 56, 
+                                    kind = '', 
+                                    step_key = '', 
+                                    command_argv = [
+                                        ''
+                                        ], 
+                                    content = '', 
+                                    exit_code = 56, 
+                                    created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
+                                ], )
+                        ], ),
                 history_reload_required = True
             )
         else:
@@ -182,7 +213,38 @@ class TestChatWriteResponse(unittest.TestCase):
                     goal = azentspublicclient.models.goal_state_response.GoalStateResponse(
                         objective = '', 
                         created_at = '', 
-                        updated_at = '', ), ),
+                        updated_at = '', ), 
+                    action_executions = [
+                        azentspublicclient.models.action_execution_projection_response.ActionExecutionProjectionResponse(
+                            execution = azentspublicclient.models.action_execution_response.ActionExecutionResponse(
+                                id = '', 
+                                input_buffer_id = '', 
+                                action_type = '', 
+                                action = null, 
+                                status = '', 
+                                owner_generation = 56, 
+                                failure_summary = '', 
+                                cancellation_summary = '', 
+                                started_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                                completed_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                                failed_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                                cancelled_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                                updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), ), 
+                            events = [
+                                azentspublicclient.models.action_execution_event_response.ActionExecutionEventResponse(
+                                    id = '', 
+                                    action_execution_id = '', 
+                                    sequence = 56, 
+                                    kind = '', 
+                                    step_key = '', 
+                                    command_argv = [
+                                        ''
+                                        ], 
+                                    content = '', 
+                                    exit_code = 56, 
+                                    created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
+                                ], )
+                        ], ),
                 history_reload_required = True,
         )
         """

@@ -235,6 +235,7 @@ const baseArgs = {
   inputActions: [],
   authorizationRequests: [],
   onAuthorizationComplete: noop,
+  actionExecutions: [],
   workspacePanel,
   goal: { objective: null, status: null },
   todo: { items: [] },
@@ -344,6 +345,62 @@ export const StreamingModelWithPartialOutput = {
   },
 } satisfies Story;
 
+export const WithActionExecutionFailure = {
+  args: {
+    ...baseArgs,
+    chatTimelineState: {
+      type: "DETACHED_HISTORY_BROWSING",
+      hasNewer: true,
+      newestCursor: "action-result-cursor",
+    },
+    messages: [],
+    actionExecutions: [
+      {
+        provenance: "durable",
+        execution: {
+          id: "action-execution-1",
+          input_buffer_id: "buffer-action-1",
+          action_type: "create_git_worktree",
+          action: {
+            type: "create_git_worktree",
+            source_project_path: "/workspace/agent/project",
+            starting_ref: "main",
+          },
+          status: "failed",
+          owner_generation: 1,
+          failure_summary:
+            "Git worktree creation failed because the branch already exists.",
+          started_at: "2026-05-19T00:00:00Z",
+          completed_at: "2026-05-19T00:00:05Z",
+          updated_at: "2026-05-19T00:00:05Z",
+        },
+        events: [
+          {
+            id: "action-event-1",
+            action_execution_id: "action-execution-1",
+            sequence: 1,
+            kind: "command_started",
+            step_key: "create_worktree",
+            command_argv: ["git", "worktree", "add", "../project-feature"],
+            content: null,
+            created_at: "2026-05-19T00:00:00Z",
+          },
+          {
+            id: "action-event-2",
+            action_execution_id: "action-execution-1",
+            sequence: 2,
+            kind: "command_failed",
+            step_key: "create_worktree",
+            command_argv: null,
+            content: "fatal: 'project-feature' is already checked out",
+            created_at: "2026-05-19T00:00:05Z",
+          },
+        ],
+      },
+    ],
+  },
+} satisfies Story;
+
 export const DetachedLatestResetIsKeyboardAccessible = {
   args: {
     ...baseArgs,
@@ -382,6 +439,93 @@ export const WithPendingInputBuffer = {
         },
       },
     ],
+  },
+} satisfies Story;
+
+export const LiveOperationRendersAbovePendingInput = {
+  args: {
+    ...baseArgs,
+    pendingInputBuffers: [
+      {
+        id: "pending-buffer-after-operation",
+        sessionId: storySessionId,
+        content: "This input remains pending after the operation.",
+        attachments: [],
+        metadata: { source: "web" },
+        createdAt: "2026-05-19T00:00:02Z",
+        status: "pending",
+        requestedInferenceProfile: {
+          model_target_label: "default",
+          reasoning_effort: null,
+        },
+      },
+    ],
+    actionExecutions: [
+      {
+        provenance: "live",
+        execution: {
+          id: "action-execution-live",
+          input_buffer_id: "consumed-action-buffer",
+          action_type: "create_git_worktree",
+          action: {
+            type: "create_git_worktree",
+            source_project_path: "/workspace/agent/project",
+            starting_ref: "main",
+          },
+          status: "running",
+          owner_generation: 1,
+          failure_summary: null,
+          started_at: "2026-05-19T00:00:00Z",
+          updated_at: "2026-05-19T00:00:01Z",
+        },
+        events: [],
+      },
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const operation = canvas.getByText("Worktree action");
+    const pendingInput = canvas.getByText(
+      "This input remains pending after the operation.",
+    );
+    const position = operation.compareDocumentPosition(pendingInput);
+    await expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  },
+} satisfies Story;
+
+export const DetachedHistoryHidesLiveOperation = {
+  args: {
+    ...baseArgs,
+    chatTimelineState: {
+      type: "DETACHED_HISTORY_BROWSING",
+      hasNewer: true,
+      newestCursor: "detached-operation-cursor",
+    },
+    actionExecutions: [
+      {
+        provenance: "live",
+        execution: {
+          id: "detached-action-execution-live",
+          input_buffer_id: "detached-consumed-action-buffer",
+          action_type: "create_git_worktree",
+          action: {
+            type: "create_git_worktree",
+            source_project_path: "/workspace/agent/project",
+            starting_ref: "main",
+          },
+          status: "running",
+          owner_generation: 1,
+          failure_summary: null,
+          started_at: "2026-05-19T00:00:00Z",
+          updated_at: "2026-05-19T00:00:01Z",
+        },
+        events: [],
+      },
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.queryByText("Worktree action")).toBeNull();
   },
 } satisfies Story;
 

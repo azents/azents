@@ -43,38 +43,38 @@ class TestAgentModelSelection(unittest.TestCase):
                 model_family = '',
                 normalized_capabilities = azentspublicclient.models.model_capabilities.ModelCapabilities(
                     context_window = azentspublicclient.models.model_context_window.ModelContextWindow(
-                        max_input_tokens = 1.0,
-                        max_output_tokens = 1.0, ),
+                        max_input_tokens = 1.0, 
+                        max_output_tokens = 1.0, ), 
                     modalities = azentspublicclient.models.model_modalities.ModelModalities(
                         input = [
                             'text'
-                            ],
+                            ], 
                         output = [
                             'text'
-                            ], ),
+                            ], ), 
                     tool_calling = azentspublicclient.models.model_tool_calling_capabilities.ModelToolCallingCapabilities(
-                        supported = True,
-                        parallel_tool_calls = True,
-                        strict_json_schema = True, ),
+                        supported = True, 
+                        parallel_tool_calls = True, 
+                        strict_json_schema = True, ), 
                     reasoning = azentspublicclient.models.model_reasoning_capabilities.ModelReasoningCapabilities(
-                        supported = True,
+                        supported = True, 
                         effort_levels = [
                             'none'
-                            ],
-                        summaries = True, ),
+                            ], 
+                        summaries = True, ), 
                     built_in_tools = azentspublicclient.models.model_built_in_tool_capabilities.ModelBuiltInToolCapabilities(
                         supported = [
                             ''
-                            ], ),
+                            ], ), 
                     parameters = azentspublicclient.models.model_parameter_capabilities.ModelParameterCapabilities(
-                        temperature = True,
-                        max_output_tokens = True,
-                        top_p = True,
-                        top_k = True,
-                        stop_sequences = True, ),
+                        temperature = True, 
+                        max_output_tokens = True, 
+                        top_p = True, 
+                        top_k = True, 
+                        stop_sequences = True, ), 
                     compatibility = azentspublicclient.models.model_compatibility_capabilities.ModelCompatibilityCapabilities(
-                        provider_family = '',
-                        responses_api = True,
+                        provider_family = '', 
+                        responses_api = True, 
                         responses_lite = True,
                         unsupported_media_policy = 'text_substitution', ), ),
                 model_snapshot = { },
@@ -90,38 +90,38 @@ class TestAgentModelSelection(unittest.TestCase):
                 model_developer = 'openai',
                 normalized_capabilities = azentspublicclient.models.model_capabilities.ModelCapabilities(
                     context_window = azentspublicclient.models.model_context_window.ModelContextWindow(
-                        max_input_tokens = 1.0,
-                        max_output_tokens = 1.0, ),
+                        max_input_tokens = 1.0, 
+                        max_output_tokens = 1.0, ), 
                     modalities = azentspublicclient.models.model_modalities.ModelModalities(
                         input = [
                             'text'
-                            ],
+                            ], 
                         output = [
                             'text'
-                            ], ),
+                            ], ), 
                     tool_calling = azentspublicclient.models.model_tool_calling_capabilities.ModelToolCallingCapabilities(
-                        supported = True,
-                        parallel_tool_calls = True,
-                        strict_json_schema = True, ),
+                        supported = True, 
+                        parallel_tool_calls = True, 
+                        strict_json_schema = True, ), 
                     reasoning = azentspublicclient.models.model_reasoning_capabilities.ModelReasoningCapabilities(
-                        supported = True,
+                        supported = True, 
                         effort_levels = [
                             'none'
-                            ],
-                        summaries = True, ),
+                            ], 
+                        summaries = True, ), 
                     built_in_tools = azentspublicclient.models.model_built_in_tool_capabilities.ModelBuiltInToolCapabilities(
                         supported = [
                             ''
-                            ], ),
+                            ], ), 
                     parameters = azentspublicclient.models.model_parameter_capabilities.ModelParameterCapabilities(
-                        temperature = True,
-                        max_output_tokens = True,
-                        top_p = True,
-                        top_k = True,
-                        stop_sequences = True, ),
+                        temperature = True, 
+                        max_output_tokens = True, 
+                        top_p = True, 
+                        top_k = True, 
+                        stop_sequences = True, ), 
                     compatibility = azentspublicclient.models.model_compatibility_capabilities.ModelCompatibilityCapabilities(
-                        provider_family = '',
-                        responses_api = True,
+                        provider_family = '', 
+                        responses_api = True, 
                         responses_lite = True,
                         unsupported_media_policy = 'text_substitution', ), ),
                 model_snapshot = { },

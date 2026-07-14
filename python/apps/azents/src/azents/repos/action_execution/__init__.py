@@ -27,7 +27,7 @@ _JSON_OBJECT_ADAPTER = TypeAdapter[dict[str, JSONValue]](dict[str, JSONValue])
 
 
 class ActionExecutionRepository:
-    """Durable TurnAction execution repository."""
+    """Live TurnAction execution repository."""
 
     async def create(
         self,
@@ -45,6 +45,7 @@ class ActionExecutionRepository:
                 action_type=create.action_type,
                 action=create.action,
                 status=create.status,
+                owner_generation=create.owner_generation,
             )
             .on_conflict_do_nothing(
                 constraint="uq_action_executions_input_buffer_id",
@@ -192,14 +193,38 @@ class ActionExecutionRepository:
         )
         return ActionExecutionProjection(execution=execution, events=events)
 
+    async def get_projection_by_id(
+        self,
+        session: AsyncSession,
+        *,
+        action_execution_id: str,
+    ) -> ActionExecutionProjection | None:
+        """Fetch one active execution and its ordered progress events."""
+        execution = await self.get_by_id(
+            session,
+            action_execution_id=action_execution_id,
+        )
+        if execution is None:
+            return None
+        return ActionExecutionProjection(
+            execution=execution,
+            events=await self.list_events(
+                session,
+                action_execution_id=action_execution_id,
+            ),
+        )
+
     async def list_projections_by_session_id(
         self,
         session: AsyncSession,
         *,
         session_id: str,
     ) -> list[ActionExecutionProjection]:
-        """List action execution projections for a session in creation order."""
-        executions = await self.list_by_session_id(session, session_id=session_id)
+        """List active action execution projections in creation order."""
+        executions = await self.list_pending_or_running_by_session_id(
+            session,
+            session_id=session_id,
+        )
         return [
             ActionExecutionProjection(
                 execution=execution,
@@ -210,6 +235,47 @@ class ActionExecutionRepository:
             )
             for execution in executions
         ]
+
+    async def lock_projection_by_id(
+        self,
+        session: AsyncSession,
+        *,
+        action_execution_id: str,
+        session_id: str,
+    ) -> ActionExecutionProjection | None:
+        """Lock and load one active execution projection for terminalization."""
+        result = await session.execute(
+            sa.select(RDBActionExecution)
+            .where(
+                RDBActionExecution.id == action_execution_id,
+                RDBActionExecution.session_id == session_id,
+            )
+            .with_for_update()
+        )
+        rdb = result.scalar_one_or_none()
+        if rdb is None:
+            return None
+        return ActionExecutionProjection(
+            execution=self._build_execution(rdb),
+            events=await self.list_events(
+                session,
+                action_execution_id=action_execution_id,
+            ),
+        )
+
+    async def delete_by_id(
+        self,
+        session: AsyncSession,
+        *,
+        action_execution_id: str,
+    ) -> None:
+        """Delete one live execution and its cascaded progress events."""
+        await session.execute(
+            sa.delete(RDBActionExecution).where(
+                RDBActionExecution.id == action_execution_id
+            )
+        )
+        await session.flush()
 
     async def mark_running(
         self,
@@ -224,40 +290,9 @@ class ActionExecutionRepository:
         rdb.started_at = started_at
         rdb.completed_at = None
         rdb.failed_at = None
+        rdb.cancelled_at = None
         rdb.failure_summary = None
-        await session.flush()
-        await session.refresh(rdb)
-        return self._build_execution(rdb)
-
-    async def mark_completed(
-        self,
-        session: AsyncSession,
-        *,
-        action_execution_id: str,
-        completed_at: datetime.datetime,
-    ) -> ActionExecution:
-        """Mark execution as completed."""
-        rdb = await self._get_required(session, action_execution_id)
-        rdb.status = ActionExecutionStatus.COMPLETED
-        rdb.completed_at = completed_at
-        rdb.failure_summary = None
-        await session.flush()
-        await session.refresh(rdb)
-        return self._build_execution(rdb)
-
-    async def mark_failed(
-        self,
-        session: AsyncSession,
-        *,
-        action_execution_id: str,
-        failure_summary: str,
-        failed_at: datetime.datetime,
-    ) -> ActionExecution:
-        """Mark execution as terminally failed."""
-        rdb = await self._get_required(session, action_execution_id)
-        rdb.status = ActionExecutionStatus.FAILED
-        rdb.failure_summary = failure_summary
-        rdb.failed_at = failed_at
+        rdb.cancellation_summary = None
         await session.flush()
         await session.refresh(rdb)
         return self._build_execution(rdb)
@@ -301,10 +336,13 @@ class ActionExecutionRepository:
             action_type=rdb.action_type,
             action=_JSON_OBJECT_ADAPTER.validate_python(rdb.action),
             status=rdb.status,
+            owner_generation=rdb.owner_generation,
             failure_summary=rdb.failure_summary,
+            cancellation_summary=rdb.cancellation_summary,
             started_at=rdb.started_at,
             completed_at=rdb.completed_at,
             failed_at=rdb.failed_at,
+            cancelled_at=rdb.cancelled_at,
             created_at=rdb.created_at,
             updated_at=rdb.updated_at,
         )

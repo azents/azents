@@ -9,7 +9,7 @@ from azents.rdb.models.event import JSONValue
 
 
 class ActionExecution(BaseModel):
-    """Durable execution state for one operation TurnAction event."""
+    """Live execution state for one operation TurnAction event."""
 
     id: str = Field(description="Action execution ID")
     session_id: str = Field(description="AgentSession ID")
@@ -17,10 +17,15 @@ class ActionExecution(BaseModel):
     action_type: str = Field(description="Action discriminator")
     action: dict[str, JSONValue] = Field(description="Durable action payload")
     status: ActionExecutionStatus = Field(description="Execution status")
+    owner_generation: int = Field(description="Admitting Session owner generation")
     failure_summary: str | None = Field(description="User-safe failure summary")
+    cancellation_summary: str | None = Field(
+        description="User-safe cancellation summary"
+    )
     started_at: datetime.datetime | None = Field(description="Start time")
     completed_at: datetime.datetime | None = Field(description="Completion time")
     failed_at: datetime.datetime | None = Field(description="Failure time")
+    cancelled_at: datetime.datetime | None = Field(description="Cancellation time")
     created_at: datetime.datetime = Field(description="Created time")
     updated_at: datetime.datetime = Field(description="Updated time")
 
@@ -34,6 +39,7 @@ class ActionExecutionCreate(BaseModel):
     action_type: str = Field(description="Action discriminator")
     action: dict[str, JSONValue] = Field(description="Durable action payload")
     status: ActionExecutionStatus = Field(description="Initial execution status")
+    owner_generation: int = Field(description="Admitting Session owner generation")
 
 
 class ActionExecutionEvent(BaseModel):
@@ -64,7 +70,7 @@ class ActionExecutionEventCreate(BaseModel):
 
 
 class ActionExecutionProjection(BaseModel):
-    """Action execution with ordered durable progress events."""
+    """Action execution with ordered live progress events."""
 
     execution: ActionExecution = Field(description="Action execution state")
     events: list[ActionExecutionEvent] = Field(description="Ordered progress events")

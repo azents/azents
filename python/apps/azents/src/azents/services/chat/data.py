@@ -10,6 +10,7 @@ from azents.engine.events.types import Event
 from azents.engine.run.failure import FailedRunAttemptSource, FailedRunRetryability
 from azents.engine.tools.goal import GoalStateSnapshot, GoalStatus
 from azents.engine.tools.todo import TodoStateSnapshot
+from azents.repos.action_execution.data import ActionExecutionProjection
 
 # ---------------------------------------------------------------------------
 # Output
@@ -75,6 +76,9 @@ class ChatLiveStateSnapshot:
     session_run_state: AgentSessionRunState = AgentSessionRunState.IDLE
     todo: TodoStateSnapshot | None = None
     goal: GoalStateSnapshot | None = None
+    action_executions: list[ActionExecutionProjection] = dataclasses.field(
+        default_factory=list,
+    )
 
 
 @dataclasses.dataclass(frozen=True)

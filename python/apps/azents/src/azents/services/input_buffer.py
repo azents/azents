@@ -443,6 +443,7 @@ class InputBufferService:
                             worktree_action.action.model_dump(mode="json")
                         ),
                         status=ActionExecutionStatus.PENDING,
+                        owner_generation=agent_session.owner_generation,
                     ),
                 )
                 worktree_action = dataclasses.replace(

@@ -40,8 +40,8 @@ code_paths:
   - python/apps/azents/src/azents/worker/session/**
   - typescript/apps/azents-web/src/features/chat/components/ChatView.tsx
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
-last_verified_at: 2026-07-13
-spec_version: 78
+last_verified_at: 2026-07-14
+spec_version: 79
 ---
 
 # Agent Execution Loop
@@ -60,7 +60,7 @@ Main steps:
 
 1. Worker reads exactly one FIFO InputBuffer head, resolves the requested profile when that input requires inference, and then locks the same head for atomic preparation.
 2. Preparation atomically updates the Session inference snapshot, applies Goal/Skill side effects, appends canonical events, associates run input, and deletes the source buffer. A changed FIFO head restarts preparation instead of applying a stale resolution.
-3. Worker executes buffer-keyed operation TurnActions such as `create_git_worktree` before the next model dispatch; the execution claim is durable before buffer deletion, and failed operations are terminal while FIFO processing may continue to later pending input.
+3. Worker executes buffer-keyed operation TurnActions such as `create_git_worktree` before the next model dispatch. The current Session owner generation admits the execution before buffer deletion; active state and progress remain in execution tables until one atomic terminal handover appends durable history and deletes live state.
 4. `AgentRunExecution` repeats model steps and tool steps while updating `agent_runs.phase`.
 5. `PreLowerFilterPipeline` cleans up event transcript into DB-mutating event transcript.
 6. `LiteLLMResponsesLowerer` lowers event transcript, client tools, hosted tools, and model kwargs
@@ -93,6 +93,12 @@ Phase enum:
 
 `active_tool_calls` contains `call_id`, `name`, redacted/summarized `arguments`, `started_at`,
 and the admitting `owner_generation`. PostgreSQL is the execution and live-state authority for this set. The UI LLM running indicator is derived only from the active Run phase: it appears in `waiting_for_model`, remains visible for the entire `streaming_model` phase even after partial model output becomes visible, and disappears when the phase advances beyond `streaming_model`. Tool activity uses `executing_tools` and `active_tool_calls`.
+
+`action_executions` and `action_execution_events` are likewise live execution state, not a second
+terminal history store. Each active operation stores its admitting Session `owner_generation` and
+remains `pending` or `running` in those tables. Completed, failed, and cancelled shapes exist only in
+the final durable snapshot. A terminal transaction locks the live row, appends the deterministic
+`action_execution_result:{execution_id}` event, and deletes the execution with its progress rows.
 
 A newly selected run begins as `pending`. For normal buffered input, the worker resolves the
 Agent-owned target label and optional effort before transactionally preparing the FIFO head. Successful
@@ -456,17 +462,28 @@ command from the session and passes it into `RunExecutor`, which prepares the sa
 existing pending commands, or pending input buffers reject command/edit writes with `409 Conflict`.
 Operation TurnActions are processed after input-buffer preparation and before model dispatch at both
 wake-up entry and model-call turn boundaries inside an already-running run. `create_git_worktree`
-action execution is keyed by the source `input_buffer_id`; the transaction stores the typed action
-payload and pending execution before deleting the source buffer. Execution publishes projection
-updates while status or log entries change, creates the worktree through typed Runner Git operations,
-registers the created path as a session Project, refreshes catalog/Skill projection, and then
-invalidates the prepared context boundary. This same path covers new-session setup actions and
-existing-session Register Project worktree actions. After successful Project mutation, the same
-active `AgentRun` rebuilds model/tool context and the next physical model request from the current
-Session inference snapshot. If an action fails, it is terminal and FIFO processing may continue to
-later pending input without a retry/discard mutation. Terminal completed and failed worktree actions
-append an `action_execution_result` durable event containing the final projection; live state excludes
-terminal executions so logs survive history reload without a live-only fallback.
+action execution is keyed by the source `input_buffer_id`; the preparation transaction stores the
+typed action payload, current Session owner generation, and pending execution before deleting the
+source buffer. Before invoking a side effect, the worker verifies that generation and admits the
+operation through the same shutdown barrier used by foreground tools. Execution publishes live
+projection updates while status or log entries change, creates the worktree through typed Runner Git
+operations, registers the created path as a session Project, refreshes catalog/Skill projection, and
+then invalidates the prepared context boundary.
+
+This same path covers new-session setup actions and existing-session Register Project worktree
+actions. After successful Project mutation, the same active `AgentRun` rebuilds model/tool context
+and the next physical model request from the current Session inference snapshot. If an action fails,
+it is terminal and FIFO processing may continue to later pending input without a retry/discard
+mutation. Completion, failure, and cancellation all use one transaction that copies the current
+execution and ordered progress events into one `action_execution_result`, then deletes the live row.
+The stable execution ID joins live and durable projections.
+
+At every new Session processing boundary, the current owner terminalizes any leftover operation as
+cancelled before admitting new work. It never resumes or re-executes an uncertain stale side effect.
+Worker shutdown closes new operation admission and allows the supervised foreground task up to 30
+seconds to finish. Timeout cancels the task and persists a cancelled snapshot before ownership is
+released. User stop cancels immediately through the existing foreground-task path; the operation
+records a user-stop cancellation snapshot while the Run follows normal preemptive stop semantics.
 
 Stop uses the REST control endpoint `POST /chat/v1/sessions/{session_id}/stop`; it records a durable
 DB stop intent and sends a best-effort broker stop signal for immediate cancellation. WebSocket
@@ -479,7 +496,8 @@ Public web chat projection is split by lifecycle:
 - durable transcript reads use `GET /chat/v1/sessions/{session_id}/history`;
 - current streaming/tool/pending-input state uses `GET /chat/v1/sessions/{session_id}/live`;
 - WebSocket transport publishes canonical action envelopes such as `history_event_appended`,
-  `live_event_upserted`, `live_event_removed`, and `action_execution_updated`.
+  `live_event_upserted`, `live_event_removed`, `action_execution_updated`, and
+  `action_execution_removed`.
 
 A durable `Event` is nested inside `history_event_appended`; it is never sent as a raw top-level public
 WebSocket frame. REST writes commit their authoritative database state before projection. When the
@@ -596,8 +614,10 @@ handoff from idle hook result to recoverable runner work.
 
 A graceful worker shutdown is not an idle transition. If shutdown is observed while a run is active,
 the departing worker preserves `running` state and hands over by wake-up instead of marking the
-session idle or dispatching idle hooks. Stale recovery can then resume from durable state without
-waiting for an idle-only path.
+session idle or dispatching idle hooks. The supervised foreground task receives a bounded 30-second
+completion window. Tool-call recovery may continue from its durable ownership protocol, but an
+uncertain operation TurnAction is cancelled into durable history and is never resumed by the next
+owner.
 
 The first idle hook provider is Goal Toolkit. It emits continuation only for `active` Goal state.
 `paused`, `blocked`, `complete`, or empty Goal state does not enqueue a continuation and does not
@@ -617,6 +637,7 @@ updated by the user.
 
 ## Changelog
 
+- **2026-07-14** (spec_version 79) — Defined operation TurnActions as owner-generation-fenced live execution state with atomic terminal snapshot/delete handover, 30-second shutdown completion, preemptive user-stop cancellation, and no stale-owner re-execution.
 - **2026-07-13** (spec_version 78) — Reverted incremental native-stream normalization from version 77 and removed time- and character-based live partial batching so every existing content and reasoning delta updates Redis and WebSocket projection immediately.
 - **2026-07-13** (spec_version 77) — Made native model stream normalization incremental so text and reasoning projections are emitted before provider completion without retaining the full native event sequence.
 - **2026-07-13** (spec_version 76) — Clarified that the LLM running indicator remains visible through the complete model streaming phase, including after partial output appears.

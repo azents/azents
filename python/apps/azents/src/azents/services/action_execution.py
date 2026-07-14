@@ -23,7 +23,7 @@ _SESSION_MANAGER_DEP = Depends(get_session_manager)
 
 
 class ActionExecutionService:
-    """Service boundary for durable TurnAction execution projections."""
+    """Service boundary for live TurnAction execution projections."""
 
     def __init__(
         self,
@@ -43,6 +43,7 @@ class ActionExecutionService:
         input_buffer_id: str,
         action_type: str,
         action: dict[str, JSONValue],
+        owner_generation: int,
     ) -> ActionExecution:
         """Create or return execution state for one source input buffer."""
         async with self.session_manager() as session:
@@ -55,6 +56,7 @@ class ActionExecutionService:
                     action_type=action_type,
                     action=action,
                     status=ActionExecutionStatus.PENDING,
+                    owner_generation=owner_generation,
                 ),
             )
 
@@ -76,7 +78,7 @@ class ActionExecutionService:
         *,
         session_id: str,
     ) -> list[ActionExecution]:
-        """List durable action executions for a session."""
+        """List live action executions for a session."""
         async with self.session_manager() as session:
             return await self.action_execution_repository.list_by_session_id(
                 session,
@@ -94,7 +96,7 @@ class ActionExecutionService:
         content: str | None,
         exit_code: int | None,
     ) -> ActionExecutionEvent:
-        """Append one durable execution progress event."""
+        """Append one live execution progress event."""
         async with self.session_manager() as session:
             return await self.action_execution_repository.append_event(
                 session,
@@ -120,32 +122,4 @@ class ActionExecutionService:
                 session,
                 action_execution_id=action_execution_id,
                 started_at=datetime.datetime.now(datetime.UTC),
-            )
-
-    async def mark_completed(
-        self,
-        *,
-        action_execution_id: str,
-    ) -> ActionExecution:
-        """Mark an execution completed with the current UTC time."""
-        async with self.session_manager() as session:
-            return await self.action_execution_repository.mark_completed(
-                session,
-                action_execution_id=action_execution_id,
-                completed_at=datetime.datetime.now(datetime.UTC),
-            )
-
-    async def mark_failed(
-        self,
-        *,
-        action_execution_id: str,
-        failure_summary: str,
-    ) -> ActionExecution:
-        """Mark an execution failed with the current UTC time."""
-        async with self.session_manager() as session:
-            return await self.action_execution_repository.mark_failed(
-                session,
-                action_execution_id=action_execution_id,
-                failure_summary=failure_summary,
-                failed_at=datetime.datetime.now(datetime.UTC),
             )

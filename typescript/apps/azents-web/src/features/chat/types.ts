@@ -1,6 +1,7 @@
 /** Chat feature status type */
 
 import type {
+  ActionExecutionProjectionResponse,
   AgentResponse,
   AppliedInferenceProfile,
   ChatEventResponse,
@@ -227,6 +228,10 @@ export interface GoalBriefingPayload {
   duration_seconds?: number | null;
 }
 
+export interface ActionExecutionResultPayload {
+  action_execution: ActionExecutionProjectionResponse;
+}
+
 export interface SkillLoadedPayload {
   name: string;
   skill_path: string;
@@ -305,6 +310,7 @@ export type ChatEventPayload =
   | GoalBriefingPayload
   | ActionMessagePayload
   | AgentMessagePayload
+  | ActionExecutionResultPayload
   | SkillLoadedPayload
   | SystemReminderPayload
   | SystemErrorPayload
@@ -341,6 +347,7 @@ export type ChatHistoryEvent =
   | EventBase<"goal_briefing", GoalBriefingPayload>
   | EventBase<"action_message", ActionMessagePayload>
   | EventBase<"agent_message", AgentMessagePayload>
+  | EventBase<"action_execution_result", ActionExecutionResultPayload>
   | EventBase<"skill_loaded", SkillLoadedPayload>
   | EventBase<"system_reminder", SystemReminderPayload>
   | EventBase<"system_error", SystemErrorPayload>
@@ -550,6 +557,24 @@ export interface InputActionsUpdatedEvent {
   session_id: string;
 }
 
+export type ActionExecutionProjection = ActionExecutionProjectionResponse & {
+  provenance: "durable" | "live";
+  historyEventId?: string;
+  historyCreatedAt?: string;
+};
+
+export interface ActionExecutionUpdatedEvent {
+  type: "action_execution_updated";
+  session_id: string;
+  action_execution: ActionExecutionProjection;
+}
+
+export interface ActionExecutionRemovedEvent {
+  type: "action_execution_removed";
+  session_id: string;
+  action_execution_id: string;
+}
+
 export interface SubscriptionHealthCheckAckEvent {
   type: "subscription_health_check_ack";
   session_id: string;
@@ -620,6 +645,8 @@ export type ChatEvent =
   | LiveEventRemovedEvent
   | SubscribedEvent
   | InputActionsUpdatedEvent
+  | ActionExecutionUpdatedEvent
+  | ActionExecutionRemovedEvent
   | SubscriptionHealthCheckAckEvent
   | LiveRunUpdatedEvent
   | LiveRunClearedEvent

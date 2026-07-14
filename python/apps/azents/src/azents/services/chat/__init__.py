@@ -1028,6 +1028,12 @@ class ChatSessionService:
             todo = TodoStateSnapshot.from_state(
                 await todo_store.load(agent_session.agent_id, session_id)
             )
+            action_executions = (
+                await self.action_execution_repository.list_projections_by_session_id(
+                    session,
+                    session_id=session_id,
+                )
+            )
             session_run_state = agent_session.run_state
             if run is not None:
                 if session_run_state != AgentSessionRunState.RUNNING:
@@ -1083,6 +1089,7 @@ class ChatSessionService:
                     session_run_state=session_run_state,
                     todo=todo,
                     goal=goal,
+                    action_executions=action_executions,
                 )
             )
 

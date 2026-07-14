@@ -287,6 +287,35 @@ def _create_git_worktree_session(
     return session_id
 
 
+def _live_projection(
+    *,
+    server_url: str,
+    token: str,
+    session_id: str,
+) -> dict[str, object]:
+    """Fetch the current live projection for a session."""
+    return _get_json(
+        server_url=server_url,
+        token=token,
+        path=f"/chat/v1/sessions/{session_id}/live",
+    )
+
+
+def _assert_no_live_action_executions(
+    *,
+    server_url: str,
+    token: str,
+    session_id: str,
+) -> None:
+    """Verify terminal handoff removed the live operation projection."""
+    live = _live_projection(
+        server_url=server_url,
+        token=token,
+        session_id=session_id,
+    )
+    assert live.get("action_executions") == []
+
+
 def _action_execution_status(projection: dict[str, object]) -> str:
     """Return an action execution status from a projection."""
     execution = _OBJECT_ADAPTER.validate_python(projection.get("execution"))
@@ -491,6 +520,11 @@ class TestSessionGitWorktreeLifecycle:
             status="completed",
         )
         action_execution_id = _action_execution_id(projection)
+        _assert_no_live_action_executions(
+            server_url=azents_public_server_url,
+            token=token,
+            session_id=session_id,
+        )
         _assert_action_retry_controls_removed(
             server_url=azents_public_server_url,
             token=token,
@@ -524,6 +558,11 @@ class TestSessionGitWorktreeLifecycle:
             failed_projection.get("execution")
         )
         assert failed_execution.get("failure_summary")
+        _assert_no_live_action_executions(
+            server_url=azents_public_server_url,
+            token=token,
+            session_id=failed_session_id,
+        )
         assert (
             _list_session_projects(
                 server_url=azents_public_server_url,

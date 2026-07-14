@@ -228,6 +228,10 @@ Class | Method | HTTP request | Description
 
  - [AcceptDeclineResponse](azentspublicclient/docs/AcceptDeclineResponse.md)
  - [Action](azentspublicclient/docs/Action.md)
+ - [Action1](azentspublicclient/docs/Action1.md)
+ - [ActionExecutionEventResponse](azentspublicclient/docs/ActionExecutionEventResponse.md)
+ - [ActionExecutionProjectionResponse](azentspublicclient/docs/ActionExecutionProjectionResponse.md)
+ - [ActionExecutionResponse](azentspublicclient/docs/ActionExecutionResponse.md)
  - [AgentAdminAddRequest](azentspublicclient/docs/AgentAdminAddRequest.md)
  - [AgentAdminListResponse](azentspublicclient/docs/AgentAdminListResponse.md)
  - [AgentAdminResponse](azentspublicclient/docs/AgentAdminResponse.md)

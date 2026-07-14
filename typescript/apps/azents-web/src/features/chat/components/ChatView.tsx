@@ -43,6 +43,7 @@ import {
 } from "react";
 import { type UploadedFile, useFileUpload } from "../hooks/useFileUpload";
 import { WorkspacePanel } from "../workspace/components/WorkspacePanel";
+import { ActionExecutionTimelineCard } from "./ActionExecutionTimelineCard";
 import { AgentRunIndicator } from "./AgentRunIndicator";
 import { AuthorizationRequestBubble } from "./AuthorizationRequestBubble";
 import { ChatInput } from "./ChatInput";
@@ -54,6 +55,7 @@ import { PendingInputBufferBubble } from "./PendingInputBufferBubble";
 import { RunRetryCard } from "./RunRetryCard";
 import { TurnDivider } from "./TurnDivider";
 import type {
+  ActionExecutionProjection,
   AuthorizationRequest,
   ChatAction,
   ChatLiveRunState,
@@ -175,17 +177,109 @@ function getLatestCompactionIndex(messages: ChatMessage[]): number {
   return -1;
 }
 
+function actionExecutionTimelineItemId(
+  actionExecution: ActionExecutionProjection,
+): string {
+  return `action:${actionExecution.execution.id}`;
+}
+
+function compareTimelineKeys(
+  leftTime: string,
+  leftId: string,
+  rightTime: string,
+  rightId: string,
+): number {
+  const byTime = leftTime.localeCompare(rightTime);
+  return byTime === 0 ? leftId.localeCompare(rightId) : byTime;
+}
+
+interface ActionExecutionTimelinePlacement {
+  durableBeforeMessage: Map<string, ActionExecutionProjection[]>;
+  durableTail: ActionExecutionProjection[];
+  liveTail: ActionExecutionProjection[];
+}
+
+function placeActionExecutions(
+  messages: ChatMessage[],
+  actionExecutions: ActionExecutionProjection[],
+): ActionExecutionTimelinePlacement {
+  const durableBeforeMessage = new Map<string, ActionExecutionProjection[]>();
+  const durableTail: ActionExecutionProjection[] = [];
+  const durable = actionExecutions
+    .filter((projection) => projection.provenance === "durable")
+    .sort((left, right) =>
+      compareTimelineKeys(
+        left.historyCreatedAt ?? left.execution.updated_at,
+        left.historyEventId ?? left.execution.id,
+        right.historyCreatedAt ?? right.execution.updated_at,
+        right.historyEventId ?? right.execution.id,
+      ),
+    );
+  const liveTail = actionExecutions
+    .filter((projection) => projection.provenance === "live")
+    .sort((left, right) =>
+      compareTimelineKeys(
+        left.execution.updated_at,
+        left.execution.id,
+        right.execution.updated_at,
+        right.execution.id,
+      ),
+    );
+
+  for (const actionExecution of durable) {
+    const followingMessage = messages.find(
+      (message) =>
+        compareTimelineKeys(
+          actionExecution.historyCreatedAt ??
+            actionExecution.execution.updated_at,
+          actionExecution.historyEventId ?? actionExecution.execution.id,
+          message.createdAt,
+          message.id,
+        ) < 0,
+    );
+    if (!followingMessage) {
+      durableTail.push(actionExecution);
+      continue;
+    }
+    const before = durableBeforeMessage.get(followingMessage.id) ?? [];
+    durableBeforeMessage.set(followingMessage.id, [...before, actionExecution]);
+  }
+
+  return { durableBeforeMessage, durableTail, liveTail };
+}
+
 /** Build scroll-tracking IDs in the same order as rendered timeline items. */
 function getTimelineItemIds(
   messages: ChatMessage[],
   pendingInputBuffers: PendingInputBuffer[],
   liveRun: ChatLiveRunState | null,
+  actionExecutions: ActionExecutionProjection[],
 ): string[] {
-  return [
-    ...messages.map((message) => `message:${message.id}`),
-    ...(hasLiveRetry(liveRun) ? [`live-run-retry:${liveRun.run_id}`] : []),
-    ...pendingInputBuffers.map((buffer) => `pending:${buffer.id}`),
-  ];
+  const placement = placeActionExecutions(messages, actionExecutions);
+  const ids: string[] = [];
+
+  for (const message of messages) {
+    for (const actionExecution of placement.durableBeforeMessage.get(
+      message.id,
+    ) ?? []) {
+      ids.push(actionExecutionTimelineItemId(actionExecution));
+    }
+    ids.push(`message:${message.id}`);
+  }
+  for (const actionExecution of placement.durableTail) {
+    ids.push(actionExecutionTimelineItemId(actionExecution));
+  }
+  if (hasLiveRetry(liveRun)) {
+    ids.push(`live-run-retry:${liveRun.run_id}`);
+  }
+  for (const actionExecution of placement.liveTail) {
+    ids.push(actionExecutionTimelineItemId(actionExecution));
+  }
+  for (const buffer of pendingInputBuffers) {
+    ids.push(`pending:${buffer.id}`);
+  }
+
+  return ids;
 }
 
 /** display message bar with after to text completion marker UI control with collects.. */
@@ -281,6 +375,8 @@ interface ChatViewProps {
   authorizationRequests: AuthorizationRequest[];
   /** auth complete when remove corresponding request */
   onAuthorizationComplete: (toolkitId: string) => void;
+  /** current operation TurnAction execution projections */
+  actionExecutions: ActionExecutionProjection[];
   /** Workspace panel container output */
   workspacePanel: WorkspacePanelContainerOutput;
   /** current session goal snapshot */
@@ -325,6 +421,7 @@ export function ChatView({
   inputActions,
   authorizationRequests,
   onAuthorizationComplete,
+  actionExecutions,
   workspacePanel,
   goal,
   todo,
@@ -392,8 +489,24 @@ export function ChatView({
       ? liveRun
       : null;
   const liveRetryVisible = liveRetryRun !== null;
+  const visibleActionExecutions = useMemo(
+    () =>
+      chatTimelineState.type === "LATEST_FOLLOWING"
+        ? actionExecutions
+        : actionExecutions.filter(
+            (actionExecution) => actionExecution.provenance === "durable",
+          ),
+    [actionExecutions, chatTimelineState.type],
+  );
+  const actionExecutionPlacement = useMemo(
+    () => placeActionExecutions(messages, visibleActionExecutions),
+    [messages, visibleActionExecutions],
+  );
   const hasTimelineItems =
-    messages.length > 0 || pendingInputBuffers.length > 0 || liveRetryVisible;
+    messages.length > 0 ||
+    pendingInputBuffers.length > 0 ||
+    liveRetryVisible ||
+    visibleActionExecutions.length > 0;
   const editingMessageIndex = useMemo(() => {
     if (!editingMessage) {
       return null;
@@ -634,13 +747,19 @@ export function ChatView({
       }
       savedScrollRef.current = null;
       prevMessageIdsRef.current = new Set(
-        getTimelineItemIds(messages, pendingInputBuffers, liveRun),
+        getTimelineItemIds(
+          messages,
+          pendingInputBuffers,
+          liveRun,
+          visibleActionExecutions,
+        ),
       );
     }
   }, [
     messages,
     pendingInputBuffers,
     liveRun,
+    visibleActionExecutions,
     hasMore,
     isLoadingMore,
     markProgrammaticScroll,
@@ -728,7 +847,12 @@ export function ChatView({
     }
     isInitialScrollRef.current = false;
     prevMessageIdsRef.current = new Set(
-      getTimelineItemIds(messages, pendingInputBuffers, liveRun),
+      getTimelineItemIds(
+        messages,
+        pendingInputBuffers,
+        liveRun,
+        visibleActionExecutions,
+      ),
     );
 
     // text after next frame pagination enable (sectext scroll insidetext waiting)
@@ -740,6 +864,7 @@ export function ChatView({
     messages,
     pendingInputBuffers,
     liveRun,
+    visibleActionExecutions,
     chatViewState.type,
     hasMore,
     loadOlderUntilViewportScrollable,
@@ -750,7 +875,12 @@ export function ChatView({
   useEffect(() => {
     const frame = requestAnimationFrame(loadOlderUntilViewportScrollable);
     return () => cancelAnimationFrame(frame);
-  }, [loadOlderUntilViewportScrollable, messages, pendingInputBuffers]);
+  }, [
+    visibleActionExecutions,
+    loadOlderUntilViewportScrollable,
+    messages,
+    pendingInputBuffers,
+  ]);
 
   useEffect(() => {
     const el = contentRef.current;
@@ -810,6 +940,7 @@ export function ChatView({
       messages,
       pendingInputBuffers,
       liveRun,
+      visibleActionExecutions,
     );
     const hasNewMessage = timelineItemIds.some((id) => !prevIds.has(id));
 
@@ -830,7 +961,13 @@ export function ChatView({
     } else {
       setShowNewMessageChip(true);
     }
-  }, [messages, pendingInputBuffers, liveRun, schedulePinToBottom]);
+  }, [
+    messages,
+    pendingInputBuffers,
+    liveRun,
+    visibleActionExecutions,
+    schedulePinToBottom,
+  ]);
 
   // integration scroll handler: bottom detection + new message chip release + older messages  withtext + mobile header hide/display
   useEffect(() => {
@@ -1080,16 +1217,36 @@ export function ChatView({
             ) : (
               <Stack gap={0}>
                 {messages.map((msg, index) => {
+                  const durableBefore =
+                    actionExecutionPlacement.durableBeforeMessage.get(msg.id) ??
+                    [];
                   if (msg.role === "compaction") {
                     return (
-                      <CompactionDivider key={msg.id} content={msg.content} />
+                      <Fragment key={msg.id}>
+                        {durableBefore.map((actionExecution) => (
+                          <ActionExecutionTimelineCard
+                            key={actionExecution.execution.id}
+                            actionExecution={actionExecution}
+                          />
+                        ))}
+                        <CompactionDivider content={msg.content} />
+                      </Fragment>
                     );
                   }
                   if (
                     msg.role === "compaction_started" ||
                     isBoundaryMessage(msg)
                   ) {
-                    return null;
+                    return durableBefore.length > 0 ? (
+                      <Fragment key={msg.id}>
+                        {durableBefore.map((actionExecution) => (
+                          <ActionExecutionTimelineCard
+                            key={actionExecution.execution.id}
+                            actionExecution={actionExecution}
+                          />
+                        ))}
+                      </Fragment>
+                    ) : null;
                   }
                   const boundaryControls = getBoundaryControls(messages, index);
                   const dimmedByEdit =
@@ -1119,6 +1276,12 @@ export function ChatView({
                     : null;
                   return (
                     <Fragment key={msg.id}>
+                      {durableBefore.map((actionExecution) => (
+                        <ActionExecutionTimelineCard
+                          key={actionExecution.execution.id}
+                          actionExecution={actionExecution}
+                        />
+                      ))}
                       <MessageBubble
                         message={msg}
                         dimmed={dimmedByEdit}
@@ -1130,6 +1293,12 @@ export function ChatView({
                     </Fragment>
                   );
                 })}
+                {actionExecutionPlacement.durableTail.map((actionExecution) => (
+                  <ActionExecutionTimelineCard
+                    key={actionExecution.execution.id}
+                    actionExecution={actionExecution}
+                  />
+                ))}
                 {authorizationRequests.map((req) => (
                   <AuthorizationRequestBubble
                     key={req.toolkitId}
@@ -1153,19 +1322,24 @@ export function ChatView({
                   isModelResponsePending && <AgentRunIndicator />}
                 {chatTimelineState.type === "LATEST_FOLLOWING" &&
                   isCompacting && <CompactionIndicator />}
+                {actionExecutionPlacement.liveTail.map((actionExecution) => (
+                  <ActionExecutionTimelineCard
+                    key={actionExecution.execution.id}
+                    actionExecution={actionExecution}
+                  />
+                ))}
                 {chatTimelineState.type === "LATEST_FOLLOWING" &&
-                  pendingInputBuffers.map((buffer) => (
-                    <Fragment key={buffer.id}>
-                      {buffer.id.startsWith("optimistic:") ? (
-                        <OptimisticInputBubble buffer={buffer} />
-                      ) : (
-                        <PendingInputBufferBubble
-                          buffer={buffer}
-                          onDelete={onDeletePendingInputBuffer}
-                        />
-                      )}
-                    </Fragment>
-                  ))}
+                  pendingInputBuffers.map((buffer) =>
+                    buffer.id.startsWith("optimistic:") ? (
+                      <OptimisticInputBubble key={buffer.id} buffer={buffer} />
+                    ) : (
+                      <PendingInputBufferBubble
+                        key={buffer.id}
+                        buffer={buffer}
+                        onDelete={onDeletePendingInputBuffer}
+                      />
+                    ),
+                  )}
               </Stack>
             )}
           </Box>
