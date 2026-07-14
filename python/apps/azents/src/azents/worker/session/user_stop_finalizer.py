@@ -70,6 +70,7 @@ class UserStopFinalizer:
         effective_tool_calls = (
             list(running_run.active_tool_calls) if running_run is not None else []
         )
+        await self.live_event_projector.flush_session(session_id)
         await self._persist_live_events_for_user_stop(
             session_id,
             run_id=effective_run_id,

@@ -20,7 +20,7 @@ from azents.core.chatgpt_oauth import (
 from azents.core.credentials import ChatGPTOAuthConfig, ChatGPTOAuthSecrets
 from azents.core.crypto import CredentialCipher
 from azents.core.deps import get_credential_cipher
-from azents.core.enums import LLMProvider
+from azents.core.enums import LLMCatalogLowererTarget, LLMProvider
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.chatgpt_oauth_session import ChatGPTOAuthSessionRepository
@@ -28,6 +28,7 @@ from azents.repos.chatgpt_oauth_session.data import (
     ChatGPTOAuthSessionCreate,
     ChatGPTOAuthSessionWithSecrets,
 )
+from azents.repos.llm_catalog import LLMCatalogRepository
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationCreate
 
@@ -90,12 +91,14 @@ class ChatGPTOAuthService:
         integration_repo: Annotated[
             LLMProviderIntegrationRepository, Depends(_get_integration_repo)
         ],
+        catalog_repo: Annotated[LLMCatalogRepository, Depends(LLMCatalogRepository)],
         client: Annotated[ChatGPTOAuthClient, Depends(_get_client)],
     ) -> None:
         """Inject service dependencies."""
         self._session_manager = session_manager
         self._session_repo = session_repo
         self._integration_repo = integration_repo
+        self._catalog_repo = catalog_repo
         self._client = client
 
     async def start_device(
@@ -298,6 +301,12 @@ class ChatGPTOAuthService:
                                 last_refreshed_at=datetime.datetime.now(datetime.UTC),
                             ),
                         ),
+                    )
+                    await self._catalog_repo.ensure_integration_catalog(
+                        session,
+                        integration_id=integration.id,
+                        provider=integration.provider,
+                        lowerer_target=LLMCatalogLowererTarget.LITELLM,
                     )
                 return Success(ChatGPTOAuthExchangeOutput(integration=integration))
             case Failure(error):

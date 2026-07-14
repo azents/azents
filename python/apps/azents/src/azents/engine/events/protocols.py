@@ -127,15 +127,30 @@ class ModelAdapter(Protocol):
         ...
 
 
-class AdapterOutputNormalizer(Protocol):
-    """Normalize adapter native output to event."""
+class AdapterOutputStream(Protocol):
+    """Incrementally normalize one adapter-native model stream."""
 
-    def normalize(
+    def process_event(
         self,
-        session_id: str,
-        native_events: Sequence[NativeEvent],
+        native_event: NativeEvent,
     ) -> NormalizedAdapterOutput:
-        """Convert native event sequence to event output."""
+        """Convert one native event to immediate live projections."""
+        ...
+
+    def complete(self) -> NormalizedAdapterOutput:
+        """Build durable output after the native stream completes."""
+        ...
+
+    def interrupt(self) -> NormalizedAdapterOutput:
+        """Build preservable partial output after user interruption."""
+        ...
+
+
+class AdapterOutputNormalizer(Protocol):
+    """Create incremental normalizers for adapter-native model streams."""
+
+    def start(self, session_id: str) -> AdapterOutputStream:
+        """Start normalization state for one native model stream."""
         ...
 
 
@@ -354,12 +369,12 @@ class ManualCompactor(Protocol):
 
     async def compact(
         self,
-        session: AsyncSession,
         *,
         session_id: str,
         transcript: Sequence[Event],
         compaction_id: str,
         summarize: "SummaryGenerator",
+        on_started: Callable[[], Awaitable[None]] | None = None,
         summary_context_window_tokens: int | None = None,
         reason: str | None = None,
         summary_enricher: SummaryEnricher | None = None,

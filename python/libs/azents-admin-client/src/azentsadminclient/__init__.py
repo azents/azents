@@ -52,7 +52,6 @@ __all__ = [
     "InvitationListResponse",
     "InvitationResponse",
     "InvitationStatus",
-    "LLMProvider",
     "PasswordResetTokenListResponse",
     "PasswordResetTokenResponse",
     "SentryDiagnostics",
@@ -63,6 +62,7 @@ __all__ = [
     "SystemBootstrapFirstAdminRequest",
     "SystemBootstrapFirstAdminResponse",
     "SystemBootstrapStatusResponse",
+    "SystemCatalogProvider",
     "SystemModelCatalogListResponse",
     "SystemModelCatalogRefreshListResponse",
     "SystemModelCatalogRefreshResponse",
@@ -129,7 +129,6 @@ from azentsadminclient.models.health_status import HealthStatus as HealthStatus
 from azentsadminclient.models.invitation_list_response import InvitationListResponse as InvitationListResponse
 from azentsadminclient.models.invitation_response import InvitationResponse as InvitationResponse
 from azentsadminclient.models.invitation_status import InvitationStatus as InvitationStatus
-from azentsadminclient.models.llm_provider import LLMProvider as LLMProvider
 from azentsadminclient.models.password_reset_token_list_response import PasswordResetTokenListResponse as PasswordResetTokenListResponse
 from azentsadminclient.models.password_reset_token_response import PasswordResetTokenResponse as PasswordResetTokenResponse
 from azentsadminclient.models.sentry_diagnostics import SentryDiagnostics as SentryDiagnostics
@@ -140,6 +139,7 @@ from azentsadminclient.models.system_admin_me_response import SystemAdminMeRespo
 from azentsadminclient.models.system_bootstrap_first_admin_request import SystemBootstrapFirstAdminRequest as SystemBootstrapFirstAdminRequest
 from azentsadminclient.models.system_bootstrap_first_admin_response import SystemBootstrapFirstAdminResponse as SystemBootstrapFirstAdminResponse
 from azentsadminclient.models.system_bootstrap_status_response import SystemBootstrapStatusResponse as SystemBootstrapStatusResponse
+from azentsadminclient.models.system_catalog_provider import SystemCatalogProvider as SystemCatalogProvider
 from azentsadminclient.models.system_model_catalog_list_response import SystemModelCatalogListResponse as SystemModelCatalogListResponse
 from azentsadminclient.models.system_model_catalog_refresh_list_response import SystemModelCatalogRefreshListResponse as SystemModelCatalogRefreshListResponse
 from azentsadminclient.models.system_model_catalog_refresh_response import SystemModelCatalogRefreshResponse as SystemModelCatalogRefreshResponse

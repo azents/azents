@@ -15,6 +15,7 @@ from azents.core.enums import (
     LLMCatalogScope,
     LLMProvider,
 )
+from azents.core.llm_catalog import INTEGRATION_SCOPED_CATALOG_PROVIDERS
 from azents.rdb.models.llm_catalog import (
     RDBLiteLLMSourceSnapshot,
     RDBLLMCatalog,
@@ -318,7 +319,10 @@ class LLMCatalogRepository:
             integration_id=integration_id,
             workspace_id=workspace_id,
         )
-        if catalog is None:
+        if (
+            catalog is None
+            and integration.provider not in INTEGRATION_SCOPED_CATALOG_PROVIDERS
+        ):
             catalog = await self.get_system_catalog(
                 session,
                 provider=integration.provider,

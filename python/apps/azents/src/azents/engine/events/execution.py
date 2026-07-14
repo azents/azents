@@ -15,9 +15,9 @@ from azents.core.inference_profile import SessionInferenceState
 from azents.engine.events.model_file_refs import unique_model_file_ids
 from azents.engine.events.protocols import (
     AdapterOutputNormalizer,
+    AdapterOutputStream,
     ClientToolExecutor,
     ModelAdapter,
-    NativeEvent,
     NativeModelRequest,
     NormalizedAdapterOutput,
     OutputSink,
@@ -151,9 +151,9 @@ class AgentRunExecutionRequest:
 class _ModelStreamUserInterrupted(Exception):
     """Indicates model stream was interrupted by user stop."""
 
-    def __init__(self, native_events: Sequence[NativeEvent]) -> None:
+    def __init__(self, normalized: NormalizedAdapterOutput) -> None:
         super().__init__(USER_STOP_CANCEL_MESSAGE)
-        self.native_events = list(native_events)
+        self.normalized = normalized
 
 
 class _ToolExecutionUserInterrupted(Exception):
@@ -320,9 +320,10 @@ class AgentRunExecution:
                     )
                     await session.commit()
                     try:
-                        native_events = await self._stream_model(
+                        output_stream = await self._stream_model(
                             session,
                             request.run_id,
+                            request.session_id,
                             native_request,
                         )
                     except _ModelStreamUserInterrupted as exc:
@@ -330,7 +331,7 @@ class AgentRunExecution:
                         return await self._complete_user_interrupted_model_stream(
                             session,
                             request,
-                            exc.native_events,
+                            exc.normalized,
                         )
 
                     await self._update_phase(
@@ -338,10 +339,7 @@ class AgentRunExecution:
                         request.run_id,
                         AgentRunPhase.NORMALIZING_OUTPUT,
                     )
-                    normalized = self._output_normalizer.normalize(
-                        request.session_id,
-                        native_events,
-                    )
+                    normalized = output_stream.complete()
                     _log_model_token_usage(
                         request=request,
                         usage=normalized.usage,
@@ -515,40 +513,39 @@ class AgentRunExecution:
         self,
         session: AsyncSession,
         run_id: str,
+        session_id: str,
         native_request: NativeModelRequest,
-    ) -> list[NativeEvent]:
-        """Collect model stream."""
+    ) -> AdapterOutputStream:
+        """Normalize and project model stream events as they arrive."""
         await self._update_phase(
             session,
             run_id,
             AgentRunPhase.STREAMING_MODEL,
         )
         await session.commit()
-        events: list[NativeEvent] = []
+        output_stream = self._output_normalizer.start(session_id)
         try:
             async for event in self._model_adapter.stream(native_request):
-                events.append(event)
+                incremental = output_stream.process_event(event)
+                if self._output_sink is not None and incremental.projections:
+                    await self._output_sink(incremental, [])
         except asyncio.CancelledError as exc:
             if _is_user_stop_cancellation(exc):
-                raise _ModelStreamUserInterrupted(events) from exc
+                raise _ModelStreamUserInterrupted(output_stream.interrupt()) from exc
             raise
-        return events
+        return output_stream
 
     async def _complete_user_interrupted_model_stream(
         self,
         session: AsyncSession,
         request: AgentRunExecutionRequest,
-        native_events: Sequence[NativeEvent],
+        normalized: NormalizedAdapterOutput,
     ) -> AgentRunStatus:
         """Durabilize partial text from model stream interrupted by user stop."""
         await self._update_phase(
             session,
             request.run_id,
             AgentRunPhase.APPENDING_EVENTS,
-        )
-        normalized = self._output_normalizer.normalize(
-            request.session_id,
-            native_events,
         )
         assistant_events = [
             event

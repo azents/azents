@@ -14,10 +14,10 @@
 
 import unittest
 
-from azentsadminclient.models.llm_provider import LLMProvider
+from azentsadminclient.models.system_catalog_provider import SystemCatalogProvider
 
-class TestLLMProvider(unittest.TestCase):
-    """LLMProvider unit test stubs"""
+class TestSystemCatalogProvider(unittest.TestCase):
+    """SystemCatalogProvider unit test stubs"""
 
     def setUp(self):
         pass
@@ -25,9 +25,9 @@ class TestLLMProvider(unittest.TestCase):
     def tearDown(self):
         pass
 
-    def testLLMProvider(self):
-        """Test LLMProvider"""
-        # inst = LLMProvider()
+    def testSystemCatalogProvider(self):
+        """Test SystemCatalogProvider"""
+        # inst = SystemCatalogProvider()
 
 if __name__ == '__main__':
     unittest.main()

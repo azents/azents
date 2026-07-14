@@ -1,7 +1,7 @@
 """add model call start time to agent runs
 
 Revision ID: 7d01fb472aeb
-Revises: 4ac866c17faf
+Revises: c1b023f8e0d4
 Create Date: 2026-07-14 08:32:48.290283
 
 """
@@ -13,7 +13,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "7d01fb472aeb"
-down_revision: str | Sequence[str] | None = "4ac866c17faf"
+down_revision: str | Sequence[str] | None = "c1b023f8e0d4"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

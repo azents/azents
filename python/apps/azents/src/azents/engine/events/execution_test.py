@@ -22,6 +22,7 @@ from azents.engine.events.protocols import (
     NativeEvent,
     NativeModelRequest,
     NormalizedAdapterOutput,
+    StreamProjection,
 )
 from azents.engine.events.types import (
     ActiveToolCall,
@@ -382,6 +383,25 @@ class _ModelAdapter:
         yield NativeEvent(type="done", item={})
 
 
+class _BlockingModelAdapter:
+    """Pause the model stream after yielding its first delta."""
+
+    def __init__(self) -> None:
+        self.waiting_after_delta = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def stream(
+        self,
+        request: NativeModelRequest,
+    ) -> AsyncIterator[NativeEvent]:
+        """Yield a delta, wait, then finish the native stream."""
+        del request
+        yield NativeEvent(type="text_delta", item={"delta": "hel"})
+        self.waiting_after_delta.set()
+        await self.release.wait()
+        yield NativeEvent(type="done", item={})
+
+
 class _CancellingModelAdapter:
     """Yield some native events, then raise user stop cancellation."""
 
@@ -412,6 +432,63 @@ class _FailingModelAdapter:
         yield
 
 
+class _StaticOutputStream:
+    """Incremental normalizer stream that returns predefined durable output."""
+
+    def __init__(self, output: NormalizedAdapterOutput) -> None:
+        self._output = output
+
+    def process_event(
+        self,
+        native_event: NativeEvent,
+    ) -> NormalizedAdapterOutput:
+        """Ignore one native event because output is predefined."""
+        del native_event
+        return NormalizedAdapterOutput()
+
+    def complete(self) -> NormalizedAdapterOutput:
+        """Return predefined completed output."""
+        return self._output
+
+    def interrupt(self) -> NormalizedAdapterOutput:
+        """Return predefined interrupted output."""
+        return self._output
+
+
+class _ProjectingOutputStream(_StaticOutputStream):
+    """Return a live content projection for the test delta event."""
+
+    def process_event(
+        self,
+        native_event: NativeEvent,
+    ) -> NormalizedAdapterOutput:
+        """Project the test adapter's native text delta."""
+        if native_event.type != "text_delta":
+            return NormalizedAdapterOutput()
+        return NormalizedAdapterOutput(
+            projections=[
+                StreamProjection(
+                    type="content_delta",
+                    delta=str(native_event.item.get("delta", "")),
+                )
+            ]
+        )
+
+
+class _ProjectingNormalizer:
+    """Create projecting streams with predefined durable output."""
+
+    def __init__(self, events: list[Event]) -> None:
+        self._events = events
+
+    def start(self, session_id: str) -> _ProjectingOutputStream:
+        """Start one projecting output stream."""
+        del session_id
+        return _ProjectingOutputStream(
+            NormalizedAdapterOutput(events=self._events, usage=_usage())
+        )
+
+
 class _Normalizer:
     """Normalizer for tests."""
 
@@ -423,34 +500,32 @@ class _Normalizer:
         self._events = events
         self._usage = usage or _usage()
 
-    def normalize(
-        self,
-        session_id: str,
-        native_events: Sequence[NativeEvent],
-    ) -> NormalizedAdapterOutput:
-        """Return predefined event."""
-        return NormalizedAdapterOutput(events=self._events, usage=self._usage)
+    def start(self, session_id: str) -> _StaticOutputStream:
+        """Return one predefined output stream."""
+        del session_id
+        return _StaticOutputStream(
+            NormalizedAdapterOutput(events=self._events, usage=self._usage)
+        )
 
 
 class _SequenceNormalizer:
-    """Return normalized output by call order."""
+    """Return normalized output by stream call order."""
 
     def __init__(self, event_batches: Sequence[Sequence[Event]]) -> None:
         self._event_batches = [list(events) for events in event_batches]
         self._index = 0
 
-    def normalize(
-        self,
-        session_id: str,
-        native_events: Sequence[NativeEvent],
-    ) -> NormalizedAdapterOutput:
-        """Return next batch."""
-        del session_id, native_events
+    def start(self, session_id: str) -> _StaticOutputStream:
+        """Return the next predefined output stream."""
+        del session_id
         if self._index >= len(self._event_batches):
-            return NormalizedAdapterOutput(events=[], usage=_usage())
-        events = self._event_batches[self._index]
+            events: list[Event] = []
+        else:
+            events = self._event_batches[self._index]
         self._index += 1
-        return NormalizedAdapterOutput(events=events, usage=_usage())
+        return _StaticOutputStream(
+            NormalizedAdapterOutput(events=events, usage=_usage())
+        )
 
 
 class _ToolExecutor:
@@ -713,6 +788,61 @@ async def test_text_run_completes() -> None:
     )
     assert waiting_started_at is not None
     assert streaming_started_at == waiting_started_at
+
+
+async def test_model_delta_reaches_output_sink_before_stream_completion() -> None:
+    """Project native text while the provider stream remains open."""
+    run_repo = _RunRepo()
+    transcript_repo = _TranscriptRepo()
+    model_adapter = _BlockingModelAdapter()
+    sink_outputs: list[NormalizedAdapterOutput] = []
+
+    async def output_sink(
+        normalized: NormalizedAdapterOutput,
+        appended: Sequence[Event],
+    ) -> None:
+        """Record incremental and durable output sink calls."""
+        del appended
+        sink_outputs.append(normalized)
+
+    execution = AgentRunExecution(
+        post_lower_filter=_PostFilter(),
+        model_adapter=model_adapter,
+        output_normalizer=_ProjectingNormalizer([_assistant_event()]),
+        model_call_preparer=_model_call_preparer(),
+        output_sink=output_sink,
+        run_repo=run_repo,
+        transcript_repo=transcript_repo,
+    )
+    run_task = asyncio.create_task(
+        execution.run(
+            _Session(),
+            AgentRunExecutionRequest(
+                owner_generation=1,
+                tool_admission_barrier=_OpenToolAdmissionBarrier(),
+                run_id="run-1",
+                session_id="session-1",
+                model="gpt-5.1",
+            ),
+        )
+    )
+
+    await asyncio.wait_for(model_adapter.waiting_after_delta.wait(), timeout=1)
+
+    assert not run_task.done()
+    assert len(sink_outputs) == 1
+    assert sink_outputs[0].projections == [
+        StreamProjection(type="content_delta", delta="hel")
+    ]
+    assert transcript_repo.events == []
+
+    model_adapter.release.set()
+    assert await run_task == AgentRunStatus.COMPLETED
+    assert [event.kind for event in transcript_repo.events] == [
+        EventKind.ASSISTANT_MESSAGE,
+        EventKind.TURN_MARKER,
+        EventKind.RUN_MARKER,
+    ]
 
 
 async def test_text_run_commits_durable_events_before_output_sink() -> None:
