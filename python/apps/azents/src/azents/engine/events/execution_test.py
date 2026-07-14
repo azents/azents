@@ -15,6 +15,7 @@ from azents.engine.events.execution import (
     AgentRunExecutionRequest,
     InputPollResult,
     ModelCallPreparer,
+    ModelStreamWatchdog,
     PreparedModelCall,
     TurnEndReason,
 )
@@ -46,7 +47,7 @@ from azents.engine.events.types import (
     UserMessagePayload,
     build_native_compat_key,
 )
-from azents.engine.run.errors import ModelCallError
+from azents.engine.run.errors import ModelCallError, ModelStreamTimeoutError
 from azents.engine.run.types import USER_STOP_CANCEL_MESSAGE
 from azents.repos.agent_execution.data import EventCreate
 from azents.testing.model_selection import make_test_model_selection
@@ -395,6 +396,32 @@ class _BlockingModelAdapter:
         self.waiting_after_delta.set()
         await self.release.wait()
         yield NativeEvent(type="done", item={})
+
+
+class _WatchdogModelAdapter:
+    """Wait before or after a native stream event until cancelled."""
+
+    def __init__(self, *, emit_first_event: bool) -> None:
+        self.emit_first_event = emit_first_event
+        self.waiting = asyncio.Event()
+        self.cancelled = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def stream(
+        self,
+        request: NativeModelRequest,
+    ) -> AsyncIterator[NativeEvent]:
+        """Block at the configured progress boundary."""
+        del request
+        try:
+            if self.emit_first_event:
+                yield NativeEvent(type="text_delta", item={"delta": "hello"})
+            self.waiting.set()
+            await self.release.wait()
+            yield NativeEvent(type="done", item={})
+        except asyncio.CancelledError:
+            self.cancelled.set()
+            raise
 
 
 class _CancellingModelAdapter:
@@ -823,6 +850,42 @@ async def test_model_delta_reaches_output_sink_before_stream_completion() -> Non
         EventKind.TURN_MARKER,
         EventKind.RUN_MARKER,
     ]
+
+
+@pytest.mark.parametrize(
+    ("emit_first_event", "expected_stage"),
+    [(False, "first_event"), (True, "idle")],
+)
+async def test_model_stream_watchdog_closes_stalled_provider_stream(
+    emit_first_event: bool,
+    expected_stage: str,
+) -> None:
+    """Bound each provider-progress wait and close the cancelled stream."""
+    model_adapter = _WatchdogModelAdapter(emit_first_event=emit_first_event)
+    execution = AgentRunExecution(
+        post_lower_filter=_PostFilter(),
+        model_adapter=model_adapter,
+        output_normalizer=_Normalizer([_assistant_event()]),
+        model_call_preparer=_model_call_preparer(),
+        model_stream_watchdog=ModelStreamWatchdog(
+            first_event_timeout_seconds=0.01,
+            idle_timeout_seconds=0.01,
+        ),
+        run_repo=_RunRepo(),
+        transcript_repo=_TranscriptRepo(),
+    )
+
+    with pytest.raises(ModelStreamTimeoutError) as exc_info:
+        await execution._stream_model(  # pyright: ignore[reportPrivateUsage]
+            _Session(),
+            "run-1",
+            "session-1",
+            NativeModelRequest(model="gpt-5.1", input=[]),
+        )
+
+    assert exc_info.value.stage == expected_stage
+    assert exc_info.value.timeout_seconds == 0.01
+    await asyncio.wait_for(model_adapter.cancelled.wait(), timeout=1)
 
 
 async def test_text_run_commits_durable_events_before_output_sink() -> None:

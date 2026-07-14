@@ -71,7 +71,7 @@ from azents.engine.run.contracts import (
     ToolkitBinding,
 )
 from azents.engine.run.emit import Emit, handle_engine_event
-from azents.engine.run.errors import UserVisibleRuntimeError
+from azents.engine.run.errors import ModelStreamTimeoutError, UserVisibleRuntimeError
 from azents.engine.run.failure import (
     FailedRunAttempt,
     FailedRunAttemptSource,
@@ -1403,6 +1403,10 @@ class RunExecutor:
                         terminal_run_status = AgentRunStatus.COMPLETED
                     break
                 except UserVisibleRuntimeError as exc:
+                    if isinstance(exc, ModelStreamTimeoutError):
+                        await self.live_event_projector.clear_session(
+                            message.session_id
+                        )
                     retry_state = await self._record_failed_run_attempt(
                         session_id=message.session_id,
                         run_id=run_id,

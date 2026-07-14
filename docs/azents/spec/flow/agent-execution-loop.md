@@ -41,7 +41,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ChatView.tsx
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
 last_verified_at: 2026-07-14
-spec_version: 80
+spec_version: 81
 ---
 
 # Agent Execution Loop
@@ -72,6 +72,13 @@ Main steps:
 10. Foreground client tools execute in parallel and results are appended as event `client_tool_result`.
 11. When no foreground client tool call or pending follow-up remains, the runner observes the
     terminal `RunComplete` boundary and then transitions `AgentSession.run_state` to idle.
+
+Azents owns model-stream progress deadlines independently of provider transport defaults. The first
+native provider event must arrive within 90 seconds, and every subsequent native event must arrive
+within 360 seconds. Each native event, including one without user-renderable content, refreshes the
+idle deadline. A missed deadline cancels the pending stream iteration, raises a retryable
+user-visible model timeout, and clears the attempt's live partial projection before retry state is
+published. User Stop remains an independent immediate cancellation path.
 
 Streaming text, reasoning, and function-call deltas are UI projections only. The worker coalesces
 text and reasoning deltas for at most 75 milliseconds or 96 characters before Redis/WebSocket

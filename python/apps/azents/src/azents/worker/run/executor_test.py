@@ -52,6 +52,7 @@ from azents.engine.run.contracts import AgentEngineProtocol, RunContext, RunRequ
 from azents.engine.run.emit import Emit, ephemeral
 from azents.engine.run.errors import (
     ModelCallError,
+    ModelStreamTimeoutError,
     UserVisibleRuntimeError,
 )
 from azents.engine.run.failure import FailedRunRetryState
@@ -477,6 +478,7 @@ class _LiveEventProjector:
 
     def __init__(self) -> None:
         self.flushed_session_ids: list[str] = []
+        self.cleared_session_ids: list[str] = []
         self.active_tool_calls: list[tuple[str, object]] = []
         self.live_run_updates: list[tuple[str, ChatLiveRunState]] = []
         self.live_run_clears: list[tuple[str, str]] = []
@@ -512,6 +514,10 @@ class _LiveEventProjector:
     async def flush_session(self, session_id: str) -> None:
         """Record flushed sessions."""
         self.flushed_session_ids.append(session_id)
+
+    async def clear_session(self, session_id: str) -> None:
+        """Record cleared live projections."""
+        self.cleared_session_ids.append(session_id)
 
 
 class _Engine:
@@ -623,6 +629,36 @@ class _FlakyEngine(_Engine):
             self.calls += 1
             if self.calls == 1:
                 raise ModelCallError("model temporarily unavailable")
+            yield ephemeral(RunComplete(run_id=context.run_id))
+
+        return iterator()
+
+
+class _TimeoutFlakyEngine(_Engine):
+    """Engine that times out once and then completes."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def run(
+        self,
+        request: RunRequest,
+        context: object,
+        *,
+        poll_messages: object = None,
+        check_stop: object = None,
+    ) -> AsyncIterator[Emit]:
+        """Fail the first attempt with a stream progress timeout."""
+        del request, poll_messages, check_stop
+        assert isinstance(context, RunContext)
+
+        async def iterator() -> AsyncIterator[Emit]:
+            self.calls += 1
+            if self.calls == 1:
+                raise ModelStreamTimeoutError(
+                    stage="idle",
+                    timeout_seconds=360.0,
+                )
             yield ephemeral(RunComplete(run_id=context.run_id))
 
         return iterator()
@@ -2676,6 +2712,68 @@ async def test_execute_retries_failed_run_without_durable_error(
         isinstance(event, Event) and event.kind == EventKind.SYSTEM_ERROR
         for event in dispatched
     )
+
+
+@pytest.mark.asyncio
+async def test_execute_clears_live_projection_after_stream_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A retried stream timeout removes stale partial projections first."""
+    monkeypatch.setattr(run_executor_module, "_FAILED_RUN_RETRY_WAIT_POLL_SECONDS", 0)
+    lifecycle = _SessionLifecycle()
+    engine = _TimeoutFlakyEngine()
+    live_event_projector = _LiveEventProjector()
+    executor = _executor(
+        lifecycle,
+        engine=cast(AgentEngineProtocol, engine),
+        live_event_projector=live_event_projector,
+    )
+
+    async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
+        del args, kwargs
+        return RunInputPollResult(
+            context_invalidated=False,
+            complete_run=False,
+            requested_inference_profile=None,
+            promoted_event_ids=[],
+            user_messages=[],
+            has_actionable_work=True,
+        )
+
+    async def resolve_success(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        return await _resolve_success()
+
+    async def resolve_agent_tools_success(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        return []
+
+    monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
+    monkeypatch.setattr(
+        run_executor_module, "resolve_invoke_input_with_profile", resolve_success
+    )
+    monkeypatch.setattr(
+        run_executor_module, "resolve_agent_tools", resolve_agent_tools_success
+    )
+
+    async def dispatch_event(session_id: str, event: PublishedEvent) -> None:
+        del session_id, event
+
+    result = await executor.execute(
+        _message(),
+        poll_fn=None,
+        check_stop=None,
+        prepare_toolkits=None,
+        shutdown_event=asyncio.Event(),
+        dispatch_event=dispatch_event,
+        owner_generation=1,
+        tool_admission_barrier=ToolAdmissionBarrier(),
+    )
+
+    assert engine.calls == 2
+    assert result.terminal_run_status == AgentRunStatus.COMPLETED
+    assert live_event_projector.cleared_session_ids == ["session-001"]
+    assert live_event_projector.live_run_updates[-1][1].retry is None
 
 
 @pytest.mark.asyncio

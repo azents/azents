@@ -15,7 +15,7 @@ Record the topic-by-topic design discussion that follows the seven findings from
 | Order | Original topic | Status | Accepted direction |
 | --- | --- | --- | --- |
 | 1 | LLM streaming is not shown before provider EOF | Decided | Restore the intended incremental live-partial pipeline while preserving completion-only durability and tool admission. |
-| 2 | A real server-side LLM hang is structurally possible | Deferred | Stage-aware, stop-aware watchdogs accepted in principle; implementation and numeric policy deferred because this is not the primary incident factor. |
+| 2 | A real server-side LLM hang is structurally possible | Implemented | Cancel a model stream after 90 seconds without its first native event or 360 seconds without a subsequent native event, then use the existing retry boundary. |
 | 3 | Auto-compaction runs before the next LLM call for large contexts | Decided | Keep compaction blocking at the model boundary, split the transaction around the external summary call, and make start/completion/input-buffer behavior durable and push-driven. |
 | 4 | Repeated preparation cost occurs between tool completion and the next LLM call | Deferred | The available MCP timings measure background refresh, not confirmed foreground latency; instrument the model-call preparation boundary before selecting an optimization. |
 | 5 | One completed tool does not mean that all sibling tools completed | Deferred | — |
@@ -200,9 +200,20 @@ LiteLLM's default is not accepted as an Azents reliability policy. In the active
 
 The default remains useful only as a permissive library fallback. Azents should pass explicit granular transport limits and own stage-aware liveness, semantic-progress, cancellation, retry, and background-transition policy.
 
+### Implemented Baseline
+
+The event runtime applies two application-owned progress deadlines to the transformed native provider stream:
+
+- 90 seconds from stream start to the first native provider event;
+- 360 seconds between every subsequent native provider event.
+
+A timeout cancels the pending asynchronous iteration and raises a retryable `ModelStreamTimeoutError`. The worker clears the failed attempt's live partial projection before it publishes retry state, so a new attempt cannot append to stale text or reasoning. User Stop still independently cancels the stream without being converted into a timeout.
+
+This baseline intentionally treats every native event as progress. It does not yet implement a raw-byte heartbeat detector, provider-specific overrides, a meaningful-output deadline, or an absolute attempt cap.
+
 ### Status
 
-Deferred. The stage-aware, ping-aware direction is retained, but timeout implementation and numeric thresholds will be revisited after higher-probability incident factors are addressed.
+Implemented as the bounded baseline above. Provider-specific timing policy and raw transport heartbeat support remain future work.
 
 ## Topic 3: Auto-Compaction Runs Before the Next LLM Call for Large Contexts
 

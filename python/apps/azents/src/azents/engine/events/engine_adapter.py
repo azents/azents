@@ -41,6 +41,7 @@ from azents.engine.events.execution import (
     AgentRunExecutionRequest,
     InputPoller,
     InputPollResult,
+    ModelStreamWatchdog,
     PreparedModelCall,
 )
 from azents.engine.events.file_parts import RequestLocalModelFileResolver
@@ -160,6 +161,8 @@ class EventEngineAdapterConfig:
     """Event engine adapter configuration."""
 
     native_request_max_input_chars: int = 16_000_000
+    model_stream_first_event_timeout_seconds: float = 90.0
+    model_stream_idle_timeout_seconds: float = 360.0
 
 
 _SUMMARY_INPUT_OVERHEAD_TOKENS = 8_000
@@ -479,6 +482,12 @@ class AgentEngineAdapter:
             ),
             pre_model_lower_hook=model_file_materializer.materialize,
             model_file_pin_repo=self.model_file_pin_repo,
+            model_stream_watchdog=ModelStreamWatchdog(
+                first_event_timeout_seconds=(
+                    self.config.model_stream_first_event_timeout_seconds
+                ),
+                idle_timeout_seconds=self.config.model_stream_idle_timeout_seconds,
+            ),
             run_repo=self.run_repo,
             transcript_repo=self.transcript_repo,
             session_repo=self.session_head_repo,

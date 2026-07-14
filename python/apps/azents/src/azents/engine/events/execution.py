@@ -50,6 +50,7 @@ from azents.engine.events.types import (
 from azents.engine.run.contracts import ToolAdmissionBarrier
 from azents.engine.run.errors import (
     ModelCallError,
+    ModelStreamTimeoutError,
     UserVisibleRuntimeError,
 )
 from azents.engine.run.types import USER_STOP_CANCEL_MESSAGE
@@ -148,6 +149,24 @@ class AgentRunExecutionRequest:
     max_turns: int | None = None
 
 
+@dataclass(frozen=True)
+class ModelStreamWatchdog:
+    """Application-owned model stream progress deadlines."""
+
+    first_event_timeout_seconds: float = 90.0
+    idle_timeout_seconds: float = 360.0
+
+    def __post_init__(self) -> None:
+        """Reject non-positive stream progress deadlines."""
+        if self.first_event_timeout_seconds <= 0:
+            raise ValueError("first_event_timeout_seconds must be greater than zero")
+        if self.idle_timeout_seconds <= 0:
+            raise ValueError("idle_timeout_seconds must be greater than zero")
+
+
+_DEFAULT_MODEL_STREAM_WATCHDOG = ModelStreamWatchdog()
+
+
 class _ModelStreamUserInterrupted(Exception):
     """Indicates model stream was interrupted by user stop."""
 
@@ -183,6 +202,7 @@ class AgentRunExecution:
         phase_sink: PhaseSink | None = None,
         pre_model_lower_hook: PreModelLowerHook | None = None,
         model_file_pin_repo: ModelFilePinRepositoryProtocol | None = None,
+        model_stream_watchdog: ModelStreamWatchdog = _DEFAULT_MODEL_STREAM_WATCHDOG,
         run_repo: RunStateRepository | None = None,
         transcript_repo: TranscriptRepository | None = None,
         session_repo: SessionHeadRepository | None = None,
@@ -197,6 +217,7 @@ class AgentRunExecution:
         self._phase_sink = phase_sink
         self._pre_model_lower_hook = pre_model_lower_hook
         self._model_file_pin_repo = model_file_pin_repo
+        self._model_stream_watchdog = model_stream_watchdog
         self._run_repo = run_repo or AgentRunRepository()
         self._transcript_repo = transcript_repo or EventTranscriptRepository()
         self._session_repo = session_repo
@@ -524,11 +545,34 @@ class AgentRunExecution:
         )
         await session.commit()
         output_stream = self._output_normalizer.start(session_id)
+        stream = aiter(self._model_adapter.stream(native_request))
+        stage = "first_event"
+        timeout_seconds = self._model_stream_watchdog.first_event_timeout_seconds
         try:
-            async for event in self._model_adapter.stream(native_request):
+            while True:
+                try:
+                    event = await asyncio.wait_for(anext(stream), timeout_seconds)
+                except StopAsyncIteration:
+                    break
+                except TimeoutError as exc:
+                    logger.warning(
+                        "Model stream progress deadline exceeded",
+                        extra={
+                            "run_id": run_id,
+                            "session_id": session_id,
+                            "stage": stage,
+                            "timeout_seconds": timeout_seconds,
+                        },
+                    )
+                    raise ModelStreamTimeoutError(
+                        stage=stage,
+                        timeout_seconds=timeout_seconds,
+                    ) from exc
                 incremental = output_stream.process_event(event)
                 if self._output_sink is not None and incremental.projections:
                     await self._output_sink(incremental, [])
+                stage = "idle"
+                timeout_seconds = self._model_stream_watchdog.idle_timeout_seconds
         except asyncio.CancelledError as exc:
             if _is_user_stop_cancellation(exc):
                 raise _ModelStreamUserInterrupted(output_stream.interrupt()) from exc
