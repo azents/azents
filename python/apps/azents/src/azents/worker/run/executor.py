@@ -937,41 +937,41 @@ class RunExecutor:
                 allowed_domains=(), denied_domains=()
             )
 
-            logger.info(
-                "Run agent tools resolve started",
-                extra={
-                    "session_id": message.session_id,
-                    "agent_id": invoke_input.agent_id,
-                    "run_id": run_id,
-                    "workspace_id": run_request.workspace_id,
-                    "model": run_request.model,
-                    "execution_mode": execution_mode.value,
-                    "memory_enabled": agent_memory_enabled,
-                    "runtime_tools_enabled": runtime_tools_enabled,
-                },
-            )
-            toolkits = await resolve_agent_tools(
-                invoke_input.agent_id,
-                context,
-                execution_mode=execution_mode,
-                toolkit_registry=self.toolkit_registry,
-                agent_toolkit_repository=self.agent_toolkit_repository,
-                toolkit_repository=self.toolkit_repository,
-                session=session,
-                web_url=self.worker_config.web_url,
-                oauth_secret_key=self.worker_config.oauth_secret_key,
-                mcp_proxy_url=self.worker_config.mcp_proxy_url,
-                runtime_domain_config=runtime_domain_config,
-                workspace_handle=message.workspace_handle or "",
-                builtin_toolkit_provider=self.builtin_toolkit_provider,
-                claude_rules_toolkit_provider=self.claude_rules_toolkit_provider,
-                todo_toolkit_provider=self.todo_toolkit_provider,
-                goal_toolkit_provider=self.goal_toolkit_provider,
-                skill_toolkit_provider=self.skill_toolkit_provider,
-                subagent_toolkit_provider=self.subagent_toolkit_provider,
-                memory_enabled=agent_memory_enabled,
-                runtime_tools_enabled=runtime_tools_enabled,
-            )
+        logger.info(
+            "Run agent tools resolve started",
+            extra={
+                "session_id": message.session_id,
+                "agent_id": invoke_input.agent_id,
+                "run_id": run_id,
+                "workspace_id": run_request.workspace_id,
+                "model": run_request.model,
+                "execution_mode": execution_mode.value,
+                "memory_enabled": agent_memory_enabled,
+                "runtime_tools_enabled": runtime_tools_enabled,
+            },
+        )
+        toolkits = await resolve_agent_tools(
+            invoke_input.agent_id,
+            context,
+            execution_mode=execution_mode,
+            toolkit_registry=self.toolkit_registry,
+            agent_toolkit_repository=self.agent_toolkit_repository,
+            toolkit_repository=self.toolkit_repository,
+            session_manager=self.session_manager,
+            web_url=self.worker_config.web_url,
+            oauth_secret_key=self.worker_config.oauth_secret_key,
+            mcp_proxy_url=self.worker_config.mcp_proxy_url,
+            runtime_domain_config=runtime_domain_config,
+            workspace_handle=message.workspace_handle or "",
+            builtin_toolkit_provider=self.builtin_toolkit_provider,
+            claude_rules_toolkit_provider=self.claude_rules_toolkit_provider,
+            todo_toolkit_provider=self.todo_toolkit_provider,
+            goal_toolkit_provider=self.goal_toolkit_provider,
+            skill_toolkit_provider=self.skill_toolkit_provider,
+            subagent_toolkit_provider=self.subagent_toolkit_provider,
+            memory_enabled=agent_memory_enabled,
+            runtime_tools_enabled=runtime_tools_enabled,
+        )
 
         now = loop.time()
         logger.info(

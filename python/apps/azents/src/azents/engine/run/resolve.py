@@ -490,22 +490,8 @@ async def resolve_invoke_input_with_model_source(
                     integration_id=main_selection.llm_provider_integration_id,
                 )
             )
-        refreshed_integration = await _ensure_provider_runtime_tokens(
-            integration=integration,
-            integration_repository=integration_repository,
-            session_manager=session_manager,
-        )
-        match refreshed_integration:
-            case Success(value):
-                integration = value
-            case Failure():
-                return Failure(
-                    IntegrationDisabled(
-                        integration_id=main_selection.llm_provider_integration_id,
-                    )
-                )
 
-        lightweight_integration = integration
+        loaded_lightweight_integration = integration
         if lightweight_selection.llm_provider_integration_id != integration.id:
             loaded_lightweight_integration = (
                 await integration_repository.get_by_id_with_secrets(
@@ -525,22 +511,40 @@ async def resolve_invoke_input_with_model_source(
                         integration_id=lightweight_selection.llm_provider_integration_id,
                     )
                 )
-            refreshed_lightweight_integration = await _ensure_provider_runtime_tokens(
-                integration=loaded_lightweight_integration,
-                integration_repository=integration_repository,
-                session_manager=session_manager,
+
+    refreshed_integration = await _ensure_provider_runtime_tokens(
+        integration=integration,
+        integration_repository=integration_repository,
+        session_manager=session_manager,
+    )
+    match refreshed_integration:
+        case Success(value):
+            integration = value
+        case Failure():
+            return Failure(
+                IntegrationDisabled(
+                    integration_id=main_selection.llm_provider_integration_id,
+                )
             )
-            match refreshed_lightweight_integration:
-                case Success(value):
-                    lightweight_integration = value
-                case Failure():
-                    return Failure(
-                        IntegrationDisabled(
-                            integration_id=(
-                                lightweight_selection.llm_provider_integration_id
-                            ),
-                        )
+
+    lightweight_integration = integration
+    if loaded_lightweight_integration.id != integration.id:
+        refreshed_lightweight_integration = await _ensure_provider_runtime_tokens(
+            integration=loaded_lightweight_integration,
+            integration_repository=integration_repository,
+            session_manager=session_manager,
+        )
+        match refreshed_lightweight_integration:
+            case Success(value):
+                lightweight_integration = value
+            case Failure():
+                return Failure(
+                    IntegrationDisabled(
+                        integration_id=(
+                            lightweight_selection.llm_provider_integration_id
+                        ),
                     )
+                )
 
     model = to_runtime_model(
         main_selection.provider,
@@ -875,7 +879,7 @@ async def resolve_agent_tools(
     toolkit_registry: dict[str, ToolkitProvider[Any]],
     agent_toolkit_repository: AgentToolkitRepository,
     toolkit_repository: ToolkitRepository,
-    session: AsyncSession,
+    session_manager: SessionManager[AsyncSession],
     web_url: str,
     oauth_secret_key: str,
     mcp_proxy_url: str | None,
@@ -898,7 +902,7 @@ async def resolve_agent_tools(
     :param toolkit_registry: toolkit_type to ToolkitProvider instance mapping
     :param agent_toolkit_repository: AgentToolkit repository
     :param toolkit_repository: Toolkit repository
-    :param session: DB session
+    :param session_manager: DB session factory used only for Toolkit snapshot reads
     :param web_url: Frontend URL for OAuth redirect_uri construction
     :param oauth_secret_key: OAuth HMAC signing key
     :param runtime_domain_config: Runtime domain allow/deny policy. Parent
@@ -915,7 +919,14 @@ async def resolve_agent_tools(
         Memory tools can be exposed without runtime.
     :return: List of (Toolkit, slug) tuples
     """
-    agent_toolkits = await agent_toolkit_repository.list_by_agent(session, agent_id)
+    async with session_manager() as session:
+        agent_toolkits = await agent_toolkit_repository.list_by_agent(session, agent_id)
+        registered_toolkits = []
+        for agent_toolkit in agent_toolkits:
+            toolkit = await toolkit_repository.get_by_id(
+                session, agent_toolkit.toolkit_id
+            )
+            registered_toolkits.append((agent_toolkit, toolkit))
     # (provider, resolved, config, slug, prompt, use_prefix, toolkit_type, modes)
     # toolkit_type is populated only for DB-registered toolkits; auto-binding is None
     pending: list[
@@ -932,7 +943,7 @@ async def resolve_agent_tools(
     ] = []
 
     # DB-registered toolkit (registry-based, prefix applied)
-    for at in agent_toolkits:
+    for at, toolkit in registered_toolkits:
         provider = toolkit_registry.get(at.toolkit_type)
         if provider is None:
             logger.warning(
@@ -944,7 +955,6 @@ async def resolve_agent_tools(
             )
             continue
 
-        toolkit = await toolkit_repository.get_by_id(session, at.toolkit_id)
         if toolkit is None or not toolkit.enabled:
             continue
 
@@ -956,7 +966,7 @@ async def resolve_agent_tools(
             agent_id=context.agent_id,
             session_id=context.session_id,
             user_id=context.user_id,
-            session=session,
+            session=None,
             web_url=web_url,
             oauth_secret_key=oauth_secret_key,
             workspace_id=context.workspace_id,
@@ -1014,7 +1024,7 @@ async def resolve_agent_tools(
                     agent_id=context.agent_id,
                     session_id=context.session_id,
                     user_id=context.user_id,
-                    session=session,
+                    session=None,
                     web_url=web_url,
                     oauth_secret_key=oauth_secret_key,
                     workspace_id=context.workspace_id,
@@ -1057,7 +1067,7 @@ async def resolve_agent_tools(
                     agent_id=context.agent_id,
                     session_id=context.session_id,
                     user_id=context.user_id,
-                    session=session,
+                    session=None,
                     web_url=web_url,
                     oauth_secret_key=oauth_secret_key,
                     workspace_id=context.workspace_id,
@@ -1102,7 +1112,7 @@ async def resolve_agent_tools(
                     agent_id=context.agent_id,
                     session_id=context.session_id,
                     user_id=context.user_id,
-                    session=session,
+                    session=None,
                     web_url=web_url,
                     oauth_secret_key=oauth_secret_key,
                     workspace_id=context.workspace_id,
@@ -1161,7 +1171,7 @@ async def resolve_agent_tools(
                         agent_id=context.agent_id,
                         session_id=context.session_id,
                         user_id=context.user_id,
-                        session=session,
+                        session=None,
                         web_url=web_url,
                         oauth_secret_key=oauth_secret_key,
                         workspace_id=context.workspace_id,
@@ -1212,7 +1222,7 @@ async def resolve_agent_tools(
             agent_id=context.agent_id,
             session_id=context.session_id,
             user_id=context.user_id,
-            session=session,
+            session=None,
             web_url=web_url,
             oauth_secret_key=oauth_secret_key,
             workspace_id=context.workspace_id,
@@ -1257,7 +1267,7 @@ async def resolve_agent_tools(
             agent_id=context.agent_id,
             session_id=context.session_id,
             user_id=context.user_id,
-            session=session,
+            session=None,
             web_url=web_url,
             oauth_secret_key=oauth_secret_key,
             workspace_id=context.workspace_id,
@@ -1305,7 +1315,7 @@ async def resolve_agent_tools(
             agent_id=context.agent_id,
             session_id=context.session_id,
             user_id=context.user_id,
-            session=session,
+            session=None,
             web_url=web_url,
             oauth_secret_key=oauth_secret_key,
             workspace_id=context.workspace_id,
@@ -1353,7 +1363,7 @@ async def resolve_agent_tools(
             agent_id=context.agent_id,
             session_id=context.session_id,
             user_id=context.user_id,
-            session=session,
+            session=None,
             web_url=web_url,
             oauth_secret_key=oauth_secret_key,
             workspace_id=context.workspace_id,

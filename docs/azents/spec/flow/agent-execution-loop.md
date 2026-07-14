@@ -16,6 +16,7 @@ code_paths:
   - python/apps/azents/src/azents/engine/events/**
   - python/apps/azents/src/azents/engine/hooks/**
   - python/apps/azents/src/azents/engine/run/deps.py
+  - python/apps/azents/src/azents/engine/run/resolve.py
   - python/apps/azents/src/azents/api/public/chat/v1/**
   - python/apps/azents/src/azents/core/config.py
   - python/apps/azents/src/azents/core/inference_profile.py
@@ -40,8 +41,8 @@ code_paths:
   - python/apps/azents/src/azents/worker/session/**
   - typescript/apps/azents-web/src/features/chat/components/ChatView.tsx
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
-last_verified_at: 2026-07-14
-spec_version: 81
+last_verified_at: 2026-07-15
+spec_version: 82
 ---
 
 # Agent Execution Loop
@@ -576,6 +577,21 @@ Primary checks:
 - **2026-07-06** — v59. Removed the session-initialization run gate and documented terminal `action_execution_result` history events.
 - **2026-07-05** — v56. Reflected operation TurnAction processing before model dispatch and Project context invalidation after worktree setup.
 
+## Database session boundaries
+
+Run execution uses short database sessions around one durable read or state transition. Model
+preparation callbacks, model streaming, runtime hooks, foreground tools, Toolkit provider resolution,
+OAuth token HTTP requests, broker calls, and live event publication run only after the preceding
+database session has closed. Boundary input polling also completes its external queue read before it
+opens the short session that appends promoted messages.
+
+Row locks remain limited to persistence invariants. Tool-result finalization locks its `AgentRun`
+while appending the deterministic result and removing that call from `active_tool_calls`, so parallel
+tool completions cannot overwrite each other. MCP OAuth refresh reads a credential snapshot, closes
+the session, performs the provider request, then briefly locks and re-reads the row before applying
+the result. If another refresh committed first, the newer credentials win; a stale success or failure
+must not overwrite them. No database row lock or transaction spans external I/O.
+
 ## Idle continuation
 
 Idle transition is allowed only at a terminal run boundary. `AgentSession.run_state` may become `idle` only
@@ -642,6 +658,8 @@ updated by the user.
 
 ## Changelog
 
+- **2026-07-15** (spec_version 82) — Required short run-owned database sessions, external-I/O
+  separation, and lock/revalidation boundaries for tool finalization and MCP OAuth refresh.
 - **2026-07-14** (spec_version 81) — Added durable per-model-call start time to live Run projections and a once-per-second duration beside the LLM indicator after ten elapsed seconds.
 - **2026-07-14** (spec_version 80) — Restored incremental native-stream normalization and bounded live partial batching: text and reasoning are projected before provider completion, durable output remains completion-based, and user stop preserves valid partial assistant text without admitting incomplete tools.
 - **2026-07-14** (spec_version 79) — Defined operation TurnActions as owner-generation-fenced live execution state with atomic terminal snapshot/delete handover, 30-second shutdown completion, preemptive user-stop cancellation, and no stale-owner re-execution.

@@ -173,9 +173,11 @@ class McpToolkitProvider(ToolkitProvider[McpToolkitConfig]):
         on_auth_failure: Callable[[], Awaitable[str | None]] | None = None
 
         if config.auth_type == "oauth2" and self._connection_repo is not None:
+            if self._session_manager is None:
+                raise RuntimeError("MCP OAuth requires a DB session manager")
             connection = await _ensure_oauth_connection_token(
                 connection_repo=self._connection_repo,
-                session=context.session,
+                session_manager=self._session_manager,
                 toolkit_id=context.toolkit_id,
                 proxy_url=context.mcp_proxy_url,
             )
@@ -184,13 +186,12 @@ class McpToolkitProvider(ToolkitProvider[McpToolkitConfig]):
                 and connection.status == MCPOAuthConnectionStatus.CONNECTED
             ):
                 secret = connection.access_token
-            if self._session_manager is not None:
-                on_auth_failure = _make_oauth_refresh_callback(
-                    toolkit_id=context.toolkit_id,
-                    connection_repo=self._connection_repo,
-                    session_manager=self._session_manager,
-                    proxy_url=context.mcp_proxy_url,
-                )
+            on_auth_failure = _make_oauth_refresh_callback(
+                toolkit_id=context.toolkit_id,
+                connection_repo=self._connection_repo,
+                session_manager=self._session_manager,
+                proxy_url=context.mcp_proxy_url,
+            )
         else:
             secret = _extract_static_secret(config, context.credentials_json)
 
@@ -235,20 +236,19 @@ def _make_oauth_refresh_callback(
     """
 
     async def _refresh() -> str | None:
-        async with session_manager() as session:
-            connection = await _refresh_oauth_connection_under_lock(
-                connection_repo=connection_repo,
-                session=session,
-                toolkit_id=toolkit_id,
-                proxy_url=proxy_url,
-                force=True,
-            )
-            if (
-                connection is None
-                or connection.status != MCPOAuthConnectionStatus.CONNECTED
-            ):
-                return None
-            return connection.access_token
+        connection = await _refresh_oauth_connection(
+            connection_repo=connection_repo,
+            session_manager=session_manager,
+            toolkit_id=toolkit_id,
+            proxy_url=proxy_url,
+            force=True,
+        )
+        if (
+            connection is None
+            or connection.status != MCPOAuthConnectionStatus.CONNECTED
+        ):
+            return None
+        return connection.access_token
 
     return _refresh
 
@@ -298,57 +298,67 @@ def _token_needs_refresh(connection: MCPOAuthConnection) -> bool:
 async def _ensure_oauth_connection_token(
     *,
     connection_repo: MCPOAuthConnectionRepository,
-    session: AsyncSession,
+    session_manager: SessionManager[AsyncSession],
     toolkit_id: str,
     proxy_url: str | None,
 ) -> MCPOAuthConnection | None:
     """Load OAuth connection and refresh it when needed.
 
     :param connection_repo: OAuth connection repository
-    :param session: Database session
+    :param session_manager: Database session factory
     :param toolkit_id: Toolkit ID
     :param proxy_url: egress proxy URL
     :return: OAuth connection or None
     """
-    connection = await connection_repo.get_by_toolkit_id(session, toolkit_id)
+    async with session_manager() as session:
+        connection = await connection_repo.get_by_toolkit_id(session, toolkit_id)
     if connection is None or connection.status != MCPOAuthConnectionStatus.CONNECTED:
         return connection
     if not _token_needs_refresh(connection):
         return connection
-    return await _refresh_oauth_connection_under_lock(
+    return await _refresh_oauth_connection(
         connection_repo=connection_repo,
-        session=session,
+        session_manager=session_manager,
         toolkit_id=toolkit_id,
         proxy_url=proxy_url,
         force=False,
+        connection=connection,
     )
 
 
-async def _refresh_oauth_connection_under_lock(
+async def _refresh_oauth_connection(
     *,
     connection_repo: MCPOAuthConnectionRepository,
-    session: AsyncSession,
+    session_manager: SessionManager[AsyncSession],
     toolkit_id: str,
     proxy_url: str | None,
     force: bool,
+    connection: MCPOAuthConnection | None = None,
 ) -> MCPOAuthConnection | None:
-    """Refresh OAuth connection while holding the row lock.
+    """Refresh OAuth outside DB and conditionally persist the result.
 
     :param connection_repo: OAuth connection repository
-    :param session: Database session
+    :param session_manager: Database session factory
     :param toolkit_id: Toolkit ID
     :param proxy_url: egress proxy URL
     :param force: Refresh even when token is not near expiry
     :return: Refreshed or existing OAuth connection
     """
-    connection = await connection_repo.get_by_toolkit_id_for_update(session, toolkit_id)
+    if connection is None:
+        async with session_manager() as session:
+            connection = await connection_repo.get_by_toolkit_id(session, toolkit_id)
     if connection is None or connection.status != MCPOAuthConnectionStatus.CONNECTED:
         return connection
     if not force and not _token_needs_refresh(connection):
         return connection
     if connection.refresh_token is None:
-        await connection_repo.mark_reconnect_required(session, toolkit_id=toolkit_id)
-        return await connection_repo.get_by_toolkit_id(session, toolkit_id)
+        return await _persist_refresh_failure(
+            connection_repo=connection_repo,
+            session_manager=session_manager,
+            connection=connection,
+            toolkit_id=toolkit_id,
+            reconnect_required=True,
+        )
 
     try:
         refreshed = await refresh_access_token(
@@ -359,50 +369,108 @@ async def _refresh_oauth_connection_under_lock(
             proxy_url=proxy_url,
         )
     except httpx.HTTPStatusError as exc:
-        await _handle_refresh_failure(
-            exc,
-            connection_repo=connection_repo,
-            session=session,
-            toolkit_id=toolkit_id,
-        )
-        return await connection_repo.get_by_toolkit_id(session, toolkit_id)
-    except OAuthTokenError as exc:
-        if "invalid_grant" in str(exc):
-            await connection_repo.mark_reconnect_required(
-                session, toolkit_id=toolkit_id
+        reconnect_required = _refresh_failure_requires_reconnect(exc)
+        if not reconnect_required:
+            logger.warning(
+                "Failed to refresh MCP OAuth connection",
+                extra={
+                    "toolkit_id": toolkit_id,
+                    "status_code": exc.response.status_code,
+                },
+                exc_info=True,
             )
-        else:
+        return await _persist_refresh_failure(
+            connection_repo=connection_repo,
+            session_manager=session_manager,
+            connection=connection,
+            toolkit_id=toolkit_id,
+            reconnect_required=reconnect_required,
+        )
+    except OAuthTokenError as exc:
+        reconnect_required = "invalid_grant" in str(exc)
+        if not reconnect_required:
             logger.warning(
                 "Failed to refresh MCP OAuth connection",
                 extra={"toolkit_id": toolkit_id},
                 exc_info=True,
             )
-        return await connection_repo.get_by_toolkit_id(session, toolkit_id)
+        return await _persist_refresh_failure(
+            connection_repo=connection_repo,
+            session_manager=session_manager,
+            connection=connection,
+            toolkit_id=toolkit_id,
+            reconnect_required=reconnect_required,
+        )
     except httpx.HTTPError, KeyError, ValidationError:
         logger.warning(
             "Failed to refresh MCP OAuth connection",
             extra={"toolkit_id": toolkit_id},
             exc_info=True,
         )
+        return await _persist_refresh_failure(
+            connection_repo=connection_repo,
+            session_manager=session_manager,
+            connection=connection,
+            toolkit_id=toolkit_id,
+            reconnect_required=False,
+        )
+
+    async with session_manager() as session:
+        current = await connection_repo.get_by_toolkit_id_for_update(
+            session, toolkit_id
+        )
+        if current is None:
+            return None
+        if _connection_changed(connection, current):
+            return current
+        return await connection_repo.update_tokens(
+            session,
+            toolkit_id=toolkit_id,
+            access_token=refreshed.access_token,
+            refresh_token=refreshed.refresh_token,
+            expires_at=refreshed.expires_at,
+        )
+
+
+async def _persist_refresh_failure(
+    *,
+    connection_repo: MCPOAuthConnectionRepository,
+    session_manager: SessionManager[AsyncSession],
+    connection: MCPOAuthConnection,
+    toolkit_id: str,
+    reconnect_required: bool,
+) -> MCPOAuthConnection | None:
+    """Keep a concurrent refresh or persist this refresh failure."""
+    async with session_manager() as session:
+        current = await connection_repo.get_by_toolkit_id_for_update(
+            session, toolkit_id
+        )
+        if current is None:
+            return None
+        if _connection_changed(connection, current):
+            return current
+        if reconnect_required:
+            await connection_repo.mark_reconnect_required(
+                session, toolkit_id=toolkit_id
+            )
         return await connection_repo.get_by_toolkit_id(session, toolkit_id)
 
-    return await connection_repo.update_tokens(
-        session,
-        toolkit_id=toolkit_id,
-        access_token=refreshed.access_token,
-        refresh_token=refreshed.refresh_token,
-        expires_at=refreshed.expires_at,
+
+def _connection_changed(
+    before: MCPOAuthConnection,
+    current: MCPOAuthConnection,
+) -> bool:
+    """Return whether another transaction changed the credential snapshot."""
+    return (
+        current.updated_at != before.updated_at
+        or current.refresh_token != before.refresh_token
+        or current.access_token != before.access_token
+        or current.status != before.status
     )
 
 
-async def _handle_refresh_failure(
-    exc: httpx.HTTPStatusError,
-    *,
-    connection_repo: MCPOAuthConnectionRepository,
-    session: AsyncSession,
-    toolkit_id: str,
-) -> None:
-    """Handle HTTP refresh failure and mark terminal revocation."""
+def _refresh_failure_requires_reconnect(exc: httpx.HTTPStatusError) -> bool:
+    """Return whether an HTTP refresh failure requires reconnect."""
     should_reconnect = exc.response.status_code in {400, 401}
     if should_reconnect:
         try:
@@ -411,14 +479,7 @@ async def _handle_refresh_failure(
                 should_reconnect = payload.get("error") == "invalid_grant"
         except ValueError:
             pass
-    if should_reconnect:
-        await connection_repo.mark_reconnect_required(session, toolkit_id=toolkit_id)
-        return
-    logger.warning(
-        "Failed to refresh MCP OAuth connection",
-        extra={"toolkit_id": toolkit_id, "status_code": exc.response.status_code},
-        exc_info=True,
-    )
+    return should_reconnect
 
 
 async def _test_oauth2_discovery(
