@@ -2170,12 +2170,46 @@ class RunExecutor:
                             resolved_at=datetime.datetime.now(datetime.UTC),
                         )
             try:
+                attachment_preparation_started_at = asyncio.get_running_loop().time()
+                prepared_attachments = None
+                if profile_resolution_failure is None:
+                    prepare_attachments = (
+                        self.input_buffer_service.prepare_pending_input_attachments
+                    )
+                    prepared_attachments = await prepare_attachments(
+                        session_id=session_id,
+                        expected_buffer_id=pending.input_buffer_id,
+                    )
+                logger.info(
+                    "Input buffer attachment preparation completed before "
+                    "durable flush",
+                    extra={
+                        "session_id": session_id,
+                        "input_buffer_id": pending.input_buffer_id,
+                        "duration_seconds": round(
+                            asyncio.get_running_loop().time()
+                            - attachment_preparation_started_at,
+                            3,
+                        ),
+                        "attachment_count": (
+                            len(prepared_attachments.attachments)
+                            if prepared_attachments is not None
+                            else 0
+                        ),
+                        "file_part_count": (
+                            len(prepared_attachments.file_parts)
+                            if prepared_attachments is not None
+                            else 0
+                        ),
+                    },
+                )
                 promoted = await self.input_buffer_service.flush_session_input_buffers(
                     session_id=session_id,
                     model=model,
                     required_inference_profile=required_inference_profile,
                     expected_buffer_id=pending.input_buffer_id,
                     prepared_inference_state=prepared_inference_state,
+                    prepared_attachments=prepared_attachments,
                     profile_resolution_failure=profile_resolution_failure,
                     active_run_id=active_run_id,
                     include_action_messages=include_action_messages,

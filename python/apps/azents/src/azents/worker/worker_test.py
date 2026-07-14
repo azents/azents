@@ -44,6 +44,7 @@ from azents.engine.events.user_messages import make_run_user_message
 from azents.engine.run.contracts import AgentEngineProtocol, ToolkitBinding
 from azents.engine.run.emit import PublishedEvent
 from azents.engine.run.errors import CompactionFailedError, UserVisibleRuntimeError
+from azents.engine.run.resolve import MaterializedUserInputAttachments
 from azents.engine.run.types import (
     CheckStop,
     PollMessages,
@@ -123,6 +124,16 @@ class _InputBufferService:
             ),
         )
 
+    async def prepare_pending_input_attachments(
+        self,
+        *,
+        session_id: str,
+        expected_buffer_id: str | None,
+    ) -> MaterializedUserInputAttachments | None:
+        """Return no prepared attachments for the configured input."""
+        del session_id, expected_buffer_id
+        return None
+
     async def flush_session_input_buffers(
         self,
         *,
@@ -131,6 +142,7 @@ class _InputBufferService:
         required_inference_profile: RequestedInferenceProfile | None,
         expected_buffer_id: str | None,
         prepared_inference_state: SessionInferenceState | None,
+        prepared_attachments: MaterializedUserInputAttachments | None,
         profile_resolution_failure: str | None,
         active_run_id: str | None,
         limit: int | None = None,
@@ -141,6 +153,7 @@ class _InputBufferService:
             required_inference_profile,
             expected_buffer_id,
             prepared_inference_state,
+            prepared_attachments,
             profile_resolution_failure,
             active_run_id,
             limit,

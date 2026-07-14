@@ -56,7 +56,10 @@ from azents.engine.run.errors import (
 )
 from azents.engine.run.failure import FailedRunRetryState
 from azents.engine.run.input import AgentNotFound
-from azents.engine.run.resolve import ResolvedInvokeInputProfile
+from azents.engine.run.resolve import (
+    MaterializedUserInputAttachments,
+    ResolvedInvokeInputProfile,
+)
 from azents.engine.run.types import (
     SHUTDOWN_CANCEL_MESSAGE,
     USER_STOP_CANCEL_MESSAGE,
@@ -454,6 +457,16 @@ class _InputBufferService:
             exists=True,
             requested_inference_profile=None,
         )
+
+    async def prepare_pending_input_attachments(
+        self,
+        *,
+        session_id: str,
+        expected_buffer_id: str | None,
+    ) -> MaterializedUserInputAttachments | None:
+        """Return no attachment preparation for the default pending input."""
+        del session_id, expected_buffer_id
+        return None
 
     async def has_pending_session_input_buffers(self, session_id: str) -> bool:
         """Return no additional buffered input after execution."""

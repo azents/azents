@@ -92,7 +92,7 @@ api_routes:
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-07-14
-spec_version: 100
+spec_version: 101
 ---
 
 # Conversation & Events
@@ -569,8 +569,9 @@ profile, then the Agent default when the Session has no snapshot.
 `InputBufferService` owns input-buffer reads and writes. Enqueue commits only the pending row;
 producers own wake-up and run-state transitions. Preparation handles exactly one FIFO head per
 transaction. The worker first reads the head's identity and inference requirement, resolves the
-profile outside the transaction when needed, then locks the Session and the same FIFO head. If the
-identity changed, it discards the stale preparation result and starts again. Successful preparation
+profile and materializes Exchange-file attachments outside the transaction when needed, then locks
+the Session and the same FIFO head. If the identity changed, it discards the stale preparation result
+and starts again. Successful preparation
 atomically updates the complete Session inference snapshot, applies Goal/Skill state changes, appends
 canonical events, associates input events with the active run, and deletes the source buffer.
 

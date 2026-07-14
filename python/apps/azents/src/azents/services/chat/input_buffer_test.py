@@ -385,6 +385,7 @@ class TestChatSessionInputBuffer:
             required_inference_profile=None,
             expected_buffer_id=buffer_id,
             prepared_inference_state=None,
+            prepared_attachments=None,
             profile_resolution_failure=None,
             active_run_id=None,
         )

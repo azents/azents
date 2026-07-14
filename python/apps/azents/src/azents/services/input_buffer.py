@@ -1,5 +1,6 @@
 """Session input buffer service."""
 
+import asyncio
 import dataclasses
 import datetime
 import enum
@@ -33,7 +34,10 @@ from azents.engine.events.types import (
 )
 from azents.engine.events.user_messages import make_run_user_message
 from azents.engine.io.user_input import RunUserMessage
-from azents.engine.run.resolve import materialize_user_input_exchange_file_attachments
+from azents.engine.run.resolve import (
+    MaterializedUserInputAttachments,
+    materialize_user_input_exchange_file_attachments,
+)
 from azents.engine.tools.goal import GoalState, GoalStateSnapshot, GoalStateStore
 from azents.engine.tools.skill import (
     SkillProjectionItem,
@@ -164,6 +168,7 @@ class InputBufferPreparationContext:
     session_id: str
     required_inference_profile: RequestedInferenceProfile | None
     prepared_inference_state: SessionInferenceState | None
+    prepared_attachments: MaterializedUserInputAttachments | None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -353,6 +358,51 @@ class InputBufferService:
             ),
         )
 
+    async def prepare_pending_input_attachments(
+        self,
+        *,
+        session_id: str,
+        expected_buffer_id: str | None,
+    ) -> MaterializedUserInputAttachments | None:
+        """Resolve the FIFO head attachments without holding durable row locks."""
+        async with self.session_manager() as session:
+            pending = await self.input_buffer_repository.list_for_flush(
+                session,
+                session_id,
+                limit=1,
+            )
+            buffer = pending[0] if pending else None
+            actual_buffer_id = buffer.id if buffer is not None else None
+            if actual_buffer_id != expected_buffer_id:
+                raise InputBufferPreparationStaleError(
+                    "Input buffer FIFO head changed during attachment preparation"
+                )
+            if buffer is None or not buffer.attachments:
+                return None
+            agent_session = await self.agent_session_repository.get_by_id(
+                session,
+                session_id,
+            )
+
+        if agent_session is None:
+            raise ValueError("AgentSession not found")
+        if buffer.actor_user_id is None:
+            raise ValueError("Input buffer attachments require an actor user")
+        materialized = await materialize_user_input_exchange_file_attachments(
+            buffer.attachments,
+            agent_id=agent_session.agent_id,
+            session_id=session_id,
+            exchange_file_service=self.exchange_file_service,
+            model_file_service=(None if buffer.file_parts else self.model_file_service),
+            user_id=buffer.actor_user_id,
+        )
+        if not buffer.file_parts:
+            return materialized
+        return MaterializedUserInputAttachments(
+            attachments=materialized.attachments,
+            file_parts=list(buffer.file_parts),
+        )
+
     async def has_pending_session_input_buffers(self, session_id: str) -> bool:
         """Check whether session still has unflushed InputBuffer."""
         async with self.session_manager() as session:
@@ -371,18 +421,72 @@ class InputBufferService:
         required_inference_profile: RequestedInferenceProfile | None,
         expected_buffer_id: str | None,
         prepared_inference_state: SessionInferenceState | None,
+        prepared_attachments: MaterializedUserInputAttachments | None,
         profile_resolution_failure: str | None,
         active_run_id: str | None,
         limit: int | None = None,
         include_action_messages: bool = True,
     ) -> PromotedInputBuffers:
-        """Flush pending buffers of session in claim, append, delete order."""
+        """Commit one prepared FIFO head in a short durable transaction."""
+        started_at = asyncio.get_running_loop().time()
+        promoted = await self._flush_session_input_buffers_transaction(
+            session_id=session_id,
+            model=model,
+            required_inference_profile=required_inference_profile,
+            expected_buffer_id=expected_buffer_id,
+            prepared_inference_state=prepared_inference_state,
+            prepared_attachments=prepared_attachments,
+            profile_resolution_failure=profile_resolution_failure,
+            active_run_id=active_run_id,
+            limit=limit,
+            include_action_messages=include_action_messages,
+        )
+        logger.info(
+            "Input buffer durable flush transaction committed",
+            extra={
+                "session_id": session_id,
+                "input_buffer_id": expected_buffer_id,
+                "duration_seconds": round(
+                    asyncio.get_running_loop().time() - started_at,
+                    3,
+                ),
+            },
+        )
+        return promoted
+
+    async def _flush_session_input_buffers_transaction(
+        self,
+        *,
+        session_id: str,
+        model: str | None,
+        required_inference_profile: RequestedInferenceProfile | None,
+        expected_buffer_id: str | None,
+        prepared_inference_state: SessionInferenceState | None,
+        prepared_attachments: MaterializedUserInputAttachments | None,
+        profile_resolution_failure: str | None,
+        active_run_id: str | None,
+        limit: int | None,
+        include_action_messages: bool,
+    ) -> PromotedInputBuffers:
+        """Lock, append, and delete one prepared FIFO head atomically."""
         del model
         del limit
         async with self.session_manager() as session:
+            lock_started_at = asyncio.get_running_loop().time()
             agent_session = await self.agent_session_repository.lock_by_id(
                 session,
                 session_id,
+            )
+            logger.info(
+                "Input buffer durable flush acquired AgentSession row lock",
+                extra={
+                    "session_id": session_id,
+                    "input_buffer_id": expected_buffer_id,
+                    "wait_seconds": round(
+                        asyncio.get_running_loop().time() - lock_started_at,
+                        3,
+                    ),
+                },
             )
             if agent_session is None:
                 raise ValueError("AgentSession not found")
@@ -416,6 +520,7 @@ class InputBufferService:
                 claimed=claimed,
                 required_inference_profile=required_inference_profile,
                 prepared_inference_state=prepared_inference_state,
+                prepared_attachments=prepared_attachments,
                 profile_resolution_failure=profile_resolution_failure,
                 include_action_messages=include_action_messages,
             )
@@ -542,6 +647,7 @@ class InputBufferService:
         claimed: list[InputBuffer],
         required_inference_profile: RequestedInferenceProfile | None,
         prepared_inference_state: SessionInferenceState | None,
+        prepared_attachments: MaterializedUserInputAttachments | None,
         profile_resolution_failure: str | None,
         include_action_messages: bool,
     ) -> InputBufferPreparationOutcome:
@@ -575,6 +681,7 @@ class InputBufferService:
             session_id=session_id,
             required_inference_profile=required_inference_profile,
             prepared_inference_state=prepared_inference_state,
+            prepared_attachments=prepared_attachments,
         )
         processor = self._processor_for(buffer)
         return await processor.process(context, buffer)
@@ -649,11 +756,12 @@ class InputBufferService:
         except _GoalActionError as exc:
             return [_system_error_promoted_buffer(buffer, exc.message)]
         snapshot = GoalStateSnapshot.from_state(updated)
-        user_message = await self.buffer_to_user_message(
+        user_message = self.buffer_to_user_message(
             buffer,
             external_id=f"{buffer.id}:user_message",
             fallback_profile=_requested_inference_profile(buffer),
             prepared_inference_state=prepared_inference_state,
+            prepared_attachments=None,
         )
         return [
             _PromotedInputBuffer(
@@ -715,11 +823,12 @@ class InputBufferService:
             )
         ]
         if buffer.content.strip():
-            user_message = await self.buffer_to_user_message(
+            user_message = self.buffer_to_user_message(
                 buffer,
                 external_id=f"{buffer.id}:user_message",
                 fallback_profile=_requested_inference_profile(buffer),
                 prepared_inference_state=prepared_inference_state,
+                prepared_attachments=None,
             )
             promoted.append(
                 _PromotedInputBuffer(
@@ -732,45 +841,28 @@ class InputBufferService:
             )
         return promoted
 
-    async def buffer_to_user_message(
+    def buffer_to_user_message(
         self,
         buffer: InputBuffer,
         *,
         external_id: str | None = None,
         fallback_profile: RequestedInferenceProfile | None,
         prepared_inference_state: SessionInferenceState | None,
+        prepared_attachments: MaterializedUserInputAttachments | None,
     ) -> RunUserMessage:
-        """Convert InputBuffer domain row to event run user message."""
-        attachments = []
-        file_parts = list(buffer.file_parts)
-        if buffer.attachments:
-            if buffer.actor_user_id is None:
-                raise ValueError("Input buffer attachments require an actor user")
-            async with self.session_manager() as session:
-                agent_session = await self.agent_session_repository.get_by_id(
-                    session,
-                    buffer.session_id,
-                )
-            if agent_session is None:
-                logger.warning(
-                    "Input buffer session disappeared before attachment "
-                    "materialization",
-                    extra={"session_id": buffer.session_id, "buffer_id": buffer.id},
-                )
-            else:
-                materialized = await materialize_user_input_exchange_file_attachments(
-                    buffer.attachments,
-                    agent_id=agent_session.agent_id,
-                    session_id=buffer.session_id,
-                    exchange_file_service=self.exchange_file_service,
-                    model_file_service=(
-                        None if file_parts else self.model_file_service
-                    ),
-                    user_id=buffer.actor_user_id,
-                )
-                attachments = materialized.attachments
-                if not file_parts:
-                    file_parts = materialized.file_parts
+        """Convert a prepared InputBuffer row to an event run user message."""
+        if buffer.attachments and prepared_attachments is None:
+            raise RuntimeError(
+                "Input buffer attachments must be prepared before durable flush"
+            )
+        attachments = (
+            prepared_attachments.attachments if prepared_attachments is not None else []
+        )
+        file_parts = (
+            prepared_attachments.file_parts
+            if prepared_attachments is not None
+            else list(buffer.file_parts)
+        )
 
         requested_profile = _requested_inference_profile(buffer) or fallback_profile
         if prepared_inference_state is not None:
@@ -840,11 +932,12 @@ class _UserMessageInputBufferProcessor:
         context: InputBufferPreparationContext,
         buffer: InputBuffer,
     ) -> InputBufferPreparationOutcome:
-        user_message = await self.service.buffer_to_user_message(
+        user_message = self.service.buffer_to_user_message(
             buffer,
             external_id=f"{buffer.id}:user_message",
             fallback_profile=context.required_inference_profile,
             prepared_inference_state=context.prepared_inference_state,
+            prepared_attachments=context.prepared_attachments,
         )
         return _preparation_outcome(
             [
@@ -871,11 +964,12 @@ class _GoalContinuationInputBufferProcessor:
         context: InputBufferPreparationContext,
         buffer: InputBuffer,
     ) -> InputBufferPreparationOutcome:
-        user_message = await self.service.buffer_to_user_message(
+        user_message = self.service.buffer_to_user_message(
             buffer,
             external_id=f"{buffer.id}:goal_continuation",
             fallback_profile=context.required_inference_profile,
             prepared_inference_state=context.prepared_inference_state,
+            prepared_attachments=context.prepared_attachments,
         )
         return _preparation_outcome(
             [
@@ -902,11 +996,12 @@ class _AgentMessageInputBufferProcessor:
         context: InputBufferPreparationContext,
         buffer: InputBuffer,
     ) -> InputBufferPreparationOutcome:
-        user_message = await self.service.buffer_to_user_message(
+        user_message = self.service.buffer_to_user_message(
             buffer,
             external_id=f"{buffer.id}:agent_message",
             fallback_profile=context.required_inference_profile,
             prepared_inference_state=context.prepared_inference_state,
+            prepared_attachments=context.prepared_attachments,
         )
         return _preparation_outcome(
             [

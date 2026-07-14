@@ -40,6 +40,7 @@ from azents.engine.tools.skill import (
     SkillStateStore,
 )
 from azents.rdb.models.agent import RDBAgent
+from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.event import RDBEvent
 from azents.rdb.models.input_buffer import RDBInputBuffer
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
@@ -372,6 +373,49 @@ class _ExchangeFileService(ExchangeFileService):
         return Failure(FileNotFound())
 
 
+class _RowLockCheckingExchangeFileService(_ExchangeFileService):
+    """Attachment resolver that verifies no AgentSession row lock is held."""
+
+    def __init__(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+        *,
+        session_id: str,
+        metadata_result: Result[
+            ExchangeFile,
+            SessionNotFound | FileNotFound | FileAccessDenied,
+        ],
+    ) -> None:
+        """Store the lock probe and attachment result."""
+        super().__init__(metadata_result)
+        self.rdb_session_manager = rdb_session_manager
+        self.session_id = session_id
+        self.lock_check_count = 0
+
+    async def resolve_attachment_metadata_for_agent(
+        self,
+        *,
+        uri: str,
+        agent_id: str,
+        user_id: str,
+    ) -> Result[ExchangeFile, SessionNotFound | FileNotFound | FileAccessDenied]:
+        """Acquire the session row NOWAIT before resolving attachment metadata."""
+        async with self.rdb_session_manager() as session:
+            query = (
+                sa.select(RDBAgentSession)
+                .where(RDBAgentSession.id == self.session_id)
+                .with_for_update(nowait=True)
+            )
+            locked = (await session.execute(query)).scalar_one_or_none()
+            assert locked is not None
+        self.lock_check_count += 1
+        return await super().resolve_attachment_metadata_for_agent(
+            uri=uri,
+            agent_id=agent_id,
+            user_id=user_id,
+        )
+
+
 class _ModelFileService(ModelFileService):
     """ModelFileService for tests."""
 
@@ -600,6 +644,7 @@ class TestInputBufferService:
             required_inference_profile=None,
             expected_buffer_id=buffer_id,
             prepared_inference_state=None,
+            prepared_attachments=None,
             profile_resolution_failure=None,
             active_run_id=None,
         )
@@ -681,6 +726,7 @@ class TestInputBufferService:
                 required_inference_profile=None,
                 expected_buffer_id="another-buffer",
                 prepared_inference_state=None,
+                prepared_attachments=None,
                 profile_resolution_failure=None,
                 active_run_id=None,
             )
@@ -742,6 +788,7 @@ class TestInputBufferService:
                 ),
                 expected_buffer_id=buffer_id,
                 prepared_inference_state=prepared_state,
+                prepared_attachments=None,
                 profile_resolution_failure=None,
                 active_run_id=None,
             )
@@ -798,6 +845,7 @@ class TestInputBufferService:
             ),
             expected_buffer_id=buffer_id,
             prepared_inference_state=None,
+            prepared_attachments=None,
             profile_resolution_failure=None,
             active_run_id=run.id,
         )
@@ -853,6 +901,7 @@ class TestInputBufferService:
             required_inference_profile=None,
             expected_buffer_id=first_id,
             prepared_inference_state=None,
+            prepared_attachments=None,
             profile_resolution_failure=None,
             active_run_id=None,
         )
@@ -904,6 +953,7 @@ class TestInputBufferService:
             ),
             expected_buffer_id=buffer_id,
             prepared_inference_state=None,
+            prepared_attachments=None,
             profile_resolution_failure=None,
             active_run_id=None,
         )
@@ -944,6 +994,7 @@ class TestInputBufferService:
             ),
             expected_buffer_id=buffer_id,
             prepared_inference_state=None,
+            prepared_attachments=None,
             profile_resolution_failure=None,
             active_run_id=None,
         )
@@ -999,6 +1050,7 @@ class TestInputBufferService:
             ),
             expected_buffer_id=buffer_id,
             prepared_inference_state=None,
+            prepared_attachments=None,
             profile_resolution_failure=None,
             active_run_id=None,
         )
@@ -1022,11 +1074,11 @@ class TestInputBufferService:
             f"{buffer_id}:user_message"
         ]
 
-    async def test_flush_preserves_exchange_attachment_payload(
+    async def test_attachment_preparation_precedes_session_row_lock(
         self,
         rdb_session_manager: SessionManager[AsyncSession],
     ) -> None:
-        """Attachment URI is restored as same event payload as direct path."""
+        """Resolve attachments before the durable flush locks AgentSession."""
         session_id, user_id = await _create_fixture(
             rdb_session_manager,
             "input-buffer-promote-attachment",
@@ -1042,8 +1094,10 @@ class TestInputBufferService:
             content="buffered with file",
             attachments=[attachment_uri],
         )
-        exchange_file_service = _ExchangeFileService(
-            Success(
+        exchange_file_service = _RowLockCheckingExchangeFileService(
+            rdb_session_manager,
+            session_id=session_id,
+            metadata_result=Success(
                 _exchange_file(
                     file_id=file_id,
                     user_id=user_id,
@@ -1051,19 +1105,24 @@ class TestInputBufferService:
                     preview_thumbnail_file_id=thumbnail_file_id,
                     preview_thumbnail_uri=thumbnail_uri,
                 )
-            )
+            ),
         )
         service = _input_buffer_service(
             rdb_session_manager,
             exchange_file_service=exchange_file_service,
         )
 
+        prepared_attachments = await service.prepare_pending_input_attachments(
+            session_id=session_id,
+            expected_buffer_id=attachment_buffer_id,
+        )
         result = await service.flush_session_input_buffers(
             session_id=session_id,
             model="gpt-5.4",
             required_inference_profile=None,
             expected_buffer_id=attachment_buffer_id,
             prepared_inference_state=None,
+            prepared_attachments=prepared_attachments,
             profile_resolution_failure=None,
             active_run_id=None,
         )
@@ -1087,6 +1146,7 @@ class TestInputBufferService:
         assert payload.attachments[0].preview_thumbnail_uri == thumbnail_uri
         assert len(result.events) == 1
         assert result.events[0].id == event.id
+        assert exchange_file_service.lock_check_count == 1
 
     async def test_flush_reuses_buffer_file_parts_without_rematerializing(
         self,
@@ -1130,12 +1190,17 @@ class TestInputBufferService:
             model_file_service=model_file_service,
         )
 
+        prepared_attachments = await service.prepare_pending_input_attachments(
+            session_id=session_id,
+            expected_buffer_id=image_buffer_id,
+        )
         result = await service.flush_session_input_buffers(
             session_id=session_id,
             model="gpt-5.4",
             required_inference_profile=None,
             expected_buffer_id=image_buffer_id,
             prepared_inference_state=None,
+            prepared_attachments=prepared_attachments,
             profile_resolution_failure=None,
             active_run_id=None,
         )
@@ -1175,6 +1240,7 @@ class TestInputBufferService:
             required_inference_profile=None,
             expected_buffer_id=None,
             prepared_inference_state=None,
+            prepared_attachments=None,
             profile_resolution_failure=None,
             active_run_id=None,
         )
