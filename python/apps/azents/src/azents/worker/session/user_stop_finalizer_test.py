@@ -196,8 +196,13 @@ class _LiveEventProjector:
     """LiveEventProjector test double."""
 
     def __init__(self) -> None:
+        self.flushed_session_ids: list[str] = []
         self.removed_events: list[tuple[str, str]] = []
         self.removed_active_call_ids: list[set[str]] = []
+
+    async def flush_session(self, session_id: str) -> None:
+        """Record flush request."""
+        self.flushed_session_ids.append(session_id)
 
     async def remove_event(self, session_id: str, event_id: str) -> None:
         """Record remove request."""
@@ -379,6 +384,7 @@ async def test_finalize_persists_live_events_and_marks_run_terminal() -> None:
     )
     assert marker.kind == EventKind.RUN_MARKER
     assert isinstance(RunMarkerPayload.model_validate(marker.payload), RunMarkerPayload)
+    assert projector.flushed_session_ids == [session_id]
     assert projector.removed_events == [
         (session_id, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
         (session_id, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
@@ -460,6 +466,7 @@ async def test_record_interrupted_run_only_records_marker_and_stopped_event() ->
     assert isinstance(stopped_event, RunStopped)
     assert stopped_event.run_id == "22222222222222222222222222222222"
     assert session_repository.cleared_stop_request_session_ids == [session_id]
+    assert projector.flushed_session_ids == []
     assert projector.removed_events == []
     assert broker.cleared_session_ids == []
     assert run_repository.terminal_runs == [

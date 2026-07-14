@@ -46,6 +46,10 @@ class _Projector:
     def __init__(self) -> None:
         self.events: list[tuple[str, object]] = []
 
+    async def flush_session(self, session_id: str) -> None:
+        """Accept durable handoff flush."""
+        del session_id
+
     async def update(self, session_id: str, event: object) -> None:
         """Record projection attempts."""
         self.events.append((session_id, event))
@@ -94,6 +98,10 @@ class _TrackingProjector:
 
     def __init__(self, calls: list[object]) -> None:
         self.calls = calls
+
+    async def flush_session(self, session_id: str) -> None:
+        """Record pre-handoff partial flush."""
+        self.calls.append(("flush", session_id))
 
     async def update(self, session_id: str, event: object) -> None:
         """Record post-history counterpart removal."""
@@ -161,8 +169,8 @@ async def test_internal_runtime_event_is_not_publicly_broadcast() -> None:
 
 
 @pytest.mark.asyncio
-async def test_durable_event_publishes_history_before_live_removal() -> None:
-    """Durable handoff publishes history before removing its live counterpart."""
+async def test_durable_event_uses_one_canonical_history_frame_after_flush() -> None:
+    """Durable handoff flushes live partials before the canonical history action."""
     calls: list[object] = []
     publisher = WorkerEventPublisher(
         broker=cast(SessionBroker, cast(Any, _TrackingBroker(calls))),
@@ -173,10 +181,10 @@ async def test_durable_event_publishes_history_before_live_removal() -> None:
 
     await publisher.dispatch_event("session-1", event)
 
+    assert calls[0] == ("flush", "session-1")
     published = [
         call for call in calls if isinstance(call, tuple) and call[0] == "publish"
     ]
     assert len(published) == 1
-    assert calls[0] == published[0]
     assert published[0][2]["type"] == "history_event_appended"
     assert calls[-1] == ("update", "session-1", event)
