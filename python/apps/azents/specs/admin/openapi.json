@@ -922,7 +922,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/LLMProvider"
+              "$ref": "#/components/schemas/SystemCatalogProvider"
             }
           }
         ],
@@ -2344,21 +2344,6 @@
         "title": "InvitationStatus",
         "description": "Workspace invitation status."
       },
-      "LLMProvider": {
-        "type": "string",
-        "enum": [
-          "openai",
-          "chatgpt_oauth",
-          "xai",
-          "xai_oauth",
-          "anthropic",
-          "google_gemini",
-          "aws_bedrock",
-          "google_vertex_ai"
-        ],
-        "title": "LLMProvider",
-        "description": "LLM hosting provider."
-      },
       "PasswordResetTokenListResponse": {
         "properties": {
           "items": {
@@ -2691,6 +2676,18 @@
         "title": "SystemBootstrapStatusResponse",
         "description": "Initial system bootstrap availability response."
       },
+      "SystemCatalogProvider": {
+        "type": "string",
+        "enum": [
+          "openai",
+          "xai",
+          "xai_oauth",
+          "anthropic",
+          "google_gemini"
+        ],
+        "title": "SystemCatalogProvider",
+        "description": "Provider with a system-owned model catalog."
+      },
       "SystemModelCatalogListResponse": {
         "properties": {
           "items": {
@@ -2728,7 +2725,7 @@
       "SystemModelCatalogRefreshResponse": {
         "properties": {
           "provider": {
-            "$ref": "#/components/schemas/LLMProvider"
+            "$ref": "#/components/schemas/SystemCatalogProvider"
           },
           "catalog_id": {
             "type": "string",
@@ -2809,7 +2806,7 @@
       "SystemModelCatalogResponse": {
         "properties": {
           "provider": {
-            "$ref": "#/components/schemas/LLMProvider"
+            "$ref": "#/components/schemas/SystemCatalogProvider"
           },
           "catalog_id": {
             "anyOf": [

@@ -20,8 +20,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/agents/components/ModelCatalogPicker.tsx
   - typescript/apps/azents-web/src/features/llm-settings/**
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
-last_verified_at: 2026-07-12
-spec_version: 7
+last_verified_at: 2026-07-14
+spec_version: 8
 ---
 
 # ChatGPT OAuth Flow
@@ -124,7 +124,7 @@ sequenceDiagram
         Device-->>API: authorization_code + code_verifier
         API->>Token: POST /oauth/token
         Token-->>API: access/refresh/id token
-        API->>DB: Store encrypted integration secrets + config
+        API->>DB: Store encrypted integration + empty account catalog
         API-->>Web: connected integration response
     end
 ```
@@ -138,7 +138,7 @@ Rules:
 
 ## Account-scoped model catalog
 
-After a device connection succeeds, Azents queues an initial integration catalog sync. Integration updates and explicit picker sync use the same catalog service. The sync path refreshes the OAuth token when necessary, then requests:
+The OAuth success transaction creates the integration and its empty account-scoped catalog together. Azents then queues the initial integration catalog sync. Integration updates and explicit picker sync use the same catalog service. The sync path refreshes the OAuth token when necessary, then requests:
 
 ```text
 GET https://chatgpt.com/backend-api/codex/models?client_version=0.144.0
@@ -146,7 +146,7 @@ GET https://chatgpt.com/backend-api/codex/models?client_version=0.144.0
 
 The request includes the connected account id and Azents client identity. Models are selectable only when backend metadata marks them API-supported and picker-visible. The backend model payload supplies the normalized `use_responses_lite` capability plus reasoning, modality, context-window, and tool metadata. A backend model remains selectable without a matching LiteLLM metadata key.
 
-Picker reads use the stored integration catalog and do not call ChatGPT. Before the first integration snapshot exists, the existing ChatGPT system catalog is the fallback. Failed sync attempts preserve the last successful snapshot.
+Picker reads use only the stored integration catalog and do not call ChatGPT. Before the first snapshot exists, the catalog returns an empty status-aware result; ChatGPT OAuth has no system-catalog fallback. Failed sync attempts preserve the last successful snapshot.
 
 Catalog refresh does not mutate Agent or Workspace model selection snapshots. Runtime transport selection uses the compatibility capability copied into the saved model selection when the user selects the model.
 
@@ -229,6 +229,7 @@ Rules:
 
 | Date | Version | Change | Rationale |
 |---|---|---|---|
+| 2026-07-14 | 8 | Removed the system-catalog fallback and made the account catalog transactional with OAuth integration creation | `python/apps/azents/src/azents/services/chatgpt_oauth/__init__.py` |
 | 2026-07-12 | 7 | Added account-scoped model discovery and saved-capability-driven Responses Lite lowering | [`design/chatgpt-responses-lite-catalog.md`](../../design/chatgpt-responses-lite-catalog.md) |
 | 2026-06-16 | 5 | Updated runtime refresh sequence from Agent model selection snapshot → Integration resolve | [`adr/0063-agent-model-selection-snapshot.md`](../../adr/0063-agent-model-selection-snapshot.md) |
 | 2026-05-17 | 4 | Updated runtime refresh sequence from Agent static provider model resolve to ModelConfig → Integration resolve | [`design/dynamic-llm-model-configs.md`](../../design/dynamic-llm-model-configs.md) |

@@ -9,6 +9,7 @@ from azents.services.llm_catalog import (
 )
 
 from . import refresh_system_model_catalog
+from .data import SystemCatalogProvider
 
 
 async def test_xai_api_key_supports_system_catalog_refresh() -> None:
@@ -26,9 +27,9 @@ async def test_xai_api_key_supports_system_catalog_refresh() -> None:
 
     response = await refresh_system_model_catalog(
         service,
-        provider=LLMProvider.XAI,
+        provider=SystemCatalogProvider.XAI,
     )
 
     service.sync_system_catalog.assert_awaited_once_with(provider=LLMProvider.XAI)
-    assert response.provider == LLMProvider.XAI
+    assert response.provider == SystemCatalogProvider.XAI
     assert response.catalog_id == "catalog-id"

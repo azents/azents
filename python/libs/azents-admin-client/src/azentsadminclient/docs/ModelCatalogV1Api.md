@@ -96,7 +96,7 @@ Refresh one system model catalog projection by provider.
 
 ```python
 import azentsadminclient
-from azentsadminclient.models.llm_provider import LLMProvider
+from azentsadminclient.models.system_catalog_provider import SystemCatalogProvider
 from azentsadminclient.models.system_model_catalog_refresh_response import SystemModelCatalogRefreshResponse
 from azentsadminclient.rest import ApiException
 from pprint import pprint
@@ -121,7 +121,7 @@ configuration = azentsadminclient.Configuration(
 with azentsadminclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentsadminclient.ModelCatalogV1Api(api_client)
-    provider = azentsadminclient.LLMProvider() # LLMProvider |
+    provider = azentsadminclient.SystemCatalogProvider() # SystemCatalogProvider |
 
     try:
         # Refresh System Model Catalog
@@ -139,7 +139,7 @@ with azentsadminclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **provider** | [**LLMProvider**](.md)|  |
+ **provider** | [**SystemCatalogProvider**](.md)|  |
 
 ### Return type
 

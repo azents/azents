@@ -7,6 +7,15 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from azents.core.builtin_tools import BUILTIN_TOOL_RULES
+from azents.core.enums import LLMProvider
+
+INTEGRATION_SCOPED_CATALOG_PROVIDERS: frozenset[LLMProvider] = frozenset(
+    {
+        LLMProvider.AWS_BEDROCK,
+        LLMProvider.CHATGPT_OAUTH,
+        LLMProvider.GOOGLE_VERTEX_AI,
+    }
+)
 
 
 class ModelModality(enum.StrEnum):

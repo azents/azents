@@ -25,6 +25,7 @@ from azents.core.enums import (
     LLMProvider,
 )
 from azents.core.llm_catalog import (
+    INTEGRATION_SCOPED_CATALOG_PROVIDERS,
     ModelBuiltInToolCapabilities,
     ModelCapabilities,
     ModelCompatibilityCapabilities,
@@ -82,7 +83,6 @@ def _get_integration_repository(
 
 _SYSTEM_PROVIDER_TO_LITELLM_PROVIDER: dict[LLMProvider, tuple[str, ...]] = {
     LLMProvider.OPENAI: ("openai",),
-    LLMProvider.CHATGPT_OAUTH: ("openai",),
     LLMProvider.XAI: ("xai",),
     LLMProvider.XAI_OAUTH: ("xai",),
     LLMProvider.ANTHROPIC: ("anthropic",),
@@ -601,12 +601,7 @@ class IntegrationCatalogProjectionService:
         if (
             deterministic_listing is None
             and not deterministic_failure
-            and integration.provider
-            not in (
-                LLMProvider.AWS_BEDROCK,
-                LLMProvider.CHATGPT_OAUTH,
-                LLMProvider.GOOGLE_VERTEX_AI,
-            )
+            and integration.provider not in INTEGRATION_SCOPED_CATALOG_PROVIDERS
         ):
             return Failure(
                 IntegrationCatalogSyncUnsupportedProvider(integration.provider)
@@ -971,7 +966,7 @@ def project_system_entries(
                     provider, model_key
                 ),
                 lowerer_target=LLMCatalogLowererTarget.LITELLM,
-                runtime_model_identifier=_runtime_model_identifier(provider, model_key),
+                runtime_model_identifier=model_key,
                 display_name=_display_name(model_key),
                 normalized_capabilities=_capabilities_from_litellm_metadata(
                     metadata
@@ -1017,12 +1012,6 @@ def _provider_model_identifier(provider: LLMProvider, model_key: str) -> str:
     ):
         return model_key.removeprefix("xai/")
     return model_key.removeprefix("openai/").removeprefix("anthropic/")
-
-
-def _runtime_model_identifier(provider: LLMProvider, model_key: str) -> str:
-    if provider == LLMProvider.CHATGPT_OAUTH and not model_key.startswith("openai/"):
-        return f"openai/{model_key}"
-    return model_key
 
 
 def _display_name(model_key: str) -> str:
