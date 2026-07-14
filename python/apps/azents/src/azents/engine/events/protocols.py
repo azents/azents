@@ -369,12 +369,12 @@ class ManualCompactor(Protocol):
 
     async def compact(
         self,
-        session: AsyncSession,
         *,
         session_id: str,
         transcript: Sequence[Event],
         compaction_id: str,
         summarize: "SummaryGenerator",
+        on_started: Callable[[], Awaitable[None]] | None = None,
         summary_context_window_tokens: int | None = None,
         reason: str | None = None,
         summary_enricher: SummaryEnricher | None = None,

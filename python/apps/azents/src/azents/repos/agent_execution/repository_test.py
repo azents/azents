@@ -2,6 +2,8 @@
 
 import asyncio
 import datetime
+from collections.abc import AsyncIterator, Sequence
+from contextlib import asynccontextmanager
 
 import pytest
 import sqlalchemy as sa
@@ -22,8 +24,11 @@ from azents.core.inference_profile import (
 )
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.engine.events.action_messages import ActionMessagePayload, GoalAction
+from azents.engine.events.filters import EventCompactor
 from azents.engine.events.types import (
     ActiveToolCall,
+    CompactionSummaryPayload,
+    Event,
     TokenUsagePayload,
     TurnMarkerPayload,
     UserMessagePayload,
@@ -458,6 +463,111 @@ class TestEventExecutionRepositories:
                     append_task.cancel()
                     with pytest.raises(asyncio.CancelledError):
                         await append_task
+
+    async def test_compaction_releases_session_lock_during_summary(
+        self,
+        rdb_engine: AsyncEngine,
+        latest_db_schema: None,
+    ) -> None:
+        """Concurrent input commits while the compaction model is running."""
+        session_factory = async_sessionmaker(rdb_engine, expire_on_commit=False)
+
+        @asynccontextmanager
+        async def session_manager() -> AsyncIterator[AsyncSession]:
+            """Commit each compaction persistence stage on clean scope exit."""
+            async with session_factory() as session:
+                try:
+                    yield session
+                except Exception:
+                    await session.rollback()
+                    raise
+                else:
+                    await session.commit()
+
+        transcript_repo = EventTranscriptRepository()
+        session_repo = _agent_session_repository()
+        async with session_factory() as setup_session:
+            workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
+                setup_session,
+                "event-compaction-lock-ws",
+            )
+            event_session = await session_repo.create(
+                setup_session,
+                AgentSessionCreate(
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                    title=None,
+                ),
+            )
+            first = await transcript_repo.append(
+                setup_session,
+                EventCreate(
+                    session_id=event_session.id,
+                    kind=EventKind.USER_MESSAGE,
+                    payload=UserMessagePayload(content="before compaction").model_dump(
+                        mode="json"
+                    ),
+                ),
+            )
+            await setup_session.commit()
+
+        concurrent_input: Event | None = None
+
+        async def summarize(
+            old_events: Sequence[Event],
+            summary_budget: object,
+        ) -> str:
+            """Append input through an independent transaction during summary."""
+            nonlocal concurrent_input
+            del old_events, summary_budget
+            async with session_factory() as input_session:
+                concurrent_input = await asyncio.wait_for(
+                    transcript_repo.append(
+                        input_session,
+                        EventCreate(
+                            session_id=event_session.id,
+                            kind=EventKind.USER_MESSAGE,
+                            payload=UserMessagePayload(
+                                content="during compaction"
+                            ).model_dump(mode="json"),
+                        ),
+                    ),
+                    timeout=2,
+                )
+                await input_session.commit()
+            return "summary"
+
+        summary = await EventCompactor(
+            session_manager=session_manager,
+            transcript_repo=transcript_repo,
+            session_repo=session_repo,
+        ).compact(
+            session_id=event_session.id,
+            transcript=[first],
+            compaction_id="compaction-lock-test",
+            summarize=summarize,
+        )
+
+        assert summary is not None
+        assert concurrent_input is not None
+        assert summary.model_order < concurrent_input.model_order
+        async with session_factory() as read_session:
+            current_session = await session_repo.get_by_id(
+                read_session,
+                event_session.id,
+            )
+            assert current_session is not None
+            model_input = await transcript_repo.list_for_model_input(
+                read_session,
+                event_session.id,
+                head_event_id=current_session.model_input_head_event_id,
+            )
+        assert [event.id for event in model_input] == [
+            summary.id,
+            concurrent_input.id,
+        ]
+        payload = model_input[0].payload
+        assert isinstance(payload, CompactionSummaryPayload)
 
     async def test_model_input_uses_logical_order(
         self,
