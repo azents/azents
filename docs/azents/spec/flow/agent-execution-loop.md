@@ -41,7 +41,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ChatView.tsx
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
 last_verified_at: 2026-07-14
-spec_version: 79
+spec_version: 80
 ---
 
 # Agent Execution Loop
@@ -67,13 +67,17 @@ Main steps:
    into a LiteLLM Responses native request.
 7. `PostLowerFilterPipeline` applies adapter-native request size guard.
 8. `LiteLLMResponsesModelAdapter.stream()` calls the raw LiteLLM Responses API.
-9. `AdapterOutputNormalizer` normalizes native output into events and UI stream projection.
+9. `AdapterOutputNormalizer` incrementally processes native output into non-durable UI stream
+   projections while retaining only the state needed to build durable output at completion.
 10. Foreground client tools execute in parallel and results are appended as event `client_tool_result`.
 11. When no foreground client tool call or pending follow-up remains, the runner observes the
     terminal `RunComplete` boundary and then transitions `AgentSession.run_state` to idle.
 
-Streaming deltas are UI projection only. Durable events are appended based on completed output items
-or completed responses.
+Streaming text, reasoning, and function-call deltas are UI projections only. The worker coalesces
+text and reasoning deltas for at most 75 milliseconds or 96 characters before Redis/WebSocket
+publication. Durable events are appended only from completed output items or completed responses;
+incomplete tool calls are never admitted. A user stop may durably preserve assistant text received
+before completion.
 
 ## 2. Run State
 
@@ -517,11 +521,12 @@ UI projection boundaries: they preserve `asyncio.CancelledError`, log other proj
 do not fail provider execution, durable event append, Run phase/terminal persistence, or subsequent
 cleanup.
 
-`ContentDelta` and `ReasoningDelta` are live projection events only. The worker applies every delta to
-the Redis live projection and emits `live_event_upserted` immediately. There is no time- or
-character-based partial batching layer. Engine emit ordering therefore keeps each live update ahead
-of a later durable assistant/reasoning event, whose history action is published before the matching
-live projection is removed.
+`ContentDelta` and `ReasoningDelta` are live projection events only. The worker coalesces each
+Session's text and reasoning deltas for at most 75 milliseconds or 96 characters before applying a
+batch to the Redis live projection and emitting `live_event_upserted`. It flushes pending batches at
+Session cleanup. Engine emit ordering keeps each flushed live update ahead of a later durable
+assistant/reasoning event, whose history action is published before the matching live projection is
+removed.
 
 The old `GET /chat/v1/sessions/{session_id}/messages` aggregate endpoint is removed. The POST
 `/chat/v1/sessions/{session_id}/messages` write endpoint is a separate REST commit boundary and does
@@ -637,6 +642,7 @@ updated by the user.
 
 ## Changelog
 
+- **2026-07-14** (spec_version 80) — Restored incremental native-stream normalization and bounded live partial batching: text and reasoning are projected before provider completion, durable output remains completion-based, and user stop preserves valid partial assistant text without admitting incomplete tools.
 - **2026-07-14** (spec_version 79) — Defined operation TurnActions as owner-generation-fenced live execution state with atomic terminal snapshot/delete handover, 30-second shutdown completion, preemptive user-stop cancellation, and no stale-owner re-execution.
 - **2026-07-13** (spec_version 78) — Reverted incremental native-stream normalization from version 77 and removed time- and character-based live partial batching so every existing content and reasoning delta updates Redis and WebSocket projection immediately.
 - **2026-07-13** (spec_version 77) — Made native model stream normalization incremental so text and reasoning projections are emitted before provider completion without retaining the full native event sequence.
