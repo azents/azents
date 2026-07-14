@@ -49,6 +49,18 @@ async def test_bounded_operation_times_out() -> None:
         )
 
 
+async def test_operation_cancellation_preserves_reason() -> None:
+    """Shielding does not erase an operation-originated cancellation reason."""
+
+    async def operation() -> None:
+        raise asyncio.CancelledError("operation cancelled")
+
+    with pytest.raises(asyncio.CancelledError) as cancelled:
+        await run_bounded_cancellation_safe(operation)
+
+    assert cancelled.value.args == ("operation cancelled",)
+
+
 async def test_timeout_quarantines_cancellation_swallowing_operation(
     caplog: pytest.LogCaptureFixture,
 ) -> None:

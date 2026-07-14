@@ -108,6 +108,13 @@ async def run_bounded_cancellation_safe(
     try:
         return await asyncio.shield(bounded_task)
     except asyncio.CancelledError:
+        if not current_task_is_cancelling() and bounded_task.done():
+            # ``asyncio.shield`` surfaces a child task's CancelledError as a
+            # new, argument-less cancellation. Recover the original exception
+            # so an operation-initiated cancellation keeps its reason. A real
+            # caller cancellation remains authoritative even if completion
+            # races with this branch.
+            return bounded_task.result()
         # Caller cancellation stays authoritative and immediate. The retained
         # supervisor will either finish recovery or quarantine its operation at
         # the hard deadline without leaking an unobserved task outcome.
