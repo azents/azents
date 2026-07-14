@@ -1,9 +1,15 @@
 """LLM catalog repository tests."""
 
+import datetime
+
 import pytest
 import sqlalchemy as sa
+from azcommon.result import Success
+from cryptography.fernet import Fernet
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.credentials import ChatGPTOAuthConfig, ChatGPTOAuthSecrets
+from azents.core.crypto import CredentialCipher
 from azents.core.enums import (
     LLMCatalogEntryVisibility,
     LLMCatalogLowererTarget,
@@ -14,6 +20,10 @@ from azents.core.llm_catalog import ModelCapabilities
 from azents.rdb.models.llm_catalog import RDBLLMCatalogEntry, RDBLLMCatalogSnapshot
 from azents.repos.llm_catalog import LLMCatalogRepository
 from azents.repos.llm_catalog.data import LLMCatalogEntryCreate
+from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
+from azents.repos.llm_provider_integration.data import LLMProviderIntegrationCreate
+from azents.repos.workspace import WorkspaceRepository
+from azents.repos.workspace.data import WorkspaceCreate
 
 pytestmark = pytest.mark.asyncio
 
@@ -65,3 +75,87 @@ async def test_replace_current_snapshot_persists_snapshot_before_entries(
     assert snapshot_id is not None
     assert snapshot_count == 1
     assert entry_count == 1
+
+
+async def test_chatgpt_integration_never_falls_back_to_system_catalog(
+    rdb_session: AsyncSession,
+) -> None:
+    """Do not expose system-projected models to an account-scoped integration."""
+    workspace_repository = WorkspaceRepository()
+    workspace_result = await workspace_repository.create(
+        rdb_session,
+        WorkspaceCreate(
+            name="ChatGPT fallback workspace",
+            handle="chatgpt-fallback-workspace",
+        ),
+    )
+    assert isinstance(workspace_result, Success)
+    workspace_id = await workspace_repository.resolve_id(
+        rdb_session, "chatgpt-fallback-workspace"
+    )
+    assert workspace_id is not None
+
+    integration = await LLMProviderIntegrationRepository(
+        CredentialCipher(Fernet.generate_key().decode())
+    ).create(
+        rdb_session,
+        LLMProviderIntegrationCreate(
+            workspace_id=workspace_id,
+            provider=LLMProvider.CHATGPT_OAUTH,
+            name="ChatGPT Subscription",
+            secrets=ChatGPTOAuthSecrets(
+                access_token="access-token",
+                refresh_token="refresh-token",
+                expires_at=datetime.datetime(2030, 1, 1, tzinfo=datetime.UTC),
+            ),
+            config=ChatGPTOAuthConfig(
+                account_id="account-123",
+                email="user@example.com",
+                plan_type="plus",
+                connection_method="callback",
+                status="connected",
+                connected_at=datetime.datetime(2026, 7, 14, tzinfo=datetime.UTC),
+            ),
+        ),
+    )
+    repository = LLMCatalogRepository()
+    system_catalog = await repository.ensure_system_catalog(
+        rdb_session,
+        provider=LLMProvider.CHATGPT_OAUTH,
+        lowerer_target=LLMCatalogLowererTarget.LITELLM,
+    )
+    await repository.replace_current_snapshot(
+        rdb_session,
+        catalog=system_catalog,
+        source_snapshot_id=None,
+        entries=[
+            LLMCatalogEntryCreate(
+                provider=LLMProvider.CHATGPT_OAUTH,
+                provider_model_identifier="gpt-system-only",
+                lowerer_target=LLMCatalogLowererTarget.LITELLM,
+                runtime_model_identifier="chatgpt/gpt-system-only",
+                display_name="System-only GPT",
+                normalized_capabilities=ModelCapabilities().model_dump(mode="json"),
+                lifecycle_status=LLMModelLifecycleStatus.ACTIVE,
+                visibility_status=LLMCatalogEntryVisibility.SELECTABLE,
+                provider_integration_id=None,
+                publisher="openai",
+                family="gpt",
+                source_metadata=None,
+                projection_metadata=None,
+                hidden_reason=None,
+            )
+        ],
+        diagnostics=None,
+    )
+
+    result = await repository.list_entries_by_integration(
+        rdb_session,
+        integration_id=integration.id,
+        workspace_id=workspace_id,
+        search=None,
+        limit=50,
+        offset=0,
+    )
+
+    assert result is None

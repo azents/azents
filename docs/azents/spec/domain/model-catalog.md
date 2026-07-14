@@ -5,7 +5,10 @@ tags: [backend, frontend, engine]
 spec_type: domain
 domain: model-catalog
 code_paths:
+  - python/apps/azents/src/azents/core/llm_catalog.py
   - python/apps/azents/src/azents/services/llm_catalog/__init__.py
+  - python/apps/azents/src/azents/services/llm_provider_integration/__init__.py
+  - python/apps/azents/src/azents/services/chatgpt_oauth/__init__.py
   - python/apps/azents/src/azents/repos/llm_catalog/__init__.py
   - python/apps/azents/src/azents/repos/llm_catalog/data.py
   - python/apps/azents/src/azents/api/public/llm_provider_integration/v1/__init__.py
@@ -18,8 +21,9 @@ code_paths:
   - typescript/apps/azents-web/src/features/agents/containers/useAgentFormContainer.ts
   - typescript/apps/azents-web/src/features/llm-settings/containers/useLlmSettingsContainer.ts
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
-last_verified_at: 2026-07-13
-spec_version: 6
+  - typescript/apps/azents-admin-web/src/features/model-catalog/containers/useModelCatalogPageContainer.ts
+last_verified_at: 2026-07-14
+spec_version: 7
 ---
 
 # Model Catalog Domain Spec
@@ -32,10 +36,10 @@ The model catalog stores projected model choices for Agent and Workspace model s
 
 Catalogs have two ownership scopes.
 
-- System catalog: managed by Azents for providers whose selectable models are not scoped to a customer integration. Current system catalogs cover OpenAI, ChatGPT OAuth fallback, xAI API key, xAI OAuth, Anthropic, and Google Gemini using the active lowerer target projection source.
+- System catalog: managed by Azents for providers whose selectable models are not scoped to a customer integration. Current system catalogs cover OpenAI, xAI API key, xAI OAuth, Anthropic, and Google Gemini using the active lowerer target projection source.
 - Integration catalog: scoped to a provider integration for providers whose visible models depend on customer credential, account, region, or project. Current user-scoped integration catalogs cover AWS Bedrock, ChatGPT OAuth, and Google Vertex AI.
 
-A public model picker starts from an enabled LLM provider integration. Reads first try the integration catalog. If an integration catalog does not exist, the read path falls back to the provider system catalog.
+An integration-scoped catalog is created in the same transaction as its provider integration. Public reads for integration-scoped providers use only that catalog and never fall back to a system catalog. For providers with system-owned model visibility, the picker resolves the provider system catalog through the enabled integration.
 
 ## Stored projection entries
 
@@ -115,12 +119,13 @@ The web picker is integration-first. The form displays the current model summary
 
 The picker shows catalog status and supports search plus infinite-scroll paged loading. It renders provider-independent catalog UI states for no integration selected, loading, never synced, syncing without snapshot, failed without snapshot, ready, ready with latest failed attempt, ready empty result, and loading next page. Failure state renders before empty result state.
 
-For user-scoped integration catalogs, the picker can trigger integration sync. For system catalog fallback entries, public users do not trigger system sync.
+For user-scoped integration catalogs, the picker can trigger integration sync. For providers backed by system catalogs, public users do not trigger system sync.
 
 ## Change History
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-07-14 | 7 | Removed the ChatGPT OAuth system catalog and made integration catalogs authoritative from integration creation |
 | 2026-07-13 | 6 | Documented live system-administrator authorization for Admin model-catalog operations |
 | 2026-07-12 | 5 | Added account-scoped ChatGPT OAuth integration catalogs and backend-authoritative Responses Lite capability projection |
 | 2026-07-10 | 4 | Documented canonical LiteLLM reasoning-effort capability projection and strict empty-list semantics |
@@ -130,4 +135,4 @@ For user-scoped integration catalogs, the picker can trigger integration sync. F
 
 ## Current implementation notes
 
-The current implementation does not use models.dev for model catalog source data. OpenAI and Anthropic provider API listing are not part of the current model catalog path. Current system providers use LiteLLM projection source data for the active lowerer target. ChatGPT OAuth uses its system catalog only before an account-scoped integration catalog exists. The separate `xai` and `xai_oauth` system catalogs are both projected from LiteLLM provider family `xai`; provider-facing identifiers remove the `xai/` prefix, and runtime invocation reconstructs the LiteLLM `xai/` route prefix.
+The current implementation does not use models.dev for model catalog source data. OpenAI and Anthropic provider API listing are not part of the current model catalog path. Current system providers use LiteLLM projection source data for the active lowerer target. ChatGPT OAuth has no system catalog; its account-scoped integration catalog is the only model-visibility source. The separate `xai` and `xai_oauth` system catalogs are both projected from LiteLLM provider family `xai`; provider-facing identifiers remove the `xai/` prefix, and runtime invocation reconstructs the LiteLLM `xai/` route prefix.

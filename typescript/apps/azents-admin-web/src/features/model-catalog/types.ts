@@ -1,9 +1,6 @@
-export type SystemCatalogProvider =
-  | "openai"
-  | "chatgpt_oauth"
-  | "xai_oauth"
-  | "anthropic"
-  | "google_gemini";
+import type { SystemCatalogProvider } from "@azents/admin-client";
+
+export type { SystemCatalogProvider };
 
 export interface SystemModelCatalogSyncAttemptResponse {
   id: string;

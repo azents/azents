@@ -14,6 +14,7 @@ from azents.core.auth.deps import WorkspaceMember, get_workspace_member
 from azents.core.auth.permissions import Permissions
 from azents.core.credentials import PROVIDER_SECRET_TYPES
 from azents.core.enums import LLMProvider
+from azents.core.llm_catalog import INTEGRATION_SCOPED_CATALOG_PROVIDERS
 from azents.repos.llm_catalog.data import CatalogNotFound
 from azents.repos.llm_provider_integration.data import NotFound
 from azents.services.llm_catalog import (
@@ -398,11 +399,7 @@ def _enqueue_initial_catalog_sync(
     deterministic_variant = parse_deterministic_fixture_variant(name)
     if deterministic_variant is not None:
         return
-    if provider not in (
-        LLMProvider.AWS_BEDROCK,
-        LLMProvider.CHATGPT_OAUTH,
-        LLMProvider.GOOGLE_VERTEX_AI,
-    ):
+    if provider not in INTEGRATION_SCOPED_CATALOG_PROVIDERS:
         return
     background_tasks.add_task(
         _run_initial_catalog_sync,

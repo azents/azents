@@ -16,7 +16,7 @@ from pydantic import validate_call, Field, StrictFloat, StrictStr, StrictInt
 from typing import Any, Dict, List, Optional, Tuple, Union
 from typing_extensions import Annotated
 
-from azentsadminclient.models.llm_provider import LLMProvider
+from azentsadminclient.models.system_catalog_provider import SystemCatalogProvider
 from azentsadminclient.models.system_model_catalog_list_response import SystemModelCatalogListResponse
 from azentsadminclient.models.system_model_catalog_refresh_list_response import SystemModelCatalogRefreshListResponse
 from azentsadminclient.models.system_model_catalog_refresh_response import SystemModelCatalogRefreshResponse
@@ -288,7 +288,7 @@ class ModelCatalogV1Api:
     @validate_call
     def model_catalog_v1_refresh_system_model_catalog(
         self,
-        provider: LLMProvider,
+        provider: SystemCatalogProvider,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -307,7 +307,7 @@ class ModelCatalogV1Api:
         Refresh one system model catalog projection by provider.
 
         :param provider: (required)
-        :type provider: LLMProvider
+        :type provider: SystemCatalogProvider
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -356,7 +356,7 @@ class ModelCatalogV1Api:
     @validate_call
     def model_catalog_v1_refresh_system_model_catalog_with_http_info(
         self,
-        provider: LLMProvider,
+        provider: SystemCatalogProvider,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -375,7 +375,7 @@ class ModelCatalogV1Api:
         Refresh one system model catalog projection by provider.
 
         :param provider: (required)
-        :type provider: LLMProvider
+        :type provider: SystemCatalogProvider
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -424,7 +424,7 @@ class ModelCatalogV1Api:
     @validate_call
     def model_catalog_v1_refresh_system_model_catalog_without_preload_content(
         self,
-        provider: LLMProvider,
+        provider: SystemCatalogProvider,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -443,7 +443,7 @@ class ModelCatalogV1Api:
         Refresh one system model catalog projection by provider.
 
         :param provider: (required)
-        :type provider: LLMProvider
+        :type provider: SystemCatalogProvider
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of

@@ -9,8 +9,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.crypto import CredentialCipher
 from azents.core.deps import get_credential_cipher
+from azents.core.enums import LLMCatalogLowererTarget
+from azents.core.llm_catalog import INTEGRATION_SCOPED_CATALOG_PROVIDERS
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.repos.llm_catalog import LLMCatalogRepository
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.llm_provider_integration.data import (
     LLMProviderIntegrationCreate,
@@ -38,6 +41,7 @@ class LLMProviderIntegrationService:
     """LLM Provider Integration CRUD service."""
 
     repository: Annotated[LLMProviderIntegrationRepository, Depends(_get_repo)]
+    catalog_repository: Annotated[LLMCatalogRepository, Depends(LLMCatalogRepository)]
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
     ]
@@ -56,6 +60,13 @@ class LLMProviderIntegrationService:
         )
         async with self.session_manager() as session:
             integration = await self.repository.create(session, repo_create)
+            if integration.provider in INTEGRATION_SCOPED_CATALOG_PROVIDERS:
+                await self.catalog_repository.ensure_integration_catalog(
+                    session,
+                    integration_id=integration.id,
+                    provider=integration.provider,
+                    lowerer_target=LLMCatalogLowererTarget.LITELLM,
+                )
         return LLMProviderIntegrationOutput.convert_from(integration)
 
     async def list_by_workspace(
@@ -97,6 +108,19 @@ class LLMProviderIntegrationService:
 
         async with self.session_manager() as session:
             result = await self.repository.update_by_id(session, integration_id, update)
+            match result:
+                case Success(value):
+                    if value.provider in INTEGRATION_SCOPED_CATALOG_PROVIDERS:
+                        await self.catalog_repository.ensure_integration_catalog(
+                            session,
+                            integration_id=value.id,
+                            provider=value.provider,
+                            lowerer_target=LLMCatalogLowererTarget.LITELLM,
+                        )
+                case Failure():
+                    pass
+                case _:
+                    assert_never(result)
 
         match result:
             case Success(value):
