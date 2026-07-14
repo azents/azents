@@ -1828,6 +1828,9 @@ class ChatLiveRunStateResponse(BaseModel):
     inference_profile: AppliedInferenceProfile = Field(
         description="Inference settings applied to the active turn",
     )
+    model_call_started_at: datetime.datetime | None = Field(
+        description="Current model call start time, or null outside a model call",
+    )
     retry: ChatLiveRunRetryStateResponse | None = Field(
         default=None,
         description="Current failed-run retry state",
@@ -1842,6 +1845,7 @@ class ChatLiveRunStateResponse(BaseModel):
             phase=run.phase,
             status=run.status,
             inference_profile=run.inference_profile,
+            model_call_started_at=run.model_call_started_at,
             retry=None
             if run.retry is None
             else ChatLiveRunRetryStateResponse.from_domain(run.retry),

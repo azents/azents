@@ -76,12 +76,19 @@ class TestSerializeEngineEvent:
     def test_run_phase_changed(self) -> None:
         """Serialize RunPhaseChanged."""
         result = serialize_event(
-            RunPhaseChanged(run_id="r1", phase=AgentRunPhase.STREAMING_MODEL)
+            RunPhaseChanged(
+                run_id="r1",
+                phase=AgentRunPhase.STREAMING_MODEL,
+                model_call_started_at=datetime.datetime(
+                    2026, 7, 14, tzinfo=datetime.UTC
+                ),
+            )
         )
         assert result == {
             "type": "run_phase_changed",
             "run_id": "r1",
             "phase": "streaming_model",
+            "model_call_started_at": "2026-07-14T00:00:00Z",
         }
 
     def test_run_complete(self) -> None:

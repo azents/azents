@@ -846,6 +846,9 @@ class _EventService:
                     phase=AgentRunPhase.WAITING_FOR_MODEL,
                     status=AgentRunStatus.RUNNING,
                     inference_profile=self.inference_profile,
+                    model_call_started_at=datetime.datetime(
+                        2026, 7, 14, tzinfo=datetime.UTC
+                    ),
                 ),
                 session_run_state=AgentSessionRunState.RUNNING,
             )
@@ -1530,6 +1533,7 @@ class TestEventRoutes:
                 "model_display_name": "Reasoning Model",
                 "reasoning_effort": "high",
             },
+            "model_call_started_at": "2026-07-14T00:00:00Z",
         }
         assert dump["session_run_state"] == "running"
 

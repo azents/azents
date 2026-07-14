@@ -126,6 +126,7 @@ def _running_run(run_id: str) -> AgentRunState:
         stop_requested_at=None,
         created_at=now,
         started_at=now,
+        model_call_started_at=now,
         ended_at=None,
         updated_at=now,
     )
@@ -202,6 +203,7 @@ async def test_stale_terminal_event_does_not_clear_newer_run_projection() -> Non
                 model_display_name="Test model",
                 reasoning_effort=None,
             ),
+            model_call_started_at=datetime.datetime(2026, 7, 14, tzinfo=datetime.UTC),
             retry=None,
         ),
     )
@@ -211,6 +213,9 @@ async def test_stale_terminal_event_does_not_clear_newer_run_projection() -> Non
 
     assert store.clear_count == 0
     assert [event[1]["type"] for event in broadcast.events] == ["live_run_updated"]
+    live_run = broadcast.events[0][1]["run"]
+    assert isinstance(live_run, dict)
+    assert live_run["model_call_started_at"] == "2026-07-14T00:00:00+00:00"
 
     await projector.publish_live_run_cleared("session-001", run_id="run-b")
 
@@ -299,6 +304,7 @@ async def test_live_run_broadcast_failure_is_non_fatal() -> None:
                 model_display_name="Test model",
                 reasoning_effort=None,
             ),
+            model_call_started_at=datetime.datetime(2026, 7, 14, tzinfo=datetime.UTC),
             retry=None,
         ),
     )

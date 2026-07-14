@@ -41,7 +41,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ChatView.tsx
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
 last_verified_at: 2026-07-14
-spec_version: 79
+spec_version: 80
 ---
 
 # Agent Execution Loop
@@ -92,7 +92,7 @@ Phase enum:
 - `stopping`
 
 `active_tool_calls` contains `call_id`, `name`, redacted/summarized `arguments`, `started_at`,
-and the admitting `owner_generation`. PostgreSQL is the execution and live-state authority for this set. The UI LLM running indicator is derived only from the active Run phase: it appears in `waiting_for_model`, remains visible for the entire `streaming_model` phase even after partial model output becomes visible, and disappears when the phase advances beyond `streaming_model`. Tool activity uses `executing_tools` and `active_tool_calls`.
+and the admitting `owner_generation`. PostgreSQL is the execution and live-state authority for this set. The UI LLM running indicator is derived only from the active Run phase: it appears in `waiting_for_model`, remains visible for the entire `streaming_model` phase even after partial model output becomes visible, and disappears when the phase advances beyond `streaming_model`. `agent_runs.model_call_started_at` is set when each model turn enters `waiting_for_model`, preserved through `streaming_model`, and cleared when the Run leaves the model-call phases or enters failed-attempt retry backoff. REST and WebSocket live Run projections expose this timestamp as `model_call_started_at`. After ten elapsed seconds, the indicator shows the client-calculated whole-second duration and refreshes it once per second until the model-call phase ends. Tool activity uses `executing_tools` and `active_tool_calls`.
 
 `action_executions` and `action_execution_events` are likewise live execution state, not a second
 terminal history store. Each active operation stores its admitting Session `owner_generation` and
@@ -637,6 +637,7 @@ updated by the user.
 
 ## Changelog
 
+- **2026-07-14** (spec_version 80) — Added durable per-model-call start time to live Run projections and a once-per-second duration beside the LLM indicator after ten elapsed seconds.
 - **2026-07-14** (spec_version 79) — Defined operation TurnActions as owner-generation-fenced live execution state with atomic terminal snapshot/delete handover, 30-second shutdown completion, preemptive user-stop cancellation, and no stale-owner re-execution.
 - **2026-07-13** (spec_version 78) — Reverted incremental native-stream normalization from version 77 and removed time- and character-based live partial batching so every existing content and reasoning delta updates Redis and WebSocket projection immediately.
 - **2026-07-13** (spec_version 77) — Made native model stream normalization incremental so text and reasoning projections are emitted before provider completion without retaining the full native event sequence.

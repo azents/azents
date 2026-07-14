@@ -166,6 +166,7 @@ def _running_run() -> AgentRunState:
         active_tool_calls=[],
         created_at=now,
         started_at=now,
+        model_call_started_at=None,
         updated_at=now,
     )
 

@@ -714,6 +714,20 @@ class TestEventExecutionRepositories:
         )
         assert run.run_index == 1
 
+        waiting = await repo.update_phase(
+            rdb_session,
+            run.id,
+            AgentRunPhase.WAITING_FOR_MODEL,
+        )
+        assert waiting.model_call_started_at is not None
+
+        streaming = await repo.update_phase(
+            rdb_session,
+            run.id,
+            AgentRunPhase.STREAMING_MODEL,
+        )
+        assert streaming.model_call_started_at == waiting.model_call_started_at
+
         active_call = ActiveToolCall(
             call_id="call-1",
             name="read_text",
@@ -729,6 +743,7 @@ class TestEventExecutionRepositories:
         )
         assert executing.phase == AgentRunPhase.EXECUTING_TOOLS
         assert executing.active_tool_calls == [active_call]
+        assert executing.model_call_started_at is None
 
         running = await repo.get_running_by_session_id(
             rdb_session,
@@ -857,9 +872,17 @@ class TestEventExecutionRepositories:
             next_retry_at=now + datetime.timedelta(seconds=1),
         )
 
+        waiting = await repo.update_phase(
+            rdb_session,
+            run.id,
+            AgentRunPhase.WAITING_FOR_MODEL,
+        )
+        assert waiting.model_call_started_at is not None
+
         updated = await repo.update_retry_state(rdb_session, run.id, retry_state)
 
         assert updated.retry_state == retry_state
+        assert updated.model_call_started_at is None
         running = await repo.get_running_by_session_id(
             rdb_session,
             session_id=event_session.id,

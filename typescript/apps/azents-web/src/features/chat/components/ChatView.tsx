@@ -1314,12 +1314,20 @@ export function ChatView({
                       retry={liveRetryRun.retry}
                       phase={liveRetryRun.phase}
                     />
-                    {isModelResponsePending && <AgentRunIndicator />}
+                    {isModelResponsePending && (
+                      <AgentRunIndicator
+                        modelCallStartedAt={liveRetryRun.modelCallStartedAt}
+                      />
+                    )}
                   </>
                 )}
                 {chatTimelineState.type === "LATEST_FOLLOWING" &&
                   !liveRetryVisible &&
-                  isModelResponsePending && <AgentRunIndicator />}
+                  isModelResponsePending && (
+                    <AgentRunIndicator
+                      modelCallStartedAt={liveRun?.modelCallStartedAt ?? null}
+                    />
+                  )}
                 {chatTimelineState.type === "LATEST_FOLLOWING" &&
                   isCompacting && <CompactionIndicator />}
                 {actionExecutionPlacement.liveTail.map((actionExecution) => (

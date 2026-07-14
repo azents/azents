@@ -6,7 +6,7 @@ Current User system role response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**roles** | [**List[SystemUserRole]**](SystemUserRole.md) | Current User system roles |
+**roles** | [**List[SystemUserRole]**](SystemUserRole.md) | Current User system roles | 
 
 ## Example
 
@@ -26,3 +26,5 @@ my_system_roles_response_dict = my_system_roles_response_instance.to_dict()
 my_system_roles_response_from_dict = MySystemRolesResponse.from_dict(my_system_roles_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

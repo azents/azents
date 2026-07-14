@@ -208,7 +208,7 @@ class RunStateRepository(Protocol):
         phase: AgentRunPhase,
         *,
         active_tool_calls: list[ActiveToolCall] | None = None,
-    ) -> object:
+    ) -> AgentRunState:
         """Update run phase."""
         ...
 

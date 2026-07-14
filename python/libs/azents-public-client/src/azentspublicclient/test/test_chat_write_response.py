@@ -76,6 +76,7 @@ class TestChatWriteResponse(unittest.TestCase):
                         phase = 'idle', 
                         status = 'pending', 
                         inference_profile = { }, 
+                        model_call_started_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                         retry = azentspublicclient.models.chat_live_run_retry_state_response.ChatLiveRunRetryStateResponse(
                             status = '', 
                             last_error_message = '', 
@@ -183,6 +184,7 @@ class TestChatWriteResponse(unittest.TestCase):
                         phase = 'idle', 
                         status = 'pending', 
                         inference_profile = { }, 
+                        model_call_started_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                         retry = azentspublicclient.models.chat_live_run_retry_state_response.ChatLiveRunRetryStateResponse(
                             status = '', 
                             last_error_message = '', 

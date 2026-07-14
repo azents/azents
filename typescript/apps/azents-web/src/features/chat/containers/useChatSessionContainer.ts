@@ -561,6 +561,7 @@ function chatLiveRunStateFromValue(value: unknown): ChatLiveRunState | null {
     phase,
     status,
     inferenceProfile,
+    modelCallStartedAt: stringField(value, "model_call_started_at"),
     retry,
   };
 }
@@ -2075,13 +2076,23 @@ export function useChatSessionContainer(
           return;
         }
       }
-      const markRunActive = (phase: AgentRunPhase | null): void => {
+      const markRunActive = (
+        phase: AgentRunPhase | null,
+        modelCallStartedAt?: string | null,
+      ): void => {
         setManagedLiveState((prev) => ({
           ...prev,
           liveRun:
             prev.liveRun === null || phase === null
               ? prev.liveRun
-              : { ...prev.liveRun, phase, status: "running" },
+              : {
+                  ...prev.liveRun,
+                  phase,
+                  status: "running",
+                  ...(typeof modelCallStartedAt === "undefined"
+                    ? {}
+                    : { modelCallStartedAt }),
+                },
           liveRunPhase: phase,
           sessionRunState: "running",
           isResponsePending:
@@ -2317,7 +2328,7 @@ export function useChatSessionContainer(
           void utils.chat.getSubagentTree.invalidate();
           break;
         case "run_phase_changed":
-          markRunActive(event.phase);
+          markRunActive(event.phase, event.model_call_started_at);
           break;
         case "run_complete":
           if ("item" in event) {

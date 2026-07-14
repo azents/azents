@@ -10,6 +10,7 @@ Name | Type | Description | Notes
 **phase** | [**AgentRunPhase**](AgentRunPhase.md) | Current run phase | 
 **status** | [**AgentRunStatus**](AgentRunStatus.md) | Current run status | 
 **inference_profile** | [**AppliedInferenceProfile**](AppliedInferenceProfile.md) | Inference settings applied to the active turn | 
+**model_call_started_at** | **datetime** |  | 
 **retry** | [**ChatLiveRunRetryStateResponse**](ChatLiveRunRetryStateResponse.md) |  | [optional] 
 
 ## Example

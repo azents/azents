@@ -152,6 +152,7 @@ class _PendingRun:
     parent_agent_run_id: str | None = None
     status: AgentRunStatus = AgentRunStatus.PENDING
     phase: AgentRunPhase = AgentRunPhase.IDLE
+    model_call_started_at: datetime.datetime | None = None
     active_tool_calls: list[ActiveToolCall] = dataclasses.field(default_factory=list)
     retry_state: FailedRunRetryState | None = None
 
@@ -617,6 +618,13 @@ class _FlakyEngine(_Engine):
         async def iterator() -> AsyncIterator[Emit]:
             self.calls += 1
             if self.calls == 1:
+                yield ephemeral(
+                    RunPhaseChanged(
+                        run_id=context.run_id,
+                        phase=AgentRunPhase.WAITING_FOR_MODEL,
+                        model_call_started_at=datetime.datetime.now(datetime.UTC),
+                    )
+                )
                 raise ModelCallError("model temporarily unavailable")
             yield ephemeral(RunComplete(run_id=context.run_id))
 
@@ -2281,6 +2289,7 @@ async def test_execute_runs_pending_command_inside_run_boundary(
                 RunPhaseChanged(
                     run_id="command-run",
                     phase=AgentRunPhase.NORMALIZING_OUTPUT,
+                    model_call_started_at=None,
                 )
             )
         ]
@@ -2663,6 +2672,10 @@ async def test_execute_retries_failed_run_without_durable_error(
     assert len(retry_updates) == 1
     assert retry_updates[0].last_error_message == "model temporarily unavailable"
     assert retry_updates[0].attempts[0].user_message == "model temporarily unavailable"
+    retry_live_runs = [
+        run for _, run in live_event_projector.live_run_updates if run.retry is not None
+    ]
+    assert retry_live_runs[0].model_call_started_at is None
     assert live_event_projector.live_run_updates[-1][1].retry is None
     assert finalizer.inputs == []
     assert not any(

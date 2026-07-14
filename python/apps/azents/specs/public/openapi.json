@@ -11346,6 +11346,19 @@
             "$ref": "#/components/schemas/AppliedInferenceProfile",
             "description": "Inference settings applied to the active turn"
           },
+          "model_call_started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Call Started At",
+            "description": "Current model call start time, or null outside a model call"
+          },
           "retry": {
             "anyOf": [
               {
@@ -11363,7 +11376,8 @@
           "run_id",
           "phase",
           "status",
-          "inference_profile"
+          "inference_profile",
+          "model_call_started_at"
         ],
         "title": "ChatLiveRunStateResponse",
         "description": "Current live run state response."

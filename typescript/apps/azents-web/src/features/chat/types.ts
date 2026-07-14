@@ -376,6 +376,7 @@ export interface RunPhaseChangedEvent {
   type: "run_phase_changed";
   run_id: string;
   phase: AgentRunPhase;
+  model_call_started_at: string | null;
 }
 
 /** run stop — user stopped run */
@@ -617,6 +618,7 @@ export interface ChatLiveRunState {
   phase: AgentRunPhase;
   status: AgentRunStatus;
   inferenceProfile: AppliedInferenceProfile;
+  modelCallStartedAt: string | null;
   retry?: ChatLiveRunRetryState | null;
 }
 

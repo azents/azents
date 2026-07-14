@@ -1,5 +1,6 @@
 """Ephemeral event types yielded by Engine."""
 
+import datetime
 from typing import Annotated, Literal, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -56,6 +57,7 @@ class RunPhaseChanged(BaseModel):
     type: Literal["run_phase_changed"] = "run_phase_changed"
     run_id: str
     phase: AgentRunPhase
+    model_call_started_at: datetime.datetime | None
 
 
 class RunComplete(BaseModel):

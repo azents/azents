@@ -16,7 +16,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
 last_verified_at: 2026-07-14
-spec_version: 28
+spec_version: 29
 ---
 
 # Chat Session Resync
@@ -137,7 +137,7 @@ Response fields:
 | --- | --- |
 | `partial_history.items` | ordered partial history projection list to synthesize after durable history. |
 | `input_buffers` | pending user input buffer projection list not yet injected into model turn. |
-| `run` | currently running run projection. `null` if absent. Includes running profile provenance plus `run.retry` with failed-run retry status, latest user-safe error, attempt count, retry budget, next retry timestamp, and bounded attempt history when retry is active. |
+| `run` | currently running run projection. `null` if absent. Includes running profile provenance, nullable `model_call_started_at` for the current model turn, plus `run.retry` with failed-run retry status, latest user-safe error, attempt count, retry budget, next retry timestamp, and bounded attempt history when retry is active. |
 | `session_run_state` | authoritative run state of session. |
 | `todo` | session-scoped TodoToolkit State snapshot. `null` if absent. |
 | `action_executions` | current nonterminal operation TurnAction execution projections, each with execution state and live progress events. Terminal completed, failed, and cancelled snapshots are recovered only from durable history events. |
@@ -417,6 +417,7 @@ finite transaction periodically.
 
 ## 11. Changelog
 
+- **2026-07-14** — v29. Added current model-call start time to REST and WebSocket live Run replacement snapshots for elapsed-duration recovery.
 - **2026-07-14** — v28. Defined active operation tail placement, explicit removal transport, stable-ID durable handover deduplication, cancelled terminal history, and detached durable-result rendering.
 - **2026-07-13** — v27. Promoted confirmed-generation WebSocket barriers, finite fresh-baseline resync, detached observation isolation, raw-page projection identity, durable output promotion, and exact follow/accessibility behavior.
 - **2026-07-12** — v26. Added resilient live snapshot ordering, exact terminal correlation, opaque effort handling, Composer last-selected persistence, and durable token provenance.
