@@ -128,6 +128,57 @@ async def test_size_threshold_flushes_immediately() -> None:
 
 
 @pytest.mark.asyncio
+async def test_discard_session_waits_for_inflight_flush() -> None:
+    """Do not let clear ordering overtake a partial flush already in progress."""
+    flush_started = asyncio.Event()
+    release_flush = asyncio.Event()
+
+    async def flush(batch: LivePartialFlush) -> None:
+        del batch
+        flush_started.set()
+        await release_flush.wait()
+
+    batcher = LivePartialBatcher(flush, max_delay_seconds=10, max_chars=100)
+    await batcher.append_content_delta(
+        session_id="session-1",
+        delta="stale",
+        content_index=0,
+    )
+    flush_task = asyncio.create_task(batcher.flush_session("session-1"))
+    await asyncio.wait_for(flush_started.wait(), timeout=1)
+    discard_task = asyncio.create_task(batcher.discard_session("session-1"))
+    await asyncio.sleep(0)
+
+    assert not discard_task.done()
+
+    release_flush.set()
+    await flush_task
+    await discard_task
+
+
+@pytest.mark.asyncio
+async def test_discard_session_drops_pending_batch_and_timer() -> None:
+    """Discard pending deltas without allowing their timer to flush later."""
+    flushed: list[LivePartialFlush] = []
+
+    async def flush(batch: LivePartialFlush) -> None:
+        flushed.append(batch)
+
+    batcher = LivePartialBatcher(flush, max_delay_seconds=0.01, max_chars=100)
+
+    await batcher.append_content_delta(
+        session_id="session-1",
+        delta="stale",
+        content_index=0,
+    )
+    await batcher.discard_session("session-1")
+    await asyncio.sleep(0.05)
+    await batcher.flush_session("session-1")
+
+    assert flushed == []
+
+
+@pytest.mark.asyncio
 async def test_timer_flushes_pending_batch() -> None:
     """Flush pending batch when timer expires."""
     flushed: list[LivePartialFlush] = []

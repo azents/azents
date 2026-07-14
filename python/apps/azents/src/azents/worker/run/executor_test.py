@@ -52,6 +52,7 @@ from azents.engine.run.contracts import AgentEngineProtocol, RunContext, RunRequ
 from azents.engine.run.emit import Emit, ephemeral
 from azents.engine.run.errors import (
     ModelCallError,
+    ModelProviderTimeoutError,
     ModelStreamTimeoutError,
     UserVisibleRuntimeError,
 )
@@ -244,6 +245,8 @@ class _SessionLifecycle:
         """Record retry-state updates."""
         del session_id, run_id
         self.retry_states.append(retry_state)
+        if self.order is not None and retry_state is not None:
+            self.order.append("retry_state_updated")
 
     async def heartbeat_session(self, session_id: str) -> None:
         """Record the session id passed to heartbeat."""
@@ -520,6 +523,22 @@ class _LiveEventProjector:
         self.cleared_session_ids.append(session_id)
 
 
+class _OrderedLiveEventProjector(_LiveEventProjector):
+    """Live projector that records timeout cleanup ordering."""
+
+    def __init__(self, order: list[str], *, fail_clear: bool) -> None:
+        super().__init__()
+        self.order = order
+        self.fail_clear = fail_clear
+
+    async def clear_session(self, session_id: str) -> None:
+        """Record cleanup before delegating to the base projector."""
+        self.order.append("live_projection_cleared")
+        if self.fail_clear:
+            raise RuntimeError("live projection unavailable")
+        await super().clear_session(session_id)
+
+
 class _Engine:
     """AgentEngineProtocol test double."""
 
@@ -637,7 +656,8 @@ class _FlakyEngine(_Engine):
 class _TimeoutFlakyEngine(_Engine):
     """Engine that times out once and then completes."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, provider_timeout: bool) -> None:
+        self.provider_timeout = provider_timeout
         self.calls = 0
 
     def run(
@@ -655,9 +675,15 @@ class _TimeoutFlakyEngine(_Engine):
         async def iterator() -> AsyncIterator[Emit]:
             self.calls += 1
             if self.calls == 1:
+                if self.provider_timeout:
+                    raise ModelProviderTimeoutError(
+                        "The model provider request timed out."
+                    )
                 raise ModelStreamTimeoutError(
                     stage="idle",
                     timeout_seconds=360.0,
+                    cancellation_cleanup_timed_out=False,
+                    cancellation_cleanup_error_type=None,
                 )
             yield ephemeral(RunComplete(run_id=context.run_id))
 
@@ -2714,18 +2740,27 @@ async def test_execute_retries_failed_run_without_durable_error(
     )
 
 
+@pytest.mark.parametrize("clear_fails", [False, True])
+@pytest.mark.parametrize("provider_timeout", [False, True])
 @pytest.mark.asyncio
-async def test_execute_clears_live_projection_after_stream_timeout(
+async def test_execute_clears_live_projection_after_model_timeout(
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    clear_fails: bool,
+    provider_timeout: bool,
 ) -> None:
-    """A retried stream timeout removes stale partial projections first."""
+    """Stream cleanup precedes retry state and cannot block the retry itself."""
     monkeypatch.setattr(run_executor_module, "_FAILED_RUN_RETRY_WAIT_POLL_SECONDS", 0)
-    lifecycle = _SessionLifecycle()
-    engine = _TimeoutFlakyEngine()
-    live_event_projector = _LiveEventProjector()
+    order: list[str] = []
+    lifecycle = _SessionLifecycle(order)
+    engine = _TimeoutFlakyEngine(provider_timeout=provider_timeout)
+    live_event_projector = _OrderedLiveEventProjector(
+        order,
+        fail_clear=clear_fails,
+    )
     executor = _executor(
         lifecycle,
-        engine=cast(AgentEngineProtocol, engine),
+        engine=engine,
         live_event_projector=live_event_projector,
     )
 
@@ -2772,7 +2807,41 @@ async def test_execute_clears_live_projection_after_stream_timeout(
 
     assert engine.calls == 2
     assert result.terminal_run_status == AgentRunStatus.COMPLETED
-    assert live_event_projector.cleared_session_ids == ["session-001"]
+    assert live_event_projector.cleared_session_ids == (
+        [] if clear_fails else ["session-001"]
+    )
+    assert order.index("live_projection_cleared") < order.index("retry_state_updated")
+    retry_state = next(state for state in lifecycle.retry_states if state is not None)
+    assert retry_state.last_user_message == (
+        "The model provider request timed out."
+        if provider_timeout
+        else "The model did not make progress before the timeout."
+    )
+    assert retry_state.retryability == "transient"
+    assert retry_state.failure_code == (
+        "model_provider_timeout" if provider_timeout else "model_stream_timeout"
+    )
+    timeout_log = next(
+        record
+        for record in caplog.records
+        if record.message
+        == (
+            "Model provider request timed out"
+            if provider_timeout
+            else "Model stream progress deadline exceeded"
+        )
+    )
+    if not provider_timeout:
+        assert timeout_log.__dict__["stage"] == "idle"
+        assert timeout_log.__dict__["timeout_seconds"] == 360.0
+        assert timeout_log.__dict__["cancellation_cleanup_timed_out"] is False
+        assert timeout_log.__dict__["cancellation_cleanup_error_type"] is None
+    cleanup_logs = [
+        record
+        for record in caplog.records
+        if record.message == "Failed to clear timed-out model projection"
+    ]
+    assert len(cleanup_logs) == int(clear_fails)
     assert live_event_projector.live_run_updates[-1][1].retry is None
 
 

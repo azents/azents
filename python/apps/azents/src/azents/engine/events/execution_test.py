@@ -15,7 +15,8 @@ from azents.engine.events.execution import (
     AgentRunExecutionRequest,
     InputPollResult,
     ModelCallPreparer,
-    ModelStreamWatchdog,
+    ModelStreamTaskRegistry,
+    ModelStreamTimeouts,
     PreparedModelCall,
     TurnEndReason,
 )
@@ -47,7 +48,11 @@ from azents.engine.events.types import (
     UserMessagePayload,
     build_native_compat_key,
 )
-from azents.engine.run.errors import ModelCallError, ModelStreamTimeoutError
+from azents.engine.run.errors import (
+    ModelCallError,
+    ModelProviderTimeoutError,
+    ModelStreamTimeoutError,
+)
 from azents.engine.run.types import USER_STOP_CANCEL_MESSAGE
 from azents.repos.agent_execution.data import EventCreate
 from azents.testing.model_selection import make_test_model_selection
@@ -398,14 +403,21 @@ class _BlockingModelAdapter:
         yield NativeEvent(type="done", item={})
 
 
-class _WatchdogModelAdapter:
+class _StallingModelAdapter:
     """Wait before or after a native stream event until cancelled."""
 
-    def __init__(self, *, emit_first_event: bool) -> None:
+    def __init__(
+        self,
+        *,
+        emit_first_event: bool,
+        block_cancellation_cleanup: bool,
+    ) -> None:
         self.emit_first_event = emit_first_event
+        self.block_cancellation_cleanup = block_cancellation_cleanup
         self.waiting = asyncio.Event()
         self.cancelled = asyncio.Event()
         self.release = asyncio.Event()
+        self.finished = asyncio.Event()
 
     async def stream(
         self,
@@ -421,7 +433,24 @@ class _WatchdogModelAdapter:
             yield NativeEvent(type="done", item={})
         except asyncio.CancelledError:
             self.cancelled.set()
+            if self.block_cancellation_cleanup:
+                await self.release.wait()
             raise
+        finally:
+            self.finished.set()
+
+
+class _ProviderTimeoutModelAdapter:
+    """Raise a provider-owned timeout from native iteration."""
+
+    async def stream(
+        self,
+        request: NativeModelRequest,
+    ) -> AsyncIterator[NativeEvent]:
+        """Raise a transport/provider timeout without application reclassification."""
+        del request
+        raise TimeoutError("provider transport timeout")
+        yield  # pragma: no cover
 
 
 class _CancellingModelAdapter:
@@ -757,6 +786,20 @@ def _event(
     )
 
 
+def _model_stream_timeouts() -> ModelStreamTimeouts:
+    """Create explicit model stream timeout policy for tests."""
+    return ModelStreamTimeouts(
+        first_event_seconds=10.0,
+        idle_seconds=10.0,
+        cancellation_cleanup_seconds=1.0,
+    )
+
+
+def _model_stream_task_registry() -> ModelStreamTaskRegistry:
+    """Create explicit detached stream task ownership for tests."""
+    return ModelStreamTaskRegistry()
+
+
 async def test_text_run_completes() -> None:
     """End as completed when there are no tool calls."""
     run_repo = _RunRepo()
@@ -768,6 +811,8 @@ async def test_text_run_completes() -> None:
 
     execution = AgentRunExecution(
         post_lower_filter=_PostFilter(),
+        model_stream_timeouts=_model_stream_timeouts(),
+        model_stream_task_registry=_model_stream_task_registry(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
         model_call_preparer=_model_call_preparer(
@@ -814,6 +859,8 @@ async def test_model_delta_reaches_output_sink_before_stream_completion() -> Non
 
     execution = AgentRunExecution(
         post_lower_filter=_PostFilter(),
+        model_stream_timeouts=_model_stream_timeouts(),
+        model_stream_task_registry=_model_stream_task_registry(),
         model_adapter=model_adapter,
         output_normalizer=_ProjectingNormalizer([_assistant_event()]),
         model_call_preparer=_model_call_preparer(),
@@ -861,31 +908,114 @@ async def test_model_stream_watchdog_closes_stalled_provider_stream(
     expected_stage: str,
 ) -> None:
     """Bound each provider-progress wait and close the cancelled stream."""
-    model_adapter = _WatchdogModelAdapter(emit_first_event=emit_first_event)
+    model_adapter = _StallingModelAdapter(
+        emit_first_event=emit_first_event,
+        block_cancellation_cleanup=False,
+    )
     execution = AgentRunExecution(
         post_lower_filter=_PostFilter(),
+        model_stream_timeouts=ModelStreamTimeouts(
+            first_event_seconds=0.01,
+            idle_seconds=0.01,
+            cancellation_cleanup_seconds=0.01,
+        ),
+        model_stream_task_registry=_model_stream_task_registry(),
         model_adapter=model_adapter,
         output_normalizer=_Normalizer([_assistant_event()]),
         model_call_preparer=_model_call_preparer(),
-        model_stream_watchdog=ModelStreamWatchdog(
-            first_event_timeout_seconds=0.01,
-            idle_timeout_seconds=0.01,
-        ),
         run_repo=_RunRepo(),
         transcript_repo=_TranscriptRepo(),
     )
 
     with pytest.raises(ModelStreamTimeoutError) as exc_info:
-        await execution._stream_model(  # pyright: ignore[reportPrivateUsage]
+        await execution.run(
             _Session(),
-            "run-1",
-            "session-1",
-            NativeModelRequest(model="gpt-5.1", input=[]),
+            AgentRunExecutionRequest(
+                owner_generation=1,
+                tool_admission_barrier=_OpenToolAdmissionBarrier(),
+                run_id="run-1",
+                session_id="session-1",
+                model="gpt-5.1",
+            ),
         )
 
     assert exc_info.value.stage == expected_stage
     assert exc_info.value.timeout_seconds == 0.01
+    assert exc_info.value.cancellation_cleanup_timed_out is False
+    assert exc_info.value.cancellation_cleanup_error_type is None
     await asyncio.wait_for(model_adapter.cancelled.wait(), timeout=1)
+
+
+async def test_model_stream_timeout_bounds_cancellation_cleanup() -> None:
+    """A cancellation-resistant adapter cannot hold the retry boundary open."""
+    model_adapter = _StallingModelAdapter(
+        emit_first_event=False,
+        block_cancellation_cleanup=True,
+    )
+    task_registry = ModelStreamTaskRegistry()
+    execution = AgentRunExecution(
+        post_lower_filter=_PostFilter(),
+        model_stream_timeouts=ModelStreamTimeouts(
+            first_event_seconds=0.01,
+            idle_seconds=0.01,
+            cancellation_cleanup_seconds=0.01,
+        ),
+        model_stream_task_registry=task_registry,
+        model_adapter=model_adapter,
+        output_normalizer=_Normalizer([_assistant_event()]),
+        model_call_preparer=_model_call_preparer(),
+        run_repo=_RunRepo(),
+        transcript_repo=_TranscriptRepo(),
+    )
+
+    with pytest.raises(ModelStreamTimeoutError) as exc_info:
+        await execution.run(
+            _Session(),
+            AgentRunExecutionRequest(
+                owner_generation=1,
+                tool_admission_barrier=_OpenToolAdmissionBarrier(),
+                run_id="run-1",
+                session_id="session-1",
+                model="gpt-5.1",
+            ),
+        )
+
+    assert len(task_registry.tasks) == 1
+    assert exc_info.value.cancellation_cleanup_timed_out is True
+    assert exc_info.value.cancellation_cleanup_error_type is None
+    model_adapter.release.set()
+    await asyncio.wait_for(model_adapter.finished.wait(), timeout=1)
+    await asyncio.sleep(0)
+    assert task_registry.tasks == set()
+
+
+async def test_provider_timeout_is_not_reclassified_as_progress_deadline() -> None:
+    """Preserve provider-owned TimeoutError classification before the deadline."""
+    execution = AgentRunExecution(
+        post_lower_filter=_PostFilter(),
+        model_stream_timeouts=_model_stream_timeouts(),
+        model_stream_task_registry=_model_stream_task_registry(),
+        model_adapter=_ProviderTimeoutModelAdapter(),
+        output_normalizer=_Normalizer([_assistant_event()]),
+        model_call_preparer=_model_call_preparer(),
+        run_repo=_RunRepo(),
+        transcript_repo=_TranscriptRepo(),
+    )
+
+    with pytest.raises(ModelProviderTimeoutError) as exc_info:
+        await execution.run(
+            _Session(),
+            AgentRunExecutionRequest(
+                owner_generation=1,
+                tool_admission_barrier=_OpenToolAdmissionBarrier(),
+                run_id="run-1",
+                session_id="session-1",
+                model="gpt-5.1",
+            ),
+        )
+
+    assert exc_info.value.user_message == "The model provider request timed out."
+    assert isinstance(exc_info.value.__cause__, TimeoutError)
 
 
 async def test_text_run_commits_durable_events_before_output_sink() -> None:
@@ -905,6 +1035,8 @@ async def test_text_run_commits_durable_events_before_output_sink() -> None:
 
     execution = AgentRunExecution(
         post_lower_filter=_PostFilter(),
+        model_stream_timeouts=_model_stream_timeouts(),
+        model_stream_task_registry=_model_stream_task_registry(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
         model_call_preparer=_model_call_preparer(
@@ -946,6 +1078,8 @@ async def test_text_run_output_sink_receives_run_marker() -> None:
 
     execution = AgentRunExecution(
         post_lower_filter=_PostFilter(),
+        model_stream_timeouts=_model_stream_timeouts(),
+        model_stream_task_registry=_model_stream_task_registry(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
         model_call_preparer=_model_call_preparer(
@@ -1014,6 +1148,8 @@ async def test_model_usage_is_appended_as_turn_marker(
     )
     execution = AgentRunExecution(
         post_lower_filter=_PostFilter(),
+        model_stream_timeouts=_model_stream_timeouts(),
+        model_stream_task_registry=_model_stream_task_registry(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()], usage=usage),
         model_call_preparer=_model_call_preparer(
@@ -1080,6 +1216,8 @@ async def test_model_input_uses_session_head_event_id() -> None:
     transcript_repo = _TranscriptRepo()
     execution = AgentRunExecution(
         post_lower_filter=_PostFilter(),
+        model_stream_timeouts=_model_stream_timeouts(),
+        model_stream_task_registry=_model_stream_task_registry(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
         model_call_preparer=_model_call_preparer(
@@ -1111,6 +1249,8 @@ async def test_closed_admission_barrier_prevents_call_and_handler_start() -> Non
     tool_executor = _ToolExecutor()
     execution = AgentRunExecution(
         post_lower_filter=_PostFilter(),
+        model_stream_timeouts=_model_stream_timeouts(),
+        model_stream_task_registry=_model_stream_task_registry(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_tool_call_event()]),
         model_call_preparer=_model_call_preparer(
@@ -1144,6 +1284,8 @@ async def test_tool_run_with_turn_limit_interrupts_after_tool_result() -> None:
     transcript_repo = _TranscriptRepo()
     execution = AgentRunExecution(
         post_lower_filter=_PostFilter(),
+        model_stream_timeouts=_model_stream_timeouts(),
+        model_stream_task_registry=_model_stream_task_registry(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_tool_call_event(), _assistant_event()]),
         model_call_preparer=_model_call_preparer(
@@ -1185,6 +1327,8 @@ async def test_parallel_calls_finalize_independently() -> None:
     tool_executor = _OrderedToolExecutor()
     execution = AgentRunExecution(
         post_lower_filter=_PostFilter(),
+        model_stream_timeouts=_model_stream_timeouts(),
+        model_stream_task_registry=_model_stream_task_registry(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer(
             [_tool_call_event("call-1"), _tool_call_event("call-2")]
@@ -1245,6 +1389,8 @@ async def test_term_after_admission_keeps_normal_result_and_run_recoverable() ->
     barrier = _MutableToolAdmissionBarrier()
     execution = AgentRunExecution(
         post_lower_filter=_PostFilter(),
+        model_stream_timeouts=_model_stream_timeouts(),
+        model_stream_task_registry=_model_stream_task_registry(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_tool_call_event("call-2")]),
         model_call_preparer=_model_call_preparer(
@@ -1295,6 +1441,8 @@ async def test_unlimited_tool_run_executes_tool_then_completes() -> None:
     transcript_repo = _TranscriptRepo()
     execution = AgentRunExecution(
         post_lower_filter=_PostFilter(),
+        model_stream_timeouts=_model_stream_timeouts(),
+        model_stream_task_registry=_model_stream_task_registry(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_SequenceNormalizer(
             [
@@ -1356,6 +1504,8 @@ async def test_model_call_preparer_runs_for_each_model_turn() -> None:
 
     execution = AgentRunExecution(
         post_lower_filter=_PostFilter(),
+        model_stream_timeouts=_model_stream_timeouts(),
+        model_stream_task_registry=_model_stream_task_registry(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_SequenceNormalizer(
             [
@@ -1418,6 +1568,8 @@ async def test_model_call_preparer_turn_end_receives_error_reason() -> None:
 
     execution = AgentRunExecution(
         post_lower_filter=_PostFilter(),
+        model_stream_timeouts=_model_stream_timeouts(),
+        model_stream_task_registry=_model_stream_task_registry(),
         model_adapter=_FailingModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
         model_call_preparer=prepare_model_call,
@@ -1446,6 +1598,8 @@ async def test_provider_tool_call_completes_without_next_model_turn() -> None:
     transcript_repo = _TranscriptRepo()
     execution = AgentRunExecution(
         post_lower_filter=_PostFilter(),
+        model_stream_timeouts=_model_stream_timeouts(),
+        model_stream_task_registry=_model_stream_task_registry(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_SequenceNormalizer(
             [
@@ -1486,6 +1640,8 @@ async def test_provider_tool_call_with_message_completes_one_turn() -> None:
     transcript_repo = _TranscriptRepo()
     execution = AgentRunExecution(
         post_lower_filter=_PostFilter(),
+        model_stream_timeouts=_model_stream_timeouts(),
+        model_stream_task_registry=_model_stream_task_registry(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_SequenceNormalizer(
             [
@@ -1547,6 +1703,8 @@ async def test_compacted_run_continues_with_summary_without_terminal_marker() ->
 
     execution = AgentRunExecution(
         post_lower_filter=_PostFilter(),
+        model_stream_timeouts=_model_stream_timeouts(),
+        model_stream_task_registry=_model_stream_task_registry(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
         model_call_preparer=_model_call_preparer(
@@ -1612,6 +1770,8 @@ async def test_tool_turn_polls_input_before_next_model_call() -> None:
 
     execution = AgentRunExecution(
         post_lower_filter=_PostFilter(),
+        model_stream_timeouts=_model_stream_timeouts(),
+        model_stream_task_registry=_model_stream_task_registry(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_SequenceNormalizer(
             [
@@ -1675,6 +1835,8 @@ async def test_context_invalidation_yields_for_request_refresh() -> None:
 
     execution = AgentRunExecution(
         post_lower_filter=_PostFilter(),
+        model_stream_timeouts=_model_stream_timeouts(),
+        model_stream_task_registry=_model_stream_task_registry(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_SequenceNormalizer(
             [
@@ -1720,6 +1882,8 @@ async def test_orphan_tool_call_without_state_is_cancelled_before_lowering() -> 
     lowerer = _RecordingLowerer()
     execution = AgentRunExecution(
         post_lower_filter=_PostFilter(),
+        model_stream_timeouts=_model_stream_timeouts(),
+        model_stream_task_registry=_model_stream_task_registry(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
         model_call_preparer=_model_call_preparer(
@@ -1771,6 +1935,8 @@ async def test_active_unresolved_tool_call_is_cancelled_before_lowering() -> Non
     lowerer = _RecordingLowerer()
     execution = AgentRunExecution(
         post_lower_filter=_PostFilter(),
+        model_stream_timeouts=_model_stream_timeouts(),
+        model_stream_task_registry=_model_stream_task_registry(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
         model_call_preparer=_model_call_preparer(
@@ -1820,6 +1986,8 @@ async def test_stale_active_entry_with_result_is_removed_without_replacement() -
     transcript_repo.events.extend([_tool_call_event(), _tool_result_event()])
     execution = AgentRunExecution(
         post_lower_filter=_PostFilter(),
+        model_stream_timeouts=_model_stream_timeouts(),
+        model_stream_task_registry=_model_stream_task_registry(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
         model_call_preparer=_model_call_preparer(),
@@ -1865,6 +2033,8 @@ async def test_active_entry_without_call_event_fails_invariant() -> None:
     ]
     execution = AgentRunExecution(
         post_lower_filter=_PostFilter(),
+        model_stream_timeouts=_model_stream_timeouts(),
+        model_stream_task_registry=_model_stream_task_registry(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
         model_call_preparer=_model_call_preparer(),
@@ -1901,6 +2071,8 @@ async def test_model_stream_user_stop_appends_only_assistant_text() -> None:
     )
     execution = AgentRunExecution(
         post_lower_filter=_PostFilter(),
+        model_stream_timeouts=_model_stream_timeouts(),
+        model_stream_task_registry=_model_stream_task_registry(),
         model_adapter=_CancellingModelAdapter(),
         output_normalizer=_Normalizer([assistant, reasoning, _tool_call_event()]),
         model_call_preparer=_model_call_preparer(
@@ -1938,6 +2110,8 @@ async def test_model_stream_user_stop_without_text_appends_only_marker() -> None
     transcript_repo = _TranscriptRepo()
     execution = AgentRunExecution(
         post_lower_filter=_PostFilter(),
+        model_stream_timeouts=_model_stream_timeouts(),
+        model_stream_task_registry=_model_stream_task_registry(),
         model_adapter=_CancellingModelAdapter(),
         output_normalizer=_Normalizer([]),
         model_call_preparer=_model_call_preparer(
@@ -1971,6 +2145,8 @@ async def test_shutdown_tool_cancellation_repairs_before_reraising() -> None:
     tool_executor = _CancellingToolExecutor()
     execution = AgentRunExecution(
         post_lower_filter=_PostFilter(),
+        model_stream_timeouts=_model_stream_timeouts(),
+        model_stream_task_registry=_model_stream_task_registry(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_tool_call_event()]),
         model_call_preparer=_model_call_preparer(
@@ -2012,6 +2188,8 @@ async def test_tool_user_stop_appends_cancelled_result_and_interrupts() -> None:
     tool_executor = _CancellingToolExecutor(user_stop=True)
     execution = AgentRunExecution(
         post_lower_filter=_PostFilter(),
+        model_stream_timeouts=_model_stream_timeouts(),
+        model_stream_task_registry=_model_stream_task_registry(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_tool_call_event()]),
         model_call_preparer=_model_call_preparer(
@@ -2065,6 +2243,8 @@ async def test_tool_result_output_sink_receives_tool_result() -> None:
 
     execution = AgentRunExecution(
         post_lower_filter=_PostFilter(),
+        model_stream_timeouts=_model_stream_timeouts(),
+        model_stream_task_registry=_model_stream_task_registry(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_tool_call_event()]),
         model_call_preparer=_model_call_preparer(
@@ -2097,6 +2277,8 @@ async def test_tool_failure_appends_failed_tool_result() -> None:
     transcript_repo = _TranscriptRepo()
     execution = AgentRunExecution(
         post_lower_filter=_PostFilter(),
+        model_stream_timeouts=_model_stream_timeouts(),
+        model_stream_task_registry=_model_stream_task_registry(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_tool_call_event()]),
         model_call_preparer=_model_call_preparer(
@@ -2137,6 +2319,8 @@ async def test_run_input_preparation_does_not_run_lifecycle_cleanup() -> None:
     """File lifecycle cleanup is scheduler-owned, not run-loop-owned."""
     execution = AgentRunExecution(
         post_lower_filter=_PostFilter(),
+        model_stream_timeouts=_model_stream_timeouts(),
+        model_stream_task_registry=_model_stream_task_registry(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
         model_call_preparer=_model_call_preparer(
@@ -2179,6 +2363,8 @@ async def test_pre_model_lower_hook_runs_before_lowerer() -> None:
     hook = _PreModelLowerHook()
     execution = AgentRunExecution(
         post_lower_filter=_PostFilter(),
+        model_stream_timeouts=_model_stream_timeouts(),
+        model_stream_task_registry=_model_stream_task_registry(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
         model_call_preparer=_model_call_preparer(
@@ -2213,6 +2399,8 @@ async def test_empty_model_output_propagates_for_retry() -> None:
     transcript_repo = _TranscriptRepo()
     execution = AgentRunExecution(
         post_lower_filter=_PostFilter(),
+        model_stream_timeouts=_model_stream_timeouts(),
+        model_stream_task_registry=_model_stream_task_registry(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([]),
         model_call_preparer=_model_call_preparer(
@@ -2249,6 +2437,8 @@ async def test_blank_assistant_message_propagates_for_retry() -> None:
     )
     execution = AgentRunExecution(
         post_lower_filter=_PostFilter(),
+        model_stream_timeouts=_model_stream_timeouts(),
+        model_stream_task_registry=_model_stream_task_registry(),
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([blank_message]),
         model_call_preparer=_model_call_preparer(
@@ -2280,6 +2470,8 @@ async def test_model_call_error_propagates_for_retry() -> None:
     transcript_repo = _TranscriptRepo()
     execution = AgentRunExecution(
         post_lower_filter=_PostFilter(),
+        model_stream_timeouts=_model_stream_timeouts(),
+        model_stream_task_registry=_model_stream_task_registry(),
         model_adapter=_FailingModelAdapter(),
         output_normalizer=_Normalizer([]),
         model_call_preparer=_model_call_preparer(

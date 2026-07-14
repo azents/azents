@@ -1,6 +1,7 @@
 """Chat live streaming partial batching helper."""
 
 import asyncio
+import contextlib
 import dataclasses
 import logging
 from collections import OrderedDict
@@ -71,6 +72,7 @@ class LivePartialBatcher:
             OrderedDict[tuple[LivePartialKind, int | None], _PartialBuffer],
         ] = {}
         self._timers: dict[str, asyncio.Task[None]] = {}
+        self._inflight_flush_tasks: dict[str, set[asyncio.Task[object]]] = {}
 
     async def append_content_delta(
         self,
@@ -148,14 +150,41 @@ class LivePartialBatcher:
     async def flush_session(self, session_id: str) -> None:
         """Flush all partial batches accumulated in Session."""
         current = asyncio.current_task()
+        if current is not None:
+            self._inflight_flush_tasks.setdefault(session_id, set()).add(current)
+        try:
+            timer = self._timers.pop(session_id, None)
+            if timer is not None and timer is not current:
+                timer.cancel()
+            session_buffers = self._buffers.pop(session_id, None)
+            if not session_buffers:
+                return
+            for buffer in session_buffers.values():
+                await self._flush(buffer.to_flush(session_id))
+        finally:
+            if current is not None:
+                tasks = self._inflight_flush_tasks.get(session_id)
+                if tasks is not None:
+                    tasks.discard(current)
+                    if not tasks:
+                        self._inflight_flush_tasks.pop(session_id, None)
+
+    async def discard_session(self, session_id: str) -> None:
+        """Cancel pending batches and wait for any flush already in progress."""
+        current = asyncio.current_task()
         timer = self._timers.pop(session_id, None)
         if timer is not None and timer is not current:
             timer.cancel()
-        session_buffers = self._buffers.pop(session_id, None)
-        if not session_buffers:
-            return
-        for buffer in session_buffers.values():
-            await self._flush(buffer.to_flush(session_id))
+            with contextlib.suppress(asyncio.CancelledError):
+                await timer
+        inflight = [
+            task
+            for task in self._inflight_flush_tasks.get(session_id, set())
+            if task is not current
+        ]
+        if inflight:
+            await asyncio.gather(*inflight, return_exceptions=True)
+        self._buffers.pop(session_id, None)
 
     async def close_session(self, session_id: str) -> None:
         """Flush pending batch and clean up timer at Session cleanup boundary."""

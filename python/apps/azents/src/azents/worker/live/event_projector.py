@@ -181,7 +181,8 @@ class LiveEventProjector:
             )
 
     async def clear_session(self, session_id: str) -> None:
-        """Clear streaming and active live projections and broadcast removals."""
+        """Discard pending deltas and clear stored live projections."""
+        await self._partial_batcher.discard_session(session_id)
         events = await self._live_event_store.list_by_session_id(session_id)
         active_events = self._active_tool_events.pop(session_id, {})
         await self._live_event_store.clear_session(session_id)

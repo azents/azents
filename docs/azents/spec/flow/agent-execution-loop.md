@@ -76,9 +76,13 @@ Main steps:
 Azents owns model-stream progress deadlines independently of provider transport defaults. The first
 native provider event must arrive within 90 seconds, and every subsequent native event must arrive
 within 360 seconds. Each native event, including one without user-renderable content, refreshes the
-idle deadline. A missed deadline cancels the pending stream iteration, raises a retryable
-user-visible model timeout, and clears the attempt's live partial projection before retry state is
-published. User Stop remains an independent immediate cancellation path.
+idle deadline. A missed deadline cancels the pending stream iteration, allows up to 5 seconds for
+cooperative provider cleanup, and then raises a retryable user-visible model timeout even if cleanup
+remains pending. An adapter-scoped task registry owns and observes detached cleanup tasks until they
+finish. Provider-owned transport timeouts retain a separate failure code. Both timeout paths
+best-effort discard buffered deltas and clear the attempt's live partial projection before retry state
+is published. Projection cleanup failures are logged but do not prevent durable retry state. User Stop
+remains an independent immediate cancellation path.
 
 Streaming text, reasoning, and function-call deltas are UI projections only. The worker coalesces
 text and reasoning deltas for at most 75 milliseconds or 96 characters before Redis/WebSocket

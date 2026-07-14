@@ -29,11 +29,14 @@ from azents.engine.events.engine_adapter import (
     EventEngineAdapterConfig,
     RunExecutionFactory,
     _HookedClientToolExecutor,  # pyright: ignore[reportPrivateUsage]  # Fix Hook wrapper cancellation contract.
+    build_model_stream_timeouts,
 )
 from azents.engine.events.engine_events import RunComplete
 from azents.engine.events.execution import (
     AgentRunExecutionRequest,
     ModelCallPreparer,
+    ModelStreamTaskRegistry,
+    ModelStreamTimeouts,
     PreparedModelCall,
 )
 from azents.engine.events.filters import (
@@ -429,6 +432,30 @@ class _Execution:
         return AgentRunStatus.COMPLETED
 
 
+class _RecordingExecutionFactory:
+    """Execution factory that records selected assembly dependencies."""
+
+    def __init__(self, execution: _Execution) -> None:
+        self.execution = execution
+        self.model_stream_timeouts: ModelStreamTimeouts | None = None
+        self.model_stream_task_registry: ModelStreamTaskRegistry | None = None
+
+    def __call__(
+        self,
+        *,
+        model_call_preparer: ModelCallPreparer,
+        model_stream_timeouts: ModelStreamTimeouts,
+        model_stream_task_registry: ModelStreamTaskRegistry,
+        **kwargs: object,
+    ) -> _Execution:
+        """Record dependencies and return the configured execution."""
+        del kwargs
+        self.execution.model_call_preparer = model_call_preparer
+        self.model_stream_timeouts = model_stream_timeouts
+        self.model_stream_task_registry = model_stream_task_registry
+        return self.execution
+
+
 class _FailingExecution:
     """Execution that raises user-visible runtime error."""
 
@@ -576,6 +603,28 @@ class _CompactionSummaryHookToolkit(Toolkit[BaseModel]):
         )
 
 
+@pytest.mark.parametrize(
+    "config",
+    [
+        EventEngineAdapterConfig(
+            model_stream_first_event_timeout_seconds=0.0,
+        ),
+        EventEngineAdapterConfig(
+            model_stream_idle_timeout_seconds=float("nan"),
+        ),
+        EventEngineAdapterConfig(
+            model_stream_cancellation_cleanup_timeout_seconds=float("inf"),
+        ),
+    ],
+)
+def test_model_stream_timeout_config_rejects_invalid_values(
+    config: EventEngineAdapterConfig,
+) -> None:
+    """Reject non-positive and non-finite deadlines at composition time."""
+    with pytest.raises(ValueError, match="must be finite and greater than zero"):
+        build_model_stream_timeouts(config)
+
+
 def test_hooked_tool_executor_forwards_request_cancel() -> None:
     """Hook wrapper forwards cancellation request to inner executor."""
     inner = _RecordingToolExecutor()
@@ -604,6 +653,8 @@ async def test_event_engine_adapter_runs_execution() -> None:
     """Adapter assembles AgentRunExecution and returns terminal emit."""
     run_repo = _RunRepo()
     execution = _Execution()
+    execution_factory = _RecordingExecutionFactory(execution)
+
     adapter = _agent_engine_adapter(
         session_manager=_session_context,
         artifact_service=_ArtifactService(),
@@ -611,14 +662,13 @@ async def test_event_engine_adapter_runs_execution() -> None:
         model_file_service=_ModelFileService(),
         run_repo=run_repo,
         agent_session_repo=_AgentSessionRepo(),
-        execution_factory=lambda **kwargs: (
-            setattr(
-                execution,
-                "model_call_preparer",
-                kwargs["model_call_preparer"],
-            )
-            or execution
+        config=EventEngineAdapterConfig(
+            native_request_max_input_chars=16_000_000,
+            model_stream_first_event_timeout_seconds=12.0,
+            model_stream_idle_timeout_seconds=34.0,
+            model_stream_cancellation_cleanup_timeout_seconds=5.0,
         ),
+        execution_factory=execution_factory,
     )
 
     emits = [
@@ -650,6 +700,15 @@ async def test_event_engine_adapter_runs_execution() -> None:
     assert run_repo.retry_state_updates == []
     assert execution.request is not None
     assert execution.prepared_model_call is not None
+    assert execution_factory.model_stream_timeouts == ModelStreamTimeouts(
+        first_event_seconds=12.0,
+        idle_seconds=34.0,
+        cancellation_cleanup_seconds=5.0,
+    )
+    assert (
+        execution_factory.model_stream_task_registry
+        is adapter.model_stream_task_registry
+    )
     prepared_request = execution.prepared_model_call.native_request
     assert prepared_request.kwargs["instructions"] == "## Agent prompt\n\nagent prompt"
     assert isinstance(prepared_request.kwargs.get("prompt_cache_key"), str)
@@ -1414,12 +1473,15 @@ def _agent_engine_adapter(
     summary_model_call: SummaryModelCall | None = None,
 ) -> AgentEngineAdapter:
     """Create AgentEngineAdapter for tests."""
+    adapter_config = config or EventEngineAdapterConfig()
     return AgentEngineAdapter(
         session_manager=session_manager,
         artifact_service=artifact_service or _ArtifactService(),
         exchange_file_service=exchange_file_service or _ExchangeFileService(),
         model_file_service=model_file_service or _ModelFileService(),
-        config=config or EventEngineAdapterConfig(),
+        config=adapter_config,
+        model_stream_timeouts=build_model_stream_timeouts(adapter_config),
+        model_stream_task_registry=ModelStreamTaskRegistry(),
         execution_factory=execution_factory or (lambda **kwargs: _Execution()),
         run_repo=run_repo or _RunRepo(),
         agent_session_repo=agent_session_repo or _AgentSessionRepo(),

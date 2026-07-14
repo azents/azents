@@ -1,5 +1,6 @@
 """Live event projector Run-correlation tests."""
 
+import asyncio
 import datetime
 from contextlib import AbstractAsyncContextManager
 from typing import Any, cast
@@ -11,10 +12,16 @@ from azents.broker.broadcast import (
     WebSocketBroadcast,
     WebSocketBroadcastPublishError,
 )
-from azents.core.enums import AgentRunPhase, AgentRunStatus
+from azents.core.enums import AgentRunPhase, AgentRunStatus, EventKind
 from azents.core.inference_profile import AppliedInferenceProfile
-from azents.engine.events.engine_events import RunComplete
-from azents.engine.events.types import ActiveToolCall, AgentRunState
+from azents.engine.events.engine_events import ContentDelta, RunComplete
+from azents.engine.events.types import (
+    ActiveToolCall,
+    AgentRunState,
+    AssistantMessagePayload,
+    Event,
+    NativeArtifact,
+)
 from azents.services.chat.data import ChatLiveRunState
 from azents.services.chat.live_events import RedisLiveEventStore
 from azents.worker.live.event_projector import LiveEventProjector
@@ -61,16 +68,56 @@ class _LiveEventStore:
 
     def __init__(self) -> None:
         self.clear_count = 0
+        self.append_attempts = 0
+        self.block_append = False
+        self.append_started = asyncio.Event()
+        self.release_append = asyncio.Event()
+        self.events: list[Event] = []
 
-    async def list_by_session_id(self, session_id: str) -> list[object]:
-        """Return no partial events."""
+    async def list_by_session_id(self, session_id: str) -> list[Event]:
+        """Return current partial events."""
         del session_id
-        return []
+        return list(self.events)
 
     async def clear_session(self, session_id: str) -> None:
         """Record a session clear."""
         del session_id
         self.clear_count += 1
+        self.events.clear()
+
+    async def append_assistant_delta(
+        self,
+        session_id: str,
+        *,
+        delta: str,
+        content_index: int,
+    ) -> Event:
+        """Record and optionally block one partial append attempt."""
+        del content_index
+        self.append_attempts += 1
+        if self.block_append:
+            self.append_started.set()
+            await self.release_append.wait()
+        event = Event(
+            id="1" * 32,
+            session_id=session_id,
+            kind=EventKind.ASSISTANT_MESSAGE,
+            payload=AssistantMessagePayload(
+                content=delta,
+                native_artifact=NativeArtifact(
+                    compat_key="test:responses:openai:test:1",
+                    adapter="test",
+                    native_format="responses",
+                    provider="openai",
+                    model="test",
+                    schema_version="1",
+                    item={"type": "message"},
+                ),
+            ),
+            created_at=datetime.datetime.now(datetime.UTC),
+        )
+        self.events.append(event)
+        return event
 
 
 class _Broadcast:
@@ -120,6 +167,55 @@ def _projector(
         session_manager=_SessionManager(),
         agent_run_repository=cast(Any, _AgentRunRepository(current_run)),
     )
+
+
+@pytest.mark.asyncio
+async def test_clear_session_discards_pending_partial_batch() -> None:
+    """A cleared failed attempt cannot flush a queued partial afterward."""
+    store = _LiveEventStore()
+    broadcast = _Broadcast()
+    projector = _projector(store, broadcast)
+
+    await projector.update(
+        "session-001",
+        ContentDelta(delta="stale", content_index=0),
+    )
+    await projector.clear_session("session-001")
+    await asyncio.sleep(0.1)
+
+    assert store.clear_count == 1
+    assert store.append_attempts == 0
+    assert broadcast.events == []
+
+
+@pytest.mark.asyncio
+async def test_clear_session_waits_for_inflight_partial_before_store_clear() -> None:
+    """Store cleanup occurs after a partial append already in progress."""
+    store = _LiveEventStore()
+    store.block_append = True
+    broadcast = _Broadcast()
+    projector = _projector(store, broadcast)
+
+    await projector.update(
+        "session-001",
+        ContentDelta(delta="stale", content_index=0),
+    )
+    await asyncio.wait_for(store.append_started.wait(), timeout=1)
+    clear_task = asyncio.create_task(projector.clear_session("session-001"))
+    await asyncio.sleep(0)
+
+    assert store.clear_count == 0
+
+    store.release_append.set()
+    await clear_task
+
+    assert store.append_attempts == 1
+    assert store.clear_count == 1
+    assert store.events == []
+    assert [event[1]["type"] for event in broadcast.events] == [
+        "live_event_upserted",
+        "live_event_removed",
+    ]
 
 
 @pytest.mark.asyncio

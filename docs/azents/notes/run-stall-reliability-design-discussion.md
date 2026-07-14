@@ -207,7 +207,7 @@ The event runtime applies two application-owned progress deadlines to the transf
 - 90 seconds from stream start to the first native provider event;
 - 360 seconds between every subsequent native provider event.
 
-A timeout cancels the pending asynchronous iteration and raises a retryable `ModelStreamTimeoutError`. The worker clears the failed attempt's live partial projection before it publishes retry state, so a new attempt cannot append to stale text or reasoning. User Stop still independently cancels the stream without being converted into a timeout.
+A timeout cancels the pending asynchronous iteration, allows up to five seconds for cooperative provider cleanup, and raises a retryable `ModelStreamTimeoutError` even if cleanup remains pending. An adapter-scoped task registry owns and observes detached cleanup tasks until they finish. Provider-owned transport timeouts retain a separate transient failure code. The worker discards buffered deltas, then best-effort clears the failed attempt's live partial projection before it publishes retry state, so a new attempt does not normally append to stale text or reasoning. A projection cleanup failure is logged and does not block durable retry state. User Stop still independently cancels the stream without being converted into a timeout.
 
 This baseline intentionally treats every native event as progress. It does not yet implement a raw-byte heartbeat detector, provider-specific overrides, a meaningful-output deadline, or an absolute attempt cap.
 

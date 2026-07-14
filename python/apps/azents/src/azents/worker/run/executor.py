@@ -71,7 +71,11 @@ from azents.engine.run.contracts import (
     ToolkitBinding,
 )
 from azents.engine.run.emit import Emit, handle_engine_event
-from azents.engine.run.errors import ModelStreamTimeoutError, UserVisibleRuntimeError
+from azents.engine.run.errors import (
+    ModelProviderTimeoutError,
+    ModelStreamTimeoutError,
+    UserVisibleRuntimeError,
+)
 from azents.engine.run.failure import (
     FailedRunAttempt,
     FailedRunAttemptSource,
@@ -183,6 +187,8 @@ _INTERNAL_ERROR_MESSAGE = "An internal error occurred."
 _RUN_HEARTBEAT_INTERVAL_SECONDS = 30.0
 _FAILED_RUN_RETRY_WAIT_POLL_SECONDS = 0.2
 _FAILED_RUN_NO_FIXTURE_MATCH_CODE = "no_fixture_match"
+_MODEL_PROVIDER_TIMEOUT_FAILURE_CODE = "model_provider_timeout"
+_MODEL_STREAM_TIMEOUT_FAILURE_CODE = "model_stream_timeout"
 _NON_ACTIONABLE_TAIL_EVENT_KINDS = {
     EventKind.RUN_MARKER,
     EventKind.TURN_MARKER,
@@ -1404,8 +1410,38 @@ class RunExecutor:
                     break
                 except UserVisibleRuntimeError as exc:
                     if isinstance(exc, ModelStreamTimeoutError):
-                        await self.live_event_projector.clear_session(
-                            message.session_id
+                        logger.warning(
+                            "Model stream progress deadline exceeded",
+                            extra={
+                                "session_id": message.session_id,
+                                "run_id": run_id,
+                                "attempt_number": attempt_number,
+                                "stage": exc.stage,
+                                "timeout_seconds": exc.timeout_seconds,
+                                "cancellation_cleanup_timed_out": (
+                                    exc.cancellation_cleanup_timed_out
+                                ),
+                                "cancellation_cleanup_error_type": (
+                                    exc.cancellation_cleanup_error_type
+                                ),
+                            },
+                        )
+                    elif isinstance(exc, ModelProviderTimeoutError):
+                        logger.warning(
+                            "Model provider request timed out",
+                            extra={
+                                "session_id": message.session_id,
+                                "run_id": run_id,
+                                "attempt_number": attempt_number,
+                            },
+                        )
+                    if isinstance(
+                        exc,
+                        (ModelStreamTimeoutError, ModelProviderTimeoutError),
+                    ):
+                        await self._clear_timed_out_model_projection(
+                            session_id=message.session_id,
+                            run_id=run_id,
                         )
                     retry_state = await self._record_failed_run_attempt(
                         session_id=message.session_id,
@@ -1611,6 +1647,23 @@ class RunExecutor:
                 command_id=command_id,
             )
 
+    async def _clear_timed_out_model_projection(
+        self,
+        *,
+        session_id: str,
+        run_id: str,
+    ) -> None:
+        """Clear a timed-out model projection without blocking durable retry state."""
+        try:
+            await self.live_event_projector.clear_session(session_id)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception(
+                "Failed to clear timed-out model projection",
+                extra={"session_id": session_id, "run_id": run_id},
+            )
+
     def _failed_run_attempt_from_user_visible_error(
         self,
         exc: UserVisibleRuntimeError,
@@ -1622,7 +1675,13 @@ class RunExecutor:
         message = str(exc)
         retryability: FailedRunRetryability = "unknown"
         failure_code: str | None = None
-        if _FAILED_RUN_NO_FIXTURE_MATCH_CODE in message:
+        if isinstance(exc, ModelStreamTimeoutError):
+            retryability = "transient"
+            failure_code = _MODEL_STREAM_TIMEOUT_FAILURE_CODE
+        elif isinstance(exc, ModelProviderTimeoutError):
+            retryability = "transient"
+            failure_code = _MODEL_PROVIDER_TIMEOUT_FAILURE_CODE
+        elif _FAILED_RUN_NO_FIXTURE_MATCH_CODE in message:
             retryability = "non_retryable"
             failure_code = _FAILED_RUN_NO_FIXTURE_MATCH_CODE
         return FailedRunAttempt(

@@ -4,7 +4,7 @@ import asyncio
 import datetime
 import itertools
 import logging
-from collections.abc import Awaitable, Callable, Iterable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
@@ -18,6 +18,7 @@ from azents.engine.events.protocols import (
     AdapterOutputStream,
     ClientToolExecutor,
     ModelAdapter,
+    NativeEvent,
     NativeModelRequest,
     NormalizedAdapterOutput,
     OutputSink,
@@ -50,7 +51,9 @@ from azents.engine.events.types import (
 from azents.engine.run.contracts import ToolAdmissionBarrier
 from azents.engine.run.errors import (
     ModelCallError,
+    ModelProviderTimeoutError,
     ModelStreamTimeoutError,
+    ModelStreamTimeoutStage,
     UserVisibleRuntimeError,
 )
 from azents.engine.run.types import USER_STOP_CANCEL_MESSAGE
@@ -150,21 +153,47 @@ class AgentRunExecutionRequest:
 
 
 @dataclass(frozen=True)
-class ModelStreamWatchdog:
+class ModelStreamTimeouts:
     """Application-owned model stream progress deadlines."""
 
-    first_event_timeout_seconds: float = 90.0
-    idle_timeout_seconds: float = 360.0
-
-    def __post_init__(self) -> None:
-        """Reject non-positive stream progress deadlines."""
-        if self.first_event_timeout_seconds <= 0:
-            raise ValueError("first_event_timeout_seconds must be greater than zero")
-        if self.idle_timeout_seconds <= 0:
-            raise ValueError("idle_timeout_seconds must be greater than zero")
+    first_event_seconds: float
+    idle_seconds: float
+    cancellation_cleanup_seconds: float
 
 
-_DEFAULT_MODEL_STREAM_WATCHDOG = ModelStreamWatchdog()
+class ModelStreamTaskRegistry:
+    """Own detached cancelled stream reads until their cleanup finishes."""
+
+    def __init__(self) -> None:
+        self.tasks: set[asyncio.Task[NativeEvent]] = set()
+
+    def adopt(
+        self,
+        task: asyncio.Task[NativeEvent],
+        *,
+        run_id: str,
+        session_id: str,
+    ) -> None:
+        """Retain and observe one cancellation-resistant stream read."""
+        self.tasks.add(task)
+
+        def on_done(done: asyncio.Task[NativeEvent]) -> None:
+            self.tasks.discard(done)
+            if done.cancelled():
+                return
+            exc = done.exception()
+            if exc is not None:
+                logger.warning(
+                    "Detached model stream cleanup failed",
+                    extra={
+                        "run_id": run_id,
+                        "session_id": session_id,
+                        "error_type": exc.__class__.__name__,
+                    },
+                    exc_info=(exc.__class__, exc, exc.__traceback__),
+                )
+
+        task.add_done_callback(on_done)
 
 
 class _ModelStreamUserInterrupted(Exception):
@@ -201,8 +230,9 @@ class AgentRunExecution:
         output_sink: OutputSink | None = None,
         phase_sink: PhaseSink | None = None,
         pre_model_lower_hook: PreModelLowerHook | None = None,
+        model_stream_timeouts: ModelStreamTimeouts,
+        model_stream_task_registry: ModelStreamTaskRegistry,
         model_file_pin_repo: ModelFilePinRepositoryProtocol | None = None,
-        model_stream_watchdog: ModelStreamWatchdog = _DEFAULT_MODEL_STREAM_WATCHDOG,
         run_repo: RunStateRepository | None = None,
         transcript_repo: TranscriptRepository | None = None,
         session_repo: SessionHeadRepository | None = None,
@@ -216,8 +246,9 @@ class AgentRunExecution:
         self._output_sink = output_sink
         self._phase_sink = phase_sink
         self._pre_model_lower_hook = pre_model_lower_hook
+        self.model_stream_timeouts = model_stream_timeouts
+        self.model_stream_task_registry = model_stream_task_registry
         self._model_file_pin_repo = model_file_pin_repo
-        self._model_stream_watchdog = model_stream_watchdog
         self._run_repo = run_repo or AgentRunRepository()
         self._transcript_repo = transcript_repo or EventTranscriptRepository()
         self._session_repo = session_repo
@@ -530,6 +561,65 @@ class AgentRunExecution:
             model=model,
         )
 
+    async def _next_model_stream_event(
+        self,
+        stream: AsyncIterator[NativeEvent],
+        *,
+        run_id: str,
+        session_id: str,
+        stage: ModelStreamTimeoutStage,
+        timeout_seconds: float,
+    ) -> NativeEvent:
+        """Read one event while bounding progress and cancellation cleanup."""
+
+        async def read_next() -> NativeEvent:
+            return await anext(stream)
+
+        next_event = asyncio.create_task(read_next())
+        try:
+            done, _ = await asyncio.wait({next_event}, timeout=timeout_seconds)
+        except asyncio.CancelledError:
+            next_event.cancel()
+            self.model_stream_task_registry.adopt(
+                next_event,
+                run_id=run_id,
+                session_id=session_id,
+            )
+            raise
+        if next_event in done:
+            try:
+                return next_event.result()
+            except TimeoutError as exc:
+                raise ModelProviderTimeoutError(
+                    "The model provider request timed out."
+                ) from exc
+
+        next_event.cancel()
+        cleanup_done, _ = await asyncio.wait(
+            {next_event},
+            timeout=self.model_stream_timeouts.cancellation_cleanup_seconds,
+        )
+        cleanup_error_type: str | None = None
+        if next_event in cleanup_done:
+            try:
+                next_event.result()
+            except asyncio.CancelledError:
+                pass
+            except Exception as exc:
+                cleanup_error_type = exc.__class__.__name__
+        else:
+            self.model_stream_task_registry.adopt(
+                next_event,
+                run_id=run_id,
+                session_id=session_id,
+            )
+        raise ModelStreamTimeoutError(
+            stage=stage,
+            timeout_seconds=timeout_seconds,
+            cancellation_cleanup_timed_out=next_event not in cleanup_done,
+            cancellation_cleanup_error_type=cleanup_error_type,
+        )
+
     async def _stream_model(
         self,
         session: AsyncSession,
@@ -546,33 +636,25 @@ class AgentRunExecution:
         await session.commit()
         output_stream = self._output_normalizer.start(session_id)
         stream = aiter(self._model_adapter.stream(native_request))
-        stage = "first_event"
-        timeout_seconds = self._model_stream_watchdog.first_event_timeout_seconds
+        stage: ModelStreamTimeoutStage = "first_event"
+        timeout_seconds = self.model_stream_timeouts.first_event_seconds
         try:
             while True:
                 try:
-                    event = await asyncio.wait_for(anext(stream), timeout_seconds)
-                except StopAsyncIteration:
-                    break
-                except TimeoutError as exc:
-                    logger.warning(
-                        "Model stream progress deadline exceeded",
-                        extra={
-                            "run_id": run_id,
-                            "session_id": session_id,
-                            "stage": stage,
-                            "timeout_seconds": timeout_seconds,
-                        },
-                    )
-                    raise ModelStreamTimeoutError(
+                    event = await self._next_model_stream_event(
+                        stream,
+                        run_id=run_id,
+                        session_id=session_id,
                         stage=stage,
                         timeout_seconds=timeout_seconds,
-                    ) from exc
+                    )
+                except StopAsyncIteration:
+                    break
                 incremental = output_stream.process_event(event)
                 if self._output_sink is not None and incremental.projections:
                     await self._output_sink(incremental, [])
                 stage = "idle"
-                timeout_seconds = self._model_stream_watchdog.idle_timeout_seconds
+                timeout_seconds = self.model_stream_timeouts.idle_seconds
         except asyncio.CancelledError as exc:
             if _is_user_stop_cancellation(exc):
                 raise _ModelStreamUserInterrupted(output_stream.interrupt()) from exc

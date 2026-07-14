@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import dataclasses
 import logging
+import math
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from typing import Annotated, Protocol
 
@@ -41,7 +42,8 @@ from azents.engine.events.execution import (
     AgentRunExecutionRequest,
     InputPoller,
     InputPollResult,
-    ModelStreamWatchdog,
+    ModelStreamTaskRegistry,
+    ModelStreamTimeouts,
     PreparedModelCall,
 )
 from azents.engine.events.file_parts import RequestLocalModelFileResolver
@@ -163,6 +165,35 @@ class EventEngineAdapterConfig:
     native_request_max_input_chars: int = 16_000_000
     model_stream_first_event_timeout_seconds: float = 90.0
     model_stream_idle_timeout_seconds: float = 360.0
+    model_stream_cancellation_cleanup_timeout_seconds: float = 5.0
+
+
+def build_model_stream_timeouts(
+    config: Annotated[
+        EventEngineAdapterConfig,
+        Depends(EventEngineAdapterConfig),
+    ],
+) -> ModelStreamTimeouts:
+    """Validate and assemble model stream deadlines at composition time."""
+    values = {
+        "first event": config.model_stream_first_event_timeout_seconds,
+        "idle": config.model_stream_idle_timeout_seconds,
+        "cancellation cleanup": (
+            config.model_stream_cancellation_cleanup_timeout_seconds
+        ),
+    }
+    for name, value in values.items():
+        if not math.isfinite(value) or value <= 0:
+            raise ValueError(
+                f"Model stream {name} timeout must be finite and greater than zero"
+            )
+    return ModelStreamTimeouts(
+        first_event_seconds=config.model_stream_first_event_timeout_seconds,
+        idle_seconds=config.model_stream_idle_timeout_seconds,
+        cancellation_cleanup_seconds=(
+            config.model_stream_cancellation_cleanup_timeout_seconds
+        ),
+    )
 
 
 _SUMMARY_INPUT_OVERHEAD_TOKENS = 8_000
@@ -193,6 +224,14 @@ class AgentEngineAdapter:
     exchange_file_service: Annotated[ExchangeFileService, Depends(ExchangeFileService)]
     model_file_service: Annotated[ModelFileService, Depends(ModelFileService)]
     config: Annotated[EventEngineAdapterConfig, Depends(EventEngineAdapterConfig)]
+    model_stream_timeouts: Annotated[
+        ModelStreamTimeouts,
+        Depends(build_model_stream_timeouts),
+    ]
+    model_stream_task_registry: Annotated[
+        ModelStreamTaskRegistry,
+        Depends(ModelStreamTaskRegistry),
+    ]
     execution_factory: Annotated[
         RunExecutionFactory, Depends(_agent_run_execution_factory)
     ]
@@ -482,12 +521,8 @@ class AgentEngineAdapter:
             ),
             pre_model_lower_hook=model_file_materializer.materialize,
             model_file_pin_repo=self.model_file_pin_repo,
-            model_stream_watchdog=ModelStreamWatchdog(
-                first_event_timeout_seconds=(
-                    self.config.model_stream_first_event_timeout_seconds
-                ),
-                idle_timeout_seconds=self.config.model_stream_idle_timeout_seconds,
-            ),
+            model_stream_timeouts=self.model_stream_timeouts,
+            model_stream_task_registry=self.model_stream_task_registry,
             run_repo=self.run_repo,
             transcript_repo=self.transcript_repo,
             session_repo=self.session_head_repo,
