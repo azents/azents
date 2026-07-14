@@ -34,12 +34,26 @@ async def finalize_tool_result(
     transcript_repo: TranscriptRepository,
     run_id: str,
     session_id: str,
+    owner_generation: int | None,
     call: ToolCallIdentity,
     result: ClientToolResultPayload,
 ) -> Event:
     """Append one terminal result and remove only its active ownership entry."""
     if result.call_id != call.call_id:
         raise ValueError("Tool result call ID does not match admitted call")
+    if owner_generation is None:
+        # Explicit stop/recovery finalization already owns the Session row and
+        # may intentionally repair a terminal interrupted Run.
+        run_state = await run_repo.lock_by_id(session, run_id)
+        if run_state is None or run_state.session_id != session_id:
+            raise ValueError("Agent run not found in session")
+    else:
+        run_state = await run_repo.lock_active_owner(
+            session,
+            run_id=run_id,
+            session_id=session_id,
+            owner_generation=owner_generation,
+        )
     event = await transcript_repo.append(
         session,
         EventCreate(
@@ -49,9 +63,6 @@ async def finalize_tool_result(
             external_id=tool_result_external_id(run_id, call.call_id),
         ),
     )
-    run_state = await run_repo.lock_by_id(session, run_id)
-    if run_state is None:
-        raise ValueError("Agent run not found")
     if run_state.status == AgentRunStatus.RUNNING:
         remaining = [
             active

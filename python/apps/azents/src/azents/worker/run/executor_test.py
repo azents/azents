@@ -4,18 +4,27 @@ import asyncio
 import contextlib
 import dataclasses
 import datetime
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AbstractAsyncContextManager
 from types import SimpleNamespace
 from typing import Any, cast
+from unittest.mock import AsyncMock
 
 import pytest
 from azcommon.result import Failure, Success
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import azents.broker.redis as redis_broker_module
 import azents.worker.run.executor as run_executor_module
 from azents.broker.broadcast import WebSocketBroadcast
-from azents.broker.types import PublishedEvent, SessionBroker, SessionWakeUp
+from azents.broker.redis import RedisBroker
+from azents.broker.types import (
+    PublishedEvent,
+    SessionBroker,
+    SessionOwnershipLostError,
+    SessionWakeUp,
+)
 from azents.core.agent import AgentModelSelection
 from azents.core.enums import (
     ActionExecutionStatus,
@@ -37,6 +46,7 @@ from azents.engine.events.action_messages import CreateGitWorktreeAction
 from azents.engine.events.engine_events import (
     RunComplete,
     RunPhaseChanged,
+    RunStarted,
     SubagentTreeChanged,
 )
 from azents.engine.events.types import (
@@ -58,6 +68,7 @@ from azents.engine.run.failure import FailedRunRetryState
 from azents.engine.run.input import AgentNotFound
 from azents.engine.run.resolve import ResolvedInvokeInputProfile
 from azents.engine.run.types import (
+    OWNERSHIP_LOST_CANCEL_MESSAGE,
     SHUTDOWN_CANCEL_MESSAGE,
     USER_STOP_CANCEL_MESSAGE,
     PollMessages,
@@ -70,7 +81,10 @@ from azents.engine.tools.skill import SkillToolkitProvider
 from azents.engine.tools.subagent import SubagentToolkitProvider
 from azents.engine.tools.todo import TodoToolkitProvider
 from azents.rdb.session import SessionManager
-from azents.repos.action_execution.data import ActionExecution
+from azents.repos.action_execution.data import (
+    ActionExecution,
+    ActionExecutionProjection,
+)
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
@@ -118,20 +132,28 @@ class _DBSession:
 class _SessionScope(AbstractAsyncContextManager[AsyncSession]):
     """DB session scope test double."""
 
+    def __init__(self, manager: "_SessionManager") -> None:
+        self.manager = manager
+
     async def __aenter__(self) -> AsyncSession:
         """Return a dummy DB session."""
+        self.manager.active_sessions += 1
         return cast(AsyncSession, _DBSession())
 
     async def __aexit__(self, *exc_info: object) -> None:
         """No resources to clean up."""
+        self.manager.active_sessions -= 1
 
 
 class _SessionManager:
     """SessionManager test double."""
 
+    def __init__(self) -> None:
+        self.active_sessions = 0
+
     def __call__(self) -> _SessionScope:
         """Return a new session scope."""
-        return _SessionScope()
+        return _SessionScope(self)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -169,9 +191,11 @@ class _SessionLifecycle:
         self.order = order
         self.recoverable_run = recoverable_run
         self.heartbeat_session_ids: list[str] = []
+        self.heartbeat_owner_generations: list[int] = []
         self.retry_states: list[FailedRunRetryState | None] = []
         self.activities: list[tuple[str, str, object]] = []
         self.cleared_session_ids: list[str] = []
+        self.cleared_session_runs: list[tuple[str, str]] = []
         self.terminal_runs: list[tuple[str, AgentRunStatus]] = []
         self.profile_resolution_failures: list[
             tuple[str, InferenceProfileFailureCode, str]
@@ -199,6 +223,18 @@ class _SessionLifecycle:
     async def clear_session_activity(self, session_id: str) -> None:
         """Record session activity cleanup."""
         self.cleared_session_ids.append(session_id)
+        if self.order is not None:
+            self.order.append("clear_session_activity")
+
+    async def clear_session_activity_for_run(
+        self,
+        session_id: str,
+        *,
+        run_id: str,
+    ) -> None:
+        """Record an authority-scoped session activity cleanup."""
+        self.cleared_session_ids.append(session_id)
+        self.cleared_session_runs.append((session_id, run_id))
         if self.order is not None:
             self.order.append("clear_session_activity")
 
@@ -245,9 +281,15 @@ class _SessionLifecycle:
         del session_id, run_id
         self.retry_states.append(retry_state)
 
-    async def heartbeat_session(self, session_id: str) -> None:
-        """Record the session id passed to heartbeat."""
+    async def heartbeat_session(
+        self,
+        session_id: str,
+        *,
+        owner_generation: int,
+    ) -> None:
+        """Record the ownership evidence passed to heartbeat."""
         self.heartbeat_session_ids.append(session_id)
+        self.heartbeat_owner_generations.append(owner_generation)
 
     async def get_running_agent_run(
         self,
@@ -261,6 +303,21 @@ class _SessionLifecycle:
         ):
             return self.recoverable_run
         return None
+
+    async def get_agent_run_status(
+        self,
+        session_id: str,
+        *,
+        run_id: str,
+    ) -> AgentRunStatus | None:
+        """Return the latest terminal status recorded by this lifecycle fake."""
+        del session_id
+        for terminal_run_id, status in reversed(self.terminal_runs):
+            if terminal_run_id == run_id:
+                return status
+        if self.recoverable_run is not None and self.recoverable_run.id == run_id:
+            return self.recoverable_run.status
+        return AgentRunStatus.RUNNING
 
     async def claim_recoverable_agent_run(
         self,
@@ -347,6 +404,28 @@ class _SessionLifecycle:
         """Return no durable projections for lightweight executor tests."""
         del run_id
         return []
+
+
+class _BrokerActivitySessionLifecycle(_SessionLifecycle):
+    """Delegate startup activity to the real RedisBroker boundary."""
+
+    def __init__(self, broker: RedisBroker) -> None:
+        super().__init__()
+        self.broker = broker
+
+    async def set_session_activity(
+        self,
+        session_id: str,
+        *,
+        run_id: str,
+        phase: object,
+    ) -> None:
+        """Exercise the production Redis activity deadline from RunExecutor."""
+        await self.broker.set_session_activity(
+            session_id,
+            run_id=run_id,
+            phase=cast(AgentRunPhase | None, phase),
+        )
 
 
 class _AgentRepository:
@@ -476,11 +555,20 @@ class _SessionTitleService:
 class _LiveEventProjector:
     """LiveEventProjector test double."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        projection_order: list[str] | None = None,
+        *,
+        flush_error: Exception | None = None,
+        clear_error: Exception | None = None,
+    ) -> None:
         self.flushed_session_ids: list[str] = []
         self.active_tool_calls: list[tuple[str, object]] = []
         self.live_run_updates: list[tuple[str, ChatLiveRunState]] = []
         self.live_run_clears: list[tuple[str, str]] = []
+        self.projection_order = projection_order
+        self.flush_error = flush_error
+        self.clear_error = clear_error
 
     async def publish_live_run_updated(
         self,
@@ -488,6 +576,8 @@ class _LiveEventProjector:
         run: ChatLiveRunState,
     ) -> None:
         """Record live run update broadcasts."""
+        if self.projection_order is not None:
+            self.projection_order.append("live_run_updated")
         self.live_run_updates.append((session_id, run))
 
     async def publish_live_run_cleared(
@@ -497,6 +587,8 @@ class _LiveEventProjector:
         run_id: str,
     ) -> None:
         """Record live run clear broadcasts."""
+        if self.clear_error is not None:
+            raise self.clear_error
         self.live_run_clears.append((session_id, run_id))
 
     async def replace_active_tool_calls(
@@ -504,14 +596,17 @@ class _LiveEventProjector:
         session_id: str,
         active_tool_calls: object,
         *,
+        run_id: str,
         removed_call_ids: set[str],
     ) -> None:
         """Record active tool call projection replacements."""
-        del removed_call_ids
+        del run_id, removed_call_ids
         self.active_tool_calls.append((session_id, active_tool_calls))
 
     async def flush_session(self, session_id: str) -> None:
         """Record flushed sessions."""
+        if self.flush_error is not None:
+            raise self.flush_error
         self.flushed_session_ids.append(session_id)
 
 
@@ -803,6 +898,24 @@ class _FailedRunFinalizer:
         return object()
 
 
+class _UserStopFinalizer:
+    """User-stop finalizer test double."""
+
+    def __init__(self) -> None:
+        self.recorded_run_ids: list[str] = []
+
+    async def record_interrupted_run(
+        self,
+        session_id: str,
+        *,
+        run_id: str,
+        active_tool_calls: object,
+    ) -> None:
+        """Record attempts to reinterpret one Run as user-stopped."""
+        del session_id, active_tool_calls
+        self.recorded_run_ids.append(run_id)
+
+
 def _executor(
     session_lifecycle: _SessionLifecycle | None = None,
     *,
@@ -812,6 +925,7 @@ def _executor(
     agent_session_repository: _AgentSessionRepository | None = None,
     live_event_projector: _LiveEventProjector | None = None,
     session_git_worktree_service: _SessionGitWorktreeService | None = None,
+    user_stop_finalizer: _UserStopFinalizer | None = None,
     failed_run_max_retries: int = 10,
 ) -> RunExecutor:
     """Create a RunExecutor for resolve-failure tests."""
@@ -853,6 +967,8 @@ def _executor(
         live_event_projector = _LiveEventProjector()
     if session_git_worktree_service is None:
         session_git_worktree_service = _SessionGitWorktreeService()
+    if user_stop_finalizer is None:
+        user_stop_finalizer = _UserStopFinalizer()
     return RunExecutor(
         broker=cast(SessionBroker, object()),
         session_manager=cast(SessionManager[AsyncSession], _SessionManager()),
@@ -888,7 +1004,7 @@ def _executor(
         ),
         session_title_service=cast(SessionTitleService, _SessionTitleService()),
         live_event_projector=cast(LiveEventProjector, live_event_projector),
-        user_stop_finalizer=cast(UserStopFinalizer, object()),
+        user_stop_finalizer=cast(UserStopFinalizer, user_stop_finalizer),
         failed_run_finalizer=cast(Any, failed_run_finalizer),
         builtin_toolkit_provider=cast(BuiltinToolkitProvider, object()),
         claude_rules_toolkit_provider=cast(ClaudeRulesToolkitProvider, object()),
@@ -1778,14 +1894,21 @@ async def test_execute_rebuilds_turn_with_exact_updated_inference_state(
     assert engine.requests[1].auto_compaction_threshold_tokens == 102_400
 
 
+@pytest.mark.parametrize("pending_input", [False, True])
 @pytest.mark.asyncio
-async def test_execute_enqueues_follow_up_after_context_invalidating_action(
+async def test_execute_only_requeues_context_change_with_pending_input(
     monkeypatch: pytest.MonkeyPatch,
+    pending_input: bool,
 ) -> None:
-    """Project-mutating actions stop before model dispatch and wake fresh context."""
+    """Context handoff emits a follow-up signal only for durable pending input."""
     lifecycle = _SessionLifecycle()
     executor = _executor(session_lifecycle=lifecycle)
     message = _message()
+
+    class PendingInputBufferService(_InputBufferService):
+        async def has_pending_session_input_buffers(self, session_id: str) -> bool:
+            assert session_id == message.session_id
+            return pending_input
 
     async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
         del args, kwargs
@@ -1803,6 +1926,11 @@ async def test_execute_enqueues_follow_up_after_context_invalidating_action(
         raise AssertionError("resolve_invoke_input should not be called")
 
     monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
+    monkeypatch.setattr(
+        executor,
+        "input_buffer_service",
+        cast(InputBufferService, PendingInputBufferService()),
+    )
     monkeypatch.setattr(
         run_executor_module,
         "resolve_invoke_input_with_profile",
@@ -1824,7 +1952,120 @@ async def test_execute_enqueues_follow_up_after_context_invalidating_action(
     )
 
     assert result.no_actionable_work is True
-    assert lifecycle.wake_ups == [message]
+    assert lifecycle.wake_ups == ([message] if pending_input else [])
+
+
+@pytest.mark.asyncio
+async def test_execute_starts_initial_run_after_worktree_context_change(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Finish worktree setup and the first message in one preparation boundary."""
+    lifecycle = _SessionLifecycle()
+    session_repo = _AgentSessionRepository()
+    order: list[str] = []
+    engine = _RecordingEngine(order)
+    executor = _executor(
+        session_lifecycle=lifecycle,
+        engine=engine,
+        agent_session_repository=session_repo,
+    )
+    worktree_action = cast(Any, object())
+    requested_profile = RequestedInferenceProfile(
+        model_target_label="default",
+        reasoning_effort=None,
+    )
+    prepared_state = SessionInferenceState(
+        model_target_label=requested_profile.model_target_label,
+        model_selection=make_test_model_selection(model_identifier="gpt-test"),
+        reasoning_effort=requested_profile.reasoning_effort,
+        effective_context_window_tokens=64_000,
+        effective_auto_compaction_threshold_tokens=51_200,
+        resolved_at=datetime.datetime.now(datetime.UTC),
+    )
+    user_message = make_run_user_message(
+        content="handle the initial prompt",
+        metadata={},
+        attachments=[],
+        external_id="buffer-user",
+        attachment_source="input_buffer",
+        requested_inference_profile=requested_profile,
+    )
+    empty_batch = PromotedInputBuffers(
+        worktree_action=None,
+        turn_effect=TurnEffect.NEUTRAL,
+        requested_inference_profile=None,
+        promoted_event_ids=[],
+        user_messages=[],
+        events=[],
+        deleted_buffer_ids=[],
+        claimed_count=0,
+        inserted_count=0,
+        deduped_count=0,
+    )
+    promoted_batches = [
+        dataclasses.replace(
+            empty_batch,
+            worktree_action=worktree_action,
+            deleted_buffer_ids=["buffer-worktree"],
+            claimed_count=1,
+        ),
+        dataclasses.replace(
+            empty_batch,
+            turn_effect=TurnEffect.ELIGIBLE,
+            requested_inference_profile=requested_profile,
+            promoted_event_ids=["event-user"],
+            user_messages=[user_message],
+            deleted_buffer_ids=["buffer-user"],
+            claimed_count=1,
+            inserted_count=1,
+        ),
+        empty_batch,
+    ]
+
+    async def promote(*args: object, **kwargs: object) -> PromotedInputBuffers:
+        del args, kwargs
+        promoted = promoted_batches.pop(0)
+        if promoted.user_messages:
+            session_repo.inference_state = prepared_state
+        return promoted
+
+    async def process_operation_actions(
+        *args: object,
+        **kwargs: object,
+    ) -> OperationActionProcessResult:
+        del args
+        return OperationActionProcessResult(
+            context_invalidated=kwargs["worktree_action"] is worktree_action
+        )
+
+    monkeypatch.setattr(executor, "_promote_input_buffers", promote)
+    monkeypatch.setattr(
+        executor,
+        "_process_operation_actions",
+        process_operation_actions,
+    )
+    _patch_successful_resolution(monkeypatch)
+
+    async def dispatch_event(session_id: str, event: PublishedEvent) -> None:
+        del session_id, event
+
+    result = await executor.execute(
+        _message(),
+        poll_fn=None,
+        check_stop=None,
+        prepare_toolkits=None,
+        shutdown_event=asyncio.Event(),
+        dispatch_event=dispatch_event,
+        owner_generation=1,
+        tool_admission_barrier=ToolAdmissionBarrier(),
+    )
+
+    assert result.terminal_run_status is AgentRunStatus.COMPLETED
+    assert lifecycle.activation_calls == 1
+    assert lifecycle.wake_ups == []
+    assert len(engine.requests) == 1
+    assert engine.requests[0].inference_state == prepared_state
+    assert promoted_batches == []
 
 
 @pytest.mark.asyncio
@@ -1873,6 +2114,64 @@ async def test_operation_owner_generation_mismatch_is_cancelled() -> None:
     assert result.context_invalidated is False
     assert service.cancelled_execution_ids == [execution.id]
     assert service.executed_execution_ids == []
+
+
+@pytest.mark.asyncio
+async def test_pending_worktree_operation_runs_after_projection_session_closes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Projection reads cannot hold a DB session across the external Git call."""
+    service = _SessionGitWorktreeService()
+    executor = _executor(session_git_worktree_service=service)
+    session_manager = _SessionManager()
+    executor.session_manager = cast(
+        SessionManager[AsyncSession],
+        session_manager,
+    )
+    execution = _action_execution()
+
+    async def list_projections(
+        session: AsyncSession,
+        *,
+        session_id: str,
+    ) -> list[ActionExecutionProjection]:
+        del session
+        assert session_id == execution.session_id
+        assert session_manager.active_sessions == 1
+        return [ActionExecutionProjection(execution=execution, events=[])]
+
+    async def run_git_worktree_action(
+        **kwargs: object,
+    ) -> GitWorktreeActionExecutionResult:
+        assert kwargs["execution"] == execution
+        assert session_manager.active_sessions == 0
+        return GitWorktreeActionExecutionResult(
+            completed=True,
+            context_invalidated=True,
+        )
+
+    monkeypatch.setattr(
+        service,
+        "list_action_execution_projections",
+        list_projections,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        service,
+        "run_git_worktree_action",
+        run_git_worktree_action,
+    )
+
+    result = await executor._process_operation_actions(  # pyright: ignore[reportPrivateUsage]  # Pin the transaction boundary around external work.
+        agent_id="agent-001",
+        session_id="session-001",
+        owner_generation=1,
+        tool_admission_barrier=ToolAdmissionBarrier(),
+        worktree_action=None,
+    )
+
+    assert result.context_invalidated is True
+    assert session_manager.active_sessions == 0
 
 
 @pytest.mark.asyncio
@@ -2082,6 +2381,7 @@ async def test_poll_run_inputs_continues_fifo_after_failed_turn_action(
         active_run_id=None,
         owner_generation=1,
         tool_admission_barrier=ToolAdmissionBarrier(),
+        stop_on_context_invalidation=False,
         initial_turn_eligible=False,
         poll_fn=None,
         process_actions=True,
@@ -2151,6 +2451,7 @@ async def test_poll_run_inputs_completes_run_after_terminal_preparation_failure(
         active_run_id="run-1",
         owner_generation=1,
         tool_admission_barrier=ToolAdmissionBarrier(),
+        stop_on_context_invalidation=False,
         initial_turn_eligible=False,
         poll_fn=None,
         process_actions=False,
@@ -2285,9 +2586,10 @@ async def test_execute_runs_pending_command_inside_run_boundary(
     """RunExecutor resolves and executes pending commands inside the run boundary."""
     _patch_successful_resolution(monkeypatch)
     dispatched: list[tuple[str, PublishedEvent]] = []
+    projection_order: list[str] = []
     lifecycle = _SessionLifecycle()
     session_repository = _AgentSessionRepository()
-    live_event_projector = _LiveEventProjector()
+    live_event_projector = _LiveEventProjector(projection_order)
     handler = _CommandHandler(
         [
             ephemeral(
@@ -2308,6 +2610,8 @@ async def test_execute_runs_pending_command_inside_run_boundary(
 
     async def dispatch_event(session_id: str, event: PublishedEvent) -> None:
         dispatched.append((session_id, event))
+        if isinstance(event, RunStarted):
+            projection_order.append("run_started")
 
     result = await executor.execute(
         _message(),
@@ -2335,6 +2639,7 @@ async def test_execute_runs_pending_command_inside_run_boundary(
         "RunPhaseChanged",
         "RunComplete",
     ]
+    assert projection_order[:2] == ["run_started", "live_run_updated"]
     assert live_event_projector.flushed_session_ids == ["session-001"]
     assert lifecycle.cleared_session_ids == ["session-001"]
     assert lifecycle.terminal_runs == [(run_id, AgentRunStatus.COMPLETED)]
@@ -2428,6 +2733,76 @@ async def test_execute_finalizes_command_error_through_failed_run_finalizer(
     assert finalization_input.reason == "retry_exhausted"
     assert result.terminal_run_status == AgentRunStatus.FAILED
     assert session_repository.cleared_commands == [("session-001", "command-001")]
+
+
+@pytest.mark.asyncio
+async def test_execute_hard_bounds_hung_startup_activity_before_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Hung Redis activity I/O fails closed before the provider is invoked."""
+    _patch_successful_resolution(monkeypatch)
+    monkeypatch.setattr(
+        redis_broker_module,
+        "_REDIS_OPERATION_TIMEOUT_SECONDS",
+        0.01,
+    )
+    redis = AsyncMock()
+    eval_calls = 0
+
+    async def hang_owner_fence(*args: object, **kwargs: object) -> int:
+        nonlocal eval_calls
+        del args, kwargs
+        eval_calls += 1
+        if eval_calls == 1:
+            await asyncio.Event().wait()
+        return 1
+
+    redis.eval.side_effect = hang_owner_fence
+    broker = RedisBroker(cast(Redis, redis), worker_id="worker-1")
+    lifecycle = _BrokerActivitySessionLifecycle(broker)
+    provider_order: list[str] = []
+    executor = _executor(
+        lifecycle,
+        engine=cast(AgentEngineProtocol, _RecordingEngine(provider_order)),
+    )
+
+    async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
+        del args, kwargs
+        return RunInputPollResult(
+            context_invalidated=False,
+            complete_run=False,
+            requested_inference_profile=None,
+            promoted_event_ids=[],
+            user_messages=[],
+            has_actionable_work=True,
+        )
+
+    monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
+    dispatched: list[PublishedEvent] = []
+
+    async def dispatch_event(session_id: str, event: PublishedEvent) -> None:
+        del session_id
+        dispatched.append(event)
+
+    started_at = asyncio.get_running_loop().time()
+    with pytest.raises(TimeoutError):
+        await asyncio.wait_for(
+            executor.execute(
+                _message(),
+                poll_fn=None,
+                check_stop=None,
+                prepare_toolkits=None,
+                shutdown_event=asyncio.Event(),
+                dispatch_event=dispatch_event,
+                owner_generation=1,
+                tool_admission_barrier=ToolAdmissionBarrier(),
+            ),
+            timeout=0.5,
+        )
+
+    assert asyncio.get_running_loop().time() - started_at < 0.2
+    assert provider_order == []
+    assert [type(event).__name__ for event in dispatched] == ["RunStarted"]
 
 
 @pytest.mark.asyncio
@@ -2538,6 +2913,185 @@ async def test_execute_clears_activity_after_run_complete(
     assert live_event_projector.live_run_clears == [("session-001", result.run_id)]
 
 
+@pytest.mark.asyncio
+async def test_terminal_projection_failure_does_not_retry_completed_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A post-commit delivery failure cannot restart a durable completed Run."""
+    _patch_successful_resolution(monkeypatch)
+    lifecycle = _SessionLifecycle()
+    finalizer = _FailedRunFinalizer()
+    handler = _CommandHandler([])
+    live_event_projector = _LiveEventProjector(
+        flush_error=RuntimeError("flush unavailable"),
+        clear_error=RuntimeError("live clear unavailable"),
+    )
+    executor = _executor(
+        lifecycle,
+        failed_run_finalizer=finalizer,
+        command_registry={"compact": cast(CommandHandler, handler)},
+        live_event_projector=live_event_projector,
+    )
+    dispatched: list[PublishedEvent] = []
+
+    async def dispatch_event(session_id: str, event: PublishedEvent) -> None:
+        del session_id
+        dispatched.append(event)
+        if isinstance(event, RunComplete):
+            raise RuntimeError("projection unavailable")
+
+    result = await executor.execute(
+        _message(),
+        poll_fn=None,
+        check_stop=None,
+        prepare_toolkits=None,
+        shutdown_event=asyncio.Event(),
+        dispatch_event=dispatch_event,
+        owner_generation=1,
+        tool_admission_barrier=ToolAdmissionBarrier(),
+        command=_pending_command(),
+    )
+
+    assert any(isinstance(event, RunComplete) for event in dispatched)
+    assert lifecycle.retry_states == []
+    assert finalizer.inputs == []
+    assert result.terminal_event_observed
+    assert result.terminal_run_status == AgentRunStatus.COMPLETED
+    assert result.run_id is not None
+    assert lifecycle.cleared_session_runs == [("session-001", result.run_id)]
+
+
+@pytest.mark.asyncio
+async def test_cancelled_terminal_delivery_reconciles_durable_completed_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cancellation after terminal commit still clears the completed live Run."""
+    _patch_successful_resolution(monkeypatch)
+    lifecycle = _SessionLifecycle()
+    live_event_projector = _LiveEventProjector()
+    handler = _CommandHandler([])
+    executor = _executor(
+        lifecycle,
+        live_event_projector=live_event_projector,
+        command_registry={"compact": cast(CommandHandler, handler)},
+    )
+
+    async def dispatch_event(session_id: str, event: PublishedEvent) -> None:
+        del session_id
+        if isinstance(event, RunComplete):
+            raise asyncio.CancelledError
+
+    with pytest.raises(asyncio.CancelledError):
+        await executor.execute(
+            _message(),
+            poll_fn=None,
+            check_stop=None,
+            prepare_toolkits=None,
+            shutdown_event=asyncio.Event(),
+            dispatch_event=dispatch_event,
+            owner_generation=1,
+            tool_admission_barrier=ToolAdmissionBarrier(),
+            command=_pending_command(),
+        )
+
+    assert lifecycle.terminal_runs == [("run-001", AgentRunStatus.COMPLETED)]
+    assert lifecycle.cleared_session_runs == [("session-001", "run-001")]
+    assert live_event_projector.live_run_clears == [("session-001", "run-001")]
+
+
+@pytest.mark.asyncio
+async def test_late_user_stop_does_not_interrupt_durable_completed_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A stop delivered after terminal commit preserves completed semantics."""
+    _patch_successful_resolution(monkeypatch)
+    lifecycle = _SessionLifecycle()
+    user_stop_finalizer = _UserStopFinalizer()
+    handler = _CommandHandler([])
+    executor = _executor(
+        lifecycle,
+        user_stop_finalizer=user_stop_finalizer,
+        command_registry={"compact": cast(CommandHandler, handler)},
+    )
+
+    async def dispatch_event(session_id: str, event: PublishedEvent) -> None:
+        del session_id
+        if isinstance(event, RunComplete):
+            raise asyncio.CancelledError(USER_STOP_CANCEL_MESSAGE)
+
+    with pytest.raises(asyncio.CancelledError):
+        await executor.execute(
+            _message(),
+            poll_fn=None,
+            check_stop=None,
+            prepare_toolkits=None,
+            shutdown_event=asyncio.Event(),
+            dispatch_event=dispatch_event,
+            owner_generation=1,
+            tool_admission_barrier=ToolAdmissionBarrier(),
+            command=_pending_command(),
+        )
+
+    assert lifecycle.terminal_runs == [("run-001", AgentRunStatus.COMPLETED)]
+    assert user_stop_finalizer.recorded_run_ids == []
+
+
+@pytest.mark.asyncio
+async def test_terminal_projection_sequence_survives_caller_cancellation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Caller cancellation cannot strand later terminal cleanup projections."""
+    _patch_successful_resolution(monkeypatch)
+    flush_started = asyncio.Event()
+    release_flush = asyncio.Event()
+
+    class BlockingFlushProjector(_LiveEventProjector):
+        async def flush_session(self, session_id: str) -> None:
+            flush_started.set()
+            await release_flush.wait()
+            await super().flush_session(session_id)
+
+    lifecycle = _SessionLifecycle()
+    live_event_projector = BlockingFlushProjector()
+    handler = _CommandHandler([])
+    executor = _executor(
+        lifecycle,
+        live_event_projector=live_event_projector,
+        command_registry={"compact": cast(CommandHandler, handler)},
+    )
+
+    async def dispatch_event(session_id: str, event: PublishedEvent) -> None:
+        del session_id, event
+
+    execution = asyncio.create_task(
+        executor.execute(
+            _message(),
+            poll_fn=None,
+            check_stop=None,
+            prepare_toolkits=None,
+            shutdown_event=asyncio.Event(),
+            dispatch_event=dispatch_event,
+            owner_generation=1,
+            tool_admission_barrier=ToolAdmissionBarrier(),
+            command=_pending_command(),
+        )
+    )
+    await asyncio.wait_for(flush_started.wait(), timeout=1)
+    execution.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await execution
+
+    release_flush.set()
+
+    async def wait_for_live_clear() -> None:
+        while not live_event_projector.live_run_clears:
+            await asyncio.sleep(0)
+
+    await asyncio.wait_for(wait_for_live_clear(), timeout=1)
+    assert lifecycle.cleared_session_runs == [("session-001", "run-001")]
+    assert live_event_projector.live_run_clears == [("session-001", "run-001")]
+
+
 def test_actionable_tail_ignores_completed_run_marker() -> None:
     """A transcript already covered by a run marker has no new work."""
     run_marker = Event(
@@ -2579,10 +3133,14 @@ async def test_run_session_heartbeat_loop_refreshes_lifecycle(
     lifecycle = _SessionLifecycle()
     monkeypatch.setattr(run_executor_module, "_RUN_HEARTBEAT_INTERVAL_SECONDS", 0.01)
     executor = _executor(session_lifecycle=lifecycle)
+    owner_task = asyncio.current_task()
+    assert owner_task is not None
 
     task = asyncio.create_task(
         executor._run_session_heartbeat_loop(  # pyright: ignore[reportPrivateUsage]
-            "session-001"
+            "session-001",
+            owner_generation=7,
+            owner_task=owner_task,
         )
     )
     try:
@@ -2594,6 +3152,283 @@ async def test_run_session_heartbeat_loop_refreshes_lifecycle(
             await task
 
     assert lifecycle.heartbeat_session_ids[:2] == ["session-001", "session-001"]
+    assert lifecycle.heartbeat_owner_generations[:2] == [7, 7]
+
+
+@pytest.mark.asyncio
+async def test_run_session_heartbeat_loop_cancels_execution_after_ownership_loss(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A stale worker cannot keep executing after Redis rejects its heartbeat."""
+    lifecycle = _SessionLifecycle()
+    monkeypatch.setattr(run_executor_module, "_RUN_HEARTBEAT_INTERVAL_SECONDS", 0)
+
+    async def lose_ownership(
+        session_id: str,
+        *,
+        owner_generation: int,
+    ) -> None:
+        lifecycle.heartbeat_session_ids.append(session_id)
+        lifecycle.heartbeat_owner_generations.append(owner_generation)
+        raise SessionOwnershipLostError(session_id)
+
+    monkeypatch.setattr(lifecycle, "heartbeat_session", lose_ownership)
+    executor = _executor(session_lifecycle=lifecycle)
+    owner_started = asyncio.Event()
+    cancellation_args: tuple[object, ...] | None = None
+
+    async def run_owner() -> None:
+        nonlocal cancellation_args
+        owner_started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError as exc:
+            cancellation_args = exc.args
+            raise
+
+    owner_task = asyncio.create_task(run_owner())
+    await owner_started.wait()
+
+    await executor._run_session_heartbeat_loop(  # pyright: ignore[reportPrivateUsage]
+        "session-001",
+        owner_generation=9,
+        owner_task=owner_task,
+    )
+    with pytest.raises(asyncio.CancelledError):
+        await owner_task
+
+    assert lifecycle.heartbeat_session_ids == ["session-001"]
+    assert lifecycle.heartbeat_owner_generations == [9]
+    assert cancellation_args == (OWNERSHIP_LOST_CANCEL_MESSAGE,)
+
+
+@pytest.mark.asyncio
+async def test_run_session_heartbeat_loop_fails_closed_after_partition_grace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unavailable ownership store cannot leave a Run executing forever."""
+    lifecycle = _SessionLifecycle()
+    monkeypatch.setattr(run_executor_module, "_RUN_HEARTBEAT_INTERVAL_SECONDS", 0)
+    monkeypatch.setattr(run_executor_module, "_RUN_HEARTBEAT_FAILURE_GRACE_SECONDS", 0)
+
+    async def unavailable(
+        session_id: str,
+        *,
+        owner_generation: int,
+    ) -> None:
+        lifecycle.heartbeat_session_ids.append(session_id)
+        lifecycle.heartbeat_owner_generations.append(owner_generation)
+        raise ConnectionError("Redis partition")
+
+    monkeypatch.setattr(lifecycle, "heartbeat_session", unavailable)
+    executor = _executor(session_lifecycle=lifecycle)
+    owner_started = asyncio.Event()
+    cancellation_args: tuple[object, ...] | None = None
+
+    async def run_owner() -> None:
+        nonlocal cancellation_args
+        owner_started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError as exc:
+            cancellation_args = exc.args
+            raise
+
+    owner_task = asyncio.create_task(run_owner())
+    await owner_started.wait()
+
+    await executor._run_session_heartbeat_loop(  # pyright: ignore[reportPrivateUsage]
+        "session-001",
+        owner_generation=11,
+        owner_task=owner_task,
+    )
+    with pytest.raises(asyncio.CancelledError):
+        await owner_task
+
+    assert lifecycle.heartbeat_session_ids == ["session-001"]
+    assert lifecycle.heartbeat_owner_generations == [11]
+    assert cancellation_args == (OWNERSHIP_LOST_CANCEL_MESSAGE,)
+
+
+@pytest.mark.asyncio
+async def test_execute_validates_ownership_before_any_run_preparation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A stale owner cannot enter _execute before the initial lease fence."""
+    lifecycle = _SessionLifecycle()
+    executor = _executor(session_lifecycle=lifecycle)
+    execute_calls: list[str] = []
+
+    async def lose_ownership(
+        session_id: str,
+        *,
+        owner_generation: int,
+    ) -> None:
+        lifecycle.heartbeat_session_ids.append(session_id)
+        lifecycle.heartbeat_owner_generations.append(owner_generation)
+        raise SessionOwnershipLostError(session_id)
+
+    async def unexpected_execute(
+        *args: object,
+        **kwargs: object,
+    ) -> RunExecutionResult:
+        del args, kwargs
+        execute_calls.append("execute")
+        raise AssertionError("stale owner must not enter _execute")
+
+    monkeypatch.setattr(lifecycle, "heartbeat_session", lose_ownership)
+    monkeypatch.setattr(executor, "_execute", unexpected_execute)
+
+    with pytest.raises(SessionOwnershipLostError, match="session-001"):
+        await executor.execute(
+            _message(),
+            poll_fn=None,
+            check_stop=None,
+            prepare_toolkits=None,
+            shutdown_event=asyncio.Event(),
+            dispatch_event=lambda _session_id, _event: asyncio.sleep(0),
+            owner_generation=1,
+            tool_admission_barrier=ToolAdmissionBarrier(),
+        )
+
+    assert lifecycle.heartbeat_session_ids == ["session-001"]
+    assert lifecycle.heartbeat_owner_generations == [1]
+    assert execute_calls == []
+
+
+@pytest.mark.asyncio
+async def test_execute_fails_closed_when_initial_ownership_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Initial Redis partition cannot enter Run preparation or failure writes."""
+    lifecycle = _SessionLifecycle()
+    executor = _executor(session_lifecycle=lifecycle)
+    execute_calls: list[str] = []
+
+    async def unavailable(
+        session_id: str,
+        *,
+        owner_generation: int,
+    ) -> None:
+        lifecycle.heartbeat_session_ids.append(session_id)
+        lifecycle.heartbeat_owner_generations.append(owner_generation)
+        raise ConnectionError("Redis partition")
+
+    async def unexpected_execute(
+        *args: object,
+        **kwargs: object,
+    ) -> RunExecutionResult:
+        del args, kwargs
+        execute_calls.append("execute")
+        raise AssertionError("unverified owner must not enter _execute")
+
+    monkeypatch.setattr(lifecycle, "heartbeat_session", unavailable)
+    monkeypatch.setattr(executor, "_execute", unexpected_execute)
+
+    with pytest.raises(SessionOwnershipLostError, match="session-001"):
+        await executor.execute(
+            _message(),
+            poll_fn=None,
+            check_stop=None,
+            prepare_toolkits=None,
+            shutdown_event=asyncio.Event(),
+            dispatch_event=lambda _session_id, _event: asyncio.sleep(0),
+            owner_generation=13,
+            tool_admission_barrier=ToolAdmissionBarrier(),
+        )
+
+    assert lifecycle.heartbeat_session_ids == ["session-001"]
+    assert lifecycle.heartbeat_owner_generations == [13]
+    assert execute_calls == []
+
+
+@pytest.mark.asyncio
+async def test_ownership_loss_cancellation_skips_stale_action_cleanup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The former owner performs no DB action handoff after losing its lease."""
+    executor = _executor()
+    cleanup_calls: list[str] = []
+
+    async def lose_ownership(*args: object, **kwargs: object) -> RunExecutionResult:
+        del args, kwargs
+        raise asyncio.CancelledError(OWNERSHIP_LOST_CANCEL_MESSAGE)
+
+    async def cleanup(session_id: str, *, reason: str) -> None:
+        del reason
+        cleanup_calls.append(session_id)
+
+    monkeypatch.setattr(executor, "_execute", lose_ownership)
+    monkeypatch.setattr(executor, "_cancel_leftover_action_executions", cleanup)
+
+    with pytest.raises(asyncio.CancelledError) as cancelled:
+        await executor.execute(
+            _message(),
+            poll_fn=None,
+            check_stop=None,
+            prepare_toolkits=None,
+            shutdown_event=asyncio.Event(),
+            dispatch_event=lambda _session_id, _event: asyncio.sleep(0),
+            owner_generation=1,
+            tool_admission_barrier=ToolAdmissionBarrier(),
+        )
+
+    assert cancelled.value.args == (OWNERSHIP_LOST_CANCEL_MESSAGE,)
+    assert cleanup_calls == []
+
+
+@pytest.mark.asyncio
+async def test_action_cleanup_deadline_preserves_primary_cancellation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A stuck multi-action cleanup cannot hold the Run boundary open forever."""
+    executor = _executor()
+    cleanup_started = asyncio.Event()
+    original_bounded_cleanup = run_executor_module.run_bounded_cancellation_safe
+
+    async def cancel_run(*args: object, **kwargs: object) -> RunExecutionResult:
+        del args, kwargs
+        raise asyncio.CancelledError(USER_STOP_CANCEL_MESSAGE)
+
+    async def stuck_cleanup(session_id: str, *, reason: str) -> None:
+        del session_id, reason
+        cleanup_started.set()
+        await asyncio.Event().wait()
+
+    async def short_bounded_cleanup(
+        operation: Callable[[], Awaitable[object]],
+    ) -> object:
+        return await original_bounded_cleanup(operation, timeout_seconds=0.01)
+
+    monkeypatch.setattr(executor, "_execute", cancel_run)
+    monkeypatch.setattr(
+        executor,
+        "_cancel_leftover_action_executions",
+        stuck_cleanup,
+    )
+    monkeypatch.setattr(
+        run_executor_module,
+        "run_bounded_cancellation_safe",
+        short_bounded_cleanup,
+    )
+
+    with pytest.raises(asyncio.CancelledError) as cancelled:
+        await asyncio.wait_for(
+            executor.execute(
+                _message(),
+                poll_fn=None,
+                check_stop=None,
+                prepare_toolkits=None,
+                shutdown_event=asyncio.Event(),
+                dispatch_event=lambda _session_id, _event: asyncio.sleep(0),
+                owner_generation=1,
+                tool_admission_barrier=ToolAdmissionBarrier(),
+            ),
+            timeout=1,
+        )
+
+    assert cleanup_started.is_set()
+    assert cancelled.value.args == (USER_STOP_CANCEL_MESSAGE,)
 
 
 @pytest.mark.asyncio

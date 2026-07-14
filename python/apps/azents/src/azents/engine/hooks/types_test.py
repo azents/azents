@@ -150,6 +150,7 @@ def test_empty_string_defaults_are_not_used_for_contexts() -> None:
         agent_id="agent-1",
         session_id="session-1",
         run_id="run-1",
+        owner_generation=1,
         output_text=None,
         error_message=None,
     )

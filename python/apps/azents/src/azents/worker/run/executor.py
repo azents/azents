@@ -17,6 +17,7 @@ from azents.broker.broadcast import WebSocketBroadcast
 from azents.broker.types import (
     PublishedEvent,
     SessionBroker,
+    SessionOwnershipLostError,
     SessionWakeUp,
 )
 from azents.core.enums import (
@@ -89,6 +90,7 @@ from azents.engine.run.resolve import (
     resolve_invoke_input_with_resolved_profile,
 )
 from azents.engine.run.types import (
+    OWNERSHIP_LOST_CANCEL_MESSAGE,
     SHUTDOWN_CANCEL_MESSAGE,
     USER_STOP_CANCEL_MESSAGE,
     CheckStop,
@@ -113,7 +115,10 @@ from azents.repos.action_execution.data import (
     ActionExecutionProjection,
 )
 from azents.repos.agent import AgentRepository
-from azents.repos.agent_execution import EventTranscriptRepository
+from azents.repos.agent_execution import (
+    AgentRunNotActiveError,
+    EventTranscriptRepository,
+)
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import PendingSessionCommand
@@ -149,6 +154,10 @@ from azents.transport.chat import (
     chat_history_event_appended_dump,
     chat_live_event_removed_dump,
 )
+from azents.utils.task_recovery import (
+    compensate_then_reraise,
+    run_bounded_cancellation_safe,
+)
 from azents.worker.config import AgentWorkerConfig
 from azents.worker.deps import (
     get_broadcast,
@@ -181,7 +190,12 @@ logger = logging.getLogger(__name__)
 _CHAT_ACTION_ADAPTER = TypeAdapter(ChatAction)
 _INTERNAL_ERROR_MESSAGE = "An internal error occurred."
 _RUN_HEARTBEAT_INTERVAL_SECONDS = 30.0
+_RUN_HEARTBEAT_ATTEMPT_TIMEOUT_SECONDS = 10.0
+# Grace remains below RedisBroker's 120-second owner-heartbeat TTL, and each
+# attempt is bounded, so a partitioned worker stops before another may steal.
+_RUN_HEARTBEAT_FAILURE_GRACE_SECONDS = 60.0
 _FAILED_RUN_RETRY_WAIT_POLL_SECONDS = 0.2
+_TERMINAL_PROJECTION_TIMEOUT_SECONDS = 1.0
 _FAILED_RUN_NO_FIXTURE_MATCH_CODE = "no_fixture_match"
 _NON_ACTIONABLE_TAIL_EVENT_KINDS = {
     EventKind.RUN_MARKER,
@@ -250,7 +264,14 @@ def _operation_cancellation_reason(exc: asyncio.CancelledError) -> str:
         return "Operation cancelled by user stop."
     if reason == SHUTDOWN_CANCEL_MESSAGE:
         return "Operation cancelled after the worker shutdown wait expired."
+    if reason == OWNERSHIP_LOST_CANCEL_MESSAGE:
+        return "Operation cancelled during Session ownership handover."
     return "Operation cancelled because the worker processing boundary ended."
+
+
+def _ownership_lost_cancelled(exc: asyncio.CancelledError) -> bool:
+    """Return whether cancellation fences a worker that lost Session ownership."""
+    return bool(exc.args and exc.args[0] == OWNERSHIP_LOST_CANCEL_MESSAGE)
 
 
 def _runtime_hook_provider_refs(
@@ -347,6 +368,95 @@ class RunExecutor:
         default_factory=set,
         init=False,
     )
+    _terminal_projection_tasks: set[asyncio.Task[None]] = dataclasses.field(
+        default_factory=set,
+        init=False,
+    )
+
+    async def _run_terminal_projection_step(
+        self,
+        session_id: str,
+        *,
+        step: str,
+        action: Callable[[], Awaitable[None]],
+    ) -> None:
+        """Run post-terminal projection work without blocking durable closure."""
+
+        async def run_action() -> None:
+            await action()
+
+        task = asyncio.create_task(run_action())
+        try:
+            done, _ = await asyncio.wait(
+                {task},
+                timeout=_TERMINAL_PROJECTION_TIMEOUT_SECONDS,
+            )
+        except asyncio.CancelledError:
+            task.cancel()
+            self._retain_terminal_projection_task(task)
+            raise
+        if task not in done:
+            task.cancel()
+            self._retain_terminal_projection_task(task)
+            logger.warning(
+                "Terminal projection step timed out",
+                extra={
+                    "session_id": session_id,
+                    "step": step,
+                    "timeout": _TERMINAL_PROJECTION_TIMEOUT_SECONDS,
+                },
+            )
+            return
+        try:
+            task.result()
+        except asyncio.CancelledError:
+            raise
+        except SessionOwnershipLostError:
+            raise
+        except Exception:
+            logger.exception(
+                "Terminal projection step failed",
+                extra={"session_id": session_id, "step": step},
+            )
+
+    async def _run_terminal_projection_sequence(
+        self,
+        session_id: str,
+        *,
+        action: Callable[[], Awaitable[None]],
+    ) -> None:
+        """Let ordered terminal projections finish after caller cancellation."""
+
+        async def run_action() -> None:
+            await action()
+
+        task = asyncio.create_task(
+            run_action(),
+            name=f"terminal-projection:{session_id}",
+        )
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            # A terminal Run is already durable at this point. Keep the ordered
+            # cleanup alive so a caller cancellation cannot leave activity or the
+            # live Run marker stuck until a full client refresh.
+            self._retain_terminal_projection_task(task)
+            raise
+
+    def _retain_terminal_projection_task(self, task: asyncio.Task[None]) -> None:
+        """Keep a timed-out projection task until its outcome is consumed."""
+        self._terminal_projection_tasks.add(task)
+        task.add_done_callback(self._on_terminal_projection_task_done)
+
+    def _on_terminal_projection_task_done(self, task: asyncio.Task[None]) -> None:
+        """Consume and release a timed-out terminal projection task."""
+        self._terminal_projection_tasks.discard(task)
+        try:
+            task.result()
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            logger.warning("Detached terminal projection task failed", exc_info=True)
 
     async def _cancel_leftover_action_executions(
         self,
@@ -467,26 +577,71 @@ class RunExecutor:
         command: PendingSessionCommand | None = None,
     ) -> RunExecutionResult:
         """Execute one Session processing boundary with cancellation cleanup."""
+        execution_task = asyncio.current_task()
+        if execution_task is None:
+            raise RuntimeError("Run execution requires an asyncio Task")
+        # Fence every preparation/cleanup write behind a synchronous lease check.
+        # Merely scheduling the periodic task would allow _execute() to win the
+        # first event-loop turn and mutate durable state as a stale owner.
         try:
-            return await self._execute(
-                message,
-                poll_fn=poll_fn,
-                check_stop=check_stop,
-                prepare_toolkits=prepare_toolkits,
-                shutdown_event=shutdown_event,
-                dispatch_event=dispatch_event,
-                owner_generation=owner_generation,
-                tool_admission_barrier=tool_admission_barrier,
-                command=command,
-            )
-        except asyncio.CancelledError as exc:
-            await asyncio.shield(
-                self._cancel_leftover_action_executions(
+            async with asyncio.timeout(_RUN_HEARTBEAT_ATTEMPT_TIMEOUT_SECONDS):
+                await self.session_lifecycle.heartbeat_session(
                     message.session_id,
-                    reason=_operation_cancellation_reason(exc),
+                    owner_generation=owner_generation,
                 )
-            )
+        except asyncio.CancelledError, SessionOwnershipLostError:
             raise
+        except Exception as exc:
+            # No Run work may start when the worker cannot prove both its Redis
+            # lease and durable ownership generation. Treat an unavailable
+            # ownership authority as lost instead of entering generic failure
+            # finalization, which itself would write as an unverified owner.
+            logger.exception(
+                "Unable to validate Session ownership before run execution",
+                extra={"session_id": message.session_id},
+            )
+            raise SessionOwnershipLostError(message.session_id) from exc
+        heartbeat_task = asyncio.create_task(
+            self._run_session_heartbeat_loop(
+                message.session_id,
+                owner_generation=owner_generation,
+                owner_task=execution_task,
+            )
+        )
+        try:
+            try:
+                return await self._execute(
+                    message,
+                    poll_fn=poll_fn,
+                    check_stop=check_stop,
+                    prepare_toolkits=prepare_toolkits,
+                    shutdown_event=shutdown_event,
+                    dispatch_event=dispatch_event,
+                    owner_generation=owner_generation,
+                    tool_admission_barrier=tool_admission_barrier,
+                    command=command,
+                )
+            except asyncio.CancelledError as exc:
+                if _ownership_lost_cancelled(exc):
+                    raise
+                cancellation_reason = _operation_cancellation_reason(exc)
+
+                async def finalize_leftover_actions() -> None:
+                    await run_bounded_cancellation_safe(
+                        lambda: self._cancel_leftover_action_executions(
+                            message.session_id,
+                            reason=cancellation_reason,
+                        )
+                    )
+
+                await compensate_then_reraise(
+                    finalize_leftover_actions,
+                    primary_error=exc,
+                )
+        finally:
+            heartbeat_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await heartbeat_task
 
     async def _execute(
         self,
@@ -634,6 +789,7 @@ class RunExecutor:
                 active_run_id=run_id,
                 owner_generation=owner_generation,
                 tool_admission_barrier=tool_admission_barrier,
+                stop_on_context_invalidation=False,
                 initial_turn_eligible=(
                     recoverable_run is not None
                     and recoverable_run.status == AgentRunStatus.RUNNING
@@ -680,7 +836,11 @@ class RunExecutor:
                         message.session_id,
                     )
                 if prepared_session is None or prepared_session.inference_state is None:
-                    await self.session_lifecycle.send_session_wake_up(message)
+                    has_pending_input = (
+                        self.input_buffer_service.has_pending_session_input_buffers
+                    )
+                    if await has_pending_input(message.session_id):
+                        await self.session_lifecycle.send_session_wake_up(message)
                     return RunExecutionResult(
                         toolkits=[],
                         terminal_event_observed=False,
@@ -937,41 +1097,41 @@ class RunExecutor:
                 allowed_domains=(), denied_domains=()
             )
 
-            logger.info(
-                "Run agent tools resolve started",
-                extra={
-                    "session_id": message.session_id,
-                    "agent_id": invoke_input.agent_id,
-                    "run_id": run_id,
-                    "workspace_id": run_request.workspace_id,
-                    "model": run_request.model,
-                    "execution_mode": execution_mode.value,
-                    "memory_enabled": agent_memory_enabled,
-                    "runtime_tools_enabled": runtime_tools_enabled,
-                },
-            )
-            toolkits = await resolve_agent_tools(
-                invoke_input.agent_id,
-                context,
-                execution_mode=execution_mode,
-                toolkit_registry=self.toolkit_registry,
-                agent_toolkit_repository=self.agent_toolkit_repository,
-                toolkit_repository=self.toolkit_repository,
-                session=session,
-                web_url=self.worker_config.web_url,
-                oauth_secret_key=self.worker_config.oauth_secret_key,
-                mcp_proxy_url=self.worker_config.mcp_proxy_url,
-                runtime_domain_config=runtime_domain_config,
-                workspace_handle=message.workspace_handle or "",
-                builtin_toolkit_provider=self.builtin_toolkit_provider,
-                claude_rules_toolkit_provider=self.claude_rules_toolkit_provider,
-                todo_toolkit_provider=self.todo_toolkit_provider,
-                goal_toolkit_provider=self.goal_toolkit_provider,
-                skill_toolkit_provider=self.skill_toolkit_provider,
-                subagent_toolkit_provider=self.subagent_toolkit_provider,
-                memory_enabled=agent_memory_enabled,
-                runtime_tools_enabled=runtime_tools_enabled,
-            )
+        logger.info(
+            "Run agent tools resolve started",
+            extra={
+                "session_id": message.session_id,
+                "agent_id": invoke_input.agent_id,
+                "run_id": run_id,
+                "workspace_id": run_request.workspace_id,
+                "model": run_request.model,
+                "execution_mode": execution_mode.value,
+                "memory_enabled": agent_memory_enabled,
+                "runtime_tools_enabled": runtime_tools_enabled,
+            },
+        )
+        toolkits = await resolve_agent_tools(
+            invoke_input.agent_id,
+            context,
+            execution_mode=execution_mode,
+            toolkit_registry=self.toolkit_registry,
+            agent_toolkit_repository=self.agent_toolkit_repository,
+            toolkit_repository=self.toolkit_repository,
+            session_manager=self.session_manager,
+            web_url=self.worker_config.web_url,
+            oauth_secret_key=self.worker_config.oauth_secret_key,
+            mcp_proxy_url=self.worker_config.mcp_proxy_url,
+            runtime_domain_config=runtime_domain_config,
+            workspace_handle=message.workspace_handle or "",
+            builtin_toolkit_provider=self.builtin_toolkit_provider,
+            claude_rules_toolkit_provider=self.claude_rules_toolkit_provider,
+            todo_toolkit_provider=self.todo_toolkit_provider,
+            goal_toolkit_provider=self.goal_toolkit_provider,
+            skill_toolkit_provider=self.skill_toolkit_provider,
+            subagent_toolkit_provider=self.subagent_toolkit_provider,
+            memory_enabled=agent_memory_enabled,
+            runtime_tools_enabled=runtime_tools_enabled,
+        )
 
         now = loop.time()
         logger.info(
@@ -1078,6 +1238,7 @@ class RunExecutor:
                 agent_id=run_request.agent_id,
                 session_id=message.session_id,
                 run_id=run_id,
+                owner_generation=owner_generation,
             ),
         )
 
@@ -1156,14 +1317,15 @@ class RunExecutor:
             )
             await publish_live_run()
 
-        await refresh_session_activity()
         await dispatch_event(
             message.session_id,
             RunStarted(run_id=run_id, phase=active_phase),
         )
+        await refresh_session_activity()
         await self.live_event_projector.replace_active_tool_calls(
             message.session_id,
             active_tool_calls,
+            run_id=run_id,
             removed_call_ids=set(),
         )
         await publish_session_tree_changed()
@@ -1185,6 +1347,7 @@ class RunExecutor:
         terminal_run_status: AgentRunStatus | None = None
         terminal_state_persisted = False
         turn_boundary_context_invalidated = False
+        ownership_lost = False
 
         def mark_turn_boundary_context_invalidated() -> None:
             nonlocal turn_boundary_context_invalidated
@@ -1244,6 +1407,7 @@ class RunExecutor:
                 await self.live_event_projector.replace_active_tool_calls(
                     message.session_id,
                     active_tool_calls,
+                    run_id=run_id,
                     removed_call_ids=removed_call_ids,
                 )
             await handle_engine_event(
@@ -1251,9 +1415,55 @@ class RunExecutor:
                 publish=lambda ev: dispatch_event(message.session_id, ev),
             )
 
-        heartbeat_task = asyncio.create_task(
-            self._run_session_heartbeat_loop(message.session_id)
-        )
+        async def reconcile_durable_terminal_after_projection_failure(
+            exc: BaseException,
+        ) -> bool:
+            """Honor an engine-committed terminal Run after projection failure."""
+            nonlocal run_completed, run_end_reason, terminal_run_status
+            nonlocal terminal_state_persisted, live_retry_state
+            try:
+                durable_status = await self.session_lifecycle.get_agent_run_status(
+                    message.session_id,
+                    run_id=run_id,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception(
+                    "Failed to reconcile Run status after projection failure",
+                    extra={"session_id": message.session_id, "run_id": run_id},
+                )
+                return False
+            if durable_status is None:
+                return False
+            if durable_status in {
+                AgentRunStatus.PENDING,
+                AgentRunStatus.RUNNING,
+            }:
+                return False
+            terminal_run_status = durable_status
+            terminal_state_persisted = True
+            run_completed = True
+            live_retry_state = None
+            if durable_status == AgentRunStatus.COMPLETED:
+                run_end_reason = "completed"
+            elif durable_status == AgentRunStatus.FAILED:
+                run_end_reason = "error"
+            else:
+                run_end_reason = "cancelled"
+            logger.warning(
+                "Projection failed after Run was already terminal; "
+                "skipping engine retry",
+                extra={
+                    "session_id": message.session_id,
+                    "run_id": run_id,
+                    "run_status": durable_status.value,
+                    "error_type": exc.__class__.__name__,
+                },
+                exc_info=True,
+            )
+            return True
+
         failed_attempt_source: FailedRunAttemptSource = (
             "command" if command_handler is not None else "model"
         )
@@ -1413,6 +1623,8 @@ class RunExecutor:
                         run_end_reason = "completed"
                         terminal_run_status = AgentRunStatus.COMPLETED
                     break
+                except SessionOwnershipLostError:
+                    raise
                 except UserVisibleRuntimeError as exc:
                     retry_state = await self._record_failed_run_attempt(
                         session_id=message.session_id,
@@ -1468,6 +1680,8 @@ class RunExecutor:
                     await clear_live_retry_state()
                     attempt_number += 1
                 except Exception as exc:
+                    if await reconcile_durable_terminal_after_projection_failure(exc):
+                        break
                     retry_state = await self._record_failed_run_attempt(
                         session_id=message.session_id,
                         run_id=run_id,
@@ -1536,67 +1750,130 @@ class RunExecutor:
                         break
                     await clear_live_retry_state()
                     attempt_number += 1
+        except SessionOwnershipLostError:
+            ownership_lost = True
+            raise
+        except AgentRunNotActiveError as exc:
+            if not await reconcile_durable_terminal_after_projection_failure(exc):
+                raise
         except asyncio.CancelledError as exc:
-            run_end_reason = "cancelled"
-            if user_stop_cancelled(exc):
-                terminal_run_status = AgentRunStatus.STOPPED
-                await self.user_stop_finalizer.record_interrupted_run(
-                    message.session_id,
-                    run_id=run_id,
-                )
-            else:
-                terminal_run_status = AgentRunStatus.CANCELLED
+            if _ownership_lost_cancelled(exc):
+                ownership_lost = True
+            elif not await reconcile_durable_terminal_after_projection_failure(exc):
+                run_end_reason = "cancelled"
+                if user_stop_cancelled(exc):
+                    terminal_run_status = AgentRunStatus.STOPPED
+                    await self.user_stop_finalizer.record_interrupted_run(
+                        message.session_id,
+                        run_id=run_id,
+                        active_tool_calls=active_tool_calls,
+                    )
+                else:
+                    terminal_run_status = AgentRunStatus.CANCELLED
             raise
         finally:
-            heartbeat_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await heartbeat_task
-            await self.live_event_projector.flush_session(message.session_id)
-            terminal_event_observed = observed_terminal_run_event(
-                run_completed=run_completed,
-                terminal_run_status=terminal_run_status,
+            terminal_event_observed = (
+                False
+                if ownership_lost
+                else observed_terminal_run_event(
+                    run_completed=run_completed,
+                    terminal_run_status=terminal_run_status,
+                )
             )
-            if not terminal_event_observed:
-                logger.info(
-                    "Leaving agent run RUNNING until terminal event recovery",
-                    extra={
-                        "session_id": message.session_id,
-                        "run_id": run_id,
-                    },
-                )
-            elif not terminal_state_persisted:
-                await self.session_lifecycle.mark_agent_run_terminal_if_running(
-                    message.session_id,
-                    run_id=run_id,
-                    status=terminal_run_status or AgentRunStatus.CANCELLED,
-                )
-            await hook_dispatcher.dispatch_observation(
-                hook_providers,
-                "on_run_end",
-                RunEndHookContext(
-                    workspace_id=run_request.workspace_id,
-                    agent_id=run_request.agent_id,
-                    session_id=message.session_id,
-                    run_id=run_id,
-                    reason=run_end_reason,
-                ),
+            pending_command_id = command.id if command is not None else None
+
+            async def project_terminal_state() -> None:
+                if not ownership_lost:
+                    await self._run_terminal_projection_step(
+                        message.session_id,
+                        step="flush_live_events",
+                        action=lambda: self.live_event_projector.flush_session(
+                            message.session_id
+                        ),
+                    )
+                if ownership_lost:
+                    logger.warning(
+                        "Skipping Run finalization after Session ownership loss",
+                        extra={"session_id": message.session_id, "run_id": run_id},
+                    )
+                elif not terminal_event_observed:
+                    logger.info(
+                        "Leaving agent run RUNNING until terminal event recovery",
+                        extra={
+                            "session_id": message.session_id,
+                            "run_id": run_id,
+                        },
+                    )
+                elif not terminal_state_persisted:
+                    await self.session_lifecycle.mark_agent_run_terminal_if_running(
+                        message.session_id,
+                        run_id=run_id,
+                        status=terminal_run_status or AgentRunStatus.CANCELLED,
+                    )
+                if not ownership_lost and terminal_event_observed:
+                    await self._run_terminal_projection_step(
+                        message.session_id,
+                        step="on_run_end",
+                        action=lambda: hook_dispatcher.dispatch_observation(
+                            hook_providers,
+                            "on_run_end",
+                            RunEndHookContext(
+                                workspace_id=run_request.workspace_id,
+                                agent_id=run_request.agent_id,
+                                session_id=message.session_id,
+                                run_id=run_id,
+                                reason=run_end_reason,
+                            ),
+                        ),
+                    )
+                if ownership_lost:
+                    pass
+                elif not terminal_event_observed:
+                    logger.info(
+                        "Keeping session activity until terminal event recovery",
+                        extra={"session_id": message.session_id},
+                    )
+                else:
+                    await self._run_terminal_projection_step(
+                        message.session_id,
+                        step="clear_session_activity",
+                        action=lambda: (
+                            self.session_lifecycle.clear_session_activity_for_run(
+                                message.session_id,
+                                run_id=run_id,
+                            )
+                        ),
+                    )
+                    await self._run_terminal_projection_step(
+                        message.session_id,
+                        step="publish_live_run_cleared",
+                        action=lambda: (
+                            self.live_event_projector.publish_live_run_cleared(
+                                message.session_id,
+                                run_id=run_id,
+                            )
+                        ),
+                    )
+                    await self._run_terminal_projection_step(
+                        message.session_id,
+                        step="publish_session_tree_changed",
+                        action=publish_session_tree_changed,
+                    )
+                if pending_command_id is not None and terminal_event_observed:
+                    command_id = pending_command_id
+                    await self._run_terminal_projection_step(
+                        message.session_id,
+                        step="clear_pending_command",
+                        action=lambda: self._clear_pending_command(
+                            message.session_id,
+                            command_id=command_id,
+                        ),
+                    )
+
+            await self._run_terminal_projection_sequence(
+                message.session_id,
+                action=project_terminal_state,
             )
-            if not terminal_event_observed:
-                logger.info(
-                    "Keeping session activity until terminal event recovery",
-                    extra={"session_id": message.session_id},
-                )
-            else:
-                await self.session_lifecycle.clear_session_activity(message.session_id)
-                await self.live_event_projector.publish_live_run_cleared(
-                    message.session_id,
-                    run_id=run_id,
-                )
-                await publish_session_tree_changed()
-            if command is not None:
-                await self._clear_pending_command(
-                    message.session_id, command_id=command.id
-                )
 
         return RunExecutionResult(
             toolkits=run_request.toolkits,
@@ -1735,20 +2012,61 @@ class RunExecutor:
         task.add_done_callback(self._session_title_tasks.discard)
         task.add_done_callback(on_done)
 
-    async def _run_session_heartbeat_loop(self, session_id: str) -> None:
-        """Refresh session heartbeat while the engine run is active."""
+    async def _run_session_heartbeat_loop(
+        self,
+        session_id: str,
+        *,
+        owner_generation: int,
+        owner_task: asyncio.Task[object],
+    ) -> None:
+        """Refresh ownership evidence and fail closed after a bounded outage."""
+        loop = asyncio.get_running_loop()
+        last_verified_at = loop.time()
         while True:
+            await asyncio.sleep(_RUN_HEARTBEAT_INTERVAL_SECONDS)
             try:
-                await self.session_lifecycle.heartbeat_session(session_id)
+                async with asyncio.timeout(_RUN_HEARTBEAT_ATTEMPT_TIMEOUT_SECONDS):
+                    await self.session_lifecycle.heartbeat_session(
+                        session_id,
+                        owner_generation=owner_generation,
+                    )
             except asyncio.CancelledError:
                 raise
+            except SessionOwnershipLostError:
+                logger.error(
+                    "Session ownership lost during active run; canceling execution",
+                    extra={"session_id": session_id},
+                )
+                if not owner_task.done():
+                    owner_task.cancel(OWNERSHIP_LOST_CANCEL_MESSAGE)
+                return
             except Exception:
+                now = loop.time()
+                unverified_seconds = now - last_verified_at
+                if unverified_seconds >= _RUN_HEARTBEAT_FAILURE_GRACE_SECONDS:
+                    logger.exception(
+                        "Session ownership heartbeat remained unavailable; "
+                        "canceling execution",
+                        extra={
+                            "session_id": session_id,
+                            "unverified_seconds": round(unverified_seconds, 3),
+                            "grace_seconds": _RUN_HEARTBEAT_FAILURE_GRACE_SECONDS,
+                        },
+                    )
+                    if not owner_task.done():
+                        owner_task.cancel(OWNERSHIP_LOST_CANCEL_MESSAGE)
+                    return
                 logger.warning(
                     "Failed to update run heartbeat",
-                    extra={"session_id": session_id},
+                    extra={
+                        "session_id": session_id,
+                        "unverified_seconds": round(unverified_seconds, 3),
+                        "grace_seconds": _RUN_HEARTBEAT_FAILURE_GRACE_SECONDS,
+                    },
                     exc_info=True,
                 )
-            await asyncio.sleep(_RUN_HEARTBEAT_INTERVAL_SECONDS)
+            else:
+                last_verified_at = loop.time()
 
     async def _select_requested_profile(
         self,
@@ -1818,6 +2136,7 @@ class RunExecutor:
                 active_run_id=run_id,
                 owner_generation=owner_generation,
                 tool_admission_barrier=tool_admission_barrier,
+                stop_on_context_invalidation=True,
                 initial_turn_eligible=True,
                 poll_fn=poll_fn,
                 process_actions=True,
@@ -1846,6 +2165,7 @@ class RunExecutor:
         active_run_id: str | None,
         owner_generation: int,
         tool_admission_barrier: ToolAdmissionBarrier,
+        stop_on_context_invalidation: bool,
         initial_turn_eligible: bool,
         poll_fn: PollMessages | None,
         process_actions: bool,
@@ -1876,6 +2196,7 @@ class RunExecutor:
                 model=model,
                 required_inference_profile=selected_profile,
                 active_run_id=active_run_id,
+                owner_generation=owner_generation,
                 include_action_messages=process_actions,
             )
             if not promoted.deleted_buffer_ids:
@@ -1907,7 +2228,10 @@ class RunExecutor:
                 or action_result.context_invalidated
                 or (profile_changed and promoted.turn_effect is not TurnEffect.FAILED)
             )
-            if context_invalidated:
+            if context_invalidated and stop_on_context_invalidation:
+                # A model boundary must return so its already-built model/tool
+                # context can be rebuilt. Wake-up preparation has no such context
+                # yet, so it keeps draining the FIFO queue before toolkit assembly.
                 break
 
         queued_result = (
@@ -2099,6 +2423,7 @@ class RunExecutor:
         model: str | None,
         required_inference_profile: RequestedInferenceProfile | None,
         active_run_id: str | None,
+        owner_generation: int,
         include_action_messages: bool,
     ) -> PromotedInputBuffers:
         """Promote input buffers and publish the matching live-state changes."""
@@ -2175,6 +2500,7 @@ class RunExecutor:
                     model=model,
                     required_inference_profile=required_inference_profile,
                     expected_buffer_id=pending.input_buffer_id,
+                    owner_generation=owner_generation,
                     prepared_inference_state=prepared_inference_state,
                     profile_resolution_failure=profile_resolution_failure,
                     active_run_id=active_run_id,

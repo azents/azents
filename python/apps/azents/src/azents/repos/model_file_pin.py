@@ -6,8 +6,9 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import AgentRunStatus
+from azents.core.enums import AgentRunStatus, ModelFileStatus
 from azents.rdb.models.agent_run import RDBAgentRun
+from azents.rdb.models.model_file import RDBModelFile
 from azents.rdb.models.model_file_pin import RDBModelFilePin
 
 
@@ -23,16 +24,35 @@ class ModelFilePinRepository:
         model_file_ids: Sequence[str],
     ) -> None:
         """Create idempotent active run pins for ModelFiles."""
+        requested_ids = sorted(dict.fromkeys(model_file_ids))
+        if not requested_ids:
+            return
+        model_files = (
+            await session.scalars(
+                sa.select(RDBModelFile)
+                .where(RDBModelFile.id.in_(requested_ids))
+                .order_by(RDBModelFile.id)
+                .with_for_update()
+            )
+        ).all()
+        eligible_ids = {
+            model_file.id
+            for model_file in model_files
+            if model_file.session_id == session_id
+            and model_file.status is ModelFileStatus.AVAILABLE
+        }
+        if eligible_ids != set(requested_ids):
+            raise RuntimeError(
+                "Cannot pin a missing, unavailable, or cross-session ModelFile"
+            )
         rows = [
             {
                 "model_file_id": model_file_id,
                 "session_id": session_id,
                 "run_id": run_id,
             }
-            for model_file_id in dict.fromkeys(model_file_ids)
+            for model_file_id in requested_ids
         ]
-        if not rows:
-            return
         await session.execute(
             pg_insert(RDBModelFilePin)
             .values(rows)

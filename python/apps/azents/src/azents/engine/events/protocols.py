@@ -18,10 +18,13 @@ from azents.engine.events.types import (
     TokenUsagePayload,
 )
 from azents.engine.run.failure import FailedRunRetryState
+from azents.rdb.session import SessionManager
 from azents.repos.agent_execution.data import (
     AgentRunCreate,
     EventCreate,
 )
+
+DurableRunWriteFence = Callable[[AsyncSession], Awaitable[None]]
 
 
 class NativeModelRequest(BaseModel):
@@ -85,10 +88,10 @@ class PreLowerFilter(Protocol):
 
     async def apply(
         self,
-        session: AsyncSession,
+        session_manager: SessionManager[AsyncSession],
         transcript: Sequence[Event],
     ) -> list[Event]:
-        """Normalize Event transcript before lowerer input."""
+        """Normalize Event transcript using short database transactions."""
         ...
 
 
@@ -165,6 +168,17 @@ class AgentRunCreateRepository(Protocol):
         """Fetch run state."""
         ...
 
+    async def lock_active_owner(
+        self,
+        session: AsyncSession,
+        *,
+        run_id: str,
+        session_id: str,
+        owner_generation: int,
+    ) -> AgentRunState:
+        """Lock and validate the exact active Run and Session owner generation."""
+        ...
+
     async def create(
         self,
         session: AsyncSession,
@@ -199,6 +213,17 @@ class AgentRunCreateRepository(Protocol):
 
 class RunStateRepository(Protocol):
     """Agent run state repository protocol."""
+
+    async def lock_active_owner(
+        self,
+        session: AsyncSession,
+        *,
+        run_id: str,
+        session_id: str,
+        owner_generation: int,
+    ) -> AgentRunState:
+        """Lock and validate the exact active Run and Session owner generation."""
+        ...
 
     async def lock_by_id(
         self,
@@ -374,6 +399,7 @@ class ManualCompactor(Protocol):
         transcript: Sequence[Event],
         compaction_id: str,
         summarize: "SummaryGenerator",
+        write_fence: DurableRunWriteFence,
         on_started: Callable[[], Awaitable[None]] | None = None,
         summary_context_window_tokens: int | None = None,
         reason: str | None = None,

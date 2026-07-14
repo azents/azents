@@ -1,7 +1,7 @@
 """ChatGPT OAuth runtime token refresh support."""
 
+import asyncio
 import datetime
-from typing import cast
 
 import httpx
 from azcommon.result import Failure, Result, Success
@@ -18,11 +18,16 @@ from azents.repos.llm_provider_integration import LLMProviderIntegrationReposito
 from azents.repos.llm_provider_integration.data import (
     LLMProviderIntegrationWithSecrets,
 )
+from azents.utils.task_recovery import (
+    current_task_is_cancelling,
+    run_bounded_cancellation_safe,
+)
 
 from .client import ChatGPTOAuthClient
 from .data import ProviderRejected, ProviderUnavailable, TokenSet
 
 _REFRESH_WINDOW = datetime.timedelta(minutes=5)
+_REFRESH_PERSIST_ATTEMPTS = 3
 
 
 async def ensure_runtime_tokens(
@@ -34,31 +39,32 @@ async def ensure_runtime_tokens(
     """Ensure ChatGPT OAuth token freshness before Runtime execution."""
     if integration.provider != LLMProvider.CHATGPT_OAUTH:
         return Success(integration)
-    if not isinstance(integration.secrets, ChatGPTOAuthSecrets) or not isinstance(
-        integration.config, ChatGPTOAuthConfig
-    ):
-        return Failure(ProviderRejected(reason="ChatGPT OAuth integration is invalid"))
-    retryable_statuses = {
-        ChatGPTOAuthConnectionStatus.CONNECTED.value,
-        ChatGPTOAuthConnectionStatus.TEMPORARILY_UNAVAILABLE.value,
-    }
-    if integration.config.status not in retryable_statuses:
-        return Failure(ProviderRejected(reason="ChatGPT OAuth reconnect is required"))
+    async with session_manager() as session:
+        latest = await integration_repository.get_by_id_with_secrets(
+            session,
+            integration.id,
+        )
+    rejection = _runtime_rejection(latest)
+    if rejection is not None:
+        return Failure(rejection)
+    assert latest is not None
+    assert isinstance(latest.secrets, ChatGPTOAuthSecrets)
+    assert isinstance(latest.config, ChatGPTOAuthConfig)
     refresh_threshold = datetime.datetime.now(datetime.UTC) + _REFRESH_WINDOW
-    if integration.secrets.expires_at > refresh_threshold:
-        return Success(integration)
+    if latest.secrets.expires_at > refresh_threshold:
+        return Success(latest)
 
     async with httpx.AsyncClient(timeout=20.0) as http_client:
         refresh_result = await ChatGPTOAuthClient(http_client).refresh_tokens(
-            refresh_token=integration.secrets.refresh_token,
+            refresh_token=latest.secrets.refresh_token,
             connection_method=ChatGPTOAuthConnectionMethod(
-                integration.config.connection_method
+                latest.config.connection_method
             ),
         )
     match refresh_result:
         case Success(tokens):
             refresh_success = await _persist_refresh_success(
-                integration=integration,
+                integration=latest,
                 integration_repository=integration_repository,
                 session_manager=session_manager,
                 tokens=tokens,
@@ -69,15 +75,12 @@ async def ensure_runtime_tokens(
                 case Failure(error):
                     return Failure(error)
         case Failure(error):
-            recovered = await _persist_refresh_failure(
-                integration=integration,
+            return await _persist_refresh_failure(
+                integration=latest,
                 integration_repository=integration_repository,
                 session_manager=session_manager,
                 error=error,
             )
-            if recovered is not None:
-                return Success(recovered)
-            return Failure(error)
 
 
 async def _persist_refresh_success(
@@ -87,42 +90,110 @@ async def _persist_refresh_success(
     session_manager: SessionManager[AsyncSession],
     tokens: TokenSet,
 ) -> Result[LLMProviderIntegrationWithSecrets, ProviderRejected]:
-    """Store refresh success result and return latest integration."""
-    config = cast(ChatGPTOAuthConfig, integration.config)
-    async with session_manager() as session:
-        update = await integration_repository.update_by_id(
-            session,
-            integration.id,
-            {
-                "secrets": ChatGPTOAuthSecrets(
-                    access_token=tokens.access_token,
-                    refresh_token=tokens.refresh_token,
-                    id_token=tokens.id_token,
-                    expires_at=tokens.expires_at,
-                ),
-                "config": ChatGPTOAuthConfig(
-                    account_id=tokens.account_id or config.account_id,
-                    email=tokens.email or config.email,
-                    plan_type=tokens.plan_type or config.plan_type,
-                    connection_method=config.connection_method,
-                    status=ChatGPTOAuthConnectionStatus.CONNECTED.value,
-                    connected_at=config.connected_at,
-                    last_refreshed_at=datetime.datetime.now(datetime.UTC),
-                ),
-            },
-        )
-        if isinstance(update, Failure):
-            return Failure(
-                ProviderRejected(reason="ChatGPT OAuth integration was not found")
-            )
-        refreshed = await integration_repository.get_by_id_with_secrets(
-            session, integration.id
-        )
-    if refreshed is None:
-        return Failure(
-            ProviderRejected(reason="ChatGPT OAuth integration was not found")
-        )
-    return Success(refreshed)
+    """Durably store provider-rotated tokens without abandoning them on cancel."""
+    assert isinstance(integration.config, ChatGPTOAuthConfig)
+    config = integration.config
+    expected_secrets = ChatGPTOAuthSecrets(
+        access_token=tokens.access_token,
+        refresh_token=tokens.refresh_token,
+        id_token=tokens.id_token,
+        expires_at=tokens.expires_at,
+    )
+    expected_config = ChatGPTOAuthConfig(
+        account_id=tokens.account_id or config.account_id,
+        email=tokens.email or config.email,
+        plan_type=tokens.plan_type or config.plan_type,
+        connection_method=config.connection_method,
+        status=ChatGPTOAuthConnectionStatus.CONNECTED.value,
+        connected_at=config.connected_at,
+        last_refreshed_at=datetime.datetime.now(datetime.UTC),
+    )
+
+    async def persist_or_repair() -> Result[
+        LLMProviderIntegrationWithSecrets,
+        ProviderRejected,
+    ]:
+        first_error: Exception | None = None
+        last_error: Exception | None = None
+        for _attempt in range(_REFRESH_PERSIST_ATTEMPTS):
+            try:
+                async with session_manager() as session:
+                    latest = await integration_repository.lock_by_id_with_secrets(
+                        session,
+                        integration.id,
+                    )
+                    if _matches_expected_refresh(
+                        latest,
+                        integration_id=integration.id,
+                        expected_secrets=expected_secrets,
+                        expected_config=expected_config,
+                    ):
+                        assert latest is not None
+                        return Success(latest)
+                    rejection = _runtime_rejection(latest)
+                    if rejection is not None:
+                        return Failure(rejection)
+                    assert latest is not None
+                    if _refresh_authority_changed(latest, integration):
+                        return Success(latest)
+                    update = await integration_repository.update_by_id(
+                        session,
+                        integration.id,
+                        {
+                            "secrets": expected_secrets,
+                            "config": expected_config,
+                        },
+                    )
+                    if isinstance(update, Failure):
+                        return Failure(
+                            ProviderRejected(
+                                reason="ChatGPT OAuth integration was not found"
+                            )
+                        )
+                    refreshed = await integration_repository.get_by_id_with_secrets(
+                        session,
+                        integration.id,
+                    )
+                    if refreshed is None:
+                        return Failure(
+                            ProviderRejected(
+                                reason="ChatGPT OAuth integration was not found"
+                            )
+                        )
+                return Success(refreshed)
+            except asyncio.CancelledError as persistence_cancellation:
+                if current_task_is_cancelling() or first_error is None:
+                    raise
+                raise first_error from persistence_cancellation
+            except Exception as persistence_error:
+                if first_error is None:
+                    first_error = persistence_error
+                last_error = persistence_error
+
+        assert first_error is not None
+        if last_error is first_error:
+            raise first_error
+        raise first_error from last_error
+
+    return await run_bounded_cancellation_safe(persist_or_repair)
+
+
+def _matches_expected_refresh(
+    integration: LLMProviderIntegrationWithSecrets | None,
+    *,
+    integration_id: str,
+    expected_secrets: ChatGPTOAuthSecrets,
+    expected_config: ChatGPTOAuthConfig,
+) -> bool:
+    """Return whether the exact rotated token generation became durable."""
+    return (
+        integration is not None
+        and integration.id == integration_id
+        and integration.enabled
+        and integration.provider == LLMProvider.CHATGPT_OAUTH
+        and integration.secrets == expected_secrets
+        and integration.config == expected_config
+    )
 
 
 async def _persist_refresh_failure(
@@ -131,31 +202,31 @@ async def _persist_refresh_failure(
     integration_repository: LLMProviderIntegrationRepository,
     session_manager: SessionManager[AsyncSession],
     error: ProviderRejected | ProviderUnavailable,
-) -> LLMProviderIntegrationWithSecrets | None:
-    """Store refresh failure state or return concurrent refresh success result."""
-    config = cast(ChatGPTOAuthConfig, integration.config)
-    original_secrets = cast(ChatGPTOAuthSecrets, integration.secrets)
-    async with session_manager() as session:
-        latest = await integration_repository.get_by_id_with_secrets(
-            session, integration.id
-        )
-    if (
-        latest is not None
-        and isinstance(latest.secrets, ChatGPTOAuthSecrets)
-        and isinstance(latest.config, ChatGPTOAuthConfig)
-    ):
-        if (
-            latest.secrets.refresh_token != original_secrets.refresh_token
-            or latest.config.last_refreshed_at != config.last_refreshed_at
-        ):
-            return latest
+) -> Result[
+    LLMProviderIntegrationWithSecrets,
+    ProviderRejected | ProviderUnavailable,
+]:
+    """CAS refresh failure state without overwriting concurrent user changes."""
     status = (
         ChatGPTOAuthConnectionStatus.REFRESH_REQUIRED
         if isinstance(error, ProviderRejected)
         else ChatGPTOAuthConnectionStatus.TEMPORARILY_UNAVAILABLE
     )
     async with session_manager() as session:
-        await integration_repository.update_by_id(
+        latest = await integration_repository.lock_by_id_with_secrets(
+            session,
+            integration.id,
+        )
+        rejection = _runtime_rejection(latest)
+        if rejection is not None:
+            return Failure(rejection)
+        assert latest is not None
+        assert isinstance(latest.secrets, ChatGPTOAuthSecrets)
+        assert isinstance(latest.config, ChatGPTOAuthConfig)
+        if _refresh_authority_changed(latest, integration):
+            return Success(latest)
+        config = latest.config
+        update = await integration_repository.update_by_id(
             session,
             integration.id,
             {
@@ -172,4 +243,43 @@ async def _persist_refresh_failure(
                 )
             },
         )
+        if isinstance(update, Failure):
+            return Failure(
+                ProviderRejected(reason="ChatGPT OAuth integration was not found")
+            )
+    return Failure(error)
+
+
+def _runtime_rejection(
+    integration: LLMProviderIntegrationWithSecrets | None,
+) -> ProviderRejected | None:
+    """Validate current runtime authority before and after provider I/O."""
+    if integration is None:
+        return ProviderRejected(reason="ChatGPT OAuth integration was not found")
+    if not integration.enabled:
+        return ProviderRejected(reason="ChatGPT OAuth integration is disabled")
+    if (
+        integration.provider != LLMProvider.CHATGPT_OAUTH
+        or not isinstance(integration.secrets, ChatGPTOAuthSecrets)
+        or not isinstance(integration.config, ChatGPTOAuthConfig)
+    ):
+        return ProviderRejected(reason="ChatGPT OAuth integration is invalid")
+    if integration.config.status not in {
+        ChatGPTOAuthConnectionStatus.CONNECTED.value,
+        ChatGPTOAuthConnectionStatus.TEMPORARILY_UNAVAILABLE.value,
+    }:
+        return ProviderRejected(reason="ChatGPT OAuth reconnect is required")
     return None
+
+
+def _refresh_authority_changed(
+    latest: LLMProviderIntegrationWithSecrets,
+    original: LLMProviderIntegrationWithSecrets,
+) -> bool:
+    """Return whether another writer changed the token refresh authority."""
+    assert isinstance(latest.config, ChatGPTOAuthConfig)
+    assert isinstance(original.config, ChatGPTOAuthConfig)
+    return (
+        latest.secrets != original.secrets
+        or latest.config.connection_method != original.config.connection_method
+    )

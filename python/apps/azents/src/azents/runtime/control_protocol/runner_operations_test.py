@@ -34,6 +34,7 @@ from azents.runtime.control_protocol.service import (
 )
 from azents.runtime.coordination.data import (
     JsonValue,
+    RuntimeBodyChunk,
     RuntimeReplyEvent,
     RuntimeReplyEventType,
 )
@@ -362,6 +363,78 @@ async def test_write_file_uses_body_stream_chunks() -> None:
     )
     result = await asyncio.wait_for(task, timeout=1)
     assert result.bytes_written == 7
+
+
+@pytest.mark.asyncio
+async def test_write_file_deadline_covers_all_body_chunks_before_dispatch() -> None:
+    """Slow successful chunks share one deadline instead of resetting it."""
+    store = _SlowBodyChunkStore(delay_seconds=0.03)
+    harness = await _make_harness(
+        body_chunk_size_bytes=1,
+        coordination_store=store,
+    )
+
+    with pytest.raises(RuntimeRunnerOperationFailedError, match="timed out"):
+        await asyncio.wait_for(
+            harness.client.write_file(
+                runtime_id="runtime-1",
+                runner_generation=harness.runner_generation,
+                owner_session_id="session-1",
+                path="/workspace/agent/out.txt",
+                data=b"abc",
+                deadline_at=_now() + timedelta(milliseconds=70),
+            ),
+            timeout=0.3,
+        )
+
+    assert 0 < store.committed_chunks < 3
+    assert store.append_attempts == store.committed_chunks + 1
+    assert (
+        await harness.control.claim_next_runner_request(
+            runtime_id="runtime-1",
+            generation=harness.runner_generation,
+            consumer_id="runner-a",
+            block_ms=0,
+        )
+        is None
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_bash_caller_cancellation_stays_cancelled_and_finalizes() -> None:
+    """The overall deadline wrapper preserves explicit caller cancellation."""
+    harness = await _make_harness()
+    task = asyncio.create_task(
+        harness.client.run_bash(
+            runtime_id="runtime-1",
+            runner_generation=harness.runner_generation,
+            owner_session_id="session-1",
+            command="sleep 60",
+            timeout_seconds=30,
+            env=None,
+            deadline_at=_now() + timedelta(seconds=30),
+        )
+    )
+    await asyncio.sleep(0)
+    request = await harness.control.claim_next_runner_request(
+        runtime_id="runtime-1",
+        generation=harness.runner_generation,
+        consumer_id="runner-a",
+        block_ms=0,
+    )
+    assert request is not None
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(task, timeout=0.2)
+
+    replies = await harness.control.read_replies(
+        reply_stream_id=request.reply_stream_id,
+        after_cursor=None,
+        limit=10,
+    )
+    assert replies[-1].event.payload["error_code"] == "canceled"
+    assert replies[-1].event.final is True
 
 
 @pytest.mark.asyncio
@@ -1019,8 +1092,9 @@ class _Harness:
 async def _make_harness(
     *,
     body_chunk_size_bytes: int = 1024 * 1024,
+    coordination_store: InMemoryRuntimeCoordinationStore | None = None,
 ) -> _Harness:
-    store = InMemoryRuntimeCoordinationStore()
+    store = coordination_store or InMemoryRuntimeCoordinationStore()
     control = RuntimeControlProtocolService(
         store,
         request_id_factory=_RequestIds(),
@@ -1037,6 +1111,27 @@ async def _make_harness(
         client=client,
         runner_generation=runner.generation,
     )
+
+
+class _SlowBodyChunkStore(InMemoryRuntimeCoordinationStore):
+    """Coordination store whose body writes are slow but individually succeed."""
+
+    def __init__(self, *, delay_seconds: float) -> None:
+        super().__init__()
+        self.delay_seconds = delay_seconds
+        self.append_attempts = 0
+        self.committed_chunks = 0
+
+    async def append_body_chunk(
+        self,
+        stream_id: str,
+        chunk: RuntimeBodyChunk,
+    ) -> str:
+        self.append_attempts += 1
+        await asyncio.sleep(self.delay_seconds)
+        cursor = await super().append_body_chunk(stream_id, chunk)
+        self.committed_chunks += 1
+        return cursor
 
 
 class _RequestIds:

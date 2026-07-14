@@ -1,5 +1,6 @@
 """Chat session service. Session management + message lookup + access control."""
 
+import asyncio
 import dataclasses
 import datetime
 import logging
@@ -7,6 +8,7 @@ from typing import Annotated, assert_never
 
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
+from redis.exceptions import RedisError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
@@ -49,6 +51,7 @@ from azents.repos.agent_session.data import (
 from azents.repos.message import MessageRepository
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.session_workspace_project.data import SessionWorkspaceProjectCreate
+from azents.repos.toolkit_state import ToolkitStateRepository
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.services.input_buffer import InputBufferEnqueue, InputBufferService
 from azents.services.session_git_worktree import (
@@ -88,6 +91,7 @@ from .data import (
     SessionAccessDenied,
     SessionAccessError,
     SessionNotFound,
+    SessionWorktreeCleanupIncomplete,
     SubagentSessionReadOnly,
     SubagentTreeNode,
     SubagentTreeProjection,
@@ -103,6 +107,29 @@ from .live_events import (
 )
 
 logger = logging.getLogger(__name__)
+_LIVE_EVENT_READ_TIMEOUT_SECONDS = 0.25
+
+
+async def _list_live_events_best_effort(
+    live_event_store: LiveEventStore,
+    *,
+    session_id: str,
+) -> list[Event]:
+    """Read non-durable Redis projections without blocking a DB snapshot."""
+    try:
+        async with asyncio.timeout(_LIVE_EVENT_READ_TIMEOUT_SECONDS):
+            return await live_event_store.list_by_session_id(session_id)
+    except TimeoutError:
+        logger.warning(
+            "Timed out reading non-durable Chat live events",
+            extra={"session_id": session_id},
+        )
+    except OSError, RedisError:
+        logger.exception(
+            "Failed to read non-durable Chat live events",
+            extra={"session_id": session_id},
+        )
+    return []
 
 
 def _latest_agent_message_at(
@@ -293,6 +320,9 @@ class ChatSessionService:
     ]
     agent_session_repository: Annotated[
         AgentSessionRepository, Depends(AgentSessionRepository)
+    ]
+    toolkit_state_repository: Annotated[
+        ToolkitStateRepository, Depends(ToolkitStateRepository)
     ]
     workspace_user_repository: Annotated[
         WorkspaceUserRepository, Depends(WorkspaceUserRepository)
@@ -528,6 +558,17 @@ class ChatSessionService:
         setup_actions: list[CreateGitWorktreeAction],
     ) -> Result[AgentSession, EnsureSessionError | InvalidProjectPath]:
         """Create a non-primary team session with setup actions."""
+        workspace_items_result = _workspace_items_from_request(
+            existing_project_paths=existing_project_paths,
+            setup_actions=setup_actions,
+        )
+        match workspace_items_result:
+            case Success(workspace_items):
+                pass
+            case Failure(error):
+                return Failure(error)
+            case _:
+                assert_never(workspace_items_result)
         async with self.session_manager() as session:
             agent = await self.agent_repository.get_by_id(session, agent_id)
             if agent is None:
@@ -547,17 +588,6 @@ class ChatSessionService:
                 workspace_id=agent.workspace_id,
                 agent_id=agent_id,
             )
-            workspace_items_result = _workspace_items_from_request(
-                existing_project_paths=existing_project_paths,
-                setup_actions=setup_actions,
-            )
-            match workspace_items_result:
-                case Success(workspace_items):
-                    pass
-                case Failure(error):
-                    return Failure(error)
-                case _:
-                    assert_never(workspace_items_result)
             created = await self.agent_session_repository.create(
                 session,
                 AgentSessionCreate(
@@ -578,7 +608,10 @@ class ChatSessionService:
                 case Success():
                     pass
                 case Failure(error):
-                    return Failure(error)
+                    raise RuntimeError(
+                        "Normalized Session workspace items became invalid: "
+                        f"{error.reason}"
+                    )
                 case _:
                     assert_never(workspace_result)
             setup_input_created = await self._enqueue_setup_actions(
@@ -592,7 +625,6 @@ class ChatSessionService:
                     session,
                     created.id,
                 )
-            await session.commit()
         return Success(created)
 
     async def list_agent_project_presets(
@@ -996,37 +1028,9 @@ class ChatSessionService:
             input_buffers = await self.input_buffer_service.list_by_session_id(
                 session, session_id
             )
-            partial_history_events = []
-            if live_event_store is not None:
-                partial_history_events = await live_event_store.list_by_session_id(
-                    session_id
-                )
-            input_buffer_events = [
-                input_buffer_to_live_event(input_buffer)
-                for input_buffer in input_buffers
-            ]
             run = await self.agent_run_repository.get_running_by_session_id(
                 session,
                 session_id=session_id,
-            )
-            partial_history_events = [
-                event
-                for event in partial_history_events
-                if not isinstance(event.payload, ClientToolCallPayload)
-            ]
-            if run is not None:
-                partial_history_events.extend(
-                    active_tool_call_to_live_event(session_id, active)
-                    for active in run.active_tool_calls
-                )
-            partial_history_events.sort(key=lambda event: (event.created_at, event.id))
-            goal_store = GoalStateStore(session_manager=self.session_manager)
-            goal = GoalStateSnapshot.from_state(
-                await goal_store.load(agent_session.agent_id, session_id)
-            )
-            todo_store = TodoStateStore(session_manager=self.session_manager)
-            todo = TodoStateSnapshot.from_state(
-                await todo_store.load(agent_session.agent_id, session_id)
             )
             action_executions = (
                 await self.action_execution_repository.list_projections_by_session_id(
@@ -1034,65 +1038,102 @@ class ChatSessionService:
                     session_id=session_id,
                 )
             )
-            session_run_state = agent_session.run_state
-            if run is not None:
-                if session_run_state != AgentSessionRunState.RUNNING:
-                    logger.warning(
-                        "Active AgentRun contradicts persisted Session run state",
-                        extra={
-                            "session_id": session_id,
-                            "run_id": run.id,
-                            "run_status": run.status,
-                            "session_run_state": session_run_state,
-                        },
-                    )
-                session_run_state = AgentSessionRunState.RUNNING
-            return Success(
-                ChatLiveStateSnapshot(
-                    partial_history_events=partial_history_events,
-                    input_buffer_events=input_buffer_events,
-                    run=None
-                    if run is None
-                    else ChatLiveRunState(
-                        run_id=run.id,
-                        phase=run.phase,
-                        status=run.status,
-                        inference_profile=_require_session_inference_profile(
-                            agent_session
-                        ),
-                        model_call_started_at=run.model_call_started_at,
-                        retry=None
-                        if run.retry_state is None
-                        else ChatLiveRunRetryState(
-                            status=run.retry_state.status,
-                            last_error_message=run.retry_state.last_user_message,
-                            failed_attempt_count=run.retry_state.failed_attempt_count,
-                            max_retries=run.retry_state.max_retries,
-                            backoff_seconds=run.retry_state.backoff_seconds,
-                            next_retry_at=run.retry_state.next_retry_at.isoformat(),
-                            attempts=[
-                                ChatLiveRunRetryAttempt(
-                                    attempt_number=attempt.attempt_number,
-                                    user_message=attempt.user_message,
-                                    error_type=attempt.error_type,
-                                    source=attempt.source,
-                                    failed_at=attempt.failed_at.isoformat(),
-                                    backoff_seconds=attempt.backoff_seconds,
-                                    next_retry_at=attempt.next_retry_at.isoformat(),
-                                    retryability=attempt.retryability,
-                                    failure_code=attempt.failure_code,
-                                    truncated=attempt.truncated,
-                                )
-                                for attempt in run.retry_state.attempts
-                            ],
-                        ),
-                    ),
-                    session_run_state=session_run_state,
-                    todo=todo,
-                    goal=goal,
-                    action_executions=action_executions,
-                )
+        partial_history_events = []
+        if live_event_store is not None:
+            partial_history_events = await _list_live_events_best_effort(
+                live_event_store,
+                session_id=session_id,
             )
+        input_buffer_events = [
+            input_buffer_to_live_event(input_buffer) for input_buffer in input_buffers
+        ]
+        partial_history_events = [
+            event
+            for event in partial_history_events
+            if not isinstance(event.payload, ClientToolCallPayload)
+        ]
+        if run is not None:
+            partial_history_events.extend(
+                active_tool_call_to_live_event(session_id, active)
+                for active in run.active_tool_calls
+            )
+        partial_history_events.sort(key=lambda event: (event.created_at, event.id))
+        goal_store = GoalStateStore(
+            session_manager=self.session_manager,
+            agent_run_repository=self.agent_run_repository,
+            agent_session_repository=self.agent_session_repository,
+            event_transcript_repository=self.event_transcript_repository,
+            toolkit_state_repository=self.toolkit_state_repository,
+        )
+        goal = GoalStateSnapshot.from_state(
+            await goal_store.load(agent_session.agent_id, session_id)
+        )
+        todo_store = TodoStateStore(
+            session_manager=self.session_manager,
+            agent_run_repository=self.agent_run_repository,
+            agent_session_repository=self.agent_session_repository,
+            toolkit_state_repository=self.toolkit_state_repository,
+        )
+        todo = TodoStateSnapshot.from_state(
+            await todo_store.load(agent_session.agent_id, session_id)
+        )
+        session_run_state = agent_session.run_state
+        if run is not None:
+            if session_run_state != AgentSessionRunState.RUNNING:
+                logger.warning(
+                    "Active AgentRun contradicts persisted Session run state",
+                    extra={
+                        "session_id": session_id,
+                        "run_id": run.id,
+                        "run_status": run.status,
+                        "session_run_state": session_run_state,
+                    },
+                )
+            session_run_state = AgentSessionRunState.RUNNING
+        return Success(
+            ChatLiveStateSnapshot(
+                partial_history_events=partial_history_events,
+                input_buffer_events=input_buffer_events,
+                run=None
+                if run is None
+                else ChatLiveRunState(
+                    run_id=run.id,
+                    phase=run.phase,
+                    status=run.status,
+                    inference_profile=_require_session_inference_profile(agent_session),
+                    model_call_started_at=run.model_call_started_at,
+                    retry=None
+                    if run.retry_state is None
+                    else ChatLiveRunRetryState(
+                        status=run.retry_state.status,
+                        last_error_message=run.retry_state.last_user_message,
+                        failed_attempt_count=run.retry_state.failed_attempt_count,
+                        max_retries=run.retry_state.max_retries,
+                        backoff_seconds=run.retry_state.backoff_seconds,
+                        next_retry_at=run.retry_state.next_retry_at.isoformat(),
+                        attempts=[
+                            ChatLiveRunRetryAttempt(
+                                attempt_number=attempt.attempt_number,
+                                user_message=attempt.user_message,
+                                error_type=attempt.error_type,
+                                source=attempt.source,
+                                failed_at=attempt.failed_at.isoformat(),
+                                backoff_seconds=attempt.backoff_seconds,
+                                next_retry_at=attempt.next_retry_at.isoformat(),
+                                retryability=attempt.retryability,
+                                failure_code=attempt.failure_code,
+                                truncated=attempt.truncated,
+                            )
+                            for attempt in run.retry_state.attempts
+                        ],
+                    ),
+                ),
+                session_run_state=session_run_state,
+                todo=todo,
+                goal=goal,
+                action_executions=action_executions,
+            )
+        )
 
     async def delete_session(
         self,
@@ -1121,26 +1162,105 @@ class ChatSessionService:
                         return Failure(error)
                     case _:
                         assert_never(error)
+            case _:
+                assert_never(get_result)
 
         worktree_service = self.session_git_worktree_service
         if worktree_service is not None:
-            cleanup_requested = False
+            cleanup_sessions: list[tuple[str, str]] = []
             async with self.session_manager() as session:
-                mark_cleanup_pending = worktree_service.mark_cleanup_pending_for_session
-                cleanup_request = await mark_cleanup_pending(
-                    session,
-                    session_id=session_id,
+                list_subtree_ids = (
+                    self.agent_session_repository.list_session_agent_subtree_session_ids
                 )
-                cleanup_requested = cleanup_request.cleanup_requested
-            if cleanup_requested:
+                session_ids = await list_subtree_ids(
+                    session,
+                    agent_session_id=session_id,
+                )
+                locked_sessions = await self.agent_session_repository.lock_by_ids(
+                    session,
+                    agent_session_ids=session_ids,
+                )
+                requested_session = locked_sessions.get(session_id)
+                if requested_session is None:
+                    return Success(None)
+                missing_session_ids = set(session_ids) - locked_sessions.keys()
+                if missing_session_ids:
+                    raise RuntimeError(
+                        "SessionAgent subtree references missing AgentSessions"
+                    )
+                if any(
+                    current.workspace_id != requested_session.workspace_id
+                    for current in locked_sessions.values()
+                ):
+                    raise RuntimeError(
+                        "SessionAgent subtree crossed Workspace authority"
+                    )
+                workspace_user = (
+                    await self.workspace_user_repository.lock_by_workspace_and_user(
+                        session,
+                        requested_session.workspace_id,
+                        user_id,
+                    )
+                )
+                if workspace_user is None:
+                    return Failure(SessionAccessDenied())
+                for current_session_id in sorted(locked_sessions):
+                    current = locked_sessions[current_session_id]
+                    cleanup_sessions.append((current.agent_id, current.id))
+                    await worktree_service.mark_cleanup_pending_for_session(
+                        session,
+                        session_id=current.id,
+                    )
+            for cleanup_agent_id, cleanup_session_id in cleanup_sessions:
                 await worktree_service.run_cleanup_for_session(
-                    agent_id=agent_session.agent_id,
-                    session_id=session_id,
+                    agent_id=cleanup_agent_id,
+                    session_id=cleanup_session_id,
                     session_workspace_project_id=None,
                 )
 
-        # Delete DB record
+        # Root tree fence -> AgentSession rows is the repository-wide delete order.
         async with self.session_manager() as session:
+            list_subtree_ids = (
+                self.agent_session_repository.list_session_agent_subtree_session_ids
+            )
+            session_ids = await list_subtree_ids(
+                session,
+                agent_session_id=session_id,
+            )
+            locked_sessions = await self.agent_session_repository.lock_by_ids(
+                session,
+                agent_session_ids=session_ids,
+            )
+            requested_session = locked_sessions.get(session_id)
+            if requested_session is None:
+                return Success(None)
+            missing_session_ids = set(session_ids) - locked_sessions.keys()
+            if missing_session_ids:
+                raise RuntimeError(
+                    "SessionAgent subtree references missing AgentSessions"
+                )
+            if any(
+                current.workspace_id != requested_session.workspace_id
+                for current in locked_sessions.values()
+            ):
+                raise RuntimeError("SessionAgent subtree crossed Workspace authority")
+            workspace_user = (
+                await self.workspace_user_repository.lock_by_workspace_and_user(
+                    session,
+                    requested_session.workspace_id,
+                    user_id,
+                )
+            )
+            if workspace_user is None:
+                return Failure(SessionAccessDenied())
+            locked_session_ids = list(locked_sessions)
+            if worktree_service is not None and not (
+                await worktree_service.cleanup_is_complete_for_sessions(
+                    session,
+                    session_ids=locked_session_ids,
+                )
+            ):
+                return Failure(SessionWorktreeCleanupIncomplete())
             await self.agent_session_repository.delete_by_id(session, session_id)
 
         return Success(None)
@@ -1199,8 +1319,16 @@ class ChatSessionService:
                         return Failure(error)
                     case _:
                         assert_never(error)
+            case _:
+                assert_never(get_result)
 
-        goal_store = GoalStateStore(session_manager=self.session_manager)
+        goal_store = GoalStateStore(
+            session_manager=self.session_manager,
+            agent_run_repository=self.agent_run_repository,
+            agent_session_repository=self.agent_session_repository,
+            event_transcript_repository=self.event_transcript_repository,
+            toolkit_state_repository=self.toolkit_state_repository,
+        )
         if objective is None:
             updated = await goal_store.update(
                 agent_session.agent_id,
@@ -1265,8 +1393,16 @@ class ChatSessionService:
                         return Failure(error)
                     case _:
                         assert_never(error)
+            case _:
+                assert_never(get_result)
 
-        goal_store = GoalStateStore(session_manager=self.session_manager)
+        goal_store = GoalStateStore(
+            session_manager=self.session_manager,
+            agent_run_repository=self.agent_run_repository,
+            agent_session_repository=self.agent_session_repository,
+            event_transcript_repository=self.event_transcript_repository,
+            toolkit_state_repository=self.toolkit_state_repository,
+        )
         changed = False
         previous_status: str | None = None
         updated_at = datetime.datetime.now(datetime.UTC).isoformat()
@@ -1347,6 +1483,8 @@ class ChatSessionService:
                         return Failure(error)
                     case _:
                         assert_never(error)
+            case _:
+                assert_never(get_result)
 
         async with self.session_manager() as session:
             await self.input_buffer_service.delete_by_session_and_id(

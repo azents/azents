@@ -1,5 +1,7 @@
 """Session-scoped todo Toolkit State tools."""
 
+import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 from typing import Literal, Self
 
@@ -23,12 +25,19 @@ from azents.engine.hooks.types import (
 from azents.engine.run.types import FunctionTool, FunctionToolError
 from azents.engine.tooling.make_tool import make_tool
 from azents.engine.tooling.toolkit_state import (
+    RunFencedToolkitStateStore,
     ToolkitStateHandle,
     ToolkitStateIdentity,
     ToolkitStateModel,
+    ToolkitStateRunAuthority,
     ToolkitStateStore,
 )
 from azents.rdb.session import SessionManager
+from azents.repos.agent_execution import AgentRunRepository
+from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.toolkit_state import ToolkitStateRepository
+
+logger = logging.getLogger(__name__)
 
 TODO_TOOLKIT_NAMESPACE = "todo"
 TODO_TOOLKIT_STATE_NAME = "todo"
@@ -36,6 +45,7 @@ TODO_STATE_SCHEMA_VERSION = 1
 TODO_STATUS_VALUES = {"pending", "in_progress", "completed"}
 TodoStatus = Literal["pending", "in_progress", "completed"]
 TodoOperation = Literal["replace", "clear"]
+_TODO_CHANGED_PUBLISH_TIMEOUT_SECONDS = 1.0
 
 _TODO_PROMPT = """### Todo List
 
@@ -92,9 +102,15 @@ class TodoStateStore:
         self,
         *,
         session_manager: SessionManager[AsyncSession],
+        agent_run_repository: AgentRunRepository,
+        agent_session_repository: AgentSessionRepository,
+        toolkit_state_repository: ToolkitStateRepository,
     ) -> None:
         """Create todo state store."""
         self._session_manager = session_manager
+        self._agent_run_repository = agent_run_repository
+        self._agent_session_repository = agent_session_repository
+        self._toolkit_state_repository = toolkit_state_repository
 
     async def load(self, agent_id: str, session_id: str) -> TodoState:
         """Fetch session todo state."""
@@ -108,11 +124,22 @@ class TodoStateStore:
         self,
         agent_id: str,
         session_id: str,
+        *,
+        run_id: str,
+        owner_generation: int,
         mutator: Callable[[TodoState], TodoState],
     ) -> TodoState:
-        """Update session todo state with optimistic retry."""
+        """Update Todo state only for the still-authoritative active Run."""
         async with self._session_manager() as session:
-            handle = await self._make_handle(session, agent_id, session_id)
+            handle = await self._make_run_fenced_handle(
+                session,
+                agent_id,
+                session_id,
+                ToolkitStateRunAuthority(
+                    run_id=run_id,
+                    owner_generation=owner_generation,
+                ),
+            )
             if handle is None:
                 return TodoState()
             saved_state: TodoState | None = None
@@ -140,7 +167,34 @@ class TodoStateStore:
             toolkit_namespace=TODO_TOOLKIT_NAMESPACE,
             state_name=TODO_TOOLKIT_STATE_NAME,
         )
-        return ToolkitStateStore(session=session).handle(identity, TodoState)
+        return ToolkitStateStore(
+            session=session,
+            repository=self._toolkit_state_repository,
+        ).handle(identity, TodoState)
+
+    async def _make_run_fenced_handle(
+        self,
+        session: AsyncSession,
+        agent_id: str,
+        session_id: str,
+        run_authority: ToolkitStateRunAuthority,
+    ) -> ToolkitStateHandle[TodoState] | None:
+        """Create a Todo handle that rejects stale runtime writes."""
+        if not agent_id or not session_id:
+            return None
+        identity = ToolkitStateIdentity(
+            agent_id=agent_id,
+            session_id=session_id,
+            toolkit_namespace=TODO_TOOLKIT_NAMESPACE,
+            state_name=TODO_TOOLKIT_STATE_NAME,
+        )
+        return RunFencedToolkitStateStore(
+            session=session,
+            repository=self._toolkit_state_repository,
+            run_authority=run_authority,
+            agent_run_repository=self._agent_run_repository,
+            agent_session_repository=self._agent_session_repository,
+        ).handle(identity, TodoState)
 
 
 class TodoToolkitConfig(BaseModel):
@@ -199,7 +253,10 @@ class TodoToolkit(Toolkit[TodoToolkitConfig]):
 
         async def publish_todo_changed(snapshot: TodoStateSnapshot) -> None:
             await context.publish_event(
-                TodoStateChanged(todo=snapshot.model_dump(mode="json"))
+                TodoStateChanged(
+                    run_id=context.run_id,
+                    todo=snapshot.model_dump(mode="json"),
+                )
             )
 
         return ToolkitState(
@@ -209,6 +266,8 @@ class TodoToolkit(Toolkit[TodoToolkitConfig]):
                     store=self._store,
                     agent_id=self._agent_id,
                     session_id=self._session_id,
+                    run_id=context.run_id,
+                    owner_generation=context.owner_generation,
                     publish_changed=publish_todo_changed,
                 )
             ],
@@ -257,6 +316,8 @@ def make_update_todo_tool(
     store: TodoStateStore,
     agent_id: str,
     session_id: str,
+    run_id: str,
+    owner_generation: int,
     publish_changed: Callable[[TodoStateSnapshot], Awaitable[None]] | None = None,
 ) -> FunctionTool:
     """Create update_todo FunctionTool."""
@@ -268,11 +329,30 @@ def make_update_todo_tool(
         updated = await store.update(
             agent_id,
             session_id,
-            lambda current: apply_todo_update(current, args),
+            run_id=run_id,
+            owner_generation=owner_generation,
+            mutator=lambda current: apply_todo_update(current, args),
         )
         snapshot = TodoStateSnapshot.from_state(updated)
         if publish_changed is not None:
-            await publish_changed(snapshot)
+            try:
+                async with asyncio.timeout(_TODO_CHANGED_PUBLISH_TIMEOUT_SECONDS):
+                    await publish_changed(snapshot)
+            except asyncio.CancelledError:
+                raise
+            except TimeoutError:
+                logger.warning(
+                    "Timed out publishing committed Todo state",
+                    extra={"run_id": run_id, "session_id": session_id},
+                )
+            except Exception:
+                # State is already committed under the exact Run fence. A
+                # projection failure must not turn that success into a failed
+                # tool result that the model may retry.
+                logger.exception(
+                    "Failed to publish committed Todo state",
+                    extra={"run_id": run_id, "session_id": session_id},
+                )
         return "Done"
 
     return make_tool(update_todo, input_model=UpdateTodoInput)

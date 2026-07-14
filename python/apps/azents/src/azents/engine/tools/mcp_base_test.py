@@ -108,6 +108,7 @@ def _context() -> TurnContext:
         workspace_id="workspace-1",
         model="model",
         run_id="run-1",
+        owner_generation=1,
         session_id="session-1",
         publish_event=_publish,
     )

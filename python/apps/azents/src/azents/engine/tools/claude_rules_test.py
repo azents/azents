@@ -15,6 +15,7 @@ from azents.engine.hooks.types import (
     ToolOutputReplace,
 )
 from azents.engine.io.attachments import RuntimeAttachment
+from azents.engine.tools import claude_rules as claude_rules_module
 from azents.engine.tools.claude_rules import (
     ClaudeRuleFile,
     ClaudeRuleRoot,
@@ -53,11 +54,15 @@ class _FakeClaudeRulesAppendixDedupeStateStore:
         self,
         agent_id: str,
         session_id: str,
+        *,
+        run_id: str,
+        owner_generation: int,
         mutator: Callable[
             [ClaudeRulesAppendixDedupeState], ClaudeRulesAppendixDedupeState
         ],
     ) -> None:
         """Apply appendix dedupe state update."""
+        del run_id, owner_generation
         state = await self.load_appendix_dedupe(agent_id, session_id)
         self.dedupe_states[(agent_id, session_id)] = mutator(state)
 
@@ -130,6 +135,7 @@ def _make_after_read_context(
         agent_id="agent-1",
         session_id="session-1",
         run_id="run-1",
+        owner_generation=1,
         output_text=output_text,
         error_message=error_message,
     )
@@ -359,6 +365,21 @@ class TestClaudeRuleMatching:
             "/workspace/agent/project/src/app.py",
         )
 
+    def test_unexpected_frontmatter_error_is_not_swallowed(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Unexpected parser failures remain visible instead of hiding defects."""
+        monkeypatch.setattr(
+            claude_rules_module.frontmatter,
+            "loads",
+            Mock(side_effect=RuntimeError("unexpected parser failure")),
+        )
+
+        with pytest.raises(RuntimeError, match="unexpected parser failure"):
+            claude_rules_module._parse_frontmatter(  # pyright: ignore[reportPrivateUsage]
+                "---\npaths: src/**\n---"
+            )
+
 
 class TestClaudeRulesToolkit:
     """ClaudeRulesToolkit hook behavior tests."""
@@ -428,6 +449,7 @@ class TestClaudeRulesToolkit:
                 agent_id="agent-1",
                 session_id="session-1",
                 run_id="run-1",
+                owner_generation=1,
             ),
         )
         second = await _run_after_tool_call_hook(
@@ -473,6 +495,7 @@ class TestClaudeRulesToolkit:
                 workspace_id="ws-1",
                 model="test-model",
                 run_id="run-1",
+                owner_generation=1,
                 publish_event=AsyncMock(),
             )
         )

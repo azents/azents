@@ -4,6 +4,7 @@ Provides standalone function that loads Agent and Integration from InvokeInput
 and builds RunRequest.
 """
 
+import asyncio
 import dataclasses
 import logging
 import time
@@ -35,6 +36,7 @@ from azents.engine.io.attachments import RuntimeAttachment
 from azents.engine.io.user_input import RunUserMessage
 from azents.engine.run.contracts import RunRequest, ToolkitBinding
 from azents.engine.run.types import (
+    OWNERSHIP_LOST_CANCEL_MESSAGE,
     BuiltinToolSpec,
 )
 from azents.engine.tools.builtin import (
@@ -59,6 +61,7 @@ from azents.repos.exchange_file.data import ExchangeFile
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationWithSecrets
 from azents.repos.toolkit import AgentToolkitRepository, ToolkitRepository
+from azents.repos.toolkit.data import ToolkitConfig
 from azents.runtime.types import RuntimeDomainConfig
 from azents.services.chatgpt_oauth.data import (
     ProviderRejected as ChatGPTOAuthProviderRejected,
@@ -146,7 +149,7 @@ def _toolkit_resolve_log_extra(
     return extra
 
 
-async def _resolve_toolkit_with_logging(
+async def _resolve_toolkit_with_slow_log(
     *,
     agent_id: str,
     context: ToolkitContext,
@@ -158,7 +161,7 @@ async def _resolve_toolkit_with_logging(
     toolkit_type: str | None = None,
     toolkit_name: str | None = None,
 ) -> Toolkit[Any]:
-    """Record Toolkit resolve failures and slow boundaries."""
+    """Record slow Toolkit resolution without duplicating failure logs."""
     log_extra = _toolkit_resolve_log_extra(
         agent_id=agent_id,
         context=context,
@@ -170,17 +173,7 @@ async def _resolve_toolkit_with_logging(
         toolkit_name=toolkit_name,
     )
     started_at = time.monotonic()
-    try:
-        resolved = await resolve
-    except Exception:
-        logger.exception(
-            "Toolkit resolve failed",
-            extra={
-                **log_extra,
-                "duration_seconds": round(time.monotonic() - started_at, 3),
-            },
-        )
-        raise
+    resolved = await resolve
     duration_seconds = time.monotonic() - started_at
     if duration_seconds > _SLOW_TOOLKIT_RESOLVE_SECONDS:
         logger.warning(
@@ -422,7 +415,7 @@ async def resolve_invoke_input_with_model_source(
     exchange_file_service: ExchangeFileService,
     model_file_service: ModelFileService,
 ) -> Result[_ResolvedInvokeInputModelSource, ResolveError]:
-    """Resolve a run request and main selection from one Agent snapshot."""
+    """Resolve a run request and main selection from short-lived DB snapshots."""
     async with session_manager() as session:
         agent = await agent_repository.get_by_id(session, invoke_input.agent_id)
         if agent is None:
@@ -474,39 +467,25 @@ async def resolve_invoke_input_with_model_source(
                     )
         lightweight_selection = model_agent.lightweight_model_selection
 
-        integration = await integration_repository.get_by_id_with_secrets(
+        loaded_integration = await integration_repository.get_by_id_with_secrets(
             session,
             main_selection.llm_provider_integration_id,
         )
-        if integration is None:
+        if loaded_integration is None:
             return Failure(
                 IntegrationNotFound(
                     integration_id=main_selection.llm_provider_integration_id,
                 )
             )
-        if not integration.enabled:
+        if not loaded_integration.enabled:
             return Failure(
                 IntegrationDisabled(
                     integration_id=main_selection.llm_provider_integration_id,
                 )
             )
-        refreshed_integration = await _ensure_provider_runtime_tokens(
-            integration=integration,
-            integration_repository=integration_repository,
-            session_manager=session_manager,
-        )
-        match refreshed_integration:
-            case Success(value):
-                integration = value
-            case Failure():
-                return Failure(
-                    IntegrationDisabled(
-                        integration_id=main_selection.llm_provider_integration_id,
-                    )
-                )
 
-        lightweight_integration = integration
-        if lightweight_selection.llm_provider_integration_id != integration.id:
+        loaded_lightweight_integration = loaded_integration
+        if lightweight_selection.llm_provider_integration_id != loaded_integration.id:
             loaded_lightweight_integration = (
                 await integration_repository.get_by_id_with_secrets(
                     session,
@@ -525,22 +504,46 @@ async def resolve_invoke_input_with_model_source(
                         integration_id=lightweight_selection.llm_provider_integration_id,
                     )
                 )
-            refreshed_lightweight_integration = await _ensure_provider_runtime_tokens(
-                integration=loaded_lightweight_integration,
-                integration_repository=integration_repository,
-                session_manager=session_manager,
+
+    # OAuth refresh performs network I/O and may open its own DB sessions. The
+    # read snapshot above must be released before either operation starts.
+    refreshed_integration = await _ensure_provider_runtime_tokens(
+        integration=loaded_integration,
+        integration_repository=integration_repository,
+        session_manager=session_manager,
+    )
+    match refreshed_integration:
+        case Success(value):
+            integration = value
+        case Failure():
+            return Failure(
+                IntegrationDisabled(
+                    integration_id=main_selection.llm_provider_integration_id,
+                )
             )
-            match refreshed_lightweight_integration:
-                case Success(value):
-                    lightweight_integration = value
-                case Failure():
-                    return Failure(
-                        IntegrationDisabled(
-                            integration_id=(
-                                lightweight_selection.llm_provider_integration_id
-                            ),
-                        )
+        case _:
+            assert_never(refreshed_integration)
+
+    lightweight_integration = integration
+    if lightweight_selection.llm_provider_integration_id != integration.id:
+        refreshed_lightweight_integration = await _ensure_provider_runtime_tokens(
+            integration=loaded_lightweight_integration,
+            integration_repository=integration_repository,
+            session_manager=session_manager,
+        )
+        match refreshed_lightweight_integration:
+            case Success(value):
+                lightweight_integration = value
+            case Failure():
+                return Failure(
+                    IntegrationDisabled(
+                        integration_id=(
+                            lightweight_selection.llm_provider_integration_id
+                        ),
                     )
+                )
+            case _:
+                assert_never(refreshed_lightweight_integration)
 
     model = to_runtime_model(
         main_selection.provider,
@@ -680,110 +683,165 @@ async def materialize_user_input_exchange_file_attachments(
     """
     attachments: list[RuntimeAttachment] = []
     file_parts: list[FileOutputPart] = []
+    created_model_file_ids: list[str] = []
 
-    for uri in attachment_uris:
-        metadata_result = (
-            await exchange_file_service.resolve_attachment_metadata_for_agent(
+    try:
+        for uri in attachment_uris:
+            metadata_result = (
+                await exchange_file_service.resolve_attachment_metadata_for_agent(
+                    uri=uri,
+                    agent_id=agent_id,
+                    user_id=user_id,
+                )
+            )
+            if isinstance(metadata_result, Failure):
+                logger.warning(
+                    "Failed to resolve exchange attachment in agent namespace",
+                    extra={
+                        "uri": uri,
+                        "session_id": session_id,
+                        "agent_id": agent_id,
+                    },
+                )
+                continue
+
+            file = metadata_result.value
+            availability: Literal["available", "expired", "unavailable"] = (
+                "expired" if file.status == ExchangeFileStatus.EXPIRED else "available"
+            )
+            text_preview = _attachment_text_preview(file, availability=availability)
+            attachments.append(
+                RuntimeAttachment(
+                    attachment_id=file.id,
+                    uri=file.uri,
+                    media_type=file.media_type,
+                    size=file.size_bytes,
+                    name=file.filename,
+                    text_preview=text_preview,
+                    preview_thumbnail_uri=file.preview_thumbnail_uri,
+                    availability=availability,
+                    preview_title=file.preview_title,
+                    preview_thumbnail_media_type=file.preview_thumbnail_media_type,
+                    preview_thumbnail_width=file.preview_thumbnail_width,
+                    preview_thumbnail_height=file.preview_thumbnail_height,
+                    preview_generated_at=file.preview_generated_at,
+                )
+            )
+
+            if availability != "available" or model_file_service is None:
+                continue
+
+            download_result = await exchange_file_service.resolve_attachment_for_agent(
                 uri=uri,
                 agent_id=agent_id,
                 user_id=user_id,
             )
-        )
-        if isinstance(metadata_result, Failure):
-            logger.warning(
-                "Failed to resolve exchange attachment in agent namespace",
-                extra={"uri": uri, "session_id": session_id, "agent_id": agent_id},
-            )
-            continue
-
-        file = metadata_result.value
-        availability: Literal["available", "expired", "unavailable"] = (
-            "expired" if file.status == ExchangeFileStatus.EXPIRED else "available"
-        )
-        text_preview = _attachment_text_preview(file, availability=availability)
-        attachments.append(
-            RuntimeAttachment(
-                attachment_id=file.id,
-                uri=file.uri,
-                media_type=file.media_type,
-                size=file.size_bytes,
-                name=file.filename,
-                text_preview=text_preview,
-                preview_thumbnail_uri=file.preview_thumbnail_uri,
-                availability=availability,
-                preview_title=file.preview_title,
-                preview_thumbnail_media_type=file.preview_thumbnail_media_type,
-                preview_thumbnail_width=file.preview_thumbnail_width,
-                preview_thumbnail_height=file.preview_thumbnail_height,
-                preview_generated_at=file.preview_generated_at,
-            )
-        )
-
-        if availability != "available" or model_file_service is None:
-            continue
-
-        download_result = await exchange_file_service.resolve_attachment_for_agent(
-            uri=uri,
-            agent_id=agent_id,
-            user_id=user_id,
-        )
-        if isinstance(download_result, Failure):
-            logger.warning(
-                "Failed to download exchange attachment for user input FilePart",
-                extra={
-                    "uri": uri,
-                    "session_id": session_id,
-                    "agent_id": agent_id,
-                    "error": download_result.error.__class__.__name__,
-                },
-            )
-            continue
-        download = download_result.value
-        model_file_result = await model_file_service.create_for_agent_pending_input(
-            agent_id=agent_id,
-            session_id=session_id,
-            user_id=user_id,
-            filename=download.file.filename,
-            media_type=download.file.media_type,
-            body=download.body,
-            metadata={
-                "source_kind": "user_upload",
-                "source_attachment_id": download.file.id,
-                "source_attachment_uri": download.file.uri,
-            },
-        )
-        if isinstance(model_file_result, Failure):
-            if isinstance(model_file_result.error, ModelFileOversized):
-                reason = model_file_size_limit_message(model_file_result.error)
-            elif isinstance(model_file_result.error, ModelFileInvalidImage):
-                reason = "Uploaded image could not be normalized for model input."
-            else:
-                reason = model_file_result.error.__class__.__name__
-            logger.warning(
-                "Failed to create ModelFile for user input attachment",
-                extra={
-                    "uri": uri,
-                    "session_id": session_id,
-                    "agent_id": agent_id,
-                    "reason": reason,
-                },
-            )
-            continue
-        file_parts.append(
-            file_output_part_from_model_file(
-                model_file_result.value,
+            if isinstance(download_result, Failure):
+                logger.warning(
+                    "Failed to download exchange attachment for user input FilePart",
+                    extra={
+                        "uri": uri,
+                        "session_id": session_id,
+                        "agent_id": agent_id,
+                        "error": download_result.error.__class__.__name__,
+                    },
+                )
+                continue
+            download = download_result.value
+            model_file_result = await model_file_service.create_for_agent_pending_input(
+                agent_id=agent_id,
+                session_id=session_id,
+                user_id=user_id,
+                filename=download.file.filename,
+                media_type=download.file.media_type,
+                body=download.body,
                 metadata={
                     "source_kind": "user_upload",
                     "source_attachment_id": download.file.id,
                     "source_attachment_uri": download.file.uri,
                 },
             )
+            if isinstance(model_file_result, Failure):
+                if isinstance(model_file_result.error, ModelFileOversized):
+                    reason = model_file_size_limit_message(model_file_result.error)
+                elif isinstance(model_file_result.error, ModelFileInvalidImage):
+                    reason = "Uploaded image could not be normalized for model input."
+                else:
+                    reason = model_file_result.error.__class__.__name__
+                logger.warning(
+                    "Failed to create ModelFile for user input attachment",
+                    extra={
+                        "uri": uri,
+                        "session_id": session_id,
+                        "agent_id": agent_id,
+                        "reason": reason,
+                    },
+                )
+                continue
+            model_file = model_file_result.value
+            created_model_file_ids.append(model_file.id)
+            file_parts.append(
+                file_output_part_from_model_file(
+                    model_file,
+                    metadata={
+                        "source_kind": "user_upload",
+                        "source_attachment_id": download.file.id,
+                        "source_attachment_uri": download.file.uri,
+                    },
+                )
+            )
+    except asyncio.CancelledError as exc:
+        if OWNERSHIP_LOST_CANCEL_MESSAGE in exc.args:
+            raise
+        await _discard_materialized_model_files(
+            model_file_service,
+            agent_id=agent_id,
+            session_id=session_id,
+            model_file_ids=created_model_file_ids,
         )
+        raise
+    except Exception:
+        await _discard_materialized_model_files(
+            model_file_service,
+            agent_id=agent_id,
+            session_id=session_id,
+            model_file_ids=created_model_file_ids,
+        )
+        raise
 
     return MaterializedUserInputAttachments(
         attachments=attachments,
         file_parts=file_parts,
     )
+
+
+async def _discard_materialized_model_files(
+    model_file_service: ModelFileService | None,
+    *,
+    agent_id: str,
+    session_id: str,
+    model_file_ids: list[str],
+) -> None:
+    """Compensate files created before attachment materialization aborted."""
+    if model_file_service is None or not model_file_ids:
+        return
+    try:
+        await model_file_service.discard_unreferenced(
+            agent_id=agent_id,
+            session_id=session_id,
+            model_file_ids=model_file_ids,
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.exception(
+            "Failed to discard ModelFiles after attachment materialization aborted",
+            extra={
+                "agent_id": agent_id,
+                "session_id": session_id,
+                "model_file_ids": model_file_ids,
+            },
+        )
 
 
 def _attachment_text_preview(
@@ -867,6 +925,36 @@ async def process_exchange_file_attachments(
 # ---------------------------------------------------------------------------
 
 
+@dataclasses.dataclass(frozen=True)
+class _RegisteredToolkitCandidate:
+    """DB-backed Toolkit configuration detached from its read session."""
+
+    provider: ToolkitProvider[Any]
+    toolkit_id: str
+    toolkit_type: str
+    toolkit: ToolkitConfig
+
+
+@dataclasses.dataclass(frozen=True)
+class _ResolvedToolkitCandidate:
+    """Resolved Toolkit plus the execution modes where it may be bound."""
+
+    toolkit: Toolkit[Any]
+    slug: str
+    use_prefix: bool
+    toolkit_type: str | None
+    execution_modes: frozenset[ToolkitExecutionMode]
+
+    def to_binding(self) -> ToolkitBinding:
+        """Build the Engine-facing Toolkit binding."""
+        return ToolkitBinding(
+            toolkit=self.toolkit,
+            slug=self.slug,
+            use_prefix=self.use_prefix,
+            toolkit_type=self.toolkit_type,
+        )
+
+
 async def resolve_agent_tools(
     agent_id: str,
     context: ToolkitContext,
@@ -875,12 +963,12 @@ async def resolve_agent_tools(
     toolkit_registry: dict[str, ToolkitProvider[Any]],
     agent_toolkit_repository: AgentToolkitRepository,
     toolkit_repository: ToolkitRepository,
-    session: AsyncSession,
+    session_manager: SessionManager[AsyncSession],
     web_url: str,
     oauth_secret_key: str,
     mcp_proxy_url: str | None,
     runtime_domain_config: RuntimeDomainConfig,
-    workspace_handle: str = "",
+    workspace_handle: str,
     builtin_toolkit_provider: BuiltinToolkitProvider | None = None,
     claude_rules_toolkit_provider: ClaudeRulesToolkitProvider | None = None,
     todo_toolkit_provider: TodoToolkitProvider | None = None,
@@ -898,7 +986,7 @@ async def resolve_agent_tools(
     :param toolkit_registry: toolkit_type to ToolkitProvider instance mapping
     :param agent_toolkit_repository: AgentToolkit repository
     :param toolkit_repository: Toolkit repository
-    :param session: DB session
+    :param session_manager: DB session factory used only for configuration snapshots
     :param web_url: Frontend URL for OAuth redirect_uri construction
     :param oauth_secret_key: OAuth HMAC signing key
     :param runtime_domain_config: Runtime domain allow/deny policy. Parent
@@ -915,80 +1003,76 @@ async def resolve_agent_tools(
         Memory tools can be exposed without runtime.
     :return: List of (Toolkit, slug) tuples
     """
-    agent_toolkits = await agent_toolkit_repository.list_by_agent(session, agent_id)
-    # (provider, resolved, config, slug, prompt, use_prefix, toolkit_type, modes)
-    # toolkit_type is populated only for DB-registered toolkits; auto-binding is None
-    pending: list[
-        tuple[
-            ToolkitProvider[Any],
-            Toolkit[Any],
-            Any,
-            str,
-            str | None,
-            bool,
-            str | None,
-            frozenset[ToolkitExecutionMode],
-        ]
-    ] = []
+    registered_toolkits: list[_RegisteredToolkitCandidate] = []
+    async with session_manager() as session:
+        agent_toolkits = await agent_toolkit_repository.list_by_agent(session, agent_id)
+        for agent_toolkit in agent_toolkits:
+            provider = toolkit_registry.get(agent_toolkit.toolkit_type)
+            if provider is None:
+                logger.warning(
+                    "Unknown toolkit_type, skipping",
+                    extra={
+                        "toolkit_type": agent_toolkit.toolkit_type,
+                        "agent_id": agent_id,
+                    },
+                )
+                continue
+
+            toolkit = await toolkit_repository.get_by_id(
+                session,
+                agent_toolkit.toolkit_id,
+            )
+            if toolkit is None or not toolkit.enabled:
+                continue
+            registered_toolkits.append(
+                _RegisteredToolkitCandidate(
+                    provider=provider,
+                    toolkit_id=agent_toolkit.toolkit_id,
+                    toolkit_type=agent_toolkit.toolkit_type,
+                    toolkit=toolkit,
+                )
+            )
+
+    pending: list[_ResolvedToolkitCandidate] = []
 
     # DB-registered toolkit (registry-based, prefix applied)
-    for at in agent_toolkits:
-        provider = toolkit_registry.get(at.toolkit_type)
-        if provider is None:
-            logger.warning(
-                "Unknown toolkit_type, skipping",
-                extra={
-                    "toolkit_type": at.toolkit_type,
-                    "agent_id": agent_id,
-                },
-            )
-            continue
-
-        toolkit = await toolkit_repository.get_by_id(session, at.toolkit_id)
-        if toolkit is None or not toolkit.enabled:
-            continue
-
+    for candidate in registered_toolkits:
+        provider = candidate.provider
+        toolkit = candidate.toolkit
         validated_config = type(provider).validate_config(toolkit.config)
         resolve_ctx = ResolveContext(
-            toolkit_id=at.toolkit_id,
+            toolkit_id=candidate.toolkit_id,
             toolkit_name=toolkit.name,
             credentials_json=toolkit.credentials,
             agent_id=context.agent_id,
             session_id=context.session_id,
             user_id=context.user_id,
-            session=session,
             web_url=web_url,
             oauth_secret_key=oauth_secret_key,
             workspace_id=context.workspace_id,
             workspace_handle=workspace_handle,
             mcp_proxy_url=mcp_proxy_url,
         )
-        try:
-            resolved = await _resolve_toolkit_with_logging(
-                agent_id=agent_id,
-                context=context,
-                source="registered",
-                slug=toolkit.slug,
-                provider=provider,
-                toolkit_id=at.toolkit_id,
-                toolkit_type=at.toolkit_type,
-                toolkit_name=toolkit.name,
-                resolve=provider.resolve(validated_config, resolve_ctx),
-            )
-            resolved.display_name = provider.name
-        except Exception:
-            continue
+        resolved = await _resolve_toolkit_with_slow_log(
+            agent_id=agent_id,
+            context=context,
+            source="registered",
+            slug=toolkit.slug,
+            provider=provider,
+            toolkit_id=candidate.toolkit_id,
+            toolkit_type=candidate.toolkit_type,
+            toolkit_name=toolkit.name,
+            resolve=provider.resolve(validated_config, resolve_ctx),
+        )
+        resolved.display_name = provider.name
 
         pending.append(
-            (
-                provider,
-                resolved,
-                validated_config,
-                toolkit.slug,
-                toolkit.prompt,
-                True,
-                at.toolkit_type,
-                _ROOT_AND_SUBAGENT_EXECUTION_MODES,
+            _ResolvedToolkitCandidate(
+                toolkit=resolved,
+                slug=toolkit.slug,
+                use_prefix=True,
+                toolkit_type=candidate.toolkit_type,
+                execution_modes=_ROOT_AND_SUBAGENT_EXECUTION_MODES,
             )
         )
 
@@ -1014,13 +1098,12 @@ async def resolve_agent_tools(
                     agent_id=context.agent_id,
                     session_id=context.session_id,
                     user_id=context.user_id,
-                    session=session,
                     web_url=web_url,
                     oauth_secret_key=oauth_secret_key,
                     workspace_id=context.workspace_id,
                     workspace_handle=workspace_handle,
                 )
-                memory_read_resolved = await _resolve_toolkit_with_logging(
+                memory_read_resolved = await _resolve_toolkit_with_slow_log(
                     agent_id=agent_id,
                     context=context,
                     source="auto",
@@ -1036,15 +1119,12 @@ async def resolve_agent_tools(
                     memory_read_resolved.set_agent_id(agent_id)
                     memory_read_resolved.set_session_id(context.session_id)
                 pending.append(
-                    (
-                        builtin_toolkit_provider,
-                        memory_read_resolved,
-                        builtin_config,
-                        "memory_read",
-                        None,
-                        False,
-                        None,
-                        memory_read_modes,
+                    _ResolvedToolkitCandidate(
+                        toolkit=memory_read_resolved,
+                        slug="memory_read",
+                        use_prefix=False,
+                        toolkit_type=None,
+                        execution_modes=memory_read_modes,
                     )
                 )
 
@@ -1057,13 +1137,12 @@ async def resolve_agent_tools(
                     agent_id=context.agent_id,
                     session_id=context.session_id,
                     user_id=context.user_id,
-                    session=session,
                     web_url=web_url,
                     oauth_secret_key=oauth_secret_key,
                     workspace_id=context.workspace_id,
                     workspace_handle=workspace_handle,
                 )
-                memory_write_resolved = await _resolve_toolkit_with_logging(
+                memory_write_resolved = await _resolve_toolkit_with_slow_log(
                     agent_id=agent_id,
                     context=context,
                     source="auto",
@@ -1079,15 +1158,12 @@ async def resolve_agent_tools(
                     memory_write_resolved.set_agent_id(agent_id)
                     memory_write_resolved.set_session_id(context.session_id)
                 pending.append(
-                    (
-                        builtin_toolkit_provider,
-                        memory_write_resolved,
-                        builtin_config,
-                        "memory_write",
-                        None,
-                        False,
-                        None,
-                        memory_write_modes,
+                    _ResolvedToolkitCandidate(
+                        toolkit=memory_write_resolved,
+                        slug="memory_write",
+                        use_prefix=False,
+                        toolkit_type=None,
+                        execution_modes=memory_write_modes,
                     )
                 )
 
@@ -1102,13 +1178,12 @@ async def resolve_agent_tools(
                     agent_id=context.agent_id,
                     session_id=context.session_id,
                     user_id=context.user_id,
-                    session=session,
                     web_url=web_url,
                     oauth_secret_key=oauth_secret_key,
                     workspace_id=context.workspace_id,
                     workspace_handle=workspace_handle,
                 )
-                runtime_resolved = await _resolve_toolkit_with_logging(
+                runtime_resolved = await _resolve_toolkit_with_slow_log(
                     agent_id=agent_id,
                     context=context,
                     source="auto",
@@ -1132,21 +1207,16 @@ async def resolve_agent_tools(
                     # structure, credential injection into runtime is limited to
                     # DB-registered toolkits such as EnvVarToolkit, so including
                     # peers up to here is sufficient.
-                    peer_toolkits = [
-                        resolved for _, resolved, _, _, _, _, _, _ in pending
-                    ]
+                    peer_toolkits = [candidate.toolkit for candidate in pending]
                     runtime_resolved.set_peer_toolkits(peer_toolkits)
 
                     pending.append(
-                        (
-                            builtin_toolkit_provider,
-                            runtime_resolved,
-                            builtin_config,
-                            "runtime",
-                            None,
-                            False,
-                            None,
-                            runtime_modes,
+                        _ResolvedToolkitCandidate(
+                            toolkit=runtime_resolved,
+                            slug="runtime",
+                            use_prefix=False,
+                            toolkit_type=None,
+                            execution_modes=runtime_modes,
                         )
                     )
 
@@ -1161,13 +1231,12 @@ async def resolve_agent_tools(
                         agent_id=context.agent_id,
                         session_id=context.session_id,
                         user_id=context.user_id,
-                        session=session,
                         web_url=web_url,
                         oauth_secret_key=oauth_secret_key,
                         workspace_id=context.workspace_id,
                         workspace_handle=workspace_handle,
                     )
-                    claude_rules_resolved = await _resolve_toolkit_with_logging(
+                    claude_rules_resolved = await _resolve_toolkit_with_slow_log(
                         agent_id=agent_id,
                         context=context,
                         source="auto",
@@ -1186,15 +1255,12 @@ async def resolve_agent_tools(
                             instruction_context_store
                         )
                     pending.append(
-                        (
-                            claude_rules_toolkit_provider,
-                            claude_rules_resolved,
-                            claude_rules_config,
-                            "claude_rules",
-                            None,
-                            False,
-                            None,
-                            claude_rules_modes,
+                        _ResolvedToolkitCandidate(
+                            toolkit=claude_rules_resolved,
+                            slug="claude_rules",
+                            use_prefix=False,
+                            toolkit_type=None,
+                            execution_modes=claude_rules_modes,
                         )
                     )
 
@@ -1212,13 +1278,12 @@ async def resolve_agent_tools(
             agent_id=context.agent_id,
             session_id=context.session_id,
             user_id=context.user_id,
-            session=session,
             web_url=web_url,
             oauth_secret_key=oauth_secret_key,
             workspace_id=context.workspace_id,
             workspace_handle=workspace_handle,
         )
-        subagent_resolved = await _resolve_toolkit_with_logging(
+        subagent_resolved = await _resolve_toolkit_with_slow_log(
             agent_id=agent_id,
             context=context,
             source="auto",
@@ -1231,15 +1296,12 @@ async def resolve_agent_tools(
             ),
         )
         pending.append(
-            (
-                subagent_toolkit_provider,
-                subagent_resolved,
-                subagent_config,
-                "subagent",
-                None,
-                False,
-                None,
-                subagent_modes,
+            _ResolvedToolkitCandidate(
+                toolkit=subagent_resolved,
+                slug="subagent",
+                use_prefix=False,
+                toolkit_type=None,
+                execution_modes=subagent_modes,
             )
         )
 
@@ -1257,13 +1319,12 @@ async def resolve_agent_tools(
             agent_id=context.agent_id,
             session_id=context.session_id,
             user_id=context.user_id,
-            session=session,
             web_url=web_url,
             oauth_secret_key=oauth_secret_key,
             workspace_id=context.workspace_id,
             workspace_handle=workspace_handle,
         )
-        goal_resolved = await _resolve_toolkit_with_logging(
+        goal_resolved = await _resolve_toolkit_with_slow_log(
             agent_id=agent_id,
             context=context,
             source="auto",
@@ -1279,15 +1340,12 @@ async def resolve_agent_tools(
             goal_resolved.set_agent_id(agent_id)
             goal_resolved.set_session_id(context.session_id)
         pending.append(
-            (
-                goal_toolkit_provider,
-                goal_resolved,
-                goal_config,
-                "goal",
-                None,
-                False,
-                None,
-                goal_modes,
+            _ResolvedToolkitCandidate(
+                toolkit=goal_resolved,
+                slug="goal",
+                use_prefix=False,
+                toolkit_type=None,
+                execution_modes=goal_modes,
             )
         )
 
@@ -1305,13 +1363,12 @@ async def resolve_agent_tools(
             agent_id=context.agent_id,
             session_id=context.session_id,
             user_id=context.user_id,
-            session=session,
             web_url=web_url,
             oauth_secret_key=oauth_secret_key,
             workspace_id=context.workspace_id,
             workspace_handle=workspace_handle,
         )
-        skill_resolved = await _resolve_toolkit_with_logging(
+        skill_resolved = await _resolve_toolkit_with_slow_log(
             agent_id=agent_id,
             context=context,
             source="auto",
@@ -1327,15 +1384,12 @@ async def resolve_agent_tools(
             skill_resolved.set_agent_id(agent_id)
             skill_resolved.set_session_id(context.session_id)
         pending.append(
-            (
-                skill_toolkit_provider,
-                skill_resolved,
-                skill_config,
-                "skill",
-                None,
-                False,
-                None,
-                skill_modes,
+            _ResolvedToolkitCandidate(
+                toolkit=skill_resolved,
+                slug="skill",
+                use_prefix=False,
+                toolkit_type=None,
+                execution_modes=skill_modes,
             )
         )
 
@@ -1353,13 +1407,12 @@ async def resolve_agent_tools(
             agent_id=context.agent_id,
             session_id=context.session_id,
             user_id=context.user_id,
-            session=session,
             web_url=web_url,
             oauth_secret_key=oauth_secret_key,
             workspace_id=context.workspace_id,
             workspace_handle=workspace_handle,
         )
-        todo_resolved = await _resolve_toolkit_with_logging(
+        todo_resolved = await _resolve_toolkit_with_slow_log(
             agent_id=agent_id,
             context=context,
             source="auto",
@@ -1375,27 +1428,19 @@ async def resolve_agent_tools(
             todo_resolved.set_agent_id(agent_id)
             todo_resolved.set_session_id(context.session_id)
         pending.append(
-            (
-                todo_toolkit_provider,
-                todo_resolved,
-                todo_config,
-                "todo",
-                None,
-                False,
-                None,
-                todo_modes,
+            _ResolvedToolkitCandidate(
+                toolkit=todo_resolved,
+                slug="todo",
+                use_prefix=False,
+                toolkit_type=None,
+                execution_modes=todo_modes,
             )
         )
 
-    result: list[ToolkitBinding] = [
-        ToolkitBinding(
-            toolkit=_resolved,
-            slug=_slug,
-            use_prefix=_pfx,
-            toolkit_type=_ttype,
-        )
-        for _prov, _resolved, _cfg, _slug, _prompt, _pfx, _ttype, _modes in pending
-        if _allows_execution_mode(_modes, execution_mode)
+    result = [
+        candidate.to_binding()
+        for candidate in pending
+        if _allows_execution_mode(candidate.execution_modes, execution_mode)
     ]
 
     return result

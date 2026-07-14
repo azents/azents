@@ -23,7 +23,10 @@ from azents.engine.tools.skill import SkillStateStore, SkillToolkitProvider
 from azents.engine.tools.todo import TodoStateStore, TodoToolkitProvider
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
+from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.mcp_oauth_connection import MCPOAuthConnectionRepository
+from azents.repos.toolkit_state import ToolkitStateRepository
 from azents.services.artifact import ArtifactService
 from azents.testing.runtime_hooks import TestenvRuntimeHookQAProvider
 
@@ -35,6 +38,13 @@ def get_toolkit_registry(
     ],
     config: Annotated[Config, Depends(get_config)],
     artifact_service: Annotated[ArtifactService, Depends(ArtifactService)],
+    agent_run_repository: Annotated[AgentRunRepository, Depends(AgentRunRepository)],
+    agent_session_repository: Annotated[
+        AgentSessionRepository, Depends(AgentSessionRepository)
+    ],
+    toolkit_state_repository: Annotated[
+        ToolkitStateRepository, Depends(ToolkitStateRepository)
+    ],
 ) -> dict[str, ToolkitProvider[Any]]:
     """Create the Toolkit registry.
 
@@ -57,6 +67,9 @@ def get_toolkit_registry(
                 github_config.platform_private_key if github_config else None
             ),
             session_manager=session_manager,
+            agent_run_repository=agent_run_repository,
+            agent_session_repository=agent_session_repository,
+            toolkit_state_repository=toolkit_state_repository,
         ),
         "notion": NotionToolkitProvider(
             connection_repo=MCPOAuthConnectionRepository(cipher=cipher),
@@ -89,27 +102,71 @@ def get_todo_toolkit_provider(
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
     ],
+    agent_run_repository: Annotated[AgentRunRepository, Depends(AgentRunRepository)],
+    agent_session_repository: Annotated[
+        AgentSessionRepository, Depends(AgentSessionRepository)
+    ],
+    toolkit_state_repository: Annotated[
+        ToolkitStateRepository, Depends(ToolkitStateRepository)
+    ],
 ) -> TodoToolkitProvider:
     """TodoToolkitProvider dependency."""
-    return TodoToolkitProvider(store=TodoStateStore(session_manager=session_manager))
+    return TodoToolkitProvider(
+        store=TodoStateStore(
+            session_manager=session_manager,
+            agent_run_repository=agent_run_repository,
+            agent_session_repository=agent_session_repository,
+            toolkit_state_repository=toolkit_state_repository,
+        )
+    )
 
 
 def get_goal_toolkit_provider(
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
     ],
+    agent_run_repository: Annotated[AgentRunRepository, Depends(AgentRunRepository)],
+    agent_session_repository: Annotated[
+        AgentSessionRepository, Depends(AgentSessionRepository)
+    ],
+    event_transcript_repository: Annotated[
+        EventTranscriptRepository, Depends(EventTranscriptRepository)
+    ],
+    toolkit_state_repository: Annotated[
+        ToolkitStateRepository, Depends(ToolkitStateRepository)
+    ],
 ) -> GoalToolkitProvider:
     """GoalToolkitProvider dependency."""
-    return GoalToolkitProvider(store=GoalStateStore(session_manager=session_manager))
+    return GoalToolkitProvider(
+        store=GoalStateStore(
+            session_manager=session_manager,
+            agent_run_repository=agent_run_repository,
+            agent_session_repository=agent_session_repository,
+            event_transcript_repository=event_transcript_repository,
+            toolkit_state_repository=toolkit_state_repository,
+        )
+    )
 
 
 def get_skill_state_store(
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
     ],
+    agent_run_repository: Annotated[AgentRunRepository, Depends(AgentRunRepository)],
+    agent_session_repository: Annotated[
+        AgentSessionRepository, Depends(AgentSessionRepository)
+    ],
+    toolkit_state_repository: Annotated[
+        ToolkitStateRepository, Depends(ToolkitStateRepository)
+    ],
 ) -> SkillStateStore:
     """SkillStateStore dependency."""
-    return SkillStateStore(session_manager=session_manager)
+    return SkillStateStore(
+        session_manager=session_manager,
+        agent_run_repository=agent_run_repository,
+        agent_session_repository=agent_session_repository,
+        toolkit_state_repository=toolkit_state_repository,
+    )
 
 
 def get_skill_toolkit_provider(

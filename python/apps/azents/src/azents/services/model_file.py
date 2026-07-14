@@ -1,7 +1,10 @@
 """ModelFile service."""
 
+import asyncio
 import dataclasses
+import datetime
 import hashlib
+import logging
 import re
 from io import BytesIO
 from typing import Annotated, Literal
@@ -9,6 +12,7 @@ from typing import Annotated, Literal
 from azcommon.infra.s3.service import S3Service
 from azcommon.result import Failure, Result, Success
 from azcommon.types import JSONValue
+from azcommon.uuid import uuid7
 from fastapi import Depends
 from PIL import Image, ImageOps, UnidentifiedImageError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,9 +26,15 @@ from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.model_file import ModelFileRepository
+from azents.repos.model_file import ModelFileRepository, model_file_storage_key
 from azents.repos.model_file.data import ModelFile, ModelFileCreate
 from azents.repos.workspace_user import WorkspaceUserRepository
+from azents.services.upload_commit import reconcile_uploaded_metadata
+from azents.utils.task_recovery import (
+    compensate_then_reraise,
+    current_task_is_cancelling,
+    run_bounded_cancellation_safe,
+)
 
 _IMAGE_MEDIA_PREFIX = "image/"
 _TEXT_MEDIA_PREFIX = "text/"
@@ -33,6 +43,8 @@ _MODEL_IMAGE_NORMALIZED_FORMAT = "jpeg"
 _ORIGINAL_NORMALIZED_FORMAT = "original"
 _IMAGE_JPEG_QUALITY = 85
 _NON_IMAGE_MAX_BYTES = 1_000_000
+
+logger = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -84,6 +96,15 @@ class NormalizedModelFileBody:
     media_type: str
     kind: Literal["image", "document", "text", "binary"]
     normalized_format: str
+
+
+@dataclasses.dataclass(frozen=True)
+class _ModelFileCreationScope:
+    """Authorized immutable namespace for one ModelFile creation."""
+
+    workspace_id: str
+    session_id: str
+    agent_id: str
 
 
 ModelFileCreateError = (
@@ -144,55 +165,21 @@ class ModelFileService:
         normalized = normalize_model_file_body(media_type=media_type, body=body)
         if isinstance(normalized, Failure):
             return Failure(normalized.error)
-
-        uploaded_object_key: str | None = None
-        succeeded = False
-        try:
-            created_result: Success[ModelFile] | None = None
-            async with self.session_manager() as session:
-                agent_session = await self.agent_session_repository.get_by_id(
-                    session,
-                    session_id,
-                )
-                if agent_session is None:
-                    return Failure(ModelFileSessionNotFound())
-                if not await self._has_workspace_access(
-                    session,
-                    workspace_id=agent_session.workspace_id,
-                    user_id=user_id,
-                ):
-                    return Failure(ModelFileAccessDenied())
-
-                normalized_body = normalized.value
-                created = await self.model_file_repository.create(
-                    session,
-                    ModelFileCreate(
-                        workspace_id=agent_session.workspace_id,
-                        session_id=session_id,
-                        agent_id=agent_session.agent_id,
-                        name=_sanitize_display_filename(filename),
-                        media_type=normalized_body.media_type,
-                        kind=normalized_body.kind,
-                        size_bytes=len(normalized_body.body),
-                        created_run_index=created_run_index,
-                        normalized_format=normalized_body.normalized_format,
-                        sha256=hashlib.sha256(normalized_body.body).hexdigest(),
-                        metadata=_json_metadata(metadata),
-                    ),
-                )
-                await self.s3_service.upload(
-                    bucket=self.config.workspace_s3.bucket,
-                    key=created.storage_key,
-                    body=normalized_body.body,
-                    content_type=normalized_body.media_type,
-                )
-                uploaded_object_key = created.storage_key
-                created_result = Success(created)
-            succeeded = True
-            return created_result
-        finally:
-            if not succeeded:
-                await self._cleanup_uploaded_object(uploaded_object_key)
+        scope_result = await self._resolve_creation_scope(
+            session_id=session_id,
+            user_id=user_id,
+            expected_agent_id=None,
+        )
+        if isinstance(scope_result, Failure):
+            return Failure(scope_result.error)
+        return await self._store_normalized_model_file(
+            scope=scope_result.value,
+            user_id=user_id,
+            created_run_index=created_run_index,
+            filename=filename,
+            normalized_body=normalized.value,
+            metadata=metadata,
+        )
 
     async def create_for_pending_input(
         self,
@@ -205,18 +192,22 @@ class ModelFileService:
         metadata: dict[str, object] | None = None,
     ) -> Result[ModelFile, ModelFileCreateError]:
         """Create ModelFile for user input that has not started yet."""
-        async with self.session_manager() as session:
-            next_run_index = await self.agent_run_repository.next_run_index(
-                session,
-                session_id=session_id,
-            )
-        return await self.create(
+        normalized = normalize_model_file_body(media_type=media_type, body=body)
+        if isinstance(normalized, Failure):
+            return Failure(normalized.error)
+        scope_result = await self._resolve_creation_scope(
             session_id=session_id,
             user_id=user_id,
-            created_run_index=next_run_index,
+            expected_agent_id=None,
+        )
+        if isinstance(scope_result, Failure):
+            return Failure(scope_result.error)
+        return await self._store_normalized_model_file(
+            scope=scope_result.value,
+            user_id=user_id,
+            created_run_index=None,
             filename=filename,
-            media_type=media_type,
-            body=body,
+            normalized_body=normalized.value,
             metadata=metadata,
         )
 
@@ -235,56 +226,289 @@ class ModelFileService:
         normalized = normalize_model_file_body(media_type=media_type, body=body)
         if isinstance(normalized, Failure):
             return Failure(normalized.error)
+        scope_result = await self._resolve_creation_scope(
+            session_id=session_id,
+            user_id=user_id,
+            expected_agent_id=agent_id,
+        )
+        if isinstance(scope_result, Failure):
+            return Failure(scope_result.error)
+        return await self._store_normalized_model_file(
+            scope=scope_result.value,
+            user_id=user_id,
+            created_run_index=None,
+            filename=filename,
+            normalized_body=normalized.value,
+            metadata=metadata,
+        )
 
-        uploaded_object_key: str | None = None
-        succeeded = False
-        try:
-            created_result: Success[ModelFile] | None = None
+    async def discard_unreferenced(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        model_file_ids: list[str],
+    ) -> None:
+        """Delete newly created ModelFiles that never reached a durable event."""
+        if not model_file_ids:
+            return
+        candidate_ids: list[str] = []
+        async with self.session_manager() as session:
+            for model_file_id in dict.fromkeys(model_file_ids):
+                model_file = await self.model_file_repository.get_by_id_for_agent(
+                    session,
+                    model_file_id=model_file_id,
+                    agent_id=agent_id,
+                )
+                if model_file is None or model_file.session_id != session_id:
+                    continue
+                if model_file.status is not ModelFileStatus.AVAILABLE:
+                    continue
+                candidate_ids.append(model_file.id)
+            deleted = await self.model_file_repository.mark_deleted_if_unpinned(
+                session,
+                model_file_ids=candidate_ids,
+                deleted_at=datetime.datetime.now(datetime.UTC),
+            )
+        for model_file in deleted:
+            try:
+                await self.s3_service.delete(
+                    bucket=self.config.workspace_s3.bucket,
+                    key=model_file.storage_key,
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to discard unreferenced ModelFile blob",
+                    extra={
+                        "model_file_id": model_file.id,
+                        "session_id": session_id,
+                        "agent_id": agent_id,
+                    },
+                )
+                continue
             async with self.session_manager() as session:
-                agent = await self.agent_repository.get_by_id(session, agent_id)
-                if agent is None:
-                    return Failure(ModelFileSessionNotFound())
-                if not await self._has_workspace_access(
+                await self.model_file_repository.mark_blob_deleted(
                     session,
-                    workspace_id=agent.workspace_id,
-                    user_id=user_id,
-                ):
-                    return Failure(ModelFileAccessDenied())
-                next_run_index = await self.agent_run_repository.next_run_index(
-                    session,
-                    session_id=session_id,
+                    model_file_id=model_file.id,
+                    blob_deleted_at=datetime.datetime.now(datetime.UTC),
                 )
 
-                normalized_body = normalized.value
-                created = await self.model_file_repository.create(
+    async def _resolve_creation_scope(
+        self,
+        *,
+        session_id: str,
+        user_id: str,
+        expected_agent_id: str | None,
+    ) -> Result[_ModelFileCreationScope, ModelFileCreateError]:
+        """Authorize one creation scope in a short DB session."""
+        async with self.session_manager() as session:
+            return await self._resolve_creation_scope_in_session(
+                session,
+                session_id=session_id,
+                user_id=user_id,
+                expected_agent_id=expected_agent_id,
+            )
+
+    async def _resolve_creation_scope_in_session(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        user_id: str,
+        expected_agent_id: str | None,
+        lock_membership: bool = False,
+    ) -> Result[_ModelFileCreationScope, ModelFileCreateError]:
+        """Authorize one creation scope using the caller's short DB session."""
+        agent_session = await self.agent_session_repository.get_by_id(
+            session,
+            session_id,
+        )
+        if agent_session is None:
+            return Failure(ModelFileSessionNotFound())
+        if (
+            expected_agent_id is not None
+            and agent_session.agent_id != expected_agent_id
+        ):
+            return Failure(ModelFileSessionNotFound())
+        if expected_agent_id is not None:
+            agent = await self.agent_repository.get_by_id(session, expected_agent_id)
+            if agent is None or agent.workspace_id != agent_session.workspace_id:
+                return Failure(ModelFileSessionNotFound())
+        if not await self._has_workspace_access(
+            session,
+            workspace_id=agent_session.workspace_id,
+            user_id=user_id,
+            lock_authority=lock_membership,
+        ):
+            return Failure(ModelFileAccessDenied())
+        return Success(
+            _ModelFileCreationScope(
+                workspace_id=agent_session.workspace_id,
+                session_id=agent_session.id,
+                agent_id=agent_session.agent_id,
+            )
+        )
+
+    async def _store_normalized_model_file(
+        self,
+        *,
+        scope: _ModelFileCreationScope,
+        user_id: str,
+        created_run_index: int | None,
+        filename: str | None,
+        normalized_body: NormalizedModelFileBody,
+        metadata: dict[str, object] | None,
+    ) -> Result[ModelFile, ModelFileCreateError]:
+        """Upload without a DB session, then commit authorized metadata."""
+        model_file_id = uuid7().hex
+        object_key = model_file_storage_key(
+            workspace_id=scope.workspace_id,
+            session_id=scope.session_id,
+            model_file_id=model_file_id,
+        )
+        try:
+            await self.s3_service.upload(
+                bucket=self.config.workspace_s3.bucket,
+                key=object_key,
+                body=normalized_body.body,
+                content_type=normalized_body.media_type,
+            )
+        except (asyncio.CancelledError, Exception) as upload_error:
+            await compensate_then_reraise(
+                lambda: self._compensate_uploaded_object(object_key),
+                primary_error=upload_error,
+            )
+
+        create: ModelFileCreate | None = None
+        metadata_result: Result[ModelFile, ModelFileCreateError]
+        try:
+            async with self.session_manager() as session:
+                locked_session = await self.agent_session_repository.lock_by_id(
                     session,
-                    ModelFileCreate(
-                        workspace_id=agent.workspace_id,
-                        session_id=session_id,
-                        agent_id=agent.id,
-                        name=_sanitize_display_filename(filename),
-                        media_type=normalized_body.media_type,
-                        kind=normalized_body.kind,
-                        size_bytes=len(normalized_body.body),
-                        created_run_index=next_run_index,
-                        normalized_format=normalized_body.normalized_format,
-                        sha256=hashlib.sha256(normalized_body.body).hexdigest(),
-                        metadata=_json_metadata(metadata),
+                    scope.session_id,
+                )
+                if locked_session is None:
+                    metadata_result = Failure(ModelFileSessionNotFound())
+                else:
+                    refreshed_scope_result = (
+                        await self._resolve_creation_scope_in_session(
+                            session,
+                            session_id=scope.session_id,
+                            user_id=user_id,
+                            expected_agent_id=scope.agent_id,
+                            lock_membership=True,
+                        )
+                    )
+                    if isinstance(refreshed_scope_result, Failure):
+                        metadata_result = Failure(refreshed_scope_result.error)
+                    elif refreshed_scope_result.value != scope:
+                        metadata_result = Failure(ModelFileSessionNotFound())
+                    else:
+                        resolved_run_index = created_run_index
+                        if resolved_run_index is None:
+                            resolved_run_index = (
+                                await self.agent_run_repository.next_run_index(
+                                    session,
+                                    session_id=scope.session_id,
+                                )
+                            )
+                        create = ModelFileCreate(
+                            id=model_file_id,
+                            workspace_id=scope.workspace_id,
+                            session_id=scope.session_id,
+                            agent_id=scope.agent_id,
+                            name=_sanitize_display_filename(filename),
+                            media_type=normalized_body.media_type,
+                            kind=normalized_body.kind,
+                            size_bytes=len(normalized_body.body),
+                            created_run_index=resolved_run_index,
+                            normalized_format=normalized_body.normalized_format,
+                            sha256=hashlib.sha256(normalized_body.body).hexdigest(),
+                            metadata=_json_metadata(metadata),
+                        )
+                        created = await self.model_file_repository.create(
+                            session,
+                            create,
+                        )
+                        if not _model_file_matches_creation(
+                            created,
+                            create=create,
+                            object_key=object_key,
+                        ):
+                            raise RuntimeError(
+                                "ModelFile repository returned a mismatched "
+                                "storage identity"
+                            )
+                        metadata_result = Success(created)
+        except (asyncio.CancelledError, Exception) as commit_error:
+            if create is None:
+                await compensate_then_reraise(
+                    lambda: self._compensate_uploaded_object(object_key),
+                    primary_error=commit_error,
+                )
+            try:
+                reconciled = await reconcile_uploaded_metadata(
+                    lookup=lambda: self._get_model_file_by_id(model_file_id),
+                    matches_expected_identity=lambda model_file: (
+                        _model_file_matches_creation(
+                            model_file,
+                            create=create,
+                            object_key=object_key,
+                        )
+                    ),
+                    resource_kind="ModelFile",
+                    resource_id=model_file_id,
+                    compensate_if_absent=lambda: self._compensate_uploaded_object(
+                        object_key
                     ),
                 )
-                await self.s3_service.upload(
-                    bucket=self.config.workspace_s3.bucket,
-                    key=created.storage_key,
-                    body=normalized_body.body,
-                    content_type=normalized_body.media_type,
+            except asyncio.CancelledError as reconciliation_cancellation:
+                if (
+                    isinstance(commit_error, asyncio.CancelledError)
+                    or not current_task_is_cancelling()
+                ):
+                    raise commit_error from reconciliation_cancellation
+                raise
+            except Exception as reconciliation_error:
+                logger.exception(
+                    "Could not establish ModelFile metadata commit outcome; "
+                    "preserving uploaded object",
+                    extra={
+                        "model_file_id": model_file_id,
+                        "storage_key": object_key,
+                    },
                 )
-                uploaded_object_key = created.storage_key
-                created_result = Success(created)
-            succeeded = True
-            return created_result
-        finally:
-            if not succeeded:
-                await self._cleanup_uploaded_object(uploaded_object_key)
+                raise commit_error from reconciliation_error
+            if reconciled is None:
+                raise commit_error
+            if isinstance(commit_error, asyncio.CancelledError):
+                raise
+            logger.warning(
+                "Recovered ModelFile metadata after ambiguous commit response",
+                extra={"model_file_id": model_file_id, "storage_key": object_key},
+            )
+            return Success(reconciled)
+
+        if isinstance(metadata_result, Failure):
+            await self._compensate_uploaded_object(object_key)
+        return metadata_result
+
+    async def _get_model_file_by_id(self, model_file_id: str) -> ModelFile | None:
+        """Fetch one ModelFile in an independent short reconciliation scope."""
+        async with self.session_manager() as session:
+            return await self.model_file_repository.get_by_id(session, model_file_id)
+
+    async def _compensate_uploaded_object(self, object_key: str) -> None:
+        """Run bounded object compensation to completion across cancellation."""
+        try:
+            await run_bounded_cancellation_safe(
+                lambda: self._cleanup_uploaded_object(object_key)
+            )
+        except TimeoutError:
+            logger.error(
+                "Timed out cleaning up ModelFile object after create failure",
+                extra={"storage_key": object_key},
+            )
 
     async def download(
         self,
@@ -397,23 +621,66 @@ class ModelFileService:
         *,
         workspace_id: str,
         user_id: str,
+        lock_authority: bool = False,
     ) -> bool:
         """Check whether user is workspace member."""
-        workspace_user = await self.workspace_user_repository.get_by_workspace_and_user(
-            session,
-            workspace_id=workspace_id,
-            user_id=user_id,
-        )
+        if lock_authority:
+            workspace_user = (
+                await self.workspace_user_repository.lock_by_workspace_and_user(
+                    session,
+                    workspace_id,
+                    user_id,
+                )
+            )
+        else:
+            workspace_user = (
+                await self.workspace_user_repository.get_by_workspace_and_user(
+                    session,
+                    workspace_id=workspace_id,
+                    user_id=user_id,
+                )
+            )
         return workspace_user is not None
 
     async def _cleanup_uploaded_object(self, object_key: str | None) -> None:
         """Delete already uploaded object when metadata commit fails."""
         if object_key is None:
             return
-        await self.s3_service.delete(
-            bucket=self.config.workspace_s3.bucket,
-            key=object_key,
-        )
+        try:
+            await self.s3_service.delete(
+                bucket=self.config.workspace_s3.bucket,
+                key=object_key,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to clean up ModelFile object after create failure",
+                extra={"storage_key": object_key},
+            )
+
+
+def _model_file_matches_creation(
+    model_file: ModelFile,
+    *,
+    create: ModelFileCreate,
+    object_key: str,
+) -> bool:
+    """Check immutable metadata that proves a preallocated ModelFile identity."""
+    return (
+        create.id is not None
+        and model_file.id == create.id
+        and model_file.storage_key == object_key
+        and model_file.workspace_id == create.workspace_id
+        and model_file.session_id == create.session_id
+        and model_file.agent_id == create.agent_id
+        and model_file.name == create.name
+        and model_file.media_type == create.media_type
+        and model_file.kind == create.kind
+        and model_file.size_bytes == create.size_bytes
+        and model_file.created_run_index == create.created_run_index
+        and model_file.normalized_format == create.normalized_format
+        and model_file.sha256 == create.sha256
+        and model_file.metadata == create.metadata
+    )
 
 
 def normalize_model_file_body(

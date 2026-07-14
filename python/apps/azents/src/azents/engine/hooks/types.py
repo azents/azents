@@ -65,7 +65,8 @@ class SessionCompactHookContext:
     workspace_id: str
     agent_id: str
     session_id: str
-    run_id: str | None
+    run_id: str
+    owner_generation: int
 
 
 @dataclasses.dataclass(frozen=True)
@@ -102,6 +103,7 @@ class RunStartHookContext:
     agent_id: str
     session_id: str
     run_id: str
+    owner_generation: int
 
 
 @dataclasses.dataclass(frozen=True)
@@ -123,6 +125,7 @@ class TurnStartHookContext:
     agent_id: str
     session_id: str
     run_id: str
+    owner_generation: int
     turn_index: int | None
 
 
@@ -162,6 +165,7 @@ class AfterToolCallHookContext:
     agent_id: str
     session_id: str
     run_id: str
+    owner_generation: int
     output_text: str | None
     error_message: str | None
 

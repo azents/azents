@@ -41,6 +41,7 @@ from azents.engine.events.types import (
     build_native_compat_key,
 )
 from azents.engine.run.errors import CompactionFailedError
+from azents.engine.run.types import OWNERSHIP_LOST_CANCEL_MESSAGE
 from azents.repos.agent_execution.data import EventCreate
 
 
@@ -59,6 +60,16 @@ class _Session(AsyncSession):
     def expire_all(self) -> None:
         """Record caller identity-map invalidation."""
         self.expire_all_count += 1
+
+    @asynccontextmanager
+    async def __call__(self) -> AsyncIterator["_Session"]:
+        """Provide a short commit-on-success session scope."""
+        try:
+            yield self
+        except BaseException:
+            raise
+        else:
+            await self.commit()
 
 
 class _SessionManager:
@@ -157,6 +168,11 @@ class _SessionRepo:
         del session, session_id
         self.head_event_id = event_id
         return object()
+
+
+async def _allow_run_write(session: AsyncSession) -> None:
+    """Allow a durable write for tests not exercising ownership fencing."""
+    del session
 
 
 def _compactor(
@@ -285,6 +301,7 @@ async def test_attachment_availability_filter_marks_expired_attachment() -> None
     )
 
     result = await EventAttachmentAvailabilityFilter(
+        write_fence=_allow_run_write,
         exchange_file_repository=status_repo,
         transcript_repo=transcript_repo,
     ).apply(_Session(), transcript)
@@ -293,6 +310,36 @@ async def test_attachment_availability_filter_marks_expired_attachment() -> None
     payload = result[0].payload
     assert isinstance(payload, UserMessagePayload)
     assert payload.attachments[0].availability == "expired"
+
+
+async def test_attachment_filter_checks_run_fence_before_durable_update() -> None:
+    """A stale owner cannot rewrite attachment payloads."""
+    attachment = _attachment("exchange://exchange/workspace/files/random/original")
+    event = _event(
+        "1",
+        EventKind.USER_MESSAGE,
+        UserMessagePayload(content="see file", attachments=[attachment]),
+    )
+    transcript = [event]
+    transcript_repo = _TranscriptRepo(transcript)
+    status_repo = _ExchangeFileStatusRepo(
+        {"exchange/workspace/files/random/original": ExchangeFileStatus.EXPIRED}
+    )
+
+    async def reject_stale_owner(session: AsyncSession) -> None:
+        del session
+        raise asyncio.CancelledError(OWNERSHIP_LOST_CANCEL_MESSAGE)
+
+    with pytest.raises(asyncio.CancelledError) as cancelled:
+        await EventAttachmentAvailabilityFilter(
+            write_fence=reject_stale_owner,
+            exchange_file_repository=status_repo,
+            transcript_repo=transcript_repo,
+        ).apply(_Session(), transcript)
+
+    assert cancelled.value.args == (OWNERSHIP_LOST_CANCEL_MESSAGE,)
+    assert status_repo.calls == []
+    assert transcript_repo.events == [event]
 
 
 async def test_attachment_availability_filter_marks_missing_exchange_unavailable() -> (
@@ -310,6 +357,7 @@ async def test_attachment_availability_filter_marks_missing_exchange_unavailable
     status_repo = _ExchangeFileStatusRepo({})
 
     result = await EventAttachmentAvailabilityFilter(
+        write_fence=_allow_run_write,
         exchange_file_repository=status_repo,
         transcript_repo=transcript_repo,
     ).apply(_Session(), transcript)
@@ -332,6 +380,7 @@ async def test_attachment_availability_filter_ignores_non_exchange_uri() -> None
     status_repo = _ExchangeFileStatusRepo({})
 
     result = await EventAttachmentAvailabilityFilter(
+        write_fence=_allow_run_write,
         exchange_file_repository=status_repo,
         transcript_repo=transcript_repo,
     ).apply(_Session(), transcript)
@@ -366,6 +415,7 @@ async def test_attachment_availability_filter_updates_tool_output_part() -> None
     )
 
     result = await EventAttachmentAvailabilityFilter(
+        write_fence=_allow_run_write,
         exchange_file_repository=status_repo,
         transcript_repo=transcript_repo,
     ).apply(_Session(), transcript)
@@ -398,6 +448,7 @@ async def test_filepart_placeholder_filter_rewrites_deleted_user_filepart() -> N
 
     result = await EventFilePartPlaceholderFilter(
         session_id="session-1",
+        write_fence=_allow_run_write,
         model_file_repository=status_repo,
         transcript_repo=transcript_repo,
     ).apply(_Session(), transcript)
@@ -437,6 +488,7 @@ async def test_filepart_placeholder_filter_rewrites_missing_tool_filepart() -> N
 
     result = await EventFilePartPlaceholderFilter(
         session_id="session-1",
+        write_fence=_allow_run_write,
         model_file_repository=status_repo,
         transcript_repo=transcript_repo,
     ).apply(_Session(), transcript)
@@ -475,6 +527,7 @@ async def test_filepart_placeholder_filter_rewrites_missing_assistant_filepart()
 
     result = await EventFilePartPlaceholderFilter(
         session_id="session-1",
+        write_fence=_allow_run_write,
         model_file_repository=status_repo,
         transcript_repo=transcript_repo,
     ).apply(_Session(), transcript)
@@ -508,6 +561,7 @@ async def test_filepart_placeholder_filter_keeps_available_filepart() -> None:
 
     result = await EventFilePartPlaceholderFilter(
         session_id="session-1",
+        write_fence=_allow_run_write,
         model_file_repository=status_repo,
         transcript_repo=transcript_repo,
     ).apply(_Session(), transcript)
@@ -550,6 +604,7 @@ async def test_compactor_appends_summary_and_moves_head() -> None:
         transcript=events,
         compaction_id="compact-1",
         summarize=summarize,
+        write_fence=_allow_run_write,
         reason="manual_command",
     )
 
@@ -618,10 +673,62 @@ async def test_compactor_commits_before_external_summary_call() -> None:
         transcript=events,
         compaction_id="compact-1",
         summarize=summarize,
+        write_fence=_allow_run_write,
     )
 
     assert len(session_manager.sessions) == 2
     assert [session.commit_count for session in session_manager.sessions] == [1, 1]
+
+
+async def test_compactor_rechecks_run_fence_before_summary_write() -> None:
+    """Ownership handover during summary leaves no stale summary or head move."""
+    events = [
+        _event(
+            "1",
+            EventKind.USER_MESSAGE,
+            UserMessagePayload(content="old"),
+        )
+    ]
+    session_manager = _SessionManager()
+    transcript_repo = _TranscriptRepo(events)
+    session_repo = _SessionRepo()
+    fence_calls = 0
+
+    async def fence(session: AsyncSession) -> None:
+        nonlocal fence_calls
+        del session
+        fence_calls += 1
+        if fence_calls == 2:
+            raise asyncio.CancelledError(OWNERSHIP_LOST_CANCEL_MESSAGE)
+
+    async def summarize(
+        old_events: Sequence[Event],
+        summary_budget: object,
+    ) -> str:
+        del old_events, summary_budget
+        return "summary"
+
+    with pytest.raises(asyncio.CancelledError) as cancelled:
+        await _compactor(
+            session_manager=session_manager,
+            transcript_repo=transcript_repo,
+            session_repo=session_repo,
+        ).compact(
+            session_id="session-1",
+            transcript=events,
+            compaction_id="compact-1",
+            summarize=summarize,
+            write_fence=fence,
+        )
+
+    assert cancelled.value.args == (OWNERSHIP_LOST_CANCEL_MESSAGE,)
+    assert fence_calls == 2
+    assert [event.kind for event in transcript_repo.events] == [
+        EventKind.USER_MESSAGE,
+        EventKind.COMPACTION_MARKER,
+    ]
+    assert session_repo.head_event_id is None
+    assert [session.commit_count for session in session_manager.sessions] == [1, 0]
 
 
 async def test_compactor_preserves_input_appended_during_summary() -> None:
@@ -667,6 +774,7 @@ async def test_compactor_preserves_input_appended_during_summary() -> None:
         transcript=events,
         compaction_id="compact-1",
         summarize=summarize,
+        write_fence=_allow_run_write,
     )
 
     assert summary is not None
@@ -735,6 +843,7 @@ async def test_compactor_continuity_uses_concise_transcript_labels() -> None:
         transcript=events,
         compaction_id="compact-1",
         summarize=summarize,
+        write_fence=_allow_run_write,
     )
 
     assert summary is not None
@@ -796,6 +905,7 @@ async def test_compactor_summary_enricher_runs_before_continuity_append() -> Non
         transcript=events,
         compaction_id="compact-1",
         summarize=summarize,
+        write_fence=_allow_run_write,
         reason="manual_command",
         summary_enricher=enrich,
     )
@@ -878,6 +988,7 @@ async def test_compactor_continuity_uses_last_five_completed_turns() -> None:
         transcript=events,
         compaction_id="compact-1",
         summarize=summarize,
+        write_fence=_allow_run_write,
     )
 
     assert summary is not None
@@ -949,6 +1060,7 @@ async def test_compactor_continuity_user_message_section_uses_last_five_users() 
         transcript=events,
         compaction_id="compact-1",
         summarize=summarize,
+        write_fence=_allow_run_write,
     )
 
     assert summary is not None
@@ -990,6 +1102,7 @@ async def test_compactor_truncates_large_continuity_events() -> None:
         transcript=events,
         compaction_id="compact-1",
         summarize=summarize,
+        write_fence=_allow_run_write,
     )
 
     assert summary is not None
@@ -1033,6 +1146,7 @@ async def test_compactor_propagates_summary_failure() -> None:
             transcript=events,
             compaction_id="compact-1",
             summarize=summarize,
+            write_fence=_allow_run_write,
         )
 
     assert session_repo.head_event_id is None
@@ -1099,6 +1213,7 @@ async def test_compactor_commits_failure_after_summary_enrichment_error() -> Non
             transcript=events,
             compaction_id="compact-1",
             summarize=summarize,
+            write_fence=_allow_run_write,
             summary_enricher=enrich,
         )
 
@@ -1144,6 +1259,7 @@ async def test_compactor_records_cancelled_start_callback() -> None:
             transcript=events,
             compaction_id="compact-1",
             summarize=summarize,
+            write_fence=_allow_run_write,
             on_started=on_started,
         )
 
@@ -1187,6 +1303,7 @@ async def test_compactor_commits_cancelled_marker_after_summary_cancellation() -
             transcript=events,
             compaction_id="compact-1",
             summarize=summarize,
+            write_fence=_allow_run_write,
         )
 
     assert [session.commit_count for session in session_manager.sessions] == [1, 1]
@@ -1194,6 +1311,75 @@ async def test_compactor_commits_cancelled_marker_after_summary_cancellation() -
     assert isinstance(cancelled, CompactionMarkerPayload)
     assert cancelled.status == "failed"
     assert cancelled.reason == "cancelled"
+
+
+@pytest.mark.parametrize("cancel_stage", ["on_started", "summarize", "enrich"])
+async def test_compactor_ownership_loss_does_not_append_failure_marker(
+    cancel_stage: str,
+) -> None:
+    """A stale worker must not append compaction state after losing ownership."""
+    events = [
+        _event(
+            "1",
+            EventKind.USER_MESSAGE,
+            UserMessagePayload(content="old"),
+        )
+    ]
+    session_manager = _SessionManager()
+    transcript_repo = _TranscriptRepo(events)
+
+    async def on_started() -> None:
+        if cancel_stage == "on_started":
+            raise asyncio.CancelledError(OWNERSHIP_LOST_CANCEL_MESSAGE)
+
+    async def summarize(
+        old_events: Sequence[Event],
+        summary_budget: object,
+    ) -> str:
+        del old_events, summary_budget
+        if cancel_stage == "summarize":
+            raise asyncio.CancelledError(OWNERSHIP_LOST_CANCEL_MESSAGE)
+        return "summary"
+
+    async def enrich(
+        *,
+        summary: str,
+        continuity_history: str,
+        compaction_id: str,
+        reason: str | None,
+        covered_until_event_id: str,
+    ) -> str:
+        del (
+            continuity_history,
+            compaction_id,
+            reason,
+            covered_until_event_id,
+        )
+        if cancel_stage == "enrich":
+            raise asyncio.CancelledError(OWNERSHIP_LOST_CANCEL_MESSAGE)
+        return summary
+
+    with pytest.raises(asyncio.CancelledError) as exc_info:
+        await _compactor(
+            session_manager=session_manager,
+            transcript_repo=transcript_repo,
+            session_repo=_SessionRepo(),
+        ).compact(
+            session_id="session-1",
+            transcript=events,
+            compaction_id="compact-1",
+            summarize=summarize,
+            write_fence=_allow_run_write,
+            on_started=on_started,
+            summary_enricher=enrich,
+        )
+
+    assert exc_info.value.args == (OWNERSHIP_LOST_CANCEL_MESSAGE,)
+    assert [session.commit_count for session in session_manager.sessions] == [1]
+    assert len(transcript_repo.events) == 2
+    started = transcript_repo.events[-1].payload
+    assert isinstance(started, CompactionMarkerPayload)
+    assert started.status == "started"
 
 
 async def test_compactor_raises_when_summary_is_empty() -> None:
@@ -1230,6 +1416,7 @@ async def test_compactor_raises_when_summary_is_empty() -> None:
             transcript=events,
             compaction_id="compact-1",
             summarize=summarize,
+            write_fence=_allow_run_write,
         )
 
     assert session_repo.head_event_id is None
@@ -1275,6 +1462,7 @@ async def test_auto_compaction_runs_when_threshold_is_exceeded() -> None:
             session_repo=session_repo,
         ),
         summarize=summarize,
+        write_fence=_allow_run_write,
         max_input_tokens=10,
         auto_compaction_threshold_tokens=None,
         compaction_id_factory=lambda: "compact-1",
@@ -1311,11 +1499,9 @@ async def test_auto_compaction_emits_started_before_summary_call() -> None:
     transcript_repo = _TranscriptRepo(events)
     session_repo = _SessionRepo()
     session_manager = _SessionManager()
-    session = _Session()
     calls: list[str] = []
 
     async def on_compaction_started() -> None:
-        assert session.commit_count == 1
         assert session_manager.active_scopes == 0
         assert session_manager.sessions[0].commit_count == 1
         marker = transcript_repo.events[-1].payload
@@ -1340,14 +1526,14 @@ async def test_auto_compaction_emits_started_before_summary_call() -> None:
             session_repo=session_repo,
         ),
         summarize=summarize,
+        write_fence=_allow_run_write,
         max_input_tokens=10,
         auto_compaction_threshold_tokens=None,
         compaction_id_factory=lambda: "compact-1",
         on_compaction_started=on_compaction_started,
-    ).apply(session, events)
+    ).apply(_SessionManager(), events)
 
     assert calls == ["started", "summarize"]
-    assert session.expire_all_count == 1
 
 
 async def test_auto_compaction_marks_compacted_only_when_summary_is_created() -> None:
@@ -1382,6 +1568,7 @@ async def test_auto_compaction_marks_compacted_only_when_summary_is_created() ->
             session_repo=session_repo,
         ),
         summarize=summarize,
+        write_fence=_allow_run_write,
         max_input_tokens=10,
         auto_compaction_threshold_tokens=None,
         compaction_id_factory=lambda: "compact-1",
@@ -1418,6 +1605,7 @@ async def test_auto_compaction_skips_when_threshold_is_not_exceeded() -> None:
             session_repo=_SessionRepo(),
         ),
         summarize=summarize,
+        write_fence=_allow_run_write,
         max_input_tokens=1000,
         auto_compaction_threshold_tokens=None,
         compaction_id_factory=lambda: "compact-1",
@@ -1452,6 +1640,7 @@ async def test_auto_compaction_uses_explicit_threshold_override() -> None:
             session_repo=_SessionRepo(),
         ),
         summarize=summarize,
+        write_fence=_allow_run_write,
         max_input_tokens=1000,
         auto_compaction_threshold_tokens=1,
         compaction_id_factory=lambda: "compact-1",
@@ -1496,6 +1685,7 @@ async def test_auto_compaction_uses_latest_turn_marker_usage() -> None:
             session_repo=_SessionRepo(),
         ),
         summarize=summarize,
+        write_fence=_allow_run_write,
         max_input_tokens=1000,
         auto_compaction_threshold_tokens=None,
         compaction_id_factory=lambda: "compact-1",
@@ -1536,6 +1726,7 @@ async def test_auto_compaction_counts_events_after_latest_turn_marker() -> None:
             session_repo=session_repo,
         ),
         summarize=summarize,
+        write_fence=_allow_run_write,
         max_input_tokens=100,
         auto_compaction_threshold_tokens=None,
         compaction_id_factory=lambda: "compact-1",

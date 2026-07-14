@@ -1,16 +1,39 @@
 """Session-bound Toolkit State runtime abstraction."""
 
+import dataclasses
 from collections.abc import Callable
 from typing import Generic, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.repos.agent_execution import (
+    AgentRunNotActiveError,
+    AgentRunOwnershipLostError,
+    AgentRunRepository,
+)
+from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.toolkit_state import (
     ToolkitStateConflictError,
     ToolkitStateRepository,
 )
 from azents.repos.toolkit_state.data import ToolkitStateRecord, ToolkitStateUpsert
+
+
+@dataclasses.dataclass(frozen=True)
+class ToolkitStateRunAuthority:
+    """Durable Run identity required before a runtime-owned state write."""
+
+    run_id: str
+    owner_generation: int
+
+
+class ToolkitStateRunAuthorityLostError(RuntimeError):
+    """A stale Run attempted to mutate Session-bound Toolkit State."""
+
+    def __init__(self, run_id: str) -> None:
+        super().__init__(f"Toolkit State write rejected for stale Run: {run_id}")
+        self.run_id = run_id
 
 
 class ToolkitStateIdentity(BaseModel):
@@ -142,6 +165,63 @@ class ToolkitStateHandle(Generic[StateT]):
         )
 
 
+class RunFencedToolkitStateHandle(ToolkitStateHandle[StateT]):
+    """Toolkit State handle that rejects writes from a stale Session Run."""
+
+    def __init__(
+        self,
+        *,
+        session: AsyncSession,
+        repository: ToolkitStateRepository,
+        identity: ToolkitStateIdentity,
+        model_type: type[StateT],
+        run_authority: ToolkitStateRunAuthority,
+        agent_run_repository: AgentRunRepository,
+        agent_session_repository: AgentSessionRepository,
+    ) -> None:
+        """Create a handle with explicit durable authority dependencies."""
+        super().__init__(
+            session=session,
+            repository=repository,
+            identity=identity,
+            model_type=model_type,
+        )
+        self._run_authority = run_authority
+        self._agent_run_repository = agent_run_repository
+        self._agent_session_repository = agent_session_repository
+
+    async def _save(self, state: StateT) -> SavedToolkitState:
+        """Fence and save within the same short database transaction."""
+        await self._validate_run_authority()
+        return await super()._save(state)
+
+    async def _validate_run_authority(self) -> None:
+        """Lock the Session and exact Run before the state row is mutated."""
+        agent_session = await self._agent_session_repository.lock_by_id(
+            self._session,
+            self._identity.session_id,
+        )
+        if (
+            agent_session is None
+            or agent_session.owner_generation != self._run_authority.owner_generation
+        ):
+            raise ToolkitStateRunAuthorityLostError(self._run_authority.run_id)
+        try:
+            # Keep the exact Run row locked through Toolkit State persistence.
+            # A plain active-run SELECT allows a concurrent terminal UPDATE to
+            # commit first and the stale state write to land after terminality.
+            await self._agent_run_repository.lock_active_owner(
+                self._session,
+                run_id=self._run_authority.run_id,
+                session_id=self._identity.session_id,
+                owner_generation=self._run_authority.owner_generation,
+            )
+        except AgentRunNotActiveError, AgentRunOwnershipLostError, ValueError:
+            raise ToolkitStateRunAuthorityLostError(
+                self._run_authority.run_id
+            ) from None
+
+
 class ToolkitStateStore:
     """Toolkit State handle factory."""
 
@@ -166,4 +246,40 @@ class ToolkitStateStore:
             repository=self._repository,
             identity=identity,
             model_type=model_type,
+        )
+
+
+class RunFencedToolkitStateStore:
+    """Run-fenced Toolkit State handle factory with explicit collaborators."""
+
+    def __init__(
+        self,
+        *,
+        session: AsyncSession,
+        repository: ToolkitStateRepository,
+        run_authority: ToolkitStateRunAuthority,
+        agent_run_repository: AgentRunRepository,
+        agent_session_repository: AgentSessionRepository,
+    ) -> None:
+        """Create a run-fenced Toolkit State store."""
+        self._session = session
+        self._repository = repository
+        self._run_authority = run_authority
+        self._agent_run_repository = agent_run_repository
+        self._agent_session_repository = agent_session_repository
+
+    def handle(
+        self,
+        identity: ToolkitStateIdentity,
+        model_type: type[StateT],
+    ) -> RunFencedToolkitStateHandle[StateT]:
+        """Return a typed handle fenced by the configured Run authority."""
+        return RunFencedToolkitStateHandle(
+            session=self._session,
+            repository=self._repository,
+            identity=identity,
+            model_type=model_type,
+            run_authority=self._run_authority,
+            agent_run_repository=self._agent_run_repository,
+            agent_session_repository=self._agent_session_repository,
         )

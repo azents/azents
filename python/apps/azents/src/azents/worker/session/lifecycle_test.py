@@ -7,14 +7,14 @@ from typing import cast
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.broker.types import SessionBroker
+from azents.broker.types import SessionBroker, SessionOwnershipLostError
 from azents.core.enums import AgentRunPhase, AgentRunStatus
 from azents.engine.events.types import AgentRunState
 from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession
-from azents.repos.input_buffer import InputBufferRepository
+from azents.repos.input_buffer.repository import InputBufferRepository
 from azents.worker.session.lifecycle import SessionLifecycleService
 
 
@@ -40,6 +40,16 @@ class _SessionManager:
 class _Broker:
     """SessionBroker test double."""
 
+    def __init__(
+        self,
+        *,
+        heartbeat_error: Exception | None = None,
+        order: list[str] | None = None,
+    ) -> None:
+        self.owner_heartbeat_session_ids: list[str] = []
+        self.heartbeat_error = heartbeat_error
+        self.order = order
+
     async def release_session_lock(self, session_id: str) -> None:
         """This test does not release broker locks."""
         del session_id
@@ -59,15 +69,29 @@ class _Broker:
         del session_id, run_id, phase
 
     async def renew_session_owner_heartbeat(self, session_id: str) -> None:
-        """This test does not renew owner heartbeat."""
-        del session_id
+        """Record owner heartbeat renewal."""
+        if self.order is not None:
+            self.order.append("redis")
+        self.owner_heartbeat_session_ids.append(session_id)
+        if self.heartbeat_error is not None:
+            raise self.heartbeat_error
 
 
 class _AgentSessionRepository:
     """AgentSessionRepository test double."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        heartbeat_error: Exception | None = None,
+        heartbeat_updated: bool = True,
+        order: list[str] | None = None,
+    ) -> None:
         self.idle_session_ids: list[str] = []
+        self.heartbeat_error = heartbeat_error
+        self.heartbeat_updated = heartbeat_updated
+        self.heartbeat_calls: list[tuple[str, int]] = []
+        self.order = order
 
     async def lock_by_id(
         self,
@@ -82,6 +106,22 @@ class _AgentSessionRepository:
         """Record idle transition."""
         del session
         self.idle_session_ids.append(runtime_id)
+
+    async def heartbeat_running(
+        self,
+        session: AsyncSession,
+        session_id: str,
+        *,
+        expected_owner_generation: int,
+    ) -> bool:
+        """Raise the configured DB heartbeat failure, if any."""
+        del session
+        if self.order is not None:
+            self.order.append("db")
+        self.heartbeat_calls.append((session_id, expected_owner_generation))
+        if self.heartbeat_error is not None:
+            raise self.heartbeat_error
+        return self.heartbeat_updated
 
 
 class _InputBufferRepository:
@@ -110,9 +150,11 @@ class _AgentRunRepository:
         running_run: AgentRunState | None,
         *,
         activated_run: AgentRunState | None = None,
+        terminal_error: Exception | None = None,
     ) -> None:
         self.running_run = running_run
         self.activated_run = activated_run
+        self.terminal_error = terminal_error
         self.terminal_session_ids: list[str] = []
         self.activation_run_ids: list[str] = []
 
@@ -152,6 +194,20 @@ class _AgentRunRepository:
         del session, status, ended_at
         self.terminal_session_ids.append(session_id)
 
+    async def mark_terminal_if_running(
+        self,
+        session: AsyncSession,
+        run_id: str,
+        status: AgentRunStatus,
+        *,
+        ended_at: datetime,
+    ) -> AgentRunState | None:
+        """Raise the configured terminal persistence failure, if any."""
+        del session, run_id, status, ended_at
+        if self.terminal_error is not None:
+            raise self.terminal_error
+        return self.running_run
+
 
 def _running_run() -> AgentRunState:
     """Create a running AgentRunState."""
@@ -176,10 +232,11 @@ def _service(
     agent_run_repository: _AgentRunRepository,
     agent_session_repository: _AgentSessionRepository,
     pending_input: bool,
+    broker: _Broker | None = None,
 ) -> SessionLifecycleService:
     """Create SessionLifecycleService with test doubles."""
     return SessionLifecycleService(
-        broker=cast(SessionBroker, _Broker()),
+        broker=cast(SessionBroker, broker or _Broker()),
         session_manager=cast(SessionManager[AsyncSession], _SessionManager()),
         agent_session_repository=cast(
             AgentSessionRepository,
@@ -267,3 +324,132 @@ async def test_activate_pending_rejects_session_mismatch() -> None:
         )
 
     assert agent_run_repository.activation_run_ids == [activated_run.id]
+
+
+@pytest.mark.asyncio
+async def test_terminal_transition_propagates_db_failure() -> None:
+    """A failed terminal write cannot be reported to the executor as persisted."""
+    error = RuntimeError("terminal write failed")
+    service = _service(
+        agent_run_repository=_AgentRunRepository(None, terminal_error=error),
+        agent_session_repository=_AgentSessionRepository(),
+        pending_input=False,
+    )
+
+    with pytest.raises(RuntimeError, match="terminal write failed"):
+        await service.mark_agent_run_terminal_if_running(
+            "session-001",
+            run_id="run-001",
+            status=AgentRunStatus.COMPLETED,
+        )
+
+
+@pytest.mark.asyncio
+async def test_terminal_transition_rejects_run_from_another_session() -> None:
+    """A session lifecycle call cannot terminalize another session's Run."""
+    other_session_run = _running_run().model_copy(update={"session_id": "session-002"})
+    service = _service(
+        agent_run_repository=_AgentRunRepository(other_session_run),
+        agent_session_repository=_AgentSessionRepository(),
+        pending_input=False,
+    )
+
+    with pytest.raises(ValueError, match="AgentRun not found in session"):
+        await service.mark_agent_run_terminal_if_running(
+            "session-001",
+            run_id=other_session_run.id,
+            status=AgentRunStatus.COMPLETED,
+        )
+
+
+@pytest.mark.asyncio
+async def test_heartbeat_validates_lease_before_generation_fenced_db_write() -> None:
+    """Heartbeat performs no DB write until Redis proves current ownership."""
+    order: list[str] = []
+    broker = _Broker(order=order)
+    agent_session_repository = _AgentSessionRepository(
+        heartbeat_error=RuntimeError("heartbeat write failed"),
+        order=order,
+    )
+    service = _service(
+        agent_run_repository=_AgentRunRepository(None),
+        agent_session_repository=agent_session_repository,
+        pending_input=False,
+        broker=broker,
+    )
+
+    with pytest.raises(RuntimeError, match="heartbeat write failed"):
+        await service.heartbeat_session("session-001", owner_generation=7)
+
+    assert order == ["redis", "db"]
+    assert broker.owner_heartbeat_session_ids == ["session-001"]
+    assert agent_session_repository.heartbeat_calls == [("session-001", 7)]
+
+
+@pytest.mark.asyncio
+async def test_redis_ownership_loss_prevents_db_heartbeat() -> None:
+    """A stale worker cannot refresh DB liveness after its lease was stolen."""
+    order: list[str] = []
+    broker = _Broker(
+        heartbeat_error=SessionOwnershipLostError("session-001"),
+        order=order,
+    )
+    agent_session_repository = _AgentSessionRepository(order=order)
+    service = _service(
+        agent_run_repository=_AgentRunRepository(None),
+        agent_session_repository=agent_session_repository,
+        pending_input=False,
+        broker=broker,
+    )
+
+    with pytest.raises(SessionOwnershipLostError, match="session-001"):
+        await service.heartbeat_session("session-001", owner_generation=3)
+
+    assert order == ["redis"]
+    assert agent_session_repository.heartbeat_calls == []
+
+
+@pytest.mark.asyncio
+async def test_redis_heartbeat_timeout_prevents_db_heartbeat() -> None:
+    """An unverifiable Redis lease cannot authorize durable DB liveness."""
+    order: list[str] = []
+    broker = _Broker(
+        heartbeat_error=TimeoutError("Redis owner check timed out"),
+        order=order,
+    )
+    agent_session_repository = _AgentSessionRepository(order=order)
+    service = _service(
+        agent_run_repository=_AgentRunRepository(None),
+        agent_session_repository=agent_session_repository,
+        pending_input=False,
+        broker=broker,
+    )
+
+    with pytest.raises(TimeoutError, match="Redis owner check timed out"):
+        await service.heartbeat_session("session-001", owner_generation=3)
+
+    assert order == ["redis"]
+    assert agent_session_repository.heartbeat_calls == []
+
+
+@pytest.mark.asyncio
+async def test_stale_owner_generation_rejects_db_heartbeat() -> None:
+    """A lease check cannot authorize a heartbeat for an obsolete generation."""
+    order: list[str] = []
+    broker = _Broker(order=order)
+    agent_session_repository = _AgentSessionRepository(
+        heartbeat_updated=False,
+        order=order,
+    )
+    service = _service(
+        agent_run_repository=_AgentRunRepository(None),
+        agent_session_repository=agent_session_repository,
+        pending_input=False,
+        broker=broker,
+    )
+
+    with pytest.raises(SessionOwnershipLostError, match="session-001"):
+        await service.heartbeat_session("session-001", owner_generation=4)
+
+    assert order == ["redis", "db"]
+    assert agent_session_repository.heartbeat_calls == [("session-001", 4)]

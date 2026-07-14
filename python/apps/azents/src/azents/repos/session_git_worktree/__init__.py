@@ -99,6 +99,21 @@ class SessionGitWorktreeRepository:
             return None
         return self._build(rdb)
 
+    async def lock_by_id(
+        self,
+        session: AsyncSession,
+        *,
+        worktree_id: str,
+    ) -> SessionGitWorktree | None:
+        """Fetch one allocation under a row lock for lifecycle transitions."""
+        rdb = await session.scalar(
+            sa.select(RDBSessionAgentContextGitWorktree)
+            .where(RDBSessionAgentContextGitWorktree.id == worktree_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        return None if rdb is None else self._build(rdb)
+
     async def get_by_action_execution_id(
         self,
         session: AsyncSession,
@@ -160,60 +175,86 @@ class SessionGitWorktreeRepository:
         )
         return result.scalar_one_or_none() is not None
 
-    async def update_target(
+    async def update_target_if_pending(
         self,
         session: AsyncSession,
         *,
         worktree_id: str,
         worktree_path: str,
         branch_name: str,
-    ) -> SessionGitWorktree:
-        """Update pending allocation target names after collision suffixing."""
-        rdb = await session.get(RDBSessionAgentContextGitWorktree, worktree_id)
-        if rdb is None:
-            raise RuntimeError("SessionGitWorktree row is missing")
-        rdb.worktree_path = worktree_path
-        rdb.branch_name = branch_name
+    ) -> SessionGitWorktree | None:
+        """Update target names only while the action owns a pending allocation."""
+        updated_id = await session.scalar(
+            sa.update(RDBSessionAgentContextGitWorktree)
+            .where(
+                RDBSessionAgentContextGitWorktree.id == worktree_id,
+                RDBSessionAgentContextGitWorktree.status
+                == SessionGitWorktreeStatus.PENDING,
+            )
+            .values(
+                worktree_path=worktree_path,
+                branch_name=branch_name,
+            )
+            .returning(RDBSessionAgentContextGitWorktree.id)
+        )
+        if updated_id is None:
+            return None
         await session.flush()
-        await session.refresh(rdb)
-        return self._build(rdb)
+        return await self._get_after_conditional_update(session, updated_id)
 
-    async def mark_pending_for_retry(
+    async def mark_pending_after_collision_if_creating(
         self,
         session: AsyncSession,
         *,
         worktree_id: str,
-    ) -> SessionGitWorktree:
-        """Reset a failed allocation so initialization can be retried."""
-        rdb = await session.get(RDBSessionAgentContextGitWorktree, worktree_id)
-        if rdb is None:
-            raise RuntimeError("SessionGitWorktree row is missing")
-        rdb.status = SessionGitWorktreeStatus.PENDING
-        rdb.failure_summary = None
-        rdb.cleanup_summary = None
-        rdb.failed_at = None
+    ) -> SessionGitWorktree | None:
+        """Return a creating allocation to pending for a collision retry."""
+        updated_id = await session.scalar(
+            sa.update(RDBSessionAgentContextGitWorktree)
+            .where(
+                RDBSessionAgentContextGitWorktree.id == worktree_id,
+                RDBSessionAgentContextGitWorktree.status
+                == SessionGitWorktreeStatus.CREATING,
+            )
+            .values(
+                status=SessionGitWorktreeStatus.PENDING,
+                failure_summary=None,
+                failed_at=None,
+            )
+            .returning(RDBSessionAgentContextGitWorktree.id)
+        )
+        if updated_id is None:
+            return None
         await session.flush()
-        await session.refresh(rdb)
-        return self._build(rdb)
+        return await self._get_after_conditional_update(session, updated_id)
 
-    async def mark_creating(
+    async def mark_creating_if_pending(
         self,
         session: AsyncSession,
         *,
         worktree_id: str,
-    ) -> SessionGitWorktree:
-        """Mark allocation as actively creating."""
-        rdb = await session.get(RDBSessionAgentContextGitWorktree, worktree_id)
-        if rdb is None:
-            raise RuntimeError("SessionGitWorktree row is missing")
-        rdb.status = SessionGitWorktreeStatus.CREATING
-        rdb.failure_summary = None
-        rdb.failed_at = None
+    ) -> SessionGitWorktree | None:
+        """Atomically claim a pending allocation for Runner creation."""
+        updated_id = await session.scalar(
+            sa.update(RDBSessionAgentContextGitWorktree)
+            .where(
+                RDBSessionAgentContextGitWorktree.id == worktree_id,
+                RDBSessionAgentContextGitWorktree.status
+                == SessionGitWorktreeStatus.PENDING,
+            )
+            .values(
+                status=SessionGitWorktreeStatus.CREATING,
+                failure_summary=None,
+                failed_at=None,
+            )
+            .returning(RDBSessionAgentContextGitWorktree.id)
+        )
+        if updated_id is None:
+            return None
         await session.flush()
-        await session.refresh(rdb)
-        return self._build(rdb)
+        return await self._get_after_conditional_update(session, updated_id)
 
-    async def mark_ready(
+    async def mark_ready_if_creating(
         self,
         session: AsyncSession,
         *,
@@ -222,55 +263,94 @@ class SessionGitWorktreeRepository:
         worktree_path: str,
         branch_name: str,
         ready_at: datetime.datetime,
-    ) -> SessionGitWorktree:
-        """Mark allocation ready after runner worktree creation."""
-        rdb = await session.get(RDBSessionAgentContextGitWorktree, worktree_id)
-        if rdb is None:
-            raise RuntimeError("SessionGitWorktree row is missing")
-        rdb.status = SessionGitWorktreeStatus.READY
-        rdb.base_commit = base_commit
-        rdb.worktree_path = worktree_path
-        rdb.branch_name = branch_name
-        rdb.failure_summary = None
-        rdb.ready_at = ready_at
+    ) -> SessionGitWorktree | None:
+        """Atomically mark a still-creating allocation ready."""
+        updated_id = await session.scalar(
+            sa.update(RDBSessionAgentContextGitWorktree)
+            .where(
+                RDBSessionAgentContextGitWorktree.id == worktree_id,
+                RDBSessionAgentContextGitWorktree.status
+                == SessionGitWorktreeStatus.CREATING,
+            )
+            .values(
+                status=SessionGitWorktreeStatus.READY,
+                base_commit=base_commit,
+                worktree_path=worktree_path,
+                branch_name=branch_name,
+                failure_summary=None,
+                ready_at=ready_at,
+            )
+            .returning(RDBSessionAgentContextGitWorktree.id)
+        )
+        if updated_id is None:
+            return None
         await session.flush()
-        await session.refresh(rdb)
+        rdb = await session.scalar(
+            sa.select(RDBSessionAgentContextGitWorktree)
+            .where(RDBSessionAgentContextGitWorktree.id == updated_id)
+            .execution_options(populate_existing=True)
+        )
+        if rdb is None:
+            raise RuntimeError("SessionGitWorktree row disappeared after update")
         return self._build(rdb)
 
-    async def link_workspace_project(
+    async def link_workspace_project_if_ready(
         self,
         session: AsyncSession,
         *,
         worktree_id: str,
         session_workspace_project_id: str,
-    ) -> SessionGitWorktree:
-        """Link allocation to its registered SessionAgentContextProject row."""
-        rdb = await session.get(RDBSessionAgentContextGitWorktree, worktree_id)
-        if rdb is None:
-            raise RuntimeError("SessionGitWorktree row is missing")
-        rdb.session_agent_context_project_id = session_workspace_project_id
+    ) -> SessionGitWorktree | None:
+        """Link a Project only while the allocation remains ready."""
+        updated_id = await session.scalar(
+            sa.update(RDBSessionAgentContextGitWorktree)
+            .where(
+                RDBSessionAgentContextGitWorktree.id == worktree_id,
+                RDBSessionAgentContextGitWorktree.status
+                == SessionGitWorktreeStatus.READY,
+            )
+            .values(
+                session_agent_context_project_id=session_workspace_project_id,
+            )
+            .returning(RDBSessionAgentContextGitWorktree.id)
+        )
+        if updated_id is None:
+            return None
         await session.flush()
-        await session.refresh(rdb)
-        return self._build(rdb)
+        return await self._get_after_conditional_update(session, updated_id)
 
-    async def mark_failed(
+    async def mark_failed_if_active(
         self,
         session: AsyncSession,
         *,
         worktree_id: str,
         failure_summary: str,
         failed_at: datetime.datetime,
-    ) -> SessionGitWorktree:
-        """Mark allocation failed."""
-        rdb = await session.get(RDBSessionAgentContextGitWorktree, worktree_id)
-        if rdb is None:
-            raise RuntimeError("SessionGitWorktree row is missing")
-        rdb.status = SessionGitWorktreeStatus.FAILED
-        rdb.failure_summary = failure_summary
-        rdb.failed_at = failed_at
+    ) -> SessionGitWorktree | None:
+        """Mark an action-owned allocation failed without overriding cleanup."""
+        updated_id = await session.scalar(
+            sa.update(RDBSessionAgentContextGitWorktree)
+            .where(
+                RDBSessionAgentContextGitWorktree.id == worktree_id,
+                RDBSessionAgentContextGitWorktree.status.in_(
+                    (
+                        SessionGitWorktreeStatus.PENDING,
+                        SessionGitWorktreeStatus.CREATING,
+                        SessionGitWorktreeStatus.READY,
+                    )
+                ),
+            )
+            .values(
+                status=SessionGitWorktreeStatus.FAILED,
+                failure_summary=failure_summary,
+                failed_at=failed_at,
+            )
+            .returning(RDBSessionAgentContextGitWorktree.id)
+        )
+        if updated_id is None:
+            return None
         await session.flush()
-        await session.refresh(rdb)
-        return self._build(rdb)
+        return await self._get_after_conditional_update(session, updated_id)
 
     async def mark_cleanup_pending(
         self,
@@ -278,55 +358,128 @@ class SessionGitWorktreeRepository:
         *,
         worktree_id: str,
     ) -> SessionGitWorktree:
-        """Mark allocation cleanup requested."""
-        rdb = await session.get(RDBSessionAgentContextGitWorktree, worktree_id)
+        """Request cleanup without overwriting a concurrently cleaned row."""
+        updated_id = await session.scalar(
+            sa.update(RDBSessionAgentContextGitWorktree)
+            .where(
+                RDBSessionAgentContextGitWorktree.id == worktree_id,
+                RDBSessionAgentContextGitWorktree.status
+                != SessionGitWorktreeStatus.CLEANED,
+            )
+            .values(
+                status=SessionGitWorktreeStatus.CLEANUP_PENDING,
+                cleanup_summary=None,
+                cleaned_at=None,
+                updated_at=sa.func.clock_timestamp(),
+            )
+            .returning(RDBSessionAgentContextGitWorktree.id)
+        )
+        if updated_id is not None:
+            await session.flush()
+            return await self._get_after_conditional_update(session, updated_id)
+        rdb = await session.scalar(
+            sa.select(RDBSessionAgentContextGitWorktree)
+            .where(RDBSessionAgentContextGitWorktree.id == worktree_id)
+            .execution_options(populate_existing=True)
+        )
         if rdb is None:
             raise RuntimeError("SessionGitWorktree row is missing")
-        if rdb.status is not SessionGitWorktreeStatus.CLEANED:
-            rdb.status = SessionGitWorktreeStatus.CLEANUP_PENDING
-            rdb.cleanup_summary = None
-            rdb.cleaned_at = None
-        await session.flush()
-        await session.refresh(rdb)
         return self._build(rdb)
 
-    async def mark_cleaned(
+    async def reopen_cleaned_after_late_create(
+        self,
+        session: AsyncSession,
+        *,
+        worktree_id: str,
+    ) -> SessionGitWorktree | None:
+        """Reopen cleanup when a create result arrives after cleanup completed."""
+        updated_id = await session.scalar(
+            sa.update(RDBSessionAgentContextGitWorktree)
+            .where(
+                RDBSessionAgentContextGitWorktree.id == worktree_id,
+                RDBSessionAgentContextGitWorktree.status
+                == SessionGitWorktreeStatus.CLEANED,
+            )
+            .values(
+                status=SessionGitWorktreeStatus.CLEANUP_PENDING,
+                cleanup_summary=None,
+                cleaned_at=None,
+                updated_at=sa.func.clock_timestamp(),
+            )
+            .returning(RDBSessionAgentContextGitWorktree.id)
+        )
+        if updated_id is None:
+            return None
+        await session.flush()
+        return await self._get_after_conditional_update(session, updated_id)
+
+    async def mark_cleaned_if_cleanup_owned(
         self,
         session: AsyncSession,
         *,
         worktree_id: str,
         cleanup_summary: str,
         cleaned_at: datetime.datetime,
-    ) -> SessionGitWorktree:
-        """Mark allocation cleanup completed."""
-        rdb = await session.get(RDBSessionAgentContextGitWorktree, worktree_id)
-        if rdb is None:
-            raise RuntimeError("SessionGitWorktree row is missing")
-        rdb.status = SessionGitWorktreeStatus.CLEANED
-        rdb.cleanup_summary = cleanup_summary
-        rdb.cleaned_at = cleaned_at
+        expected_updated_at: datetime.datetime,
+    ) -> SessionGitWorktree | None:
+        """Mark cleanup completed without reviving non-cleanup authority."""
+        updated_id = await session.scalar(
+            sa.update(RDBSessionAgentContextGitWorktree)
+            .where(
+                RDBSessionAgentContextGitWorktree.id == worktree_id,
+                RDBSessionAgentContextGitWorktree.status.in_(
+                    (
+                        SessionGitWorktreeStatus.CLEANUP_PENDING,
+                        SessionGitWorktreeStatus.CLEANUP_FAILED,
+                    )
+                ),
+                RDBSessionAgentContextGitWorktree.updated_at == expected_updated_at,
+            )
+            .values(
+                status=SessionGitWorktreeStatus.CLEANED,
+                cleanup_summary=cleanup_summary,
+                cleaned_at=cleaned_at,
+            )
+            .returning(RDBSessionAgentContextGitWorktree.id)
+        )
+        if updated_id is None:
+            return None
         await session.flush()
-        await session.refresh(rdb)
-        return self._build(rdb)
+        return await self._get_after_conditional_update(session, updated_id)
 
-    async def mark_cleanup_failed(
+    async def mark_cleanup_failed_if_pending(
         self,
         session: AsyncSession,
         *,
         worktree_id: str,
         cleanup_summary: str,
         failed_at: datetime.datetime,
-    ) -> SessionGitWorktree:
-        """Mark allocation cleanup failed."""
-        rdb = await session.get(RDBSessionAgentContextGitWorktree, worktree_id)
-        if rdb is None:
-            raise RuntimeError("SessionGitWorktree row is missing")
-        rdb.status = SessionGitWorktreeStatus.CLEANUP_FAILED
-        rdb.cleanup_summary = cleanup_summary
-        rdb.failed_at = failed_at
+        expected_updated_at: datetime.datetime | None = None,
+    ) -> SessionGitWorktree | None:
+        """Mark only an in-flight cleanup failed; completed cleanup always wins."""
+        conditions = [
+            RDBSessionAgentContextGitWorktree.id == worktree_id,
+            RDBSessionAgentContextGitWorktree.status
+            == SessionGitWorktreeStatus.CLEANUP_PENDING,
+        ]
+        if expected_updated_at is not None:
+            conditions.append(
+                RDBSessionAgentContextGitWorktree.updated_at == expected_updated_at
+            )
+        updated_id = await session.scalar(
+            sa.update(RDBSessionAgentContextGitWorktree)
+            .where(*conditions)
+            .values(
+                status=SessionGitWorktreeStatus.CLEANUP_FAILED,
+                cleanup_summary=cleanup_summary,
+                failed_at=failed_at,
+            )
+            .returning(RDBSessionAgentContextGitWorktree.id)
+        )
+        if updated_id is None:
+            return None
         await session.flush()
-        await session.refresh(rdb)
-        return self._build(rdb)
+        return await self._get_after_conditional_update(session, updated_id)
 
     async def _get_context_id_by_session_id(
         self,
@@ -361,6 +514,21 @@ class SessionGitWorktreeRepository:
         if session_agent_id is None:
             raise ValueError("SessionAgent not found for AgentSession")
         return session_agent_id
+
+    async def _get_after_conditional_update(
+        self,
+        session: AsyncSession,
+        updated_id: str,
+    ) -> SessionGitWorktree:
+        """Reload a row changed by a conditional lifecycle update."""
+        rdb = await session.scalar(
+            sa.select(RDBSessionAgentContextGitWorktree)
+            .where(RDBSessionAgentContextGitWorktree.id == updated_id)
+            .execution_options(populate_existing=True)
+        )
+        if rdb is None:
+            raise RuntimeError("SessionGitWorktree row disappeared after update")
+        return self._build(rdb)
 
     def _build(
         self,

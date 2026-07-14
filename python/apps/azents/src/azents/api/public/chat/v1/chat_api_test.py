@@ -6,16 +6,24 @@ from typing import Any, cast
 from unittest.mock import AsyncMock
 from zoneinfo import ZoneInfo
 
+import pytest
 from azcommon.result import Failure, Result, Success
 from fastapi import BackgroundTasks, HTTPException
 from pydantic import ValidationError
+from redis.asyncio import Redis
+from redis.exceptions import RedisError
+from redis.exceptions import TimeoutError as RedisTimeoutError
 
+import azents.api.public.chat.v1 as chat_v1_module
 from azents.api.public.chat.v1 import (
+    _handle_agent_session_input_result,  # pyright: ignore[reportPrivateUsage]  # Pin input request conflict mapping.
+    _handle_created_agent_session_input_result,  # pyright: ignore[reportPrivateUsage]  # Pin create-request conflict mapping.
     _run_session_receive_loop,  # pyright: ignore[reportPrivateUsage]  # Pin health-check generation behavior.
     _SubscriptionRegistration,  # pyright: ignore[reportPrivateUsage]  # Pin subscription generation semantics.
     _validate_rest_session,  # pyright: ignore[reportPrivateUsage]  # Pin the REST session validation helper directly.
     _write_command_via_rest,  # pyright: ignore[reportPrivateUsage]  # Pin the REST write boundary helper directly.
     _write_edit_message_via_rest,  # pyright: ignore[reportPrivateUsage]  # Pin the REST write boundary helper directly.
+    _write_failed_run_retry_via_rest,  # pyright: ignore[reportPrivateUsage]  # Pin the REST write boundary helper directly.
     _write_input_via_rest,  # pyright: ignore[reportPrivateUsage]  # Pin the REST write boundary helper directly.
     _write_message_via_rest,  # pyright: ignore[reportPrivateUsage]  # Pin the REST write boundary helper directly.
     _write_new_session_message_via_rest,  # pyright: ignore[reportPrivateUsage]  # Pin the REST write boundary helper directly.
@@ -39,13 +47,17 @@ from azents.api.public.chat.v1.data import (
     AgentSessionTitleUpdateRequest,
     ChatCommandWriteRequest,
     ChatEditMessageWriteRequest,
+    ChatFailedRunRetryRequest,
     ChatInputWriteRequest,
     ChatMessageWriteRequest,
     ChatSessionCreateMessageWriteRequest,
     CleanupSessionGitWorktreeRequest,
     GoalStatusUpdateRequest,
 )
-from azents.broker.broadcast import WebSocketBroadcastPublishError
+from azents.broker.broadcast import (
+    WebSocketBroadcast,
+    WebSocketBroadcastPublishError,
+)
 from azents.broker.types import (
     BrokerMessage,
     PublishedEvent,
@@ -85,6 +97,9 @@ from azents.repos.agent_session.data import AgentSession
 from azents.repos.chat_write_request.data import ChatWriteRequest
 from azents.repos.input_buffer.data import InputBuffer
 from azents.services.agent_session_input import (
+    AgentSessionCreateRequestConflict,
+    AgentSessionInputAccessDenied,
+    AgentSessionInputRequestConflict,
     BufferedAgentSessionInputResult,
     CreatedAgentSessionInputResult,
 )
@@ -107,8 +122,10 @@ from azents.services.chat.live_events import InMemoryLiveEventStore, LiveEventSt
 from azents.services.chat_write import (
     AcceptedChatWriteRequest,
     AcceptedEditInput,
+    AcceptedFailedRunRetry,
     AcceptedPendingCommand,
     AcceptedStopRequest,
+    ChatWriteSessionAccessDenied,
 )
 from azents.services.session_git_worktree import GitWorktreeCleanupRequest
 
@@ -157,6 +174,48 @@ class _MemoryBroker:
         return self.activity
 
 
+class _PartiallyFailingStopBroker(_MemoryBroker):
+    """Broker that fails one stop signal while recording every attempt."""
+
+    def __init__(self, failed_session_id: str) -> None:
+        super().__init__()
+        self.failed_session_id = failed_session_id
+        self.attempted_session_ids: list[str] = []
+
+    async def send_message(self, message: BrokerMessage) -> None:
+        """Fail the selected Session after recording its send attempt."""
+        self.attempted_session_ids.append(message.session_id)
+        if message.session_id == self.failed_session_id:
+            raise RedisError("broker unavailable")
+        await super().send_message(message)
+
+
+class _HangingBroker(_MemoryBroker):
+    """Broker whose send never returns unless the call-site bounds it."""
+
+    async def send_message(self, message: BrokerMessage) -> None:
+        """Block forever after observing the attempted signal."""
+        self.messages.append(message)
+        await asyncio.Event().wait()
+
+
+class _BarrierBroker(_MemoryBroker):
+    """Broker whose caller can be cancelled while delivery remains in flight."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+        self.completed = asyncio.Event()
+
+    async def send_message(self, message: BrokerMessage) -> None:
+        """Record, block, and then mark the shielded delivery complete."""
+        self.messages.append(message)
+        self.started.set()
+        await self.release.wait()
+        self.completed.set()
+
+
 class _MemoryBroadcast:
     """WebSocket broadcast for tests."""
 
@@ -166,6 +225,49 @@ class _MemoryBroadcast:
     async def publish(self, session_id: str, event_json: dict[str, object]) -> None:
         """Record published events."""
         self.events.append((session_id, event_json))
+
+
+class _BarrierBroadcast(_MemoryBroadcast):
+    """Broadcast barrier for caller-cancellation delivery tests."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+        self.completed = asyncio.Event()
+
+    async def publish(self, session_id: str, event_json: dict[str, object]) -> None:
+        """Block until released, then finish the shielded live upsert."""
+        self.started.set()
+        await self.release.wait()
+        await super().publish(session_id, event_json)
+        self.completed.set()
+
+
+class _OrderedBroker(_MemoryBroker):
+    """Broker that records its position in the message-write side effects."""
+
+    def __init__(self, timeline: list[str]) -> None:
+        super().__init__()
+        self.timeline = timeline
+
+    async def send_message(self, message: BrokerMessage) -> None:
+        """Record the wake only after any preceding live publication."""
+        self.timeline.append("broker_wake")
+        await super().send_message(message)
+
+
+class _OrderedBroadcast(_MemoryBroadcast):
+    """Broadcast that records its position in the message-write side effects."""
+
+    def __init__(self, timeline: list[str]) -> None:
+        super().__init__()
+        self.timeline = timeline
+
+    async def publish(self, session_id: str, event_json: dict[str, object]) -> None:
+        """Record the live upsert before allowing the worker to wake."""
+        self.timeline.append("live_upsert")
+        await super().publish(session_id, event_json)
 
 
 class _WebSocket:
@@ -191,6 +293,24 @@ class _FailingBroadcast:
         """Fail every publication attempt."""
         del session_id, event_json
         raise WebSocketBroadcastPublishError
+
+
+class _HangingBroadcast:
+    """WebSocket broadcast whose Redis publish never returns."""
+
+    async def publish(self, session_id: str, event_json: dict[str, object]) -> None:
+        """Block forever after accepting the publication attempt."""
+        del session_id, event_json
+        await asyncio.Event().wait()
+
+
+class _TimeoutRedis:
+    """Redis double surfacing a client-side publish timeout."""
+
+    async def publish(self, channel: str, data: str) -> None:
+        """Fail the Pub/Sub publish with the Redis timeout type."""
+        del channel, data
+        raise RedisTimeoutError("publish timed out")
 
 
 def _exchange_file_service() -> AsyncMock:
@@ -244,10 +364,18 @@ async def test_health_check_ack_requires_current_confirmed_generation() -> None:
 class _BufferedInputService:
     """AgentSessionInputService double for tests."""
 
-    def __init__(self, target_session_id: str | None = None) -> None:
+    def __init__(
+        self,
+        target_session_id: str | None = None,
+        *,
+        existing_session_input_pending: bool = True,
+        new_session_input_pending: bool = True,
+    ) -> None:
         self.calls: list[str] = []
         self.kwargs: list[dict[str, object]] = []
         self.target_session_id = target_session_id
+        self.existing_session_input_pending = existing_session_input_pending
+        self.new_session_input_pending = new_session_input_pending
 
     async def create_buffered_agent_input(
         self,
@@ -263,6 +391,7 @@ class _BufferedInputService:
                 agent_runtime_id="1123456789abcdef0123456789abcdef",
                 agent_session_id=session_id,
                 input_buffer=input_buffer,
+                input_buffer_pending=self.existing_session_input_pending,
             )
         )
 
@@ -299,6 +428,7 @@ class _BufferedInputService:
                 agent_runtime_id="1123456789abcdef0123456789abcdef",
                 agent_session_id=session_id,
                 input_buffer=input_buffer,
+                input_buffer_pending=self.existing_session_input_pending,
             )
         )
 
@@ -336,6 +466,7 @@ class _BufferedInputService:
                     updated_at=datetime.datetime(2026, 6, 5, tzinfo=datetime.UTC),
                 ),
                 input_buffer=input_buffer,
+                input_buffer_pending=self.new_session_input_pending,
             )
         )
 
@@ -617,29 +748,44 @@ class _StopWriteService:
         self.session_ids: list[str] = []
         self.user_ids: list[str] = []
         self.stopped_session_ids = ["1123456789abcdef0123456789abcdef"]
+        self.error: SessionAccessDenied | SessionNotFound | None = None
 
     async def request_session_stop(
         self,
         *,
         session_id: str,
         user_id: str,
-    ) -> AcceptedStopRequest:
+    ) -> Success[AcceptedStopRequest] | Failure[SessionAccessDenied | SessionNotFound]:
         """Store stop intent record requests."""
         self.session_ids.append(session_id)
         self.user_ids.append(user_id)
-        return AcceptedStopRequest(
-            session_id=session_id,
-            stop_request_id="stop-request-1",
-            runtime_was_running=True,
-            stopped_session_ids=self.stopped_session_ids,
+        if self.error is not None:
+            return Failure(self.error)
+        return Success(
+            AcceptedStopRequest(
+                session_id=session_id,
+                stop_request_id="stop-request-1",
+                runtime_was_running=True,
+                stopped_session_ids=self.stopped_session_ids,
+                stop_request_ids_by_session={
+                    stopped_session_id: "stop-request-1"
+                    for stopped_session_id in self.stopped_session_ids
+                },
+            )
         )
 
 
 class _RestWriteIdempotencyService:
     """REST edit/command idempotency service double."""
 
-    def __init__(self, *, created: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        created: bool = True,
+        pending_on_replay: bool = False,
+    ) -> None:
         self.created = created
+        self.pending_on_replay = pending_on_replay
         self.calls: list[dict[str, object]] = []
 
     async def create_idempotent_edit_input(
@@ -668,7 +814,7 @@ class _RestWriteIdempotencyService:
                 file_parts=[],
                 created_at=datetime.datetime(2026, 5, 19, tzinfo=datetime.UTC),
             )
-            if self.created
+            if self.created or self.pending_on_replay
             else None
         )
         return AcceptedEditInput(
@@ -697,7 +843,31 @@ class _RestWriteIdempotencyService:
                 record=record,
                 created=self.created,
             ),
-            command_id="command-request-1" if self.created else None,
+            command_id=(
+                "command-request-1" if self.created or self.pending_on_replay else None
+            ),
+        )
+
+    async def create_idempotent_failed_run_retry(
+        self,
+        **kwargs: object,
+    ) -> AcceptedFailedRunRetry:
+        """Return a retry acceptance that always needs a safe replay wake."""
+        self.calls.append(kwargs)
+        failed_event_id = str(kwargs["failed_event_id"])
+        record = self._record(
+            kwargs,
+            write_type=ChatWriteRequestType.FAILED_RUN_RETRY,
+            accepted_id=failed_event_id,
+        )
+        return AcceptedFailedRunRetry(
+            request=AcceptedChatWriteRequest(
+                session_id=str(kwargs["session_id"]),
+                record=record,
+                created=self.created,
+            ),
+            failed_event_id=failed_event_id,
+            wake_needed=True,
         )
 
     def _record(
@@ -721,6 +891,18 @@ class _RestWriteIdempotencyService:
             created_at=datetime.datetime(2026, 6, 5, tzinfo=datetime.UTC),
         )
         return record
+
+
+class _DeniedRestWriteIdempotencyService(_RestWriteIdempotencyService):
+    """Final-authority service double rejecting a revoked membership."""
+
+    async def create_idempotent_pending_command(
+        self,
+        **kwargs: object,
+    ) -> AcceptedPendingCommand:
+        """Raise the typed final-transaction access failure."""
+        del kwargs
+        raise ChatWriteSessionAccessDenied("Session access denied")
 
 
 class _EmptySkillStore:
@@ -1384,6 +1566,56 @@ class TestStopSessionRun:
         assert isinstance(message, SessionStopSignal)
         assert message.session_id == "1123456789abcdef0123456789abcdef"
         assert message.user_id == "user-1"
+        assert message.stop_request_id == "stop-request-1"
+
+    async def test_returns_after_stop_signal_publish_timeout(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A hung Redis fast path cannot hold the committed REST stop response."""
+        monkeypatch.setattr(
+            chat_v1_module,
+            "_POST_COMMIT_PUBLISH_TIMEOUT_SECONDS",
+            0.01,
+        )
+        broker = _HangingBroker()
+
+        response = await asyncio.wait_for(
+            stop_session_run(
+                "1123456789abcdef0123456789abcdef",
+                CurrentUser(user_id="user-1", session_id="auth-session"),
+                _StopChatService(),  # pyright: ignore[reportArgumentType]
+                _StopWriteService(),  # pyright: ignore[reportArgumentType]
+                broker,  # pyright: ignore[reportArgumentType]
+            ),
+            timeout=1,
+        )
+
+        assert response.session_id == "1123456789abcdef0123456789abcdef"
+        assert len(broker.messages) == 1
+
+    async def test_stop_signal_completes_after_http_caller_cancellation(self) -> None:
+        """Disconnect after commit cannot cancel the subtree stop fast path."""
+        broker = _BarrierBroker()
+        task = asyncio.create_task(
+            stop_session_run(
+                "1123456789abcdef0123456789abcdef",
+                CurrentUser(user_id="user-1", session_id="auth-session"),
+                _StopChatService(),  # pyright: ignore[reportArgumentType]
+                _StopWriteService(),  # pyright: ignore[reportArgumentType]
+                broker,  # pyright: ignore[reportArgumentType]
+            )
+        )
+        await asyncio.wait_for(broker.started.wait(), timeout=1)
+
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=0.1)
+
+        broker.release.set()
+        await asyncio.wait_for(broker.completed.wait(), timeout=1)
+        assert len(broker.messages) == 1
+        assert isinstance(broker.messages[0], SessionStopSignal)
 
     async def test_sends_stop_signal_for_each_subtree_session(self) -> None:
         """REST stop endpoint publishes stop signals for the requested subtree."""
@@ -1410,6 +1642,35 @@ class TestStopSessionRun:
             if isinstance(message, SessionStopSignal)
         ] == chat_write_service.stopped_session_ids
 
+    async def test_attempts_every_subtree_signal_when_one_fast_path_fails(
+        self,
+    ) -> None:
+        """Durable subtree stop succeeds while every broker fast path is attempted."""
+        failed_session_id = "2123456789abcdef0123456789abcdef"
+        broker = _PartiallyFailingStopBroker(failed_session_id)
+        chat_service = _StopChatService()
+        chat_write_service = _StopWriteService()
+        chat_write_service.stopped_session_ids = [
+            "1123456789abcdef0123456789abcdef",
+            failed_session_id,
+            "3123456789abcdef0123456789abcdef",
+        ]
+
+        response = await stop_session_run(
+            "1123456789abcdef0123456789abcdef",
+            CurrentUser(user_id="user-1", session_id="auth-session"),
+            chat_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            chat_write_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            broker,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+        )
+
+        assert response.session_id == "1123456789abcdef0123456789abcdef"
+        assert broker.attempted_session_ids == chat_write_service.stopped_session_ids
+        assert [message.session_id for message in broker.messages] == [
+            "1123456789abcdef0123456789abcdef",
+            "3123456789abcdef0123456789abcdef",
+        ]
+
     async def test_denies_stop_without_session_access(self) -> None:
         """Do not issue stop request without session access."""
         broker = _MemoryBroker()
@@ -1432,6 +1693,30 @@ class TestStopSessionRun:
 
         assert broker.messages == []
         assert chat_write_service.session_ids == []
+
+    async def test_denies_stop_when_final_membership_revalidation_fails(self) -> None:
+        """Do not publish when membership is revoked after the API preflight check."""
+        broker = _MemoryBroker()
+        chat_service = _StopChatService()
+        chat_write_service = _StopWriteService()
+        chat_write_service.error = SessionAccessDenied()
+
+        try:
+            await stop_session_run(
+                "1123456789abcdef0123456789abcdef",
+                CurrentUser(user_id="user-1", session_id="auth-session"),
+                chat_service,  # pyright: ignore[reportArgumentType]
+                chat_write_service,  # pyright: ignore[reportArgumentType]
+                broker,  # pyright: ignore[reportArgumentType]
+            )
+        except Exception as exc:
+            assert getattr(exc, "status_code", None) == 404
+        else:
+            raise AssertionError("Expected HTTPException")
+
+        assert chat_service.session_ids == ["1123456789abcdef0123456789abcdef"]
+        assert chat_write_service.session_ids == ["1123456789abcdef0123456789abcdef"]
+        assert broker.messages == []
 
 
 class TestListInputActions:
@@ -1570,12 +1855,14 @@ class TestRestMessageWriteContract:
         broadcast = _MemoryBroadcast()
         chat_service = _RestWriteChatService()
         input_service = _BufferedInputService()
+        exchange_file_service = _exchange_file_service()
+        model_file_service = _model_file_service()
 
         response = await _write_message_via_rest(
             chat_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
             input_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-            _exchange_file_service(),
-            _model_file_service(),
+            exchange_file_service,
+            model_file_service,
             broker,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
             broadcast,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
             InMemoryLiveEventStore(),
@@ -1587,6 +1874,7 @@ class TestRestMessageWriteContract:
                     model_target_label="Primary",
                     reasoning_effort=None,
                 ),
+                attachments=["exchange://attachment-1"],
             ),
             session_id="0123456789abcdef0123456789abcdef",
             user_id="user-1",
@@ -1595,6 +1883,11 @@ class TestRestMessageWriteContract:
 
         assert input_service.calls == ["create_buffered_agent_input"]
         assert input_service.kwargs[0]["client_request_id"] == "client-1"
+        accepted_message = cast(InputMessage, input_service.kwargs[0]["message"])
+        assert accepted_message.attachments == ["exchange://attachment-1"]
+        assert accepted_message.file_parts == []
+        exchange_file_service.assert_not_called()
+        model_file_service.assert_not_called()
         assert response.session_id == "0123456789abcdef0123456789abcdef"
         assert response.client_request_id == "client-1"
         assert response.accepted.id == "0123456789abcdef0123456789abcdef"
@@ -1605,6 +1898,110 @@ class TestRestMessageWriteContract:
         assert broadcast.events[0][1]["type"] == "live_event_upserted"
         assert len(broker.messages) == 1
         assert isinstance(broker.messages[0], SessionWakeUp)
+
+    async def test_existing_session_response_loss_retry_resends_pending_wake(
+        self,
+    ) -> None:
+        """A pending durable request retry republishes its live state and wake."""
+        broker = _MemoryBroker()
+        broadcast = _MemoryBroadcast()
+        input_service = _BufferedInputService()
+        request = ChatMessageWriteRequest(
+            agent_id="agent-1",
+            client_request_id="client-existing-response-loss",
+            message="retry me",
+            inference_profile=RequestedInferenceProfile(
+                model_target_label="Primary",
+                reasoning_effort=None,
+            ),
+        )
+
+        first = await _write_message_via_rest(
+            _RestWriteChatService(),  # pyright: ignore[reportArgumentType]
+            input_service,  # pyright: ignore[reportArgumentType]
+            _exchange_file_service(),
+            _model_file_service(),
+            broker,  # pyright: ignore[reportArgumentType]
+            broadcast,  # pyright: ignore[reportArgumentType]
+            InMemoryLiveEventStore(),
+            request,
+            session_id="0123456789abcdef0123456789abcdef",
+            user_id="user-1",
+            tz=ZoneInfo("UTC"),
+        )
+        second = await _write_message_via_rest(
+            _RestWriteChatService(),  # pyright: ignore[reportArgumentType]
+            input_service,  # pyright: ignore[reportArgumentType]
+            _exchange_file_service(),
+            _model_file_service(),
+            broker,  # pyright: ignore[reportArgumentType]
+            broadcast,  # pyright: ignore[reportArgumentType]
+            InMemoryLiveEventStore(),
+            request,
+            session_id="0123456789abcdef0123456789abcdef",
+            user_id="user-1",
+            tz=ZoneInfo("UTC"),
+        )
+
+        assert second.accepted.id == first.accepted.id
+        assert len(broadcast.events) == 2
+        assert len(broker.messages) == 2
+
+    async def test_consumed_existing_session_retry_does_not_resurrect_input(
+        self,
+    ) -> None:
+        """A consumed durable request retry returns without live upsert or wake."""
+        broker = _MemoryBroker()
+        broadcast = _MemoryBroadcast()
+        input_service = _BufferedInputService(existing_session_input_pending=False)
+
+        response = await _write_message_via_rest(
+            _RestWriteChatService(),  # pyright: ignore[reportArgumentType]
+            input_service,  # pyright: ignore[reportArgumentType]
+            _exchange_file_service(),
+            _model_file_service(),
+            broker,  # pyright: ignore[reportArgumentType]
+            broadcast,  # pyright: ignore[reportArgumentType]
+            InMemoryLiveEventStore(),
+            ChatMessageWriteRequest(
+                agent_id="agent-1",
+                client_request_id="client-existing-consumed",
+                message="already consumed",
+                inference_profile=RequestedInferenceProfile(
+                    model_target_label="Primary",
+                    reasoning_effort=None,
+                ),
+            ),
+            session_id="0123456789abcdef0123456789abcdef",
+            user_id="user-1",
+            tz=ZoneInfo("UTC"),
+        )
+
+        assert response.accepted.id == "0123456789abcdef0123456789abcdef"
+        assert broadcast.events == []
+        assert broker.messages == []
+
+    def test_existing_session_payload_conflict_maps_to_http_409(self) -> None:
+        """Semantic reuse of an input request key is a public conflict."""
+        with pytest.raises(HTTPException) as exc_info:
+            _handle_agent_session_input_result(
+                Failure(
+                    AgentSessionInputRequestConflict(
+                        client_request_id="conflicting-input",
+                    )
+                )
+            )
+
+        assert exc_info.value.status_code == 409
+        assert "different input payload" in str(exc_info.value.detail)
+
+    def test_existing_session_revoked_access_maps_to_http_403(self) -> None:
+        """Final-transaction membership rejection is a typed public 403."""
+        with pytest.raises(HTTPException) as exc_info:
+            _handle_agent_session_input_result(Failure(AgentSessionInputAccessDenied()))
+
+        assert exc_info.value.status_code == 403
+        assert exc_info.value.detail == "Session access denied."
 
     async def test_existing_session_message_wakes_when_broadcast_fails(self) -> None:
         """A committed input still wakes the worker when UI publication fails."""
@@ -1634,6 +2031,197 @@ class TestRestMessageWriteContract:
         )
 
         assert response.accepted.type == "input_buffer"
+        assert len(broker.messages) == 1
+        assert isinstance(broker.messages[0], SessionWakeUp)
+
+    async def test_existing_session_message_wakes_on_redis_publish_timeout(
+        self,
+    ) -> None:
+        """A Redis client timeout is normalized and cannot suppress the wake."""
+        broker = _MemoryBroker()
+        broadcast = WebSocketBroadcast(cast(Redis, cast(Any, _TimeoutRedis())))
+
+        response = await _write_message_via_rest(
+            _RestWriteChatService(),  # pyright: ignore[reportArgumentType]
+            _BufferedInputService(),  # pyright: ignore[reportArgumentType]
+            _exchange_file_service(),
+            _model_file_service(),
+            broker,  # pyright: ignore[reportArgumentType]
+            broadcast,
+            InMemoryLiveEventStore(),
+            ChatMessageWriteRequest(
+                agent_id="agent-1",
+                client_request_id="client-redis-broadcast-timeout",
+                message="hello",
+                inference_profile=RequestedInferenceProfile(
+                    model_target_label="Primary",
+                    reasoning_effort=None,
+                ),
+            ),
+            session_id="0123456789abcdef0123456789abcdef",
+            user_id="user-1",
+            tz=ZoneInfo("UTC"),
+        )
+
+        assert response.accepted.type == "input_buffer"
+        assert len(broker.messages) == 1
+
+    async def test_existing_session_message_returns_when_broker_stalls(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A hung Redis wake cannot hold a committed message response open."""
+        monkeypatch.setattr(
+            chat_v1_module,
+            "_POST_COMMIT_PUBLISH_TIMEOUT_SECONDS",
+            0.01,
+        )
+        broker = _HangingBroker()
+
+        response = await asyncio.wait_for(
+            _write_message_via_rest(
+                _RestWriteChatService(),  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+                _BufferedInputService(),  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+                _exchange_file_service(),
+                _model_file_service(),
+                broker,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+                _MemoryBroadcast(),  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+                InMemoryLiveEventStore(),
+                ChatMessageWriteRequest(
+                    agent_id="agent-1",
+                    client_request_id="client-broker-stall",
+                    message="hello",
+                    inference_profile=RequestedInferenceProfile(
+                        model_target_label="Primary",
+                        reasoning_effort=None,
+                    ),
+                ),
+                session_id="0123456789abcdef0123456789abcdef",
+                user_id="user-1",
+                tz=ZoneInfo("UTC"),
+            ),
+            timeout=1,
+        )
+
+        assert response.accepted.type == "input_buffer"
+        assert len(broker.messages) == 1
+
+    async def test_existing_session_message_wakes_when_broadcast_stalls(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A hung live publication is bounded before the committed input wake."""
+        monkeypatch.setattr(
+            chat_v1_module,
+            "_POST_COMMIT_PUBLISH_TIMEOUT_SECONDS",
+            0.01,
+        )
+        broker = _MemoryBroker()
+
+        response = await asyncio.wait_for(
+            _write_message_via_rest(
+                _RestWriteChatService(),  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+                _BufferedInputService(),  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+                _exchange_file_service(),
+                _model_file_service(),
+                broker,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+                _HangingBroadcast(),  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+                InMemoryLiveEventStore(),
+                ChatMessageWriteRequest(
+                    agent_id="agent-1",
+                    client_request_id="client-broadcast-stall",
+                    message="hello",
+                    inference_profile=RequestedInferenceProfile(
+                        model_target_label="Primary",
+                        reasoning_effort=None,
+                    ),
+                ),
+                session_id="0123456789abcdef0123456789abcdef",
+                user_id="user-1",
+                tz=ZoneInfo("UTC"),
+            ),
+            timeout=1,
+        )
+
+        assert response.accepted.type == "input_buffer"
+        assert len(broker.messages) == 1
+        assert isinstance(broker.messages[0], SessionWakeUp)
+
+    async def test_pending_message_publishes_live_upsert_before_worker_wake(
+        self,
+    ) -> None:
+        """A fast worker cannot remove input before its live upsert is visible."""
+        timeline: list[str] = []
+        broker = _OrderedBroker(timeline)
+        broadcast = _OrderedBroadcast(timeline)
+
+        response = await _write_message_via_rest(
+            _RestWriteChatService(),  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            _BufferedInputService(),  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            _exchange_file_service(),
+            _model_file_service(),
+            broker,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            broadcast,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            InMemoryLiveEventStore(),
+            ChatMessageWriteRequest(
+                agent_id="agent-1",
+                client_request_id="client-live-before-wake",
+                message="hello",
+                inference_profile=RequestedInferenceProfile(
+                    model_target_label="Primary",
+                    reasoning_effort=None,
+                ),
+            ),
+            session_id="0123456789abcdef0123456789abcdef",
+            user_id="user-1",
+            tz=ZoneInfo("UTC"),
+        )
+
+        assert response.accepted.type == "input_buffer"
+        assert timeline == ["live_upsert", "broker_wake"]
+
+    async def test_caller_cancellation_does_not_break_live_upsert_wake_pipeline(
+        self,
+    ) -> None:
+        """Disconnect during live publish still completes publish then wake."""
+        broker = _MemoryBroker()
+        broadcast = _BarrierBroadcast()
+        task = asyncio.create_task(
+            _write_message_via_rest(
+                _RestWriteChatService(),  # pyright: ignore[reportArgumentType]
+                _BufferedInputService(),  # pyright: ignore[reportArgumentType]
+                _exchange_file_service(),
+                _model_file_service(),
+                broker,  # pyright: ignore[reportArgumentType]
+                broadcast,  # pyright: ignore[reportArgumentType]
+                InMemoryLiveEventStore(),
+                ChatMessageWriteRequest(
+                    agent_id="agent-1",
+                    client_request_id="client-cancel-after-commit",
+                    message="hello",
+                    inference_profile=RequestedInferenceProfile(
+                        model_target_label="Primary",
+                        reasoning_effort=None,
+                    ),
+                ),
+                session_id="0123456789abcdef0123456789abcdef",
+                user_id="user-1",
+                tz=ZoneInfo("UTC"),
+            )
+        )
+        await asyncio.wait_for(broadcast.started.wait(), timeout=1)
+
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=0.1)
+        assert broker.messages == []
+
+        broadcast.release.set()
+        await asyncio.wait_for(broadcast.completed.wait(), timeout=1)
+        for _ in range(10):
+            if broker.messages:
+                break
+            await asyncio.sleep(0)
         assert len(broker.messages) == 1
         assert isinstance(broker.messages[0], SessionWakeUp)
 
@@ -1683,6 +2271,116 @@ class TestRestMessageWriteContract:
         assert broadcast.events[0][0] == response.session_id
         assert len(broker.messages) == 1
         assert isinstance(broker.messages[0], SessionWakeUp)
+
+    async def test_new_session_response_loss_retry_resends_wake(self) -> None:
+        """A retry returning the same accepted input publishes another wake-up."""
+        broker = _MemoryBroker()
+        broadcast = _MemoryBroadcast()
+        chat_service = _RestWriteChatService(
+            session_id="4123456789abcdef0123456789abcdef"
+        )
+        input_service = _BufferedInputService()
+        request = ChatSessionCreateMessageWriteRequest(
+            client_request_id="client-new-response-loss",
+            message="retry me",
+            inference_profile=RequestedInferenceProfile(
+                model_target_label="Primary",
+                reasoning_effort=None,
+            ),
+            existing_project_paths=[],
+            setup_actions=[],
+        )
+
+        first = await _write_new_session_message_via_rest(
+            chat_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            input_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            broker,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            broadcast,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            InMemoryLiveEventStore(),
+            request,
+            agent_id="agent-1",
+            user_id="user-1",
+            tz=ZoneInfo("UTC"),
+        )
+        second = await _write_new_session_message_via_rest(
+            chat_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            input_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            broker,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            broadcast,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            InMemoryLiveEventStore(),
+            request,
+            agent_id="agent-1",
+            user_id="user-1",
+            tz=ZoneInfo("UTC"),
+        )
+
+        assert second.session_id == first.session_id
+        assert second.accepted.id == first.accepted.id
+        assert len(broker.messages) == 2
+        assert all(isinstance(message, SessionWakeUp) for message in broker.messages)
+
+    async def test_consumed_new_session_retry_does_not_resurrect_live_input(
+        self,
+    ) -> None:
+        """A snapshot-only retry neither wakes nor republishes consumed input."""
+        broker = _MemoryBroker()
+        broadcast = _MemoryBroadcast()
+        chat_service = _RestWriteChatService(
+            session_id="4123456789abcdef0123456789abcdef"
+        )
+        input_service = _BufferedInputService()
+        request = ChatSessionCreateMessageWriteRequest(
+            client_request_id="client-new-consumed-retry",
+            message="already consumed",
+            inference_profile=RequestedInferenceProfile(
+                model_target_label="Primary",
+                reasoning_effort=None,
+            ),
+            existing_project_paths=[],
+            setup_actions=[],
+        )
+        first = await _write_new_session_message_via_rest(
+            chat_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            input_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            broker,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            broadcast,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            InMemoryLiveEventStore(),
+            request,
+            agent_id="agent-1",
+            user_id="user-1",
+            tz=ZoneInfo("UTC"),
+        )
+        input_service.new_session_input_pending = False
+        second = await _write_new_session_message_via_rest(
+            chat_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            input_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            broker,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            broadcast,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            InMemoryLiveEventStore(),
+            request,
+            agent_id="agent-1",
+            user_id="user-1",
+            tz=ZoneInfo("UTC"),
+        )
+
+        assert second.session_id == first.session_id
+        assert second.accepted.id == first.accepted.id
+        assert len(broker.messages) == 1
+        assert len(broadcast.events) == 1
+
+    def test_new_session_payload_conflict_maps_to_http_409(self) -> None:
+        """Semantic reuse of a create-request key is a public conflict."""
+        with pytest.raises(HTTPException) as exc_info:
+            _handle_created_agent_session_input_result(
+                Failure(
+                    AgentSessionCreateRequestConflict(
+                        client_request_id="conflicting-create",
+                    )
+                )
+            )
+
+        assert exc_info.value.status_code == 409
+        assert "different new-session payload" in str(exc_info.value.detail)
 
     async def test_new_session_message_accepts_setup_actions(self) -> None:
         """Draft-session REST write accepts setup actions before the message."""
@@ -1882,12 +2580,14 @@ class TestRestEditCommandWriteContract:
         broker = _MemoryBroker()
         chat_service = _RestWriteChatService()
         idempotency = _RestWriteIdempotencyService(created=True)
+        exchange_file_service = _exchange_file_service()
+        model_file_service = _model_file_service()
 
         response = await _write_edit_message_via_rest(
             chat_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
             idempotency,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-            _exchange_file_service(),
-            _model_file_service(),
+            exchange_file_service,
+            model_file_service,
             broker,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
             InMemoryLiveEventStore(),
             ChatEditMessageWriteRequest(
@@ -1899,6 +2599,7 @@ class TestRestEditCommandWriteContract:
                     model_target_label="Primary",
                     reasoning_effort=None,
                 ),
+                attachments=["exchange://edit-attachment"],
             ),
             session_id="0123456789abcdef0123456789abcdef",
             user_id="user-1",
@@ -1909,13 +2610,17 @@ class TestRestEditCommandWriteContract:
         assert response.accepted.id == "message-1"
         assert response.history_reload_required is True
         assert idempotency.calls[0]["message_id"] == "message-1"
+        assert idempotency.calls[0]["attachments"] == ["exchange://edit-attachment"]
+        assert idempotency.calls[0]["file_parts"] == []
+        exchange_file_service.assert_not_called()
+        model_file_service.assert_not_called()
         assert len(broker.messages) == 1
         message = broker.messages[0]
         assert isinstance(message, SessionWakeUp)
         assert message.session_id == "0123456789abcdef0123456789abcdef"
 
     async def test_edit_message_retry_does_not_enqueue_broker_message(self) -> None:
-        """REST edit retry returns existing record and skips broker enqueue."""
+        """A consumed REST edit retry returns without a redundant wake."""
         broker = _MemoryBroker()
         chat_service = _RestWriteChatService()
         idempotency = _RestWriteIdempotencyService(created=False)
@@ -1944,6 +2649,39 @@ class TestRestEditCommandWriteContract:
 
         assert response.client_request_id == "edit-1"
         assert broker.messages == []
+
+    async def test_edit_message_response_loss_retry_resends_pending_wake(self) -> None:
+        """An edit buffer still pending after response loss is woken again."""
+        broker = _MemoryBroker()
+        idempotency = _RestWriteIdempotencyService(
+            created=False,
+            pending_on_replay=True,
+        )
+
+        response = await _write_edit_message_via_rest(
+            _RestWriteChatService(),  # pyright: ignore[reportArgumentType]
+            idempotency,  # pyright: ignore[reportArgumentType]
+            _exchange_file_service(),
+            _model_file_service(),
+            broker,  # pyright: ignore[reportArgumentType]
+            InMemoryLiveEventStore(),
+            ChatEditMessageWriteRequest(
+                agent_id="agent-1",
+                client_request_id="edit-response-loss",
+                message_id="message-1",
+                message="edited",
+                inference_profile=RequestedInferenceProfile(
+                    model_target_label="Primary",
+                    reasoning_effort=None,
+                ),
+            ),
+            session_id="0123456789abcdef0123456789abcdef",
+            user_id="user-1",
+            tz=ZoneInfo("UTC"),
+        )
+
+        assert response.accepted.type == "edit_message"
+        assert len(broker.messages) == 1
 
     async def test_command_stores_pending_command_and_wakes_once(self) -> None:
         """New command request creates a pending command and sends wake-up."""
@@ -1975,7 +2713,7 @@ class TestRestEditCommandWriteContract:
         assert message.session_id == "0123456789abcdef0123456789abcdef"
 
     async def test_command_retry_does_not_enqueue_broker_message(self) -> None:
-        """REST command retry skips broker enqueue."""
+        """A consumed REST command retry skips broker enqueue."""
         broker = _MemoryBroker()
         chat_service = _RestWriteChatService()
         idempotency = _RestWriteIdempotencyService(created=False)
@@ -1996,6 +2734,102 @@ class TestRestEditCommandWriteContract:
 
         assert response.client_request_id == "command-1"
         assert broker.messages == []
+
+    async def test_command_response_loss_retry_survives_broker_failure(self) -> None:
+        """A pending command replay attempts wake without failing its response."""
+        session_id = "0123456789abcdef0123456789abcdef"
+        broker = _PartiallyFailingStopBroker(session_id)
+        idempotency = _RestWriteIdempotencyService(
+            created=False,
+            pending_on_replay=True,
+        )
+
+        response = await _write_command_via_rest(
+            _RestWriteChatService(),  # pyright: ignore[reportArgumentType]
+            idempotency,  # pyright: ignore[reportArgumentType]
+            broker,  # pyright: ignore[reportArgumentType]
+            InMemoryLiveEventStore(),
+            ChatCommandWriteRequest(
+                agent_id="agent-1",
+                client_request_id="command-response-loss",
+                command="compact",
+            ),
+            session_id=session_id,
+            user_id="user-1",
+        )
+
+        assert response.accepted.id == "command-request-1"
+        assert broker.attempted_session_ids == [session_id]
+
+    async def test_failed_run_retry_replay_safely_resends_wake(self) -> None:
+        """A durable failed-run retry replay always sends a safe recovery wake."""
+        broker = _MemoryBroker()
+        idempotency = _RestWriteIdempotencyService(created=False)
+
+        response = await _write_failed_run_retry_via_rest(
+            _RestWriteChatService(),  # pyright: ignore[reportArgumentType]
+            idempotency,  # pyright: ignore[reportArgumentType]
+            broker,  # pyright: ignore[reportArgumentType]
+            InMemoryLiveEventStore(),
+            ChatFailedRunRetryRequest(
+                agent_id="agent-1",
+                client_request_id="retry-response-loss",
+                failed_event_id="1123456789abcdef0123456789abcdef",
+            ),
+            session_id="0123456789abcdef0123456789abcdef",
+            user_id="user-1",
+        )
+
+        assert response.accepted.type == "failed_run_retry"
+        assert len(broker.messages) == 1
+
+    async def test_command_wake_completes_after_http_caller_cancellation(self) -> None:
+        """Cancellation during post-commit wake does not cancel delivery."""
+        broker = _BarrierBroker()
+        task = asyncio.create_task(
+            _write_command_via_rest(
+                _RestWriteChatService(),  # pyright: ignore[reportArgumentType]
+                _RestWriteIdempotencyService(),  # pyright: ignore[reportArgumentType]
+                broker,  # pyright: ignore[reportArgumentType]
+                InMemoryLiveEventStore(),
+                ChatCommandWriteRequest(
+                    agent_id="agent-1",
+                    client_request_id="command-cancel-after-commit",
+                    command="compact",
+                ),
+                session_id="0123456789abcdef0123456789abcdef",
+                user_id="user-1",
+            )
+        )
+        await asyncio.wait_for(broker.started.wait(), timeout=1)
+
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=0.1)
+
+        broker.release.set()
+        await asyncio.wait_for(broker.completed.wait(), timeout=1)
+        assert len(broker.messages) == 1
+
+    async def test_final_transaction_access_denial_maps_to_http_403(self) -> None:
+        """Membership revoke between API check and mutation returns a 403."""
+        with pytest.raises(HTTPException) as exc_info:
+            await _write_command_via_rest(
+                _RestWriteChatService(),  # pyright: ignore[reportArgumentType]
+                _DeniedRestWriteIdempotencyService(),  # pyright: ignore[reportArgumentType]
+                _MemoryBroker(),  # pyright: ignore[reportArgumentType]
+                InMemoryLiveEventStore(),
+                ChatCommandWriteRequest(
+                    agent_id="agent-1",
+                    client_request_id="command-revoked",
+                    command="compact",
+                ),
+                session_id="0123456789abcdef0123456789abcdef",
+                user_id="user-1",
+            )
+
+        assert exc_info.value.status_code == 403
+        assert exc_info.value.detail == "Session access denied."
 
 
 class TestChatInferenceProfileRequestContract:

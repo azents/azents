@@ -15,8 +15,13 @@ from azents.engine.run.failure import (
     FailedRunFinalizationReason,
     FailedRunRetryState,
 )
-from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
+from azents.repos.agent_execution import (
+    AgentRunNotActiveError,
+    AgentRunRepository,
+    EventTranscriptRepository,
+)
 from azents.repos.agent_execution.data import EventCreate
+from azents.repos.agent_session import AgentSessionRepository
 
 
 @dataclasses.dataclass(frozen=True)
@@ -33,6 +38,7 @@ class FailedRunEventStore:
 
     transcript_repo: Annotated[TranscriptRepository, Depends(EventTranscriptRepository)]
     run_repo: Annotated[AgentRunRepository, Depends(AgentRunRepository)]
+    session_repo: Annotated[AgentSessionRepository, Depends(AgentSessionRepository)]
 
     async def append_terminal_failed_run(
         self,
@@ -46,6 +52,15 @@ class FailedRunEventStore:
         action_hint: str | None = None,
     ) -> FailedRunEventStoreResult:
         """Append final failed-run events and close the AgentRun."""
+        agent_session = await self.session_repo.lock_by_id(session, session_id)
+        if agent_session is None:
+            raise ValueError("AgentSession not found")
+        run = await self.run_repo.lock_by_id(session, run_id)
+        if run is None or run.session_id != session_id:
+            raise ValueError("AgentRun not found in session")
+        if run.status != AgentRunStatus.RUNNING:
+            raise AgentRunNotActiveError(run_id, run.status)
+
         metadata = FailedRunFailureMetadata.from_retry_state(
             retry_state,
             finalization_reason=reason,
@@ -78,7 +93,7 @@ class FailedRunEventStore:
                 external_id=f"failed-run:{run_id}:run-marker",
             ),
         )
-        await self.run_repo.mark_terminal_if_running(
+        terminal = await self.run_repo.mark_terminal_if_running(
             session,
             run_id,
             AgentRunStatus.FAILED,
@@ -87,4 +102,7 @@ class FailedRunEventStore:
             terminal_result_event_id=error_event.id,
             terminal_result_message=user_message,
         )
+        if terminal is None or terminal.status != AgentRunStatus.FAILED:
+            status = run.status if terminal is None else terminal.status
+            raise AgentRunNotActiveError(run_id, status)
         return FailedRunEventStoreResult(error_event=error_event, run_marker=run_marker)

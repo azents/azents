@@ -8,6 +8,7 @@ import pytest
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import azents.engine.events.engine_adapter as engine_adapter_module
 from azents.core.chatgpt_oauth import CHATGPT_OAUTH_BACKEND_BASE_URL
 from azents.core.enums import (
     AgentRunPhase,
@@ -41,6 +42,7 @@ from azents.engine.events.filters import (
     PostLowerFilterPipeline,
 )
 from azents.engine.events.protocols import (
+    DurableRunWriteFence,
     NormalizedAdapterOutput,
     OutputSink,
     SummaryEnricher,
@@ -69,7 +71,13 @@ from azents.engine.hooks.types import (
 from azents.engine.run.contracts import RunContext, RunRequest, ToolkitBinding
 from azents.engine.run.emit import Emit
 from azents.engine.run.errors import CompactionFailedError, ModelCallError
-from azents.engine.run.types import USER_STOP_CANCEL_MESSAGE, CheckStop
+from azents.engine.run.types import (
+    OWNERSHIP_LOST_CANCEL_MESSAGE,
+    USER_STOP_CANCEL_MESSAGE,
+    CheckStop,
+)
+from azents.rdb.session import SessionManager
+from azents.repos.agent_execution import AgentRunOwnershipLostError
 from azents.repos.agent_execution.data import AgentRunCreate, EventCreate
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession
@@ -147,6 +155,8 @@ class _RunRepo:
         self.created: AgentRunCreate | None = None
         self.terminal_status: AgentRunStatus | None = None
         self.retry_state_updates: list[object | None] = []
+        self.ownership_lost = False
+        self.authority_checks: list[tuple[str, str, int]] = []
         now = datetime.datetime.now(datetime.UTC)
         self._state: AgentRunState | None = AgentRunState(
             id="0" * 32,
@@ -169,6 +179,31 @@ class _RunRepo:
     ) -> AgentRunState | None:
         """Return existing run state when retry reuses a run id."""
         del session, run_id
+        return self._state
+
+    async def lock_active_owner(
+        self,
+        session: AsyncSession,
+        *,
+        run_id: str,
+        session_id: str,
+        owner_generation: int,
+    ) -> AgentRunState:
+        """Return the active test Run for a matching owner."""
+        del session
+        self.authority_checks.append((run_id, session_id, owner_generation))
+        if self.ownership_lost:
+            raise AgentRunOwnershipLostError(
+                run_id=run_id,
+                session_id=session_id,
+                expected_owner_generation=owner_generation,
+                current_owner_generation=owner_generation + 1,
+                active_run_id="replacement-run",
+            )
+        if self._state is None or self._state.id != run_id:
+            raise ValueError("Agent run not found")
+        if self._state.session_id != session_id:
+            raise ValueError("Agent run session mismatch")
         return self._state
 
     async def create(
@@ -338,6 +373,7 @@ class _Compactor:
         transcript: Sequence[Event],
         compaction_id: str,
         summarize: SummaryGenerator,
+        write_fence: DurableRunWriteFence,
         on_started: Callable[[], Awaitable[None]] | None = None,
         summary_context_window_tokens: int | None = None,
         reason: str | None = None,
@@ -384,6 +420,7 @@ class _FailingCompactor:
         transcript: Sequence[Event],
         compaction_id: str,
         summarize: SummaryGenerator,
+        write_fence: DurableRunWriteFence,
         on_started: Callable[[], Awaitable[None]] | None = None,
         summary_context_window_tokens: int | None = None,
         reason: str | None = None,
@@ -395,6 +432,7 @@ class _FailingCompactor:
             transcript,
             compaction_id,
             summarize,
+            write_fence,
             on_started,
             summary_context_window_tokens,
             reason,
@@ -415,14 +453,14 @@ class _Execution:
 
     async def run(
         self,
-        session: AsyncSession,
+        session_manager: SessionManager[AsyncSession],
         request: AgentRunExecutionRequest,
         *,
         check_stop: CheckStop | None = None,
         poll_input_events: object = None,
     ) -> AgentRunStatus:
         """Record run request and prepare a model call when wired."""
-        del session, check_stop, poll_input_events
+        del session_manager, check_stop, poll_input_events
         self.request = request
         if self.model_call_preparer is not None:
             self.prepared_model_call = await self.model_call_preparer(
@@ -437,14 +475,14 @@ class _FailingExecution:
 
     async def run(
         self,
-        session: AsyncSession,
+        session_manager: SessionManager[AsyncSession],
         request: AgentRunExecutionRequest,
         *,
         check_stop: CheckStop | None = None,
         poll_input_events: object = None,
     ) -> AgentRunStatus:
         """Propagate ModelCallError."""
-        del session, request, check_stop, poll_input_events
+        del session_manager, request, check_stop, poll_input_events
         raise ModelCallError("Model call failed (401): Missing scopes")
 
 
@@ -459,31 +497,20 @@ class _StreamingExecution:
 
     async def run(
         self,
-        session: AsyncSession,
+        session_manager: SessionManager[AsyncSession],
         request: AgentRunExecutionRequest,
         *,
         check_stop: CheckStop | None = None,
         poll_input_events: object = None,
     ) -> AgentRunStatus:
         """Send tool call output to sink first, then wait for completion signal."""
-        del session, request, check_stop, poll_input_events
-        event = Event(
-            id="1" * 32,
-            session_id="session-1",
-            kind=EventKind.CLIENT_TOOL_CALL,
-            payload=ClientToolCallPayload(
-                call_id="call-1",
-                name="tool",
-                arguments="{}",
-                native_artifact=_artifact(
-                    {"type": "function_call", "call_id": "call-1"}
-                ),
-            ),
-            created_at=datetime.datetime.now(datetime.UTC),
-        )
+        del session_manager, request, check_stop, poll_input_events
         if self.output_sink is None:
             raise AssertionError("output sink was not injected")
-        await self.output_sink(NormalizedAdapterOutput(events=[]), [event])
+        await self.output_sink(
+            NormalizedAdapterOutput(events=[]),
+            [_streaming_tool_call_event()],
+        )
         try:
             await self._done.wait()
         except asyncio.CancelledError as exc:
@@ -491,6 +518,77 @@ class _StreamingExecution:
             self.cancelled.set()
             raise
         return AgentRunStatus.COMPLETED
+
+
+class _CancellationResistantFencedExecution(_StreamingExecution):
+    """Ignore cancellation, then attempt one exact-owner-fenced late write."""
+
+    def __init__(self, run_repo: _RunRepo) -> None:
+        super().__init__(asyncio.Event())
+        self._run_repo = run_repo
+        self.release = asyncio.Event()
+        self.cancel_args_history: list[tuple[object, ...]] = []
+        self.fence_rejected = asyncio.Event()
+        self.durable_mutations = 0
+
+    async def run(
+        self,
+        session_manager: SessionManager[AsyncSession],
+        request: AgentRunExecutionRequest,
+        *,
+        check_stop: CheckStop | None = None,
+        poll_input_events: object = None,
+    ) -> AgentRunStatus:
+        """Remain alive past quarantine and prove a stale write is rejected."""
+        del check_stop, poll_input_events
+        if self.output_sink is None:
+            raise AssertionError("output sink was not injected")
+        await self.output_sink(
+            NormalizedAdapterOutput(events=[]),
+            [_streaming_tool_call_event()],
+        )
+        while not self.release.is_set():
+            try:
+                await self.release.wait()
+            except asyncio.CancelledError as exc:
+                self.cancel_args_history.append(exc.args)
+                self.cancelled.set()
+        try:
+            async with session_manager() as session:
+                await self._run_repo.lock_active_owner(
+                    session,
+                    run_id=request.run_id,
+                    session_id=request.session_id,
+                    owner_generation=request.owner_generation,
+                )
+                self.durable_mutations += 1
+        except AgentRunOwnershipLostError:
+            self.fence_rejected.set()
+            raise
+        return AgentRunStatus.COMPLETED
+
+
+class _CleanupFailingStreamingExecution(_StreamingExecution):
+    """Execution that reports a cleanup failure after receiving cancellation."""
+
+    async def run(
+        self,
+        session_manager: SessionManager[AsyncSession],
+        request: AgentRunExecutionRequest,
+        *,
+        check_stop: CheckStop | None = None,
+        poll_input_events: object = None,
+    ) -> AgentRunStatus:
+        """Convert the injected execution cancellation into a cleanup failure."""
+        try:
+            return await super().run(
+                session_manager,
+                request,
+                check_stop=check_stop,
+                poll_input_events=poll_input_events,
+            )
+        except asyncio.CancelledError:
+            raise RuntimeError("execution cleanup failed") from None
 
 
 class _RecordingToolExecutor:
@@ -590,6 +688,7 @@ def test_hooked_tool_executor_forwards_request_cancel() -> None:
         agent_id="agent-1",
         session_id="session-1",
         run_id="run-1",
+        owner_generation=1,
     )
     call = ClientToolCallPayload(
         call_id="call-1",
@@ -703,8 +802,14 @@ async def test_adapter_yields_model_output_before_run_completion() -> None:
     assert isinstance(_events(rest)[-1], RunComplete)
 
 
-async def test_adapter_forwards_user_stop_cancellation_to_execution() -> None:
-    """Propagate adapter consumer user stop cancellation to execution task."""
+@pytest.mark.parametrize(
+    "cancel_message",
+    [USER_STOP_CANCEL_MESSAGE, OWNERSHIP_LOST_CANCEL_MESSAGE],
+)
+async def test_adapter_forwards_cancellation_reason_to_execution(
+    cancel_message: str,
+) -> None:
+    """Propagate semantic adapter cancellation to the execution task."""
     done = asyncio.Event()
     execution = _StreamingExecution(done)
     adapter = _agent_engine_adapter(
@@ -745,12 +850,152 @@ async def test_adapter_forwards_user_stop_cancellation_to_execution() -> None:
 
     task = asyncio.create_task(consume())
     await asyncio.wait_for(emitted.wait(), timeout=1)
-    task.cancel(USER_STOP_CANCEL_MESSAGE)
+    task.cancel(cancel_message)
 
     with pytest.raises(asyncio.CancelledError):
         await task
 
-    assert execution.cancel_args == (USER_STOP_CANCEL_MESSAGE,)
+    assert execution.cancel_args == (cancel_message,)
+
+
+async def test_adapter_preserves_ownership_cancel_when_execution_cleanup_fails(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A cleanup failure cannot replace the stale-owner cancellation marker."""
+    done = asyncio.Event()
+    execution = _CleanupFailingStreamingExecution(done)
+    adapter = _agent_engine_adapter(
+        session_manager=_session_context,
+        artifact_service=_ArtifactService(),
+        exchange_file_service=_ExchangeFileService(),
+        model_file_service=_ModelFileService(),
+        run_repo=_RunRepo(),
+        agent_session_repo=_AgentSessionRepo(),
+        execution_factory=_StreamingExecutionFactory(execution),
+    )
+    emitted = asyncio.Event()
+
+    async def consume() -> None:
+        """Receive ownership-loss cancellation while consuming adapter output."""
+        async for _emit in adapter.run(
+            RunRequest(
+                session_id="session-1",
+                user_messages=[],
+                agent_prompt="agent prompt",
+                toolkits=[],
+                model="gpt-5.1",
+                credential_kwargs={"api_key": "test"},
+                workspace_id="workspace-1",
+                agent_id="agent-1",
+                auto_compaction_threshold_tokens=None,
+                inference_state=None,
+            ),
+            RunContext(
+                owner_generation=1,
+                tool_admission_barrier=_OpenToolAdmissionBarrier(),
+                user_id="user-1",
+                run_id="0" * 32,
+                publish_event=_noop_publish,
+            ),
+        ):
+            emitted.set()
+
+    task = asyncio.create_task(consume())
+    await asyncio.wait_for(emitted.wait(), timeout=1)
+    task.cancel(OWNERSHIP_LOST_CANCEL_MESSAGE)
+
+    with pytest.raises(asyncio.CancelledError) as cancelled:
+        await task
+
+    assert cancelled.value.args == (OWNERSHIP_LOST_CANCEL_MESSAGE,)
+    assert execution.cancel_args == (OWNERSHIP_LOST_CANCEL_MESSAGE,)
+    assert "Execution task failed during adapter cancellation cleanup" in caplog.text
+
+
+async def test_adapter_quarantines_cancel_resistant_execution_and_fences_late_write(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Consumer cancellation stays prompt while stale late writes remain fenced."""
+    monkeypatch.setattr(
+        engine_adapter_module,
+        "_RUN_TASK_CANCEL_DRAIN_TIMEOUT_SECONDS",
+        0.01,
+    )
+    run_repo = _RunRepo()
+    execution = _CancellationResistantFencedExecution(run_repo)
+    adapter = _agent_engine_adapter(
+        session_manager=_session_context,
+        artifact_service=_ArtifactService(),
+        exchange_file_service=_ExchangeFileService(),
+        model_file_service=_ModelFileService(),
+        run_repo=run_repo,
+        agent_session_repo=_AgentSessionRepo(),
+        execution_factory=_StreamingExecutionFactory(execution),
+    )
+    emitted = asyncio.Event()
+    retained_task: asyncio.Task[AgentRunStatus] | None = None
+
+    async def consume() -> None:
+        """Receive ownership-loss cancellation while the child refuses to exit."""
+        async for _emit in adapter.run(
+            RunRequest(
+                session_id="session-1",
+                user_messages=[],
+                agent_prompt="agent prompt",
+                toolkits=[],
+                model="gpt-5.1",
+                credential_kwargs={"api_key": "test"},
+                workspace_id="workspace-1",
+                agent_id="agent-1",
+                auto_compaction_threshold_tokens=None,
+                inference_state=None,
+            ),
+            RunContext(
+                owner_generation=1,
+                tool_admission_barrier=_OpenToolAdmissionBarrier(),
+                user_id="user-1",
+                run_id="0" * 32,
+                publish_event=_noop_publish,
+            ),
+        ):
+            emitted.set()
+
+    consumer_task = asyncio.create_task(consume())
+    await asyncio.wait_for(emitted.wait(), timeout=1)
+    consumer_task.cancel(OWNERSHIP_LOST_CANCEL_MESSAGE)
+
+    try:
+        with pytest.raises(asyncio.CancelledError) as cancelled:
+            await asyncio.wait_for(consumer_task, timeout=1)
+
+        assert cancelled.value.args == (OWNERSHIP_LOST_CANCEL_MESSAGE,)
+        assert execution.cancel_args_history
+        assert all(
+            args == (OWNERSHIP_LOST_CANCEL_MESSAGE,)
+            for args in execution.cancel_args_history
+        )
+        retained_task = next(
+            task
+            for task in engine_adapter_module._RETAINED_RUN_TASKS  # pyright: ignore[reportPrivateUsage]
+            if task.get_name() == f"agent-run-execution:{'0' * 32}" and not task.done()
+        )
+        assert "Execution task ignored adapter cancellation deadline" in caplog.text
+    finally:
+        run_repo.ownership_lost = True
+        execution.release.set()
+
+    assert retained_task is not None
+    await asyncio.wait_for(execution.fence_rejected.wait(), timeout=1)
+
+    async def wait_for_retained_task_release() -> None:
+        while retained_task in engine_adapter_module._RETAINED_RUN_TASKS:  # pyright: ignore[reportPrivateUsage]
+            await asyncio.sleep(0)
+
+    await asyncio.wait_for(wait_for_retained_task_release(), timeout=1)
+    assert execution.durable_mutations == 0
+    assert run_repo.authority_checks[-1] == ("0" * 32, "session-1", 1)
+    assert "Quarantined execution task failed after adapter cancellation" in caplog.text
 
 
 async def test_adapter_drains_run_task_on_stream_close() -> None:
@@ -1342,6 +1587,22 @@ class _StreamingExecutionFactory:
         del kwargs
         self._execution.output_sink = output_sink
         return self._execution
+
+
+def _streaming_tool_call_event() -> Event:
+    """Return the durable output used to open adapter streaming tests."""
+    return Event(
+        id="1" * 32,
+        session_id="session-1",
+        kind=EventKind.CLIENT_TOOL_CALL,
+        payload=ClientToolCallPayload(
+            call_id="call-1",
+            name="tool",
+            arguments="{}",
+            native_artifact=_artifact({"type": "function_call", "call_id": "call-1"}),
+        ),
+        created_at=datetime.datetime.now(datetime.UTC),
+    )
 
 
 def _artifact(item: dict[str, object]) -> NativeArtifact:

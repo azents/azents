@@ -22,7 +22,7 @@ code_paths:
   - python/apps/azents/src/azents/engine/run/errors.py
   - python/apps/azents/src/azents/worker/session/**
 last_verified_at: 2026-07-14
-spec_version: 19
+spec_version: 20
 ---
 
 # Run Resume
@@ -82,23 +82,37 @@ operation is cancelled rather than resumed.
 
 Broker wake-up routing uses the ownership lease:
 
-1. A producer commits model input or control state to Postgres, then stores a wake-up signal in the
-   per-session wake-up list.
-2. If the session has a live owner heartbeat, the producer publishes the wake-up to the owner
-   worker's direct stream.
-3. If there is no live owner heartbeat, the producer publishes to the global incoming stream.
-4. A non-owner worker that observes a global wake-up for a live owner does not process the message.
-   It forwards the wake-up to the owner worker's direct stream.
-5. If the sticky owner key exists but the owner heartbeat has been missing for 120 seconds, the
-   observing worker may take over the session lease and process queued wake-ups.
+1. A producer commits model input or control state to Postgres, then publishes the complete broker
+   envelope to `azents:incoming:v2` with one `XADD`. The Stream entry is both body and wake
+   authority, so an ambiguous response means either the whole entry committed or nothing committed.
+   The mutation is never retried.
+2. During rolling deployment the producer also writes one uniquely identified compatibility copy
+   to the legacy per-session LIST and global/direct wake Stream. Success of either independent path
+   is sufficient. An ambiguous legacy append/expiry/publication gets one duplicate-safe repair wake.
+3. Workers alternate v2 and legacy polling. A new worker that accepts a v2 entry removes that
+   entry's exact compatibility LIST copy, preventing permanent dual-write backlog while still
+   allowing old-only workers to run after a rollback.
+4. A non-owner v2 worker assigns the pending entry to a live v2 owner's consumer with `XCLAIM` on
+   the same global Stream. The owner reads its own PEL before reclaiming abandoned or new entries.
+   When the owner is an old worker, the v2 entry remains authority until a LIST/direct-Stream bridge
+   and its wake complete, then the relay ACKs v2.
+5. A worker defers v2 `XACK` until its next receive call, after `AgentWorker` has handed the body to
+   the in-memory SessionRunner. An ambiguous ACK can therefore produce a duplicate but cannot hide
+   the only body before handoff.
+6. If the sticky owner key exists but its heartbeat has been missing for 120 seconds, an observing
+   worker may take over the lease and reclaim the pending v2 entry.
 
 Redis Cluster imposes two routing constraints on the broker implementation:
 
+- Complete-message publication is a single-key v2 `XADD`; it does not attempt a cross-slot Lua
+  transaction between a session LIST, owner lease, and global/direct Stream.
 - Owner lease scripts only touch keys that share the session hash tag, for example
   `azents:session:{session_id}:lock` and `azents:session:{session_id}:owner-heartbeat`.
-- Workers read the global incoming stream and their worker direct stream with separate
+- Legacy workers read the global incoming Stream and their worker direct Stream with separate
   `XREADGROUP` commands. They must not pass both stream keys to one Redis command because those
   streams can live in different cluster hash slots.
+- Poison-envelope quarantine uses a one-key Lua append-plus-expiry mutation, so a response loss
+  cannot leave an `invalid-messages` key without its retention TTL.
 
 ```mermaid
 sequenceDiagram
@@ -118,20 +132,21 @@ sequenceDiagram
     end
 
     API->>DB: commit input/control state
-    API->>R: RPUSH session wake-up
-    R->>R: owner heartbeat is live
-    R->>WA: XADD owner direct stream
-    WA->>R: XREADGROUP owner direct stream
-    WA->>R: drain session wake-up list
+    API->>R: XADD complete envelope to v2 Stream
+    API-->>R: legacy LIST + wake compatibility copy
+    WB->>R: XREADGROUP v2 global Stream
+    R->>R: owner heartbeat and v2 capability are live
+    WB->>R: XCLAIM pending entry to WA
+    WA->>R: read own pending entry
+    WA->>R: remove exact legacy copy
+    Note over WA,R: defer XACK until body is handed to SessionRunner
     WA->>DB: mark run_state=RUNNING
     WA->>DB: process follow-up input
 
     Note over WA: If WA stops gracefully
     WA->>R: release lease + heartbeat
-    API->>R: next message
-    R->>R: no live owner
-    R->>WB: XADD global incoming
-    WB->>R: acquire session lease
+    API->>R: next complete-message XADD
+    WB->>R: acquire session lease and process
 ```
 
 ## Failure And Takeover
@@ -153,12 +168,11 @@ sequenceDiagram
     Note over WA: crash / OOM / node loss
     Note over R: heartbeat expires after 120s<br/>sticky lease key may still exist
     API->>DB: commit input/control state
-    API->>R: RPUSH session wake-up signal
-    R->>R: sticky owner exists, heartbeat missing
-    R->>WB: XADD global incoming
+    API->>R: XADD complete v2 envelope
+    WB->>R: XAUTOCLAIM abandoned pending entry
     WB->>R: observe stale owner heartbeat
     WB->>R: steal session lease + heartbeat
-    WB->>R: drain session wake-up list
+    WB->>R: hand complete envelope to SessionRunner
     WB->>DB: mark run_state=RUNNING
     WB->>DB: resume from durable transcript / input buffers
 ```
@@ -167,8 +181,13 @@ The takeover path must preserve single-session execution:
 
 - A live owner heartbeat prevents non-owner processing.
 - A stale heartbeat permits lease stealing even if the 30-minute sticky key remains.
-- Wake-up signals remain in the per-session Redis list until a worker with valid ownership drains
-  them. Model input payloads, operation action inputs, and control state remain durable in Postgres. Before an operation input buffer is deleted, its pending `ActionExecution`, typed action payload, and admitting `owner_generation` are committed under the source `input_buffer_id`. A takeover converts any surviving execution from an older processing boundary into a cancelled durable snapshot before consuming new input.
+- Complete v2 entries remain pending in the consumer group until a worker with valid ownership
+  hands them off. Legacy LIST bodies exist only for mixed-version compatibility. Model input
+  payloads, operation action inputs, and control state remain durable in Postgres. Before an
+  operation input buffer is deleted, its pending `ActionExecution`, typed action payload, and
+  admitting `owner_generation` are committed under the source `input_buffer_id`. A takeover
+  converts any surviving execution from an older processing boundary into a cancelled durable
+  snapshot before consuming new input.
 - Durable transcript and `agent_runs` remain the execution source of truth after takeover.
 
 ## Operation Action Recovery
@@ -239,7 +258,8 @@ run to observe `check_stop()` as true.
 - Durable transcript, ordered run-input associations, and pending/running `agent_runs` are the resume source of truth.
 - The Session inference snapshot is complete and atomic per turn; recovery never restores it from an older AgentRun snapshot.
 - `agent_runs.retry_state` is the resume source for failed-run retry progress while a run remains running.
-- A live sticky owner must receive follow-up broker wake-ups directly.
+- A live sticky owner must receive a v2 pending entry by same-Stream consumer assignment, or a
+  legacy direct wake during mixed-version rollout.
 - A non-owner worker must not process a session while the owner heartbeat is live.
 - A stale owner heartbeat revokes the sticky owner even if the 30-minute lease key has not expired.
 - In-memory worker state is not required after crash because takeover resumes from durable state.
@@ -253,6 +273,7 @@ run to observe `check_stop()` as true.
 
 ## Changelog
 
+- **2026-07-14** (spec_version 20) — Made complete-message v2 Stream entries the atomic broker authority, added mixed-version dual delivery and legacy bridging, same-Stream owner assignment, deferred ACK, fair protocol polling, and atomic poison quarantine TTLs.
 - **2026-07-14** (spec_version 19) — Replaced operation resume with owner-generation-fenced live execution, atomic terminal snapshot/delete handover, 30-second graceful shutdown, and cancelled no-reexecution takeover recovery.
 - **2026-07-12** (spec_version 18) — Made ownership generation and durable call/result state authoritative for no-reexecution tool recovery.
 - **2026-07-12** (spec_version 17) — Promoted Session-owned per-turn inference recovery, handled preparation failure, buffer-only action transport, buffer-keyed action recovery, and same-run context rebuild.

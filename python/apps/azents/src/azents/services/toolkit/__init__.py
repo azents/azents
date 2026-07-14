@@ -182,11 +182,15 @@ class ToolkitService:
                         ),
                     )
                     output = ToolkitOutput.model_validate(toolkit, from_attributes=True)
-                    return Success(await self._attach_oauth_connection(output))
                 case Failure(error):
                     return Failure(DuplicateSlug(slug=error.slug))
                 case _:
                     assert_never(result)
+        # A new Toolkit cannot have an OAuth connection before its create
+        # transaction commits and the separate OAuth flow starts. Returning the
+        # explicit disconnected projection avoids a nested post-write DB session
+        # and keeps create failure atomicity unambiguous.
+        return Success(output)
 
     async def list_by_workspace(self, workspace_id: str) -> ToolkitListOutput:
         """Fetch all Toolkits in workspace.
@@ -301,6 +305,14 @@ class ToolkitService:
             if old_auth != new_auth and new_auth is not None:
                 repo_update["credentials"] = None
 
+        # Resolve optional projection state before the durable write. A summary
+        # read failure must not make an already committed update look failed.
+        projected_config = update["config"] if "config" in update else existing.config
+        oauth_snapshot = await self._attach_oauth_connection(
+            ToolkitOutput.model_validate(existing, from_attributes=True).model_copy(
+                update={"config": projected_config}
+            )
+        )
         async with self.session_manager() as session:
             result = await self.toolkit_repo.update_by_id(
                 session, toolkit_id, repo_update
@@ -308,7 +320,11 @@ class ToolkitService:
         match result:
             case Success(value):
                 output = ToolkitOutput.model_validate(value, from_attributes=True)
-                return Success(await self._attach_oauth_connection(output))
+                return Success(
+                    output.model_copy(
+                        update={"oauth_connection": oauth_snapshot.oauth_connection}
+                    )
+                )
             case Failure(error):
                 if isinstance(error, RepoDuplicateSlug):
                     return Failure(DuplicateSlug(slug=error.slug))

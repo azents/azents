@@ -60,6 +60,7 @@ def _run_start_context() -> RunStartHookContext:
         agent_id="agent-1",
         session_id="session-1",
         run_id="run-1",
+        owner_generation=1,
     )
 
 
@@ -70,6 +71,7 @@ def _turn_start_context() -> TurnStartHookContext:
         agent_id="agent-1",
         session_id="session-1",
         run_id="run-1",
+        owner_generation=1,
         turn_index=1,
     )
 
@@ -97,6 +99,7 @@ def _after_context() -> AfterToolCallHookContext:
         agent_id="agent-1",
         session_id="session-1",
         run_id="run-1",
+        owner_generation=1,
         output_text="RAW-OUTPUT-MARKER",
         error_message=None,
     )

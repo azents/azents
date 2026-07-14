@@ -1,7 +1,6 @@
 """SessionRunner engine task stop/cancel supervision."""
 
 import asyncio
-import contextlib
 import logging
 from collections.abc import Awaitable, Callable
 
@@ -24,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 _SHUTDOWN_TIMEOUT = 30.0  # seconds — foreground completion window before handover
 _EXPLICIT_STOP_POLL_INTERVAL = 0.5  # seconds — user stop detection interval
+_CANCEL_CLEANUP_TIMEOUT = 1.0  # seconds — bounded drain after task cancellation
 
 
 class ToolAdmissionBarrier:
@@ -58,12 +58,14 @@ class RunStopController:
     def __init__(self) -> None:
         self.active_task: asyncio.Task[RunExecutionResult] | None = None
         self.user_stop_requested_event = asyncio.Event()
+        self.stop_signal_received_event = asyncio.Event()
         self.handover_stop_requested_event = asyncio.Event()
         self.tool_admission_barrier = ToolAdmissionBarrier()
 
     def clear_for_next_run(self) -> None:
         """Reset in-memory stop state before next run starts."""
         self.user_stop_requested_event.clear()
+        self.stop_signal_received_event.clear()
         self.handover_stop_requested_event.clear()
         self.tool_admission_barrier = ToolAdmissionBarrier()
 
@@ -89,6 +91,10 @@ class RunStopController:
             return False
         task.cancel(USER_STOP_CANCEL_MESSAGE)
         return True
+
+    def notify_stop_signal(self) -> None:
+        """Wake the supervisor so it can validate durable stop authority."""
+        self.stop_signal_received_event.set()
 
     def request_handover_stop(self) -> None:
         """Record Shutdown/handover stop reason."""
@@ -124,6 +130,7 @@ class RunTaskSupervisor:
         self.event_publisher = event_publisher
         self.session_lifecycle = session_lifecycle
         self.stop_controller = stop_controller
+        self._quarantined_tasks: set[asyncio.Task[RunExecutionResult]] = set()
 
     async def run(
         self,
@@ -151,26 +158,24 @@ class RunTaskSupervisor:
             )
         )
         self.stop_controller.register_active_task(engine_task)
-
-        if self.shutdown_event.is_set():
-            self.stop_controller.request_handover_stop()
-            await self.stop_controller.tool_admission_barrier.close()
-            try:
+        explicit_stop_waiter: asyncio.Task[None] | None = None
+        shutdown_waiter: asyncio.Task[bool] | None = None
+        try:
+            if self.shutdown_event.is_set():
+                self.stop_controller.request_handover_stop()
+                await self.stop_controller.tool_admission_barrier.close()
                 return await self._wait_for_shutdown_completion(
                     engine_task,
                     timeout=_SHUTDOWN_TIMEOUT,
                 )
-            finally:
-                self.stop_controller.clear_active_task(engine_task)
 
-        explicit_stop_waiter = asyncio.create_task(
-            self._wait_for_explicit_stop(
-                message.session_id,
-                drain_stop_signals=drain_stop_signals,
+            explicit_stop_waiter = asyncio.create_task(
+                self._wait_for_explicit_stop(
+                    message.session_id,
+                    drain_stop_signals=drain_stop_signals,
+                )
             )
-        )
-        shutdown_waiter = asyncio.create_task(self.shutdown_event.wait())
-        try:
+            shutdown_waiter = asyncio.create_task(self.shutdown_event.wait())
             done, _ = await asyncio.wait(
                 [engine_task, explicit_stop_waiter, shutdown_waiter],
                 return_when=asyncio.FIRST_COMPLETED,
@@ -178,6 +183,7 @@ class RunTaskSupervisor:
 
             if engine_task in done:
                 if engine_task.cancelled() and self.stop_controller.user_stop_requested:
+                    await self.stop_controller.tool_admission_barrier.close()
                     await self.user_stop_finalizer.finalize(
                         message.session_id,
                         run_id=None,
@@ -188,18 +194,48 @@ class RunTaskSupervisor:
                         terminal_event_observed=True,
                         no_actionable_work=False,
                     )
-                return engine_task.result()
+                result = engine_task.result()
+                if self.stop_controller.user_stop_requested:
+                    await self.stop_controller.tool_admission_barrier.close()
+                    await self.user_stop_finalizer.finalize(
+                        message.session_id,
+                        run_id=result.run_id,
+                        active_tool_calls=[],
+                    )
+                return result
             if explicit_stop_waiter in done:
+                # A completed waiter means User stop only when its durable DB
+                # validation returned normally. Never reinterpret a DB failure as
+                # stop authority.
+                try:
+                    explicit_stop_waiter.result()
+                except Exception:
+                    await self._cancel_for_supervisor_exit(engine_task)
+                    raise
+                await self.stop_controller.tool_admission_barrier.close()
                 logger.info(
                     "Explicit stop detected during engine run, canceling",
                     extra={"session_id": message.session_id},
                 )
-                await self.user_stop_finalizer.finalize(
-                    message.session_id,
-                    run_id=None,
-                    active_tool_calls=[],
-                )
-                return await self._cancel_now(engine_task)
+                try:
+                    finalized_run_id = await self.user_stop_finalizer.finalize(
+                        message.session_id,
+                        run_id=None,
+                        active_tool_calls=[],
+                    )
+                except Exception:
+                    # The Session boundary must still outlive engine cancellation
+                    # cleanup even when durable stop finalization fails.
+                    await self._cancel_now(engine_task)
+                    raise
+                result = await self._cancel_now(engine_task)
+                if result.run_id is not None and result.run_id != finalized_run_id:
+                    await self.user_stop_finalizer.finalize(
+                        message.session_id,
+                        run_id=result.run_id,
+                        active_tool_calls=[],
+                    )
+                return result
 
             self.stop_controller.request_handover_stop()
             await self.stop_controller.tool_admission_barrier.close()
@@ -214,14 +250,31 @@ class RunTaskSupervisor:
                 engine_task,
                 timeout=_SHUTDOWN_TIMEOUT,
             )
+        except asyncio.CancelledError:
+            await self._cancel_for_supervisor_exit(engine_task)
+            raise
         finally:
-            waiters = [explicit_stop_waiter, shutdown_waiter]
+            waiters = [
+                waiter
+                for waiter in (explicit_stop_waiter, shutdown_waiter)
+                if waiter is not None
+            ]
             for waiter in waiters:
                 if not waiter.done():
                     waiter.cancel()
             for waiter in waiters:
-                with contextlib.suppress(asyncio.CancelledError):
+                try:
                     await waiter
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    # Waiter cleanup is secondary to the already-selected engine,
+                    # stop, shutdown, or supervisor-cancellation outcome.
+                    logger.warning(
+                        "Run supervisor waiter failed during cleanup",
+                        extra={"session_id": message.session_id},
+                        exc_info=True,
+                    )
             self.stop_controller.clear_active_task(engine_task)
 
     async def _wait_for_explicit_stop(
@@ -232,29 +285,107 @@ class RunTaskSupervisor:
     ) -> None:
         """Detect SessionStopSignal or durable stop intent."""
         while True:
+            self.stop_controller.stop_signal_received_event.clear()
             drain_stop_signals()
-            if await self.session_lifecycle.has_stop_request(session_id):
+            if await self.session_lifecycle.has_stop_request(
+                session_id,
+                stop_request_id=None,
+            ):
                 self.stop_controller.request_user_stop()
             if self.stop_controller.user_stop_requested:
                 return
-            await asyncio.sleep(_EXPLICIT_STOP_POLL_INTERVAL)
+            try:
+                await asyncio.wait_for(
+                    self.stop_controller.stop_signal_received_event.wait(),
+                    timeout=_EXPLICIT_STOP_POLL_INTERVAL,
+                )
+            except TimeoutError:
+                pass
 
     async def _cancel_now(
         self,
         task: asyncio.Task[RunExecutionResult],
     ) -> RunExecutionResult:
         """Cancel the engine task and wait for its durable cancellation handoff."""
+        await self.stop_controller.tool_admission_barrier.close()
         if not task.done() and task.cancelling() == 0:
             task.cancel(USER_STOP_CANCEL_MESSAGE)
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
+        completed = await self._wait_for_cancel_cleanup(
+            task,
+            cancel_message=USER_STOP_CANCEL_MESSAGE,
+        )
+        if completed:
+            try:
+                return task.result()
+            except asyncio.CancelledError:
+                pass
         return RunExecutionResult(
             toolkits=[],
             terminal_event_observed=True,
             no_actionable_work=False,
         )
+
+    async def _cancel_for_supervisor_exit(
+        self,
+        task: asyncio.Task[RunExecutionResult],
+    ) -> None:
+        """Fence and boundedly drain an engine task for a non-User exit."""
+        await self.stop_controller.tool_admission_barrier.close()
+        if not task.done() and task.cancelling() == 0:
+            task.cancel(SHUTDOWN_CANCEL_MESSAGE)
+        completed = await self._wait_for_cancel_cleanup(
+            task,
+            cancel_message=SHUTDOWN_CANCEL_MESSAGE,
+        )
+        if not completed:
+            return
+        try:
+            task.result()
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            logger.warning(
+                "Engine task failed while supervisor was exiting",
+                exc_info=True,
+            )
+
+    async def _wait_for_cancel_cleanup(
+        self,
+        task: asyncio.Task[RunExecutionResult],
+        *,
+        cancel_message: str,
+    ) -> bool:
+        """Wait a hard-bounded grace period, then quarantine a stuck task."""
+        if task.done():
+            return True
+        done, _ = await asyncio.wait({task}, timeout=_CANCEL_CLEANUP_TIMEOUT)
+        if task in done:
+            return True
+        task.cancel(cancel_message)
+        self._quarantine_task(task)
+        logger.error(
+            "Engine task ignored cancellation cleanup deadline; quarantined",
+            extra={"timeout": _CANCEL_CLEANUP_TIMEOUT},
+        )
+        return False
+
+    def _quarantine_task(self, task: asyncio.Task[RunExecutionResult]) -> None:
+        """Retain a detached engine task and consume its eventual outcome."""
+        self._quarantined_tasks.add(task)
+        task.add_done_callback(self._on_quarantined_task_done)
+
+    def _on_quarantined_task_done(
+        self,
+        task: asyncio.Task[RunExecutionResult],
+    ) -> None:
+        """Release a quarantined task after retrieving its terminal outcome."""
+        self._quarantined_tasks.discard(task)
+        try:
+            task.result()
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            logger.warning("Quarantined engine task failed", exc_info=True)
 
     async def _wait_for_shutdown_completion(
         self,
@@ -270,13 +401,19 @@ class RunTaskSupervisor:
                 "Engine task timed out after shutdown, canceling",
                 extra={"timeout": timeout},
             )
-            task.cancel(SHUTDOWN_CANCEL_MESSAGE)
-            try:
-                await task
-            except asyncio.CancelledError:
-                # If check_stop is not called within the timeout, run_state stays
-                # RUNNING and stale heartbeat recovery takes over.
-                pass
+            if not task.done() and task.cancelling() == 0:
+                task.cancel(SHUTDOWN_CANCEL_MESSAGE)
+            completed = await self._wait_for_cancel_cleanup(
+                task,
+                cancel_message=SHUTDOWN_CANCEL_MESSAGE,
+            )
+            if completed:
+                try:
+                    return task.result()
+                except asyncio.CancelledError:
+                    # If check_stop is not called within the timeout, run_state stays
+                    # RUNNING and stale heartbeat recovery takes over.
+                    pass
             return RunExecutionResult(
                 toolkits=[],
                 terminal_event_observed=False,

@@ -1,8 +1,14 @@
 """ChatSessionService InputBuffer tests."""
 
+import asyncio
 import datetime
-from unittest.mock import patch
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
+from types import SimpleNamespace
+from typing import Any, cast
+from unittest.mock import AsyncMock, patch
 
+import pytest
 from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,6 +16,7 @@ from azents.core.enums import (
     AgentRunPhase,
     AgentRunStatus,
     AgentSessionRunState,
+    AgentSessionStatus,
     InputBufferKind,
     LLMProvider,
     WorkspaceUserRole,
@@ -22,6 +29,8 @@ from azents.engine.events.types import (
     UserMessagePayload,
 )
 from azents.engine.run.failure import FailedRunAttempt, FailedRunRetryState
+from azents.engine.tools.goal import GoalState
+from azents.engine.tools.todo import TodoState
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.session import SessionManager
@@ -34,10 +43,11 @@ from azents.repos.agent_project_default import AgentProjectDefaultRepository
 from azents.repos.agent_project_preset import AgentProjectPresetRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.input_buffer import InputBufferRepository
 from azents.repos.input_buffer.data import InputBufferCreate
+from azents.repos.input_buffer.repository import InputBufferRepository
 from azents.repos.message import MessageRepository
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
+from azents.repos.toolkit_state import ToolkitStateRepository
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
@@ -52,8 +62,12 @@ from azents.testing.model_selection import (
     make_test_model_selection_dict,
 )
 
-from . import ChatSessionService
+from . import (
+    ChatSessionService,
+    _list_live_events_best_effort,  # pyright: ignore[reportPrivateUsage]  # Pin bounded non-durable Redis fallback.
+)
 from .data import SessionAccessDenied
+from .live_events import LiveEventStore
 
 
 async def _create_workspace(session: AsyncSession, handle: str) -> str:
@@ -138,6 +152,7 @@ def _service(
         event_transcript_repository=EventTranscriptRepository(),
         agent_run_repository=AgentRunRepository(),
         action_execution_repository=ActionExecutionRepository(),
+        toolkit_state_repository=ToolkitStateRepository(),
     )
     return ChatSessionService(
         message_repository=MessageRepository(),
@@ -153,6 +168,7 @@ def _service(
         session_workspace_project_repository=SessionWorkspaceProjectRepository(),
         input_buffer_service=input_buffer_service,
         session_manager=rdb_session_manager,
+        toolkit_state_repository=ToolkitStateRepository(),
     )
 
 
@@ -168,6 +184,77 @@ class _ModelFileService(ModelFileService):
 
     def __init__(self) -> None:
         """Bypass Base dataclass initialization."""
+
+
+class _TrackingSessionManager:
+    """Track concurrent service-owned DB sessions."""
+
+    def __init__(self, delegate: SessionManager[AsyncSession] | None = None) -> None:
+        self.delegate = delegate
+        self.active_sessions = 0
+        self.max_active_sessions = 0
+
+    @asynccontextmanager
+    async def __call__(self) -> AsyncGenerator[AsyncSession, None]:
+        """Delegate to the real manager while tracking session lifetime."""
+        self.active_sessions += 1
+        self.max_active_sessions = max(
+            self.max_active_sessions,
+            self.active_sessions,
+        )
+        try:
+            if self.delegate is None:
+                yield cast(AsyncSession, object())
+            else:
+                async with self.delegate() as session:
+                    yield session
+        finally:
+            self.active_sessions -= 1
+
+
+class _SessionClosedLiveEventStore:
+    """Assert Redis-like reads start after the DB snapshot session closes."""
+
+    def __init__(self, tracker: _TrackingSessionManager) -> None:
+        self.tracker = tracker
+        self.called = False
+
+    async def list_by_session_id(self, session_id: str) -> list[object]:
+        """Return no partial events after checking the session boundary."""
+        del session_id
+        assert self.tracker.active_sessions == 0
+        self.called = True
+        return []
+
+
+class _HangingLiveEventStore:
+    """Non-durable store whose Redis read never returns."""
+
+    async def list_by_session_id(self, session_id: str) -> list[object]:
+        """Block forever after accepting the read."""
+        del session_id
+        await asyncio.Event().wait()
+        return []
+
+
+async def test_live_event_read_timeout_falls_back_to_no_partial_events(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Redis stalls omit only non-durable partials from the DB-backed snapshot."""
+    monkeypatch.setattr(
+        "azents.services.chat._LIVE_EVENT_READ_TIMEOUT_SECONDS",
+        0.01,
+    )
+
+    events = await asyncio.wait_for(
+        _list_live_events_best_effort(
+            cast(LiveEventStore, _HangingLiveEventStore()),
+            session_id="session-1",
+        ),
+        timeout=1,
+    )
+
+    assert events == []
 
 
 async def _create_session_with_buffer(
@@ -204,6 +291,73 @@ async def _create_session_with_buffer(
     return agent_session.id, user_id, input_buffer.id
 
 
+async def test_list_live_events_closes_db_before_all_detached_store_reads() -> None:
+    """Live/Goal/Todo reads start only after the DB snapshot session closes."""
+    tracker = _TrackingSessionManager()
+    live_event_store = _SessionClosedLiveEventStore(tracker)
+    agent_session_repository = AsyncMock()
+    agent_session_repository.get_by_id.return_value = SimpleNamespace(
+        status=AgentSessionStatus.ACTIVE,
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        run_state=AgentSessionRunState.IDLE,
+    )
+    workspace_user_repository = AsyncMock()
+    workspace_user_repository.get_by_workspace_and_user.return_value = object()
+    input_buffer_service = AsyncMock()
+    input_buffer_service.list_by_session_id.return_value = []
+    agent_run_repository = AsyncMock()
+    agent_run_repository.get_running_by_session_id.return_value = None
+    action_execution_repository = AsyncMock()
+    action_execution_repository.list_projections_by_session_id.return_value = []
+    service = ChatSessionService(
+        message_repository=cast(Any, object()),
+        agent_repository=cast(Any, object()),
+        agent_project_preset_repository=cast(Any, object()),
+        agent_project_catalog_repository=cast(Any, object()),
+        agent_project_default_repository=cast(Any, object()),
+        agent_run_repository=agent_run_repository,
+        action_execution_repository=action_execution_repository,
+        event_transcript_repository=cast(Any, object()),
+        agent_session_repository=agent_session_repository,
+        workspace_user_repository=workspace_user_repository,
+        session_workspace_project_repository=cast(Any, object()),
+        input_buffer_service=input_buffer_service,
+        session_manager=cast(SessionManager[AsyncSession], tracker),
+        toolkit_state_repository=ToolkitStateRepository(),
+    )
+
+    async def load_goal(agent_id: str, session_id: str) -> GoalState:
+        del agent_id, session_id
+        assert tracker.active_sessions == 0
+        return GoalState()
+
+    async def load_todo(agent_id: str, session_id: str) -> TodoState:
+        del agent_id, session_id
+        assert tracker.active_sessions == 0
+        return TodoState()
+
+    with (
+        patch("azents.services.chat.GoalStateStore") as goal_store_type,
+        patch("azents.services.chat.TodoStateStore") as todo_store_type,
+    ):
+        goal_store_type.return_value.load = AsyncMock(side_effect=load_goal)
+        todo_store_type.return_value.load = AsyncMock(side_effect=load_todo)
+        result = await service.list_live_events(
+            "session-1",
+            user_id="user-1",
+            live_event_store=cast(LiveEventStore, live_event_store),
+        )
+
+    assert isinstance(result, Success)
+    assert result.value.partial_history_events == []
+    assert result.value.input_buffer_events == []
+    assert result.value.session_run_state == AgentSessionRunState.IDLE
+    assert live_event_store.called
+    assert tracker.active_sessions == 0
+    assert tracker.max_active_sessions == 1
+
+
 class TestChatSessionInputBuffer:
     """ChatSessionService InputBuffer behavior tests."""
 
@@ -236,6 +390,34 @@ class TestChatSessionInputBuffer:
         )
         assert result.value.partial_history_events == []
         assert result.value.session_run_state == AgentSessionRunState.IDLE
+
+    async def test_list_live_events_closes_db_before_live_and_state_stores(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Redis and Goal/Todo reads do not overlap the DB snapshot session."""
+        async with rdb_session_manager() as session:
+            session_id, user_id, buffer_id = await _create_session_with_buffer(
+                session,
+                handle="chat-live-session-boundary",
+                slug="chat-live-session-boundary",
+            )
+        tracker = _TrackingSessionManager(rdb_session_manager)
+        live_event_store = _SessionClosedLiveEventStore(tracker)
+
+        result = await _service(
+            cast(SessionManager[AsyncSession], tracker)
+        ).list_live_events(
+            session_id,
+            user_id=user_id,
+            live_event_store=cast(LiveEventStore, live_event_store),
+        )
+
+        assert isinstance(result, Success)
+        assert [event.id for event in result.value.input_buffer_events] == [buffer_id]
+        assert live_event_store.called
+        assert tracker.active_sessions == 0
+        assert tracker.max_active_sessions == 1
 
     async def test_list_live_events_running_run_overrides_idle_session_state(
         self,
@@ -378,12 +560,14 @@ class TestChatSessionInputBuffer:
             event_transcript_repository=EventTranscriptRepository(),
             agent_run_repository=AgentRunRepository(),
             action_execution_repository=ActionExecutionRepository(),
+            toolkit_state_repository=ToolkitStateRepository(),
         )
         promoted = await input_buffer_service.flush_session_input_buffers(
             session_id=session_id,
             model="test-model",
             required_inference_profile=None,
             expected_buffer_id=buffer_id,
+            owner_generation=0,
             prepared_inference_state=None,
             profile_resolution_failure=None,
             active_run_id=None,

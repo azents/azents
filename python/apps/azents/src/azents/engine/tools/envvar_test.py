@@ -27,6 +27,7 @@ def _make_turn_context() -> TurnContext:
         workspace_id="ws1",
         model="test",
         run_id="run1",
+        owner_generation=1,
         publish_event=AsyncMock(),
     )
 
@@ -45,7 +46,6 @@ def _make_resolve_context(
         agent_id="agent1",
         session_id="session1",
         user_id="u1",
-        session=AsyncMock(spec=AsyncSession),
         web_url="https://test.example.com",
         oauth_secret_key="test-key",
         workspace_id="ws1",

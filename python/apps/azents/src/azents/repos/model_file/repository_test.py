@@ -1,5 +1,6 @@
 """ModelFile repository tests."""
 
+import asyncio
 import datetime
 
 import sqlalchemy as sa
@@ -15,6 +16,7 @@ from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.models.model_file_pin import RDBModelFilePin
+from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_execution.data import AgentRunCreate
 from azents.repos.agent_session import AgentSessionRepository
@@ -90,6 +92,7 @@ async def test_create_model_file_metadata(rdb_session: AsyncSession) -> None:
     created = await repo.create(
         rdb_session,
         ModelFileCreate(
+            id="1234567890abcdef1234567890abcdef",
             workspace_id=workspace_id,
             session_id=session_id,
             agent_id=agent_id,
@@ -105,6 +108,7 @@ async def test_create_model_file_metadata(rdb_session: AsyncSession) -> None:
     )
 
     assert created.status == ModelFileStatus.AVAILABLE
+    assert created.id == "1234567890abcdef1234567890abcdef"
     assert created.created_run_index == 4
     assert created.storage_key == (
         f"model-files/{workspace_id}/{session_id}/{created.id}"
@@ -127,6 +131,7 @@ async def test_mark_deleted_if_unpinned_updates_available_rows(
     model_file = await repo.create(
         rdb_session,
         ModelFileCreate(
+            id=None,
             workspace_id=workspace_id,
             session_id=session_id,
             agent_id=agent_id,
@@ -155,6 +160,65 @@ async def test_mark_deleted_if_unpinned_updates_available_rows(
     assert found.deleted_at == deleted_at
 
 
+async def test_concurrent_pin_wins_over_unreferenced_cleanup(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """A pin admitted before cleanup commits prevents metadata/blob deletion."""
+    async with rdb_session_manager() as setup_session:
+        workspace_id, agent_id, session_id = await _create_agent_session(setup_session)
+        run = await AgentRunRepository().create_pending(
+            setup_session,
+            session_id=session_id,
+            parent_agent_run_id=None,
+        )
+        model_file = await ModelFileRepository().create(
+            setup_session,
+            ModelFileCreate(
+                id=None,
+                workspace_id=workspace_id,
+                session_id=session_id,
+                agent_id=agent_id,
+                name="race.pdf",
+                media_type="application/pdf",
+                kind="document",
+                size_bytes=123,
+                created_run_index=1,
+                normalized_format="original",
+                sha256="3" * 64,
+                metadata={},
+            ),
+        )
+
+    cleanup_started = asyncio.Event()
+
+    async def cleanup() -> list[str]:
+        cleanup_started.set()
+        async with rdb_session_manager() as cleanup_session:
+            deleted = await ModelFileRepository().mark_deleted_if_unpinned(
+                cleanup_session,
+                model_file_ids=[model_file.id],
+                deleted_at=datetime.datetime.now(datetime.UTC),
+            )
+        return [item.id for item in deleted]
+
+    async with rdb_session_manager() as pin_session:
+        await ModelFilePinRepository().pin_many(
+            pin_session,
+            session_id=session_id,
+            run_id=run.id,
+            model_file_ids=[model_file.id],
+        )
+        cleanup_task = asyncio.create_task(cleanup())
+        await cleanup_started.wait()
+        await asyncio.sleep(0)
+
+    assert await cleanup_task == []
+    async with rdb_session_manager() as verify_session:
+        found = await ModelFileRepository().get_by_id(verify_session, model_file.id)
+    assert found is not None
+    assert found.status is ModelFileStatus.AVAILABLE
+
+
 async def test_list_statuses_for_session_returns_known_model_files(
     rdb_session: AsyncSession,
 ) -> None:
@@ -164,6 +228,7 @@ async def test_list_statuses_for_session_returns_known_model_files(
     available = await repo.create(
         rdb_session,
         ModelFileCreate(
+            id=None,
             workspace_id=workspace_id,
             session_id=session_id,
             agent_id=agent_id,
@@ -180,6 +245,7 @@ async def test_list_statuses_for_session_returns_known_model_files(
     deleted = await repo.create(
         rdb_session,
         ModelFileCreate(
+            id=None,
             workspace_id=workspace_id,
             session_id=session_id,
             agent_id=agent_id,
@@ -219,6 +285,7 @@ async def test_release_terminal_run_pins_preserves_pending(
     model_file = await ModelFileRepository().create(
         rdb_session,
         ModelFileCreate(
+            id=None,
             workspace_id=workspace_id,
             session_id=session_id,
             agent_id=agent_id,

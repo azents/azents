@@ -214,14 +214,15 @@ class SessionTitleService:
             )
             if integration is None or not integration.enabled:
                 return None
-            refreshed = await ensure_runtime_tokens(
-                integration=integration,
-                integration_repository=self.integration_repository,
-                session_manager=self.session_manager,
-            )
-            if refreshed.failure:
-                return None
-            integration = refreshed.value
+
+        refreshed = await ensure_runtime_tokens(
+            integration=integration,
+            integration_repository=self.integration_repository,
+            session_manager=self.session_manager,
+        )
+        if refreshed.failure:
+            return None
+        integration = refreshed.value
 
         model = to_runtime_model(selection.provider, selection.model_identifier)
         try:

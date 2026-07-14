@@ -8,10 +8,10 @@ import dataclasses
 import io
 import logging
 import re
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable, Coroutine
 from datetime import datetime
 from textwrap import dedent
-from typing import Annotated, NoReturn, assert_never
+from typing import Annotated, Any, NoReturn, assert_never
 from urllib.parse import quote
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -27,6 +27,7 @@ from fastapi import (
     WebSocketDisconnect,
 )
 from fastapi.responses import StreamingResponse
+from redis.exceptions import RedisError
 
 from azents.broker.broadcast import (
     WebSocketBroadcast,
@@ -34,6 +35,7 @@ from azents.broker.broadcast import (
 )
 from azents.broker.deps import get_broker
 from azents.broker.types import (
+    BrokerMessage,
     SessionBroker,
     SessionStopSignal,
     SessionWakeUp,
@@ -63,9 +65,6 @@ from azents.engine.events.action_messages import (
 from azents.engine.events.types import FileOutputPart
 from azents.engine.run.commands import COMMAND_REGISTRY, list_registered_commands
 from azents.engine.run.input import InputMessage
-from azents.engine.run.resolve import (
-    materialize_user_input_exchange_file_attachments,
-)
 from azents.engine.tools.deps import get_skill_state_store
 from azents.engine.tools.skill import (
     SkillStateStore,
@@ -75,8 +74,11 @@ from azents.engine.tools.skill import (
 )
 from azents.repos.input_buffer.data import InputBuffer
 from azents.services.agent_session_input import (
+    AgentSessionCreateRequestConflict,
+    AgentSessionInputAccessDenied,
     AgentSessionInputError,
     AgentSessionInputInactiveSession,
+    AgentSessionInputRequestConflict,
     AgentSessionInputService,
     AgentSessionInputSessionNotFound,
     AgentSessionInputSubagentReadOnly,
@@ -97,6 +99,7 @@ from azents.services.chat.data import (
     RunningSessionArchiveBlocked,
     SessionAccessDenied,
     SessionNotFound,
+    SessionWorktreeCleanupIncomplete,
     SubagentSessionReadOnly,
     UpdateGoalStatusInput,
 )
@@ -120,7 +123,11 @@ from azents.services.chat.workspace import (
     AgentWorkspaceRuntimeInactive,
     AgentWorkspaceState,
 )
-from azents.services.chat_write import ChatWriteService
+from azents.services.chat_write import (
+    ChatWriteService,
+    ChatWriteSessionAccessDenied,
+    ChatWriteSessionNotFound,
+)
 from azents.services.exchange_file import (
     ExchangeFileError,
     ExchangeFileService,
@@ -255,6 +262,8 @@ def _validate_uuid7_hex(value: str, *, label: str) -> None:
 
 
 router = APIRouter()
+_POST_COMMIT_PUBLISH_TIMEOUT_SECONDS = 0.25
+_DETACHED_POST_COMMIT_DELIVERIES: set[asyncio.Task[None]] = set()
 
 
 async def get_ws_broadcast(
@@ -281,12 +290,178 @@ async def _publish_chat_event_best_effort(
 ) -> None:
     """Publish a WebSocket projection without failing a committed REST write."""
     try:
-        await broadcast.publish(session_id, event)
+        async with asyncio.timeout(_POST_COMMIT_PUBLISH_TIMEOUT_SECONDS):
+            await broadcast.publish(session_id, event)
+    except asyncio.CancelledError:
+        raise
+    except TimeoutError:
+        logger.warning(
+            "Timed out publishing committed Chat state to WebSocket",
+            extra={"session_id": session_id},
+        )
     except WebSocketBroadcastPublishError:
         logger.exception(
             "Failed to publish committed Chat state to WebSocket",
             extra={"session_id": session_id},
         )
+
+
+async def _run_post_commit_delivery(
+    delivery: Callable[[], Coroutine[Any, Any, None]],
+    *,
+    session_id: str,
+) -> None:
+    """Shield committed side effects while preserving caller cancellation."""
+    task = asyncio.create_task(delivery())
+    try:
+        await asyncio.shield(task)
+    except asyncio.CancelledError:
+        _DETACHED_POST_COMMIT_DELIVERIES.add(task)
+
+        def observe_delivery(done: asyncio.Task[None]) -> None:
+            _DETACHED_POST_COMMIT_DELIVERIES.discard(done)
+            try:
+                done.result()
+            except asyncio.CancelledError:
+                logger.error(
+                    "Detached post-commit delivery was cancelled",
+                    extra={"session_id": session_id},
+                )
+            except Exception:
+                logger.exception(
+                    "Detached post-commit delivery failed",
+                    extra={"session_id": session_id},
+                )
+
+        task.add_done_callback(observe_delivery)
+        raise
+
+
+async def _send_broker_message_best_effort(
+    broker: SessionBroker,
+    message: BrokerMessage,
+) -> None:
+    """Bound post-commit broker delivery without cancelling durable intent."""
+    try:
+        async with asyncio.timeout(_POST_COMMIT_PUBLISH_TIMEOUT_SECONDS):
+            await broker.send_message(message)
+    except asyncio.CancelledError:
+        raise
+    except TimeoutError:
+        logger.warning(
+            "Timed out publishing committed Session broker message",
+            extra={"session_id": message.session_id, "message_type": message.type},
+        )
+    except OSError, RedisError:
+        logger.exception(
+            "Failed to publish committed Session broker message",
+            extra={"session_id": message.session_id, "message_type": message.type},
+        )
+
+
+async def _send_stop_signal_best_effort(
+    broker: SessionBroker,
+    *,
+    session_id: str,
+    user_id: str,
+    stop_request_id: str,
+) -> None:
+    """Publish a fast-path stop signal after durable intent commit."""
+    await _send_broker_message_best_effort(
+        broker,
+        SessionStopSignal(
+            session_id=session_id,
+            user_id=user_id,
+            stop_request_id=stop_request_id,
+        ),
+    )
+
+
+async def _send_stop_signals_best_effort(
+    broker: SessionBroker,
+    *,
+    session_ids: list[str],
+    user_id: str,
+    stop_request_ids_by_session: dict[str, str],
+) -> None:
+    """Attempt every committed subtree stop signal concurrently."""
+    await asyncio.gather(
+        *(
+            _send_stop_signal_best_effort(
+                broker,
+                session_id=stopped_session_id,
+                user_id=user_id,
+                stop_request_id=stop_request_ids_by_session[stopped_session_id],
+            )
+            for stopped_session_id in session_ids
+        )
+    )
+
+
+async def _send_session_wake_up_best_effort(
+    broker: SessionBroker,
+    *,
+    agent_id: str,
+    session_id: str,
+    user_id: str,
+    workspace_id: str | None = None,
+    workspace_handle: str | None = None,
+) -> None:
+    """Publish a bounded wake after its durable work has committed."""
+    await _send_broker_message_best_effort(
+        broker,
+        SessionWakeUp(
+            agent_id=agent_id,
+            session_id=session_id,
+            user_id=user_id,
+            additional_system_prompt=None,
+            interface=None,
+            workspace_id=workspace_id,
+            workspace_handle=workspace_handle,
+        ),
+    )
+
+
+async def _publish_input_buffer_then_wake(
+    broadcast: WebSocketBroadcast,
+    broker: SessionBroker,
+    *,
+    agent_id: str,
+    session_id: str,
+    user_id: str,
+    event: dict[str, object],
+) -> None:
+    """Preserve live-upsert-before-wake ordering for a committed input."""
+    await _publish_chat_event_best_effort(
+        broadcast,
+        session_id=session_id,
+        event=event,
+    )
+    await _send_session_wake_up_best_effort(
+        broker,
+        agent_id=agent_id,
+        session_id=session_id,
+        user_id=user_id,
+    )
+
+
+async def _deliver_session_wake_up(
+    broker: SessionBroker,
+    *,
+    agent_id: str,
+    session_id: str,
+    user_id: str,
+) -> None:
+    """Deliver a committed wake even if its HTTP caller disconnects."""
+    await _run_post_commit_delivery(
+        lambda: _send_session_wake_up_best_effort(
+            broker,
+            agent_id=agent_id,
+            session_id=session_id,
+            user_id=user_id,
+        ),
+        session_id=session_id,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -613,20 +788,13 @@ async def _write_message_via_rest(
         agent_id=request.agent_id,
         user_id=user_id,
     )
-    materialized = await materialize_user_input_exchange_file_attachments(
-        request.attachments or [],
-        agent_id=request.agent_id,
-        session_id=resolved_session_id,
-        exchange_file_service=exchange_file_service,
-        model_file_service=model_file_service,
-        user_id=user_id,
-    )
+    del exchange_file_service, model_file_service
     message = _create_chat_input_message(
         text=request.message,
         user_id=user_id,
         tz=tz,
-        attachments=[attachment.uri for attachment in materialized.attachments],
-        file_parts=materialized.file_parts,
+        attachments=request.attachments or [],
+        file_parts=[],
     )
     input_result = await agent_session_input_service.create_buffered_agent_input(
         agent_id=request.agent_id,
@@ -649,6 +817,7 @@ async def _write_message_via_rest(
         user_id=user_id,
         client_request_id=request.client_request_id,
         input_buffer=result.input_buffer,
+        input_buffer_pending=result.input_buffer_pending,
     )
 
 
@@ -685,26 +854,24 @@ async def _finalize_message_write_response(
     user_id: str,
     client_request_id: str,
     input_buffer: InputBuffer,
+    input_buffer_pending: bool,
 ) -> ChatWriteResponse:
     """Publish live state, wake the worker, and return a snapshot."""
-    live_event_upserted = chat_live_event_upserted_dump(
-        input_buffer_to_live_event(input_buffer)
-    )
-    broker_message = SessionWakeUp(
-        agent_id=agent_id,
-        session_id=session_id,
-        user_id=user_id,
-        additional_system_prompt=None,
-        interface=None,
-        workspace_id=None,
-        workspace_handle=None,
-    )
-    await broker.send_message(broker_message)
-    await _publish_chat_event_best_effort(
-        broadcast,
-        session_id=session_id,
-        event=live_event_upserted,
-    )
+    if input_buffer_pending:
+        live_event_upserted = chat_live_event_upserted_dump(
+            input_buffer_to_live_event(input_buffer)
+        )
+        await _run_post_commit_delivery(
+            lambda: _publish_input_buffer_then_wake(
+                broadcast,
+                broker,
+                agent_id=agent_id,
+                session_id=session_id,
+                user_id=user_id,
+                event=live_event_upserted,
+            ),
+            session_id=session_id,
+        )
     snapshot = await _build_chat_write_snapshot(
         chat_service,
         live_event_store,
@@ -736,6 +903,11 @@ def _handle_created_agent_session_input_result(
                     raise HTTPException(status_code=404, detail="Session not found.")
                 case AgentSessionInputWrongAgent():
                     raise HTTPException(status_code=404, detail="Session not found.")
+                case AgentSessionInputAccessDenied():
+                    raise HTTPException(
+                        status_code=403,
+                        detail="Session access denied.",
+                    )
                 case AgentSessionInputInactiveSession():
                     raise HTTPException(
                         status_code=409,
@@ -745,6 +917,22 @@ def _handle_created_agent_session_input_result(
                     raise HTTPException(
                         status_code=409,
                         detail="Subagent sessions are read-only.",
+                    )
+                case AgentSessionCreateRequestConflict():
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            "client_request_id was already used with a different "
+                            "new-session payload."
+                        ),
+                    )
+                case AgentSessionInputRequestConflict():
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            "client_request_id was already used with a different "
+                            "input payload."
+                        ),
                     )
                 case InvalidProjectPath():
                     raise HTTPException(status_code=400, detail=error.reason)
@@ -767,6 +955,11 @@ def _handle_agent_session_input_result(
                     raise HTTPException(status_code=404, detail="Session not found.")
                 case AgentSessionInputWrongAgent():
                     raise HTTPException(status_code=404, detail="Session not found.")
+                case AgentSessionInputAccessDenied():
+                    raise HTTPException(
+                        status_code=403,
+                        detail="Session access denied.",
+                    )
                 case AgentSessionInputInactiveSession():
                     raise HTTPException(
                         status_code=409,
@@ -776,6 +969,22 @@ def _handle_agent_session_input_result(
                     raise HTTPException(
                         status_code=409,
                         detail="Subagent sessions are read-only.",
+                    )
+                case AgentSessionCreateRequestConflict():
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            "client_request_id was already used with a different "
+                            "new-session payload."
+                        ),
+                    )
+                case AgentSessionInputRequestConflict():
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            "client_request_id was already used with a different "
+                            "input payload."
+                        ),
                     )
                 case InvalidProjectPath():
                     raise HTTPException(status_code=400, detail=error.reason)
@@ -835,16 +1044,12 @@ async def update_session_goal(
     match result:
         case Success(update_result):
             if update_result.wake_up:
-                await broker.send_message(
-                    SessionWakeUp(
-                        agent_id=update_result.agent_id,
-                        session_id=session_id,
-                        user_id=current_user.user_id,
-                        additional_system_prompt=None,
-                        interface=None,
-                        workspace_id=update_result.workspace_id,
-                        workspace_handle=None,
-                    )
+                await _send_session_wake_up_best_effort(
+                    broker,
+                    agent_id=update_result.agent_id,
+                    session_id=session_id,
+                    user_id=current_user.user_id,
+                    workspace_id=update_result.workspace_id,
                 )
             if update_result.event is not None:
                 await _publish_chat_event_best_effort(
@@ -899,16 +1104,12 @@ async def update_session_goal_status(
     match result:
         case Success(update_result):
             if update_result.wake_up:
-                await broker.send_message(
-                    SessionWakeUp(
-                        agent_id=update_result.agent_id,
-                        session_id=session_id,
-                        user_id=current_user.user_id,
-                        additional_system_prompt=None,
-                        interface=None,
-                        workspace_id=update_result.workspace_id,
-                        workspace_handle=None,
-                    )
+                await _send_session_wake_up_best_effort(
+                    broker,
+                    agent_id=update_result.agent_id,
+                    session_id=session_id,
+                    user_id=current_user.user_id,
+                    workspace_id=update_result.workspace_id,
                 )
             if update_result.event is not None:
                 await _publish_chat_event_best_effort(
@@ -955,18 +1156,28 @@ async def stop_session_run(
     )
     match result:
         case Success(agent_session):
-            stop_result = await chat_write_service.request_session_stop(
+            stop_request_result = await chat_write_service.request_session_stop(
                 session_id=agent_session.id,
                 user_id=current_user.user_id,
             )
-            for stopped_session_id in stop_result.stopped_session_ids:
-                await broker.send_message(
-                    SessionStopSignal(
-                        session_id=stopped_session_id,
-                        user_id=current_user.user_id,
+            match stop_request_result:
+                case Success(stop_result):
+                    await _run_post_commit_delivery(
+                        lambda: _send_stop_signals_best_effort(
+                            broker,
+                            session_ids=stop_result.stopped_session_ids,
+                            user_id=current_user.user_id,
+                            stop_request_ids_by_session=(
+                                stop_result.stop_request_ids_by_session
+                            ),
+                        ),
+                        session_id=agent_session.id,
                     )
-                )
-            return ChatStopResponse(session_id=agent_session.id)
+                    return ChatStopResponse(session_id=agent_session.id)
+                case Failure(SessionNotFound() | SessionAccessDenied()):
+                    raise HTTPException(status_code=404, detail="Session not found.")
+                case _:
+                    assert_never(stop_request_result)
         case Failure(error):
             match error:
                 case SessionNotFound():
@@ -1081,6 +1292,7 @@ async def _write_new_session_message_via_rest(
         user_id=user_id,
         client_request_id=request.client_request_id,
         input_buffer=result.input_buffer,
+        input_buffer_pending=result.input_buffer_pending,
     )
 
 
@@ -1105,14 +1317,7 @@ async def _write_edit_message_via_rest(
         user_id=user_id,
     )
     payload = request.model_dump(mode="json")
-    materialized = await materialize_user_input_exchange_file_attachments(
-        request.attachments or [],
-        agent_id=request.agent_id,
-        session_id=resolved_session_id,
-        exchange_file_service=exchange_file_service,
-        model_file_service=model_file_service,
-        user_id=user_id,
-    )
+    del exchange_file_service, model_file_service
     metadata = {
         "timestamp": datetime.now(tz).isoformat(),
         "source": "chat",
@@ -1128,25 +1333,23 @@ async def _write_edit_message_via_rest(
             text=request.message,
             inference_profile=request.inference_profile,
             metadata=metadata,
-            attachments=[attachment.uri for attachment in materialized.attachments],
-            file_parts=materialized.file_parts,
+            attachments=request.attachments or [],
+            file_parts=[],
             payload=payload,
         )
+    except ChatWriteSessionNotFound as exc:
+        raise HTTPException(status_code=404, detail="Session not found.") from exc
+    except ChatWriteSessionAccessDenied as exc:
+        raise HTTPException(status_code=403, detail="Session access denied.") from exc
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    if accepted.request.created:
-        if accepted.input_buffer is not None:
-            await broker.send_message(
-                SessionWakeUp(
-                    agent_id=request.agent_id,
-                    session_id=resolved_session_id,
-                    user_id=user_id,
-                    additional_system_prompt=None,
-                    interface=None,
-                    workspace_id=None,
-                    workspace_handle=None,
-                )
-            )
+    if accepted.input_buffer is not None:
+        await _deliver_session_wake_up(
+            broker,
+            agent_id=request.agent_id,
+            session_id=resolved_session_id,
+            user_id=user_id,
+        )
     snapshot = await _build_chat_write_snapshot(
         chat_service,
         live_event_store,
@@ -1189,19 +1392,18 @@ async def _write_failed_run_retry_via_rest(
             failed_event_id=request.failed_event_id,
             payload=payload,
         )
+    except ChatWriteSessionNotFound as exc:
+        raise HTTPException(status_code=404, detail="Session not found.") from exc
+    except ChatWriteSessionAccessDenied as exc:
+        raise HTTPException(status_code=403, detail="Session access denied.") from exc
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    if accepted.request.created:
-        await broker.send_message(
-            SessionWakeUp(
-                agent_id=request.agent_id,
-                session_id=resolved_session_id,
-                user_id=user_id,
-                additional_system_prompt=None,
-                interface=None,
-                workspace_id=None,
-                workspace_handle=None,
-            )
+    if accepted.wake_needed:
+        await _deliver_session_wake_up(
+            broker,
+            agent_id=request.agent_id,
+            session_id=resolved_session_id,
+            user_id=user_id,
         )
     snapshot = await _build_chat_write_snapshot(
         chat_service,
@@ -1253,19 +1455,18 @@ async def _write_command_via_rest(
             command_name=request.command,
             payload=payload,
         )
+    except ChatWriteSessionNotFound as exc:
+        raise HTTPException(status_code=404, detail="Session not found.") from exc
+    except ChatWriteSessionAccessDenied as exc:
+        raise HTTPException(status_code=403, detail="Session access denied.") from exc
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    if accepted.request.created:
-        await broker.send_message(
-            SessionWakeUp(
-                agent_id=request.agent_id,
-                session_id=resolved_session_id,
-                user_id=user_id,
-                additional_system_prompt=None,
-                interface=None,
-                workspace_id=None,
-                workspace_handle=None,
-            )
+    if accepted.command_id is not None:
+        await _deliver_session_wake_up(
+            broker,
+            agent_id=request.agent_id,
+            session_id=resolved_session_id,
+            user_id=user_id,
         )
     snapshot = await _build_chat_write_snapshot(
         chat_service,
@@ -1347,6 +1548,7 @@ async def _write_turn_action_via_rest(
         user_id=user_id,
         client_request_id=request.client_request_id,
         input_buffer=result.input_buffer,
+        input_buffer_pending=result.input_buffer_pending,
     )
 
 
@@ -1686,16 +1888,11 @@ async def create_team_agent_session(
     match result:
         case Success(session):
             if request.setup_actions:
-                await broker.send_message(
-                    SessionWakeUp(
-                        agent_id=agent_id,
-                        session_id=session.id,
-                        user_id=current_user.user_id,
-                        additional_system_prompt=None,
-                        interface=None,
-                        workspace_id=None,
-                        workspace_handle=None,
-                    )
+                await _send_session_wake_up_best_effort(
+                    broker,
+                    agent_id=agent_id,
+                    session_id=session.id,
+                    user_id=current_user.user_id,
                 )
             return AgentSessionResponse.from_domain(session)
         case Failure(error):
@@ -2690,6 +2887,14 @@ async def delete_session(
                     raise HTTPException(
                         status_code=409,
                         detail="Subagent sessions are read-only.",
+                    )
+                case SessionWorktreeCleanupIncomplete():
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            "Session Git worktree cleanup is still in progress. "
+                            "Please retry deletion."
+                        ),
                     )
                 case _:
                     assert_never(error)

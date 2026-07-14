@@ -133,6 +133,37 @@ class TestWorkspaceUserRepository:
         # Then: None
         assert user is None
 
+    async def test_lock_by_workspace_and_user(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Fetch membership authority under a row lock."""
+        workspace_id = await _create_workspace(rdb_session)
+        created_user_id = await _create_user(
+            rdb_session,
+            email="lock-membership@example.com",
+        )
+        repo = WorkspaceUserRepository()
+        created = await repo.create(
+            rdb_session,
+            WorkspaceUserCreate(
+                workspace_id=workspace_id,
+                user_id=created_user_id,
+                name="Locked user",
+                role=WorkspaceUserRole.MEMBER,
+            ),
+        )
+        assert isinstance(created, Success)
+
+        locked = await repo.lock_by_workspace_and_user(
+            rdb_session,
+            workspace_id,
+            created_user_id,
+        )
+
+        assert locked is not None
+        assert locked.id == created.value.id
+
     async def test_list_by_workspace(self, rdb_session: AsyncSession) -> None:
         """Fetch WorkspaceUser list in Workspace."""
         # Given: Workspace multiple user create

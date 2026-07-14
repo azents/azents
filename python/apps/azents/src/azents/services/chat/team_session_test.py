@@ -1,6 +1,7 @@
 """ChatSessionService team session tests."""
 
 import datetime
+from typing import NoReturn, cast
 
 import sqlalchemy as sa
 from azcommon.result import Failure, Success
@@ -27,9 +28,10 @@ from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
 from azents.repos.agent_project_default import AgentProjectDefaultRepository
 from azents.repos.agent_project_preset import AgentProjectPresetRepository
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.input_buffer import InputBufferRepository
+from azents.repos.input_buffer.repository import InputBufferRepository
 from azents.repos.message import MessageRepository
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
+from azents.repos.toolkit_state import ToolkitStateRepository
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
@@ -40,6 +42,7 @@ from azents.services.chat.data import InvalidSessionTitle
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.input_buffer import InputBufferService
 from azents.services.model_file import ModelFileService
+from azents.services.session_workspace_project import InvalidProjectPath
 from azents.testing.model_selection import make_test_model_selection_dict
 
 from . import ChatSessionService
@@ -140,8 +143,10 @@ def _service(
             event_transcript_repository=EventTranscriptRepository(),
             agent_run_repository=AgentRunRepository(),
             action_execution_repository=ActionExecutionRepository(),
+            toolkit_state_repository=ToolkitStateRepository(),
         ),
         session_manager=rdb_session_manager,
+        toolkit_state_repository=ToolkitStateRepository(),
     )
 
 
@@ -161,6 +166,26 @@ class _ModelFileService(ModelFileService):
 
 class TestChatSessionTeamSessions:
     """Team session service behavior."""
+
+    async def test_invalid_projects_do_not_create_primary_or_draft_session(
+        self,
+    ) -> None:
+        """Pure request validation runs before any auto-committed DB mutation."""
+
+        def unexpected_session_manager() -> NoReturn:
+            raise AssertionError("invalid input must not open a DB transaction")
+
+        result = await _service(
+            cast(SessionManager[AsyncSession], unexpected_session_manager)
+        ).create_team_session(
+            agent_id="agent-1",
+            user_id="user-1",
+            existing_project_paths=["relative/project"],
+            setup_actions=[],
+        )
+
+        assert isinstance(result, Failure)
+        assert isinstance(result.error, InvalidProjectPath)
 
     async def test_create_team_session_uses_explicit_projects(
         self,

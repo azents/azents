@@ -2,8 +2,10 @@
 
 import asyncio
 
+import pytest
 from pydantic import BaseModel
 
+import azents.engine.events.tools as tools_module
 from azents.core.tools import Toolkit, ToolkitState, ToolkitStatus, TurnContext
 from azents.engine.events.litellm_responses import LiteLLMResponsesLowerer
 from azents.engine.events.output_parts import (
@@ -153,6 +155,7 @@ async def test_build_tool_catalog_prefixes_and_lowers_native_schema() -> None:
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id="run-1",
+            owner_generation=1,
             publish_event=_noop_publish,
         ),
     )
@@ -187,6 +190,7 @@ async def test_build_tool_catalog_separates_dynamic_prompt_layer() -> None:
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id="run-1",
+            owner_generation=1,
             publish_event=_noop_publish,
         ),
     )
@@ -227,6 +231,7 @@ async def test_native_tools_are_sorted_by_function_name() -> None:
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id="run-1",
+            owner_generation=1,
             publish_event=_noop_publish,
         ),
     )
@@ -249,6 +254,7 @@ async def test_client_tool_executor_returns_event_result() -> None:
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id="run-1",
+            owner_generation=1,
             publish_event=_noop_publish,
         ),
     )
@@ -301,6 +307,7 @@ async def test_client_tool_executor_applies_global_text_output_cap() -> None:
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id="run-1",
+            owner_generation=1,
             publish_event=_noop_publish,
         ),
     )
@@ -360,6 +367,7 @@ async def test_client_tool_executor_caps_structured_text_output_parts() -> None:
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id="run-1",
+            owner_generation=1,
             publish_event=_noop_publish,
         ),
     )
@@ -417,6 +425,7 @@ async def test_client_tool_executor_preserves_function_tool_result_metadata() ->
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id="run-1",
+            owner_generation=1,
             publish_event=_noop_publish,
         ),
     )
@@ -473,6 +482,7 @@ async def test_client_tool_executor_dispatches_cancel_handler() -> None:
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id="run-1",
+            owner_generation=1,
             publish_event=_noop_publish,
         ),
     )
@@ -496,6 +506,83 @@ async def test_client_tool_executor_dispatches_cancel_handler() -> None:
     ]
 
 
+async def test_client_tool_executor_bounds_cancel_handler_that_ignores_cancel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A broken cancellation hook is quarantined without blocking Run stop."""
+    monkeypatch.setattr(tools_module, "_CANCEL_HANDLER_TIMEOUT_SECONDS", 0.01)
+    started = asyncio.Event()
+    cancellation_seen = asyncio.Event()
+    release = asyncio.Event()
+
+    async def cancel_handler(request: FunctionToolCancelRequest) -> None:
+        del request
+        started.set()
+        while not release.is_set():
+            try:
+                await release.wait()
+            except asyncio.CancelledError:
+                cancellation_seen.set()
+
+    catalog = await build_tool_catalog(
+        toolkit_bindings=[
+            ToolkitBinding(
+                toolkit=_InlineToolkit(
+                    FunctionTool(
+                        spec=FunctionToolSpec(
+                            name="slow",
+                            description="Slow tool.",
+                            input_schema={"type": "object"},
+                        ),
+                        handler=_echo,
+                        cancel_handler=cancel_handler,
+                    )
+                ),
+                slug="",
+                use_prefix=False,
+            )
+        ],
+        context=TurnContext(
+            user_id=None,
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id="run-1",
+            owner_generation=1,
+            publish_event=_noop_publish,
+        ),
+    )
+
+    ToolCatalogClientToolExecutor(catalog).request_cancel(
+        ClientToolCallPayload(
+            call_id="call-1",
+            name="slow",
+            arguments="{}",
+            native_artifact=_artifact(),
+        )
+    )
+
+    retained_task: asyncio.Task[None] | None = None
+    try:
+        await asyncio.wait_for(started.wait(), timeout=1)
+        await asyncio.wait_for(cancellation_seen.wait(), timeout=1)
+        retained_task = next(
+            task
+            for task in tools_module._RETAINED_CANCEL_HANDLER_TASKS  # pyright: ignore[reportPrivateUsage]
+            if task.get_name() == "tool-cancel-hook:call-1"
+        )
+        assert not retained_task.done()
+    finally:
+        release.set()
+        if retained_task is not None:
+            await asyncio.wait_for(retained_task, timeout=1)
+            await asyncio.sleep(0)
+
+    assert retained_task is not None
+    assert (
+        retained_task not in tools_module._RETAINED_CANCEL_HANDLER_TASKS  # pyright: ignore[reportPrivateUsage]
+    )
+
+
 async def test_client_tool_executor_migrates_function_tool_result_parts() -> None:
     """FunctionToolResult output part input is validated as event output parts."""
     catalog = await build_tool_catalog(
@@ -511,6 +598,7 @@ async def test_client_tool_executor_migrates_function_tool_result_parts() -> Non
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id="run-1",
+            owner_generation=1,
             publish_event=_noop_publish,
         ),
     )
@@ -545,6 +633,7 @@ async def test_client_tool_executor_returns_failed_for_unknown_tool() -> None:
                 workspace_id="workspace-1",
                 model="gpt-5.1",
                 run_id="run-1",
+                owner_generation=1,
                 publish_event=_noop_publish,
             ),
         )

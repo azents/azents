@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent import AgentModelSelection
 from azents.core.enums import (
+    AgentRunStatus,
     AgentSessionEndReason,
     AgentSessionKind,
     AgentSessionPrimaryKind,
@@ -25,6 +26,7 @@ from azents.core.enums import (
 )
 from azents.core.inference_profile import SessionInferenceState
 from azents.core.session_handle import generate_session_handle
+from azents.rdb.models.agent_run import RDBAgentRun
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.event import RDBEvent
@@ -127,6 +129,24 @@ class AgentSessionRepository:
             return {}
         result = await session.execute(
             sa.select(RDBAgentSession).where(RDBAgentSession.id.in_(ids))
+        )
+        return {rdb.id: self._build(rdb) for rdb in result.scalars()}
+
+    async def lock_by_ids(
+        self,
+        session: AsyncSession,
+        *,
+        agent_session_ids: Sequence[str],
+    ) -> dict[str, AgentSession]:
+        """Lock AgentSessions in the repository-wide deterministic ID order."""
+        ids = sorted(set(agent_session_ids))
+        if not ids:
+            return {}
+        result = await session.execute(
+            sa.select(RDBAgentSession)
+            .where(RDBAgentSession.id.in_(ids))
+            .order_by(RDBAgentSession.id)
+            .with_for_update()
         )
         return {rdb.id: self._build(rdb) for rdb in result.scalars()}
 
@@ -522,9 +542,35 @@ class AgentSessionRepository:
         )
         if linked_agent is None:
             return [agent_session_id]
+        locked_root = await self.lock_session_agent_by_id(
+            session,
+            linked_agent.root_session_agent_id,
+        )
+        confirmed_link = await self.get_session_agent_by_session_id(
+            session,
+            agent_session_id,
+        )
+        if confirmed_link is None:
+            if await self.get_by_id(session, agent_session_id) is None:
+                return [agent_session_id]
+            raise RuntimeError(
+                "SessionAgent link disappeared while acquiring its root fence"
+            )
+        if locked_root is None:
+            raise RuntimeError(
+                "Root SessionAgent disappeared while acquiring its subtree fence"
+            )
+        if (
+            confirmed_link.id != linked_agent.id
+            or confirmed_link.root_session_agent_id
+            != linked_agent.root_session_agent_id
+        ):
+            raise RuntimeError(
+                "SessionAgent link changed while acquiring its root fence"
+            )
         descendants = await self.list_descendant_session_agents(
             session,
-            session_agent_id=linked_agent.id,
+            session_agent_id=confirmed_link.id,
             include_self=True,
         )
         return [agent.agent_session_id for agent in descendants]
@@ -541,12 +587,48 @@ class AgentSessionRepository:
         )
         session_ids = [agent_session_id]
         if linked_agent is not None:
+            locked_root = await self.lock_session_agent_by_id(
+                session,
+                linked_agent.root_session_agent_id,
+            )
+            confirmed_link = await self.get_session_agent_by_session_id(
+                session,
+                agent_session_id,
+            )
+            if confirmed_link is None:
+                if await self.get_by_id(session, agent_session_id) is None:
+                    return
+                raise RuntimeError(
+                    "SessionAgent link disappeared while acquiring its root fence"
+                )
+            if locked_root is None:
+                raise RuntimeError(
+                    "Root SessionAgent disappeared while acquiring its delete fence"
+                )
+            if (
+                confirmed_link.id != linked_agent.id
+                or confirmed_link.root_session_agent_id
+                != linked_agent.root_session_agent_id
+            ):
+                raise RuntimeError(
+                    "SessionAgent link changed while acquiring its root fence"
+                )
+            linked_agent = confirmed_link
             descendants = await self.list_descendant_session_agents(
                 session,
                 session_agent_id=linked_agent.id,
                 include_self=True,
             )
             session_ids = [agent.agent_session_id for agent in descendants]
+        locked_sessions = await self.lock_by_ids(
+            session,
+            agent_session_ids=session_ids,
+        )
+        missing_session_ids = set(session_ids) - locked_sessions.keys()
+        if missing_session_ids:
+            if linked_agent is None and missing_session_ids == {agent_session_id}:
+                return
+            raise RuntimeError("SessionAgent subtree references missing AgentSessions")
         await session.execute(
             sa.delete(RDBAgentSession).where(RDBAgentSession.id.in_(session_ids))
         )
@@ -1021,12 +1103,29 @@ class AgentSessionRepository:
         stop_request_id: str,
         user_id: str | None,
     ) -> AgentSession | None:
-        """Record stop intent on running AgentSession."""
+        """Record the first stop intent or return the one already in progress."""
+        current = await self.lock_by_id(session, session_id)
+        if current is None:
+            return None
+        if current.stop_requested_at is not None:
+            return current
+        active_run_id = await session.scalar(
+            sa.select(RDBAgentRun.id)
+            .where(
+                RDBAgentRun.session_id == session_id,
+                RDBAgentRun.status.in_(
+                    [AgentRunStatus.PENDING, AgentRunStatus.RUNNING]
+                ),
+            )
+            .limit(1)
+        )
+        if current.run_state != AgentSessionRunState.RUNNING and active_run_id is None:
+            return None
         result = await session.execute(
             sa.update(RDBAgentSession)
             .where(
                 RDBAgentSession.id == session_id,
-                RDBAgentSession.run_state == AgentSessionRunState.RUNNING,
+                RDBAgentSession.stop_requested_at.is_(None),
             )
             .values(
                 stop_requested_at=sa.func.now(),
@@ -1037,7 +1136,17 @@ class AgentSessionRepository:
         )
         rdb = result.scalar_one_or_none()
         if rdb is None:
-            return None
+            raise RuntimeError("Locked AgentSession stop intent changed unexpectedly")
+        await session.execute(
+            sa.update(RDBAgentRun)
+            .where(
+                RDBAgentRun.session_id == session_id,
+                RDBAgentRun.status.in_(
+                    [AgentRunStatus.PENDING, AgentRunStatus.RUNNING]
+                ),
+            )
+            .values(stop_requested_at=rdb.stop_requested_at)
+        )
         await session.flush()
         return self._build(rdb)
 
@@ -1045,14 +1154,17 @@ class AgentSessionRepository:
         self,
         session: AsyncSession,
         session_id: str,
+        *,
+        stop_request_id: str | None,
     ) -> bool:
         """Check whether AgentSession has stop intent."""
-        result = await session.execute(
-            sa.select(RDBAgentSession.id).where(
-                RDBAgentSession.id == session_id,
-                RDBAgentSession.stop_requested_at.is_not(None),
-            )
-        )
+        conditions = [
+            RDBAgentSession.id == session_id,
+            RDBAgentSession.stop_requested_at.is_not(None),
+        ]
+        if stop_request_id is not None:
+            conditions.append(RDBAgentSession.stop_request_id == stop_request_id)
+        result = await session.execute(sa.select(RDBAgentSession.id).where(*conditions))
         return result.scalar_one_or_none() is not None
 
     async def clear_stop_request(
@@ -1086,17 +1198,26 @@ class AgentSessionRepository:
         )
         await session.flush()
 
-    async def heartbeat_running(self, session: AsyncSession, session_id: str) -> None:
-        """Update heartbeat time of RUNNING AgentSession."""
-        await session.execute(
+    async def heartbeat_running(
+        self,
+        session: AsyncSession,
+        session_id: str,
+        *,
+        expected_owner_generation: int,
+    ) -> bool:
+        """Update heartbeat only for the authoritative RUNNING Session owner."""
+        updated_id = await session.scalar(
             sa.update(RDBAgentSession)
             .where(
                 RDBAgentSession.id == session_id,
                 RDBAgentSession.run_state == AgentSessionRunState.RUNNING,
+                RDBAgentSession.owner_generation == expected_owner_generation,
             )
             .values(run_heartbeat_at=sa.func.now())
+            .returning(RDBAgentSession.id)
         )
         await session.flush()
+        return updated_id is not None
 
     async def find_stuck_running(
         self,

@@ -48,8 +48,16 @@ class _FakeSelectedInstallationStore:
         """Load selected installation ID."""
         return self.installation_id
 
-    async def save(self, installation_id: str) -> None:
+    async def save(
+        self,
+        installation_id: str,
+        *,
+        run_id: str,
+        owner_generation: int,
+    ) -> None:
         """Save selected installation ID."""
+        assert run_id == "run-1"
+        assert owner_generation == 1
         self.installation_id = installation_id
 
 
@@ -60,6 +68,7 @@ def _make_turn_context() -> TurnContext:
         workspace_id="workspace-1",
         model="test-model",
         run_id="run-1",
+        owner_generation=1,
         session_id="session-1",
         publish_event=AsyncMock(),
     )

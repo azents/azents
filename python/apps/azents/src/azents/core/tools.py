@@ -59,6 +59,7 @@ class TurnContext:
     :param model: LLM model string
     :param session_id: Agent session ID
     :param run_id: Unique ID for message processing unit
+    :param owner_generation: Durable Session ownership generation
     :param run_index: Run index increasing within the session
     :param publish_event: Engine event publish callback
     :param check_stop: Callback that checks whether execution should stop
@@ -68,6 +69,7 @@ class TurnContext:
     workspace_id: str
     model: str
     run_id: str
+    owner_generation: int
     publish_event: PublishEventFn
     session_id: str = ""
     run_index: int = 1
@@ -85,6 +87,7 @@ class ToolCallHookContext:
     agent_id: str
     workspace_id: str
     run_id: str
+    owner_generation: int
 
 
 @dataclasses.dataclass(frozen=True)
@@ -171,13 +174,16 @@ class ToolkitContext:
 class ResolveContext:
     """Per-request context passed to resolve().
 
+    This context contains detached values only. Providers that need database
+    access must use an injected session manager and release each session before
+    performing external I/O.
+
     :param toolkit_id: Toolkit config ID
     :param toolkit_name: Human-readable Toolkit name
     :param credentials_json: Decrypted credential JSON; None means no authentication
     :param agent_id: Agent ID owning the current AgentSession
     :param session_id: Current AgentSession ID
     :param user_id: User ID; None for system context
-    :param session: DB session
     :param web_url: Frontend URL for building OAuth redirect_uri
     :param oauth_secret_key: OAuth HMAC signing key
     :param workspace_id: Workspace ID
@@ -191,7 +197,6 @@ class ResolveContext:
     agent_id: str
     session_id: str
     user_id: str | None
-    session: AsyncSession
     web_url: str
     oauth_secret_key: str
     workspace_id: str
@@ -353,6 +358,8 @@ class ToolkitProvider(ABC, Generic[ConfigT]):
         context: ResolveContext,
     ) -> Toolkit[ConfigT]:
         """Resolve per-config credentials and return executable Toolkit.
+
+        Resolution must not retain a database session across external I/O.
 
         :param config: Validated toolkit settings
         :param context: Resolve context such as credentials and user_id

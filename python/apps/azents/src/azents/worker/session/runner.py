@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.types import (
     BrokerMessage,
+    SessionOwnershipLostError,
     SessionStopSignal,
     SessionWakeUp,
 )
@@ -59,7 +60,7 @@ class AgentSessionCommandReader(Protocol):
 
 @dataclasses.dataclass(frozen=True)
 class _PendingIdleBoundary:
-    """stale wake-up 뒤에 닫아야 하는 terminal run boundary."""
+    """Terminal run boundary deferred until stale wake-ups are drained."""
 
     message: SessionWakeUp
     toolkits: list[ToolkitBinding]
@@ -95,6 +96,7 @@ class SessionRunner:
         self.agent_session_repository = agent_session_repository
         self.input_buffer_service = input_buffer_service
         self.idle_continuation_service = idle_continuation_service
+        self.user_stop_finalizer = user_stop_finalizer
         self.run_executor = run_executor
         self.inbox = SessionRunnerInbox()
         self.runner_shutdown = asyncio.Event()
@@ -118,13 +120,19 @@ class SessionRunner:
             event_publisher=event_publisher,
         )
         self.run_active = False
-        self.handover_wake_up: SessionWakeUp | None = None
+        self.in_flight_message: BrokerMessage | None = None
+        self._accepting_messages = True
         self.pending_idle_boundary: _PendingIdleBoundary | None = None
 
     @property
     def terminated(self) -> bool:
         """Whether Runner loop has ended."""
         return self.terminated_event.is_set()
+
+    @property
+    def accepting_messages(self) -> bool:
+        """Whether the Runner can safely accept another local broker delivery."""
+        return self._accepting_messages
 
     async def run(self) -> None:
         """Run session message processing loop."""
@@ -154,6 +162,8 @@ class SessionRunner:
 
         :param message: Broker message to process
         """
+        if not self._accepting_messages:
+            raise RuntimeError("Session runner no longer accepts messages")
         self.inbox.enqueue(message, stop_controller=self.stop_controller)
 
     async def prepare_toolkits(
@@ -214,7 +224,10 @@ class SessionRunner:
             if self.stop_controller.user_stop_requested:
                 return True
 
-            if await self.session_lifecycle.has_stop_request(session_id):
+            if await self.session_lifecycle.has_stop_request(
+                session_id,
+                stop_request_id=None,
+            ):
                 self.stop_controller.request_user_stop()
                 return True
 
@@ -298,6 +311,18 @@ class SessionRunner:
         await self.session_lifecycle.clear_session_activity(session_id)
         return True
 
+    async def _mark_idle_after_standalone_stop(self, session_id: str) -> bool:
+        """Close a durable stop consumed without an active engine task."""
+        logger.info(
+            "Session runner marking session idle after standalone stop",
+            extra={"session_id": session_id},
+        )
+        marked_idle = await self.session_lifecycle.mark_session_idle(session_id)
+        if not marked_idle:
+            return False
+        await self.session_lifecycle.clear_session_activity(session_id)
+        return True
+
     async def _mark_idle_after_boundary(
         self,
         boundary: _PendingIdleBoundary,
@@ -339,38 +364,49 @@ class SessionRunner:
         return True
 
     async def _release_current_session(self) -> None:
-        """Release current session ownership or hand it over to another worker."""
+        """Release current session ownership."""
         session_id = self.running_session_id
         if session_id is None:
             return
+        await self.session_lifecycle.release_session_lock(session_id)
 
-        wake_up = self.handover_wake_up
-        if wake_up is None:
-            await self.session_lifecycle.release_session_lock(session_id)
-            return
-
-        should_handover = await self.session_lifecycle.has_active_agent_run(
-            session_id,
-        )
-
-        if not should_handover:
-            await self.session_lifecycle.release_session_lock(session_id)
+    async def _redeliver_unacknowledged_messages(self) -> None:
+        """Return in-flight and locally queued hints to the durable broker queue."""
+        messages = self.inbox.drain()
+        if self.in_flight_message is not None:
+            messages.insert(0, self.in_flight_message)
+        self.in_flight_message = None
+        if not messages:
             return
 
         logger.info(
-            "Session runner stopped during active run, handing over session",
-            extra={"session_id": session_id},
+            "Session runner redelivering unacknowledged broker messages",
+            extra={
+                "session_id": messages[0].session_id,
+                "message_count": len(messages),
+            },
         )
-        await self.session_lifecycle.release_session_lock(session_id)
-        try:
-            await self.session_lifecycle.send_session_wake_up(wake_up)
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.exception(
-                "Failed to enqueue session handover wake-up",
-                extra={"session_id": session_id},
-            )
+        for message in messages:
+            try:
+                match message:
+                    case SessionWakeUp():
+                        await self.session_lifecycle.send_session_wake_up(message)
+                    case SessionStopSignal():
+                        await self.session_lifecycle.send_session_message(message)
+                    case _:
+                        assert_never(message)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                # All broker envelopes are hints for durable input, command, or stop
+                # state. The stuck-session scanner remains the final recovery path.
+                logger.exception(
+                    "Failed to redeliver unacknowledged broker message",
+                    extra={
+                        "session_id": message.session_id,
+                        "message_type": type(message).__name__,
+                    },
+                )
 
     async def _loop(self) -> None:
         """Session message processing loop."""
@@ -379,21 +415,21 @@ class SessionRunner:
             while await self._tick(idle_started_at):
                 pass
         finally:
-            toolkit_cleanup_error: Exception | None = None
             try:
+                if self.running_session_id is not None:
+                    logger.info(
+                        "Session runner stopped, releasing lock",
+                        extra={"session_id": self.running_session_id},
+                    )
+                    await self._release_current_session()
+            finally:
+                # Keep accepting direct-stream deliveries until the release await
+                # finishes. They are then drained with the current in-flight hint.
+                self._accepting_messages = False
+                await self._redeliver_unacknowledged_messages()
+                # Toolkit cleanup can perform external calls. Ownership and broker
+                # handoff must already be complete before it can delay or fail.
                 await self.toolkit_scope.cleanup()
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                toolkit_cleanup_error = exc
-            if self.running_session_id is not None:
-                logger.info(
-                    "Session runner stopped, releasing lock",
-                    extra={"session_id": self.running_session_id},
-                )
-                await self._release_current_session()
-            if toolkit_cleanup_error is not None:
-                raise toolkit_cleanup_error
 
     async def _tick(self, idle_started_at: float) -> bool:
         wait_result = await self.waiter.wait_next(
@@ -418,15 +454,19 @@ class SessionRunner:
             case ShutdownResult():
                 return False
             case MessageResult(message):
+                self.in_flight_message = message
                 if self.running_session_id is None:
+                    self.running_session_id = message.session_id
                     self.owner_generation = (
                         await self.session_lifecycle.claim_owner_generation(
                             message.session_id
                         )
                     )
-                self.running_session_id = message.session_id
+                elif self.running_session_id != message.session_id:
+                    raise RuntimeError(
+                        "Session runner received a cross-session message"
+                    )
                 self.stop_controller.clear_for_next_run()
-                self.handover_wake_up = None
                 loop = asyncio.get_running_loop()
                 message_started_at = loop.time()
                 L = bind_extra(
@@ -466,6 +506,10 @@ class SessionRunner:
                         else:
                             marked_idle = await self._mark_idle_after_boundary(boundary)
                             self.pending_idle_boundary = None
+                    elif isinstance(message, SessionStopSignal):
+                        marked_idle = await self._mark_idle_after_standalone_stop(
+                            message.session_id
+                        )
                 elif result.no_actionable_work and isinstance(message, SessionWakeUp):
                     boundary = self.pending_idle_boundary
                     if (
@@ -480,6 +524,30 @@ class SessionRunner:
                         message.session_id
                     ):
                         marked_idle = await self._mark_idle_after_no_actionable_wake_up(
+                            message.session_id
+                        )
+                elif result.no_actionable_work and isinstance(
+                    message, SessionStopSignal
+                ):
+                    # The engine may consume and finalize durable intent before its
+                    # broker hint is dequeued. Let that now-stale hint close the
+                    # pending terminal boundary instead of stranding RUNNING state.
+                    boundary = self.pending_idle_boundary
+                    if (
+                        boundary is not None
+                        and boundary.message.session_id == message.session_id
+                        and not await self._has_follow_up_work(message.session_id)
+                    ):
+                        marked_idle = await self._mark_idle_after_boundary(
+                            boundary,
+                            enqueue_idle_continuation=False,
+                        )
+                        if marked_idle:
+                            self.pending_idle_boundary = None
+                    elif boundary is None and not await self._has_follow_up_work(
+                        message.session_id
+                    ):
+                        marked_idle = await self._mark_idle_after_standalone_stop(
                             message.session_id
                         )
                 elif (
@@ -503,6 +571,7 @@ class SessionRunner:
                     },
                 )
 
+                self.in_flight_message = None
                 if self.runner_shutdown.is_set() and self.inbox.empty():
                     return False
                 idle_started_at = asyncio.get_running_loop().time()
@@ -515,16 +584,39 @@ class SessionRunner:
         try:
             match message:
                 case SessionStopSignal():
+                    if not await self.session_lifecycle.has_stop_request(
+                        message.session_id,
+                        # Broker delivery is only a wake hint. Process whichever
+                        # stop intent is currently durable so an overwritten
+                        # request ID cannot strand the newer stop.
+                        stop_request_id=None,
+                    ):
+                        return RunExecutionResult(
+                            toolkits=[],
+                            terminal_event_observed=False,
+                            no_actionable_work=True,
+                        )
+                    await self.user_stop_finalizer.finalize(
+                        message.session_id,
+                        run_id=None,
+                        active_tool_calls=[],
+                    )
                     return RunExecutionResult(
                         toolkits=[],
-                        terminal_event_observed=False,
+                        terminal_event_observed=True,
                         no_actionable_work=False,
+                        terminal_run_status=AgentRunStatus.STOPPED,
                     )
                 case SessionWakeUp():
                     return await self._process_wake_up(message)
                 case _:
                     assert_never(message)
         except asyncio.CancelledError:
+            raise
+        except SessionOwnershipLostError:
+            # A stale owner must leave through lock-release cleanup only. Error
+            # reporting or failed-run finalization would let it mutate the Run
+            # now owned by another worker.
             raise
         except UserVisibleRuntimeError as exc:
             finalized_run_id = await self.run_executor.finalize_unhandled_active_run(
@@ -583,11 +675,6 @@ class SessionRunner:
             result = await self._run_with_timeout(message, command=command)
         finally:
             self.run_active = False
-            if (
-                self.stop_controller.handover_stop_requested
-                and not self.stop_controller.user_stop_requested
-            ):
-                self.handover_wake_up = message
         await self._enqueue_wake_up_after_stop_if_needed(message)
         if self.shutdown_event.is_set():
             self._drain_stop_signals()

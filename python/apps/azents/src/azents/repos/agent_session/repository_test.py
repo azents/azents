@@ -2,9 +2,13 @@
 
 import asyncio
 import datetime
+from collections.abc import Sequence
+from types import SimpleNamespace
+from typing import cast
 from uuid import uuid4
 
 import pytest
+import sqlalchemy as sa
 from azcommon.result import Success
 from pytest import MonkeyPatch
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
@@ -13,6 +17,7 @@ import azents.repos.agent_session as agent_session_repo
 from azents.core.enums import (
     AgentSessionKind,
     AgentSessionPrimaryKind,
+    AgentSessionRunState,
     AgentSessionStartReason,
     AgentSessionStatus,
     AgentSessionTitleSource,
@@ -22,7 +27,10 @@ from azents.core.enums import (
 from azents.core.inference_profile import SessionInferenceState
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.rdb.models.agent import RDBAgent
+from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
+from azents.repos.agent_execution import AgentRunRepository
+from azents.repos.agent_execution.data import AgentRunCreate
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
 from azents.testing.model_selection import (
@@ -31,7 +39,7 @@ from azents.testing.model_selection import (
 )
 
 from . import AgentSessionRepository
-from .data import AgentSessionCreate
+from .data import AgentSession, AgentSessionCreate, SessionAgent
 
 
 async def _create_workspace(session: AsyncSession, handle: str) -> str:
@@ -104,6 +112,61 @@ class TestAgentSessionRepository:
         refreshed = await repo.get_by_id(rdb_session, created.id)
         assert refreshed is not None
         assert refreshed.owner_generation == 2
+
+    async def test_heartbeat_running_rejects_stale_owner_generation(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """A stolen lease generation cannot refresh the durable heartbeat."""
+        workspace_id = await _create_workspace(rdb_session, "heartbeat-fence-ws")
+        agent_id = await _create_agent(rdb_session, workspace_id, "heartbeat-fence")
+        repo = AgentSessionRepository()
+        created = await repo.create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        await repo.mark_running(rdb_session, created.id)
+        first_generation = await repo.claim_owner_generation(rdb_session, created.id)
+        fixed_heartbeat = datetime.datetime(2000, 1, 1, tzinfo=datetime.UTC)
+        await rdb_session.execute(
+            sa.update(RDBAgentSession)
+            .where(RDBAgentSession.id == created.id)
+            .values(run_heartbeat_at=fixed_heartbeat)
+        )
+        second_generation = await repo.claim_owner_generation(rdb_session, created.id)
+
+        stale_updated = await repo.heartbeat_running(
+            rdb_session,
+            created.id,
+            expected_owner_generation=first_generation,
+        )
+        stale_heartbeat = await rdb_session.scalar(
+            sa.select(RDBAgentSession.run_heartbeat_at).where(
+                RDBAgentSession.id == created.id
+            )
+        )
+
+        assert first_generation == 1
+        assert second_generation == 2
+        assert stale_updated is False
+        assert stale_heartbeat == fixed_heartbeat
+
+        current_updated = await repo.heartbeat_running(
+            rdb_session,
+            created.id,
+            expected_owner_generation=second_generation,
+        )
+        current = await repo.get_by_id(rdb_session, created.id)
+
+        assert current_updated is True
+        assert current is not None
+        assert current.run_state is AgentSessionRunState.RUNNING
+        assert current.owner_generation == second_generation
+        assert current.run_heartbeat_at > fixed_heartbeat
 
     async def test_last_inference_profile_round_trip(
         self,
@@ -245,6 +308,66 @@ class TestAgentSessionRepository:
         assert titled.title == "Design review"
         assert cleared is not None
         assert cleared.title is None
+
+    async def test_request_stop_preserves_first_intent_and_stamps_active_run(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Repeated stops reuse one identity and correlate the active Run."""
+        workspace_id = await _create_workspace(rdb_session, "request-stop-ws")
+        agent_id = await _create_agent(rdb_session, workspace_id, "request-stop")
+        session_repo = AgentSessionRepository()
+        agent_session = await session_repo.create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        run_repo = AgentRunRepository()
+        agent_run = await run_repo.create(
+            rdb_session,
+            AgentRunCreate(
+                session_id=agent_session.id,
+                parent_agent_run_id=None,
+            ),
+        )
+
+        first = await session_repo.request_stop(
+            rdb_session,
+            session_id=agent_session.id,
+            stop_request_id="stop-1",
+            user_id="user-1",
+        )
+        second = await session_repo.request_stop(
+            rdb_session,
+            session_id=agent_session.id,
+            stop_request_id="stop-2",
+            user_id="user-2",
+        )
+        stopped_run = await run_repo.get_by_id(rdb_session, agent_run.id)
+
+        assert first is not None
+        assert first.stop_requested_at is not None
+        assert first.stop_request_id == "stop-1"
+        assert first.stop_requested_by == "user-1"
+        assert second is not None
+        assert second.stop_requested_at == first.stop_requested_at
+        assert second.stop_request_id == "stop-1"
+        assert second.stop_requested_by == "user-1"
+        assert stopped_run is not None
+        assert stopped_run.stop_requested_at == first.stop_requested_at
+
+        await session_repo.update_title(
+            rdb_session,
+            session_id=agent_session.id,
+            title="Renamed after stop",
+            title_source=AgentSessionTitleSource.MANUAL,
+        )
+        run_after_title = await run_repo.get_by_id(rdb_session, agent_run.id)
+        assert run_after_title is not None
+        assert run_after_title.stop_requested_at == first.stop_requested_at
 
     async def test_ensure_active_recreates_after_archive(
         self, rdb_session: AsyncSession
@@ -621,6 +744,121 @@ class TestAgentSessionRepository:
         assert child_session is not None
         assert child_session.session_kind == AgentSessionKind.SUBAGENT
 
+    async def test_list_subtree_treats_concurrently_deleted_link_as_missing_session(
+        self,
+        monkeypatch: MonkeyPatch,
+    ) -> None:
+        """A delete that wins the root fence cannot turn a stop lookup into 500."""
+        order: list[str] = []
+        repo = AgentSessionRepository()
+        linked_reads = 0
+
+        async def get_linked(
+            session: AsyncSession,
+            agent_session_id: str,
+        ) -> SessionAgent | None:
+            nonlocal linked_reads
+            del session
+            assert agent_session_id == "root-session"
+            order.append("read_link")
+            linked_reads += 1
+            if linked_reads > 1:
+                return None
+            return cast(
+                SessionAgent,
+                SimpleNamespace(
+                    id="root-agent",
+                    root_session_agent_id="root-agent",
+                ),
+            )
+
+        async def lock_deleted_root(
+            session: AsyncSession,
+            session_agent_id: str,
+        ) -> None:
+            del session
+            assert session_agent_id == "root-agent"
+            order.append("lock_root")
+
+        async def get_deleted_session(
+            session: AsyncSession,
+            agent_session_id: str,
+        ) -> None:
+            del session
+            assert agent_session_id == "root-session"
+            order.append("read_agent_session")
+
+        monkeypatch.setattr(repo, "get_session_agent_by_session_id", get_linked)
+        monkeypatch.setattr(repo, "lock_session_agent_by_id", lock_deleted_root)
+        monkeypatch.setattr(repo, "get_by_id", get_deleted_session)
+
+        session_ids = await repo.list_session_agent_subtree_session_ids(
+            cast(AsyncSession, object()),
+            agent_session_id="root-session",
+        )
+
+        assert session_ids == ["root-session"]
+        assert order == [
+            "read_link",
+            "lock_root",
+            "read_link",
+            "read_agent_session",
+        ]
+
+    async def test_list_subtree_rejects_link_change_after_root_fence(
+        self,
+        monkeypatch: MonkeyPatch,
+    ) -> None:
+        """Never enumerate a different tree from the pre-fence SessionAgent link."""
+        order: list[str] = []
+        repo = AgentSessionRepository()
+        linked_reads = 0
+
+        async def get_linked(
+            session: AsyncSession,
+            agent_session_id: str,
+        ) -> SessionAgent:
+            nonlocal linked_reads
+            del session
+            assert agent_session_id == "root-session"
+            order.append("read_link")
+            linked_reads += 1
+            if linked_reads == 1:
+                return cast(
+                    SessionAgent,
+                    SimpleNamespace(
+                        id="old-agent",
+                        root_session_agent_id="old-root",
+                    ),
+                )
+            return cast(
+                SessionAgent,
+                SimpleNamespace(
+                    id="new-agent",
+                    root_session_agent_id="new-root",
+                ),
+            )
+
+        async def lock_old_root(
+            session: AsyncSession,
+            session_agent_id: str,
+        ) -> SessionAgent:
+            del session
+            assert session_agent_id == "old-root"
+            order.append("lock_root")
+            return cast(SessionAgent, SimpleNamespace(id="old-root"))
+
+        monkeypatch.setattr(repo, "get_session_agent_by_session_id", get_linked)
+        monkeypatch.setattr(repo, "lock_session_agent_by_id", lock_old_root)
+
+        with pytest.raises(RuntimeError, match="link changed"):
+            await repo.list_session_agent_subtree_session_ids(
+                cast(AsyncSession, object()),
+                agent_session_id="root-session",
+            )
+
+        assert order == ["read_link", "lock_root", "read_link"]
+
     async def test_delete_session_agent_subtree_deletes_child_sessions(
         self, rdb_session: AsyncSession
     ) -> None:
@@ -670,3 +908,215 @@ class TestAgentSessionRepository:
         assert await repo.get_session_agent_by_id(rdb_session, root_agent.id) is None
         assert await repo.get_session_agent_by_id(rdb_session, child.id) is None
         assert await repo.get_session_agent_by_id(rdb_session, nested.id) is None
+
+    async def test_delete_linked_session_locks_root_before_agent_sessions(
+        self,
+        monkeypatch: MonkeyPatch,
+    ) -> None:
+        """Serialize tree deletion in the same root-to-Session lock order."""
+        order: list[str] = []
+        repo = AgentSessionRepository()
+
+        async def get_linked(
+            session: AsyncSession,
+            agent_session_id: str,
+        ) -> SessionAgent:
+            del session, agent_session_id
+            order.append("read_link")
+            return cast(
+                SessionAgent,
+                SimpleNamespace(
+                    id="root-agent",
+                    root_session_agent_id="root-agent",
+                ),
+            )
+
+        async def lock_root(
+            session: AsyncSession,
+            session_agent_id: str,
+        ) -> SessionAgent:
+            del session
+            assert session_agent_id == "root-agent"
+            order.append("lock_root")
+            return cast(SessionAgent, SimpleNamespace(id="root-agent"))
+
+        async def list_descendants(
+            session: AsyncSession,
+            *,
+            session_agent_id: str,
+            include_self: bool,
+        ) -> list[SessionAgent]:
+            del session
+            assert session_agent_id == "root-agent"
+            assert include_self is True
+            order.append("read_subtree")
+            return [
+                cast(
+                    SessionAgent,
+                    SimpleNamespace(agent_session_id="root-session"),
+                )
+            ]
+
+        async def lock_sessions(
+            session: AsyncSession,
+            *,
+            agent_session_ids: Sequence[str],
+        ) -> dict[str, AgentSession]:
+            del session
+            assert agent_session_ids == ["root-session"]
+            order.append("lock_agent_sessions")
+            return {
+                "root-session": cast(
+                    AgentSession,
+                    SimpleNamespace(id="root-session"),
+                )
+            }
+
+        class RecordingSession:
+            async def execute(self, statement: object) -> object:
+                del statement
+                order.append("delete_agent_sessions")
+                return object()
+
+            async def flush(self) -> None:
+                order.append("flush")
+
+        monkeypatch.setattr(repo, "get_session_agent_by_session_id", get_linked)
+        monkeypatch.setattr(repo, "lock_session_agent_by_id", lock_root)
+        monkeypatch.setattr(repo, "list_descendant_session_agents", list_descendants)
+        monkeypatch.setattr(repo, "lock_by_ids", lock_sessions)
+
+        await repo.delete_by_id(
+            cast(AsyncSession, RecordingSession()),
+            "root-session",
+        )
+
+        assert order == [
+            "read_link",
+            "lock_root",
+            "read_link",
+            "read_subtree",
+            "lock_agent_sessions",
+            "delete_agent_sessions",
+            "flush",
+        ]
+
+    async def test_delete_linked_session_fails_if_link_disappears_after_fence(
+        self,
+        monkeypatch: MonkeyPatch,
+    ) -> None:
+        """Never fall back to an unfenced AgentSession delete after a linked read."""
+        order: list[str] = []
+        repo = AgentSessionRepository()
+        linked_reads = 0
+
+        async def get_linked(
+            session: AsyncSession,
+            agent_session_id: str,
+        ) -> SessionAgent | None:
+            nonlocal linked_reads
+            del session, agent_session_id
+            order.append("read_link")
+            linked_reads += 1
+            if linked_reads > 1:
+                return None
+            return cast(
+                SessionAgent,
+                SimpleNamespace(
+                    id="root-agent",
+                    root_session_agent_id="root-agent",
+                ),
+            )
+
+        async def lock_root(
+            session: AsyncSession,
+            session_agent_id: str,
+        ) -> SessionAgent:
+            del session, session_agent_id
+            order.append("lock_root")
+            return cast(SessionAgent, SimpleNamespace(id="root-agent"))
+
+        async def get_remaining_session(
+            session: AsyncSession,
+            agent_session_id: str,
+        ) -> AgentSession:
+            del session, agent_session_id
+            order.append("read_agent_session")
+            return cast(AgentSession, SimpleNamespace(id="root-session"))
+
+        class RecordingSession:
+            async def execute(self, statement: object) -> object:
+                del statement
+                order.append("delete_agent_session")
+                return object()
+
+            async def flush(self) -> None:
+                order.append("flush")
+
+        monkeypatch.setattr(repo, "get_session_agent_by_session_id", get_linked)
+        monkeypatch.setattr(repo, "lock_session_agent_by_id", lock_root)
+        monkeypatch.setattr(repo, "get_by_id", get_remaining_session)
+
+        with pytest.raises(RuntimeError, match="link disappeared"):
+            await repo.delete_by_id(
+                cast(AsyncSession, RecordingSession()),
+                "root-session",
+            )
+
+        assert order == [
+            "read_link",
+            "lock_root",
+            "read_link",
+            "read_agent_session",
+        ]
+
+    async def test_delete_unlinked_session_preserves_direct_delete(
+        self,
+        monkeypatch: MonkeyPatch,
+    ) -> None:
+        """Unlinked legacy Sessions remain directly deletable without a tree lock."""
+        order: list[str] = []
+        repo = AgentSessionRepository()
+
+        async def get_unlinked(
+            session: AsyncSession,
+            agent_session_id: str,
+        ) -> None:
+            del session, agent_session_id
+            order.append("read_link")
+
+        async def lock_sessions(
+            session: AsyncSession,
+            *,
+            agent_session_ids: Sequence[str],
+        ) -> dict[str, AgentSession]:
+            del session
+            order.append("lock_agent_session")
+            return {
+                session_id: cast(AgentSession, object())
+                for session_id in agent_session_ids
+            }
+
+        class RecordingSession:
+            async def execute(self, statement: object) -> object:
+                del statement
+                order.append("delete_agent_session")
+                return object()
+
+            async def flush(self) -> None:
+                order.append("flush")
+
+        monkeypatch.setattr(repo, "get_session_agent_by_session_id", get_unlinked)
+        monkeypatch.setattr(repo, "lock_by_ids", lock_sessions)
+
+        await repo.delete_by_id(
+            cast(AsyncSession, RecordingSession()),
+            "legacy-session",
+        )
+
+        assert order == [
+            "read_link",
+            "lock_agent_session",
+            "delete_agent_session",
+            "flush",
+        ]

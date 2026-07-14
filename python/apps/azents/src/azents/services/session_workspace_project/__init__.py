@@ -1,13 +1,17 @@
 """Session Workspace Project service."""
 
+import asyncio
 import dataclasses
+import logging
 import posixpath
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
-from typing import Annotated
+from typing import Annotated, assert_never
 
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
+from redis.exceptions import RedisError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
@@ -42,6 +46,9 @@ from azents.runtime.runner_operation_adapter import adapt_runtime_runner_operati
 
 SESSION_WORKSPACE_ROOT = PurePosixPath("/workspace/agent")
 _RUNNER_PROJECT_VALIDATION_TIMEOUT_SECONDS = 120
+_POST_COMMIT_PROJECTION_TIMEOUT_SECONDS = 1.0
+
+logger = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -81,6 +88,33 @@ class AccessibleProjectContext:
 
     agent_id: str
     session_id: str
+
+
+@dataclasses.dataclass(frozen=True)
+class _ProjectFolderRegistrationSnapshot:
+    """Detached project/runtime state validated before Runner I/O."""
+
+    context: AccessibleProjectContext
+    normalized_path: str
+    runtime: AgentRuntime
+
+
+@dataclasses.dataclass(frozen=True)
+class _LockedProjectRegistrationAuthority:
+    """Project registration authority held until the database commit."""
+
+    context: AccessibleProjectContext
+    runtime: AgentRuntime
+
+
+@dataclasses.dataclass(frozen=True)
+class _DeletedProjectInvalidation:
+    """Committed Project deletion data for post-transaction projection cleanup."""
+
+    agent_id: str
+    session_id: str
+    project_id: str
+    project_path: str
 
 
 ProjectCreateError = InvalidProjectPath | ProjectPathConflict
@@ -135,6 +169,16 @@ def _available_project_status_patch() -> AgentProjectCatalogStatusPatch:
         status=AgentProjectCatalogStatus.AVAILABLE,
         status_detail=None,
         checked_at=datetime.now(UTC),
+    )
+
+
+def _same_runner_generation(current: AgentRuntime, snapshot: AgentRuntime) -> bool:
+    """Return whether Runner validation still applies to the current Runtime."""
+    return (
+        current.id == snapshot.id
+        and current.runner_generation == snapshot.runner_generation
+        and current.runner_state == snapshot.runner_state
+        and current.runner_state == RuntimeRunnerState.READY
     )
 
 
@@ -193,7 +237,15 @@ class SessionWorkspaceProjectService:
                 pass
             case Failure(error):
                 return Failure(error)
+            case _:
+                assert_never(normalized_result)
         async with self.session_manager() as session:
+            agent_session = await self.agent_session_repository.lock_by_id(
+                session,
+                session_id,
+            )
+            if agent_session is None:
+                raise ValueError("AgentSession not found")
             project = await self.repository.create_project(
                 session,
                 SessionWorkspaceProjectCreate(
@@ -201,16 +253,11 @@ class SessionWorkspaceProjectService:
                     path=normalized_path,
                 ),
             )
-            agent_session = await self.agent_session_repository.get_by_id(
-                session,
-                session_id,
-            )
             await session.commit()
-        if agent_session is not None:
-            await self._sync_skill_projection_for_project_change(
-                agent_id=agent_session.agent_id,
-                session_id=session_id,
-            )
+        await self._sync_skill_projection_for_project_change(
+            agent_id=agent_session.agent_id,
+            session_id=session_id,
+        )
         return Success(project)
 
     async def register_existing_folder_for_session(
@@ -234,6 +281,8 @@ class SessionWorkspaceProjectService:
                     pass
                 case Failure(error):
                     return Failure(error)
+                case _:
+                    assert_never(context_result)
             validation = await self._validate_project_path_in_session(
                 session,
                 session_id=context.session_id,
@@ -244,6 +293,8 @@ class SessionWorkspaceProjectService:
                     pass
                 case Failure(error):
                     return Failure(error)
+                case _:
+                    assert_never(validation)
             runtime_result = await self._get_runtime_for_project_context(
                 session,
                 context,
@@ -253,38 +304,89 @@ class SessionWorkspaceProjectService:
                     pass
                 case Failure(error):
                     return Failure(error)
-            exists_result = await _ensure_real_directory_in_runtime(
-                self.runner_operations,
+                case _:
+                    assert_never(runtime_result)
+            snapshot = _ProjectFolderRegistrationSnapshot(
+                context=context,
+                normalized_path=normalized_path,
                 runtime=runtime,
-                path=normalized_path,
             )
-            match exists_result:
-                case Success():
+
+        exists_result = await _ensure_real_directory_in_runtime(
+            self.runner_operations,
+            runtime=snapshot.runtime,
+            path=snapshot.normalized_path,
+        )
+        match exists_result:
+            case Success():
+                pass
+            case Failure(error):
+                return Failure(error)
+            case _:
+                assert_never(exists_result)
+
+        async with self.session_manager() as session:
+            authority_result = await self._lock_project_registration_authority(
+                session,
+                agent_id=agent_id,
+                session_id=session_id,
+                user_id=user_id,
+            )
+            match authority_result:
+                case Success(authority):
                     pass
                 case Failure(error):
                     return Failure(error)
+                case _:
+                    assert_never(authority_result)
+            validation = await self._validate_project_path_in_session(
+                session,
+                session_id=authority.context.session_id,
+                path=snapshot.normalized_path,
+            )
+            match validation:
+                case Success(refreshed_normalized_path):
+                    pass
+                case Failure(error):
+                    return Failure(error)
+                case _:
+                    assert_never(validation)
+            if (
+                authority.context != snapshot.context
+                or refreshed_normalized_path != snapshot.normalized_path
+                or not _same_runner_generation(authority.runtime, snapshot.runtime)
+            ):
+                return Failure(
+                    InvalidProjectPath(
+                        path=snapshot.normalized_path,
+                        reason=(
+                            "Runtime changed while the Project directory was being "
+                            "validated. Please retry."
+                        ),
+                    )
+                )
             project = await self.repository.create_project(
                 session,
                 SessionWorkspaceProjectCreate(
-                    session_id=context.session_id,
-                    path=normalized_path,
+                    session_id=authority.context.session_id,
+                    path=refreshed_normalized_path,
                 ),
             )
             await self.agent_project_preset_repository.upsert_preset(
                 session,
-                agent_id=context.agent_id,
-                path=normalized_path,
+                agent_id=authority.context.agent_id,
+                path=refreshed_normalized_path,
             )
             await self.agent_project_catalog_repository.update_status(
                 session,
-                agent_id=context.agent_id,
-                path=normalized_path,
+                agent_id=authority.context.agent_id,
+                path=refreshed_normalized_path,
                 patch=_available_project_status_patch(),
             )
             await session.commit()
         await self._sync_skill_projection_for_project_change(
-            agent_id=context.agent_id,
-            session_id=context.session_id,
+            agent_id=snapshot.context.agent_id,
+            session_id=snapshot.context.session_id,
         )
         return Success(project)
 
@@ -320,6 +422,8 @@ class SessionWorkspaceProjectService:
                     pass
                 case Failure(error):
                     return Failure(error)
+                case _:
+                    assert_never(context_result)
             projects = await self.repository.list_projects(
                 session,
                 session_id=context.session_id,
@@ -334,6 +438,12 @@ class SessionWorkspaceProjectService:
     ) -> Result[None, ProjectNotFound]:
         """Delete only Project registry row."""
         async with self.session_manager() as session:
+            agent_session = await self.agent_session_repository.lock_by_id(
+                session,
+                session_id,
+            )
+            if agent_session is None:
+                return Failure(ProjectNotFound())
             deleted = await self.repository.delete_project(
                 session,
                 project_id,
@@ -354,7 +464,7 @@ class SessionWorkspaceProjectService:
     ) -> Result[None, ProjectAccessError | ProjectNotFound]:
         """Delete Project registry row of AgentSession accessible by user."""
         async with self.session_manager() as session:
-            context_result = await self._get_accessible_project_context_for_session(
+            context_result = await self._lock_project_access_authority(
                 session,
                 agent_id=agent_id,
                 session_id=session_id,
@@ -365,13 +475,11 @@ class SessionWorkspaceProjectService:
                     pass
                 case Failure(error):
                     return Failure(error)
+                case _:
+                    assert_never(context_result)
             project = await self.repository.get_project_by_id(session, project_id)
             if project is None or project.session_id != context.session_id:
                 return Failure(ProjectNotFound())
-            agent_session = await self.agent_session_repository.get_by_id(
-                session,
-                context.session_id,
-            )
             deleted = await self.repository.delete_project(
                 session,
                 project_id,
@@ -379,16 +487,32 @@ class SessionWorkspaceProjectService:
             )
             if not deleted:
                 return Failure(ProjectNotFound())
-            if self.skill_store is not None and agent_session is not None:
-                await self.skill_store.invalidate_project(
-                    context.agent_id,
-                    context.session_id,
-                    project_id=project.id,
-                    project_path=project.path,
-                    session_run_state=agent_session.run_state,
-                )
+            invalidation = _DeletedProjectInvalidation(
+                agent_id=context.agent_id,
+                session_id=context.session_id,
+                project_id=project.id,
+                project_path=project.path,
+            )
             await session.commit()
-            return Success(None)
+        if self.skill_store is not None:
+            skill_store = self.skill_store
+            await _run_post_commit_projection(
+                lambda: skill_store.invalidate_project(
+                    invalidation.agent_id,
+                    invalidation.session_id,
+                    project_id=invalidation.project_id,
+                    project_path=invalidation.project_path,
+                ),
+                failure_message=(
+                    "Failed to invalidate Skill projection after Project deletion"
+                ),
+                extra={
+                    "agent_id": invalidation.agent_id,
+                    "session_id": invalidation.session_id,
+                    "project_id": invalidation.project_id,
+                },
+            )
+        return Success(None)
 
     async def _sync_skill_projection_for_project_change(
         self,
@@ -402,14 +526,19 @@ class SessionWorkspaceProjectService:
         projection_service = SkillProjectionService(
             store=self.skill_store,
             session_manager=self.session_manager,
+            agent_session_repository=self.agent_session_repository,
             runner_operations=adapt_runtime_runner_operations(self.runner_operations),
             runtime_repository=self.agent_runtime_repository,
             project_repository=self.repository,
         )
-        await projection_service.sync_latest(
-            agent_id=agent_id,
-            session_id=session_id,
-            reason="project_change",
+        await _run_post_commit_projection(
+            lambda: projection_service.sync_latest(
+                agent_id=agent_id,
+                session_id=session_id,
+                reason="project_change",
+            ),
+            failure_message="Failed to refresh Skill projection after Project creation",
+            extra={"agent_id": agent_id, "session_id": session_id},
         )
 
     async def _validate_project_path(
@@ -498,6 +627,108 @@ class SessionWorkspaceProjectService:
                 session_id=agent_session.id,
             )
         )
+
+    async def _lock_project_registration_authority(
+        self,
+        session: AsyncSession,
+        *,
+        agent_id: str,
+        session_id: str,
+        user_id: str,
+    ) -> Result[_LockedProjectRegistrationAuthority, ProjectAccessError]:
+        """Lock Runtime, AgentSession, and membership in one fixed order."""
+        runtime = await self.agent_runtime_repository.lock_by_agent_id(
+            session,
+            agent_id,
+        )
+        if runtime is None:
+            return Failure(AgentNotFound())
+        context_result = await self._lock_project_access_authority(
+            session,
+            agent_id=agent_id,
+            session_id=session_id,
+            user_id=user_id,
+        )
+        match context_result:
+            case Success(context):
+                pass
+            case Failure(error):
+                return Failure(error)
+            case _:
+                assert_never(context_result)
+        return Success(
+            _LockedProjectRegistrationAuthority(
+                context=context,
+                runtime=runtime,
+            )
+        )
+
+    async def _lock_project_access_authority(
+        self,
+        session: AsyncSession,
+        *,
+        agent_id: str,
+        session_id: str,
+        user_id: str,
+    ) -> Result[AccessibleProjectContext, ProjectAccessError]:
+        """Lock AgentSession then membership for one final Project mutation."""
+        agent_session = await self.agent_session_repository.lock_by_id(
+            session,
+            session_id,
+        )
+        if (
+            agent_session is None
+            or agent_session.agent_id != agent_id
+            or agent_session.status != AgentSessionStatus.ACTIVE
+        ):
+            return Failure(ProjectAccessDenied())
+        workspace_user = (
+            await self.workspace_user_repository.lock_by_workspace_and_user(
+                session,
+                agent_session.workspace_id,
+                user_id,
+            )
+        )
+        if workspace_user is None:
+            return Failure(ProjectAccessDenied())
+        return Success(
+            AccessibleProjectContext(
+                agent_id=agent_id,
+                session_id=agent_session.id,
+            )
+        )
+
+
+async def _run_post_commit_projection(
+    operation: Callable[[], Awaitable[object]],
+    *,
+    failure_message: str,
+    extra: dict[str, object],
+) -> None:
+    """Bound best-effort projection I/O without reversing a durable commit."""
+    try:
+        async with asyncio.timeout(_POST_COMMIT_PROJECTION_TIMEOUT_SECONDS):
+            await operation()
+    except asyncio.CancelledError:
+        raise
+    except TimeoutError:
+        logger.warning(
+            "%s (timed out)",
+            failure_message,
+            extra={
+                **extra,
+                "timeout_seconds": _POST_COMMIT_PROJECTION_TIMEOUT_SECONDS,
+            },
+        )
+    except (
+        RedisError,
+        RuntimeRunnerOperationFailedError,
+        RuntimeRunnerOperationUnavailable,
+        RuntimeRunnerOperationGenerationError,
+    ):
+        logger.warning(failure_message, extra=extra, exc_info=True)
+    except Exception:
+        logger.exception(failure_message, extra=extra)
 
 
 async def _ensure_real_directory_in_runtime(

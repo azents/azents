@@ -106,11 +106,18 @@ function isChatEventWire(
       );
     case "compaction_started":
     case "compaction_complete":
-      return value.continuing == null || typeof value.continuing === "boolean";
+      return (
+        hasStringField(value, "run_id") &&
+        (value.continuing == null || typeof value.continuing === "boolean")
+      );
     case "session_created":
       return isSessionFrame(value, sessionId);
     case "todo_state_changed":
-      return isRecord(value.todo) && Array.isArray(value.todo.items);
+      return (
+        hasStringField(value, "run_id") &&
+        isRecord(value.todo) &&
+        Array.isArray(value.todo.items)
+      );
     case "subagent_tree_changed":
       return (
         hasStringField(value, "root_session_agent_id") &&

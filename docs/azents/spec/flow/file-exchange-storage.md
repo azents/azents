@@ -29,8 +29,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/AttachmentPreviewBar.tsx
   - typescript/apps/azents-web/src/features/chat/components/FileAttachmentList.tsx
   - typescript/apps/azents-web/src/features/chat/components/AttachmentPreviewViewer.tsx
-last_verified_at: 2026-07-11
-spec_version: 13
+last_verified_at: 2026-07-14
+spec_version: 15
 ---
 
 # File Exchange Storage
@@ -49,6 +49,8 @@ File Exchange Storage is the flow that separately stores and retrieves user-faci
 4. File body is stored in each store, and attachment URI snapshot and FilePart snapshot remain as independent fields in event/input buffer. Do not reverse-infer FilePart by reading attachment URI.
 5. Agent execution loop does not automatically convert attachment to rich file input when transforming user input event to LLM input. Model rich input is delivered only as FilePart content of user input.
 6. Exchange attachment has `status`, `expires_at`, and `expired_at` metadata. Scheduler-owned cleanup marks Exchange files past expiration time as `expired` and attempts blob deletion. Resolver, download API, lowerer, and UI treat expired/unavailable as normal history state based on DB availability.
+
+Exchange file, Artifact, and ModelFile creation use a three-boundary flow: a short database scope snapshots and authorizes the owner, object-store upload and thumbnail/normalization work run after that scope closes, and a second short database transaction locks and revalidates Session and membership authority before persisting metadata. No object-store, image-processing, or other external call may run while one of these database scopes is open. If the metadata commit result is uncertain, the service reconciles the exact intended row in a fresh short transaction: an exact row means commit succeeded and preserves the blob; exact absence permits compensation deletion; a mismatched row or lookup uncertainty preserves the blob and propagates the primary error. Cancellation always propagates, and compensation failure never replaces the original error or cancellation.
 
 ### Agent imports user or internal file
 
@@ -69,6 +71,17 @@ Attachment and Artifact are not automatically converted to ModelFile/FilePart. I
 ModelFileStore is model input blob store, not original preservation store. Image ModelFile is normalized to JPEG at creation. Non-image ModelFile is not normalized and only size cap applies. ModelFile has current lifecycle status `available` or `deleted`; persistent run-age degradation and `unreachable` stages are not part of the current lifecycle. Scheduler-owned GC deletes unpinned ModelFiles after their single durable FilePart event falls behind the AgentSession model-input head cursor.
 If original non-image payload exceeds size cap, ModelFile is not created and is replaced with user-visible size cap message.
 
+Input-buffer promotion reads the FIFO head and attachment ownership in a short snapshot, closes the database scope while it downloads Exchange files and materializes new ModelFiles, then locks the Session and current FIFO head in a new transaction. Promotion commits only if the head identity and Agent ownership still match the prepared snapshot. A stale head, proven rollback, cancellation, or ownership handover discards every unreferenced ModelFile created by that attempt so a concurrent message cannot receive another message's rich input. If commit acknowledgement is lost, an independent bounded transaction compares the exact FIFO row and every intended external ID, kind, and payload. Exact committed state preserves the referenced files and recovers the result; proven rollback permits deletion; mismatched or unreadable state stays uncertain, preserves the files, and propagates the original error.
+
+The final ModelFile metadata transaction locks the owning AgentSession before calculating
+`created_run_index`, serializing it with concurrent Run creation. When idempotent promotion finds an
+existing durable winner, it preserves only ModelFiles referenced by that winner, discards every
+speculative loser file, and reconstructs the returned model input from the durable event. A caller
+therefore never receives a FilePart whose speculative object was just compensation-deleted.
+ModelFile pin creation and discard lock the same ModelFile rows in sorted order. A pin must target an
+available file owned by the same Session, and a concurrent durable Run pin always prevents deletion;
+cross-Session pins and check-then-delete races are rejected.
+
 Active transcript FilePart referencing deleted or missing ModelFile is rewritten at pre-lower stage into bounded text placeholder in event payload itself. This rewrite applies equally to user message, assistant message, and client/provider tool result payload, so later compaction, reload, REST/WS projection do not interpret unavailable FilePart as rich input again.
 
 When `spawn_agent` forks parent model-visible context into a child session, FileParts are degraded to bounded text placeholders before appending the selected events to the child transcript. Forking does not copy blobs, does not create child ModelFiles, and does not share ModelFile rows through subagent tree context. If the child needs bytes, the parent must hand off a runtime path, exchange/artifact URI workflow, or another explicit transfer outside automatic context fork.
@@ -84,6 +97,7 @@ When `spawn_agent` forks parent model-visible context into a child session, File
 - There is no implicit conversion among Attachment, Artifact, and ModelFile/FilePart. URI is storage location, not entity reference, so do not add logic extracting entity id from URI string. A `model_file_id` is single-event scoped; reusing the same source bytes later requires materializing a new ModelFile/FilePart.
 - Attachment Exchange file and Artifact have time-based retention/TTL lifecycle. ModelFile has context-owned lifecycle based on model-input head cursor reachability and active run pins.
 - User upload, agent-presented file, and internal artifact must pass session/workspace ownership verification.
+- Agent-scoped ModelFile creation additionally verifies that the supplied Session belongs to the same Agent both before upload and before metadata commit.
 - Sandbox file query is possible only when active sandbox storage handle exists; inactive/hibernated state follows workspace API action contract.
 - General presigned upload such as Agent avatar uses `UploadService` category handler, but it is separate category/publish contract from chat exchange file.
 
@@ -108,6 +122,8 @@ When `spawn_agent` forks parent model-visible context into a child session, File
 
 ## Changelog
 
+- **2026-07-14** — v15. Defined exact FIFO and event reconciliation after input-promotion commit acknowledgement loss, preserving referenced or uncertain ModelFiles and compensating only proven rollback.
+- **2026-07-14** — v14. Defined short locked authorization/revalidation scopes around object-store work, exact commit-result reconciliation and safe compensation, pin/delete serialization, and stale-safe input-buffer ModelFile materialization.
 - **2026-07-11** — v13. Added persisted previews for uploaded text files and delegated original-image zooming to the browser's native image viewer.
 - **2026-07-11** — v12. Clarified universal preview activation, isolated download actions, unsupported-file fallback, and original-only Agent image galleries.
 - **2026-07-11** — v11. Documented compact attachment strips, Agent image galleries and mixed groups, dynamic overflow masks, and the shared responsive preview viewer.

@@ -26,6 +26,10 @@ from .data import (
 _JSON_OBJECT_ADAPTER = TypeAdapter[dict[str, JSONValue]](dict[str, JSONValue])
 
 
+class ActionExecutionEventIdentityConflictError(RuntimeError):
+    """A preallocated progress-event ID resolved to different durable content."""
+
+
 class ActionExecutionRepository:
     """Live TurnAction execution repository."""
 
@@ -131,12 +135,20 @@ class ActionExecutionRepository:
         session: AsyncSession,
         create: ActionExecutionEventCreate,
     ) -> ActionExecutionEvent:
-        """Append a progress event with an execution-scoped monotonic sequence."""
+        """Append or recover one exact progress event under the execution lock."""
         await self._lock_action_execution(
             session,
             action_execution_id=create.action_execution_id,
             session_id=create.session_id,
         )
+        event_id = create.id or uuid7().hex
+        existing = await session.get(RDBActionExecutionEvent, event_id)
+        if existing is not None:
+            if not _event_matches_create(existing, create):
+                raise ActionExecutionEventIdentityConflictError(
+                    "ActionExecution event ID resolved to different durable content"
+                )
+            return self._build_event(existing)
         result = await session.execute(
             sa.select(
                 sa.func.coalesce(sa.func.max(RDBActionExecutionEvent.sequence), 0)
@@ -156,6 +168,7 @@ class ActionExecutionRepository:
             content=create.content,
             exit_code=create.exit_code,
         )
+        rdb.id = event_id
         session.add(rdb)
         await session.flush()
         return self._build_event(rdb)
@@ -361,3 +374,20 @@ class ActionExecutionRepository:
             exit_code=rdb.exit_code,
             created_at=rdb.created_at,
         )
+
+
+def _event_matches_create(
+    event: RDBActionExecutionEvent,
+    create: ActionExecutionEventCreate,
+) -> bool:
+    """Return whether a durable event is the exact preallocated write."""
+    return (
+        event.action_execution_id == create.action_execution_id
+        and event.session_id == create.session_id
+        and event.kind is create.kind
+        and event.step_key == create.step_key
+        and (None if event.command_argv is None else list(event.command_argv))
+        == create.command_argv
+        and event.content == create.content
+        and event.exit_code == create.exit_code
+    )

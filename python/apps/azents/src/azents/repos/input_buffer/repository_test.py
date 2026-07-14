@@ -18,8 +18,8 @@ from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
 from azents.testing.model_selection import make_test_model_selection_dict
 
-from . import InputBufferRepository
 from .data import InputBufferCreate
+from .repository import InputBufferRepository
 
 
 async def _create_workspace(session: AsyncSession, handle: str) -> str:

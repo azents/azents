@@ -13,7 +13,12 @@ from typing import Any, cast
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.broker.types import BrokerMessage, SessionBroker, SessionWakeUp
+from azents.broker.types import (
+    BrokerMessage,
+    SessionBroker,
+    SessionStopSignal,
+    SessionWakeUp,
+)
 from azents.core.agent import SelectableModelOption, SubagentSettings
 from azents.core.enums import (
     AgentRunPhase,
@@ -28,18 +33,24 @@ from azents.core.enums import (
 )
 from azents.core.inference_profile import SessionInferenceState
 from azents.core.llm_catalog import ModelReasoningEffort
-from azents.core.tools import ToolkitStatus, TurnContext
+from azents.core.tools import PublishEventFn, ToolkitStatus, TurnContext
 from azents.engine.events.engine_events import SubagentTreeChanged
 from azents.engine.events.types import AgentRunState, Event, UserMessagePayload
 from azents.engine.run.types import FunctionToolError
 from azents.repos.agent.data import Agent
-from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
+from azents.repos.agent_execution import (
+    AgentRunNotActiveError,
+    AgentRunOwnershipLostError,
+    AgentRunRepository,
+    EventTranscriptRepository,
+)
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession, SessionAgent
 from azents.services.input_buffer import InputBufferEnqueue, InputBufferService
 from azents.testing.model_selection import make_test_model_selection
 
+from . import subagent as subagent_module
 from .subagent import (
     SpawnAgentInput,
     SubagentToolkit,
@@ -219,11 +230,13 @@ class _AgentSessionRepository:
         self.tree = [self.current, self.target]
         self.created_children: list[SessionAgent] = []
         self.locked_session_agents: list[str] = []
+        self.lock_order: list[tuple[str, str]] = []
         self.marked_running: list[str] = []
         self.inference_states: list[tuple[str, SessionInferenceState]] = []
         self.last_task_updates: list[tuple[str, str | None]] = []
         self.message_sent_updates: list[str] = []
         self.observation_updates: list[tuple[str, int | None, str | None]] = []
+        self.stop_requests: list[str] = []
 
     async def get_session_agent_by_session_id(
         self,
@@ -272,6 +285,7 @@ class _AgentSessionRepository:
         """Record root tree lock requests and return the matching SessionAgent."""
         del session
         self.locked_session_agents.append(session_agent_id)
+        self.lock_order.append(("session_agent", session_agent_id))
         for agent in self.tree:
             if agent.id == session_agent_id:
                 return agent
@@ -434,13 +448,53 @@ class _AgentSessionRepository:
         agent_session_id: str,
     ) -> AgentSession | None:
         """Return one locked AgentSession fixture."""
+        self.lock_order.append(("agent_session", agent_session_id))
         return await self.get_by_id(session, agent_session_id)
+
+    async def lock_by_ids(
+        self,
+        session: AsyncSession,
+        *,
+        agent_session_ids: list[str],
+    ) -> dict[str, AgentSession]:
+        """Lock fixture AgentSessions in deterministic ID order."""
+        locked: dict[str, AgentSession] = {}
+        for session_id in sorted(set(agent_session_ids)):
+            agent_session = await self.lock_by_id(session, session_id)
+            if agent_session is not None:
+                locked[session_id] = agent_session
+        return locked
+
+    async def request_stop(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        stop_request_id: str,
+        user_id: str | None,
+    ) -> AgentSession | None:
+        """Record stop intent only for a running fixture Session."""
+        del session
+        target = self.sessions.get(session_id)
+        if target is None or target.run_state != AgentSessionRunState.RUNNING:
+            return None
+        if target.stop_requested_at is None:
+            target = target.model_copy(
+                update={
+                    "stop_requested_at": _NOW,
+                    "stop_requested_by": user_id,
+                    "stop_request_id": stop_request_id,
+                }
+            )
+            self.sessions[session_id] = target
+        self.stop_requests.append(session_id)
+        return target
 
 
 class _AgentRunRepository:
     """AgentRunRepository fake for subagent tool tests."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, lock_order: list[tuple[str, str]]) -> None:
         """Initialize parent and latest child run fixtures."""
         self.parent_run = AgentRunState(
             id=_PARENT_RUN_ID,
@@ -458,6 +512,8 @@ class _AgentRunRepository:
             updated_at=_NOW,
         )
         self.get_by_id_calls: list[str] = []
+        self.lock_active_owner_calls: list[tuple[str, str, int]] = []
+        self.lock_order = lock_order
         self.pending_creates: list[dict[str, object]] = []
         self.latest_by_session_id = {
             "child-session": AgentRunState(
@@ -487,6 +543,34 @@ class _AgentRunRepository:
         self.get_by_id_calls.append(run_id)
         if run_id != self.parent_run.id:
             return None
+        return self.parent_run
+
+    async def lock_active_owner(
+        self,
+        session: AsyncSession,
+        *,
+        run_id: str,
+        session_id: str,
+        owner_generation: int,
+    ) -> AgentRunState:
+        """Lock and validate the exact source Run fixture."""
+        del session
+        self.lock_active_owner_calls.append((run_id, session_id, owner_generation))
+        self.lock_order.append(("agent_run", run_id))
+        if self.parent_run.status != AgentRunStatus.RUNNING:
+            raise AgentRunNotActiveError(run_id, self.parent_run.status)
+        if (
+            run_id != self.parent_run.id
+            or session_id != self.parent_run.session_id
+            or owner_generation != 1
+        ):
+            raise AgentRunOwnershipLostError(
+                run_id=run_id,
+                session_id=session_id,
+                expected_owner_generation=owner_generation,
+                current_owner_generation=1,
+                active_run_id=self.parent_run.id,
+            )
         return self.parent_run
 
     async def create_pending(
@@ -568,10 +652,16 @@ class _Broker:
     def __init__(self) -> None:
         """Initialize fake state."""
         self.messages: list[BrokerMessage] = []
+        self.block_send = False
+        self.send_error: BaseException | None = None
 
     async def send_message(self, message: BrokerMessage) -> None:
         """Record broker messages."""
         self.messages.append(message)
+        if self.send_error is not None:
+            raise self.send_error
+        if self.block_send:
+            await asyncio.Event().wait()
 
 
 async def _make_toolkit() -> tuple[
@@ -586,7 +676,7 @@ async def _make_toolkit() -> tuple[
     agent_session_repository = _AgentSessionRepository()
     input_buffer_service = _InputBufferService()
     broker = _Broker()
-    run_repository = _AgentRunRepository()
+    run_repository = _AgentRunRepository(lock_order=agent_session_repository.lock_order)
     published_events: list[SubagentTreeChanged] = []
 
     async def publish_event(event: SubagentTreeChanged) -> None:
@@ -610,6 +700,7 @@ async def _make_toolkit() -> tuple[
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
+            owner_generation=1,
             publish_event=cast(Any, publish_event),
             session_id="root-session",
         )
@@ -698,6 +789,7 @@ async def test_subagent_static_prompt_matches_codex_root_prompt() -> None:
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
+            owner_generation=1,
             publish_event=cast(Any, _noop_publish),
             session_id="root-session",
         )
@@ -718,6 +810,7 @@ async def test_subagent_static_prompt_matches_codex_child_prompt() -> None:
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id="run-1",
+            owner_generation=1,
             publish_event=cast(Any, _noop_publish),
             session_id="child-session",
         )
@@ -792,6 +885,7 @@ async def test_spawn_agent_schema_lists_labels_without_model_identity() -> None:
             workspace_id="workspace-1",
             model="secret-parent-runtime-model",
             run_id=_PARENT_RUN_ID,
+            owner_generation=1,
             publish_event=cast(Any, _noop_publish),
             session_id="root-session",
         )
@@ -831,6 +925,7 @@ async def test_send_message_is_queue_only() -> None:
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
+            owner_generation=1,
             publish_event=cast(Any, publish_event),
             session_id="root-session",
         )
@@ -850,19 +945,30 @@ async def test_send_message_is_queue_only() -> None:
     assert repo.last_task_updates == [("child-agent", "note")]
     assert repo.message_sent_updates == ["root-agent", "child-agent"]
     assert repo.marked_running == []
+    assert repo.lock_order == [
+        ("session_agent", "root-agent"),
+        ("agent_session", "child-session"),
+        ("agent_session", "root-session"),
+        ("agent_run", _PARENT_RUN_ID),
+        ("agent_session", "child-session"),
+    ]
     assert broker.messages == []
     assert [event.type for event in published_events] == ["subagent_tree_changed"]
 
 
 async def test_send_message_from_child_can_target_root() -> None:
     """send_message matches Codex by allowing upward communication."""
-    toolkit, repo, input_service, _broker, _run_repo, _events = await _make_toolkit()
+    toolkit, repo, input_service, _broker, run_repo, _events = await _make_toolkit()
+    run_repo.parent_run = run_repo.parent_run.model_copy(
+        update={"session_id": "child-session"}
+    )
     state = await toolkit.update_context(
         TurnContext(
             user_id="user-1",
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
+            owner_generation=1,
             publish_event=cast(Any, _noop_publish),
             session_id="child-session",
         )
@@ -881,6 +987,13 @@ async def test_send_message_from_child_can_target_root() -> None:
     assert input_service.enqueued[0].metadata["source_path"] == "/root/child"
     assert input_service.enqueued[0].metadata["target_path"] == "/root"
     assert repo.last_task_updates == [("root-agent", "status update")]
+    assert repo.lock_order == [
+        ("session_agent", "root-agent"),
+        ("agent_session", "child-session"),
+        ("agent_session", "root-session"),
+        ("agent_run", _PARENT_RUN_ID),
+        ("agent_session", "root-session"),
+    ]
 
 
 async def test_followup_task_wakes_target_child() -> None:
@@ -903,6 +1016,7 @@ async def test_followup_task_wakes_target_child() -> None:
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
+            owner_generation=1,
             publish_event=cast(Any, publish_event),
             session_id="root-session",
         )
@@ -921,11 +1035,273 @@ async def test_followup_task_wakes_target_child() -> None:
     assert input_service.enqueued[0].content == "work"
     assert repo.last_task_updates == [("child-agent", "work")]
     assert repo.marked_running == ["child-session"]
+    assert repo.lock_order == [
+        ("session_agent", "root-agent"),
+        ("agent_session", "child-session"),
+        ("agent_session", "root-session"),
+        ("agent_run", _PARENT_RUN_ID),
+        ("agent_session", "child-session"),
+    ]
     assert len(broker.messages) == 1
     wake = broker.messages[0]
     assert isinstance(wake, SessionWakeUp)
     assert wake.session_id == "child-session"
     assert [event.type for event in published_events] == ["subagent_tree_changed"]
+
+
+@pytest.mark.parametrize("failure_mode", ["raise", "hang"])
+@pytest.mark.parametrize(
+    ("tool_name", "payload", "expected_status"),
+    [
+        ("spawn_agent", {"name": "reviewer", "task": "review"}, "spawned"),
+        ("send_message", {"agent_name": "child", "message": "note"}, "queued"),
+        ("followup_task", {"agent_name": "child", "task": "work"}, "assigned"),
+    ],
+)
+async def test_committed_collaboration_result_survives_projection_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    failure_mode: str,
+    tool_name: str,
+    payload: dict[str, str],
+    expected_status: str,
+) -> None:
+    """A failed non-durable projection cannot turn committed work into a retry."""
+    monkeypatch.setattr(
+        subagent_module,
+        "_POST_COMMIT_EFFECT_TIMEOUT_SECONDS",
+        0.01,
+    )
+    toolkit, _repo, input_service, _broker, _run_repo, _events = await _make_toolkit()
+
+    async def failing_publish(event: SubagentTreeChanged) -> None:
+        del event
+        if failure_mode == "hang":
+            await asyncio.Event().wait()
+        raise RuntimeError("projection unavailable")
+
+    state = await toolkit.update_context(
+        TurnContext(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id=_PARENT_RUN_ID,
+            owner_generation=1,
+            publish_event=cast(Any, failing_publish),
+            session_id="root-session",
+        )
+    )
+    tool = next(tool for tool in state.tools if tool.spec.name == tool_name)
+
+    result = await asyncio.wait_for(tool.handler(json.dumps(payload)), timeout=1)
+
+    assert json.loads(cast(str, result))["status"] == expected_status
+    assert len(input_service.enqueued) == 1
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "payload"),
+    [
+        ("spawn_agent", {"name": "reviewer", "task": "review"}),
+        ("send_message", {"agent_name": "child", "message": "note"}),
+        ("followup_task", {"agent_name": "child", "task": "work"}),
+        ("wait_agent", {}),
+        ("interrupt_agent", {"agent_name": "child"}),
+    ],
+)
+async def test_collaboration_durable_writes_reject_terminal_source_run(
+    tool_name: str,
+    payload: dict[str, str],
+) -> None:
+    """A completed source Run cannot leave mailbox or tree mutations behind."""
+    toolkit, repo, input_service, broker, run_repo, events = await _make_toolkit()
+    run_repo.parent_run = run_repo.parent_run.model_copy(
+        update={"status": AgentRunStatus.COMPLETED}
+    )
+    repo.sessions["child-session"] = repo.sessions["child-session"].model_copy(
+        update={"run_state": AgentSessionRunState.RUNNING}
+    )
+    state = await toolkit.update_context(
+        TurnContext(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id=_PARENT_RUN_ID,
+            owner_generation=1,
+            publish_event=cast(PublishEventFn, _publish_to(events)),
+            session_id="root-session",
+        )
+    )
+    tool = next(tool for tool in state.tools if tool.spec.name == tool_name)
+
+    with pytest.raises(FunctionToolError, match="no longer active"):
+        await tool.handler(json.dumps(payload))
+
+    assert run_repo.lock_active_owner_calls == [(_PARENT_RUN_ID, "root-session", 1)]
+    assert repo.created_children == []
+    assert repo.observation_updates == []
+    assert repo.stop_requests == []
+    assert input_service.enqueued == []
+    assert broker.messages == []
+    assert events == []
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "payload"),
+    [
+        ("send_message", {"agent_name": "child", "message": "late note"}),
+        ("followup_task", {"agent_name": "child", "task": "late work"}),
+    ],
+)
+async def test_collaboration_mutation_rejects_stopping_source_session(
+    tool_name: str,
+    payload: dict[str, str],
+) -> None:
+    """A source Run cannot mutate the tree after its stop intent commits."""
+    toolkit, repo, input_service, broker, run_repo, events = await _make_toolkit()
+    repo.sessions["root-session"] = repo.sessions["root-session"].model_copy(
+        update={
+            "stop_requested_at": _NOW,
+            "stop_requested_by": "user-1",
+            "stop_request_id": "stop-1",
+        }
+    )
+    state = await toolkit.update_context(
+        TurnContext(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id=_PARENT_RUN_ID,
+            owner_generation=1,
+            publish_event=cast(PublishEventFn, _publish_to(events)),
+            session_id="root-session",
+        )
+    )
+    tool = next(tool for tool in state.tools if tool.spec.name == tool_name)
+
+    with pytest.raises(FunctionToolError, match="current Session is stopping"):
+        await tool.handler(json.dumps(payload))
+
+    assert run_repo.lock_active_owner_calls == [(_PARENT_RUN_ID, "root-session", 1)]
+    assert input_service.enqueued == []
+    assert repo.last_task_updates == []
+    assert repo.marked_running == []
+    assert broker.messages == []
+    assert events == []
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "payload"),
+    [
+        ("send_message", {"agent_name": "child", "message": "late note"}),
+        ("followup_task", {"agent_name": "child", "task": "late work"}),
+    ],
+)
+async def test_collaboration_mutation_rejects_stopping_target_session(
+    tool_name: str,
+    payload: dict[str, str],
+) -> None:
+    """A stopped descendant cannot receive mailbox work behind its stop fence."""
+    toolkit, repo, input_service, broker, _run_repo, events = await _make_toolkit()
+    repo.sessions["child-session"] = repo.sessions["child-session"].model_copy(
+        update={
+            "stop_requested_at": _NOW,
+            "stop_requested_by": "user-1",
+            "stop_request_id": "stop-1",
+        }
+    )
+    state = await toolkit.update_context(
+        TurnContext(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id=_PARENT_RUN_ID,
+            owner_generation=1,
+            publish_event=cast(PublishEventFn, _publish_to(events)),
+            session_id="root-session",
+        )
+    )
+    tool = next(tool for tool in state.tools if tool.spec.name == tool_name)
+
+    with pytest.raises(FunctionToolError, match="Target AgentSession is stopping"):
+        await tool.handler(json.dumps(payload))
+
+    assert input_service.enqueued == []
+    assert repo.last_task_updates == []
+    assert repo.marked_running == []
+    assert broker.messages == []
+    assert events == []
+
+
+@pytest.mark.parametrize("failure_mode", ["raise", "hang"])
+@pytest.mark.parametrize(
+    ("tool_name", "payload", "expected_status"),
+    [
+        ("spawn_agent", {"name": "reviewer", "task": "review"}, "spawned"),
+        ("followup_task", {"agent_name": "child", "task": "work"}, "assigned"),
+    ],
+)
+async def test_committed_collaboration_result_survives_wake_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    failure_mode: str,
+    tool_name: str,
+    payload: dict[str, str],
+    expected_status: str,
+) -> None:
+    """A failed Redis wake cannot invalidate the durable mailbox transition."""
+    monkeypatch.setattr(
+        subagent_module,
+        "_POST_COMMIT_EFFECT_TIMEOUT_SECONDS",
+        0.01,
+    )
+    toolkit, _repo, input_service, broker, _run_repo, _events = await _make_toolkit()
+    if failure_mode == "hang":
+        broker.block_send = True
+    else:
+        broker.send_error = RuntimeError("broker unavailable")
+    state = await toolkit.update_context(
+        TurnContext(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id=_PARENT_RUN_ID,
+            owner_generation=1,
+            publish_event=cast(Any, _noop_publish),
+            session_id="root-session",
+        )
+    )
+    tool = next(tool for tool in state.tools if tool.spec.name == tool_name)
+
+    result = await asyncio.wait_for(tool.handler(json.dumps(payload)), timeout=1)
+
+    assert json.loads(cast(str, result))["status"] == expected_status
+    assert len(input_service.enqueued) == 1
+
+
+async def test_post_commit_projection_propagates_cancellation() -> None:
+    """Caller cancellation still interrupts post-commit projection handling."""
+    toolkit, _repo, input_service, _broker, _run_repo, _events = await _make_toolkit()
+
+    async def cancelled_publish(event: SubagentTreeChanged) -> None:
+        del event
+        raise asyncio.CancelledError
+
+    state = await toolkit.update_context(
+        TurnContext(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id=_PARENT_RUN_ID,
+            owner_generation=1,
+            publish_event=cast(Any, cancelled_publish),
+            session_id="root-session",
+        )
+    )
+    tool = next(tool for tool in state.tools if tool.spec.name == "send_message")
+
+    with pytest.raises(asyncio.CancelledError):
+        await tool.handler(json.dumps({"agent_name": "child", "message": "note"}))
+
+    assert len(input_service.enqueued) == 1
 
 
 async def test_followup_task_from_child_rejects_root() -> None:
@@ -937,6 +1313,7 @@ async def test_followup_task_from_child_rejects_root() -> None:
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
+            owner_generation=1,
             publish_event=cast(Any, _noop_publish),
             session_id="child-session",
         )
@@ -962,6 +1339,7 @@ async def test_interrupt_agent_rejects_root_and_self() -> None:
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
+            owner_generation=1,
             publish_event=cast(Any, _noop_publish),
             session_id="child-session",
         )
@@ -974,6 +1352,143 @@ async def test_interrupt_agent_rejects_root_and_self() -> None:
         await tool.handler(json.dumps({"agent_name": "."}))
 
 
+async def test_interrupt_agent_stops_target_subtree() -> None:
+    """Interrupting a parent records and signals every running descendant."""
+    toolkit, repo, _input_service, broker, _run_repo, _events = await _make_toolkit()
+    grandchild = _session_agent(
+        id="grandchild-agent",
+        path="/root/child/grandchild",
+        agent_session_id="grandchild-session",
+        name="grandchild",
+    ).model_copy(update={"parent_session_agent_id": "child-agent"})
+    repo.tree.append(grandchild)
+    repo.sessions["child-session"] = _agent_session(
+        id="child-session",
+        run_state=AgentSessionRunState.RUNNING,
+    )
+    repo.sessions["grandchild-session"] = _agent_session(
+        id="grandchild-session",
+        run_state=AgentSessionRunState.RUNNING,
+    )
+    state = await toolkit.update_context(
+        TurnContext(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id=_PARENT_RUN_ID,
+            owner_generation=1,
+            publish_event=cast(Any, _noop_publish),
+            session_id="root-session",
+        )
+    )
+    tool = next(tool for tool in state.tools if tool.spec.name == "interrupt_agent")
+
+    result = await tool.handler(json.dumps({"agent_name": "child"}))
+
+    assert json.loads(cast(str, result)) == {"previous_status": "running"}
+    assert repo.stop_requests == ["child-session", "grandchild-session"]
+    stop_signals = [
+        message for message in broker.messages if isinstance(message, SessionStopSignal)
+    ]
+    assert [signal.session_id for signal in stop_signals] == [
+        "child-session",
+        "grandchild-session",
+    ]
+    assert repo.lock_order == [
+        ("session_agent", "root-agent"),
+        ("session_agent", "child-agent"),
+        ("agent_session", "child-session"),
+        ("agent_session", "grandchild-session"),
+        ("agent_session", "root-session"),
+        ("agent_run", _PARENT_RUN_ID),
+    ]
+    assert len({signal.stop_request_id for signal in stop_signals}) == 1
+    assert stop_signals[0].stop_request_id is not None
+
+
+async def test_interrupt_agent_revalidates_target_after_root_fence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A target deleted before root fencing is reported missing, not stopped."""
+    toolkit, repo, _input_service, broker, _run_repo, _events = await _make_toolkit()
+    original_lock = repo.lock_session_agent_by_id
+
+    async def delete_target_before_root_lock_returns(
+        session: AsyncSession,
+        session_agent_id: str,
+    ) -> SessionAgent | None:
+        locked = await original_lock(session, session_agent_id)
+        if session_agent_id == repo.current.id:
+            repo.tree = [agent for agent in repo.tree if agent.id != repo.target.id]
+            repo.sessions.pop(repo.target.agent_session_id, None)
+        return locked
+
+    monkeypatch.setattr(
+        repo,
+        "lock_session_agent_by_id",
+        delete_target_before_root_lock_returns,
+    )
+    state = await toolkit.update_context(
+        TurnContext(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id=_PARENT_RUN_ID,
+            owner_generation=1,
+            publish_event=cast(Any, _noop_publish),
+            session_id="root-session",
+        )
+    )
+    tool = next(tool for tool in state.tools if tool.spec.name == "interrupt_agent")
+
+    result = await tool.handler(json.dumps({"agent_name": "child"}))
+
+    assert json.loads(cast(str, result)) == {"previous_status": "not_found"}
+    assert repo.lock_order == [
+        ("session_agent", "root-agent"),
+        ("session_agent", "child-agent"),
+    ]
+    assert repo.stop_requests == []
+    assert broker.messages == []
+
+
+async def test_interrupt_agent_returns_when_stop_signal_publish_hangs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Committed child stop intent is authoritative if Redis send hangs."""
+    monkeypatch.setattr(
+        subagent_module,
+        "_STOP_SIGNAL_PUBLISH_TIMEOUT_SECONDS",
+        0.01,
+    )
+    toolkit, repo, _input_service, broker, _run_repo, _events = await _make_toolkit()
+    repo.sessions["child-session"] = _agent_session(
+        id="child-session",
+        run_state=AgentSessionRunState.RUNNING,
+    )
+    broker.block_send = True
+    state = await toolkit.update_context(
+        TurnContext(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id=_PARENT_RUN_ID,
+            owner_generation=1,
+            publish_event=cast(Any, _noop_publish),
+            session_id="root-session",
+        )
+    )
+    tool = next(tool for tool in state.tools if tool.spec.name == "interrupt_agent")
+
+    result = await asyncio.wait_for(
+        tool.handler(json.dumps({"agent_name": "child"})),
+        timeout=1,
+    )
+
+    assert json.loads(cast(str, result)) == {"previous_status": "running"}
+    assert repo.stop_requests == ["child-session"]
+
+
 async def test_list_agents_from_child_includes_root_tree() -> None:
     """list_agents matches Codex by exposing the root and known agent tree."""
     toolkit, _repo, _input_service, _broker, _run_repo, _events = await _make_toolkit()
@@ -983,6 +1498,7 @@ async def test_list_agents_from_child_includes_root_tree() -> None:
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
+            owner_generation=1,
             publish_event=cast(Any, _noop_publish),
             session_id="child-session",
         )
@@ -1015,6 +1531,7 @@ async def test_wait_agent_returns_terminal_result_and_advances_cursor() -> None:
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
+            owner_generation=1,
             publish_event=cast(Any, publish_event),
             session_id="root-session",
         )
@@ -1068,6 +1585,7 @@ async def test_wait_agent_waits_for_running_child_result() -> None:
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
+            owner_generation=1,
             publish_event=cast(Any, publish_event),
             session_id="root-session",
         )
@@ -1126,6 +1644,7 @@ async def test_wait_agent_timeout_waits_until_deadline() -> None:
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
+            owner_generation=1,
             publish_event=cast(Any, _noop_publish),
             session_id="root-session",
         )
@@ -1155,6 +1674,7 @@ async def test_wait_agent_reports_when_no_descendants_exist() -> None:
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id="run-1",
+            owner_generation=1,
             publish_event=cast(Any, _noop_publish),
             session_id="root-session",
         )
@@ -1178,6 +1698,7 @@ async def test_wait_agent_reports_named_missing_target() -> None:
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id="run-1",
+            owner_generation=1,
             publish_event=cast(Any, _noop_publish),
             session_id="root-session",
         )
@@ -1201,6 +1722,7 @@ async def test_wait_agent_rejects_current_agent_target() -> None:
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id="run-1",
+            owner_generation=1,
             publish_event=cast(Any, _noop_publish),
             session_id="root-session",
         )
@@ -1227,6 +1749,7 @@ async def test_spawn_agent_creates_and_wakes_child_within_limits() -> None:
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
+            owner_generation=1,
             publish_event=cast(Any, _publish_to(published_events)),
             session_id="root-session",
         )
@@ -1242,7 +1765,7 @@ async def test_spawn_agent_creates_and_wakes_child_within_limits() -> None:
         "status": "spawned",
     }
     assert repo.locked_session_agents == ["root-agent"]
-    assert run_repo.get_by_id_calls == [_PARENT_RUN_ID]
+    assert run_repo.lock_active_owner_calls == [(_PARENT_RUN_ID, "root-session", 1)]
     assert run_repo.pending_creates == [
         {
             "session_id": child.agent_session_id,
@@ -1255,10 +1778,48 @@ async def test_spawn_agent_creates_and_wakes_child_within_limits() -> None:
     assert input_service.enqueued[0].metadata["message_kind"] == "spawn_agent"
     assert input_service.enqueued[0].content == "Review it"
     assert repo.locked_session_agents == ["root-agent"]
+    assert repo.lock_order == [
+        ("session_agent", "root-agent"),
+        ("agent_run", _PARENT_RUN_ID),
+        ("agent_session", child.agent_session_id),
+    ]
     assert repo.marked_running == [child.agent_session_id]
     assert len(broker.messages) == 1
     assert isinstance(broker.messages[0], SessionWakeUp)
     assert [event.type for event in published_events] == ["subagent_tree_changed"]
+
+
+async def test_spawn_agent_rejects_after_tree_stop_intent_commits() -> None:
+    """A spawn serialized behind subtree stop cannot create an escaped child."""
+    toolkit, repo, input_service, broker, run_repo, events = await _make_toolkit()
+    repo.sessions["root-session"] = repo.sessions["root-session"].model_copy(
+        update={
+            "stop_requested_at": _NOW,
+            "stop_requested_by": "user-1",
+            "stop_request_id": "stop-1",
+        }
+    )
+    state = await toolkit.update_context(
+        TurnContext(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id=_PARENT_RUN_ID,
+            owner_generation=1,
+            publish_event=cast(Any, _publish_to(events)),
+            session_id="root-session",
+        )
+    )
+    tool = next(tool for tool in state.tools if tool.spec.name == "spawn_agent")
+
+    with pytest.raises(FunctionToolError, match="current Session is stopping"):
+        await tool.handler(json.dumps({"name": "late", "task": "Too late"}))
+
+    assert repo.locked_session_agents == ["root-agent"]
+    assert run_repo.pending_creates == []
+    assert input_service.enqueued == []
+    assert broker.messages == []
+    assert events == []
 
 
 async def test_spawn_agent_applies_target_override_and_normalized_effort() -> None:
@@ -1280,6 +1841,7 @@ async def test_spawn_agent_applies_target_override_and_normalized_effort() -> No
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
+            owner_generation=1,
             publish_event=cast(Any, _noop_publish),
             session_id="root-session",
         )
@@ -1339,6 +1901,7 @@ async def test_spawn_agent_rejects_invalid_override_without_child_residue(
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
+            owner_generation=1,
             publish_event=cast(Any, _publish_to(events)),
             session_id="root-session",
         )
@@ -1361,16 +1924,16 @@ async def test_spawn_agent_rejects_invalid_override_without_child_residue(
 @pytest.mark.parametrize(
     ("parent_run_id", "parent_updates", "expected_error"),
     [
-        ("arbitrary-run", {}, "Current AgentRun was not found"),
+        ("arbitrary-run", {}, "Current AgentRun is no longer active"),
         (
             _PARENT_RUN_ID,
             {"session_id": "other-session"},
-            "Current AgentRun was not found",
+            "Current AgentRun is no longer active",
         ),
         (
             _PARENT_RUN_ID,
             {"status": AgentRunStatus.COMPLETED},
-            "Current AgentRun is not running",
+            "Current AgentRun is no longer active",
         ),
     ],
 )
@@ -1395,6 +1958,7 @@ async def test_spawn_agent_rejects_invalid_parent_run(
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=parent_run_id,
+            owner_generation=1,
             publish_event=cast(Any, _noop_publish),
             session_id="root-session",
         )
@@ -1431,6 +1995,7 @@ async def test_spawn_agent_inserts_boundary_after_forked_history() -> None:
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
+            owner_generation=1,
             publish_event=cast(Any, _noop_publish),
             session_id="root-session",
         )
@@ -1473,6 +2038,7 @@ async def test_spawn_agent_does_not_insert_boundary_without_forked_history() -> 
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
+            owner_generation=1,
             publish_event=cast(Any, _noop_publish),
             session_id="root-session",
         )
@@ -1505,6 +2071,7 @@ async def test_spawn_agent_rejects_when_active_subagent_limit_is_reached() -> No
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
+            owner_generation=1,
             publish_event=cast(Any, _noop_publish),
             session_id="root-session",
         )
@@ -1555,6 +2122,7 @@ async def test_spawn_agent_counts_latest_running_run_toward_active_limit() -> No
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
+            owner_generation=1,
             publish_event=cast(Any, _noop_publish),
             session_id="root-session",
         )
@@ -1587,6 +2155,7 @@ async def test_spawn_agent_rejects_when_depth_limit_is_reached() -> None:
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
+            owner_generation=1,
             publish_event=cast(Any, _noop_publish),
             session_id="child-session",
         )

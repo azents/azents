@@ -9,16 +9,17 @@ then releases session lock and exits.
 """
 
 import asyncio
-import contextlib
 import dataclasses
 import logging
-from typing import Annotated
+from collections.abc import Sequence
+from typing import Annotated, Any
 
 from fastapi import Depends
 
 from azents.broker.types import (
     BrokerMessage,
     SessionBroker,
+    SessionOwnershipLostError,
 )
 from azents.worker.deps import get_worker_broker
 from azents.worker.session.recovery import StuckSessionRecovery
@@ -35,6 +36,25 @@ class _ShutdownRequested(Exception):
     """Internal sentinel representing Worker shutdown request."""
 
 
+async def _cancel_and_drain_tasks(
+    tasks: Sequence[asyncio.Task[Any]],
+    *,
+    failure_message: str,
+) -> None:
+    """Cancel child waits and consume every terminal outcome."""
+    for task in tasks:
+        if not task.done():
+            task.cancel()
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    for result in results:
+        if not isinstance(result, Exception):
+            continue
+        logger.warning(
+            failure_message,
+            exc_info=(type(result), result, result.__traceback__),
+        )
+
+
 @dataclasses.dataclass(frozen=True)
 class _ActiveSessionRunner:
     """Session runner execution handle owned by AgentWorker."""
@@ -42,10 +62,43 @@ class _ActiveSessionRunner:
     runner: SessionRunner
     task: asyncio.Task[None]
 
+    def __post_init__(self) -> None:
+        """Observe Runner termination immediately at the Worker boundary."""
+        self.task.add_done_callback(self._consume_task_result)
+
+    def _consume_task_result(self, task: asyncio.Task[None]) -> None:
+        """Consume and report a background Runner result exactly once."""
+        try:
+            exception = task.exception()
+        except asyncio.CancelledError:
+            logger.warning(
+                "Session runner task was cancelled",
+                extra={"session_id": self.runner.running_session_id},
+            )
+            return
+        if exception is None:
+            return
+        if isinstance(exception, SessionOwnershipLostError):
+            logger.warning(
+                "Session runner exited after ownership loss",
+                extra={"session_id": exception.session_id},
+            )
+            return
+        logger.error(
+            "Session runner task failed",
+            extra={"session_id": self.runner.running_session_id},
+            exc_info=(type(exception), exception, exception.__traceback__),
+        )
+
     @property
     def terminated(self) -> bool:
         """Return whether Runner task ended."""
         return self.task.done()
+
+    @property
+    def accepts_messages(self) -> bool:
+        """Return whether messages can still be handed to this Runner."""
+        return not self.task.done() and self.runner.accepting_messages
 
     def enqueue(self, message: BrokerMessage) -> None:
         """Deliver message to Runner queue."""
@@ -89,6 +142,7 @@ class AgentWorker:
 
         logger.info("Agent worker starting")
         runners: dict[str, _ActiveSessionRunner] = {}
+        runner_tasks: set[asyncio.Task[None]] = set()
         backoff = _INITIAL_BACKOFF
         recovery_task = self.stuck_session_recovery.start(shutdown_event)
         try:
@@ -110,7 +164,7 @@ class AgentWorker:
                 for message in messages:
                     session_id = message.session_id
                     runner = runners.get(session_id)
-                    if runner is None or runner.terminated:
+                    if runner is None or not runner.accepts_messages:
                         logger.info(
                             "Starting session runner",
                             extra={"session_id": session_id},
@@ -118,9 +172,12 @@ class AgentWorker:
                         session_runner = self.session_runner_factory.create(
                             shutdown_event=self.shutdown_event,
                         )
+                        task = asyncio.create_task(session_runner.run())
+                        runner_tasks.add(task)
+                        task.add_done_callback(runner_tasks.discard)
                         runner = _ActiveSessionRunner(
                             runner=session_runner,
-                            task=asyncio.create_task(session_runner.run()),
+                            task=task,
                         )
                         runners[session_id] = runner
                     runner.enqueue(message)
@@ -140,6 +197,8 @@ class AgentWorker:
                 *(r.shutdown() for r in runners.values()),
                 return_exceptions=True,
             )
+            if runner_tasks:
+                await asyncio.gather(*tuple(runner_tasks), return_exceptions=True)
             logger.info("Agent worker stopped")
 
     def shutdown(self) -> None:
@@ -151,9 +210,9 @@ class AgentWorker:
     ) -> list[BrokerMessage]:
         """Wait for message receive or shutdown.
 
-        When shutdown_event is set, exit immediately regardless of message receipt.
-        shutdown takes priority even if messages were already received — those messages
-        are reprocessed by another worker after lock release.
+        A successful receive takes priority over simultaneous shutdown because broker
+        receive is destructive. This hands already-popped messages to their Runner
+        before the Worker begins graceful shutdown.
 
         :param shutdown_event: Shutdown event
         :return: Received broker message list
@@ -164,17 +223,31 @@ class AgentWorker:
 
         receive_task = asyncio.ensure_future(self.broker.receive_messages())
         shutdown_task = asyncio.ensure_future(shutdown_event.wait())
-        done, pending = await asyncio.wait(
-            [receive_task, shutdown_task],
-            return_when=asyncio.FIRST_COMPLETED,
-        )
-        for p in pending:
-            p.cancel()
+        tasks = (receive_task, shutdown_task)
+        try:
+            done, pending = await asyncio.wait(
+                tasks,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+        except asyncio.CancelledError:
+            await _cancel_and_drain_tasks(
+                tasks,
+                failure_message="Worker child wait failed during cancellation cleanup",
+            )
+            raise
         if pending:
-            for p in pending:
-                with contextlib.suppress(asyncio.CancelledError):
-                    await p
+            await _cancel_and_drain_tasks(
+                tuple(pending),
+                failure_message="Worker child wait failed during race cleanup",
+            )
 
+        receive_succeeded = (
+            receive_task in done
+            and not receive_task.cancelled()
+            and receive_task.exception() is None
+        )
+        if receive_succeeded:
+            return receive_task.result()
         if shutdown_task in done:
             raise _ShutdownRequested
 

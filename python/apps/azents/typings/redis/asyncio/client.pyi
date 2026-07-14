@@ -1,7 +1,7 @@
-"""redis.asyncio.client stub — async 메서드 반환 타입 교정.
+"""Correct redis.asyncio client return types for static analysis.
 
-redis-py의 async 메서드가 Awaitable[T] | T로 선언되어
-pyright에서 "int is not awaitable" 등의 에러가 발생하는 문제를 해결합니다.
+redis-py declares async methods as ``Awaitable[T] | T``, which makes pyright
+report errors such as ``int is not awaitable`` for the asyncio client.
 https://github.com/redis/redis-py/issues/3107
 """
 
@@ -30,6 +30,18 @@ class Redis:
     async def rpush(
         self, name: bytes | str | memoryview, *values: bytes | str | int | float
     ) -> int: ...
+    async def lpush(
+        self, name: bytes | str | memoryview, *values: bytes | str | int | float
+    ) -> int: ...
+    async def lrem(
+        self,
+        name: bytes | str | memoryview,
+        count: int,
+        value: bytes | str | int | float,
+    ) -> int: ...
+    async def lrange(
+        self, name: bytes | str | memoryview, start: int, end: int
+    ) -> list[bytes]: ...
     @overload
     async def lpop(
         self, name: bytes | str | memoryview, count: None = None
@@ -72,6 +84,16 @@ class Redis:
         groupname: bytes | str | memoryview,
         *ids: str | bytes | int,
     ) -> int: ...
+    async def xautoclaim(
+        self,
+        name: bytes | str | memoryview,
+        groupname: bytes | str | memoryview,
+        consumername: bytes | str | memoryview,
+        min_idle_time: int,
+        start_id: int | bytes | str | memoryview = "0-0",
+        count: int | None = None,
+        justid: bool = False,
+    ) -> list[Any]: ...
     async def set(
         self,
         name: bytes | str | memoryview,
@@ -86,6 +108,17 @@ class Redis:
         pxat: int | datetime.datetime | None = None,
     ) -> bool | None: ...
     async def get(self, name: bytes | str | memoryview) -> bytes | None: ...
+    async def mget(
+        self,
+        keys: bytes | str | memoryview | list[bytes | str | memoryview],
+        *args: bytes | str | memoryview,
+    ) -> list[bytes | None]: ...
+    async def eval(
+        self,
+        script: str,
+        numkeys: int,
+        *keys_and_args: bytes | str | memoryview | int | float,
+    ) -> Any: ...
     async def publish(
         self,
         channel: bytes | str | memoryview,

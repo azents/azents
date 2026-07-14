@@ -1,8 +1,11 @@
 """Action execution repository tests."""
 
+import asyncio
 import datetime
+from uuid import uuid4
 
-from sqlalchemy.ext.asyncio import AsyncSession
+import pytest
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from azents.core.enums import (
     ActionExecutionEventKind,
@@ -18,7 +21,10 @@ from azents.engine.events.types import validate_event_payload
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
-from azents.repos.action_execution import ActionExecutionRepository
+from azents.repos.action_execution import (
+    ActionExecutionEventIdentityConflictError,
+    ActionExecutionRepository,
+)
 from azents.repos.action_execution.data import (
     ActionExecutionCreate,
     ActionExecutionEventCreate,
@@ -183,3 +189,145 @@ class TestActionExecutionRepository:
         assert projection is not None
         assert projection.execution.id == execution.id
         assert [event.id for event in projection.events] == [started.id, completed.id]
+
+    async def test_preallocated_event_id_is_exactly_idempotent(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """The same event identity and payload resolve to one durable event."""
+        session_id = await _create_agent_session(
+            rdb_session,
+            "action-event-idempotent",
+        )
+        repo = ActionExecutionRepository()
+        execution = await repo.create(
+            rdb_session,
+            ActionExecutionCreate(
+                id=None,
+                session_id=session_id,
+                input_buffer_id="01900000000070008000000000000020",
+                action_type="create_git_worktree",
+                action={},
+                status=ActionExecutionStatus.RUNNING,
+                owner_generation=1,
+            ),
+        )
+        create = ActionExecutionEventCreate(
+            id="01900000000070008000000000000021",
+            action_execution_id=execution.id,
+            session_id=session_id,
+            kind=ActionExecutionEventKind.STEP_STARTED,
+            step_key="register_project",
+            command_argv=None,
+            content="Starting register_project.",
+            exit_code=None,
+        )
+
+        first = await repo.append_event(rdb_session, create)
+        retried = await repo.append_event(rdb_session, create)
+        events = await repo.list_events(
+            rdb_session,
+            action_execution_id=execution.id,
+        )
+
+        assert retried.id == first.id == create.id
+        assert retried.sequence == first.sequence == 1
+        assert [event.id for event in events] == [create.id]
+
+    async def test_preallocated_event_id_rejects_different_payload(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """An event ID cannot silently alias different durable progress."""
+        session_id = await _create_agent_session(
+            rdb_session,
+            "action-event-identity-conflict",
+        )
+        repo = ActionExecutionRepository()
+        execution = await repo.create(
+            rdb_session,
+            ActionExecutionCreate(
+                id=None,
+                session_id=session_id,
+                input_buffer_id="01900000000070008000000000000022",
+                action_type="create_git_worktree",
+                action={},
+                status=ActionExecutionStatus.RUNNING,
+                owner_generation=1,
+            ),
+        )
+        event_id = "01900000000070008000000000000023"
+        create = ActionExecutionEventCreate(
+            id=event_id,
+            action_execution_id=execution.id,
+            session_id=session_id,
+            kind=ActionExecutionEventKind.STEP_STARTED,
+            step_key="register_project",
+            command_argv=None,
+            content="Starting register_project.",
+            exit_code=None,
+        )
+        await repo.append_event(rdb_session, create)
+
+        with pytest.raises(ActionExecutionEventIdentityConflictError):
+            await repo.append_event(
+                rdb_session,
+                create.model_copy(update={"content": "Different progress."}),
+            )
+
+    async def test_preallocated_event_id_serializes_concurrent_retries(
+        self,
+        rdb_engine: AsyncEngine,
+        latest_db_schema: None,
+    ) -> None:
+        """Concurrent same-ID retries create one sequence entry."""
+        del latest_db_schema
+        suffix = uuid4().hex
+        handle = f"action-event-race-{suffix[:8]}"
+        repo = ActionExecutionRepository()
+        async with AsyncSession(rdb_engine, expire_on_commit=False) as session:
+            session_id = await _create_agent_session(session, handle)
+            execution = await repo.create(
+                session,
+                ActionExecutionCreate(
+                    id=None,
+                    session_id=session_id,
+                    input_buffer_id=suffix,
+                    action_type="create_git_worktree",
+                    action={},
+                    status=ActionExecutionStatus.RUNNING,
+                    owner_generation=1,
+                ),
+            )
+            await session.commit()
+        create = ActionExecutionEventCreate(
+            id=uuid4().hex,
+            action_execution_id=execution.id,
+            session_id=session_id,
+            kind=ActionExecutionEventKind.STEP_STARTED,
+            step_key="register_project",
+            command_argv=None,
+            content="Starting register_project.",
+            exit_code=None,
+        )
+
+        async def append() -> tuple[str, int]:
+            async with AsyncSession(rdb_engine, expire_on_commit=False) as session:
+                event = await repo.append_event(session, create)
+                await session.commit()
+                return event.id, event.sequence
+
+        try:
+            first, second = await asyncio.gather(append(), append())
+            async with AsyncSession(rdb_engine, expire_on_commit=False) as session:
+                events = await repo.list_events(
+                    session,
+                    action_execution_id=execution.id,
+                )
+
+            assert first == second == (create.id, 1)
+            assert [event.id for event in events] == [create.id]
+        finally:
+            async with AsyncSession(rdb_engine, expire_on_commit=False) as session:
+                await WorkspaceRepository().delete_by_handle(session, handle)
+                await session.commit()

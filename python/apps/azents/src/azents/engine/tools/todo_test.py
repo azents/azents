@@ -1,22 +1,32 @@
 """Session todo Toolkit State tool tests."""
 
 import json
-from unittest.mock import AsyncMock
+from types import SimpleNamespace
+from typing import Any, cast
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.tools import TurnContext
+from azents.engine.events.engine_events import TodoStateChanged
 from azents.engine.hooks.types import (
     CompactionSummaryHookContext,
     CompactionSummaryReplace,
 )
+from azents.engine.tooling.toolkit_state import ToolkitStateRunAuthorityLostError
 from azents.engine.tools.todo import (
     TodoItem,
     TodoState,
+    TodoStateStore,
     TodoToolkit,
     TodoUpdateItem,
     UpdateTodoInput,
     apply_todo_update,
+    make_update_todo_tool,
     render_todo_snapshot,
 )
+from azents.repos.agent_execution import AgentRunOwnershipLostError
 
 
 def _compaction_context(
@@ -162,6 +172,7 @@ async def test_todo_toolkit_exposes_unprefixed_update_tool() -> None:
         workspace_id="workspace-1",
         model="model",
         run_id="run-1",
+        owner_generation=1,
         session_id="session-1",
         publish_event=AsyncMock(),
     )
@@ -188,6 +199,7 @@ async def test_update_todo_returns_compact_acknowledgement() -> None:
             workspace_id="workspace-1",
             model="model",
             run_id="run-1",
+            owner_generation=7,
             session_id="session-1",
             publish_event=publish_changed,
         )
@@ -203,4 +215,111 @@ async def test_update_todo_returns_compact_acknowledgement() -> None:
     )
 
     assert result == "Done"
+    _, _, update_kwargs = store.update.mock_calls[0]
+    assert update_kwargs["run_id"] == "run-1"
+    assert update_kwargs["owner_generation"] == 7
     publish_changed.assert_awaited_once()
+    assert publish_changed.await_args is not None
+    published = publish_changed.await_args.args[0]
+    assert isinstance(published, TodoStateChanged)
+    assert published.run_id == "run-1"
+
+
+async def test_update_todo_projection_failure_preserves_committed_success() -> None:
+    """Post-commit projection failure cannot make a durable update retryable."""
+    store = AsyncMock()
+    store.update.return_value = TodoState(
+        items=[TodoItem(content="Current work", status="in_progress")]
+    )
+    publish_changed = AsyncMock(side_effect=RuntimeError("projection unavailable"))
+    tool = make_update_todo_tool(
+        store=store,
+        agent_id="agent-1",
+        session_id="session-1",
+        run_id="run-1",
+        owner_generation=7,
+        publish_changed=publish_changed,
+    )
+
+    result = await tool.handler(
+        json.dumps(
+            {
+                "operation": "replace",
+                "items": [{"content": "Current work", "status": "in_progress"}],
+            }
+        )
+    )
+
+    assert result == "Done"
+    store.update.assert_awaited_once()
+    publish_changed.assert_awaited_once()
+
+
+async def test_todo_store_rejects_stale_owner_generation_before_write() -> None:
+    """A taken-over Run cannot commit Todo state under its old owner lease."""
+    scope = AsyncMock()
+    scope.__aenter__.return_value = cast(AsyncSession, object())
+    session_manager = MagicMock(return_value=scope)
+    run_repository = AsyncMock()
+    session_repository = AsyncMock()
+    session_repository.lock_by_id.return_value = SimpleNamespace(owner_generation=2)
+    toolkit_state_repository = AsyncMock()
+    toolkit_state_repository.get.return_value = None
+    store = TodoStateStore(
+        session_manager=cast(Any, session_manager),
+        agent_run_repository=cast(Any, run_repository),
+        agent_session_repository=cast(Any, session_repository),
+        toolkit_state_repository=cast(Any, toolkit_state_repository),
+    )
+
+    with pytest.raises(ToolkitStateRunAuthorityLostError):
+        await store.update(
+            "agent-1",
+            "session-1",
+            run_id="run-a",
+            owner_generation=1,
+            mutator=lambda _: TodoState(),
+        )
+
+    run_repository.lock_active_owner.assert_not_awaited()
+
+
+async def test_todo_store_rejects_inactive_run_before_write() -> None:
+    """A quarantined Run cannot overwrite Todo state after Run B starts."""
+    scope = AsyncMock()
+    scope.__aenter__.return_value = cast(AsyncSession, object())
+    session_manager = MagicMock(return_value=scope)
+    run_repository = AsyncMock()
+    run_repository.lock_active_owner.side_effect = AgentRunOwnershipLostError(
+        run_id="run-a",
+        session_id="session-1",
+        expected_owner_generation=2,
+        current_owner_generation=2,
+        active_run_id="run-b",
+    )
+    session_repository = AsyncMock()
+    session_repository.lock_by_id.return_value = SimpleNamespace(owner_generation=2)
+    toolkit_state_repository = AsyncMock()
+    toolkit_state_repository.get.return_value = None
+    store = TodoStateStore(
+        session_manager=cast(Any, session_manager),
+        agent_run_repository=cast(Any, run_repository),
+        agent_session_repository=cast(Any, session_repository),
+        toolkit_state_repository=cast(Any, toolkit_state_repository),
+    )
+
+    with pytest.raises(ToolkitStateRunAuthorityLostError):
+        await store.update(
+            "agent-1",
+            "session-1",
+            run_id="run-a",
+            owner_generation=2,
+            mutator=lambda _: TodoState(),
+        )
+
+    run_repository.lock_active_owner.assert_awaited_once_with(
+        scope.__aenter__.return_value,
+        run_id="run-a",
+        session_id="session-1",
+        owner_generation=2,
+    )

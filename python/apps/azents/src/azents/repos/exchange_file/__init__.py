@@ -12,9 +12,9 @@ from azents.rdb.models.exchange_file import RDBExchangeFile
 from .data import ExchangeFile, ExchangeFileCreate
 
 
-def _object_key(rdb: RDBExchangeFile) -> str:
+def exchange_file_object_key(*, workspace_id: str, file_id: str) -> str:
     """Create Exchange file object storage key."""
-    return f"exchange/{rdb.workspace_id}/files/{rdb.id}/original"
+    return f"exchange/{workspace_id}/files/{file_id}/original"
 
 
 class ExchangeFileRepository:
@@ -44,7 +44,12 @@ class ExchangeFileRepository:
             preview_generated_at=create.preview_generated_at,
             expires_at=create.expires_at,
         )
-        rdb.object_key = _object_key(rdb)
+        if create.id is not None:
+            rdb.id = create.id
+        rdb.object_key = exchange_file_object_key(
+            workspace_id=rdb.workspace_id,
+            file_id=rdb.id,
+        )
         session.add(rdb)
         await session.flush()
         return self._build(rdb)

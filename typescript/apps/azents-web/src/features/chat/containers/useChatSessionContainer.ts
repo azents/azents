@@ -16,6 +16,18 @@ import {
   applyProviderToolCallItem,
   applyProviderToolCallOutput,
 } from "../hooks/providerToolCallProjection";
+import { withRequestDeadline } from "../hooks/requestDeadline";
+import {
+  canAdoptLiveRunUpdatedEvent,
+  canApplyRunActivityEvent,
+  canApplyRunStartedEvent,
+  canApplyRunTerminalEvent,
+  reconcileAuthoritativeRunIdentity,
+  rememberTerminatedRunId,
+  shouldContinueStopReconciliation,
+  type StopReconciliationSnapshot,
+  upsertCanonicalHistoryEvent,
+} from "../hooks/runActivity";
 import {
   applyFunctionCallItem,
   applyFunctionCallOutput,
@@ -1431,6 +1443,8 @@ interface PartialHistoryState {
 interface ManagedLiveState {
   partialHistory: PartialHistoryState;
   pendingInputBuffers: PendingInputBuffer[];
+  activeRunId: string | null;
+  terminatedRunIds: string[];
   liveRun: ChatLiveRunState | null;
   liveRunPhase: AgentRunPhase | null;
   sessionRunState: SessionRunState;
@@ -1449,9 +1463,17 @@ interface RestSnapshotRequest {
 
 type ResyncReason = "initial" | "periodic" | "resume" | "latest" | "compaction";
 
+const STOP_RECONCILIATION_ATTEMPTS = 10;
+const STOP_RECONCILIATION_INTERVAL_MS = 500;
+const STOP_RECONCILIATION_TIMEOUT_MS = 15_000;
+const STOP_REQUEST_TIMEOUT_MS = 5_000;
+const REST_SNAPSHOT_REQUEST_TIMEOUT_MS = 5_000;
+const CHAT_WRITE_REQUEST_TIMEOUT_MS = 15_000;
+
 interface ResyncOptions {
   reason: ResyncReason;
   continuing?: boolean;
+  onSettled?: (snapshot: StopReconciliationSnapshot) => void;
 }
 
 interface LiveTaxonomySnapshot {
@@ -1491,6 +1513,8 @@ function emptyManagedLiveState(): ManagedLiveState {
   return {
     partialHistory: emptyPartialHistoryState(),
     pendingInputBuffers: [],
+    activeRunId: null,
+    terminatedRunIds: [],
     liveRun: null,
     liveRunPhase: null,
     sessionRunState: "idle",
@@ -1641,33 +1665,53 @@ function replaceLiveStateFromSnapshot(
     const buffer = mapInputBufferLiveEvent(event);
     return buffer === null ? [] : [buffer];
   });
-  const runSnapshot = liveRunSnapshotFromResponse(live);
-  const liveRun =
-    runSnapshot.type === "PRESENT"
-      ? runSnapshot.run
-      : runSnapshot.type === "INVALID"
-        ? (previous?.liveRun ?? null)
-        : null;
-  const currentLiveRunPhase = liveRunPhase(liveRun);
+  const receivedRunSnapshot = liveRunSnapshotFromResponse(live);
+  const runIdentity = reconcileAuthoritativeRunIdentity(
+    previous?.activeRunId ?? null,
+    previous?.terminatedRunIds ?? [],
+    receivedRunSnapshot.type === "INVALID"
+      ? { type: "INVALID" }
+      : receivedRunSnapshot.type === "ABSENT"
+        ? { type: "ABSENT" }
+        : {
+            type: "PRESENT",
+            runId: receivedRunSnapshot.run.run_id,
+            isRunning: receivedRunSnapshot.run.status === "running",
+          },
+  );
+  const preservePreviousRun = !runIdentity.applySnapshot;
+  const liveRun = preservePreviousRun
+    ? (previous?.liveRun ?? null)
+    : receivedRunSnapshot.type === "PRESENT" &&
+        receivedRunSnapshot.run.status === "running"
+      ? receivedRunSnapshot.run
+      : null;
+  const currentLiveRunPhase = preservePreviousRun
+    ? (previous?.liveRunPhase ?? null)
+    : liveRunPhase(liveRun);
+  const preservePendingStop =
+    previous?.isStopPending === true &&
+    runIdentity.activeRunId !== null &&
+    runIdentity.activeRunId === previous.activeRunId;
   return {
     state: {
       ...emptyManagedLiveState(),
       partialHistory: partialHistoryWithGoalContinuations,
       pendingInputBuffers,
+      activeRunId: runIdentity.activeRunId,
+      terminatedRunIds: runIdentity.terminatedRunIds,
       liveRun,
       liveRunPhase: currentLiveRunPhase,
-      sessionRunState:
-        liveRun?.status === "running"
+      sessionRunState: preservePreviousRun
+        ? (previous?.sessionRunState ?? "idle")
+        : liveRun?.status === "running"
           ? "running"
           : sessionRunStateFromResponse(live),
       isResponsePending:
         isUserBlockingRunPhase(currentLiveRunPhase) ||
         partialHistory.order.length > 0,
       isCompacting: currentLiveRunPhase === "compacting",
-      isStopPending:
-        runSnapshot.type === "INVALID"
-          ? (previous?.isStopPending ?? false)
-          : false,
+      isStopPending: preservePendingStop,
       todo: live.todo ?? emptyTodoState(),
       goal: normalizeGoalState(live.goal),
       actionExecutions: (live.action_executions ?? []).map((projection) => ({
@@ -1676,7 +1720,9 @@ function replaceLiveStateFromSnapshot(
       })),
     },
     invalidLiveRun:
-      runSnapshot.type === "INVALID" ? { value: runSnapshot.value } : null,
+      receivedRunSnapshot.type === "INVALID"
+        ? { value: receivedRunSnapshot.value }
+        : null,
   };
 }
 
@@ -1812,17 +1858,6 @@ function upsertMessage(
   );
 }
 
-function upsertHistoryEvent(
-  events: ChatEventResponse[],
-  event: ChatEventResponse,
-): ChatEventResponse[] {
-  const index = events.findIndex((item) => item.id === event.id);
-  if (index < 0) {
-    return [...events, event];
-  }
-  return events.map((item, itemIndex) => (itemIndex === index ? event : item));
-}
-
 function mergeHistoryEventPages(
   existing: ChatEventResponse[],
   incoming: ChatEventResponse[],
@@ -1927,6 +1962,8 @@ export function useChatSessionContainer(
   const [managedLiveState, setManagedLiveState] = useState<ManagedLiveState>(
     () => emptyManagedLiveState(),
   );
+  const managedLiveStateRef = useRef(managedLiveState);
+  managedLiveStateRef.current = managedLiveState;
   const [isSubscribeReady, setIsSubscribeReady] = useState(false);
   const historyOldestCursorRef = useRef<string | null>(null);
   const historyNewestCursorRef = useRef<string | null>(null);
@@ -1941,6 +1978,24 @@ export function useChatSessionContainer(
   const startResyncRef = useRef<(options: ResyncOptions) => boolean>(
     () => false,
   );
+  const stopReconciliationTimerRef = useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null);
+  const stopRequestInFlightRef = useRef(false);
+  const stopReconciliationDeadlineRef = useRef(0);
+  const stopReconciliationGenerationRef = useRef(0);
+  const containerMountedRef = useRef(true);
+  const containerIsMounted = useCallback(
+    (): boolean => containerMountedRef.current,
+    [],
+  );
+  const reconcileStoppedRunRef = useRef<
+    (
+      stoppedRunId: string,
+      remainingAttempts: number,
+      reconciliationGeneration: number,
+    ) => void
+  >(() => {});
   const startRestSnapshotRequest = useCallback((): RestSnapshotRequest => {
     restSnapshotEpochRef.current += 1;
     return {
@@ -2077,52 +2132,80 @@ export function useChatSessionContainer(
         }
       }
       const markRunActive = (
+        runId: string,
         phase: AgentRunPhase | null,
+        isRunStarted = false,
         modelCallStartedAt?: string | null,
       ): void => {
-        setManagedLiveState((prev) => ({
-          ...prev,
-          liveRun:
-            prev.liveRun === null || phase === null
-              ? prev.liveRun
-              : {
-                  ...prev.liveRun,
-                  phase,
-                  status: "running",
-                  ...(typeof modelCallStartedAt === "undefined"
-                    ? {}
-                    : { modelCallStartedAt }),
-                },
-          liveRunPhase: phase,
-          sessionRunState: "running",
-          isResponsePending:
-            isUserBlockingRunPhase(phase) ||
-            prev.partialHistory.order.length > 0,
-          isCompacting: phase === "compacting",
-        }));
+        setManagedLiveState((prev) => {
+          const canApply = isRunStarted
+            ? canApplyRunStartedEvent(
+                prev.activeRunId,
+                prev.terminatedRunIds,
+                runId,
+              )
+            : canApplyRunActivityEvent(prev.activeRunId, runId);
+          if (!canApply) {
+            return prev;
+          }
+          const nextPhase =
+            phase ?? (prev.activeRunId === runId ? prev.liveRunPhase : null);
+          return {
+            ...prev,
+            activeRunId: runId,
+            liveRun:
+              prev.liveRun?.run_id !== runId
+                ? null
+                : nextPhase === null
+                  ? prev.liveRun
+                  : {
+                      ...prev.liveRun,
+                      phase: nextPhase,
+                      status: "running",
+                      ...(typeof modelCallStartedAt === "undefined"
+                        ? {}
+                        : { modelCallStartedAt }),
+                    },
+            liveRunPhase: nextPhase,
+            sessionRunState: "running",
+            isResponsePending:
+              isUserBlockingRunPhase(nextPhase) ||
+              prev.partialHistory.order.length > 0,
+            isCompacting: nextPhase === "compacting",
+          };
+        });
       };
       const markRunInactive = (runId: string): void => {
         setManagedLiveState((prev) => {
-          if (prev.liveRun?.run_id !== runId) {
-            return prev;
+          const terminatedRunIds = rememberTerminatedRunId(
+            prev.terminatedRunIds,
+            runId,
+          );
+          if (!canApplyRunTerminalEvent(prev.activeRunId, runId)) {
+            return { ...prev, terminatedRunIds };
           }
           return {
             ...prev,
+            activeRunId: null,
+            terminatedRunIds,
             liveRun: null,
             liveRunPhase: null,
             sessionRunState: "idle",
             isResponsePending: false,
             isCompacting: false,
-            isStopPending: false,
           };
         });
       };
 
       if ("type" in event && event.type === "todo_state_changed") {
-        setManagedLiveState((prev) => ({
-          ...prev,
-          todo: event.todo,
-        }));
+        setManagedLiveState((prev) =>
+          canApplyRunActivityEvent(prev.activeRunId, event.run_id)
+            ? {
+                ...prev,
+                todo: event.todo,
+              }
+            : prev,
+        );
         return;
       }
 
@@ -2194,18 +2277,36 @@ export function useChatSessionContainer(
           reportInvalidLiveRun(event.run);
           return;
         }
+        if (nextLiveRun.status !== "running") {
+          markRunInactive(nextLiveRun.run_id);
+          return;
+        }
         const nextLiveRunPhase = liveRunPhase(nextLiveRun);
-        setManagedLiveState((prev) => ({
-          ...prev,
-          liveRun: nextLiveRun,
-          liveRunPhase: nextLiveRunPhase,
-          sessionRunState:
-            nextLiveRun.status === "running" ? "running" : prev.sessionRunState,
-          isResponsePending:
-            isUserBlockingRunPhase(nextLiveRunPhase) ||
-            prev.partialHistory.order.length > 0,
-          isCompacting: nextLiveRunPhase === "compacting",
-        }));
+        setManagedLiveState((prev) => {
+          if (
+            !canAdoptLiveRunUpdatedEvent(
+              prev.activeRunId,
+              prev.terminatedRunIds,
+              nextLiveRun.run_id,
+            )
+          ) {
+            return prev;
+          }
+          return {
+            ...prev,
+            activeRunId: nextLiveRun.run_id,
+            liveRun: nextLiveRun,
+            liveRunPhase: nextLiveRunPhase,
+            sessionRunState:
+              nextLiveRun.status === "running"
+                ? "running"
+                : prev.sessionRunState,
+            isResponsePending:
+              isUserBlockingRunPhase(nextLiveRunPhase) ||
+              prev.partialHistory.order.length > 0,
+            isCompacting: nextLiveRunPhase === "compacting",
+          };
+        });
         return;
       }
 
@@ -2276,7 +2377,7 @@ export function useChatSessionContainer(
           setLatestHumanInferenceProfile(appendedInferenceIntent.profile);
         }
         setHistoryEvents((prev) => {
-          const next = upsertHistoryEvent(prev, responseEvent);
+          const next = upsertCanonicalHistoryEvent(prev, responseEvent);
           historyEventsRef.current = next;
           return next;
         });
@@ -2324,11 +2425,16 @@ export function useChatSessionContainer(
 
       switch (event.type) {
         case "run_started":
-          markRunActive(event.phase ?? null);
+          markRunActive(event.run_id, event.phase ?? null, true);
           void utils.chat.getSubagentTree.invalidate();
           break;
         case "run_phase_changed":
-          markRunActive(event.phase, event.model_call_started_at);
+          markRunActive(
+            event.run_id,
+            event.phase,
+            false,
+            event.model_call_started_at,
+          );
           break;
         case "run_complete":
           if ("item" in event) {
@@ -2377,19 +2483,27 @@ export function useChatSessionContainer(
           );
           break;
         case "compaction_started":
-          setManagedLiveState((prev) => ({ ...prev, isCompacting: true }));
+          setManagedLiveState((prev) =>
+            canApplyRunActivityEvent(prev.activeRunId, event.run_id)
+              ? { ...prev, isCompacting: true }
+              : prev,
+          );
           break;
         case "compaction_complete":
-          setManagedLiveState((prev) => ({
-            ...prev,
-            isCompacting: false,
-            ...(event.continuing
-              ? {}
-              : {
-                  isResponsePending: false,
-                  isStopPending: false,
-                }),
-          }));
+          setManagedLiveState((prev) =>
+            canApplyRunActivityEvent(prev.activeRunId, event.run_id)
+              ? {
+                  ...prev,
+                  isCompacting: false,
+                  ...(event.continuing
+                    ? {}
+                    : {
+                        isResponsePending: false,
+                        isStopPending: false,
+                      }),
+                }
+              : prev,
+          );
           compactionReloadRef.current(event.continuing === true);
           break;
       }
@@ -2431,6 +2545,9 @@ export function useChatSessionContainer(
 
   const startResync = useCallback(
     (options: ResyncOptions): boolean => {
+      if (!containerIsMounted()) {
+        return false;
+      }
       if (
         options.reason !== "initial" &&
         options.reason !== "latest" &&
@@ -2442,100 +2559,124 @@ export function useChatSessionContainer(
       setBufferingLiveEvents(true);
       const request = startRestSnapshotRequest();
       void (async (): Promise<void> => {
-        let healthy = false;
+        let stopReconciliationSnapshot: StopReconciliationSnapshot = {
+          type: "NOT_APPLIED",
+        };
         try {
-          healthy = await requestSubscriptionHealthCheck();
-        } catch {
-          healthy = false;
-        }
-        if (request.epoch !== restSnapshotEpochRef.current) {
-          return;
-        }
-        if (!healthy) {
-          replayBufferedLiveEvents();
-          if (options.reason === "initial") {
-            setChatViewState({ type: "READY" });
+          let healthy = false;
+          try {
+            healthy = await requestSubscriptionHealthCheck();
+          } catch {
+            healthy = false;
           }
-          requestReconnect();
-          return;
-        }
-
-        let result;
-        try {
-          result = await utils.client.chat.listSessionEvents.query({
-            sessionId,
-          });
-        } catch {
-          if (request.epoch === restSnapshotEpochRef.current) {
+          if (!containerIsMounted()) {
+            return;
+          }
+          if (request.epoch !== restSnapshotEpochRef.current) {
+            return;
+          }
+          if (!healthy) {
             replayBufferedLiveEvents();
             if (options.reason === "initial") {
               setChatViewState({ type: "READY" });
             }
+            requestReconnect();
+            return;
           }
-          return;
-        }
-        if (!canApplyRestSnapshot(request)) {
-          if (request.epoch === restSnapshotEpochRef.current) {
-            replayBufferedLiveEvents();
-          }
-          return;
-        }
 
-        const mapped = mapSessionEvents(result, null);
-        hasFreshBaselineRef.current = true;
-        const detached = chatTimelineStateRef.current;
-        const preserveDetached =
-          detached.type === "DETACHED_HISTORY_BROWSING" &&
-          options.reason !== "initial" &&
-          options.reason !== "latest";
-        if (preserveDetached) {
-          setChatTimelineState({
-            ...detached,
-            hasNewer:
-              detached.hasNewer ||
-              (mapped.newestCursor !== null &&
-                mapped.newestCursor !== detached.newestCursor),
-          });
-        } else {
-          historyOldestCursorRef.current = mapped.oldestCursor;
-          historyNewestCursorRef.current = mapped.newestCursor;
-          setHistoryEvents((prev) => {
-            const next =
-              options.reason === "initial"
-                ? mapped.historyEvents
-                : mergeLatestHistoryEvents(prev, mapped.historyEvents);
-            historyEventsRef.current = next;
-            return next;
-          });
-          latestHumanModelOrderRef.current =
-            mapped.latestDurableInferenceIntent?.modelOrder ?? null;
-          setLatestHumanInferenceProfile(
-            mapped.latestDurableInferenceIntent?.profile ?? null,
-          );
-          setManagedLiveState((prev) => {
-            const next = mapSessionEvents(result, prev);
-            if (next.invalidLiveRun !== null) {
-              reportInvalidLiveRun(next.invalidLiveRun.value);
+          let result;
+          try {
+            result = await withRequestDeadline(
+              utils.client.chat.listSessionEvents.query({
+                sessionId,
+              }),
+              REST_SNAPSHOT_REQUEST_TIMEOUT_MS,
+            );
+          } catch {
+            if (
+              containerIsMounted() &&
+              request.epoch === restSnapshotEpochRef.current
+            ) {
+              replayBufferedLiveEvents();
+              if (options.reason === "initial") {
+                setChatViewState({ type: "READY" });
+              }
             }
-            return {
-              ...next.liveState,
-              isResponsePending:
-                options.reason === "compaction" && options.continuing === true
-                  ? next.liveState.isResponsePending || prev.isResponsePending
-                  : next.liveState.isResponsePending,
-            };
-          });
-          setHasMore(mapped.hasMore);
-          setChatTimelineState({ type: "LATEST_FOLLOWING" });
+            return;
+          }
+          if (!containerIsMounted()) {
+            return;
+          }
+          if (!canApplyRestSnapshot(request)) {
+            if (request.epoch === restSnapshotEpochRef.current) {
+              replayBufferedLiveEvents();
+            }
+            return;
+          }
+
+          const mapped = mapSessionEvents(result, null);
+          stopReconciliationSnapshot = {
+            type: "APPLIED",
+            activeRunId: mapped.liveState.activeRunId,
+          };
+          hasFreshBaselineRef.current = true;
+          const detached = chatTimelineStateRef.current;
+          const preserveDetached =
+            detached.type === "DETACHED_HISTORY_BROWSING" &&
+            options.reason !== "initial" &&
+            options.reason !== "latest";
+          if (preserveDetached) {
+            setChatTimelineState({
+              ...detached,
+              hasNewer:
+                detached.hasNewer ||
+                (mapped.newestCursor !== null &&
+                  mapped.newestCursor !== detached.newestCursor),
+            });
+          } else {
+            historyOldestCursorRef.current = mapped.oldestCursor;
+            historyNewestCursorRef.current = mapped.newestCursor;
+            setHistoryEvents((prev) => {
+              const next =
+                options.reason === "initial"
+                  ? mapped.historyEvents
+                  : mergeLatestHistoryEvents(prev, mapped.historyEvents);
+              historyEventsRef.current = next;
+              return next;
+            });
+            latestHumanModelOrderRef.current =
+              mapped.latestDurableInferenceIntent?.modelOrder ?? null;
+            setLatestHumanInferenceProfile(
+              mapped.latestDurableInferenceIntent?.profile ?? null,
+            );
+            setManagedLiveState((prev) => {
+              const next = mapSessionEvents(result, prev);
+              if (next.invalidLiveRun !== null) {
+                reportInvalidLiveRun(next.invalidLiveRun.value);
+              }
+              return {
+                ...next.liveState,
+                isResponsePending:
+                  options.reason === "compaction" && options.continuing === true
+                    ? next.liveState.isResponsePending || prev.isResponsePending
+                    : next.liveState.isResponsePending,
+              };
+            });
+            setHasMore(mapped.hasMore);
+            setChatTimelineState({ type: "LATEST_FOLLOWING" });
+          }
+          setChatViewState({ type: "READY" });
+          replayBufferedLiveEvents();
+        } finally {
+          options.onSettled?.(stopReconciliationSnapshot);
         }
-        setChatViewState({ type: "READY" });
-        replayBufferedLiveEvents();
       })();
       return true;
     },
     [
       canApplyRestSnapshot,
       chatViewState.type,
+      containerIsMounted,
       replayBufferedLiveEvents,
       reportInvalidLiveRun,
       requestReconnect,
@@ -2548,6 +2689,91 @@ export function useChatSessionContainer(
   );
   startResyncRef.current = startResync;
   batchReloadRef.current = (reason) => startResync({ reason });
+
+  const clearStopReconciliationTimer = useCallback((): void => {
+    if (stopReconciliationTimerRef.current !== null) {
+      clearTimeout(stopReconciliationTimerRef.current);
+      stopReconciliationTimerRef.current = null;
+    }
+  }, []);
+
+  const reconcileStoppedRun = useCallback(
+    (
+      stoppedRunId: string,
+      remainingAttempts: number,
+      reconciliationGeneration: number,
+    ): void => {
+      clearStopReconciliationTimer();
+      if (
+        !containerMountedRef.current ||
+        stopReconciliationGenerationRef.current !== reconciliationGeneration
+      ) {
+        return;
+      }
+      if (
+        !shouldContinueStopReconciliation(
+          stoppedRunId,
+          { type: "NOT_APPLIED" },
+          remainingAttempts,
+          stopReconciliationDeadlineRef.current - Date.now(),
+        )
+      ) {
+        stopReconciliationDeadlineRef.current = 0;
+        setManagedLiveState((prev) => ({ ...prev, isStopPending: false }));
+        return;
+      }
+
+      const scheduleNextAttempt = (
+        snapshot: StopReconciliationSnapshot,
+      ): void => {
+        if (!containerMountedRef.current) {
+          return;
+        }
+        if (
+          stopReconciliationGenerationRef.current !== reconciliationGeneration
+        ) {
+          return;
+        }
+        const nextRemainingAttempts = remainingAttempts - 1;
+        if (
+          !shouldContinueStopReconciliation(
+            stoppedRunId,
+            snapshot,
+            nextRemainingAttempts,
+            stopReconciliationDeadlineRef.current - Date.now(),
+          )
+        ) {
+          clearStopReconciliationTimer();
+          stopReconciliationDeadlineRef.current = 0;
+          setManagedLiveState((prev) => ({ ...prev, isStopPending: false }));
+          return;
+        }
+        stopReconciliationTimerRef.current = setTimeout(() => {
+          reconcileStoppedRunRef.current(
+            stoppedRunId,
+            nextRemainingAttempts,
+            reconciliationGeneration,
+          );
+        }, STOP_RECONCILIATION_INTERVAL_MS);
+      };
+      if (!startResync({ reason: "latest", onSettled: scheduleNextAttempt })) {
+        scheduleNextAttempt({ type: "NOT_APPLIED" });
+      }
+    },
+    [clearStopReconciliationTimer, startResync],
+  );
+  reconcileStoppedRunRef.current = reconcileStoppedRun;
+
+  useEffect(() => {
+    containerMountedRef.current = true;
+    return (): void => {
+      containerMountedRef.current = false;
+      stopRequestInFlightRef.current = false;
+      stopReconciliationDeadlineRef.current = 0;
+      stopReconciliationGenerationRef.current += 1;
+      clearStopReconciliationTimer();
+    };
+  }, [clearStopReconciliationTimer]);
 
   useEffect(() => {
     if (connectionStatus !== "connected") {
@@ -2812,7 +3038,13 @@ export function useChatSessionContainer(
       setIsWritePending(true);
       const writeSnapshotRequest = captureRestSnapshotRequest();
       try {
-        const response = await run();
+        const response = await withRequestDeadline(
+          run(),
+          CHAT_WRITE_REQUEST_TIMEOUT_MS,
+        );
+        if (!containerMountedRef.current) {
+          return false;
+        }
         failedWriteRequestRef.current = null;
         applyWriteResponse(response, writeSnapshotRequest);
         if (response.history_reload_required) {
@@ -2820,11 +3052,18 @@ export function useChatSessionContainer(
         }
         return true;
       } catch {
-        failedWriteRequestRef.current = { key: writeKey, id: clientRequestId };
+        if (containerMountedRef.current) {
+          failedWriteRequestRef.current = {
+            key: writeKey,
+            id: clientRequestId,
+          };
+        }
         return false;
       } finally {
         writeInFlightRef.current = false;
-        setIsWritePending(false);
+        if (containerMountedRef.current) {
+          setIsWritePending(false);
+        }
       }
     },
     [applyWriteResponse, captureRestSnapshotRequest, startResync],
@@ -2956,17 +3195,54 @@ export function useChatSessionContainer(
     ],
   );
 
-  const onStopRequest = useCallback(() => {
-    if (stopSessionRunMutation.isPending) {
+  const onStopRequest = useCallback((): void => {
+    if (stopRequestInFlightRef.current) {
       return;
     }
+    const stoppedRunId = managedLiveStateRef.current.activeRunId;
+    const reconciliationGeneration =
+      stopReconciliationGenerationRef.current + 1;
+    stopReconciliationGenerationRef.current = reconciliationGeneration;
+    clearStopReconciliationTimer();
+    stopReconciliationDeadlineRef.current =
+      Date.now() + STOP_RECONCILIATION_TIMEOUT_MS;
+    stopRequestInFlightRef.current = true;
     setManagedLiveState((prev) => ({ ...prev, isStopPending: true }));
-    void stopSessionRunMutation
-      .mutateAsync({ sessionId })
-      .finally(() =>
-        setManagedLiveState((prev) => ({ ...prev, isStopPending: false })),
+    void (async (): Promise<void> => {
+      try {
+        await withRequestDeadline(
+          stopSessionRunMutation.mutateAsync({ sessionId }),
+          STOP_REQUEST_TIMEOUT_MS,
+        );
+      } catch {
+        // The stop commit may have succeeded despite a lost response. Reconcile
+        // the durable run state with the same bounded path used after success.
+      }
+      if (!containerMountedRef.current) {
+        return;
+      }
+      stopRequestInFlightRef.current = false;
+      void utils.chat.listSessionEvents.invalidate({ sessionId });
+      if (stoppedRunId === null) {
+        startResync({ reason: "latest" });
+        stopReconciliationDeadlineRef.current = 0;
+        setManagedLiveState((prev) => ({ ...prev, isStopPending: false }));
+        return;
+      }
+      reconcileStoppedRun(
+        stoppedRunId,
+        STOP_RECONCILIATION_ATTEMPTS,
+        reconciliationGeneration,
       );
-  }, [sessionId, stopSessionRunMutation]);
+    })();
+  }, [
+    clearStopReconciliationTimer,
+    reconcileStoppedRun,
+    sessionId,
+    startResync,
+    stopSessionRunMutation,
+    utils.chat.listSessionEvents,
+  ]);
 
   const onDeletePendingInputBuffer = useCallback(
     (bufferId: string) => {
@@ -3090,8 +3366,7 @@ export function useChatSessionContainer(
   const tokenUsage = useMemo(() => latestTokenUsage(messages), [messages]);
   const isCompacting = managedLiveState.isCompacting || isCompactingFromHistory;
   const isStopAvailable = isUserBlockingRunPhase(managedLiveState.liveRunPhase);
-  const isStopPending =
-    stopSessionRunMutation.isPending || managedLiveState.isStopPending;
+  const isStopPending = managedLiveState.isStopPending;
 
   return {
     sessionId,

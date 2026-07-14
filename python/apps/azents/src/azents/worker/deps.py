@@ -37,12 +37,14 @@ from azents.engine.tools.subagent import SubagentToolkitProvider
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
+from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.exchange_file import ExchangeFileRepository
 from azents.repos.memory import MemoryRepository
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.toolkit import ToolkitRepository
+from azents.repos.toolkit_state import ToolkitStateRepository
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.runtime.control_protocol.runner_operations import (
     RuntimeRunnerOperationClient as ControlRuntimeRunnerOperationClient,
@@ -114,14 +116,27 @@ def get_skill_toolkit_provider(
         SessionManager[AsyncSession], Depends(get_session_manager)
     ],
     broadcast: Annotated[WebSocketBroadcast, Depends(get_broadcast)],
+    agent_run_repository: Annotated[AgentRunRepository, Depends(AgentRunRepository)],
+    agent_session_repository: Annotated[
+        AgentSessionRepository, Depends(AgentSessionRepository)
+    ],
+    toolkit_state_repository: Annotated[
+        ToolkitStateRepository, Depends(ToolkitStateRepository)
+    ],
 ) -> SkillToolkitProvider:
     """SkillToolkitProvider dependency for Worker with runtime sync support."""
-    store = SkillStateStore(session_manager=session_manager)
+    store = SkillStateStore(
+        session_manager=session_manager,
+        agent_run_repository=agent_run_repository,
+        agent_session_repository=agent_session_repository,
+        toolkit_state_repository=toolkit_state_repository,
+    )
     return SkillToolkitProvider(
         store=store,
         projection_service=SkillProjectionService(
             store=store,
             session_manager=session_manager,
+            agent_session_repository=agent_session_repository,
             runner_operations=runner_operations,
             runtime_repository=AgentRuntimeRepository(),
             project_repository=SessionWorkspaceProjectRepository(),
@@ -134,11 +149,21 @@ def get_claude_rules_toolkit_provider(
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
     ],
+    agent_run_repository: Annotated[AgentRunRepository, Depends(AgentRunRepository)],
+    agent_session_repository: Annotated[
+        AgentSessionRepository, Depends(AgentSessionRepository)
+    ],
+    toolkit_state_repository: Annotated[
+        ToolkitStateRepository, Depends(ToolkitStateRepository)
+    ],
 ) -> ClaudeRulesToolkitProvider:
     """ClaudeRulesToolkitProvider dependency for Worker."""
     return ClaudeRulesToolkitProvider(
         store=ToolkitClaudeRulesAppendixDedupeStateStore(
             session_manager=session_manager,
+            agent_run_repository=agent_run_repository,
+            agent_session_repository=agent_session_repository,
+            toolkit_state_repository=toolkit_state_repository,
         )
     )
 
@@ -154,6 +179,13 @@ def get_builtin_toolkit_provider(
     exchange_file_service: Annotated[ExchangeFileService, Depends(ExchangeFileService)],
     artifact_service: Annotated[ArtifactService, Depends(ArtifactService)],
     model_file_service: Annotated[ModelFileService, Depends(ModelFileService)],
+    agent_run_repository: Annotated[AgentRunRepository, Depends(AgentRunRepository)],
+    agent_session_repository: Annotated[
+        AgentSessionRepository, Depends(AgentSessionRepository)
+    ],
+    toolkit_state_repository: Annotated[
+        ToolkitStateRepository, Depends(ToolkitStateRepository)
+    ],
 ) -> BuiltinToolkitProvider:
     """BuiltinToolkitProvider dependency for Worker."""
     return BuiltinToolkitProvider(
@@ -162,6 +194,9 @@ def get_builtin_toolkit_provider(
         model_file_service=model_file_service,
         agents_store=ToolkitAgentsAppendixDedupeStateStore(
             session_manager=session_manager,
+            agent_run_repository=agent_run_repository,
+            agent_session_repository=agent_session_repository,
+            toolkit_state_repository=toolkit_state_repository,
         ),
         session_manager=session_manager,
         memory_repo=MemoryRepository(),

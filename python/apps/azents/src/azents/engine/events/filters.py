@@ -16,6 +16,7 @@ from azents.engine.context.window import compute_auto_compaction_threshold_token
 from azents.engine.events.file_parts import file_output_part_placeholder_text
 from azents.engine.events.output_parts import iter_output_parts
 from azents.engine.events.protocols import (
+    DurableRunWriteFence,
     EventAppendRepository,
     EventPayloadRepository,
     ManualCompactor,
@@ -59,6 +60,7 @@ from azents.engine.events.types import (
     UserMessagePayload,
 )
 from azents.engine.run.errors import CompactionFailedError
+from azents.engine.run.types import OWNERSHIP_LOST_CANCEL_MESSAGE
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import EventTranscriptRepository
@@ -76,6 +78,11 @@ _CONTINUITY_MAX_EVENT_TOKENS = 2_000
 _CONTINUITY_MAX_EVENT_CHARS = _CONTINUITY_MAX_EVENT_TOKENS * _TOKEN_BYTES
 _CONTINUITY_TRUNCATION_MARKER = "\n\n[Event truncated by Azents continuity guard.]"
 _EXCHANGE_URI_PREFIX = "exchange://"
+
+
+def _is_ownership_loss_cancellation(exc: asyncio.CancelledError) -> bool:
+    """Return whether cancellation means this worker no longer owns the session."""
+    return any(arg == OWNERSHIP_LOST_CANCEL_MESSAGE for arg in exc.args)
 
 
 AttachmentAvailability = Literal["available", "expired", "unavailable"]
@@ -122,14 +129,14 @@ class EventPreLowerFilterPipeline:
 
     async def apply(
         self,
-        session: AsyncSession,
+        session_manager: SessionManager[AsyncSession],
         transcript: Sequence[Event],
     ) -> list[Event]:
         """Apply filters in order."""
         self.was_compacted = False
         current = list(transcript)
         for filter_ in self._filters:
-            current = await filter_.apply(session, current)
+            current = await filter_.apply(session_manager, current)
             self.was_compacted = self.was_compacted or filter_.was_compacted
         return current
 
@@ -141,11 +148,11 @@ class NoopPreLowerFilter:
 
     async def apply(
         self,
-        session: AsyncSession,
+        session_manager: SessionManager[AsyncSession],
         transcript: Sequence[Event],
     ) -> list[Event]:
         """Return transcript as-is."""
-        del session
+        del session_manager
         return list(transcript)
 
 
@@ -157,9 +164,11 @@ class EventAttachmentAvailabilityFilter:
     def __init__(
         self,
         *,
+        write_fence: DurableRunWriteFence,
         exchange_file_repository: ExchangeFileStatusRepository | None = None,
         transcript_repo: EventPayloadRepository | None = None,
     ) -> None:
+        self._write_fence = write_fence
         self._exchange_file_repository = (
             exchange_file_repository or ExchangeFileRepository()
         )
@@ -167,26 +176,32 @@ class EventAttachmentAvailabilityFilter:
 
     async def apply(
         self,
-        session: AsyncSession,
+        session_manager: SessionManager[AsyncSession],
         transcript: Sequence[Event],
     ) -> list[Event]:
         """Update attachment availability from Exchange object key status."""
         object_keys = _exchange_attachment_object_keys(transcript)
         if not object_keys:
             return list(transcript)
-        statuses = await self._exchange_file_repository.list_statuses_by_object_key(
-            session,
-            object_keys=object_keys,
-        )
-        updated: list[Event] = []
-        for event in transcript:
-            payload = _refresh_attachment_availability(event.payload, statuses)
-            if payload is None:
-                updated.append(event)
-                continue
-            updated.append(
-                await self._transcript_repo.update_payload(session, event.id, payload)
+        async with session_manager() as session:
+            await self._write_fence(session)
+            statuses = await self._exchange_file_repository.list_statuses_by_object_key(
+                session,
+                object_keys=object_keys,
             )
+            updated: list[Event] = []
+            for event in transcript:
+                payload = _refresh_attachment_availability(event.payload, statuses)
+                if payload is None:
+                    updated.append(event)
+                    continue
+                updated.append(
+                    await self._transcript_repo.update_payload(
+                        session,
+                        event.id,
+                        payload,
+                    )
+                )
         return updated
 
 
@@ -199,36 +214,44 @@ class EventFilePartPlaceholderFilter:
         self,
         *,
         session_id: str,
+        write_fence: DurableRunWriteFence,
         model_file_repository: ModelFileStatusRepository | None = None,
         transcript_repo: EventPayloadRepository | None = None,
     ) -> None:
         self._session_id = session_id
+        self._write_fence = write_fence
         self._model_file_repository = model_file_repository or ModelFileRepository()
         self._transcript_repo = transcript_repo or EventTranscriptRepository()
 
     async def apply(
         self,
-        session: AsyncSession,
+        session_manager: SessionManager[AsyncSession],
         transcript: Sequence[Event],
     ) -> list[Event]:
         """Rewrite deleted/missing FilePart as bounded metadata text."""
         model_file_ids = _model_file_ids(transcript)
         if not model_file_ids:
             return list(transcript)
-        statuses = await self._model_file_repository.list_statuses_for_session(
-            session,
-            session_id=self._session_id,
-            model_file_ids=model_file_ids,
-        )
-        updated: list[Event] = []
-        for event in transcript:
-            payload = _replace_unavailable_file_parts(event.payload, statuses)
-            if payload is None:
-                updated.append(event)
-                continue
-            updated.append(
-                await self._transcript_repo.update_payload(session, event.id, payload)
+        async with session_manager() as session:
+            await self._write_fence(session)
+            statuses = await self._model_file_repository.list_statuses_for_session(
+                session,
+                session_id=self._session_id,
+                model_file_ids=model_file_ids,
             )
+            updated: list[Event] = []
+            for event in transcript:
+                payload = _replace_unavailable_file_parts(event.payload, statuses)
+                if payload is None:
+                    updated.append(event)
+                    continue
+                updated.append(
+                    await self._transcript_repo.update_payload(
+                        session,
+                        event.id,
+                        payload,
+                    )
+                )
         return updated
 
 
@@ -241,6 +264,7 @@ class EventAutoCompactionFilter:
         session_id: str,
         compactor: ManualCompactor,
         summarize: SummaryGenerator,
+        write_fence: DurableRunWriteFence,
         max_input_tokens: int,
         auto_compaction_threshold_tokens: int | None,
         compaction_id_factory: Callable[[], str],
@@ -250,6 +274,7 @@ class EventAutoCompactionFilter:
         self._session_id = session_id
         self._compactor = compactor
         self._summarize = summarize
+        self._write_fence = write_fence
         self._max_input_tokens = max_input_tokens
         self._threshold_tokens = (
             auto_compaction_threshold_tokens
@@ -263,25 +288,22 @@ class EventAutoCompactionFilter:
 
     async def apply(
         self,
-        session: AsyncSession,
+        session_manager: SessionManager[AsyncSession],
         transcript: Sequence[Event],
     ) -> list[Event]:
         """Replace old input with append-only summary when threshold is exceeded."""
+        del session_manager
         self.was_compacted = False
         events = list(transcript)
         if _compaction_input_tokens(events) <= self._threshold_tokens:
             return events
-
-        # End the input-preparation transaction before lifecycle hooks and the
-        # external summary call. Both can take tens of seconds, and keeping the
-        # transaction open would block Stop finalization and concurrent input.
-        await session.commit()
 
         summary = await self._compactor.compact(
             session_id=self._session_id,
             transcript=events,
             compaction_id=self._compaction_id_factory(),
             summarize=self._summarize,
+            write_fence=self._write_fence,
             on_started=self._on_compaction_started,
             summary_context_window_tokens=self._max_input_tokens,
             reason="auto_threshold_exceeded",
@@ -289,9 +311,6 @@ class EventAutoCompactionFilter:
         )
         if summary is None:
             return events
-        # The compactor advances the head through an independent short session.
-        # Expire the caller identity map so the next turn reloads that new head.
-        session.expire_all()
         self.was_compacted = True
         return [summary]
 
@@ -355,6 +374,7 @@ class EventCompactor:
         transcript: Sequence[Event],
         compaction_id: str,
         summarize: SummaryGenerator,
+        write_fence: DurableRunWriteFence,
         on_started: Callable[[], Awaitable[None]] | None = None,
         summary_context_window_tokens: int | None = None,
         reason: str | None = None,
@@ -366,6 +386,7 @@ class EventCompactor:
             return None
 
         async with self.session_manager() as session:
+            await write_fence(session)
             marker_event = await self.transcript_repo.append(
                 session,
                 EventCreate(
@@ -385,13 +406,16 @@ class EventCompactor:
         if on_started is not None:
             try:
                 await on_started()
-            except asyncio.CancelledError:
+            except asyncio.CancelledError as exc:
+                if _is_ownership_loss_cancellation(exc):
+                    raise
                 await self._append_compaction_failure(
                     session_id=session_id,
                     compaction_id=compaction_id,
                     model_order=summary_order,
                     reason="cancelled",
                     error=None,
+                    write_fence=write_fence,
                 )
                 raise
             except Exception as exc:
@@ -401,6 +425,7 @@ class EventCompactor:
                     model_order=summary_order,
                     reason="start_callback_failed",
                     error=str(exc),
+                    write_fence=write_fence,
                 )
                 raise
 
@@ -409,13 +434,16 @@ class EventCompactor:
         )
         try:
             summary = await summarize(old_events, summary_budget)
-        except asyncio.CancelledError:
+        except asyncio.CancelledError as exc:
+            if _is_ownership_loss_cancellation(exc):
+                raise
             await self._append_compaction_failure(
                 session_id=session_id,
                 compaction_id=compaction_id,
                 model_order=summary_order,
                 reason="cancelled",
                 error=None,
+                write_fence=write_fence,
             )
             raise
         except Exception as exc:
@@ -425,6 +453,7 @@ class EventCompactor:
                 model_order=summary_order,
                 reason="summary_failed",
                 error=str(exc),
+                write_fence=write_fence,
             )
             raise
 
@@ -435,6 +464,7 @@ class EventCompactor:
                 model_order=summary_order,
                 reason="empty_summary",
                 error=None,
+                write_fence=write_fence,
             )
             raise CompactionFailedError(
                 "Compaction failed: summary model returned no text."
@@ -450,13 +480,16 @@ class EventCompactor:
                     reason=reason,
                     covered_until_event_id=old_events[-1].id,
                 )
-            except asyncio.CancelledError:
+            except asyncio.CancelledError as exc:
+                if _is_ownership_loss_cancellation(exc):
+                    raise
                 await self._append_compaction_failure(
                     session_id=session_id,
                     compaction_id=compaction_id,
                     model_order=summary_order,
                     reason="cancelled",
                     error=None,
+                    write_fence=write_fence,
                 )
                 raise
             except Exception as exc:
@@ -466,6 +499,7 @@ class EventCompactor:
                     model_order=summary_order,
                     reason="summary_enrichment_failed",
                     error=str(exc),
+                    write_fence=write_fence,
                 )
                 raise
         if not summary.strip():
@@ -475,6 +509,7 @@ class EventCompactor:
                 model_order=summary_order,
                 reason="empty_summary",
                 error=None,
+                write_fence=write_fence,
             )
             raise CompactionFailedError(
                 "Compaction failed: summary enrichment returned no text."
@@ -485,6 +520,7 @@ class EventCompactor:
             continuity_history,
         )
         async with self.session_manager() as session:
+            await write_fence(session)
             summary_event = await self.transcript_repo.append(
                 session,
                 EventCreate(
@@ -514,9 +550,11 @@ class EventCompactor:
         model_order: int,
         reason: str,
         error: str | None,
+        write_fence: DurableRunWriteFence,
     ) -> None:
         """Append a failed compaction marker in a short transaction."""
         async with self.session_manager() as session:
+            await write_fence(session)
             await self.transcript_repo.append(
                 session,
                 EventCreate(

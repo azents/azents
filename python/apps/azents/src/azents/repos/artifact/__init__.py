@@ -11,12 +11,15 @@ from azents.rdb.models.artifact import RDBArtifact
 from .data import Artifact, ArtifactCreate
 
 
-def _storage_key(rdb: RDBArtifact) -> str:
+def artifact_storage_key(
+    *,
+    workspace_id: str,
+    session_id: str,
+    created_run_index: int,
+    artifact_id: str,
+) -> str:
     """Create Artifact object storage key."""
-    return (
-        f"artifacts/{rdb.workspace_id}/{rdb.session_id}/"
-        f"{rdb.created_run_index}/{rdb.id}"
-    )
+    return f"artifacts/{workspace_id}/{session_id}/{created_run_index}/{artifact_id}"
 
 
 class ArtifactRepository:
@@ -46,7 +49,14 @@ class ArtifactRepository:
             description=create.description,
             metadata_=create.metadata,
         )
-        rdb.storage_key = _storage_key(rdb)
+        if create.id is not None:
+            rdb.id = create.id
+        rdb.storage_key = artifact_storage_key(
+            workspace_id=rdb.workspace_id,
+            session_id=rdb.session_id,
+            created_run_index=rdb.created_run_index,
+            artifact_id=rdb.id,
+        )
         session.add(rdb)
         await session.flush()
         return self._build(rdb)

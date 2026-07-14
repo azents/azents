@@ -1,5 +1,6 @@
 """ChatWriteRequest repository data models."""
 
+import dataclasses
 import datetime
 
 from pydantic import BaseModel, Field
@@ -37,3 +38,11 @@ class ChatWriteRequestCreate(BaseModel):
         description="Whether durable history reload is required"
     )
     payload: dict[str, object] = Field(description="Write request snapshot")
+
+
+@dataclasses.dataclass(frozen=True)
+class ChatWriteRequestCreateResult:
+    """Result of creating or recovering one idempotent REST write."""
+
+    record: ChatWriteRequest
+    created: bool

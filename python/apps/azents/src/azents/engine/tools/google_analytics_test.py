@@ -35,6 +35,7 @@ def _make_context() -> TurnContext:
         workspace_id="test-workspace",
         model="claude-sonnet-4-20250514",
         run_id="test-run",
+        owner_generation=1,
         publish_event=AsyncMock(),
     )
 

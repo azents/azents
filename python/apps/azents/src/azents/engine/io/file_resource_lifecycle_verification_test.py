@@ -54,7 +54,7 @@ class _FakeArtifactRepository:
     async def create(self, session: AsyncSession, create: ArtifactCreate) -> Artifact:
         """Store Artifact create input."""
         del session
-        artifact_id = self.next_id
+        artifact_id = create.id or self.next_id
         artifact = Artifact(
             id=artifact_id,
             workspace_id=create.workspace_id,
@@ -175,6 +175,14 @@ class _FakeAgentSessionRepository:
             updated_at=_NOW,
         )
 
+    async def lock_by_id(
+        self,
+        session: AsyncSession,
+        session_id: str,
+    ) -> AgentSession | None:
+        """Lock AgentSession using the same deterministic fake snapshot."""
+        return await self.get_by_id(session, session_id)
+
 
 class _FakeWorkspaceUserRepository:
     """WorkspaceUser repository for tests."""
@@ -199,6 +207,19 @@ class _FakeWorkspaceUserRepository:
             role=WorkspaceUserRole.MEMBER,
             created_at=_NOW,
             updated_at=_NOW,
+        )
+
+    async def lock_by_workspace_and_user(
+        self,
+        session: AsyncSession,
+        workspace_id: str,
+        user_id: str,
+    ) -> WorkspaceUser | None:
+        """Lock membership using the same deterministic fake snapshot."""
+        return await self.get_by_workspace_and_user(
+            session,
+            workspace_id=workspace_id,
+            user_id=user_id,
         )
 
 

@@ -66,6 +66,7 @@ class ExchangeFile(BaseModel):
 class ExchangeFileCreate(BaseModel):
     """ExchangeFile create schema."""
 
+    id: str | None = Field(description="ExchangeFile ID override")
     workspace_id: str = Field(description="Workspace ID")
     agent_id: str = Field(description="Agent ID")
     origin_type: ExchangeFileOrigin = Field(description="File creation origin")

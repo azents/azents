@@ -101,6 +101,22 @@ class LLMProviderIntegrationRepository:
             return None
         return self._build_with_secrets(rdb)
 
+    async def lock_by_id_with_secrets(
+        self,
+        session: AsyncSession,
+        integration_id: str,
+    ) -> LLMProviderIntegrationWithSecrets | None:
+        """Lock and fetch one integration for a short optimistic-CAS transaction."""
+        rdb = await session.scalar(
+            sa.select(RDBLLMProviderIntegration)
+            .where(RDBLLMProviderIntegration.id == integration_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if rdb is None:
+            return None
+        return self._build_with_secrets(rdb)
+
     async def list_by_workspace(
         self, session: AsyncSession, workspace_id: str
     ) -> LLMProviderIntegrationList:

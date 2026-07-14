@@ -26,6 +26,7 @@ from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.message import MessageRepository
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
+from azents.repos.toolkit_state import ToolkitStateRepository
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
@@ -149,6 +150,7 @@ def _service(rdb_session_manager: SessionManager[AsyncSession]) -> ChatSessionSe
         session_workspace_project_repository=SessionWorkspaceProjectRepository(),
         input_buffer_service=cast(InputBufferService, object()),
         session_manager=rdb_session_manager,
+        toolkit_state_repository=ToolkitStateRepository(),
     )
 
 

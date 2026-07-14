@@ -13,9 +13,14 @@ from azents.rdb.models.model_file_pin import RDBModelFilePin
 from .data import ModelFile, ModelFileCreate
 
 
-def _storage_key(rdb: RDBModelFile) -> str:
+def model_file_storage_key(
+    *,
+    workspace_id: str,
+    session_id: str,
+    model_file_id: str,
+) -> str:
     """Create ModelFile object storage key."""
-    return f"model-files/{rdb.workspace_id}/{rdb.session_id}/{rdb.id}"
+    return f"model-files/{workspace_id}/{session_id}/{model_file_id}"
 
 
 class ModelFileRepository:
@@ -41,7 +46,13 @@ class ModelFileRepository:
             sha256=create.sha256,
             metadata_=create.metadata,
         )
-        rdb.storage_key = _storage_key(rdb)
+        if create.id is not None:
+            rdb.id = create.id
+        rdb.storage_key = model_file_storage_key(
+            workspace_id=rdb.workspace_id,
+            session_id=rdb.session_id,
+            model_file_id=rdb.id,
+        )
         session.add(rdb)
         await session.flush()
         return self._build(rdb)
@@ -106,26 +117,41 @@ class ModelFileRepository:
         if not model_file_ids:
             return []
 
-        rows = (
+        # Pin creation takes the same ModelFile locks in the same order.  Holding
+        # them while checking the child table makes "unpinned" a durable
+        # decision instead of a stale NOT EXISTS snapshot.
+        candidates = (
             await session.scalars(
                 sa.select(RDBModelFile)
                 .where(
                     RDBModelFile.id.in_(model_file_ids),
                     RDBModelFile.status == ModelFileStatus.AVAILABLE,
-                    ~sa.exists(
-                        sa.select(RDBModelFilePin.model_file_id).where(
-                            RDBModelFilePin.model_file_id == RDBModelFile.id
-                        )
-                    ),
                 )
                 .order_by(RDBModelFile.id)
+                .with_for_update()
             )
         ).all()
-        for row in rows:
+        if not candidates:
+            return []
+        pinned_ids = set(
+            (
+                await session.scalars(
+                    sa.select(RDBModelFilePin.model_file_id).where(
+                        RDBModelFilePin.model_file_id.in_(
+                            [candidate.id for candidate in candidates]
+                        )
+                    )
+                )
+            ).all()
+        )
+        deleted_rows = [
+            candidate for candidate in candidates if candidate.id not in pinned_ids
+        ]
+        for row in deleted_rows:
             row.status = ModelFileStatus.DELETED
             row.deleted_at = deleted_at
         await session.flush()
-        return [self._build(row) for row in rows]
+        return [self._build(row) for row in deleted_rows]
 
     async def mark_deleted(
         self,

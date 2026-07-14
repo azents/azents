@@ -55,7 +55,7 @@ api_routes:
   - /chat/v1/agents/{agent_id}/git-refs
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-07-14
-spec_version: 40
+spec_version: 44
 ---
 
 # Workspace & Membership
@@ -189,12 +189,12 @@ Agent Workspace Project is a boundary registry explicitly registered by user for
 - `agent_project_presets` stores agent-scoped recent Project path presets. Creating a new session with selected Projects or registering an existing Project refreshes matching presets. `GET /chat/v1/agents/{agent_id}/project-presets` returns these presets ordered by recent use.
 - `agent_project_catalog` stores Agent-scoped reusable Project path candidates and filesystem status projection (`unchecked`, `available`, `missing`, `unavailable`, or `error`) with optional detail and `last_checked_at`. Catalog status is a UI projection; it does not decide prompt Project eligibility. Worktree action execution upserts the created worktree path into the catalog and may refresh status, but it does not update last-created-session defaults after execution.
 - `GET /chat/v1/agents/{agent_id}/git-refs?source_project_path=...` previews branches, tags, default branch, and HEAD commit for a Git source Project through typed Runtime Runner Git operations. Runtime unavailable or Git semantic failures are surfaced as user-safe preview errors.
-- `POST /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/register` registers an existing directory as Project for the selected AgentSession. Server validates user access, agent/session match, active Runtime directory existence, and Project path policy, then creates the session-owned registry row. This API does not modify filesystem.
+- `POST /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/register` registers an existing directory as Project for the selected AgentSession. Server snapshots user access, agent/session match, normalized path, and active Runtime generation in a short database scope; closes that scope before Runner directory validation; then locks Runtime, AgentSession, and WorkspaceUser membership in that fixed order and revalidates the path and exact Runtime generation before creating the session-owned registry row. The authority locks remain held through the Project transaction commit, so a concurrent Runtime replacement, Session archive, or membership removal wins before or waits until registration has committed. This API does not modify filesystem, and no Runner call is made while a database session is open. Skill projection refresh runs only after the Project transaction commits under a one-second hard deadline; timeout or projection failure is logged without rolling back, hanging the HTTP response, or reporting failure for the committed registration, while caller cancellation still propagates.
 - `GET /chat/v1/agents/{agent_id}/sessions/{session_id}/projects` returns registered Project list for the selected AgentSession. Public response exposes only `id`, `path`, `created_at`, `updated_at`.
 - `GET /chat/v1/agents/{agent_id}/sessions/{session_id}/workspace/project-browser-manifest` returns a backend-owned Project browser manifest for the selected session. It derives Project root entries from `session_workspace_projects`, joins catalog status projection by Agent/path, and returns backend-provided capabilities. Project root entries allow registry removal when tied to a session Project and disallow filesystem delete, move, and rename. Entries linked to `session_git_worktrees` expose `repository_type: "git"` so clients can render Git-specific Project root metadata without probing the filesystem. A non-cleaned Azents-owned worktree Project also exposes `delete_worktree: true`; ordinary Project registry rows and preview entries do not.
 - `POST /chat/v1/agents/{agent_id}/workspace/project-browser-manifest/preview` accepts explicit `project_paths` before a session exists and returns the same Project browser entry model. Preview entries do not expose session registry removal because no session Project row exists yet, and they do not expose repository metadata.
 - Project browser manifest reads do not call runtime runner file stat/list operations before responding. Missing or unchecked catalog projection is represented as stored/unchecked status and may be refreshed by separate boundary-triggered sync work.
-- `DELETE /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/{project_id}` removes only the selected session's registry row. Filesystem folder deletion is destructive and not included. Azents-owned worktree cleanup is a separate archive/delete lifecycle based on `session_git_worktrees` ownership metadata, not on the Project registry row alone.
+- `DELETE /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/{project_id}` removes only the selected session's registry row. Filesystem folder deletion is destructive and not included. Skill-store invalidation runs after the deletion transaction commits as the same one-second bounded best-effort projection update. Azents-owned worktree cleanup is a separate archive/delete lifecycle based on `session_git_worktrees` ownership metadata, not on the Project registry row alone.
 - `POST /chat/v1/agents/{agent_id}/sessions/{session_id}/git-worktree/cleanup` requests destructive cleanup for Azents-owned worktree allocations. When `project_id` is supplied, cleanup is scoped to the allocation linked to that session Project; otherwise cleanup covers all non-cleaned allocations for the session. Cleanup validates session ownership, Azents worktree-root containment, branch name presence, and Azents-created branch ownership before calling Runner Git cleanup. Successful cleanup removes the Git worktree without force, deletes the Azents-created branch, removes the catalog entry, deletes the linked session Project row, and best-effort removes the empty session-scoped worktree parent directory.
 - Path policy follows: `/workspace/agent` root forbidden, path outside `/workspace/agent` forbidden, exact duplicate Project path per session forbidden. Nested Project paths are allowed.
 New-session azents-web UI shows a compact additive workspace item list above the draft first-message composer. It loads stored last-created-session defaults, shows recent agent-level presets, lets users add repository folders to the list, and lets each selected folder switch between repository and new worktree modes from the row-level type selector. The runtime-backed folder picker can select the current folder so a Git repository directory itself can be added without relying on an existing preset. Worktree branch selection in this draft UI uses the Git ref preview endpoint but exposes only local branches by default; remote branches and tags are not shown in the base branch selector. Concrete session azents-web UI exposes Project management inside the Workspace surface instead of a separate Projects tab. The Workspace browser opens in `Projects` mode by default, lists registered Project roots, and keeps `All files` as an explicit secondary mode rooted at the Agent Workspace root. Empty Project sets show an explicit empty Projects state and do not fall back to Agent Workspace root entries. Project browser root rows display the folder basename as the primary label and render the full absolute path as dimmed, truncated secondary text after the name. The secondary path truncates before the primary label; the primary label truncates only when it exceeds the available row width. Git-backed Project root rows use a Git folder icon; non-Git Project roots keep the normal folder icon.
@@ -281,7 +281,63 @@ A Git worktree-created Project is an Agent Workspace Project whose directory is 
 
 A non-primary session can own a Git worktree allocation created by a `create_git_worktree` setup action. The action is stored as an ordered `action_message` input before the first user message and is consumed without appending an `action_message` transcript event. Preparation durably claims execution by `input_buffer_id` before deleting the buffer. Successful action execution invalidates the prepared context until the worktree path is created, registered as the session Project, and the next processing boundary rebuilds context; failed action execution is terminal, appends durable result history, and FIFO input processing continues.
 
-Each created worktree is prompt-eligible only through its session-owned `SessionWorkspaceProject` row, just like manually selected Projects. The `SessionGitWorktree` row is retained for lifecycle and cleanup, and links to the registered Project row after registration succeeds. Archive/delete cleanup iterates every non-cleaned `SessionGitWorktree` allocation owned by the session, removes each worktree, removes each Azents-created branch, removes the session-scoped reserved worktree parent directory when it becomes empty, deletes catalog entries for the worktree paths, and marks allocations cleaned. Cleanup failure leaves the archive successful and records a cleanup summary for manual retry.
+Runner worktree creation executes without an open database session. After Runner returns, the commit
+transaction locks Runtime, AgentSession, action execution, and allocation in that order and revalidates Runtime ID,
+generation, readiness, Session/action owner generation/status, and allocation `creating` status. The final
+`ready` transition is a conditional update. If archive or manual cleanup changed the allocation to
+`cleanup_pending` while Runner was creating the directory, the late result cannot overwrite cleanup;
+the allocation remains cleanup-owned and any still-running action converges to a failed terminal
+result. Target suffix updates, the `pending` to `creating` Runner claim, and collision retry transitions
+lock AgentSession, action execution, then allocation and revalidate the same owner before every
+conditional update. Cleanup or successor cancellation that wins before the Runner claim therefore
+skips the external call entirely. Collision retries conditionally return `creating` to `pending`; they
+stop when cleanup or a successor has taken authority. Action admission and terminalization use the fixed AgentSession, action execution, then
+allocation order (with Runtime preceding AgentSession when Runtime authority is needed) and conditionally
+mark only action-owned `pending`, `creating`, or `ready` states failed, so they never
+rewrite `cleanup_pending`, `cleanup_failed`, or `cleaned`.
+
+Project registration after a successful create result locks AgentSession, action execution, and allocation in that
+order and requires the action to remain `running` and the allocation to remain `ready`. Cleanup that
+wins between the ready commit and Project registration therefore leaves no new registry row. Cleanup
+finalization reloads the allocation under lock after Runner cleanup and deletes the latest linked
+Project ID, rather than relying on the pre-Runner allocation snapshot.
+
+Every post-registration mutation remains cleanup-fenced. Catalog upsert runs under the same
+AgentSession-to-ActionExecution-to-allocation lock order. Runtime-backed catalog refresh and Skill projection sync
+run without an open database session and revalidate `running` plus `ready` authority both before and
+after external I/O. When cleanup wins, reconciliation deletes any catalog row recreated by an
+in-flight refresh and invalidates the linked Project from Skill projection only after the database
+scope closes. Final completion locks AgentSession, ActionExecution, then allocation, appends the terminal progress
+marker, snapshots history, and deletes live execution in one transaction; it commits `completed`
+only while the allocation is still linked and `ready`.
+
+Project linking, catalog upsert, and progress-event persistence are exact-idempotent database steps.
+If a database commit succeeds but its acknowledgement is lost, the service reopens a bounded short
+transaction and recognizes the already committed Project or catalog state under the same action
+authority. Progress events receive a stable ID before their transaction; a retry under the action
+lock reuses an existing event only when every payload field matches, and rejects the same ID with
+different content. A cancellation that arrives at this commit boundary performs the same bounded
+reconciliation before propagating the original cancellation, so it neither duplicates progress nor
+converts a successfully committed action step into a false failure.
+
+Duplicate cleanup workers also converge monotonically. A cleanup request cannot reopen `cleaned`,
+and a failed cleanup may transition only `cleanup_pending` to `cleanup_failed`; it cannot overwrite
+`cleaned`. Successful cleanup locks the allocation and transitions only cleanup-owned pending/failed
+state to `cleaned`, treating an already cleaned row as idempotent success.
+
+Cleanup never calls Runner removal while the allocation's ActionExecution is still pending or running.
+Session deletion takes the SessionAgent root fence, requests and runs cleanup for every AgentSession in
+the deleted subtree without holding a database session across Runner calls, then reacquires the root fence
+and locks the affected AgentSession rows for its final database-only check. Deletion proceeds only when
+every allocation is durably `cleaned` and no live ActionExecution remains. An incomplete cleanup returns a
+retryable conflict and preserves the Session and allocation rows. Ownership-loss cancellation performs no
+terminal/history/allocation writes from the stale worker, leaving reconciliation to the current owner.
+Both cleanup admission and final deletion lock the root fence, all affected Session rows in sorted ID
+order, and the requesting Workspace membership before changing state. Membership revocation before
+cleanup therefore prevents Runner removal entirely; revocation while cleanup is in flight is rechecked
+before hard deletion and preserves the Session instead of authorizing a stale request by preflight.
+
+Each created worktree is prompt-eligible only through its session-owned `SessionWorkspaceProject` row, just like manually selected Projects. The `SessionGitWorktree` row is retained for lifecycle and cleanup, and links to the registered Project row after registration succeeds. Archive/delete cleanup iterates every non-cleaned `SessionGitWorktree` allocation owned by the session, removes each worktree, removes each Azents-created branch, removes the session-scoped reserved worktree parent directory when it becomes empty, deletes catalog entries for the worktree paths, and marks allocations cleaned. Cleanup failure leaves archive state available with a cleanup summary for manual retry; hard Session deletion is deferred until cleanup is complete.
 
 ## Business Rules
 
@@ -302,15 +358,19 @@ At least 7 rules — all actually verified in code:
 - `[join-request-single-pending]` — one active request per `(workspace_id, user_id)`. Duplicate PENDING request is `PendingRequestExists`.
 - `[join-request-notification-cooldown]` — new request notification has 24h cooldown based on `last_notified_at`; MUTED→PENDING transition does not notify.
 - `[project-existing-directory]` — Project registration allows only Agent Workspace directory that actually exists in active Runtime.
+- `[project-registration-db-boundary]` — Runner directory validation occurs outside database sessions; the commit transaction locks Runtime, AgentSession, and WorkspaceUser membership in a fixed order and revalidates Session access, normalized path, and unchanged Runtime generation while holding those locks through commit. Post-commit Skill projection refresh is best effort and cannot change the committed registration result.
 - `[project-root-denied]` — Agent Workspace root itself cannot be registered as a Project.
 - `[project-exact-duplicate-denied]` — same session cannot register the exact same Project path twice. Nested Project paths are allowed.
 - `[project-registry-only-delete]` — Project delete API removes only registry row, not filesystem folder.
 - `[project-browser-manifest-non-blocking]` — Project browser manifest reads return stored catalog projection and do not block on runner filesystem stat/list operations.
-- `[worktree-project-registration]` — Git worktree sessions register exactly the created worktree path as a session Project after the Runner confirms worktree creation.
+- `[worktree-project-registration]` — Git worktree sessions register exactly the created worktree path as a session Project after Runner confirms creation and a fixed AgentSession→ActionExecution→SessionGitWorktree lock validates owner generation, `running`, and `ready` authority; catalog, runtime-backed refresh, Skill projection sync, and atomic terminal completion revalidate that authority, while cleanup finalization deletes the latest linked Project and reconciles catalog/Skill projections.
+- `[worktree-action-commit-reconciliation]` — Project linking, catalog upsert, and progress-event writes recover an ambiguous commit in a fresh bounded transaction; preallocated progress-event IDs are reusable only for an exact payload match under the action lock, and caller cancellation is propagated after reconciliation.
 - `[worktree-action-context-boundary]` — new-session Git worktree setup uses ordered operation TurnAction execution and gates stale context after successful Project mutation until the next processing boundary rebuilds context; failed or cancelled setup terminates into durable history and later FIFO input continues.
+- `[worktree-post-runner-fence]` — worktree creation conditionally claims a pending allocation before Runner I/O, performs Runner I/O outside database sessions, then revalidates the exact Runtime generation, action owner, and still-creating allocation under a fixed lock order before a conditional ready transition; cleanup-owned state always wins both pre-Runner claims and late create or terminalization results, and `cleaned` cannot be overwritten by a slower duplicate cleanup failure.
 - `[existing-session-worktree-action]` — existing-session Register Project worktree creation is a `create_git_worktree` operation TurnAction, not session initialization work. Its execution table rows are live state owned by one Session generation; terminalization atomically hands one snapshot to durable history and deletes live state. Successful Project mutation invalidates prepared context, while failure/cancellation does not block later pending input or permit stale re-execution.
 - `[worktree-cleanup-authority]` — destructive cleanup of an Azents-owned worktree requires a matching `session_git_worktrees` ownership row; Project registry rows or reserved-root paths are not sufficient authority.
 - `[worktree-cleanup-non-force]` — manual worktree cleanup calls Runner Git worktree removal with `force=false`; local modifications or other Git safety failures leave cleanup failed for user intervention instead of deleting data.
+- `[worktree-delete-cleanup-fence]` — hard Session deletion locks the SessionAgent root and AgentSession rows, then requires no live ActionExecution and all worktree allocations `cleaned`; otherwise it preserves durable rows and returns a retryable conflict.
 - `[project-root-action-policy]` — Project browser root entries expose backend capabilities; filesystem delete, move, and rename are disabled for Project roots, registry removal is available only for existing session Project rows, and destructive `delete_worktree` is available only for backend-identified Azents-owned worktree Projects.
 
 ## State Transitions
@@ -440,6 +500,10 @@ stateDiagram-v2
 
 ## Changelog
 
+- **2026-07-14** — v44. Defined exact Project, catalog, and preallocated progress-event reconciliation after ambiguous worktree action commits and cancellation.
+- **2026-07-14** — v43. Revalidated locked Workspace membership at both Session cleanup admission and final deletion, before any Runner cleanup and after in-flight cleanup respectively.
+- **2026-07-14** — v42. Locked Project registration authority through commit; bounded post-commit Skill projection; fenced every worktree mutation with Session/action/allocation authority; made ownership-loss cancellation zero-write; and deferred hard Session deletion until live worktree actions are gone and cleanup is durably complete.
+- **2026-07-14** — v41. Defined the short database snapshot/revalidation boundaries around Runner-backed Project registration and best-effort post-commit Skill projection refresh/invalidation.
 - **2026-07-14** — v40. Defined worktree operation ownership fencing, live-only execution rows, atomic durable terminal handover, cancelled outcomes, and no-reexecution takeover recovery.
 - **2026-07-13** — v39. Separated instance-wide system administration from Workspace roles and documented that Admin bootstrap creates no Workspace or membership.
 - **2026-07-12** — v38. Clarified buffer-keyed worktree claims, buffer-only action transport, same-run context rebuilding, and terminal result history.

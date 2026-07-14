@@ -40,7 +40,12 @@ from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.event import RDBEvent
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
-from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
+from azents.repos.agent_execution import (
+    AgentRunNotActiveError,
+    AgentRunOwnershipLostError,
+    AgentRunRepository,
+    EventTranscriptRepository,
+)
 from azents.repos.agent_execution.data import AgentRunCreate, EventCreate
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSessionCreate
@@ -513,6 +518,10 @@ class TestEventExecutionRepositories:
 
         concurrent_input: Event | None = None
 
+        async def allow_run_write(session: AsyncSession) -> None:
+            """Allow compaction writes in this transaction-boundary test."""
+            del session
+
         async def summarize(
             old_events: Sequence[Event],
             summary_budget: object,
@@ -546,6 +555,7 @@ class TestEventExecutionRepositories:
             transcript=[first],
             compaction_id="compaction-lock-test",
             summarize=summarize,
+            write_fence=allow_run_write,
         )
 
         assert summary is not None
@@ -678,6 +688,103 @@ class TestEventExecutionRepositories:
         assert await repo.list_input_event_ids(rdb_session, run_id=pending.id) == [
             event.id
         ]
+
+    async def test_active_owner_lock_rejects_stale_generation_without_mutation(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """A replaced Session owner cannot acquire durable Run write authority."""
+        workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
+            rdb_session,
+            "event-runtime-owner-fence",
+        )
+        session_repo = _agent_session_repository()
+        event_session = await session_repo.create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        generation = await session_repo.claim_owner_generation(
+            rdb_session,
+            event_session.id,
+        )
+        repo = AgentRunRepository()
+        run = await repo.create(
+            rdb_session,
+            AgentRunCreate(
+                session_id=event_session.id,
+                parent_agent_run_id=None,
+            ),
+        )
+
+        locked = await repo.lock_active_owner(
+            rdb_session,
+            run_id=run.id,
+            session_id=event_session.id,
+            owner_generation=generation,
+        )
+        with pytest.raises(AgentRunOwnershipLostError) as error:
+            await repo.lock_active_owner(
+                rdb_session,
+                run_id=run.id,
+                session_id=event_session.id,
+                owner_generation=generation - 1,
+            )
+
+        assert locked == run
+        assert error.value.current_owner_generation == generation
+        assert await repo.get_by_id(rdb_session, run.id) == run
+
+    async def test_active_owner_lock_rejects_replaced_run(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """An old Run cannot write after a newer active Run replaces it."""
+        workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
+            rdb_session,
+            "event-runtime-run-fence",
+        )
+        session_repo = _agent_session_repository()
+        event_session = await session_repo.create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        generation = await session_repo.claim_owner_generation(
+            rdb_session,
+            event_session.id,
+        )
+        repo = AgentRunRepository()
+        stale = await repo.create(
+            rdb_session,
+            AgentRunCreate(
+                session_id=event_session.id,
+                parent_agent_run_id=None,
+            ),
+        )
+        active = await repo.create(
+            rdb_session,
+            AgentRunCreate(
+                session_id=event_session.id,
+                parent_agent_run_id=None,
+            ),
+        )
+
+        with pytest.raises(AgentRunOwnershipLostError) as error:
+            await repo.lock_active_owner(
+                rdb_session,
+                run_id=stale.id,
+                session_id=event_session.id,
+                owner_generation=generation,
+            )
+
+        assert error.value.active_run_id == active.id
 
     async def test_child_run_parentage_is_independent_of_session_inference_state(
         self,
@@ -1089,6 +1196,293 @@ class TestEventExecutionRepositories:
 
         assert after_fallback is not None
         assert after_fallback.status == AgentRunStatus.INTERRUPTED
+
+    async def test_user_stop_converges_engine_interrupted_run(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Explicit User stop may canonicalize the engine's interrupted winner."""
+        workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
+            rdb_session,
+            "event-runtime-user-stop-convergence",
+        )
+        event_session = await _agent_session_repository().create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        repo = AgentRunRepository()
+        run = await repo.create(
+            rdb_session,
+            AgentRunCreate(
+                session_id=event_session.id,
+                parent_agent_run_id=None,
+            ),
+        )
+        interrupted = await repo.mark_terminal(
+            rdb_session,
+            run.id,
+            AgentRunStatus.INTERRUPTED,
+            ended_at=datetime.datetime.now(datetime.UTC),
+            terminal_result_message="preserved partial",
+        )
+
+        stopped = await repo.mark_stopped_for_user_stop(
+            rdb_session,
+            run.id,
+            ended_at=datetime.datetime.now(datetime.UTC),
+            last_completed_event_id=interrupted.last_completed_event_id,
+            terminal_result_event_id=interrupted.terminal_result_event_id,
+            terminal_result_message=interrupted.terminal_result_message,
+        )
+
+        assert stopped.status == AgentRunStatus.STOPPED
+        assert stopped.phase == AgentRunPhase.IDLE
+        assert stopped.terminal_result_message == "preserved partial"
+
+    async def test_mark_terminal_rejects_another_terminal_winner(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """A stale terminal writer aborts its surrounding durable event transaction."""
+        workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
+            rdb_session,
+            "event-runtime-terminal-conflict",
+        )
+        event_session = await _agent_session_repository().create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        repo = AgentRunRepository()
+        run = await repo.create(
+            rdb_session,
+            AgentRunCreate(
+                session_id=event_session.id,
+                parent_agent_run_id=None,
+            ),
+        )
+        stopped = await repo.mark_terminal(
+            rdb_session,
+            run.id,
+            AgentRunStatus.STOPPED,
+            ended_at=datetime.datetime.now(datetime.UTC),
+        )
+
+        with pytest.raises(AgentRunNotActiveError) as error:
+            await repo.mark_terminal(
+                rdb_session,
+                run.id,
+                AgentRunStatus.COMPLETED,
+                ended_at=datetime.datetime.now(datetime.UTC),
+            )
+
+        assert error.value.status == AgentRunStatus.STOPPED
+        current = await repo.get_by_id(rdb_session, run.id)
+        assert current == stopped
+
+    async def test_terminal_run_rejects_late_phase_and_retry_updates(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Late worker snapshots cannot resurrect phase or retry projections."""
+        workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
+            rdb_session,
+            "event-runtime-terminal-update-guard",
+        )
+        event_session = await _agent_session_repository().create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        repo = AgentRunRepository()
+        run = await repo.create(
+            rdb_session,
+            AgentRunCreate(
+                session_id=event_session.id,
+                parent_agent_run_id=None,
+            ),
+        )
+        completed_at = datetime.datetime.now(datetime.UTC)
+        await repo.mark_terminal(
+            rdb_session,
+            run.id,
+            AgentRunStatus.COMPLETED,
+            ended_at=completed_at,
+        )
+
+        with pytest.raises(AgentRunNotActiveError):
+            await repo.update_phase(
+                rdb_session,
+                run.id,
+                AgentRunPhase.WAITING_FOR_MODEL,
+            )
+        with pytest.raises(AgentRunNotActiveError):
+            await repo.update_retry_state(rdb_session, run.id, None)
+
+        current = await repo.get_by_id(rdb_session, run.id)
+        assert current is not None
+        assert current.status == AgentRunStatus.COMPLETED
+        assert current.phase == AgentRunPhase.IDLE
+        assert current.retry_state is None
+        assert current.ended_at == completed_at
+
+    async def test_terminal_conditional_update_returns_concurrent_winner(
+        self,
+        rdb_engine: AsyncEngine,
+        latest_db_schema: None,
+    ) -> None:
+        """A late terminal writer observes rather than overwrites the winner."""
+        del latest_db_schema
+        session_factory = async_sessionmaker(rdb_engine, expire_on_commit=False)
+        async with session_factory() as setup_session:
+            workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
+                setup_session,
+                "event-runtime-terminal-race",
+            )
+            event_session = await _agent_session_repository().create(
+                setup_session,
+                AgentSessionCreate(
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                    title=None,
+                ),
+            )
+            run = await AgentRunRepository().create(
+                setup_session,
+                AgentRunCreate(
+                    session_id=event_session.id,
+                    parent_agent_run_id=None,
+                ),
+            )
+            await setup_session.commit()
+
+        repo = AgentRunRepository()
+        completed_at = datetime.datetime.now(datetime.UTC)
+        interrupted_at = completed_at + datetime.timedelta(seconds=1)
+        async with (
+            session_factory() as completion_session,
+            session_factory() as fallback_session,
+        ):
+            completion_tx = await completion_session.begin()
+            completed = await repo.mark_terminal_if_running(
+                completion_session,
+                run.id,
+                AgentRunStatus.COMPLETED,
+                ended_at=completed_at,
+                terminal_result_event_id="completed-event",
+            )
+            fallback_task = asyncio.create_task(
+                repo.mark_terminal_if_running(
+                    fallback_session,
+                    run.id,
+                    AgentRunStatus.INTERRUPTED,
+                    ended_at=interrupted_at,
+                    terminal_result_event_id="interrupted-event",
+                )
+            )
+            try:
+                with pytest.raises(asyncio.TimeoutError):
+                    await asyncio.wait_for(
+                        asyncio.shield(fallback_task),
+                        timeout=0.2,
+                    )
+                await completion_tx.commit()
+                after_fallback = await asyncio.wait_for(fallback_task, timeout=2)
+                await fallback_session.commit()
+            finally:
+                if completion_tx.is_active:
+                    await completion_tx.rollback()
+                if not fallback_task.done():
+                    fallback_task.cancel()
+                    with pytest.raises(asyncio.CancelledError):
+                        await fallback_task
+
+        assert completed is not None
+        assert completed.status == AgentRunStatus.COMPLETED
+        assert after_fallback is not None
+        assert after_fallback.status == AgentRunStatus.COMPLETED
+        assert after_fallback.ended_at == completed_at
+        assert after_fallback.terminal_result_event_id == "completed-event"
+
+    async def test_phase_update_waiting_on_terminal_race_is_rejected(
+        self,
+        rdb_engine: AsyncEngine,
+        latest_db_schema: None,
+    ) -> None:
+        """A phase write queued behind completion cannot revive the Run."""
+        del latest_db_schema
+        session_factory = async_sessionmaker(rdb_engine, expire_on_commit=False)
+        async with session_factory() as setup_session:
+            workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
+                setup_session,
+                "event-runtime-phase-terminal-race",
+            )
+            event_session = await _agent_session_repository().create(
+                setup_session,
+                AgentSessionCreate(
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                    title=None,
+                ),
+            )
+            run = await AgentRunRepository().create(
+                setup_session,
+                AgentRunCreate(
+                    session_id=event_session.id,
+                    parent_agent_run_id=None,
+                ),
+            )
+            await setup_session.commit()
+
+        repo = AgentRunRepository()
+        async with (
+            session_factory() as terminal_session,
+            session_factory() as phase_session,
+        ):
+            terminal_tx = await terminal_session.begin()
+            await repo.mark_terminal_if_running(
+                terminal_session,
+                run.id,
+                AgentRunStatus.COMPLETED,
+                ended_at=datetime.datetime.now(datetime.UTC),
+            )
+            phase_task = asyncio.create_task(
+                repo.update_phase(
+                    phase_session,
+                    run.id,
+                    AgentRunPhase.WAITING_FOR_MODEL,
+                )
+            )
+            try:
+                with pytest.raises(asyncio.TimeoutError):
+                    await asyncio.wait_for(asyncio.shield(phase_task), timeout=0.2)
+                await terminal_tx.commit()
+                with pytest.raises(AgentRunNotActiveError):
+                    await asyncio.wait_for(phase_task, timeout=2)
+                await phase_session.rollback()
+            finally:
+                if terminal_tx.is_active:
+                    await terminal_tx.rollback()
+                if not phase_task.done():
+                    phase_task.cancel()
+                    with pytest.raises(asyncio.CancelledError):
+                        await phase_task
+
+        async with session_factory() as verify_session:
+            current = await repo.get_by_id(verify_session, run.id)
+        assert current is not None
+        assert current.status == AgentRunStatus.COMPLETED
+        assert current.phase == AgentRunPhase.IDLE
 
     async def test_agent_run_index_increments_per_session(
         self,

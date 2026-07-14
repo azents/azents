@@ -215,6 +215,11 @@ class SubagentSessionReadOnly:
 
 
 @dataclasses.dataclass(frozen=True)
+class SessionWorktreeCleanupIncomplete:
+    """Session deletion is deferred until Git worktree cleanup is durable."""
+
+
+@dataclasses.dataclass(frozen=True)
 class InvalidGoalStatusTransition:
     """Disallowed Goal status transition."""
 
@@ -238,7 +243,9 @@ class InvalidSessionTitle:
 
 EnsureSessionError = AgentNotFound | NotWorkspaceMember | SessionAccessDenied
 SessionAccessError = SessionNotFound | SessionAccessDenied
-DeleteSessionError = SessionAccessDenied | SubagentSessionReadOnly
+DeleteSessionError = (
+    SessionAccessDenied | SubagentSessionReadOnly | SessionWorktreeCleanupIncomplete
+)
 DeleteInputBufferError = SessionNotFound | SessionAccessDenied | SubagentSessionReadOnly
 UpdateGoalError = (
     SessionNotFound

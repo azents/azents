@@ -60,6 +60,10 @@ class ActionExecutionEvent(BaseModel):
 class ActionExecutionEventCreate(BaseModel):
     """Action execution event create schema."""
 
+    id: str | None = Field(
+        default=None,
+        description="Optional preallocated event ID for commit reconciliation",
+    )
     action_execution_id: str = Field(description="Action execution ID")
     session_id: str = Field(description="AgentSession ID")
     kind: ActionExecutionEventKind = Field(description="Progress event kind")

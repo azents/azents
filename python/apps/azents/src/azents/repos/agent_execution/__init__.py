@@ -34,6 +34,44 @@ from .data import (
 
 _JSON_OBJECT_ADAPTER = TypeAdapter[dict[str, JSONValue]](dict[str, JSONValue])
 _MODEL_ORDER_STEP = 1000
+_ACTIVE_RUN_STATUSES = (AgentRunStatus.PENDING, AgentRunStatus.RUNNING)
+
+
+class AgentRunNotActiveError(RuntimeError):
+    """A stale writer tried to mutate a terminal AgentRun."""
+
+    def __init__(self, run_id: str, status: AgentRunStatus) -> None:
+        """Create an error carrying the immutable terminal status."""
+        super().__init__(f"AgentRun {run_id} is already terminal: {status.value}")
+        self.run_id = run_id
+        self.status = status
+
+
+class AgentRunOwnershipLostError(RuntimeError):
+    """A stale Session owner tried to mutate an active AgentRun."""
+
+    def __init__(
+        self,
+        *,
+        run_id: str,
+        session_id: str,
+        expected_owner_generation: int,
+        current_owner_generation: int | None,
+        active_run_id: str | None,
+    ) -> None:
+        """Create an error carrying the rejected durable authority."""
+        super().__init__(
+            "AgentRun durable write authority was lost: "
+            f"run={run_id}, session={session_id}, "
+            f"expected_generation={expected_owner_generation}, "
+            f"current_generation={current_owner_generation}, "
+            f"active_run={active_run_id}"
+        )
+        self.run_id = run_id
+        self.session_id = session_id
+        self.expected_owner_generation = expected_owner_generation
+        self.current_owner_generation = current_owner_generation
+        self.active_run_id = active_run_id
 
 
 def _validate_payload(
@@ -756,6 +794,63 @@ class AgentRunRepository:
         )
         return self._build(rdb) if rdb is not None else None
 
+    async def lock_active_owner(
+        self,
+        session: AsyncSession,
+        *,
+        run_id: str,
+        session_id: str,
+        owner_generation: int,
+    ) -> AgentRunState:
+        """Lock and validate one Run's exact durable Session authority.
+
+        AgentSession is always locked before AgentRun so ownership handover and
+        run replacement serialize with every execution-owned durable write.
+        """
+        rdb_session = await session.scalar(
+            sa.select(RDBAgentSession)
+            .where(RDBAgentSession.id == session_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if rdb_session is None:
+            raise ValueError("AgentSession not found")
+
+        active = await session.scalar(
+            sa.select(RDBAgentRun)
+            .where(
+                RDBAgentRun.session_id == session_id,
+                RDBAgentRun.status.in_(_ACTIVE_RUN_STATUSES),
+            )
+            .order_by(RDBAgentRun.run_index.desc())
+            .limit(1)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        active_run_id = active.id if active is not None else None
+        if (
+            rdb_session.owner_generation != owner_generation
+            or active is None
+            or active.id != run_id
+            or active.status != AgentRunStatus.RUNNING
+        ):
+            if rdb_session.owner_generation == owner_generation and active is None:
+                current = await self._get_current_rdb(session, run_id)
+                if (
+                    current is not None
+                    and current.session_id == session_id
+                    and current.status not in _ACTIVE_RUN_STATUSES
+                ):
+                    raise AgentRunNotActiveError(run_id, current.status)
+            raise AgentRunOwnershipLostError(
+                run_id=run_id,
+                session_id=session_id,
+                expected_owner_generation=owner_generation,
+                current_owner_generation=rdb_session.owner_generation,
+                active_run_id=active_run_id,
+            )
+        return self._build(active)
+
     async def get_running_by_session_id(
         self,
         session: AsyncSession,
@@ -783,11 +878,18 @@ class AgentRunRepository:
         patch: AgentRunPatch,
     ) -> AgentRunState:
         """Update Agent run state."""
-        rdb = await session.get(RDBAgentRun, run_id)
+        rdb = await session.scalar(
+            sa.select(RDBAgentRun)
+            .where(RDBAgentRun.id == run_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
         if rdb is None:
             raise ValueError("Agent run not found")
 
         values = patch.model_dump(exclude_unset=True)
+        if values and rdb.status not in _ACTIVE_RUN_STATUSES:
+            raise AgentRunNotActiveError(run_id, rdb.status)
         if "active_tool_calls" in values:
             values["active_tool_calls"] = [
                 call.model_dump(mode="json", exclude_none=True)
@@ -815,28 +917,17 @@ class AgentRunRepository:
         active_tool_calls: list[ActiveToolCall] | None = None,
     ) -> AgentRunState:
         """Update phase and active model/tool call projections."""
-        model_call_started_at: datetime.datetime | None
+        values: dict[str, object] = {"phase": phase}
         if phase == AgentRunPhase.WAITING_FOR_MODEL:
-            model_call_started_at = datetime.datetime.now(datetime.UTC)
-        elif phase == AgentRunPhase.STREAMING_MODEL:
-            current = await self.get_by_id(session, run_id)
-            if current is None:
-                raise ValueError("Agent run not found")
-            model_call_started_at = current.model_call_started_at
-        else:
-            model_call_started_at = None
-        if active_tool_calls is None:
-            patch = AgentRunPatch(
-                phase=phase,
-                model_call_started_at=model_call_started_at,
-            )
-        else:
-            patch = AgentRunPatch(
-                phase=phase,
-                model_call_started_at=model_call_started_at,
-                active_tool_calls=active_tool_calls,
-            )
-        return await self.update(session, run_id, patch)
+            values["model_call_started_at"] = datetime.datetime.now(datetime.UTC)
+        elif phase != AgentRunPhase.STREAMING_MODEL:
+            values["model_call_started_at"] = None
+        if active_tool_calls is not None:
+            values["active_tool_calls"] = [
+                call.model_dump(mode="json", exclude_none=True)
+                for call in active_tool_calls
+            ]
+        return await self._update_running_values(session, run_id, values)
 
     async def update_retry_state(
         self,
@@ -845,13 +936,17 @@ class AgentRunRepository:
         retry_state: FailedRunRetryState | None,
     ) -> AgentRunState:
         """Set or clear durable failed-run retry state."""
-        return await self.update(
+        return await self._update_running_values(
             session,
             run_id,
-            AgentRunPatch(
-                retry_state=retry_state,
-                model_call_started_at=None,
-            ),
+            {
+                "retry_state": (
+                    retry_state.model_dump(mode="json", exclude_none=True)
+                    if retry_state is not None
+                    else None
+                ),
+                "model_call_started_at": None,
+            },
         )
 
     async def mark_terminal(
@@ -866,21 +961,21 @@ class AgentRunRepository:
         terminal_result_message: str | None = None,
     ) -> AgentRunState:
         """Transition Run to terminal state."""
-        return await self.update(
+        terminal = await self._mark_terminal_if_statuses(
             session,
             run_id,
-            AgentRunPatch(
-                status=status,
-                phase=AgentRunPhase.IDLE,
-                active_tool_calls=[],
-                model_call_started_at=None,
-                retry_state=None,
-                ended_at=ended_at,
-                last_completed_event_id=last_completed_event_id,
-                terminal_result_event_id=terminal_result_event_id,
-                terminal_result_message=terminal_result_message,
-            ),
+            status,
+            allowed_statuses=_ACTIVE_RUN_STATUSES,
+            ended_at=ended_at,
+            last_completed_event_id=last_completed_event_id,
+            terminal_result_event_id=terminal_result_event_id,
+            terminal_result_message=terminal_result_message,
         )
+        if terminal is None:
+            raise ValueError("Agent run not found")
+        if terminal.status != status:
+            raise AgentRunNotActiveError(run_id, terminal.status)
+        return terminal
 
     async def mark_terminal_if_running(
         self,
@@ -894,23 +989,119 @@ class AgentRunRepository:
         terminal_result_message: str | None = None,
     ) -> AgentRunState | None:
         """Close Run as terminal state if it is still running."""
-        rdb = await session.get(RDBAgentRun, run_id)
-        if rdb is None:
-            return None
-        if rdb.status != AgentRunStatus.RUNNING:
-            return self._build(rdb)
-        rdb.status = status
-        rdb.phase = AgentRunPhase.IDLE
-        rdb.active_tool_calls = []
-        rdb.model_call_started_at = None
-        rdb.retry_state = None
-        rdb.ended_at = ended_at
-        rdb.last_completed_event_id = last_completed_event_id
-        rdb.terminal_result_event_id = terminal_result_event_id
-        rdb.terminal_result_message = terminal_result_message
+        return await self._mark_terminal_if_statuses(
+            session,
+            run_id,
+            status,
+            allowed_statuses=(AgentRunStatus.RUNNING,),
+            ended_at=ended_at,
+            last_completed_event_id=last_completed_event_id,
+            terminal_result_event_id=terminal_result_event_id,
+            terminal_result_message=terminal_result_message,
+        )
+
+    async def mark_stopped_for_user_stop(
+        self,
+        session: AsyncSession,
+        run_id: str,
+        *,
+        ended_at: datetime.datetime,
+        last_completed_event_id: str | None = None,
+        terminal_result_event_id: str | None = None,
+        terminal_result_message: str | None = None,
+    ) -> AgentRunState:
+        """Converge an active or engine-interrupted Run to an explicit User stop."""
+        stopped = await self._mark_terminal_if_statuses(
+            session,
+            run_id,
+            AgentRunStatus.STOPPED,
+            allowed_statuses=(*_ACTIVE_RUN_STATUSES, AgentRunStatus.INTERRUPTED),
+            ended_at=ended_at,
+            last_completed_event_id=last_completed_event_id,
+            terminal_result_event_id=terminal_result_event_id,
+            terminal_result_message=terminal_result_message,
+        )
+        if stopped is None:
+            raise ValueError("Agent run not found")
+        return stopped
+
+    async def _update_running_values(
+        self,
+        session: AsyncSession,
+        run_id: str,
+        values: dict[str, object],
+    ) -> AgentRunState:
+        """Atomically update a running Run or reject a stale terminal writer."""
+        updated_id = await session.scalar(
+            sa.update(RDBAgentRun)
+            .where(
+                RDBAgentRun.id == run_id,
+                RDBAgentRun.status == AgentRunStatus.RUNNING,
+            )
+            .values(**values)
+            .returning(RDBAgentRun.id)
+        )
+        if updated_id is None:
+            current = await self._get_current_rdb(session, run_id)
+            if current is None:
+                raise ValueError("Agent run not found")
+            raise AgentRunNotActiveError(run_id, current.status)
         await session.flush()
-        await session.refresh(rdb)
-        return self._build(rdb)
+        updated = await self._get_current_rdb(session, run_id)
+        if updated is None:
+            raise ValueError("Agent run not found")
+        return self._build(updated)
+
+    async def _mark_terminal_if_statuses(
+        self,
+        session: AsyncSession,
+        run_id: str,
+        status: AgentRunStatus,
+        *,
+        allowed_statuses: Sequence[AgentRunStatus],
+        ended_at: datetime.datetime,
+        last_completed_event_id: str | None,
+        terminal_result_event_id: str | None,
+        terminal_result_message: str | None,
+    ) -> AgentRunState | None:
+        """Atomically close an active Run and return immutable terminal state."""
+        if status in _ACTIVE_RUN_STATUSES:
+            raise ValueError("Terminal AgentRun status is required")
+        updated_id = await session.scalar(
+            sa.update(RDBAgentRun)
+            .where(
+                RDBAgentRun.id == run_id,
+                RDBAgentRun.status.in_(allowed_statuses),
+            )
+            .values(
+                status=status,
+                phase=AgentRunPhase.IDLE,
+                active_tool_calls=[],
+                model_call_started_at=None,
+                retry_state=None,
+                ended_at=ended_at,
+                last_completed_event_id=last_completed_event_id,
+                terminal_result_event_id=terminal_result_event_id,
+                terminal_result_message=terminal_result_message,
+            )
+            .returning(RDBAgentRun.id)
+        )
+        if updated_id is not None:
+            await session.flush()
+        current = await self._get_current_rdb(session, run_id)
+        return self._build(current) if current is not None else None
+
+    async def _get_current_rdb(
+        self,
+        session: AsyncSession,
+        run_id: str,
+    ) -> RDBAgentRun | None:
+        """Reload one row after an atomic update, bypassing stale identity state."""
+        return await session.scalar(
+            sa.select(RDBAgentRun)
+            .where(RDBAgentRun.id == run_id)
+            .execution_options(populate_existing=True)
+        )
 
     def _build(self, rdb: RDBAgentRun) -> AgentRunState:
         """Convert RDB row to domain model."""

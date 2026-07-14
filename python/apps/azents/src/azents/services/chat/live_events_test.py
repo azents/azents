@@ -1,5 +1,6 @@
 """Live event store tests."""
 
+import asyncio
 import datetime
 from collections.abc import AsyncGenerator
 
@@ -19,6 +20,7 @@ from azents.engine.events.types import (
 )
 from azents.repos.input_buffer.data import InputBuffer
 
+from . import live_events as live_events_module
 from .live_events import (
     InMemoryLiveEventStore,
     LiveEventStore,
@@ -26,6 +28,20 @@ from .live_events import (
     active_tool_call_to_live_event,
     input_buffer_to_live_event,
 )
+
+
+class _HangingRedis:
+    """Redis double whose projection read never returns."""
+
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+
+    async def hvals(self, key: str) -> list[bytes]:
+        """Block one hash read until the caller's deadline expires."""
+        del key
+        self.started.set()
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
 
 
 def test_user_input_buffer_live_event_preserves_nullable_requested_profile() -> None:
@@ -158,6 +174,43 @@ async def test_in_memory_live_event_store_contract() -> None:
 async def test_redis_live_event_store_contract(redis: Redis) -> None:
     """Redis live event store contract."""
     await _assert_live_store_contract(RedisLiveEventStore(redis))
+
+
+@pytest.mark.asyncio
+async def test_redis_live_event_store_bounds_hung_projection_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A hung Redis response cannot block non-durable projection callers."""
+    monkeypatch.setattr(
+        live_events_module,
+        "_LIVE_EVENT_REDIS_OPERATION_TIMEOUT_SECONDS",
+        0.01,
+    )
+    store = RedisLiveEventStore(_HangingRedis())
+
+    with pytest.raises(TimeoutError):
+        await store.list_by_session_id("session-1")
+
+
+@pytest.mark.asyncio
+async def test_redis_live_event_store_preserves_caller_cancellation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The projection deadline does not turn caller cancellation into timeout."""
+    monkeypatch.setattr(
+        live_events_module,
+        "_LIVE_EVENT_REDIS_OPERATION_TIMEOUT_SECONDS",
+        60,
+    )
+    redis = _HangingRedis()
+    task = asyncio.create_task(
+        RedisLiveEventStore(redis).list_by_session_id("session-1")
+    )
+    await redis.started.wait()
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
 
 
 def test_active_tool_call_projection_has_stable_live_shape() -> None:

@@ -49,6 +49,7 @@ async def test_goal_toolkit_exposes_goal_tools() -> None:
         workspace_id="workspace-1",
         model="model",
         run_id="run-1",
+        owner_generation=1,
         session_id="session-1",
         publish_event=AsyncMock(),
     )
@@ -208,11 +209,16 @@ async def test_create_goal_rejects_existing_unfinished_goal() -> None:
     async def update(
         _agent_id: str,
         _session_id: str,
+        *,
+        run_id: str,
+        owner_generation: int,
         mutator: Callable[[GoalState], GoalState],
     ) -> GoalState:
+        assert run_id == "run-1"
+        assert owner_generation == 1
         return mutator(GoalState(objective="Existing", status="active"))
 
-    store.update.side_effect = update
+    store.update_for_run.side_effect = update
     toolkit = GoalToolkit(store=store, agent_id="agent-1", session_id="session-1")
     state = await toolkit.update_context(
         TurnContext(
@@ -220,6 +226,7 @@ async def test_create_goal_rejects_existing_unfinished_goal() -> None:
             workspace_id="workspace-1",
             model="model",
             run_id="run-1",
+            owner_generation=1,
             session_id="session-1",
             publish_event=AsyncMock(),
         )
@@ -237,8 +244,15 @@ async def test_update_goal_complete_appends_briefing_event() -> None:
     async def update(
         _agent_id: str,
         _session_id: str,
+        *,
+        run_id: str,
+        owner_generation: int,
+        completed_at: str,
         mutator: Callable[[GoalState], GoalState],
     ) -> GoalState:
+        assert run_id == "run-1"
+        assert owner_generation == 1
+        assert completed_at
         return mutator(
             GoalState(
                 objective="Ship the feature",
@@ -248,7 +262,7 @@ async def test_update_goal_complete_appends_briefing_event() -> None:
             )
         )
 
-    store.update.side_effect = update
+    store.update_for_run_and_append_briefing.side_effect = update
     toolkit = GoalToolkit(store=store, agent_id="agent-1", session_id="session-1")
     state = await toolkit.update_context(
         TurnContext(
@@ -256,6 +270,7 @@ async def test_update_goal_complete_appends_briefing_event() -> None:
             workspace_id="workspace-1",
             model="model",
             run_id="run-1",
+            owner_generation=1,
             session_id="session-1",
             publish_event=AsyncMock(),
         )
@@ -264,12 +279,7 @@ async def test_update_goal_complete_appends_briefing_event() -> None:
 
     await update_goal.handler('{"status":"complete"}')
 
-    store.append_briefing_event.assert_awaited_once()
-    _, kwargs = store.append_briefing_event.await_args
-    assert kwargs["objective"] == "Ship the feature"
-    assert kwargs["created_at"] == "2026-06-15T12:00:00+00:00"
-    assert kwargs["duration_seconds"] is not None
-    assert kwargs["duration_seconds"] >= 0
+    store.update_for_run_and_append_briefing.assert_awaited_once()
 
 
 async def test_update_goal_blocked_does_not_append_briefing_event() -> None:
@@ -279,11 +289,16 @@ async def test_update_goal_blocked_does_not_append_briefing_event() -> None:
     async def update(
         _agent_id: str,
         _session_id: str,
+        *,
+        run_id: str,
+        owner_generation: int,
         mutator: Callable[[GoalState], GoalState],
     ) -> GoalState:
+        assert run_id == "run-1"
+        assert owner_generation == 1
         return mutator(GoalState(objective="Blocked goal", status="active"))
 
-    store.update.side_effect = update
+    store.update_for_run.side_effect = update
     toolkit = GoalToolkit(store=store, agent_id="agent-1", session_id="session-1")
     state = await toolkit.update_context(
         TurnContext(
@@ -291,6 +306,7 @@ async def test_update_goal_blocked_does_not_append_briefing_event() -> None:
             workspace_id="workspace-1",
             model="model",
             run_id="run-1",
+            owner_generation=1,
             session_id="session-1",
             publish_event=AsyncMock(),
         )
@@ -299,4 +315,4 @@ async def test_update_goal_blocked_does_not_append_briefing_event() -> None:
 
     await update_goal.handler('{"status":"blocked"}')
 
-    store.append_briefing_event.assert_not_awaited()
+    store.update_for_run_and_append_briefing.assert_not_awaited()

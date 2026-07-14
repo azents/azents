@@ -154,6 +154,23 @@ class WorkspaceUserRepository:
             return None
         return self._build_workspace_user(rdb_workspace_user)
 
+    async def lock_by_workspace_and_user(
+        self, session: AsyncSession, workspace_id: str, user_id: str
+    ) -> WorkspaceUser | None:
+        """Fetch WorkspaceUser by Workspace and User IDs with a row lock."""
+        result = await session.execute(
+            sa.select(RDBWorkspaceUser)
+            .where(
+                RDBWorkspaceUser.workspace_id == workspace_id,
+                RDBWorkspaceUser.user_id == user_id,
+            )
+            .with_for_update()
+        )
+        rdb_workspace_user = result.scalar_one_or_none()
+        if rdb_workspace_user is None:
+            return None
+        return self._build_workspace_user(rdb_workspace_user)
+
     async def list_by_user(
         self, session: AsyncSession, user_id: str
     ) -> WorkspaceUserList:

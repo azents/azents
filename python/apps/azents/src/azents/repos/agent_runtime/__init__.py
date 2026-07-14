@@ -74,6 +74,22 @@ class AgentRuntimeRepository:
             return None
         return self._build(rdb)
 
+    async def lock_by_agent_id(
+        self,
+        session: AsyncSession,
+        agent_id: str,
+    ) -> AgentRuntime | None:
+        """Fetch an AgentRuntime by Agent ID with a row lock."""
+        result = await session.execute(
+            sa.select(RDBAgentRuntime)
+            .where(RDBAgentRuntime.agent_id == agent_id)
+            .with_for_update()
+        )
+        rdb = result.scalar_one_or_none()
+        if rdb is None:
+            return None
+        return self._build(rdb)
+
     async def ensure_for_agent(
         self,
         session: AsyncSession,

@@ -112,6 +112,7 @@ def _make_context(
         workspace_id="ws-1",
         model="test-model",
         run_id="run-1",
+        owner_generation=1,
         publish_event=AsyncMock(),
     )
 

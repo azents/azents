@@ -230,3 +230,6 @@ USER_STOP_CANCEL_MESSAGE = "azents:user_stop"
 
 SHUTDOWN_CANCEL_MESSAGE = "azents:shutdown"
 """asyncio task cancel message identifying shutdown/handover cancellation."""
+
+OWNERSHIP_LOST_CANCEL_MESSAGE = "azents:ownership_lost"
+"""asyncio task cancel message identifying loss of Session ownership."""

@@ -14,6 +14,7 @@ class ContentDelta(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     type: Literal["content_delta"] = "content_delta"
+    run_id: str
     delta: str
     content_index: int
 
@@ -36,6 +37,7 @@ class ReasoningDelta(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     type: Literal["reasoning_delta"] = "reasoning_delta"
+    run_id: str
     delta: str
 
 
@@ -144,6 +146,7 @@ class CompactionStarted(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     type: Literal["compaction_started"] = "compaction_started"
+    run_id: str
     continuing: bool = False
 
 
@@ -153,6 +156,7 @@ class CompactionComplete(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     type: Literal["compaction_complete"] = "compaction_complete"
+    run_id: str
     continuing: bool = False
 
 
@@ -162,6 +166,7 @@ class TodoStateChanged(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     type: Literal["todo_state_changed"] = "todo_state_changed"
+    run_id: str
     todo: dict[str, object]
 
 

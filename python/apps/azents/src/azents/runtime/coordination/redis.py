@@ -1,5 +1,6 @@
 """Redis-backed Agent Runtime coordination store."""
 
+import asyncio
 import base64
 import dataclasses
 import json
@@ -30,6 +31,26 @@ _BUSYGROUP_PREFIX = "BUSYGROUP"
 _PAYLOAD_FIELD = "payload"
 _DEFAULT_STREAM_TTL_SECONDS = 60 * 60
 _DEFAULT_CONNECTION_GENERATION_TTL_SECONDS = 7 * 24 * 60 * 60
+_DEFAULT_REDIS_OPERATION_TIMEOUT_SECONDS = 1.0
+_APPEND_STREAM_ENTRY_SCRIPT = """
+local cursor = redis.call('XADD', KEYS[1], '*', 'payload', ARGV[1])
+redis.call('EXPIRE', KEYS[1], tonumber(ARGV[2]))
+return cursor
+"""
+_ACK_STREAM_ENTRY_SCRIPT = """
+local acknowledged = redis.call('XACK', KEYS[1], ARGV[1], ARGV[2])
+redis.call('EXPIRE', KEYS[1], tonumber(ARGV[3]))
+return acknowledged
+"""
+_REGISTER_CONNECTION_SCRIPT = """
+local generation = redis.call('INCR', KEYS[1])
+redis.call('EXPIRE', KEYS[1], tonumber(ARGV[2]))
+local record = cjson.decode(ARGV[1])
+record['generation'] = generation
+local encoded = cjson.encode(record)
+redis.call('SET', KEYS[2], encoded, 'EX', tonumber(ARGV[3]))
+return encoded
+"""
 _GENERATION_FENCED_SET_CONNECTION_SCRIPT = """
 local raw = redis.call('GET', KEYS[1])
 if not raw then
@@ -137,7 +158,7 @@ end
 if ARGV[5] ~= '' then
   redis.call('EXPIRE', KEYS[2], tonumber(ARGV[5]))
 end
-return cursor
+return {cursor, encoded}
 """
 
 
@@ -153,12 +174,18 @@ class RedisRuntimeCoordinationStore:
         connection_generation_ttl_seconds: int = (
             _DEFAULT_CONNECTION_GENERATION_TTL_SECONDS
         ),
+        redis_operation_timeout_seconds: float = (
+            _DEFAULT_REDIS_OPERATION_TIMEOUT_SECONDS
+        ),
     ) -> None:
         """Initialize the Redis coordination store."""
+        if redis_operation_timeout_seconds <= 0:
+            raise ValueError("redis_operation_timeout_seconds must be positive")
         self._redis = redis
         self._key_prefix = key_prefix
         self._stream_ttl_seconds = stream_ttl_seconds
         self._connection_generation_ttl_seconds = connection_generation_ttl_seconds
+        self._redis_operation_timeout_seconds = redis_operation_timeout_seconds
 
     async def append_request(
         self,
@@ -166,13 +193,16 @@ class RedisRuntimeCoordinationStore:
         envelope: RuntimeRequestEnvelope,
     ) -> str:
         """Append a request envelope and return its cursor."""
-        stream_key = self._stream_key("request", stream_id)
-        cursor = await self._redis.xadd(
-            stream_key,
-            {_PAYLOAD_FIELD: _envelope_to_json(envelope)},
-        )
-        await self._refresh_stream_ttl(stream_key)
-        return _decode_text(cursor)
+        async with self._redis_operation_deadline(block_ms=0):
+            stream_key = self._stream_key("request", stream_id)
+            cursor = await self._redis.eval(
+                _APPEND_STREAM_ENTRY_SCRIPT,
+                1,
+                stream_key,
+                _envelope_to_json(envelope),
+                self._stream_ttl_seconds,
+            )
+            return _decode_text(cursor)
 
     async def claim_next_request(
         self,
@@ -184,44 +214,46 @@ class RedisRuntimeCoordinationStore:
         reclaim_idle_seconds: float | None = None,
     ) -> RuntimeRequestRecord | None:
         """Claim the next request for an active owner consumer."""
-        stream_key = self._stream_key("request", stream_id)
-        await self._refresh_stream_ttl(stream_key)
-        await self._ensure_group(stream_key, consumer_group)
-        await self._refresh_stream_ttl(stream_key)
-        if reclaim_idle_seconds is not None:
-            xautoclaim = cast(Any, self._redis).xautoclaim
-            reclaimed = await xautoclaim(
-                stream_key,
+        async with self._redis_operation_deadline(block_ms=block_ms):
+            stream_key = self._stream_key("request", stream_id)
+            await self._refresh_stream_ttl(stream_key)
+            await self._ensure_group(stream_key, consumer_group)
+            await self._refresh_stream_ttl(stream_key)
+            if reclaim_idle_seconds is not None:
+                xautoclaim = cast(Any, self._redis).xautoclaim
+                reclaimed = await xautoclaim(
+                    stream_key,
+                    consumer_group,
+                    consumer_id,
+                    int(reclaim_idle_seconds * 1000),
+                    start_id="0-0",
+                    count=1,
+                )
+                record = _request_record_from_xautoclaim(reclaimed)
+                if record is not None:
+                    await self._refresh_stream_ttl(stream_key)
+                    return record
+            block = block_ms if block_ms > 0 else None
+            result = await self._redis.xreadgroup(
                 consumer_group,
                 consumer_id,
-                int(reclaim_idle_seconds * 1000),
-                start_id="0-0",
+                {stream_key: ">"},
                 count=1,
+                block=block,
             )
-            record = _request_record_from_xautoclaim(reclaimed)
-            if record is not None:
-                await self._refresh_stream_ttl(stream_key)
-                return record
-        block = block_ms if block_ms > 0 else None
-        result = await self._redis.xreadgroup(
-            consumer_group,
-            consumer_id,
-            {stream_key: ">"},
-            count=1,
-            block=block,
-        )
-        streams = cast(
-            list[tuple[object, list[tuple[object, Mapping[object, object]]]]], result
-        )
-        if not streams:
-            return None
-        _stream_name, entries = streams[0]
-        cursor, fields = entries[0]
-        payload = _payload_field(fields)
-        return RuntimeRequestRecord(
-            cursor=_decode_text(cursor),
-            envelope=_envelope_from_json(payload),
-        )
+            streams = cast(
+                list[tuple[object, list[tuple[object, Mapping[object, object]]]]],
+                result,
+            )
+            if not streams:
+                return None
+            _stream_name, entries = streams[0]
+            cursor, fields = entries[0]
+            payload = _payload_field(fields)
+            return RuntimeRequestRecord(
+                cursor=_decode_text(cursor),
+                envelope=_envelope_from_json(payload),
+            )
 
     async def ack_request(
         self,
@@ -231,9 +263,16 @@ class RedisRuntimeCoordinationStore:
         cursor: str,
     ) -> None:
         """Acknowledge a claimed request."""
-        stream_key = self._stream_key("request", stream_id)
-        await self._redis.xack(stream_key, consumer_group, cursor)
-        await self._refresh_stream_ttl(stream_key)
+        async with self._redis_operation_deadline(block_ms=0):
+            stream_key = self._stream_key("request", stream_id)
+            await self._redis.eval(
+                _ACK_STREAM_ENTRY_SCRIPT,
+                1,
+                stream_key,
+                consumer_group,
+                cursor,
+                self._stream_ttl_seconds,
+            )
 
     async def append_reply(
         self,
@@ -241,13 +280,16 @@ class RedisRuntimeCoordinationStore:
         event: RuntimeReplyEvent,
     ) -> str:
         """Append a reply event and return its cursor."""
-        stream_key = self._stream_key("reply", stream_id)
-        cursor = await self._redis.xadd(
-            stream_key,
-            {_PAYLOAD_FIELD: _reply_event_to_json(event)},
-        )
-        await self._refresh_stream_ttl(stream_key)
-        return _decode_text(cursor)
+        async with self._redis_operation_deadline(block_ms=0):
+            stream_key = self._stream_key("reply", stream_id)
+            cursor = await self._redis.eval(
+                _APPEND_STREAM_ENTRY_SCRIPT,
+                1,
+                stream_key,
+                _reply_event_to_json(event),
+                self._stream_ttl_seconds,
+            )
+            return _decode_text(cursor)
 
     async def read_replies(
         self,
@@ -257,20 +299,21 @@ class RedisRuntimeCoordinationStore:
         limit: int,
     ) -> list[RuntimeReplyRecord]:
         """Read reply events after the supplied cursor."""
-        stream_key = self._stream_key("reply", stream_id)
-        await self._refresh_stream_ttl(stream_key)
-        rows = await self._read_stream(
-            stream_key,
-            after_cursor=after_cursor,
-            limit=limit,
-        )
-        return [
-            RuntimeReplyRecord(
-                cursor=cursor,
-                event=_reply_event_from_json(payload),
+        async with self._redis_operation_deadline(block_ms=0):
+            stream_key = self._stream_key("reply", stream_id)
+            await self._refresh_stream_ttl(stream_key)
+            rows = await self._read_stream(
+                stream_key,
+                after_cursor=after_cursor,
+                limit=limit,
             )
-            for cursor, payload in rows
-        ]
+            return [
+                RuntimeReplyRecord(
+                    cursor=cursor,
+                    event=_reply_event_from_json(payload),
+                )
+                for cursor, payload in rows
+            ]
 
     async def append_body_chunk(
         self,
@@ -278,13 +321,16 @@ class RedisRuntimeCoordinationStore:
         chunk: RuntimeBodyChunk,
     ) -> str:
         """Append a request body chunk and return its cursor."""
-        stream_key = self._stream_key("body", stream_id)
-        cursor = await self._redis.xadd(
-            stream_key,
-            {_PAYLOAD_FIELD: _body_chunk_to_json(chunk)},
-        )
-        await self._refresh_stream_ttl(stream_key)
-        return _decode_text(cursor)
+        async with self._redis_operation_deadline(block_ms=0):
+            stream_key = self._stream_key("body", stream_id)
+            cursor = await self._redis.eval(
+                _APPEND_STREAM_ENTRY_SCRIPT,
+                1,
+                stream_key,
+                _body_chunk_to_json(chunk),
+                self._stream_ttl_seconds,
+            )
+            return _decode_text(cursor)
 
     async def read_body_chunks(
         self,
@@ -294,20 +340,21 @@ class RedisRuntimeCoordinationStore:
         limit: int,
     ) -> list[RuntimeBodyChunkRecord]:
         """Read request body chunks after the supplied cursor."""
-        stream_key = self._stream_key("body", stream_id)
-        await self._refresh_stream_ttl(stream_key)
-        rows = await self._read_stream(
-            stream_key,
-            after_cursor=after_cursor,
-            limit=limit,
-        )
-        return [
-            RuntimeBodyChunkRecord(
-                cursor=cursor,
-                chunk=_body_chunk_from_json(payload),
+        async with self._redis_operation_deadline(block_ms=0):
+            stream_key = self._stream_key("body", stream_id)
+            await self._refresh_stream_ttl(stream_key)
+            rows = await self._read_stream(
+                stream_key,
+                after_cursor=after_cursor,
+                limit=limit,
             )
-            for cursor, payload in rows
-        ]
+            return [
+                RuntimeBodyChunkRecord(
+                    cursor=cursor,
+                    chunk=_body_chunk_from_json(payload),
+                )
+                for cursor, payload in rows
+            ]
 
     async def put_operation(
         self,
@@ -316,21 +363,23 @@ class RedisRuntimeCoordinationStore:
         ttl_seconds: int | None,
     ) -> None:
         """Create or replace operation metadata."""
-        await self._redis.set(
-            self._operation_key(metadata.operation_id),
-            _operation_to_json(metadata),
-            ex=ttl_seconds,
-        )
+        async with self._redis_operation_deadline(block_ms=0):
+            await self._redis.set(
+                self._operation_key(metadata.operation_id),
+                _operation_to_json(metadata),
+                ex=ttl_seconds,
+            )
 
     async def get_operation(
         self,
         operation_id: str,
     ) -> RuntimeOperationMetadata | None:
         """Get operation metadata."""
-        raw = await self._redis.get(self._operation_key(operation_id))
-        if raw is None:
-            return None
-        return _operation_from_json(_decode_text(raw))
+        async with self._redis_operation_deadline(block_ms=0):
+            raw = await self._redis.get(self._operation_key(operation_id))
+            if raw is None:
+                return None
+            return _operation_from_json(_decode_text(raw))
 
     async def update_operation_status(
         self,
@@ -341,20 +390,21 @@ class RedisRuntimeCoordinationStore:
         final_event_cursor: str | None,
     ) -> RuntimeOperationMetadata | None:
         """Update operation status if the operation exists and is not final."""
-        key = self._operation_key(operation_id)
-        raw = await self._redis.eval(  # pyright: ignore[reportAttributeAccessIssue]  # redis-py stub omits EVAL
-            _UPDATE_OPERATION_IF_NOT_FINAL_SCRIPT,
-            1,
-            key,
-            status.value,
-            _datetime_to_json(updated_at) or "",
-            final_event_cursor or "",
-            "",
-            "",
-        )
-        if raw is None:
-            return await self.get_operation(operation_id)
-        return _operation_from_json(_decode_text(raw))
+        async with self._redis_operation_deadline(block_ms=0):
+            key = self._operation_key(operation_id)
+            raw = await self._redis.eval(
+                _UPDATE_OPERATION_IF_NOT_FINAL_SCRIPT,
+                1,
+                key,
+                status.value,
+                _datetime_to_json(updated_at) or "",
+                final_event_cursor or "",
+                "",
+                "",
+            )
+            if raw is None:
+                return await self.get_operation(operation_id)
+            return _operation_from_json(_decode_text(raw))
 
     async def try_start_operation(
         self,
@@ -363,16 +413,17 @@ class RedisRuntimeCoordinationStore:
         updated_at: datetime,
     ) -> RuntimeOperationMetadata | None:
         """Atomically transition an operation from ACTIVE to RUNNING."""
-        key = self._operation_key(operation_id)
-        raw = await self._redis.eval(  # pyright: ignore[reportAttributeAccessIssue]  # redis-py stub omits EVAL
-            _TRY_START_OPERATION_SCRIPT,
-            1,
-            key,
-            _datetime_to_json(updated_at) or "",
-        )
-        if raw is None:
-            return None
-        return _operation_from_json(_decode_text(raw))
+        async with self._redis_operation_deadline(block_ms=0):
+            key = self._operation_key(operation_id)
+            raw = await self._redis.eval(
+                _TRY_START_OPERATION_SCRIPT,
+                1,
+                key,
+                _datetime_to_json(updated_at) or "",
+            )
+            if raw is None:
+                return None
+            return _operation_from_json(_decode_text(raw))
 
     async def append_reply_for_operation(
         self,
@@ -382,32 +433,34 @@ class RedisRuntimeCoordinationStore:
         operation_id: str,
     ) -> tuple[str, RuntimeOperationMetadata] | None:
         """Append a reply and update operation metadata if not already final."""
-        operation_key = self._operation_key(operation_id)
-        stream_key = self._stream_key("reply", stream_id)
-        if event.final:
-            next_status = RuntimeOperationStatus.FINAL.value
-            mark_final = "1"
-        else:
-            next_status = ""
-            mark_final = ""
-        raw = await self._redis.eval(  # pyright: ignore[reportAttributeAccessIssue]  # redis-py stub omits EVAL
-            _APPEND_REPLY_FOR_OPERATION_SCRIPT,
-            2,
-            operation_key,
-            stream_key,
-            _reply_event_to_json(event),
-            next_status,
-            _datetime_to_json(event.created_at) or "",
-            mark_final,
-            str(self._stream_ttl_seconds),
-        )
-        if raw is None:
-            return None
-        cursor = _decode_text(raw)
-        current = await self.get_operation(operation_id)
-        if current is None:
-            return None
-        return cursor, current
+        async with self._redis_operation_deadline(block_ms=0):
+            operation_key = self._operation_key(operation_id)
+            stream_key = self._stream_key("reply", stream_id)
+            if event.final:
+                next_status = RuntimeOperationStatus.FINAL.value
+                mark_final = "1"
+            else:
+                next_status = ""
+                mark_final = ""
+            raw = await self._redis.eval(
+                _APPEND_REPLY_FOR_OPERATION_SCRIPT,
+                2,
+                operation_key,
+                stream_key,
+                _reply_event_to_json(event),
+                next_status,
+                _datetime_to_json(event.created_at) or "",
+                mark_final,
+                str(self._stream_ttl_seconds),
+            )
+            if raw is None:
+                return None
+            response = cast(Sequence[object], raw)
+            if len(response) != 2:
+                raise RuntimeError("Runtime reply append returned an invalid response")
+            cursor = _decode_text(response[0])
+            current = _operation_from_json(_decode_text(response[1]))
+            return cursor, current
 
     async def heartbeat_operation(
         self,
@@ -416,29 +469,31 @@ class RedisRuntimeCoordinationStore:
         heartbeat_at: datetime,
     ) -> RuntimeOperationMetadata | None:
         """Record an operation heartbeat."""
-        key = self._operation_key(operation_id)
-        metadata = await self.get_operation(operation_id)
-        if metadata is None:
-            return None
-        if metadata.status is RuntimeOperationStatus.FINAL:
-            return metadata
-        raw = await self._redis.eval(  # pyright: ignore[reportAttributeAccessIssue]  # redis-py stub omits EVAL
-            _UPDATE_OPERATION_IF_NOT_FINAL_SCRIPT,
-            1,
-            key,
-            metadata.status.value,
-            _datetime_to_json(heartbeat_at) or "",
-            "",
-            _datetime_to_json(heartbeat_at) or "",
-            "",
-        )
-        if raw is None:
-            return await self.get_operation(operation_id)
-        return _operation_from_json(_decode_text(raw))
+        async with self._redis_operation_deadline(block_ms=0):
+            key = self._operation_key(operation_id)
+            metadata = await self.get_operation(operation_id)
+            if metadata is None:
+                return None
+            if metadata.status is RuntimeOperationStatus.FINAL:
+                return metadata
+            raw = await self._redis.eval(
+                _UPDATE_OPERATION_IF_NOT_FINAL_SCRIPT,
+                1,
+                key,
+                metadata.status.value,
+                _datetime_to_json(heartbeat_at) or "",
+                "",
+                _datetime_to_json(heartbeat_at) or "",
+                "",
+            )
+            if raw is None:
+                return await self.get_operation(operation_id)
+            return _operation_from_json(_decode_text(raw))
 
     async def delete_operation(self, operation_id: str) -> None:
         """Delete operation metadata."""
-        await self._redis.delete(self._operation_key(operation_id))
+        async with self._redis_operation_deadline(block_ms=0):
+            await self._redis.delete(self._operation_key(operation_id))
 
     async def register_connection(
         self,
@@ -453,32 +508,30 @@ class RedisRuntimeCoordinationStore:
         metadata: dict[str, JsonValue],
     ) -> RuntimeConnectionRecord:
         """Register a current connection and issue a new generation."""
-        generation_key = self._connection_generation_key(kind, subject_id)
-        generation = int(
-            await self._redis.incr(  # pyright: ignore[reportAttributeAccessIssue]  # redis-py stub omits INCR
-                generation_key
+        async with self._redis_operation_deadline(block_ms=0):
+            generation_key = self._connection_generation_key(kind, subject_id)
+            connection_key = self._connection_key(kind, subject_id)
+            candidate = RuntimeConnectionRecord(
+                kind=kind,
+                subject_id=subject_id,
+                connection_id=connection_id,
+                owner_replica_id=owner_replica_id,
+                generation=0,
+                connected_at=connected_at,
+                heartbeat_at=heartbeat_at,
+                expires_at=heartbeat_at + timedelta(seconds=ttl_seconds),
+                metadata=metadata,
             )
-        )
-        await self._redis.expire(
-            generation_key, self._connection_generation_ttl_seconds
-        )
-        record = RuntimeConnectionRecord(
-            kind=kind,
-            subject_id=subject_id,
-            connection_id=connection_id,
-            owner_replica_id=owner_replica_id,
-            generation=generation,
-            connected_at=connected_at,
-            heartbeat_at=heartbeat_at,
-            expires_at=heartbeat_at + timedelta(seconds=ttl_seconds),
-            metadata=metadata,
-        )
-        await self._redis.set(
-            self._connection_key(kind, subject_id),
-            _connection_to_json(record),
-            ex=ttl_seconds,
-        )
-        return record
+            raw = await self._redis.eval(
+                _REGISTER_CONNECTION_SCRIPT,
+                2,
+                generation_key,
+                connection_key,
+                _connection_to_json(candidate),
+                self._connection_generation_ttl_seconds,
+                ttl_seconds,
+            )
+            return _connection_from_json(_decode_text(raw))
 
     async def get_connection(
         self,
@@ -487,14 +540,15 @@ class RedisRuntimeCoordinationStore:
         subject_id: str,
     ) -> RuntimeConnectionRecord | None:
         """Get the current non-expired connection."""
-        key = self._connection_key(kind, subject_id)
-        raw = await self._redis.get(key)
-        if raw is None:
-            return None
-        record = _connection_from_json(_decode_text(raw))
-        if record.expires_at <= datetime.now(timezone.utc):
-            return None
-        return record
+        async with self._redis_operation_deadline(block_ms=0):
+            key = self._connection_key(kind, subject_id)
+            raw = await self._redis.get(key)
+            if raw is None:
+                return None
+            record = _connection_from_json(_decode_text(raw))
+            if record.expires_at <= datetime.now(timezone.utc):
+                return None
+            return record
 
     async def heartbeat_connection(
         self,
@@ -506,22 +560,23 @@ class RedisRuntimeCoordinationStore:
         ttl_seconds: int,
     ) -> bool:
         """Refresh a connection heartbeat if generation fencing matches."""
-        record = await self.get_connection(kind=kind, subject_id=subject_id)
-        if record is None or record.generation != generation:
-            return False
-        updated = dataclasses.replace(
-            record,
-            heartbeat_at=heartbeat_at,
-            expires_at=heartbeat_at + timedelta(seconds=ttl_seconds),
-        )
-        updated = await self._set_connection_if_generation(
-            kind=kind,
-            subject_id=subject_id,
-            generation=generation,
-            record=updated,
-            ttl_seconds=ttl_seconds,
-        )
-        return updated
+        async with self._redis_operation_deadline(block_ms=0):
+            record = await self.get_connection(kind=kind, subject_id=subject_id)
+            if record is None or record.generation != generation:
+                return False
+            updated = dataclasses.replace(
+                record,
+                heartbeat_at=heartbeat_at,
+                expires_at=heartbeat_at + timedelta(seconds=ttl_seconds),
+            )
+            updated = await self._set_connection_if_generation(
+                kind=kind,
+                subject_id=subject_id,
+                generation=generation,
+                record=updated,
+                ttl_seconds=ttl_seconds,
+            )
+            return updated
 
     async def revoke_connection(
         self,
@@ -531,11 +586,12 @@ class RedisRuntimeCoordinationStore:
         generation: int,
     ) -> bool:
         """Revoke a connection if generation fencing matches."""
-        return await self._delete_connection_if_generation(
-            kind=kind,
-            subject_id=subject_id,
-            generation=generation,
-        )
+        async with self._redis_operation_deadline(block_ms=0):
+            return await self._delete_connection_if_generation(
+                kind=kind,
+                subject_id=subject_id,
+                generation=generation,
+            )
 
     async def _set_connection_if_generation(
         self,
@@ -611,6 +667,11 @@ class RedisRuntimeCoordinationStore:
 
     async def _refresh_stream_ttl(self, key: str) -> None:
         await self._redis.expire(key, self._stream_ttl_seconds)
+
+    def _redis_operation_deadline(self, *, block_ms: int) -> asyncio.Timeout:
+        """Bound one semantic Redis operation without retrying ambiguous writes."""
+        blocking_seconds = max(block_ms, 0) / 1000
+        return asyncio.timeout(self._redis_operation_timeout_seconds + blocking_seconds)
 
     def _stream_key(self, stream_kind: str, stream_id: str) -> str:
         return f"{self._key_prefix}:stream:{stream_kind}:{stream_id}"

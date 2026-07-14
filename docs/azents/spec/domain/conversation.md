@@ -29,6 +29,7 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/session_git_worktree.py
   - python/apps/azents/src/azents/rdb/models/action_execution.py
   - python/apps/azents/src/azents/rdb/models/chat_write_request.py
+  - python/apps/azents/src/azents/rdb/models/agent_session_create_request.py
   - python/apps/azents/src/azents/rdb/models/scheduled_task.py
   - python/apps/azents/src/azents/rdb/models/exchange_file.py
   - python/apps/azents/src/azents/repos/agent_session/**
@@ -39,6 +40,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/session_git_worktree/**
   - python/apps/azents/src/azents/repos/action_execution/**
   - python/apps/azents/src/azents/repos/chat_write_request/**
+  - python/apps/azents/src/azents/repos/agent_session_create_request/**
   - python/apps/azents/src/azents/repos/scheduled_task/**
   - python/apps/azents/src/azents/repos/exchange_file/**
   - python/apps/azents/src/azents/repos/session_workspace_project/**
@@ -92,7 +94,7 @@ api_routes:
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-07-14
-spec_version: 100
+spec_version: 104
 ---
 
 # Conversation & Events
@@ -194,7 +196,30 @@ not render session-scoped Projects or Context tabs. The draft composer shows a c
 workspace selector where repository folders are added to one list and each selected folder can switch
 between repository and new worktree modes from the row-level type selector; the worktree base branch
 picker shows local branches only. On first-message success, azents-web replaces the draft
-URL with the created session URL and invalidates the Agent session list cache.
+URL with the created session URL and invalidates the Agent session list cache. The route replacement
+starts immediately after the write commits and does not wait for cache invalidation. The draft keeps
+an immediate in-flight guard against duplicate submissions and falls back to a hard navigation if the
+soft route replacement does not complete, so a committed initial message cannot leave the composer
+indefinitely loading on the draft route. Draft and existing-session writes have a 15-second
+caller-visible deadline. The deadline does not abort an ambiguous server commit; a retry keeps the
+same durable idempotency key. Draft navigation falls back to a hard route replacement after 5
+seconds.
+
+The draft keeps one `client_request_id` only while retrying the exact same semantic first-message
+payload. Changing the message, inference profile, attachments, selected Projects, or setup actions
+rotates the key. The backend owns a durable create-request authority scoped to
+`(user_id, agent_id, client_request_id)`: one transaction claims that authority, creates the Session,
+queues every setup action and the first user message, and stores a recoverable response snapshot.
+Response-loss retries return that same Session and accepted input even after the worker has consumed
+the InputBuffer; reusing the key for different semantics returns `409 Conflict`. A new request locks
+the Agent, claims its create-request authority, and then locks Workspace membership before creating the
+Session. A replay resolves that authority and locks the created Session before Workspace membership,
+matching the Session-before-membership order of ordinary writes. A newly claimed request that fails
+final membership authorization deletes only its still-incomplete authority in the same transaction,
+so a later authorized retry cannot be stranded behind a permanently pending key. The accepted Session
+ID is an intentional non-FK tombstone: deleting the Session does not release the client request key.
+A later replay revalidates membership and returns conflict for the inactive accepted target instead of
+creating a second Session; deleting the requesting User removes that principal-scoped tombstone.
 
 Each session may have a user-facing `title`. `PATCH /chat/v1/sessions/{session_id}/title`
 sets or clears a manual title after workspace membership validation. The request body uses `{ "title":
@@ -530,6 +555,11 @@ Durable/live handoff follows these invariants:
 - `live_run_updated` replaces the current `run` live-state snapshot atomically; `live_run_cleared`
   clears only when its required `run_id` exactly matches the current live run, and it does not remove
   durable transcript events. A delayed terminal or clear for Run A cannot clear a newer Run B.
+- An authoritative REST live snapshot may atomically replace a stale active Run. While the client is
+  idle, `live_run_updated` or legacy `run_started` may establish a Run identity only when that Run ID
+  has not been terminally tombstoned. Neither event may replace a different active Run. Terminal and
+  clear actions apply only to their exact Run ID, and terminal Run IDs are remembered for the
+  lifetime of the mounted session so delayed activity cannot resurrect them.
 - When a durable event has a matching live counterpart, the worker publishes the history
   append action before publishing the live removal action.
 - Operation terminalization commits the durable `action_execution_result` append and live execution
@@ -569,10 +599,18 @@ profile, then the Agent default when the Session has no snapshot.
 `InputBufferService` owns input-buffer reads and writes. Enqueue commits only the pending row;
 producers own wake-up and run-state transitions. Preparation handles exactly one FIFO head per
 transaction. The worker first reads the head's identity and inference requirement, resolves the
-profile outside the transaction when needed, then locks the Session and the same FIFO head. If the
-identity changed, it discards the stale preparation result and starts again. Successful preparation
+profile and materializes any attachment-backed model input outside the transaction when needed, then
+locks the Session and the same FIFO head. Materialization never performs Exchange download, ModelFile
+upload, or other object-store I/O while the FIFO or Session row is locked. If the identity changed,
+it discards the stale preparation result and starts again. Successful preparation
 atomically updates the complete Session inference snapshot, applies Goal/Skill state changes, appends
 canonical events, associates input events with the active run, and deletes the source buffer.
+Speculative ModelFiles created during the external materialization phase are discarded when the
+prepared head or Session owner is no longer authoritative; ownership handover never leaves those
+unreferenced files behind. If the preparation commit response is lost, a fresh short transaction
+reconciles the exact FIFO row and every intended ModelFile reference. An exact committed result keeps
+the referenced files and returns the recovered result; a proven rollback discards them; mismatched or
+unreadable state remains uncertain and preserves the files while propagating the original error.
 
 Canonical outcomes are:
 
@@ -610,7 +648,11 @@ requests require `client_request_id`; accepted writes are recorded in `chat_writ
 retries with the same key return the same accepted target instead of creating duplicate side effects.
 REST write idempotency is scoped to `(session_id, user_id, client_request_id)`. The same
 `client_request_id` may be reused independently for different explicit session routes because the URL
-session is the write boundary. New-session messages, normal messages, and edits require `inference_profile = { model_target_label, reasoning_effort }`; the label is client-visible Agent intent. Effort is concrete in normal user input whenever the selected target advertises explicit levels, while models with an empty explicit-level list use nullable provider/model default internally and show no effort control. Commands require `inference_profile = null`, and failed-run retry accepts no profile override. Message writes commit a `user_message` input buffer
+session is the write boundary. Normal message and TurnAction records retain the accepted InputBuffer
+identity after FIFO consumption, so response-loss retries do not enqueue a second turn. Edit,
+command, and failed-run-retry records are also replayed before idle-only admission checks; a retry
+re-sends a wake-up only while its committed work is still pending. A key reused for another write type
+or semantic payload returns `409 Conflict`. New-session messages, normal messages, and edits require `inference_profile = { model_target_label, reasoning_effort }`; the label is client-visible Agent intent. Effort is concrete in normal user input whenever the selected target advertises explicit levels, while models with an empty explicit-level list use nullable provider/model default internally and show no effort control. Commands require `inference_profile = null`, and failed-run retry accepts no profile override. Message writes commit a `user_message` input buffer
 to the explicit path session before returning success, mark the same session running in the producer
 transaction, then send a worker wake-up signal for that session. The message path must not
 resolve runtime current/active session state to replace the requested `session_id`. Edit writes
@@ -627,16 +669,39 @@ responses include `session_id`, `client_request_id`, an accepted target, an auth
 snapshot, and `history_reload_required` for writes such as edit/command that require durable history
 reload.
 
+Every mutating write revalidates and locks the requesting Workspace membership in its final short
+transaction; an earlier API preflight cannot authorize a post-revocation write. Attachment URIs stay
+raw in the pending InputBuffer and are materialized by the worker outside that transaction. After
+commit, live-input publication precedes the worker wake to prevent removal-before-upsert races. Both
+steps are hard-bounded, and the ordered delivery task is retained through caller cancellation so a
+client disconnect after commit cannot suppress the wake. WebSocket, broker, and live-snapshot failures
+never reopen the committed transaction or turn accepted durable work into a server error.
+
 WebSocket chat connections are existing-session live subscription channels. They publish
 subscription/history/live event actions and accept only the `subscription_health_check` control
 message for subscription reconcile. Chat input, edit, command, and stop payloads are not accepted on
-WebSocket. Stop is a REST control boundary: `POST /chat/v1/sessions/{session_id}/stop`.
+WebSocket. Redis subscription confirmation is bounded to 5 seconds, and unsubscribe/connection-close
+cleanup is independently bounded to 1 second per operation. Stop is a REST control boundary:
+`POST /chat/v1/sessions/{session_id}/stop`.
 Stop records a durable `agent_sessions.stop_requested_at` intent and sends a best-effort broker stop
 signal so an active runner can cancel immediately. If the stopped session is linked to a
 `SessionAgent`, stop applies to that participant subtree: a root session stop records stop intents for
 running descendants, while a child detail stop records stop intents for that child subtree. Runner
-polling of the DB intent covers broker signal loss. Model-visible `interrupt_agent` remains
-target-scoped and does not automatically stop descendants.
+polling of the DB intent covers broker signal loss. Model-visible `interrupt_agent` applies the same
+subtree cascade below the named target. The supervisor requests engine cancellation, then a short
+lock-ordered transaction stores valid partial output, cancelled tool results, interruption markers,
+terminal Run state, and intent clearing without waiting for cancellation cleanup. History/live
+removals and stop notifications are published only after commit, so the interrupted marker is visible
+without a page refresh; the Session boundary remains owned until engine cleanup finishes or a hard
+deadline quarantines a cancellation-ignoring task. The stop transaction also revalidates locked
+Workspace membership, so a preflight completed before membership revocation cannot mutate the tree.
+The web client marks the exact active Run as stopping immediately, serializes bounded REST live-state
+reconciliation after the stop write, and keeps the stop indicator until an applied authoritative
+snapshot no longer reports that exact Run as active. A terminal WebSocket event cannot end
+reconciliation by itself because another terminal history publication, including `interrupted`, may
+have been lost; rejected or failed snapshots are retried within the same bound. Stale events for
+another Run cannot clear or revive the stopped Run. Stop writes and REST live snapshots have 5-second
+caller-visible deadlines, and stop reconciliation has a 15-second overall deadline.
 `/chat/v1/sessions/new` is not a WebSocket write or subscription route. Web clients first resolve
 the team primary session through `GET /chat/v1/agents/{agent_id}/team-primary-session`, navigate to
 `/w/{handle}/agents/{agent_id}/sessions/{session_id}`, and then write through
@@ -708,6 +773,10 @@ Current verification:
 
 ## 11. Changelog
 
+- **2026-07-14** — v104. Required one applied authoritative post-stop snapshot before live terminal events can end reconciliation, preventing a lost `interrupted` publication from remaining hidden until refresh.
+- **2026-07-14** — v103. Defined exact frontend request and reconciliation deadlines, idle-only live Run admission with terminal tombstones, bounded WebSocket subscription cleanup, input-materialization commit reconciliation, and create-request tombstones that survive Session deletion.
+- **2026-07-14** — v102. Fixed new-session replay lock ordering and made final membership rejection release only the current transaction's incomplete create-request claim.
+- **2026-07-14** — v101. Moved attachment materialization outside FIFO transactions; added durable first-message and existing-input replay; bounded post-commit delivery through cancellation; made stop finalization commit before immediate live publication; and aligned `interrupt_agent` with participant-subtree interruption.
 - **2026-07-14** — v100. Defined action execution tables as active operation state, with owner-generation admission, atomic durable terminal snapshot/delete handover, explicit live removal, and cancelled no-reexecution recovery.
 - **2026-07-13** — v99. Promoted raw-page cursor ownership, cross-page semantic projection identity, provider/internal-agent rendering, durable-over-live promotion, and explicit public WebSocket delivery boundaries.
 - **2026-07-12** — v98. Made PostgreSQL active tool ownership authoritative for execution and live reconstruction, and removed the Background flag from active calls.

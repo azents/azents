@@ -1,7 +1,6 @@
 """Event runtime client tool catalog."""
 
 import asyncio
-import contextlib
 import json
 import logging
 import time
@@ -32,6 +31,27 @@ logger = logging.getLogger(__name__)
 
 _TOOL_OUTPUT_ADAPTER: TypeAdapter[ToolOutput] = TypeAdapter(ToolOutput)
 _SLOW_TOOLKIT_UPDATE_CONTEXT_SECONDS = 1.0
+_CANCEL_HANDLER_TIMEOUT_SECONDS = 1.0
+_RETAINED_CANCEL_HANDLER_TASKS: set[asyncio.Task[None]] = set()
+
+
+def _on_cancel_handler_task_done(task: asyncio.Task[None]) -> None:
+    """Release and observe a fire-and-forget Tool cancellation task."""
+    _RETAINED_CANCEL_HANDLER_TASKS.discard(task)
+    try:
+        task.result()
+    except asyncio.CancelledError:
+        pass
+    except Exception:
+        logger.warning("Tool cancellation task failed", exc_info=True)
+
+
+def _retain_cancel_handler_task(task: asyncio.Task[None]) -> None:
+    """Retain a Tool cancellation task until its outcome has been consumed."""
+    if task in _RETAINED_CANCEL_HANDLER_TASKS:
+        return
+    _RETAINED_CANCEL_HANDLER_TASKS.add(task)
+    task.add_done_callback(_on_cancel_handler_task_done)
 
 
 @dataclass(frozen=True)
@@ -260,18 +280,62 @@ class ToolCatalogClientToolExecutor(ClientToolExecutor):
             name=call.name,
             arguments=call.arguments,
         )
-        asyncio.create_task(_call_cancel_handler(tool, request))
+        task = asyncio.create_task(
+            _call_cancel_handler(tool, request),
+            name=f"tool-cancel-handler:{call.call_id}",
+        )
+        _retain_cancel_handler_task(task)
 
 
 async def _call_cancel_handler(
     tool: FunctionTool,
     request: FunctionToolCancelRequest,
 ) -> None:
-    """Isolate cancellation hook failures so they do not block run stop."""
-    if tool.cancel_handler is None:
+    """Hard-bound and isolate a Tool cancellation hook."""
+    cancel_handler = tool.cancel_handler
+    if cancel_handler is None:
         return
-    with contextlib.suppress(Exception):
-        await tool.cancel_handler(request)
+
+    async def invoke_cancel_handler() -> None:
+        await cancel_handler(request)
+
+    handler_task = asyncio.create_task(
+        invoke_cancel_handler(),
+        name=f"tool-cancel-hook:{request.call_id}",
+    )
+    try:
+        done, _ = await asyncio.wait(
+            {handler_task},
+            timeout=_CANCEL_HANDLER_TIMEOUT_SECONDS,
+        )
+    except asyncio.CancelledError:
+        handler_task.cancel()
+        _retain_cancel_handler_task(handler_task)
+        raise
+
+    if handler_task in done:
+        try:
+            handler_task.result()
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            logger.warning(
+                "Tool cancellation hook failed",
+                extra={"call_id": request.call_id, "tool_name": request.name},
+                exc_info=True,
+            )
+        return
+
+    handler_task.cancel()
+    _retain_cancel_handler_task(handler_task)
+    logger.error(
+        "Tool cancellation hook ignored deadline; detached",
+        extra={
+            "call_id": request.call_id,
+            "tool_name": request.name,
+            "timeout": _CANCEL_HANDLER_TIMEOUT_SECONDS,
+        },
+    )
 
 
 def _tool_result_payload(

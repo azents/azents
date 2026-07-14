@@ -103,9 +103,15 @@ class _FakeSelectedInstallationStore:
         """Load selected installation ID."""
         return None
 
-    async def save(self, installation_id: str) -> None:
+    async def save(
+        self,
+        installation_id: str,
+        *,
+        run_id: str,
+        owner_generation: int,
+    ) -> None:
         """Save selected installation ID."""
-        del installation_id
+        del installation_id, run_id, owner_generation
 
 
 @pytest.fixture(autouse=True)
@@ -136,6 +142,7 @@ def _make_context() -> TurnContext:
         workspace_id="workspace-1",
         model="model",
         run_id="run-1",
+        owner_generation=1,
         session_id="session-1",
         publish_event=_publish,
     )

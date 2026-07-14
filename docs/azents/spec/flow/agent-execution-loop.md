@@ -41,7 +41,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ChatView.tsx
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
 last_verified_at: 2026-07-14
-spec_version: 81
+spec_version: 84
 ---
 
 # Agent Execution Loop
@@ -79,9 +79,44 @@ publication. Durable events are appended only from completed output items or com
 incomplete tool calls are never admitted. A user stop may durably preserve assistant text received
 before completion.
 
+The execution loop receives a database session manager, never one session that spans a turn. Each
+transcript read, phase transition, event append, tool-result finalization, pin mutation, and terminal
+state transition uses a bounded transaction. The transaction commits and its session closes before
+model streaming, client tool execution, Toolkit or hook calls, compaction summary generation,
+Runner/Git operations, broker delivery, or live/WebSocket publication. Durable phase and history
+updates are therefore published only after commit. Provider credential refresh and Toolkit
+resolution follow the same snapshot-then-external-I/O boundary. ChatGPT, xAI, and MCP OAuth refresh
+persist the externally issued token with bounded, retained short CAS transactions. If the first
+commit rolls back or its acknowledgement is lost, the persistence task retries only while the
+original refresh authority remains current; an exact intended generation succeeds and a valid
+concurrent token, reconnect, disable, delete, or connection-identity winner is preserved. Caller
+cancellation is delivered immediately while the bounded persistence task finishes in the background,
+and repeated persistence failure preserves the first database error.
+
+Interface writes follow the same rule. A final authority transaction locks the Session and Workspace
+membership, commits a durable idempotency record together with pending input or control state, and
+closes before Redis, WebSocket, attachment materialization, or Runner work. New-session create
+requests additionally store the created Session and first-input snapshot under a global request key;
+the accepted Session ID is a non-FK tombstone so deleting that Session cannot release the key and
+recreate it on a delayed retry. Existing message and TurnAction requests retain their accepted
+InputBuffer identity after consumption.
+Edit, command, and failed-run-retry response-loss replays inspect their durable record before idle
+admission and re-wake only still-pending work.
+
+The worker validates its Redis Session lease synchronously before any recovery or Run database
+mutation, then renews it in the background. A failed renewal is an ownership-loss cancellation, not a
+Run failure: the stale worker skips hooks, live projection cleanup, tool cancellation results, and
+terminal writes. Cancellation reasons remain intact through the engine adapter, compaction, and model
+or tool tasks so cleanup exceptions cannot turn ownership loss into failed-run finalization.
+
 ## 2. Run State
 
 `agent_runs` replaces SDK `RunState`. Run phase is also the UI activity source.
+
+Terminal transitions are conditional database updates. Once completion, failure, interruption, or
+stop wins, a late phase/retry writer cannot resurrect the Run or overwrite the terminal result. The
+one intentional convergence is an exact User-stop finalization changing the engine's already
+`INTERRUPTED` Run to `STOPPED` while preserving its terminal result and last-completed cursor.
 
 Phase enum:
 
@@ -319,8 +354,9 @@ Subagent collaboration tools communicate through resolved agent input buffers:
 - `send_message` writes an `agent_message` to any resolved agent, including the root, without waking it.
 - `followup_task` writes an `agent_message`, marks the target running, and sends a broker wake-up,
   but rejects the root as a target.
-- `interrupt_agent` rejects the root and the caller itself, then records stop intent only for the
-  resolved target's current run.
+- `interrupt_agent` rejects the root and the caller itself, then records stop intent for the resolved
+  target and every running descendant in that target's participant subtree. Broker stop signals are
+  sent for every committed target after the database transaction closes.
 
 `agent_message` lowering renders the mailbox payload as an explicit task envelope for the target
 child session. `spawn_agent` and `followup_task` render `Message Type: NEW_TASK`; `send_message`
@@ -339,8 +375,8 @@ Subagent mailbox input must be written by another SessionAgent through collabora
 
 User-facing stop is subtree-aware: stopping a root session records stop intent for running linked
 descendants, and stopping a child detail session records stop intent for that child subtree.
-Model-visible `interrupt_agent` is intentionally narrower and records stop intent only for the named
-target agent's current run after rejecting the root and the caller itself.
+Model-visible `interrupt_agent` applies the same descendant cascade below its named target after
+rejecting the root and the caller itself.
 
 ## 5. Tool Loop
 
@@ -354,9 +390,12 @@ to a `client_tool_result` with status:
 
 Foreground tool execution must be bounded. Runtime-backed tools such as `read`, `write`, `grep`,
 `glob`, `stat`, `exec_command`, and `write_stdin` dispatch Runner operations with an explicit
-non-null deadline and pass that deadline through the reply-stream wait path. If the Runner request or reply is dropped, the
-operation times out into a failed/cancelled tool result path instead of leaving a durable
-`client_tool_call` without a corresponding `client_tool_result` forever.
+non-null deadline. One monotonic budget spans dispatch, body-chunk I/O, reply polling, and bounded
+terminal cleanup; nested one-second Redis operation deadlines cannot extend it. Runtime connection
+registration atomically increments the generation, refreshes both TTLs, and writes the matching
+connection record in one Redis script. If the Runner request or reply is dropped, the operation times
+out into a failed/cancelled tool result path instead of leaving a durable `client_tool_call` without a
+corresponding `client_tool_result` forever.
 
 Tool result output is `str | content part list`, and client tool results may also carry a generic JSON-object `metadata` payload. The engine preserves metadata on `client_tool_result` events without branching on toolkit-specific keys. Runtime process tools use metadata for process status/session id/exit code/truncation/missing facts, while model-visible output remains normal tool-result text. Text-only tools may return a string. Multipart
 output uses semantic event parts: `text`, `attachment`, `artifact`, and `file`, with legacy
@@ -404,7 +443,10 @@ terminal `run_marker(status=interrupted)` so the next model input can receive th
 reminder and the UI can show a non-chat timeline divider. After user stop, the session runner starts
 another turn only when pending input buffers remain. If no pending input buffer exists, queued wake-up
 messages for the same session are discarded so reconnect or duplicate wake-up signals do not resume
-model execution by themselves.
+model execution by themselves. Foreground Tool tasks receive 250 milliseconds to drain after
+cancellation and Tool cancel hooks receive one second. Tasks that ignore those deadlines are retained,
+observed, and quarantined while owner-generation, terminal-state, and admission fences block stale
+durable writes.
 
 ## 6. Compaction
 
@@ -482,6 +524,19 @@ mutation. Completion, failure, and cancellation all use one transaction that cop
 execution and ordered progress events into one `action_execution_result`, then deletes the live row.
 The stable execution ID joins live and durable projections.
 
+Each action progress event receives a stable ID before its short database transaction. Event
+sequence allocation is serialized by the action lock, and an ambiguous commit is reconciled with the
+same ID: an exact payload returns the durable event, while different content for that ID is an
+identity conflict. Project registration and catalog upsert use the same bounded, authority-fenced
+commit reconciliation. If caller cancellation arrives after a commit may have completed, the worker
+first reconciles that exact database step and then re-propagates the original cancellation.
+
+At a new-session wake-up boundary, no model or Toolkit context exists yet. A successful setup action
+may invalidate Project context, but the worker continues draining the FIFO through the initial user
+message and only then assembles the first run context. At a later model-call boundary, the same
+invalidation returns immediately so the already-built context is discarded and rebuilt. A follow-up
+wake-up is sent only when a pending input buffer actually remains.
+
 At every new Session processing boundary, the current owner terminalizes any leftover operation as
 cancelled before admitting new work. It never resumes or re-executes an uncertain stale side effect.
 Worker shutdown closes new operation admission and allows the supervised foreground task up to 30
@@ -490,8 +545,47 @@ released. User stop cancels immediately through the existing foreground-task pat
 records a user-stop cancellation snapshot while the Run follows normal preemptive stop semantics.
 
 Stop uses the REST control endpoint `POST /chat/v1/sessions/{session_id}/stop`; it records a durable
-DB stop intent and sends a best-effort broker stop signal for immediate cancellation. WebSocket
-message/edit/command/stop
+DB stop intent for the selected participant subtree and sends every committed session a best-effort
+broker stop signal for immediate cancellation. The supervisor requests engine cancellation, then a
+short, lock-ordered transaction persists valid live partial output, cancelled tool results, the
+`interrupted` event, the interrupted run marker, terminal Run state, and stop-intent clear without
+waiting for engine cleanup. Only after commit does the worker publish history events, remove live
+projections, publish `RunStopped`, and clear the exact live Run. The runner retains the Session
+boundary until cancellation cleanup finishes or its hard cleanup deadline quarantines a
+cancellation-ignoring task; owner-generation, terminal-state, and tool-admission fences then prevent
+that task from making later durable writes. A stop-only signal received without an active task remains
+queued so the runner consumes the durable intent instead of dropping it. Finalization retries
+for the same exact Run also accept an already `STOPPED` result and replay the same
+durable event IDs, allowing idempotent client upserts after a post-commit publication failure. Live
+partial timer, size, and explicit flushes are serialized per Session so concurrent Redis read/modify/
+write projections cannot lose a delta; different Sessions remain independent. Once a partial delta is
+stored in Redis, a failed or cancelled best-effort WebSocket broadcast does not requeue that committed
+delta, preventing duplicate streamed text while later snapshots/upserts provide reconciliation.
+
+Worker broker delivery is cancellation-safe at both boundaries. A cancelled interface enqueue keeps
+the ordered live-upsert-then-wake pipeline alive and observed under hard deadlines. The current
+authority is one complete-envelope `XADD` to the v2 global Stream, so message body and notification
+cannot partially commit. During rolling deployment an independent uniquely identified legacy
+LIST/wake copy remains available to old workers; new workers alternate both protocols and remove the
+exact compatibility copy they accept. A live v2 owner receives a pending entry through same-Stream
+consumer assignment, and v2 acknowledgement is deferred until the next receive call after
+SessionRunner handoff. Ambiguous publication or acknowledgement can therefore produce an idempotent
+wake duplicate but cannot create a hidden body. Legacy destructive-receive cancellation still
+restores popped envelopes in FIFO order and releases only its own lease. Invalid envelopes are removed
+from recovery before one-key atomic append-plus-expiry quarantine, so poison metadata failure cannot
+loop or leave a TTL-less quarantine key. Durable input, command, and stop state remains authoritative.
+
+Non-durable live projection I/O is also deadline-bound. A Redis or WebSocket stall may drop a live
+hint, but it cannot hold the Session projection lock forever or prevent a durable Run from reaching
+model execution and terminal cleanup. A partial-delta write with an ambiguous Redis outcome is treated
+as committed-or-dropped rather than replayed, preventing duplicate streamed text; durable completed
+output and REST snapshots remain authoritative reconciliation sources. WebSocket publish is bounded
+to 250 milliseconds, subscription confirmation to 5 seconds, and unsubscribe/close to 1 second per
+operation. Web chat writes have 15-second caller deadlines; stop and live-snapshot reads use 5 seconds,
+with a 15-second stop reconciliation window. These client deadlines do not cancel ambiguous durable
+commits, which remain retryable through their exact idempotency keys.
+
+WebSocket message/edit/command/stop
 payloads and the old `/chat/v1/sessions/new` WebSocket first-message route are no longer
 execution-loop entrypoints. WebSocket is a server-to-client projection transport only.
 
@@ -557,24 +651,6 @@ Primary checks:
 - REST chat write and preemptive stop E2E/browser blocker tracking: GitHub issues #4468 and #4469
 - static scan for removed `openai-agents`, `azents.engine.sdk`, `azents.runtime.llm`, and
   legacy `LLMClient` references
-
-
-## Changelog
-
-- **2026-07-12** — v73. Added exact terminal Run correlation, durable-before-publication ordering, and exact per-turn inference provenance.
-- **2026-07-12** — v71. Promoted sequential single-head preparation, Session-owned per-turn inference snapshots, buffer-only action transport, buffer-keyed operation execution, handled preparation failures, and same-run profile changes.
-- **2026-07-11** — v70. Added bounded-fork subagent inference overrides, label-only schema guidance, atomic validation, and session-last-used continuation semantics.
-- **2026-07-10** — v69. Added profile-aware FIFO promotion, atomic run activation, immutable resolved provenance, and exact parent-run profile inheritance.
-- **2026-07-10** — v68. Documented shared xAI API-key/OAuth transport lowering while preserving OAuth-only credential refresh.
-- **2026-07-09** — v66. Documented forked-history `<system-reminder>` boundaries, explicit agent-message envelopes, and Codex v2 agent targeting and list visibility.
-- **2026-07-09** — v65. Clarified that selectable model labels are resolved before run start and runtime receives effective model snapshots only.
-- **2026-07-09** — v64. Documented `spawn_agent` active subagent and depth limit enforcement before child-session side effects.
-- **2026-07-09** — v63. Documented default subagent context forking and child-session human write rejection before side effects.
-- **2026-07-08** — v62. Documented subagent worker scheduling through normal session runs, `agent_message` mailbox promotion, subagent execution-mode tool resolution, terminal result projections, and subtree stop behavior.
-- **2026-07-08** — v61. Process TurnActions at every model-call turn boundary; failed actions are marked failed and FIFO processing continues, while context invalidation exits through a follow-up wake-up without a completed run marker.
-- **2026-07-08** — v60. Process TurnActions at every model-call turn boundary and close the current run when an operation action blocks or invalidates context.
-- **2026-07-06** — v59. Removed the session-initialization run gate and documented terminal `action_execution_result` history events.
-- **2026-07-05** — v56. Reflected operation TurnAction processing before model dispatch and Project context invalidation after worktree setup.
 
 ## Idle continuation
 
@@ -642,6 +718,9 @@ updated by the user.
 
 ## Changelog
 
+- **2026-07-14** (spec_version 84) — Added exact, preallocated-ID reconciliation for worktree progress events and bounded commit recovery for Project and catalog action steps.
+- **2026-07-14** (spec_version 83) — Replaced split broker body/wake authority with complete-message Stream delivery, bounded Tool and adapter cancellation cleanup, made Runtime deadlines end-to-end, and reconciled OAuth and uploaded metadata after ambiguous commits.
+- **2026-07-14** (spec_version 82) — Made user stop commit terminal history atomically and publish it through cancellation, preserved stop-only signals, added durable request replay and bounded live delivery, and cascaded participant-subtree interruption.
 - **2026-07-14** (spec_version 81) — Added durable per-model-call start time to live Run projections and a once-per-second duration beside the LLM indicator after ten elapsed seconds.
 - **2026-07-14** (spec_version 80) — Restored incremental native-stream normalization and bounded live partial batching: text and reasoning are projected before provider completion, durable output remains completion-based, and user stop preserves valid partial assistant text without admitting incomplete tools.
 - **2026-07-14** (spec_version 79) — Defined operation TurnActions as owner-generation-fenced live execution state with atomic terminal snapshot/delete handover, 30-second shutdown completion, preemptive user-stop cancellation, and no stale-owner re-execution.
@@ -650,9 +729,21 @@ updated by the user.
 - **2026-07-13** (spec_version 76) — Clarified that the LLM running indicator remains visible through the complete model streaming phase, including after partial output appears.
 - **2026-07-13** (spec_version 75) — Promoted immutable requested input intent, non-fatal live projection boundaries, essential wake-up ordering, and explicit public WebSocket delivery boundaries.
 - **2026-07-12** (spec_version 74) — Added atomic tool-call admission/completion, deterministic cancellation and result identity, ownership-generation recovery, and PostgreSQL-backed active-call state.
+- **2026-07-12** (spec_version 73) — Added exact terminal Run correlation, durable-before-publication ordering, and exact per-turn inference provenance.
 - **2026-07-12** (spec_version 72) — Restored durable sent-message model label, resolved display name, and reasoning effort metadata from the prepared Session snapshot.
+- **2026-07-12** (spec_version 71) — Promoted sequential single-head preparation, Session-owned per-turn inference snapshots, buffer-only action transport, buffer-keyed operation execution, handled preparation failures, and same-run profile changes.
+- **2026-07-11** (spec_version 70) — Added bounded-fork subagent inference overrides, label-only schema guidance, atomic validation, and session-last-used continuation semantics.
+- **2026-07-10** (spec_version 69) — Added profile-aware FIFO promotion, atomic run activation, immutable resolved provenance, and exact parent-run profile inheritance.
+- **2026-07-10** (spec_version 68) — Documented shared xAI API-key/OAuth transport lowering while preserving OAuth-only credential refresh.
 - **2026-07-10** (spec_version 67) — Added explicit child identity to forked-history boundaries and rejected self-targeted `wait_agent` calls.
+- **2026-07-09** (spec_version 66) — Documented forked-history `<system-reminder>` boundaries, explicit agent-message envelopes, and Codex v2 agent targeting and list visibility.
 - **2026-07-09** (spec_version 65) — Clarified that retry live state is cleared before the next retry attempt starts so stale retry errors do not remain visible during successful progress.
+- **2026-07-09** (spec_version 64) — Documented `spawn_agent` active subagent and depth limit enforcement before child-session side effects.
+- **2026-07-09** (spec_version 63) — Documented default subagent context forking and child-session human write rejection before side effects.
+- **2026-07-08** (spec_version 62) — Documented subagent worker scheduling through normal session runs, `agent_message` mailbox promotion, subagent execution-mode tool resolution, terminal result projections, and subtree stop behavior.
+- **2026-07-08** (spec_version 61) — Process TurnActions at every model-call turn boundary; failed actions are terminal and FIFO processing continues while context invalidation rebuilds current run context.
+- **2026-07-08** (spec_version 60) — Process TurnActions at every model-call turn boundary and close the current run when an operation action blocks or invalidates context.
+- **2026-07-06** (spec_version 59) — Removed the session-initialization run gate and documented terminal `action_execution_result` history events.
 - **2026-07-06** (spec_version 58) — Promoted existing-session Register Project worktree actions and action retry/discard mutation semantics.
 - **2026-07-05** (spec_version 57) — Added operation TurnAction execution projection updates during status/log changes.
 - **2026-07-04** (spec_version 54) — Clarified that the session runner drains pending initialization work before dispatch and may continue into run creation on the same wake-up once setup becomes ready.

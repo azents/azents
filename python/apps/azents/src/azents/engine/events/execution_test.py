@@ -4,10 +4,13 @@ import asyncio
 import datetime
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from contextlib import asynccontextmanager
+from typing import Any
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import azents.engine.events.execution as execution_module
 from azents.core.enums import AgentRunPhase, AgentRunStatus, EventKind
 from azents.core.inference_profile import SessionInferenceState
 from azents.engine.events.execution import (
@@ -47,7 +50,15 @@ from azents.engine.events.types import (
     build_native_compat_key,
 )
 from azents.engine.run.errors import ModelCallError
-from azents.engine.run.types import USER_STOP_CANCEL_MESSAGE
+from azents.engine.run.types import (
+    OWNERSHIP_LOST_CANCEL_MESSAGE,
+    USER_STOP_CANCEL_MESSAGE,
+)
+from azents.rdb.session import SessionManager
+from azents.repos.agent_execution import (
+    AgentRunNotActiveError,
+    AgentRunOwnershipLostError,
+)
 from azents.repos.agent_execution.data import EventCreate
 from azents.testing.model_selection import make_test_model_selection
 
@@ -59,6 +70,7 @@ class _Session(AsyncSession):
         """Record values at commit time."""
         self.commits: list[int] = []
         self._commit_value = commit_value
+        self.active_scopes = 0
 
     async def commit(self) -> None:
         """Record commit call."""
@@ -67,6 +79,20 @@ class _Session(AsyncSession):
 
     async def rollback(self) -> None:
         """Accept rollback calls from rejected admission tests."""
+
+    @asynccontextmanager
+    async def __call__(self) -> AsyncIterator["_Session"]:
+        """Provide production-like commit and rollback session scopes."""
+        self.active_scopes += 1
+        try:
+            yield self
+        except BaseException:
+            await self.rollback()
+            raise
+        else:
+            await self.commit()
+        finally:
+            self.active_scopes -= 1
 
 
 class _OpenToolAdmissionBarrier:
@@ -112,6 +138,9 @@ class _RunRepo:
         self.model_call_started_at: datetime.datetime | None = None
         self.terminal_result_event_id: str | None = None
         self.terminal_result_message: str | None = None
+        self.terminal_conflict_status: AgentRunStatus | None = None
+        self.ownership_lost = False
+        self.authority_checks: list[tuple[str, str, int]] = []
 
     async def get_by_id(
         self,
@@ -140,6 +169,26 @@ class _RunRepo:
         run_id: str,
     ) -> AgentRunState:
         """Return locked run state."""
+        return await self.get_by_id(session, run_id)
+
+    async def lock_active_owner(
+        self,
+        session: AsyncSession,
+        *,
+        run_id: str,
+        session_id: str,
+        owner_generation: int,
+    ) -> AgentRunState:
+        """Validate the execution's durable authority."""
+        self.authority_checks.append((run_id, session_id, owner_generation))
+        if self.ownership_lost:
+            raise AgentRunOwnershipLostError(
+                run_id=run_id,
+                session_id=session_id,
+                expected_owner_generation=owner_generation,
+                current_owner_generation=owner_generation + 1,
+                active_run_id="new-run",
+            )
         return await self.get_by_id(session, run_id)
 
     async def update_phase(
@@ -174,6 +223,8 @@ class _RunRepo:
     ) -> object:
         """Record terminal status."""
         del session, run_id, ended_at, last_completed_event_id
+        if self.terminal_conflict_status is not None:
+            raise AgentRunNotActiveError("run-1", self.terminal_conflict_status)
         self.terminal = status
         self.terminal_result_event_id = terminal_result_event_id
         self.terminal_result_message = terminal_result_message
@@ -262,6 +313,20 @@ class _TranscriptRepo:
         )
         self.events.append(event)
         return event
+
+
+class _FailingToolResultTranscriptRepo(_TranscriptRepo):
+    """Fail while durably finalizing a client tool result."""
+
+    async def append(
+        self,
+        session: AsyncSession,
+        create: EventCreate,
+    ) -> Event:
+        """Raise a database-like error for tool result finalization."""
+        if create.kind == EventKind.CLIENT_TOOL_RESULT:
+            raise RuntimeError("tool result finalization failed")
+        return await super().append(session, create)
 
 
 class _Lowerer:
@@ -356,11 +421,11 @@ class _PreFilter:
 
     async def apply(
         self,
-        session: AsyncSession,
+        session_manager: SessionManager[AsyncSession],
         transcript: Sequence[Event],
     ) -> list[Event]:
         """Return transcript after compaction."""
-        del session, transcript
+        del session_manager, transcript
         return list(self._events)
 
 
@@ -380,6 +445,24 @@ class _ModelAdapter:
         request: NativeModelRequest,
     ) -> AsyncIterator[NativeEvent]:
         """Return one completed event."""
+        yield NativeEvent(type="done", item={})
+
+
+class _NoSessionModelAdapter(_ModelAdapter):
+    """Assert model I/O never runs inside a database session scope."""
+
+    def __init__(self, session_manager: _Session) -> None:
+        self._session_manager = session_manager
+        self.stream_calls = 0
+
+    async def stream(
+        self,
+        request: NativeModelRequest,
+    ) -> AsyncIterator[NativeEvent]:
+        """Fail if a database scope remains active during provider I/O."""
+        del request
+        assert self._session_manager.active_scopes == 0
+        self.stream_calls += 1
         yield NativeEvent(type="done", item={})
 
 
@@ -417,6 +500,22 @@ class _CancellingModelAdapter:
         )
         yield NativeEvent(type="response.output_text.delta", item={"delta": "lo"})
         raise asyncio.CancelledError(USER_STOP_CANCEL_MESSAGE)
+
+
+class _OwnershipLossModelAdapter:
+    """Raise ownership fencing after one partial model delta."""
+
+    async def stream(
+        self,
+        request: NativeModelRequest,
+    ) -> AsyncIterator[NativeEvent]:
+        """Emit a partial delta without allowing stale-owner durabilization."""
+        del request
+        yield NativeEvent(
+            type="response.output_text.delta",
+            item={"delta": "partial"},
+        )
+        raise asyncio.CancelledError(OWNERSHIP_LOST_CANCEL_MESSAGE)
 
 
 class _FailingModelAdapter:
@@ -550,6 +649,33 @@ class _ToolExecutor:
         self.cancelled_calls.append(call)
 
 
+class _NoSessionToolExecutor(_ToolExecutor):
+    """Assert tool I/O never runs inside a database session scope."""
+
+    def __init__(self, session_manager: _Session) -> None:
+        super().__init__()
+        self._session_manager = session_manager
+
+    async def execute(self, call: ClientToolCallPayload) -> ClientToolResultPayload:
+        """Fail if a database scope remains active during tool I/O."""
+        assert self._session_manager.active_scopes == 0
+        return await super().execute(call)
+
+
+class _OwnershipStealingToolExecutor(_ToolExecutor):
+    """Complete external work only after another owner replaces this writer."""
+
+    def __init__(self, run_repo: _RunRepo) -> None:
+        super().__init__()
+        self._run_repo = run_repo
+
+    async def execute(self, call: ClientToolCallPayload) -> ClientToolResultPayload:
+        """Return a result after making the finalization authority stale."""
+        result = await super().execute(call)
+        self._run_repo.ownership_lost = True
+        return result
+
+
 class _OrderedToolExecutor(_ToolExecutor):
     """Hold one parallel call so completion order is deterministic."""
 
@@ -563,6 +689,72 @@ class _OrderedToolExecutor(_ToolExecutor):
         if call.call_id == "call-2":
             self.blocked_started.set()
             await self.release_blocked.wait()
+        return await super().execute(call)
+
+
+class _FinalizationFailureToolExecutor(_ToolExecutor):
+    """Keep one external call running while its sibling is finalized."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.blocked_started = asyncio.Event()
+        self.blocked_cancelled = asyncio.Event()
+        self.release_blocked = asyncio.Event()
+
+    async def execute(self, call: ClientToolCallPayload) -> ClientToolResultPayload:
+        """Complete call-1 after call-2 has entered its blocking external call."""
+        if call.call_id == "call-1":
+            await self.blocked_started.wait()
+            return await super().execute(call)
+        if call.call_id == "call-2":
+            self.blocked_started.set()
+            try:
+                await self.release_blocked.wait()
+            except asyncio.CancelledError:
+                self.blocked_cancelled.set()
+                raise
+        return await super().execute(call)
+
+
+class _CancellationAwareBlockingToolExecutor(_ToolExecutor):
+    """Detect whether parent cancellation preserves ownership-loss authority."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.started = asyncio.Event()
+        self.child_cancel_args: tuple[object, ...] | None = None
+        self.stale_cleanup_writes = 0
+
+    async def execute(self, call: ClientToolCallPayload) -> ClientToolResultPayload:
+        """Block and model a stale cleanup write on generic cancellation."""
+        self.started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError as exc:
+            self.child_cancel_args = exc.args
+            if exc.args != (OWNERSHIP_LOST_CANCEL_MESSAGE,):
+                self.stale_cleanup_writes += 1
+            raise
+        return await super().execute(call)
+
+
+class _CancellationResistantToolExecutor(_ToolExecutor):
+    """Keep external work alive after task cancellation until explicitly released."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+        self.child_cancel_args: list[tuple[object, ...]] = []
+
+    async def execute(self, call: ClientToolCallPayload) -> ClientToolResultPayload:
+        """Swallow cancellation to model an uncooperative external Tool."""
+        self.started.set()
+        while not self.release.is_set():
+            try:
+                await self.release.wait()
+            except asyncio.CancelledError as exc:
+                self.child_cancel_args.append(exc.args)
         return await super().execute(call)
 
 
@@ -582,13 +774,21 @@ class _FailingToolExecutor:
 class _CancellingToolExecutor:
     """Cancelling tool executor for tests."""
 
-    def __init__(self, *, user_stop: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        user_stop: bool = False,
+        cancel_message: str | None = None,
+    ) -> None:
         self._user_stop = user_stop
+        self._cancel_message = cancel_message
         self.cancelled_calls: list[ClientToolCallPayload] = []
 
     async def execute(self, call: ClientToolCallPayload) -> ClientToolResultPayload:
         """Raise tool cancellation."""
         del call
+        if self._cancel_message is not None:
+            raise asyncio.CancelledError(self._cancel_message)
         if self._user_stop:
             raise asyncio.CancelledError(USER_STOP_CANCEL_MESSAGE)
         raise asyncio.CancelledError
@@ -788,6 +988,34 @@ async def test_text_run_completes() -> None:
     )
     assert waiting_started_at is not None
     assert streaming_started_at == waiting_started_at
+
+
+async def test_terminal_winner_aborts_late_no_tool_completion() -> None:
+    """Return the committed stop winner when completion loses its DB transition."""
+    run_repo = _RunRepo()
+    run_repo.terminal_conflict_status = AgentRunStatus.STOPPED
+    execution = AgentRunExecution(
+        post_lower_filter=_PostFilter(),
+        model_adapter=_ModelAdapter(),
+        output_normalizer=_Normalizer([_assistant_event()]),
+        model_call_preparer=_model_call_preparer(),
+        run_repo=run_repo,
+        transcript_repo=_TranscriptRepo(),
+    )
+
+    status = await execution.run(
+        _Session(),
+        AgentRunExecutionRequest(
+            owner_generation=1,
+            tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            run_id="run-1",
+            session_id="session-1",
+            model="gpt-5.1",
+        ),
+    )
+
+    assert status == AgentRunStatus.STOPPED
+    assert run_repo.terminal is None
 
 
 async def test_model_delta_reaches_output_sink_before_stream_completion() -> None:
@@ -1099,6 +1327,16 @@ async def test_tool_run_with_turn_limit_interrupts_after_tool_result() -> None:
     """Append final-turn tool result at turn limit, then end as interrupted."""
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
+    sink_events: list[Event] = []
+
+    async def output_sink(
+        normalized: NormalizedAdapterOutput,
+        appended: Sequence[Event],
+    ) -> None:
+        """Collect committed output projected during the bounded run."""
+        del normalized
+        sink_events.extend(appended)
+
     execution = AgentRunExecution(
         post_lower_filter=_PostFilter(),
         model_adapter=_ModelAdapter(),
@@ -1106,6 +1344,7 @@ async def test_tool_run_with_turn_limit_interrupts_after_tool_result() -> None:
         model_call_preparer=_model_call_preparer(
             lowerer=_Lowerer(), tool_executor=_ToolExecutor()
         ),
+        output_sink=output_sink,
         run_repo=run_repo,
         transcript_repo=transcript_repo,
     )
@@ -1133,6 +1372,11 @@ async def test_tool_run_with_turn_limit_interrupts_after_tool_result() -> None:
         "tool-call:run-1:call-1",
         "tool-result:run-1:call-1",
     ]
+    assert any(
+        isinstance(event.payload, RunMarkerPayload)
+        and event.payload.status == "interrupted"
+        for event in sink_events
+    )
 
 
 async def test_parallel_calls_finalize_independently() -> None:
@@ -1192,6 +1436,42 @@ async def test_parallel_calls_finalize_independently() -> None:
         "tool-result:run-1:call-1",
         "tool-result:run-1:call-2",
     ]
+
+
+async def test_tool_finalization_failure_cancels_unfinished_siblings() -> None:
+    """Do not leave parallel external tool work detached after a DB failure."""
+    tool_executor = _FinalizationFailureToolExecutor()
+    execution = AgentRunExecution(
+        post_lower_filter=_PostFilter(),
+        model_adapter=_ModelAdapter(),
+        output_normalizer=_Normalizer(
+            [_tool_call_event("call-1"), _tool_call_event("call-2")]
+        ),
+        model_call_preparer=_model_call_preparer(
+            lowerer=_Lowerer(),
+            tool_executor=tool_executor,
+        ),
+        run_repo=_RunRepo(),
+        transcript_repo=_FailingToolResultTranscriptRepo(),
+    )
+
+    try:
+        with pytest.raises(RuntimeError, match="tool result finalization failed"):
+            await execution.run(
+                _Session(),
+                AgentRunExecutionRequest(
+                    owner_generation=1,
+                    tool_admission_barrier=_OpenToolAdmissionBarrier(),
+                    run_id="run-1",
+                    session_id="session-1",
+                    model="gpt-5.1",
+                    max_turns=1,
+                ),
+            )
+        assert tool_executor.blocked_cancelled.is_set()
+    finally:
+        tool_executor.release_blocked.set()
+        await asyncio.sleep(0)
 
 
 async def test_term_after_admission_keeps_normal_result_and_run_recoverable() -> None:
@@ -1283,6 +1563,69 @@ async def test_unlimited_tool_run_executes_tool_then_completes() -> None:
     assert any(
         event.kind == EventKind.CLIENT_TOOL_RESULT for event in transcript_repo.events
     )
+
+
+async def test_external_model_and_tool_calls_run_after_db_scope_closes() -> None:
+    """Do not retain a database session across model or tool provider I/O."""
+    session_manager = _Session()
+    model_adapter = _NoSessionModelAdapter(session_manager)
+    tool_executor = _NoSessionToolExecutor(session_manager)
+    output_calls = 0
+    phase_calls = 0
+
+    async def output_sink(
+        normalized: NormalizedAdapterOutput,
+        appended: Sequence[Event],
+    ) -> None:
+        """Assert durable/live publication happens after DB scope exit."""
+        del normalized, appended
+        nonlocal output_calls
+        assert session_manager.active_scopes == 0
+        output_calls += 1
+
+    async def phase_sink(
+        phase: AgentRunPhase,
+        model_call_started_at: datetime.datetime | None,
+    ) -> None:
+        """Assert committed phase publication happens after DB scope exit."""
+        del phase, model_call_started_at
+        nonlocal phase_calls
+        assert session_manager.active_scopes == 0
+        phase_calls += 1
+
+    execution = AgentRunExecution(
+        post_lower_filter=_PostFilter(),
+        model_adapter=model_adapter,
+        output_normalizer=_SequenceNormalizer(
+            [
+                [_tool_call_event()],
+                [_assistant_event()],
+            ]
+        ),
+        model_call_preparer=_model_call_preparer(tool_executor=tool_executor),
+        output_sink=output_sink,
+        phase_sink=phase_sink,
+        run_repo=_RunRepo(),
+        transcript_repo=_TranscriptRepo(),
+    )
+
+    status = await execution.run(
+        session_manager,
+        AgentRunExecutionRequest(
+            owner_generation=1,
+            tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            run_id="run-1",
+            session_id="session-1",
+            model="gpt-5.1",
+        ),
+    )
+
+    assert status == AgentRunStatus.COMPLETED
+    assert model_adapter.stream_calls == 2
+    assert len(tool_executor.executed_calls) == 1
+    assert output_calls > 0
+    assert phase_calls > 0
+    assert session_manager.active_scopes == 0
 
 
 async def test_model_call_preparer_runs_for_each_model_turn() -> None:
@@ -1538,7 +1881,6 @@ async def test_tool_turn_polls_input_before_next_model_call() -> None:
     poll_count = 0
 
     async def poll_input_events(
-        session: AsyncSession,
         session_id: str,
     ) -> InputPollResult:
         """Append queued user input at second turn boundary."""
@@ -1555,7 +1897,7 @@ async def test_tool_turn_polls_input_before_next_model_call() -> None:
             complete_run=False,
             events=[
                 await transcript_repo.append(
-                    session,
+                    _Session(),
                     EventCreate(
                         session_id=session_id,
                         kind=EventKind.USER_MESSAGE,
@@ -1617,11 +1959,10 @@ async def test_context_invalidation_yields_for_request_refresh() -> None:
     poll_count = 0
 
     async def poll_input_events(
-        session: AsyncSession,
         session_id: str,
     ) -> InputPollResult:
         """Request a handoff at the second turn boundary."""
-        del session, session_id
+        del session_id
         nonlocal poll_count
         poll_count += 1
         return InputPollResult(
@@ -1880,6 +2221,8 @@ async def test_model_stream_user_stop_appends_only_assistant_text() -> None:
 
     assert status == AgentRunStatus.INTERRUPTED
     assert run_repo.terminal == AgentRunStatus.INTERRUPTED
+    assert run_repo.terminal_result_event_id == transcript_repo.events[0].id
+    assert run_repo.terminal_result_message == "hello"
     assert [event.kind for event in transcript_repo.events] == [
         EventKind.ASSISTANT_MESSAGE,
         EventKind.RUN_MARKER,
@@ -1919,6 +2262,38 @@ async def test_model_stream_user_stop_without_text_appends_only_marker() -> None
     assert [event.kind for event in transcript_repo.events] == [
         EventKind.RUN_MARKER,
     ]
+
+
+async def test_model_stream_ownership_loss_skips_partial_terminalization() -> None:
+    """A stale owner never persists partial output or an interrupted marker."""
+    run_repo = _RunRepo()
+    transcript_repo = _TranscriptRepo()
+    execution = AgentRunExecution(
+        post_lower_filter=_PostFilter(),
+        model_adapter=_OwnershipLossModelAdapter(),
+        output_normalizer=_Normalizer([_assistant_event()]),
+        model_call_preparer=_model_call_preparer(
+            lowerer=_Lowerer(), tool_executor=_ToolExecutor()
+        ),
+        run_repo=run_repo,
+        transcript_repo=transcript_repo,
+    )
+
+    with pytest.raises(asyncio.CancelledError) as cancelled:
+        await execution.run(
+            _Session(),
+            AgentRunExecutionRequest(
+                owner_generation=1,
+                tool_admission_barrier=_OpenToolAdmissionBarrier(),
+                run_id="run-1",
+                session_id="session-1",
+                model="gpt-5.1",
+            ),
+        )
+
+    assert cancelled.value.args == (OWNERSHIP_LOST_CANCEL_MESSAGE,)
+    assert transcript_repo.events == []
+    assert run_repo.terminal is None
 
 
 async def test_shutdown_tool_cancellation_repairs_before_reraising() -> None:
@@ -2004,6 +2379,196 @@ async def test_tool_user_stop_appends_cancelled_result_and_interrupts() -> None:
     marker_payload = transcript_repo.events[3].payload
     assert isinstance(marker_payload, RunMarkerPayload)
     assert marker_payload.status == "interrupted"
+
+
+async def test_tool_ownership_loss_skips_cancelled_result_and_phase_writes() -> None:
+    """Tool cancellation fencing leaves unresolved state for the new owner."""
+    run_repo = _RunRepo()
+    transcript_repo = _TranscriptRepo()
+    tool_executor = _CancellingToolExecutor(
+        cancel_message=OWNERSHIP_LOST_CANCEL_MESSAGE
+    )
+    execution = AgentRunExecution(
+        post_lower_filter=_PostFilter(),
+        model_adapter=_ModelAdapter(),
+        output_normalizer=_Normalizer([_tool_call_event()]),
+        model_call_preparer=_model_call_preparer(
+            lowerer=_Lowerer(), tool_executor=tool_executor
+        ),
+        run_repo=run_repo,
+        transcript_repo=transcript_repo,
+    )
+
+    with pytest.raises(asyncio.CancelledError) as cancelled:
+        await execution.run(
+            _Session(),
+            AgentRunExecutionRequest(
+                owner_generation=1,
+                tool_admission_barrier=_OpenToolAdmissionBarrier(),
+                run_id="run-1",
+                session_id="session-1",
+                model="gpt-5.1",
+            ),
+        )
+
+    assert cancelled.value.args == (OWNERSHIP_LOST_CANCEL_MESSAGE,)
+    assert [event.kind for event in transcript_repo.events] == [
+        EventKind.CLIENT_TOOL_CALL,
+        EventKind.TURN_MARKER,
+    ]
+    assert run_repo.terminal is None
+    assert AgentRunPhase.STOPPING not in run_repo.phases
+    assert [call.call_id for call in tool_executor.cancelled_calls] == ["call-1"]
+
+
+async def test_stale_owner_cannot_append_completed_tool_result() -> None:
+    """A lease steal after external I/O rejects the result before transcript write."""
+    run_repo = _RunRepo()
+    transcript_repo = _TranscriptRepo()
+    execution = AgentRunExecution(
+        post_lower_filter=_PostFilter(),
+        model_adapter=_ModelAdapter(),
+        output_normalizer=_Normalizer([_tool_call_event()]),
+        model_call_preparer=_model_call_preparer(
+            lowerer=_Lowerer(),
+            tool_executor=_OwnershipStealingToolExecutor(run_repo),
+        ),
+        run_repo=run_repo,
+        transcript_repo=transcript_repo,
+    )
+
+    with pytest.raises(asyncio.CancelledError) as cancelled:
+        await execution.run(
+            _Session(),
+            AgentRunExecutionRequest(
+                owner_generation=1,
+                tool_admission_barrier=_OpenToolAdmissionBarrier(),
+                run_id="run-1",
+                session_id="session-1",
+                model="gpt-5.1",
+            ),
+        )
+
+    assert cancelled.value.args == (OWNERSHIP_LOST_CANCEL_MESSAGE,)
+    assert [event.kind for event in transcript_repo.events] == [
+        EventKind.CLIENT_TOOL_CALL,
+        EventKind.TURN_MARKER,
+    ]
+    assert run_repo.terminal is None
+    assert [call.call_id for call in run_repo.active_tool_calls] == ["call-1"]
+    assert run_repo.phases[-1] == AgentRunPhase.EXECUTING_TOOLS
+
+
+async def test_parent_ownership_loss_reason_reaches_child_tool_task() -> None:
+    """Cancelling the Run cannot downgrade child tools to generic cleanup."""
+    run_repo = _RunRepo()
+    transcript_repo = _TranscriptRepo()
+    tool_executor = _CancellationAwareBlockingToolExecutor()
+    execution = AgentRunExecution(
+        post_lower_filter=_PostFilter(),
+        model_adapter=_ModelAdapter(),
+        output_normalizer=_Normalizer([_tool_call_event()]),
+        model_call_preparer=_model_call_preparer(
+            lowerer=_Lowerer(), tool_executor=tool_executor
+        ),
+        run_repo=run_repo,
+        transcript_repo=transcript_repo,
+    )
+
+    run_task = asyncio.create_task(
+        execution.run(
+            _Session(),
+            AgentRunExecutionRequest(
+                owner_generation=1,
+                tool_admission_barrier=_OpenToolAdmissionBarrier(),
+                run_id="run-1",
+                session_id="session-1",
+                model="gpt-5.1",
+            ),
+        )
+    )
+    await tool_executor.started.wait()
+    run_task.cancel(OWNERSHIP_LOST_CANCEL_MESSAGE)
+
+    with pytest.raises(asyncio.CancelledError) as cancelled:
+        await run_task
+
+    assert cancelled.value.args == (OWNERSHIP_LOST_CANCEL_MESSAGE,)
+    assert tool_executor.child_cancel_args == (OWNERSHIP_LOST_CANCEL_MESSAGE,)
+    assert tool_executor.stale_cleanup_writes == 0
+    assert [event.kind for event in transcript_repo.events] == [
+        EventKind.CLIENT_TOOL_CALL,
+        EventKind.TURN_MARKER,
+    ]
+    assert run_repo.terminal is None
+    assert AgentRunPhase.STOPPING not in run_repo.phases
+
+
+async def test_user_stop_detaches_tool_that_ignores_cancellation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An uncooperative Tool cannot block the interrupted marker indefinitely."""
+    monkeypatch.setattr(
+        execution_module,
+        "_TOOL_CANCELLATION_CLEANUP_TIMEOUT_SECONDS",
+        0.01,
+    )
+    run_repo = _RunRepo()
+    transcript_repo = _TranscriptRepo()
+    tool_executor = _CancellationResistantToolExecutor()
+    execution = AgentRunExecution(
+        post_lower_filter=_PostFilter(),
+        model_adapter=_ModelAdapter(),
+        output_normalizer=_Normalizer([_tool_call_event()]),
+        model_call_preparer=_model_call_preparer(
+            lowerer=_Lowerer(), tool_executor=tool_executor
+        ),
+        run_repo=run_repo,
+        transcript_repo=transcript_repo,
+    )
+    run_task = asyncio.create_task(
+        execution.run(
+            _Session(),
+            AgentRunExecutionRequest(
+                owner_generation=1,
+                tool_admission_barrier=_OpenToolAdmissionBarrier(),
+                run_id="run-1",
+                session_id="session-1",
+                model="gpt-5.1",
+            ),
+        )
+    )
+
+    await asyncio.wait_for(tool_executor.started.wait(), timeout=1)
+    run_task.cancel(USER_STOP_CANCEL_MESSAGE)
+    retained_task: asyncio.Task[Any] | None = None
+
+    try:
+        assert await asyncio.wait_for(run_task, timeout=1) == AgentRunStatus.INTERRUPTED
+        assert tool_executor.child_cancel_args
+        assert all(
+            args == (USER_STOP_CANCEL_MESSAGE,)
+            for args in tool_executor.child_cancel_args
+        )
+        marker_payload = transcript_repo.events[-1].payload
+        assert isinstance(marker_payload, RunMarkerPayload)
+        assert marker_payload.status == "interrupted"
+        retained_task = next(
+            task
+            for task in execution_module._RETAINED_TOOL_EXECUTION_TASKS  # pyright: ignore[reportPrivateUsage]
+            if task.get_name() == "tool-execution:call-1"
+        )
+        assert not retained_task.done()
+    finally:
+        tool_executor.release.set()
+        if retained_task is not None:
+            await asyncio.wait_for(retained_task, timeout=1)
+            await asyncio.sleep(0)
+
+    assert retained_task is not None
+    assert (
+        retained_task not in execution_module._RETAINED_TOOL_EXECUTION_TASKS  # pyright: ignore[reportPrivateUsage]
+    )
 
 
 async def test_tool_result_output_sink_receives_tool_result() -> None:

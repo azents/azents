@@ -5,6 +5,7 @@ import contextlib
 from collections.abc import Awaitable, Callable, Sequence
 from contextlib import AbstractAsyncContextManager
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -13,9 +14,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 import azents.worker.session.supervisor as session_runner_supervisor_module
 import azents.worker.session.waiter as session_runner_waiter_module
+import azents.worker.worker as worker_module
 from azents.broker.broadcast import WebSocketBroadcast
 from azents.broker.types import (
     SessionBroker,
+    SessionOwnershipLostError,
     SessionStopSignal,
     SessionWakeUp,
 )
@@ -29,7 +32,7 @@ from azents.core.inference_profile import (
 )
 from azents.core.tools import Toolkit, ToolkitState, ToolkitStatus, TurnContext
 from azents.engine.events.builders import make_system_error_event
-from azents.engine.events.engine_events import ContentDelta, ReasoningDelta
+from azents.engine.events.engine_events import ContentDelta, ReasoningDelta, RunStarted
 from azents.engine.events.types import (
     ActiveToolCall,
     AssistantMessagePayload,
@@ -72,6 +75,7 @@ from azents.worker.session.runner import (
 )
 from azents.worker.session.supervisor import RunStopController, ToolAdmissionBarrier
 from azents.worker.session.user_stop_finalizer import UserStopFinalizer
+from azents.worker.worker import AgentWorker
 
 
 class _Broadcast:
@@ -83,6 +87,30 @@ class _Broadcast:
     async def publish(self, session_id: str, event: dict[str, object]) -> None:
         """Record delivered broadcast payloads in order."""
         self.events.append((session_id, event))
+
+
+class _SimultaneousReceiveBroker:
+    """Broker whose successful receive can race Worker shutdown deterministically."""
+
+    def __init__(self, message: SessionWakeUp) -> None:
+        """Initialize a gated destructive receive."""
+        self.message = message
+        self.receive_started = asyncio.Event()
+        self.release_receive = asyncio.Event()
+        self.receive_cancelled = asyncio.Event()
+        self.cancel_error: Exception | None = None
+
+    async def receive_messages(self) -> list[SessionWakeUp]:
+        """Return one already-popped message when the test releases the receive."""
+        self.receive_started.set()
+        try:
+            await self.release_receive.wait()
+        except asyncio.CancelledError:
+            self.receive_cancelled.set()
+            if self.cancel_error is not None:
+                raise self.cancel_error from None
+            raise
+        return [self.message]
 
 
 class _SessionRunnerEventPublisher:
@@ -130,6 +158,7 @@ class _InputBufferService:
         model: str | None,
         required_inference_profile: RequestedInferenceProfile | None,
         expected_buffer_id: str | None,
+        owner_generation: int,
         prepared_inference_state: SessionInferenceState | None,
         profile_resolution_failure: str | None,
         active_run_id: str | None,
@@ -140,6 +169,7 @@ class _InputBufferService:
         del (
             required_inference_profile,
             expected_buffer_id,
+            owner_generation,
             prepared_inference_state,
             profile_resolution_failure,
             active_run_id,
@@ -181,6 +211,35 @@ class _SessionManager:
     def __call__(self) -> _SessionScope:
         """Return new session scope."""
         return _SessionScope()
+
+
+class _LiveAgentRunRepository:
+    """Expose one durable active Run for live projector tests."""
+
+    def __init__(self, run_id: str = "run-1") -> None:
+        self.run_id = run_id
+
+    async def get_active_by_session_id(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+    ) -> object:
+        """Return the configured active Run."""
+        del session, session_id
+        return SimpleNamespace(id=self.run_id)
+
+    async def list_latest_by_session_ids(
+        self,
+        session: AsyncSession,
+        *,
+        session_ids: list[str],
+    ) -> dict[str, object]:
+        """Return the configured Run as latest for each requested Session."""
+        del session
+        return {
+            session_id: SimpleNamespace(id=self.run_id) for session_id in session_ids
+        }
 
 
 class _Broker:
@@ -337,7 +396,8 @@ class _RunExecutor:
         dispatch_event: Callable[[str, PublishedEvent], Awaitable[None]],
     ) -> str | None:
         """Report that command-only test failures have no active Run."""
-        del session_id, exc, dispatch_event
+        del session_id, dispatch_event
+        self.host.unhandled_finalization_errors.append(exc)
         return None
 
     async def execute(
@@ -420,9 +480,9 @@ class _UserStopFinalizer:
         *,
         run_id: str | None,
         active_tool_calls: Sequence[ActiveToolCall],
-    ) -> None:
+    ) -> str | None:
         """Delegate to Host user stop finalization fake."""
-        await self.host.finalize_user_stop(
+        return await self.host.finalize_user_stop(
             session_id,
             run_id=run_id,
             active_tool_calls=active_tool_calls,
@@ -438,6 +498,7 @@ class _Host:
         self.idle_mark_attempted = asyncio.Event()
         self.cleared_session_ids: list[str] = []
         self.finalized_user_stop_session_ids: list[str] = []
+        self.finalized_user_stops: list[tuple[str, str | None]] = []
         self.idle_session_ids: list[str] = []
         self.idle_continuation_calls: list[
             tuple[SessionWakeUp, list[ToolkitBinding]]
@@ -448,8 +509,10 @@ class _Host:
         self.owner_heartbeat_session_ids: list[str] = []
         self.pending_input_session_ids: set[str] = set()
         self.stop_request_session_ids: set[str] = set()
+        self.stop_request_ids: dict[str, str] = {}
         self.processed_messages: list[SessionWakeUp] = []
         self.handover_messages: list[SessionWakeUp] = []
+        self.redelivered_messages: list[SessionWakeUp | SessionStopSignal] = []
         self.pending_command_result = False
         self.message_started = asyncio.Event()
         self.message_release = asyncio.Event()
@@ -459,16 +522,21 @@ class _Host:
         self.block_message_until_release = False
         self.block_message_until_cancel = False
         self.block_after_cancel = False
+        self.complete_message_on_cancel = False
         self.shutdown_before_message_returns = False
         self.idle_transition_allowed = True
         self.running_agent_run_exists = False
         self.terminal_event_observed = True
         self.no_actionable_message_numbers: set[int] = set()
         self.command_error: Exception | None = None
+        self.message_error: Exception | None = None
+        self.stop_request_error: Exception | None = None
+        self.unhandled_finalization_errors: list[Exception] = []
         self.commands: list[PendingSessionCommand] = []
         self.dispatched_events: list[tuple[str, PublishedEvent]] = []
         self.event_dispatched = asyncio.Event()
         self.owner_generation_claims = 0
+        self.owner_generation_error: Exception | None = None
 
     @property
     def shutdown_event(self) -> asyncio.Event:
@@ -478,6 +546,8 @@ class _Host:
     async def claim_owner_generation(self, session_id: str) -> int:
         """Return one durable ownership generation for the test runner."""
         del session_id
+        if self.owner_generation_error is not None:
+            raise self.owner_generation_error
         self.owner_generation_claims += 1
         return self.owner_generation_claims
 
@@ -493,6 +563,8 @@ class _Host:
         _ = poll_fn, prepare_toolkits
         self.processed_messages.append(message)
         self.message_started.set()
+        if self.message_error is not None:
+            raise self.message_error
         if self.block_message_until_release:
             await self.message_release.wait()
         if self.block_message_until_cancel:
@@ -500,6 +572,14 @@ class _Host:
                 await asyncio.Event().wait()
             except asyncio.CancelledError:
                 self.message_cancelled.set()
+                if self.complete_message_on_cancel:
+                    return RunExecutionResult(
+                        toolkits=[],
+                        terminal_event_observed=True,
+                        no_actionable_work=False,
+                        run_id="run-001",
+                        terminal_run_status=AgentRunStatus.STOPPED,
+                    )
                 if self.block_after_cancel:
                     await self.cancel_cleanup_release.wait()
                 raise
@@ -553,6 +633,14 @@ class _Host:
     async def send_session_wake_up(self, message: SessionWakeUp) -> None:
         """Store wake-up messages sent for handover."""
         self.handover_messages.append(message)
+        self.redelivered_messages.append(message)
+
+    async def send_session_message(
+        self,
+        message: SessionWakeUp | SessionStopSignal,
+    ) -> None:
+        """Store a generic broker message sent for redelivery."""
+        self.redelivered_messages.append(message)
 
     async def finalize_user_stop(
         self,
@@ -560,10 +648,13 @@ class _Host:
         *,
         run_id: str | None,
         active_tool_calls: Sequence[ActiveToolCall],
-    ) -> None:
+    ) -> str | None:
         """Store session for user stop finalization call."""
-        del run_id, active_tool_calls
+        del active_tool_calls
         self.finalized_user_stop_session_ids.append(session_id)
+        self.finalized_user_stops.append((session_id, run_id))
+        self.stop_request_session_ids.discard(session_id)
+        return run_id
 
     async def mark_session_running(self, session_id: str) -> None:
         """This test does not change run state."""
@@ -583,17 +674,33 @@ class _Host:
         del session_id
         return self.running_agent_run_exists
 
-    async def heartbeat_session(self, session_id: str) -> None:
+    async def heartbeat_session(
+        self,
+        session_id: str,
+        *,
+        owner_generation: int,
+    ) -> None:
         """This test does not refresh heartbeat."""
-        _ = session_id
+        _ = session_id, owner_generation
 
     async def renew_session_owner_heartbeat(self, session_id: str) -> None:
         """Store session for owner heartbeat refresh call."""
         self.owner_heartbeat_session_ids.append(session_id)
 
-    async def has_stop_request(self, session_id: str) -> bool:
+    async def has_stop_request(
+        self,
+        session_id: str,
+        *,
+        stop_request_id: str | None,
+    ) -> bool:
         """Return stop intent existence specified by test."""
-        return session_id in self.stop_request_session_ids
+        if self.stop_request_error is not None:
+            raise self.stop_request_error
+        if session_id not in self.stop_request_session_ids:
+            return False
+        if stop_request_id is None:
+            return True
+        return self.stop_request_ids.get(session_id) == stop_request_id
 
 
 async def _wait_for_owner_heartbeat(host: _Host) -> None:
@@ -663,7 +770,7 @@ def _make_worker_event_publisher(
         live_event_store=cast(Any, live_event_store),
         broadcast=cast(WebSocketBroadcast, broadcast),
         session_manager=cast(Any, _SessionManager()),
-        agent_run_repository=cast(Any, object()),
+        agent_run_repository=cast(Any, _LiveAgentRunRepository()),
     )
     return WorkerEventPublisher(
         broker=cast(SessionBroker, broker),
@@ -735,6 +842,105 @@ def test_observed_terminal_run_event_requires_terminal_event() -> None:
 
 
 @pytest.mark.asyncio
+async def test_worker_preserves_receive_that_completes_with_shutdown() -> None:
+    """A destructively received envelope wins a simultaneous shutdown race."""
+    message = _wake_up(session_id="session-1", agent_id="agent-1")
+    broker = _SimultaneousReceiveBroker(message)
+    worker = AgentWorker(
+        broker=cast(SessionBroker, broker),
+        stuck_session_recovery=cast(Any, object()),
+        session_runner_factory=cast(Any, object()),
+    )
+    shutdown_event = asyncio.Event()
+    receive = asyncio.create_task(
+        worker._receive_or_shutdown(  # pyright: ignore[reportPrivateUsage]
+            shutdown_event
+        )
+    )
+    await broker.receive_started.wait()
+
+    broker.release_receive.set()
+    shutdown_event.set()
+
+    assert await receive == [message]
+
+
+@pytest.mark.asyncio
+async def test_worker_cancellation_drains_in_progress_receive() -> None:
+    """Canceling the Worker wait cannot leave a destructive receive detached."""
+    message = _wake_up(session_id="session-1", agent_id="agent-1")
+    broker = _SimultaneousReceiveBroker(message)
+    worker = AgentWorker(
+        broker=cast(SessionBroker, broker),
+        stuck_session_recovery=cast(Any, object()),
+        session_runner_factory=cast(Any, object()),
+    )
+    receive = asyncio.create_task(
+        worker._receive_or_shutdown(  # pyright: ignore[reportPrivateUsage]
+            asyncio.Event()
+        )
+    )
+    await broker.receive_started.wait()
+
+    receive.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await receive
+    assert broker.receive_cancelled.is_set()
+
+
+@pytest.mark.asyncio
+async def test_worker_preserves_outer_cancel_when_receive_cleanup_fails(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A receive cleanup failure cannot replace Worker task cancellation."""
+    message = _wake_up(session_id="session-1", agent_id="agent-1")
+    broker = _SimultaneousReceiveBroker(message)
+    broker.cancel_error = RuntimeError("receive cleanup failed")
+    worker = AgentWorker(
+        broker=cast(SessionBroker, broker),
+        stuck_session_recovery=cast(Any, object()),
+        session_runner_factory=cast(Any, object()),
+    )
+    receive = asyncio.create_task(
+        worker._receive_or_shutdown(  # pyright: ignore[reportPrivateUsage]
+            asyncio.Event()
+        )
+    )
+    await broker.receive_started.wait()
+
+    receive.cancel("worker-cancel")
+
+    with pytest.raises(asyncio.CancelledError) as cancelled:
+        await receive
+    assert cancelled.value.args == ("worker-cancel",)
+    assert "Worker child wait failed during cancellation cleanup" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_active_runner_observes_background_task_failure(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A terminated Runner exception is consumed at the Worker task boundary."""
+    runner = _make_session_runner(_Host())
+
+    async def fail() -> None:
+        raise RuntimeError("runner failed")
+
+    task = asyncio.create_task(fail())
+    handle = worker_module._ActiveSessionRunner(  # pyright: ignore[reportPrivateUsage]
+        runner=runner,
+        task=task,
+    )
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    assert handle.terminated
+    assert not handle.accepts_messages
+    assert "Session runner task failed" in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_tool_admission_barrier_orders_admission_before_close() -> None:
     """Close waits for admitted persistence and rejects later admission."""
     barrier = ToolAdmissionBarrier()
@@ -800,7 +1006,13 @@ async def test_idle_stop_does_not_latch_next_run() -> None:
     message = _wake_up()
 
     try:
-        runner.enqueue(SessionStopSignal(session_id="session-001", user_id="user-001"))
+        runner.enqueue(
+            SessionStopSignal(
+                session_id="session-001",
+                user_id="user-001",
+                stop_request_id=None,
+            )
+        )
         await asyncio.sleep(0)
         runner.enqueue(message)
         await asyncio.wait_for(host.message_started.wait(), timeout=1)
@@ -809,6 +1021,64 @@ async def test_idle_stop_does_not_latch_next_run() -> None:
 
     assert host.processed_messages == [message]
     assert not host.message_cancelled.is_set()
+
+
+@pytest.mark.asyncio
+async def test_standalone_stop_signal_consumes_durable_stop_intent() -> None:
+    """A stop-only runner finalizes a committed stop without a wake-up message."""
+    host = _Host()
+    host.stop_request_session_ids.add("session-001")
+    runner = _start_session_runner(host)
+
+    try:
+        runner.enqueue(
+            SessionStopSignal(
+                session_id="session-001",
+                user_id="user-001",
+                stop_request_id=None,
+            )
+        )
+        await asyncio.wait_for(
+            _wait_until(
+                lambda: host.finalized_user_stop_session_ids == ["session-001"]
+            ),
+            timeout=2,
+        )
+        await asyncio.wait_for(
+            _wait_until(lambda: host.idle_session_ids == ["session-001"]),
+            timeout=2,
+        )
+    finally:
+        await runner.shutdown()
+
+    assert host.processed_messages == []
+    assert host.cleared_session_ids == ["session-001"]
+
+
+@pytest.mark.asyncio
+async def test_standalone_stop_signal_consumes_newer_durable_intent() -> None:
+    """An old wake hint still drives the currently durable stop request."""
+    host = _Host()
+    host.stop_request_session_ids.add("session-001")
+    host.stop_request_ids["session-001"] = "current-stop"
+    runner = _start_session_runner(host)
+
+    try:
+        runner.enqueue(
+            SessionStopSignal(
+                session_id="session-001",
+                user_id="user-001",
+                stop_request_id="stale-stop",
+            )
+        )
+        await asyncio.wait_for(
+            _wait_until(
+                lambda: host.finalized_user_stop_session_ids == ["session-001"]
+            ),
+            timeout=2,
+        )
+    finally:
+        await runner.shutdown()
 
 
 @pytest.mark.asyncio
@@ -1028,6 +1298,82 @@ async def test_session_command_reports_compaction_error_as_internal_error() -> N
     assert event.payload.content == "An internal error occurred."
 
 
+@pytest.mark.asyncio
+async def test_ownership_loss_exits_without_stale_terminal_writes() -> None:
+    """A stale runner only releases ownership and never finalizes the active Run."""
+    host = _Host()
+    host.message_error = SessionOwnershipLostError("session-001")
+    runner = _make_session_runner(host)
+    running = asyncio.create_task(runner.run())
+    runner.enqueue(_wake_up())
+
+    with pytest.raises(SessionOwnershipLostError, match="session-001"):
+        await running
+
+    assert host.unhandled_finalization_errors == []
+    assert host.dispatched_events == []
+    assert host.cleared_session_ids == []
+    assert host.idle_session_ids == []
+    assert host.released_session_ids == ["session-001"]
+
+
+@pytest.mark.asyncio
+async def test_ownership_loss_redelivers_in_flight_and_queued_wake_ups() -> None:
+    """A stale Runner returns every destructively received wake-up in FIFO order."""
+    host = _Host()
+    host.message_error = SessionOwnershipLostError("session-001")
+    runner = _make_session_runner(host)
+    running = asyncio.create_task(runner.run())
+    first = _wake_up(user_id="user-first")
+    second = _wake_up(user_id="user-second")
+    runner.enqueue(first)
+    runner.enqueue(second)
+
+    with pytest.raises(SessionOwnershipLostError, match="session-001"):
+        await running
+
+    assert host.processed_messages == [first]
+    assert host.redelivered_messages == [first, second]
+
+
+@pytest.mark.asyncio
+async def test_ownership_loss_redelivers_in_flight_stop_hint() -> None:
+    """A stop hint remains recoverable when ownership validation loses its fence."""
+    host = _Host()
+    host.stop_request_error = SessionOwnershipLostError("session-001")
+    runner = _make_session_runner(host)
+    running = asyncio.create_task(runner.run())
+    stop = SessionStopSignal(
+        session_id="session-001",
+        stop_request_id="stop-001",
+        user_id="user-001",
+    )
+    runner.enqueue(stop)
+
+    with pytest.raises(SessionOwnershipLostError, match="session-001"):
+        await running
+
+    assert host.finalized_user_stop_session_ids == []
+    assert host.redelivered_messages == [stop]
+
+
+@pytest.mark.asyncio
+async def test_owner_generation_failure_releases_and_redelivers_message() -> None:
+    """A failed durable owner claim cannot strand its Redis lock or wake-up."""
+    host = _Host()
+    host.owner_generation_error = RuntimeError("owner generation failed")
+    runner = _make_session_runner(host)
+    running = asyncio.create_task(runner.run())
+    message = _wake_up()
+    runner.enqueue(message)
+
+    with pytest.raises(RuntimeError, match="owner generation failed"):
+        await running
+
+    assert host.released_session_ids == ["session-001"]
+    assert host.redelivered_messages == [message]
+
+
 def test_apply_active_tool_call_event_tracks_until_output() -> None:
     """tool call activity is maintained only from call start until output arrives."""
     native_artifact = NativeArtifact(
@@ -1083,7 +1429,7 @@ async def test_replace_live_active_tool_calls_broadcasts_without_redis() -> None
         live_event_store=cast(Any, live_store),
         broadcast=cast(WebSocketBroadcast, broadcast),
         session_manager=cast(Any, _SessionManager()),
-        agent_run_repository=cast(Any, object()),
+        agent_run_repository=cast(Any, _LiveAgentRunRepository()),
     )
     active_tool_call = ActiveToolCall(
         call_id="call-1",
@@ -1096,6 +1442,7 @@ async def test_replace_live_active_tool_calls_broadcasts_without_redis() -> None
     await projector.replace_active_tool_calls(
         "session-1",
         [active_tool_call],
+        run_id="run-1",
         removed_call_ids=set(),
     )
 
@@ -1296,11 +1643,15 @@ async def test_dispatch_flushes_live_partial_batch_during_event_update() -> None
 
     await event_publisher.dispatch_event(
         "session-1",
-        ContentDelta(delta="hel", content_index=0),
+        RunStarted(run_id="run-1"),
     )
     await event_publisher.dispatch_event(
         "session-1",
-        ContentDelta(delta="lo", content_index=0),
+        ContentDelta(run_id="run-1", delta="hel", content_index=0),
+    )
+    await event_publisher.dispatch_event(
+        "session-1",
+        ContentDelta(run_id="run-1", delta="lo", content_index=0),
     )
     await event_publisher.dispatch_event("session-1", durable_result)
 
@@ -1347,11 +1698,15 @@ async def test_dispatch_flushes_reasoning_batch_during_event_update() -> None:
 
     await event_publisher.dispatch_event(
         "session-1",
-        ReasoningDelta(delta="think"),
+        RunStarted(run_id="run-1"),
     )
     await event_publisher.dispatch_event(
         "session-1",
-        ReasoningDelta(delta="ing"),
+        ReasoningDelta(run_id="run-1", delta="think"),
+    )
+    await event_publisher.dispatch_event(
+        "session-1",
+        ReasoningDelta(run_id="run-1", delta="ing"),
     )
     await event_publisher.dispatch_event("session-1", durable_reasoning)
 
@@ -1391,6 +1746,7 @@ async def test_prepare_toolkits_enters_before_update_context() -> None:
                 workspace_id="workspace-001",
                 model="test-model",
                 run_id="run-001",
+                owner_generation=1,
                 publish_event=_noop_publish_event,
             )
         )
@@ -1491,6 +1847,7 @@ async def test_stop_restarts_turn_when_pending_buffer_remains() -> None:
     """If pending buffer remains after Stop, start next turn with wake-up."""
     host = _Host()
     host.stop_first_message = True
+    host.stop_request_session_ids.add("session-001")
     host.pending_input_session_ids.add("session-001")
     runner = _start_session_runner(host)
     message = _wake_up()
@@ -1498,7 +1855,13 @@ async def test_stop_restarts_turn_when_pending_buffer_remains() -> None:
     try:
         runner.enqueue(message)
         await asyncio.wait_for(host.message_started.wait(), timeout=1)
-        runner.enqueue(SessionStopSignal(session_id="session-001", user_id="user-001"))
+        runner.enqueue(
+            SessionStopSignal(
+                session_id="session-001",
+                user_id="user-001",
+                stop_request_id=None,
+            )
+        )
         while len(host.processed_messages) < 2:
             await asyncio.sleep(0)
     finally:
@@ -1512,6 +1875,7 @@ async def test_stop_does_not_duplicate_existing_resume_wake_up() -> None:
     """Do not create duplicate wake-up after stop when wake-up is already queued."""
     host = _Host()
     host.stop_first_message = True
+    host.stop_request_session_ids.add("session-001")
     host.pending_input_session_ids.add("session-001")
     runner = _start_session_runner(host)
     message = _wake_up()
@@ -1520,7 +1884,13 @@ async def test_stop_does_not_duplicate_existing_resume_wake_up() -> None:
         runner.enqueue(message)
         await asyncio.wait_for(host.message_started.wait(), timeout=1)
         runner.enqueue(message)
-        runner.enqueue(SessionStopSignal(session_id="session-001", user_id="user-001"))
+        runner.enqueue(
+            SessionStopSignal(
+                session_id="session-001",
+                user_id="user-001",
+                stop_request_id=None,
+            )
+        )
         while len(host.processed_messages) < 2:
             await asyncio.sleep(0)
         await asyncio.sleep(0)
@@ -1535,6 +1905,7 @@ async def test_stop_discards_existing_wake_up_when_no_pending_buffer() -> None:
     """If no pending buffer remains after Stop, queued wake-up is not resumed."""
     host = _Host()
     host.stop_first_message = True
+    host.stop_request_session_ids.add("session-001")
     runner = _start_session_runner(host)
     message = _wake_up()
 
@@ -1542,7 +1913,13 @@ async def test_stop_discards_existing_wake_up_when_no_pending_buffer() -> None:
         runner.enqueue(message)
         await asyncio.wait_for(host.message_started.wait(), timeout=1)
         runner.enqueue(message)
-        runner.enqueue(SessionStopSignal(session_id="session-001", user_id="user-001"))
+        runner.enqueue(
+            SessionStopSignal(
+                session_id="session-001",
+                user_id="user-001",
+                stop_request_id=None,
+            )
+        )
         await asyncio.wait_for(
             _wait_until(lambda: host.idle_session_ids == ["session-001"]),
             timeout=2,
@@ -1559,16 +1936,87 @@ async def test_session_stop_signal_cancels_blocked_engine_task() -> None:
     """SessionStopSignal cancels execution task without check_stop polling."""
     host = _Host()
     host.block_message_until_cancel = True
+    host.stop_request_session_ids.add("session-001")
     runner = _start_session_runner(host)
     message = _wake_up()
 
     try:
         runner.enqueue(message)
         await asyncio.wait_for(host.message_started.wait(), timeout=1)
-        runner.enqueue(SessionStopSignal(session_id="session-001", user_id="user-001"))
+        runner.enqueue(
+            SessionStopSignal(
+                session_id="session-001",
+                user_id="user-001",
+                stop_request_id=None,
+            )
+        )
         await asyncio.wait_for(host.message_cancelled.wait(), timeout=2)
     finally:
         await runner.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_delayed_stop_signal_cannot_cancel_a_later_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A broker signal without matching durable intent is only a wake hint."""
+    monkeypatch.setattr(
+        session_runner_supervisor_module,
+        "_EXPLICIT_STOP_POLL_INTERVAL",
+        0.01,
+    )
+    host = _Host()
+    host.block_message_until_cancel = True
+    runner = _start_session_runner(host)
+
+    try:
+        runner.enqueue(_wake_up())
+        await asyncio.wait_for(host.message_started.wait(), timeout=1)
+        runner.enqueue(
+            SessionStopSignal(
+                session_id="session-001",
+                user_id="user-001",
+                stop_request_id="stale-stop",
+            )
+        )
+        await asyncio.sleep(0.05)
+        assert not host.message_cancelled.is_set()
+        assert host.finalized_user_stops == []
+
+        host.stop_request_session_ids.add("session-001")
+        await asyncio.wait_for(host.message_cancelled.wait(), timeout=2)
+    finally:
+        await runner.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_user_stop_normal_return_finalizes_exact_run() -> None:
+    """Cancellation converted to a result still finalizes its exact Run."""
+    host = _Host()
+    host.block_message_until_cancel = True
+    host.complete_message_on_cancel = True
+    host.stop_request_session_ids.add("session-001")
+    runner = _start_session_runner(host)
+    message = _wake_up()
+
+    try:
+        runner.enqueue(message)
+        await asyncio.wait_for(host.message_started.wait(), timeout=1)
+        runner.enqueue(
+            SessionStopSignal(
+                session_id="session-001",
+                user_id="user-001",
+                stop_request_id=None,
+            )
+        )
+        await asyncio.wait_for(
+            _wait_until(lambda: bool(host.finalized_user_stops)),
+            timeout=2,
+        )
+    finally:
+        await runner.shutdown()
+
+    assert host.finalized_user_stops == [("session-001", "run-001")]
 
 
 @pytest.mark.asyncio
@@ -1596,18 +2044,18 @@ async def test_durable_stop_request_cancels_blocked_engine_task(
 
 
 @pytest.mark.asyncio
-async def test_user_stop_waits_for_engine_cleanup_before_session_boundary() -> None:
-    """User stop keeps the Session boundary until cancellation cleanup finishes."""
+async def test_user_stop_finalizes_before_waiting_for_engine_cleanup() -> None:
+    """Marker finalization is immediate while the Session boundary waits cleanup."""
     host = _Host()
     host.block_message_until_cancel = True
     host.block_after_cancel = True
+    host.stop_request_session_ids.add("session-001")
     runner = _start_session_runner(host)
     message = _wake_up()
 
     try:
         runner.enqueue(message)
         await asyncio.wait_for(host.message_started.wait(), timeout=1)
-        runner.enqueue(SessionStopSignal(session_id="session-001", user_id="user-001"))
         await asyncio.wait_for(host.message_cancelled.wait(), timeout=2)
         await asyncio.wait_for(
             _wait_until(
@@ -1615,7 +2063,6 @@ async def test_user_stop_waits_for_engine_cleanup_before_session_boundary() -> N
             ),
             timeout=2,
         )
-        await asyncio.sleep(0)
         assert host.idle_session_ids == []
         assert host.released_session_ids == []
 

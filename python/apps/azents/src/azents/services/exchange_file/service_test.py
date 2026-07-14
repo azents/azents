@@ -1,7 +1,8 @@
 """ExchangeFileService tests."""
 
+import asyncio
 import datetime
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
 from io import BytesIO
 from typing import Any, cast
@@ -49,6 +50,7 @@ class _FakeExchangeFileRepository:
     def __init__(self) -> None:
         self.files: dict[str, ExchangeFile] = {}
         self.next_id = 1
+        self.fail_create = False
 
     async def create(
         self,
@@ -57,7 +59,10 @@ class _FakeExchangeFileRepository:
     ) -> ExchangeFile:
         """Store create input as domain model as-is."""
         del session
-        file_id = f"{self.next_id:032x}"
+        if self.fail_create:
+            msg = "metadata write failed"
+            raise RuntimeError(msg)
+        file_id = create.id or f"{self.next_id:032x}"
         self.next_id += 1
         file = ExchangeFile(
             id=file_id,
@@ -196,13 +201,40 @@ class _FakeExchangeFileRepository:
             expired.append(updated)
         return expired
 
+    async def mark_blob_deleted(
+        self,
+        session: AsyncSession,
+        *,
+        file_id: str,
+        blob_deleted_at: datetime.datetime,
+    ) -> None:
+        """Record successful object deletion before metadata removal."""
+        del session
+        current = self.files.get(file_id)
+        if current is not None:
+            self.files[file_id] = current.model_copy(
+                update={"blob_deleted_at": blob_deleted_at}
+            )
+
 
 class _FakeS3Service:
     """S3 service for tests."""
 
     def __init__(self) -> None:
         self.objects: dict[str, bytes] = {}
+        self.deleted_keys: list[str] = []
         self.fail_delete = False
+        self.fail_delete_at: int | None = None
+        self.delete_attempt_count = 0
+        self.fail_upload_after_write_at: int | None = None
+        self.upload_count = 0
+        self.session_tracker: _SessionTracker | None = None
+        self.after_upload: Callable[[], None] | None = None
+
+    def _assert_no_active_session(self) -> None:
+        """Ensure external I/O never runs while a DB session is open."""
+        if self.session_tracker is not None:
+            assert self.session_tracker.active_sessions == 0
 
     async def upload(
         self,
@@ -214,20 +246,59 @@ class _FakeS3Service:
     ) -> None:
         """Store object."""
         del bucket, content_type
+        self._assert_no_active_session()
+        self.upload_count += 1
         self.objects[key] = body
+        if self.after_upload is not None:
+            self.after_upload()
+        if self.fail_upload_after_write_at == self.upload_count:
+            msg = "upload failed after write"
+            raise RuntimeError(msg)
 
     async def download_bytes(self, bucket: str, key: str) -> bytes | None:
         """Fetch object bytes."""
         del bucket
+        self._assert_no_active_session()
         return self.objects.get(key)
 
     async def delete(self, bucket: str, key: str) -> None:
         """Delete object."""
         del bucket
-        if self.fail_delete:
+        self._assert_no_active_session()
+        self.delete_attempt_count += 1
+        if self.fail_delete or self.fail_delete_at == self.delete_attempt_count:
             msg = "delete failed"
             raise RuntimeError(msg)
+        self.deleted_keys.append(key)
         self.objects.pop(key, None)
+
+
+class _SessionTracker:
+    """Track open DB session scopes in service tests."""
+
+    def __init__(
+        self,
+        *,
+        exit_exception_call: int | None = None,
+        exit_exception: BaseException | None = None,
+    ) -> None:
+        self.active_sessions = 0
+        self.entries = 0
+        self.exit_exception_call = exit_exception_call
+        self.exit_exception = exit_exception
+
+    @asynccontextmanager
+    async def __call__(self) -> AsyncGenerator[AsyncSession, None]:
+        """Yield one fake session while tracking its lifetime."""
+        self.entries += 1
+        entry = self.entries
+        self.active_sessions += 1
+        try:
+            yield cast(AsyncSession, object())
+        finally:
+            self.active_sessions -= 1
+        if entry == self.exit_exception_call and self.exit_exception is not None:
+            raise self.exit_exception
 
 
 class _WorkspaceS3Config:
@@ -337,9 +408,13 @@ def _make_service(
     agent_session_repository.get_by_id.return_value = (
         agent_session if agent_session is not None else _make_agent_session()
     )
+    agent_session_repository.lock_by_id.return_value = (
+        agent_session if agent_session is not None else _make_agent_session()
+    )
 
     workspace_user_repository = AsyncMock()
     workspace_user_repository.get_by_workspace_and_user.return_value = workspace_user
+    workspace_user_repository.lock_by_workspace_and_user.return_value = workspace_user
 
     exchange_file_repository = _FakeExchangeFileRepository()
     s3_service = _FakeS3Service()
@@ -395,6 +470,253 @@ async def test_create_agent_upload_stores_object_and_metadata() -> None:
     assert s3_service.objects[file.object_key] == b"a,b\n1,2\n"
     assert file.preview_summary == "a,b\n1,2\n"
     assert repository.files[file.id].sha256
+
+
+@pytest.mark.asyncio
+async def test_create_upload_does_not_hold_db_session_during_storage_io() -> None:
+    """S3 I/O runs between the authorization and metadata DB sessions."""
+    service, _repository, s3_service = _make_service(
+        workspace_user=_make_workspace_user()
+    )
+    tracker = _SessionTracker()
+    service.session_manager = cast(Any, tracker)
+    s3_service.session_tracker = tracker
+
+    result = await service.create_agent_upload(
+        agent_id="agent-1",
+        user_id="user-1",
+        filename="report.csv",
+        media_type="text/csv",
+        body=b"a,b\n1,2\n",
+    )
+
+    assert isinstance(result, Success)
+    assert tracker.entries == 2
+    assert tracker.active_sessions == 0
+
+
+@pytest.mark.asyncio
+async def test_create_upload_cleans_blob_when_metadata_write_fails() -> None:
+    """A DB failure after upload deletes the unreferenced object."""
+    service, repository, s3_service = _make_service(
+        workspace_user=_make_workspace_user()
+    )
+    tracker = _SessionTracker()
+    service.session_manager = cast(Any, tracker)
+    s3_service.session_tracker = tracker
+    repository.fail_create = True
+
+    with pytest.raises(RuntimeError, match="metadata write failed"):
+        await service.create_agent_upload(
+            agent_id="agent-1",
+            user_id="user-1",
+            filename="report.csv",
+            media_type="text/csv",
+            body=b"a,b\n1,2\n",
+        )
+
+    assert s3_service.objects == {}
+    assert len(s3_service.deleted_keys) == 1
+    assert repository.files == {}
+    assert tracker.active_sessions == 0
+
+
+@pytest.mark.asyncio
+async def test_create_image_recovers_family_after_commit_response_loss() -> None:
+    """A lost response reconciles the exact committed original and thumbnail."""
+    service, repository, s3_service = _make_service(
+        workspace_user=_make_workspace_user()
+    )
+    tracker = _SessionTracker(
+        exit_exception_call=2,
+        exit_exception=RuntimeError("commit response lost"),
+    )
+    service.session_manager = cast(Any, tracker)
+    s3_service.session_tracker = tracker
+
+    result = await service.create_agent_upload(
+        agent_id="agent-1",
+        user_id="user-1",
+        filename="photo.jpg",
+        media_type="image/jpeg",
+        body=_jpeg_bytes(),
+    )
+
+    assert isinstance(result, Success)
+    thumbnail_id = result.value.preview_thumbnail_file_id
+    assert thumbnail_id is not None
+    assert set(repository.files) == {result.value.id, thumbnail_id}
+    assert set(s3_service.objects) == {
+        result.value.object_key,
+        repository.files[thumbnail_id].object_key,
+    }
+    assert s3_service.deleted_keys == []
+    assert tracker.entries == 3
+    assert tracker.active_sessions == 0
+
+
+@pytest.mark.asyncio
+async def test_create_preserves_committed_file_then_propagates_cancellation() -> None:
+    """Commit-time cancellation keeps the exact durable file and blob."""
+    service, repository, s3_service = _make_service(
+        workspace_user=_make_workspace_user()
+    )
+    tracker = _SessionTracker(
+        exit_exception_call=2,
+        exit_exception=asyncio.CancelledError("stop during commit"),
+    )
+    service.session_manager = cast(Any, tracker)
+    s3_service.session_tracker = tracker
+
+    with pytest.raises(asyncio.CancelledError, match="stop during commit"):
+        await service.create_agent_upload(
+            agent_id="agent-1",
+            user_id="user-1",
+            filename="report.csv",
+            media_type="text/csv",
+            body=b"a,b\n1,2\n",
+        )
+
+    assert len(repository.files) == 1
+    file = next(iter(repository.files.values()))
+    assert s3_service.objects[file.object_key] == b"a,b\n1,2\n"
+    assert s3_service.deleted_keys == []
+    assert tracker.entries == 3
+    assert tracker.active_sessions == 0
+
+
+@pytest.mark.asyncio
+async def test_create_upload_cleans_blob_when_upload_writes_then_raises() -> None:
+    """A partial original upload failure deletes its pre-generated object key."""
+    service, repository, s3_service = _make_service(
+        workspace_user=_make_workspace_user()
+    )
+    tracker = _SessionTracker()
+    service.session_manager = cast(Any, tracker)
+    s3_service.session_tracker = tracker
+    s3_service.fail_upload_after_write_at = 1
+
+    with pytest.raises(RuntimeError, match="upload failed after write"):
+        await service.create_agent_upload(
+            agent_id="agent-1",
+            user_id="user-1",
+            filename="report.csv",
+            media_type="text/csv",
+            body=b"a,b\n1,2\n",
+        )
+
+    assert s3_service.objects == {}
+    assert len(s3_service.deleted_keys) == 1
+    assert repository.files == {}
+    assert tracker.active_sessions == 0
+
+
+@pytest.mark.asyncio
+async def test_upload_cleanup_failure_does_not_replace_upload_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Internal cleanup cancellation keeps the upload failure primary."""
+    service, _repository, s3_service = _make_service(
+        workspace_user=_make_workspace_user()
+    )
+    s3_service.fail_upload_after_write_at = 1
+
+    async def failed_compensation(_object_keys: list[str]) -> None:
+        raise asyncio.CancelledError("cleanup cancelled")
+
+    monkeypatch.setattr(service, "_compensate_uploaded_objects", failed_compensation)
+
+    with pytest.raises(RuntimeError, match="upload failed after write") as raised:
+        await service.create_agent_upload(
+            agent_id="agent-1",
+            user_id="user-1",
+            filename="report.csv",
+            media_type="text/csv",
+            body=b"a,b\n1,2\n",
+        )
+    assert isinstance(raised.value.__cause__, asyncio.CancelledError)
+
+
+@pytest.mark.asyncio
+async def test_create_image_cleans_both_blobs_when_thumbnail_upload_fails() -> None:
+    """A partial thumbnail failure deletes both attempted object keys."""
+    service, repository, s3_service = _make_service(
+        workspace_user=_make_workspace_user()
+    )
+    tracker = _SessionTracker()
+    service.session_manager = cast(Any, tracker)
+    s3_service.session_tracker = tracker
+    s3_service.fail_upload_after_write_at = 2
+
+    with pytest.raises(RuntimeError, match="upload failed after write"):
+        await service.create_agent_upload(
+            agent_id="agent-1",
+            user_id="user-1",
+            filename="photo.jpg",
+            media_type="image/jpeg",
+            body=_jpeg_bytes(),
+        )
+
+    assert s3_service.objects == {}
+    assert len(s3_service.deleted_keys) == 2
+    assert repository.files == {}
+    assert tracker.active_sessions == 0
+
+
+@pytest.mark.asyncio
+async def test_create_session_upload_revalidates_session_ownership() -> None:
+    """Do not commit metadata if Session ownership changes during upload."""
+    service, repository, s3_service = _make_service(
+        workspace_user=_make_workspace_user()
+    )
+    agent_session_repository = cast(Any, service.agent_session_repository)
+    changed_session = _make_agent_session().model_copy(update={"agent_id": "agent-2"})
+    s3_service.after_upload = lambda: setattr(
+        agent_session_repository.lock_by_id,
+        "return_value",
+        changed_session,
+    )
+
+    result = await service.create_session_upload(
+        agent_id="agent-1",
+        session_id="session-1",
+        user_id="user-1",
+        filename="report.csv",
+        media_type="text/csv",
+        body=b"a,b\n1,2\n",
+    )
+
+    assert isinstance(result, Failure)
+    assert isinstance(result.error, SessionNotFound)
+    assert repository.files == {}
+    assert s3_service.objects == {}
+
+
+@pytest.mark.asyncio
+async def test_create_agent_upload_revalidates_workspace_access() -> None:
+    """Do not commit metadata when workspace access is revoked during upload."""
+    service, repository, s3_service = _make_service(
+        workspace_user=_make_workspace_user()
+    )
+    workspace_user_repository = cast(Any, service.workspace_user_repository)
+    s3_service.after_upload = lambda: setattr(
+        workspace_user_repository.lock_by_workspace_and_user,
+        "return_value",
+        None,
+    )
+
+    result = await service.create_agent_upload(
+        agent_id="agent-1",
+        user_id="user-1",
+        filename="report.csv",
+        media_type="text/csv",
+        body=b"a,b\n1,2\n",
+    )
+
+    assert isinstance(result, Failure)
+    assert isinstance(result.error, FileAccessDenied)
+    assert repository.files == {}
+    assert s3_service.objects == {}
 
 
 @pytest.mark.asyncio
@@ -729,8 +1051,8 @@ async def test_delete_removes_preview_thumbnail_object_and_metadata() -> None:
 
 
 @pytest.mark.asyncio
-async def test_delete_keeps_metadata_when_object_delete_fails() -> None:
-    """Leave metadata on object deletion failure to allow retry."""
+async def test_delete_tombstones_metadata_when_object_delete_fails() -> None:
+    """An object-store failure leaves retryable expired metadata, never AVAILABLE."""
     service, repository, s3_service = _make_service(
         workspace_user=_make_workspace_user()
     )
@@ -749,3 +1071,47 @@ async def test_delete_keeps_metadata_when_object_delete_fails() -> None:
 
     assert created.value.object_key in s3_service.objects
     assert created.value.id in repository.files
+    assert repository.files[created.value.id].status == ExchangeFileStatus.EXPIRED
+
+
+@pytest.mark.asyncio
+async def test_delete_retries_after_partial_preview_family_blob_deletion() -> None:
+    """A retry completes a family after one blob was deleted before another failed."""
+    service, repository, s3_service = _make_service(
+        workspace_user=_make_workspace_user()
+    )
+    tracker = _SessionTracker()
+    service.session_manager = cast(Any, tracker)
+    s3_service.session_tracker = tracker
+    created = await service.create_agent_upload(
+        agent_id="agent-1",
+        user_id="user-1",
+        filename="photo.jpg",
+        media_type="image/jpeg",
+        body=_jpeg_bytes(),
+    )
+    assert isinstance(created, Success)
+    thumbnail_file_id = created.value.preview_thumbnail_file_id
+    assert thumbnail_file_id is not None
+    thumbnail = repository.files[thumbnail_file_id]
+
+    s3_service.fail_delete_at = 2
+    with pytest.raises(RuntimeError, match="delete failed"):
+        await service.delete(file_id=created.value.id, user_id="user-1")
+
+    assert thumbnail.object_key not in s3_service.objects
+    assert created.value.object_key in s3_service.objects
+    assert repository.files[thumbnail.id].status == ExchangeFileStatus.EXPIRED
+    assert repository.files[thumbnail.id].blob_deleted_at is not None
+    assert repository.files[created.value.id].status == ExchangeFileStatus.EXPIRED
+    assert repository.files[created.value.id].blob_deleted_at is None
+    assert tracker.active_sessions == 0
+
+    s3_service.fail_delete_at = None
+    retried = await service.delete(file_id=created.value.id, user_id="user-1")
+
+    assert isinstance(retried, Success)
+    assert s3_service.objects == {}
+    assert created.value.id not in repository.files
+    assert thumbnail.id not in repository.files
+    assert tracker.active_sessions == 0

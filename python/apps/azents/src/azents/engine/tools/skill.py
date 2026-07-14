@@ -14,6 +14,7 @@ import frontmatter
 from azcommon.uuid import uuid7
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
+from yaml import YAMLError
 
 from azents.broker.broadcast import WebSocketBroadcast, WebSocketBroadcastPublishError
 from azents.core.enums import AgentSessionRunState, RuntimeRunnerState
@@ -26,20 +27,20 @@ from azents.core.tools import (
     TurnContext,
 )
 from azents.engine.hooks.types import (
-    RunEndHookContext,
     RunStartHookContext,
     RuntimeHooks,
     SessionCompactHookContext,
-    SessionStartHookContext,
     TurnStartHookContext,
     TurnStartResult,
 )
 from azents.engine.run.types import FunctionTool, FunctionToolError
 from azents.engine.tooling.make_tool import make_tool
 from azents.engine.tooling.toolkit_state import (
+    RunFencedToolkitStateStore,
     ToolkitStateHandle,
     ToolkitStateIdentity,
     ToolkitStateModel,
+    ToolkitStateRunAuthority,
     ToolkitStateStore,
 )
 from azents.engine.tools.runtime_io import (
@@ -49,9 +50,12 @@ from azents.engine.tools.runtime_io import (
     RuntimeRunnerOperationUnavailable,
 )
 from azents.rdb.session import SessionManager
+from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
+from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.session_workspace_project.data import SessionWorkspaceProject
+from azents.repos.toolkit_state import ToolkitStateRepository
 from azents.transport.chat import chat_input_actions_updated_dump
 
 logger = logging.getLogger(__name__)
@@ -64,10 +68,12 @@ AGENT_SKILL_ROOT = f"{AGENT_WORKSPACE_ROOT}/.azents/skills"
 SKILL_MARKDOWN_FILENAME = "SKILL.md"
 _SKILL_READ_MAX_BYTES = 512 * 1024
 _RUNNER_FILE_OPERATION_TIMEOUT_SECONDS = 10
+_SOURCE_SET_SYNC_MAX_ATTEMPTS = 3
 
 SkillSourceKind = Literal["agent", "project_agents", "project_claude"]
 SyncReason = Literal[
     "session_start",
+    "run_start",
     "run_end",
     "compaction_start",
     "project_change",
@@ -152,9 +158,15 @@ class SkillStateStore:
         self,
         *,
         session_manager: SessionManager[AsyncSession],
+        agent_run_repository: AgentRunRepository,
+        agent_session_repository: AgentSessionRepository,
+        toolkit_state_repository: ToolkitStateRepository,
     ) -> None:
         """Create Skill state store."""
         self._session_manager = session_manager
+        self._agent_run_repository = agent_run_repository
+        self._agent_session_repository = agent_session_repository
+        self._toolkit_state_repository = toolkit_state_repository
 
     async def load(self, agent_id: str, session_id: str) -> SkillProjectionState:
         """Fetch Skill projection state."""
@@ -186,6 +198,59 @@ class SkillStateStore:
             lambda current: current.model_copy(update={"latest": snapshot}),
         )
 
+    async def replace_latest_in_session(
+        self,
+        session: AsyncSession,
+        agent_id: str,
+        session_id: str,
+        snapshot: SkillProjectionSnapshot,
+    ) -> SkillProjectionState:
+        """Replace latest projection in a caller-owned fenced transaction."""
+        return await self.update_in_session(
+            session,
+            agent_id,
+            session_id,
+            lambda current: current.model_copy(update={"latest": snapshot}),
+        )
+
+    async def replace_latest_for_run(
+        self,
+        agent_id: str,
+        session_id: str,
+        snapshot: SkillProjectionSnapshot,
+        *,
+        run_id: str,
+        owner_generation: int,
+    ) -> SkillProjectionState:
+        """Replace latest projection only for the authoritative active Run."""
+        return await self.update_for_run(
+            agent_id,
+            session_id,
+            run_id=run_id,
+            owner_generation=owner_generation,
+            mutator=lambda current: current.model_copy(update={"latest": snapshot}),
+        )
+
+    async def replace_latest_for_run_in_session(
+        self,
+        session: AsyncSession,
+        agent_id: str,
+        session_id: str,
+        snapshot: SkillProjectionSnapshot,
+        *,
+        run_id: str,
+        owner_generation: int,
+    ) -> SkillProjectionState:
+        """Replace latest within a caller-owned source-set and Run fence."""
+        return await self.update_for_run_in_session(
+            session,
+            agent_id,
+            session_id,
+            run_id=run_id,
+            owner_generation=owner_generation,
+            mutator=lambda current: current.model_copy(update={"latest": snapshot}),
+        )
+
     async def adopt_latest(
         self, agent_id: str, session_id: str
     ) -> SkillProjectionState:
@@ -196,6 +261,25 @@ class SkillStateStore:
             lambda current: current.model_copy(update={"active": current.latest}),
         )
 
+    async def adopt_latest_for_run(
+        self,
+        agent_id: str,
+        session_id: str,
+        *,
+        run_id: str,
+        owner_generation: int,
+    ) -> SkillProjectionState:
+        """Adopt latest projection only for the authoritative active Run."""
+        return await self.update_for_run(
+            agent_id,
+            session_id,
+            run_id=run_id,
+            owner_generation=owner_generation,
+            mutator=lambda current: current.model_copy(
+                update={"active": current.latest}
+            ),
+        )
+
     async def invalidate_project(
         self,
         agent_id: str,
@@ -203,29 +287,41 @@ class SkillStateStore:
         *,
         project_id: str,
         project_path: str,
-        session_run_state: AgentSessionRunState,
     ) -> SkillProjectionState:
-        """Remove deleted Project items without reading runtime files."""
+        """Remove deleted Project items under Session then Toolkit State locks."""
 
-        def mutate(current: SkillProjectionState) -> SkillProjectionState:
-            latest = _filter_snapshot_project(
-                current.latest,
-                project_id=project_id,
-                project_path=project_path,
-                reason="project_change",
+        async with self._session_manager() as session:
+            agent_session = await self._agent_session_repository.lock_by_id(
+                session,
+                session_id,
             )
-            if session_run_state == AgentSessionRunState.IDLE:
-                active = _filter_snapshot_project(
-                    current.active,
+            if agent_session is None:
+                return SkillProjectionState()
+
+            def mutate(current: SkillProjectionState) -> SkillProjectionState:
+                latest = _filter_snapshot_project(
+                    current.latest,
                     project_id=project_id,
                     project_path=project_path,
                     reason="project_change",
                 )
-            else:
-                active = current.active
-            return current.model_copy(update={"latest": latest, "active": active})
+                if agent_session.run_state == AgentSessionRunState.IDLE:
+                    active = _filter_snapshot_project(
+                        current.active,
+                        project_id=project_id,
+                        project_path=project_path,
+                        reason="project_change",
+                    )
+                else:
+                    active = current.active
+                return current.model_copy(update={"latest": latest, "active": active})
 
-        return await self.update(agent_id, session_id, mutate)
+            return await self.update_in_session(
+                session,
+                agent_id,
+                session_id,
+                mutate,
+            )
 
     async def update(
         self,
@@ -235,18 +331,85 @@ class SkillStateStore:
     ) -> SkillProjectionState:
         """Update Skill projection state with optimistic retry."""
         async with self._session_manager() as session:
-            handle = await self._make_handle(session, agent_id, session_id)
-            if handle is None:
-                return SkillProjectionState()
-            saved_state: SkillProjectionState | None = None
+            return await self.update_in_session(
+                session,
+                agent_id,
+                session_id,
+                mutator,
+            )
 
-            def capture(current: SkillProjectionState) -> SkillProjectionState:
-                nonlocal saved_state
-                saved_state = mutator(current)
-                return saved_state
+    async def update_in_session(
+        self,
+        session: AsyncSession,
+        agent_id: str,
+        session_id: str,
+        mutator: Callable[[SkillProjectionState], SkillProjectionState],
+    ) -> SkillProjectionState:
+        """Update Skill projection in a caller-owned transaction."""
+        handle = await self._make_handle(session, agent_id, session_id)
+        if handle is None:
+            return SkillProjectionState()
+        saved_state: SkillProjectionState | None = None
 
-            await handle.update(default_factory=SkillProjectionState, mutator=capture)
-            return saved_state or SkillProjectionState()
+        def capture(current: SkillProjectionState) -> SkillProjectionState:
+            nonlocal saved_state
+            saved_state = mutator(current)
+            return saved_state
+
+        await handle.update(default_factory=SkillProjectionState, mutator=capture)
+        return saved_state or SkillProjectionState()
+
+    async def update_for_run(
+        self,
+        agent_id: str,
+        session_id: str,
+        *,
+        run_id: str,
+        owner_generation: int,
+        mutator: Callable[[SkillProjectionState], SkillProjectionState],
+    ) -> SkillProjectionState:
+        """Update Skill state only for the authoritative active Run."""
+        async with self._session_manager() as session:
+            return await self.update_for_run_in_session(
+                session,
+                agent_id,
+                session_id,
+                run_id=run_id,
+                owner_generation=owner_generation,
+                mutator=mutator,
+            )
+
+    async def update_for_run_in_session(
+        self,
+        session: AsyncSession,
+        agent_id: str,
+        session_id: str,
+        *,
+        run_id: str,
+        owner_generation: int,
+        mutator: Callable[[SkillProjectionState], SkillProjectionState],
+    ) -> SkillProjectionState:
+        """Update Run-owned Skill state in a caller-owned transaction."""
+        handle = await self._make_run_fenced_handle(
+            session,
+            agent_id,
+            session_id,
+            ToolkitStateRunAuthority(
+                run_id=run_id,
+                owner_generation=owner_generation,
+            ),
+        )
+        if handle is None:
+            return SkillProjectionState()
+        saved_state: SkillProjectionState | None = None
+
+        def capture(current: SkillProjectionState) -> SkillProjectionState:
+            nonlocal saved_state
+            saved_state = mutator(current)
+            return saved_state
+
+        await handle.update(default_factory=SkillProjectionState, mutator=capture)
+        return saved_state or SkillProjectionState()
 
     async def _make_handle(
         self,
@@ -263,7 +426,34 @@ class SkillStateStore:
             toolkit_namespace=SKILL_TOOLKIT_NAMESPACE,
             state_name=SKILL_TOOLKIT_STATE_NAME,
         )
-        return ToolkitStateStore(session=session).handle(identity, SkillProjectionState)
+        return ToolkitStateStore(
+            session=session,
+            repository=self._toolkit_state_repository,
+        ).handle(identity, SkillProjectionState)
+
+    async def _make_run_fenced_handle(
+        self,
+        session: AsyncSession,
+        agent_id: str,
+        session_id: str,
+        run_authority: ToolkitStateRunAuthority,
+    ) -> ToolkitStateHandle[SkillProjectionState] | None:
+        """Create a Skill handle that rejects stale runtime writes."""
+        if not agent_id or not session_id:
+            return None
+        identity = ToolkitStateIdentity(
+            agent_id=agent_id,
+            session_id=session_id,
+            toolkit_namespace=SKILL_TOOLKIT_NAMESPACE,
+            state_name=SKILL_TOOLKIT_STATE_NAME,
+        )
+        return RunFencedToolkitStateStore(
+            session=session,
+            repository=self._toolkit_state_repository,
+            run_authority=run_authority,
+            agent_run_repository=self._agent_run_repository,
+            agent_session_repository=self._agent_session_repository,
+        ).handle(identity, SkillProjectionState)
 
 
 class SkillProjectionService:
@@ -274,6 +464,7 @@ class SkillProjectionService:
         *,
         store: SkillStateStore,
         session_manager: SessionManager[AsyncSession],
+        agent_session_repository: AgentSessionRepository,
         runner_operations: RuntimeRunnerOperationClient | None = None,
         runtime_repository: AgentRuntimeRepository | None = None,
         project_repository: SessionWorkspaceProjectRepository | None = None,
@@ -282,6 +473,7 @@ class SkillProjectionService:
         """Create Skill projection service."""
         self._store = store
         self._session_manager = session_manager
+        self._agent_session_repository = agent_session_repository
         self._runner_operations = runner_operations
         self._runtime_repository = runtime_repository or AgentRuntimeRepository()
         self._project_repository = (
@@ -297,18 +489,58 @@ class SkillProjectionService:
         reason: SyncReason,
     ) -> SkillProjectionState:
         """Scan runtime filesystem and replace latest when runtime is ready."""
+        return await self._sync_latest(
+            agent_id=agent_id,
+            session_id=session_id,
+            reason=reason,
+            run_authority=None,
+        )
+
+    async def sync_latest_for_run(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        reason: SyncReason,
+        run_id: str,
+        owner_generation: int,
+    ) -> SkillProjectionState:
+        """Scan and commit only while the requesting Run remains authoritative."""
+        return await self._sync_latest(
+            agent_id=agent_id,
+            session_id=session_id,
+            reason=reason,
+            run_authority=ToolkitStateRunAuthority(
+                run_id=run_id,
+                owner_generation=owner_generation,
+            ),
+        )
+
+    async def _sync_latest(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        reason: SyncReason,
+        run_authority: ToolkitStateRunAuthority | None,
+    ) -> SkillProjectionState:
+        """Scan outside DB, then atomically validate sources and replace state."""
         runner_operations = self._runner_operations
         if runner_operations is None:
             return await self._store.load(agent_id, session_id)
-        async with self._session_manager() as session:
-            runtime = await self._runtime_repository.get_by_agent_id(session, agent_id)
-            projects = await self._project_repository.list_projects(
-                session,
-                session_id=session_id,
-            )
-        if runtime is None or runtime.runner_state != RuntimeRunnerState.READY:
-            return await self._store.load(agent_id, session_id)
-        try:
+        for _attempt in range(_SOURCE_SET_SYNC_MAX_ATTEMPTS):
+            async with self._session_manager() as session:
+                runtime = await self._runtime_repository.get_by_agent_id(
+                    session,
+                    agent_id,
+                )
+                projects = await self._project_repository.list_projects(
+                    session,
+                    session_id=session_id,
+                )
+            if runtime is None or runtime.runner_state != RuntimeRunnerState.READY:
+                return await self._store.load(agent_id, session_id)
+            source_set = _project_source_set(projects)
             items = await self._scan_runtime(
                 runner_operations=runner_operations,
                 runtime_id=runtime.id,
@@ -316,23 +548,69 @@ class SkillProjectionService:
                 owner_session_id=session_id,
                 projects=projects,
             )
-        except Exception:
-            logger.exception(
-                "Skill projection sync failed",
-                extra={
-                    "agent_id": agent_id,
-                    "session_id": session_id,
-                    "reason": reason,
-                },
-            )
-            return await self._store.load(agent_id, session_id)
-        snapshot = _make_snapshot(items, reason=reason)
-        current = await self._store.load(agent_id, session_id)
-        if current.latest.projection_hash == snapshot.projection_hash:
-            return current
-        updated = await self._store.replace_latest(agent_id, session_id, snapshot)
-        await self.publish_input_actions_updated(session_id)
-        return updated
+            snapshot = _make_snapshot(items, reason=reason)
+            source_set_changed = False
+            updated: SkillProjectionState | None = None
+            projection_changed = False
+            async with self._session_manager() as session:
+                agent_session = await self._agent_session_repository.lock_by_id(
+                    session,
+                    session_id,
+                )
+                if agent_session is None:
+                    return await self._store.load_in_session(
+                        session,
+                        agent_id,
+                        session_id,
+                    )
+                current_projects = await self._project_repository.list_projects(
+                    session,
+                    session_id=session_id,
+                )
+                if _project_source_set(current_projects) != source_set:
+                    source_set_changed = True
+                else:
+                    current = await self._store.load_in_session(
+                        session,
+                        agent_id,
+                        session_id,
+                    )
+                    if current.latest.projection_hash == snapshot.projection_hash:
+                        updated = current
+                    elif run_authority is None:
+                        updated = await self._store.replace_latest_in_session(
+                            session,
+                            agent_id,
+                            session_id,
+                            snapshot,
+                        )
+                        projection_changed = True
+                    else:
+                        updated = await self._store.replace_latest_for_run_in_session(
+                            session,
+                            agent_id,
+                            session_id,
+                            snapshot,
+                            run_id=run_authority.run_id,
+                            owner_generation=run_authority.owner_generation,
+                        )
+                        projection_changed = True
+            if source_set_changed:
+                continue
+            if updated is None:
+                raise RuntimeError("Skill projection source validation failed")
+            if projection_changed:
+                await self.publish_input_actions_updated(session_id)
+            return updated
+        logger.warning(
+            "Skill projection sync abandoned after Project sources kept changing",
+            extra={
+                "agent_id": agent_id,
+                "session_id": session_id,
+                "reason": reason,
+            },
+        )
+        return await self._store.load(agent_id, session_id)
 
     async def publish_input_actions_updated(self, session_id: str) -> None:
         """Notify chat clients that composer actions should be reloaded."""
@@ -516,10 +794,8 @@ class SkillToolkit(Toolkit[SkillToolkitConfig]):
     def hooks(self) -> RuntimeHooks:
         """Return Skill projection lifecycle hooks."""
         return {
-            "on_session_start": self._on_session_start,
             "on_session_compact": self._on_session_compact,
             "on_run_start": self._on_run_start,
-            "on_run_end": self._on_run_end,
             "on_turn_start": self._on_turn_start,
         }
 
@@ -549,21 +825,34 @@ class SkillToolkit(Toolkit[SkillToolkitConfig]):
     ) -> SkillProjectionState:
         """Ensure the run has adopted latest before turn prompt/tool collection."""
         if self._adopt_latest_on_next_turn:
+            state = await self._store.adopt_latest_for_run(
+                self._agent_id,
+                self._session_id,
+                run_id=context.run_id,
+                owner_generation=context.owner_generation,
+            )
             self._adopt_latest_on_next_turn = False
-            return await self._store.adopt_latest(self._agent_id, self._session_id)
-        if context.run_id and context.run_id not in self._adopted_run_ids:
             self._adopted_run_ids.add(context.run_id)
-            return await self._store.adopt_latest(self._agent_id, self._session_id)
+            return state
+        if context.run_id and context.run_id not in self._adopted_run_ids:
+            state = await self._store.adopt_latest_for_run(
+                self._agent_id,
+                self._session_id,
+                run_id=context.run_id,
+                owner_generation=context.owner_generation,
+            )
+            self._adopted_run_ids.add(context.run_id)
+            return state
         return await self._store.load(self._agent_id, self._session_id)
-
-    async def _on_session_start(self, context: SessionStartHookContext) -> None:
-        """Create latest Skill projection when the session lifecycle starts."""
-        await self._sync(context.agent_id, context.session_id, reason="session_start")
 
     async def _on_session_compact(self, context: SessionCompactHookContext) -> None:
         """Refresh latest projection at compaction start."""
         await self._sync(
-            context.agent_id, context.session_id, reason="compaction_start"
+            context.agent_id,
+            context.session_id,
+            reason="compaction_start",
+            run_id=context.run_id,
+            owner_generation=context.owner_generation,
         )
         self._adopt_latest_on_next_turn = True
 
@@ -571,12 +860,20 @@ class SkillToolkit(Toolkit[SkillToolkitConfig]):
         """Adopt latest projection for this run."""
         if not context.agent_id or not context.session_id:
             return
+        await self._sync(
+            context.agent_id,
+            context.session_id,
+            reason="run_start",
+            run_id=context.run_id,
+            owner_generation=context.owner_generation,
+        )
+        await self._store.adopt_latest_for_run(
+            context.agent_id,
+            context.session_id,
+            run_id=context.run_id,
+            owner_generation=context.owner_generation,
+        )
         self._adopted_run_ids.add(context.run_id)
-        await self._store.adopt_latest(context.agent_id, context.session_id)
-
-    async def _on_run_end(self, context: RunEndHookContext) -> None:
-        """Refresh latest projection after a run completes."""
-        await self._sync(context.agent_id, context.session_id, reason="run_end")
 
     async def _on_turn_start(
         self, context: TurnStartHookContext
@@ -584,19 +881,32 @@ class SkillToolkit(Toolkit[SkillToolkitConfig]):
         """Adopt latest on the first turn not covered by run-start dispatch."""
         if context.run_id in self._adopted_run_ids:
             return None
+        await self._store.adopt_latest_for_run(
+            context.agent_id,
+            context.session_id,
+            run_id=context.run_id,
+            owner_generation=context.owner_generation,
+        )
         self._adopted_run_ids.add(context.run_id)
-        await self._store.adopt_latest(context.agent_id, context.session_id)
         return None
 
     async def _sync(
-        self, agent_id: str, session_id: str, *, reason: SyncReason
+        self,
+        agent_id: str,
+        session_id: str,
+        *,
+        reason: SyncReason,
+        run_id: str,
+        owner_generation: int,
     ) -> None:
         if self._projection_service is None:
             return
-        await self._projection_service.sync_latest(
+        await self._projection_service.sync_latest_for_run(
             agent_id=agent_id,
             session_id=session_id,
             reason=reason,
+            run_id=run_id,
+            owner_generation=owner_generation,
         )
 
 
@@ -775,6 +1085,13 @@ def _skill_source_roots(
     return roots
 
 
+def _project_source_set(
+    projects: Sequence[SessionWorkspaceProject],
+) -> tuple[tuple[str, str], ...]:
+    """Return the stable Project identity/path set used by one filesystem scan."""
+    return tuple(sorted((project.id, project.path) for project in projects))
+
+
 def _filter_snapshot_project(
     snapshot: SkillProjectionSnapshot,
     *,
@@ -862,7 +1179,7 @@ def _projection_hash(items: Sequence[SkillProjectionItem]) -> str:
 def _parse_frontmatter(body: str) -> dict[str, Any]:
     try:
         post = frontmatter.loads(body)
-    except Exception:
+    except YAMLError:
         return {}
     return {str(key): value for key, value in post.metadata.items()}
 

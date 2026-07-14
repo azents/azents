@@ -43,16 +43,21 @@ from azents.core.tools import (
 from azents.engine.run.types import FunctionTool, FunctionToolError
 from azents.engine.tooling.make_tool import make_tool
 from azents.engine.tooling.toolkit_state import (
+    RunFencedToolkitStateStore,
     ToolkitStateIdentity,
     ToolkitStateModel,
+    ToolkitStateRunAuthority,
     ToolkitStateStore,
 )
 from azents.engine.tools.mcp import McpToolkit
 from azents.engine.tools.mcp_base import McpToolSnapshotState, wrap_mcp_tool
 from azents.rdb.session import SessionManager
+from azents.repos.agent_execution import AgentRunRepository
+from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.github_user_installation import (
     GithubUserInstallationRepository,
 )
+from azents.repos.toolkit_state import ToolkitStateRepository
 
 logger = logging.getLogger(__name__)
 
@@ -199,18 +204,27 @@ class GitHubSelectedInstallationStore:
         session_manager: SessionManager[AsyncSession],
         agent_id: str,
         session_id: str,
+        agent_run_repository: AgentRunRepository,
+        agent_session_repository: AgentSessionRepository,
+        toolkit_state_repository: ToolkitStateRepository,
     ) -> None:
         """Create selected installation store."""
         self._session_manager = session_manager
         self._agent_id = agent_id
         self._session_id = session_id
+        self._agent_run_repository = agent_run_repository
+        self._agent_session_repository = agent_session_repository
+        self._toolkit_state_repository = toolkit_state_repository
 
     async def load(self) -> str | None:
         """Load selected installation ID."""
         if not self._agent_id or not self._session_id:
             return None
         async with self._session_manager() as session:
-            handle = ToolkitStateStore(session=session).handle(
+            handle = ToolkitStateStore(
+                session=session,
+                repository=self._toolkit_state_repository,
+            ).handle(
                 self._identity(),
                 GitHubSelectedInstallationState,
             )
@@ -223,12 +237,27 @@ class GitHubSelectedInstallationStore:
                 return None
             return state.installation_id
 
-    async def save(self, installation_id: str) -> None:
+    async def save(
+        self,
+        installation_id: str,
+        *,
+        run_id: str,
+        owner_generation: int,
+    ) -> None:
         """Persist selected installation ID."""
         if not self._agent_id or not self._session_id:
             return
         async with self._session_manager() as session:
-            handle = ToolkitStateStore(session=session).handle(
+            handle = RunFencedToolkitStateStore(
+                session=session,
+                repository=self._toolkit_state_repository,
+                run_authority=ToolkitStateRunAuthority(
+                    run_id=run_id,
+                    owner_generation=owner_generation,
+                ),
+                agent_run_repository=self._agent_run_repository,
+                agent_session_repository=self._agent_session_repository,
+            ).handle(
                 self._identity(),
                 GitHubSelectedInstallationState,
             )
@@ -774,7 +803,7 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
                 _with_tool_prefix(tool, binding.target) for tool in installation_tools
             )
         if len(self._installation_targets) > 1 and self._selected_installation_store:
-            tools.append(self._create_switch_installation_tool())
+            tools.append(self._create_switch_installation_tool(context))
         return ToolkitState(
             status=ToolkitStatus.ENABLED,
             tools=sorted(tools, key=lambda tool: tool.spec.name),
@@ -791,7 +820,7 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
             return ""
         return await self._mcp.get_static_prompt(context)
 
-    def _create_switch_installation_tool(self) -> FunctionTool:
+    def _create_switch_installation_tool(self, context: TurnContext) -> FunctionTool:
         """Create switch_installation tool."""
 
         async def switch_installation(args: GitHubSwitchInstallationInput) -> str:
@@ -804,7 +833,11 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
                 )
             if self._selected_installation_store is None:
                 raise FunctionToolError("GitHub installation selection is unavailable.")
-            await self._selected_installation_store.save(target.installation_id)
+            await self._selected_installation_store.save(
+                target.installation_id,
+                run_id=context.run_id,
+                owner_generation=context.owner_generation,
+            )
             return (
                 "Selected GitHub installation: "
                 f"{target.account_login} ({target.installation_id}). "
@@ -863,6 +896,9 @@ class GitHubToolkitProvider(ToolkitProvider[GitHubToolkitConfig]):
         platform_app_id: str | None = None,
         platform_private_key: str | None = None,
         session_manager: SessionManager[AsyncSession] | None = None,
+        agent_run_repository: AgentRunRepository,
+        agent_session_repository: AgentSessionRepository,
+        toolkit_state_repository: ToolkitStateRepository,
     ) -> None:
         """Initialize GitHubToolkitProvider.
 
@@ -873,6 +909,9 @@ class GitHubToolkitProvider(ToolkitProvider[GitHubToolkitConfig]):
         self._platform_app_id = platform_app_id
         self._platform_private_key = platform_private_key
         self._session_manager = session_manager
+        self._agent_run_repository = agent_run_repository
+        self._agent_session_repository = agent_session_repository
+        self._toolkit_state_repository = toolkit_state_repository
 
     def to_mcp_config(self, config: GitHubToolkitConfig) -> McpToolkitConfig:
         """Convert to fixed GitHub MCP settings."""
@@ -1115,6 +1154,9 @@ class GitHubToolkitProvider(ToolkitProvider[GitHubToolkitConfig]):
             session_manager=self._session_manager,
             agent_id=context.agent_id,
             session_id=context.session_id,
+            agent_run_repository=self._agent_run_repository,
+            agent_session_repository=self._agent_session_repository,
+            toolkit_state_repository=self._toolkit_state_repository,
         )
 
     async def _resolve_github_app(

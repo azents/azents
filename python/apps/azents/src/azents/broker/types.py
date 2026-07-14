@@ -44,11 +44,20 @@ class SessionStopSignal:
     """Fast-path signal that immediately notifies the session runner to stop."""
 
     session_id: str
+    stop_request_id: str | None
     user_id: str | None = None
     type: Literal["session_stop_signal"] = "session_stop_signal"
 
 
 BrokerMessage = SessionWakeUp | SessionStopSignal
+
+
+class SessionOwnershipLostError(RuntimeError):
+    """Raised when a worker can no longer renew its Session ownership lease."""
+
+    def __init__(self, session_id: str) -> None:
+        self.session_id = session_id
+        super().__init__(f"Session ownership was lost: {session_id}")
 
 
 class SessionBroker(Protocol):
@@ -97,6 +106,15 @@ class SessionBroker(Protocol):
 
     async def clear_session_activity(self, session_id: str) -> None:
         """Remove activity when session processing completes or errors."""
+        ...
+
+    async def clear_session_activity_for_run(
+        self,
+        session_id: str,
+        *,
+        run_id: str,
+    ) -> None:
+        """Remove activity only when it still belongs to the expected Run."""
         ...
 
     async def get_session_activity(self, session_id: str) -> SessionActivity | None:

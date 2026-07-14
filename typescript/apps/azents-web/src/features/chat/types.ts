@@ -419,12 +419,14 @@ export interface AccountLinkNudgeEvent {
 /** Compaction start — context compression in progress */
 export interface CompactionStartedEvent {
   type: "compaction_started";
+  run_id: string;
   continuing?: boolean;
 }
 
 /** Compaction complete — context compression complete */
 export interface CompactionCompleteEvent {
   type: "compaction_complete";
+  run_id: string;
   continuing?: boolean;
 }
 
@@ -456,6 +458,7 @@ export interface GoalStateSnapshot {
 
 export interface TodoStateChangedEvent {
   type: "todo_state_changed";
+  run_id: string;
   todo: TodoStateSnapshot;
 }
 

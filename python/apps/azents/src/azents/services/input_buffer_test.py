@@ -1,13 +1,17 @@
 """InputBufferService tests."""
 
+import asyncio
 import dataclasses
 import datetime
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock
 
 import pytest
 import sqlalchemy as sa
 from azcommon.datetime import tznow
 from azcommon.result import Failure, Result, Success
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent import AgentModelSelection
@@ -32,6 +36,8 @@ from azents.engine.events.types import (
     SkillLoadedPayload,
     UserMessagePayload,
 )
+from azents.engine.run.resolve import MaterializedUserInputAttachments
+from azents.engine.run.types import OWNERSHIP_LOST_CANCEL_MESSAGE
 from azents.engine.tools.goal import GoalStateStore
 from azents.engine.tools.skill import (
     SkillProjectionItem,
@@ -46,12 +52,14 @@ from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.session import SessionManager
 from azents.repos.action_execution import ActionExecutionRepository
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
+from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.exchange_file.data import ExchangeFile
-from azents.repos.input_buffer import InputBufferRepository
 from azents.repos.input_buffer.data import InputBuffer, InputBufferCreate
+from azents.repos.input_buffer.repository import InputBufferRepository
 from azents.repos.model_file.data import ModelFile
+from azents.repos.toolkit_state import ToolkitStateRepository
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
@@ -208,6 +216,7 @@ async def _create_action_buffer(
     user_id: str,
     content: str,
     action: GoalAction | SkillAction,
+    attachments: list[str] | None = None,
 ) -> str:
     """Create action InputBuffer for tests."""
     async with rdb_session_manager() as session:
@@ -223,7 +232,7 @@ async def _create_action_buffer(
                 idempotency_key=None,
                 metadata={"source": "chat"},
                 action=action.model_dump(mode="json"),
-                attachments=[],
+                attachments=attachments if attachments is not None else [],
                 file_parts=[],
             ),
         )
@@ -332,6 +341,23 @@ def _exchange_file(
     )
 
 
+def _materialized_model_file(model_file_id: str) -> MaterializedUserInputAttachments:
+    """Build one materialized text file for promotion recovery tests."""
+    return MaterializedUserInputAttachments(
+        attachments=[],
+        file_parts=[
+            FileOutputPart(
+                model_file_id=model_file_id,
+                media_type="text/plain",
+                name="report.txt",
+                size=5,
+                kind="text",
+                metadata={"source_kind": "user_upload"},
+            )
+        ],
+    )
+
+
 class _ExchangeFileService(ExchangeFileService):
     """ExchangeFileService for tests."""
 
@@ -378,6 +404,8 @@ class _ModelFileService(ModelFileService):
     def __init__(self) -> None:
         """Store whether called."""
         self.create_for_agent_pending_input_called = False
+        self.discarded_model_file_ids: list[str] = []
+        self.discard_completed = asyncio.Event()
 
     async def create_for_agent_pending_input(
         self,
@@ -394,6 +422,71 @@ class _ModelFileService(ModelFileService):
         del agent_id, session_id, user_id, filename, media_type, body, metadata
         self.create_for_agent_pending_input_called = True
         return Failure(ModelFileInvalidImage())
+
+    async def discard_unreferenced(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        model_file_ids: list[str],
+    ) -> None:
+        """Record compensation for a promotion that did not commit."""
+        del agent_id, session_id
+        self.discarded_model_file_ids.extend(model_file_ids)
+        self.discard_completed.set()
+
+
+class _TrackedSessionManager:
+    """Track DB scopes opened by InputBufferService."""
+
+    def __init__(self, delegate: SessionManager[AsyncSession]) -> None:
+        self.delegate = delegate
+        self.active = 0
+
+    @asynccontextmanager
+    async def __call__(self) -> AsyncIterator[AsyncSession]:
+        """Yield a delegated session while recording the active scope."""
+        async with self.delegate() as session:
+            self.active += 1
+            try:
+                yield session
+            finally:
+                self.active -= 1
+
+
+class _PromotionExitFailureSessionManager:
+    """Fail the promotion scope after either committing or rolling it back."""
+
+    def __init__(
+        self,
+        delegate: SessionManager[AsyncSession],
+        *,
+        error: BaseException,
+        commit_before_failure: bool,
+    ) -> None:
+        self.delegate = delegate
+        self.error = error
+        self.commit_before_failure = commit_before_failure
+        self.scope_count = 0
+
+    @asynccontextmanager
+    async def __call__(self) -> AsyncIterator[AsyncSession]:
+        """Inject the failure only at the second, promotion transaction scope."""
+        self.scope_count += 1
+        scope = self.scope_count
+        if scope != 2:
+            async with self.delegate() as session:
+                yield session
+            return
+
+        if self.commit_before_failure:
+            async with self.delegate() as session:
+                yield session
+            raise self.error
+
+        async with self.delegate() as session:
+            yield session
+            raise self.error
 
 
 def _input_buffer_service(
@@ -415,6 +508,7 @@ def _input_buffer_service(
         ),
         agent_run_repository=AgentRunRepository(),
         action_execution_repository=ActionExecutionRepository(),
+        toolkit_state_repository=ToolkitStateRepository(),
     )
 
 
@@ -554,6 +648,7 @@ class TestInputBufferService:
             event_transcript_repository=EventTranscriptRepository(),
             agent_run_repository=AgentRunRepository(),
             action_execution_repository=ActionExecutionRepository(),
+            toolkit_state_repository=ToolkitStateRepository(),
         )
         enqueue = InputBufferEnqueue(
             session_id="session-001",
@@ -599,6 +694,7 @@ class TestInputBufferService:
             model="gpt-5.4",
             required_inference_profile=None,
             expected_buffer_id=buffer_id,
+            owner_generation=0,
             prepared_inference_state=None,
             profile_resolution_failure=None,
             active_run_id=None,
@@ -680,6 +776,57 @@ class TestInputBufferService:
                 model="gpt-5.4",
                 required_inference_profile=None,
                 expected_buffer_id="another-buffer",
+                owner_generation=0,
+                prepared_inference_state=None,
+                profile_resolution_failure=None,
+                active_run_id=None,
+            )
+
+        async with rdb_session_manager() as session:
+            remaining = await InputBufferRepository().get_by_id(session, buffer_id)
+        assert remaining is not None
+
+    async def test_flush_rejects_session_agent_change_after_snapshot(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Promotion revalidates the locked session Agent after preparation."""
+        session_id, user_id = await _create_fixture(
+            rdb_session_manager,
+            "input-buffer-session-agent-change",
+        )
+        buffer_id = await _create_buffer(
+            rdb_session_manager,
+            session_id=session_id,
+            user_id=user_id,
+            content="keep this pending",
+        )
+        service = _input_buffer_service(rdb_session_manager)
+        async with rdb_session_manager() as session:
+            snapshot = await service.agent_session_repository.get_by_id(
+                session,
+                session_id,
+            )
+        assert snapshot is not None
+        monkeypatch.setattr(
+            service.agent_session_repository,
+            "lock_by_id",
+            AsyncMock(
+                return_value=snapshot.model_copy(update={"agent_id": "another-agent"})
+            ),
+        )
+
+        with pytest.raises(
+            InputBufferPreparationStaleError,
+            match="Session Agent changed",
+        ):
+            await service.flush_session_input_buffers(
+                session_id=session_id,
+                model="gpt-5.4",
+                required_inference_profile=None,
+                expected_buffer_id=buffer_id,
+                owner_generation=0,
                 prepared_inference_state=None,
                 profile_resolution_failure=None,
                 active_run_id=None,
@@ -741,6 +888,7 @@ class TestInputBufferService:
                     reasoning_effort=ModelReasoningEffort.HIGH,
                 ),
                 expected_buffer_id=buffer_id,
+                owner_generation=0,
                 prepared_inference_state=prepared_state,
                 profile_resolution_failure=None,
                 active_run_id=None,
@@ -753,7 +901,13 @@ class TestInputBufferService:
             )
             remaining = await InputBufferRepository().get_by_id(session, buffer_id)
         assert agent_session is not None
-        goal = await GoalStateStore(session_manager=rdb_session_manager).load(
+        goal = await GoalStateStore(
+            session_manager=rdb_session_manager,
+            agent_run_repository=AgentRunRepository(),
+            agent_session_repository=AgentSessionRepository(),
+            event_transcript_repository=EventTranscriptRepository(),
+            toolkit_state_repository=ToolkitStateRepository(),
+        ).load(
             agent_id,
             session_id,
         )
@@ -797,6 +951,7 @@ class TestInputBufferService:
                 reasoning_effort=ModelReasoningEffort.HIGH,
             ),
             expected_buffer_id=buffer_id,
+            owner_generation=0,
             prepared_inference_state=None,
             profile_resolution_failure=None,
             active_run_id=run.id,
@@ -852,6 +1007,7 @@ class TestInputBufferService:
             model="gpt-5.4",
             required_inference_profile=None,
             expected_buffer_id=first_id,
+            owner_generation=0,
             prepared_inference_state=None,
             profile_resolution_failure=None,
             active_run_id=None,
@@ -903,6 +1059,7 @@ class TestInputBufferService:
                 reasoning_effort=None,
             ),
             expected_buffer_id=buffer_id,
+            owner_generation=0,
             prepared_inference_state=None,
             profile_resolution_failure=None,
             active_run_id=None,
@@ -943,6 +1100,7 @@ class TestInputBufferService:
                 reasoning_effort=ModelReasoningEffort.HIGH,
             ),
             expected_buffer_id=buffer_id,
+            owner_generation=0,
             prepared_inference_state=None,
             profile_resolution_failure=None,
             active_run_id=None,
@@ -974,7 +1132,12 @@ class TestInputBufferService:
         )
         agent_id = await _agent_id_for_session(rdb_session_manager, session_id)
         item = _skill_item()
-        await SkillStateStore(session_manager=rdb_session_manager).update(
+        await SkillStateStore(
+            session_manager=rdb_session_manager,
+            agent_run_repository=AgentRunRepository(),
+            agent_session_repository=AgentSessionRepository(),
+            toolkit_state_repository=ToolkitStateRepository(),
+        ).update(
             agent_id,
             session_id,
             lambda _current: SkillProjectionState(
@@ -998,6 +1161,7 @@ class TestInputBufferService:
                 reasoning_effort=ModelReasoningEffort.HIGH,
             ),
             expected_buffer_id=buffer_id,
+            owner_generation=0,
             prepared_inference_state=None,
             profile_resolution_failure=None,
             active_run_id=None,
@@ -1063,6 +1227,7 @@ class TestInputBufferService:
             model="gpt-5.4",
             required_inference_profile=None,
             expected_buffer_id=attachment_buffer_id,
+            owner_generation=0,
             prepared_inference_state=None,
             profile_resolution_failure=None,
             active_run_id=None,
@@ -1087,6 +1252,926 @@ class TestInputBufferService:
         assert payload.attachments[0].preview_thumbnail_uri == thumbnail_uri
         assert len(result.events) == 1
         assert result.events[0].id == event.id
+
+    async def test_flush_materializes_attachments_without_open_db_session(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """External attachment work happens between short DB sessions."""
+        session_id, user_id = await _create_fixture(
+            rdb_session_manager,
+            "input-buffer-materialize-outside-session",
+        )
+        buffer_id = await _create_buffer(
+            rdb_session_manager,
+            session_id=session_id,
+            user_id=user_id,
+            content="buffered with external work",
+            attachments=["exchange://exchange/workspace-1/session/report.txt"],
+        )
+        tracked_session_manager = _TrackedSessionManager(rdb_session_manager)
+        materialize_calls = 0
+
+        async def materialize(
+            attachment_uris: list[str],
+            *,
+            agent_id: str,
+            session_id: str,
+            exchange_file_service: ExchangeFileService,
+            model_file_service: ModelFileService | None,
+            user_id: str,
+        ) -> MaterializedUserInputAttachments:
+            del (
+                attachment_uris,
+                agent_id,
+                session_id,
+                exchange_file_service,
+                model_file_service,
+                user_id,
+            )
+            nonlocal materialize_calls
+            assert tracked_session_manager.active == 0
+            materialize_calls += 1
+            return MaterializedUserInputAttachments(attachments=[], file_parts=[])
+
+        monkeypatch.setattr(
+            "azents.services.input_buffer."
+            "materialize_user_input_exchange_file_attachments",
+            materialize,
+        )
+        service = _input_buffer_service(tracked_session_manager)
+
+        result = await service.flush_session_input_buffers(
+            session_id=session_id,
+            model="gpt-5.4",
+            required_inference_profile=None,
+            expected_buffer_id=buffer_id,
+            owner_generation=0,
+            prepared_inference_state=None,
+            profile_resolution_failure=None,
+            active_run_id=None,
+        )
+
+        assert materialize_calls == 1
+        assert tracked_session_manager.active == 0
+        assert result.deleted_buffer_ids == [buffer_id]
+
+    async def test_flush_rechecks_fifo_head_after_external_materialization(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A concurrently replaced head is not promoted using a stale snapshot."""
+        session_id, user_id = await _create_fixture(
+            rdb_session_manager,
+            "input-buffer-head-change-during-materialization",
+        )
+        buffer_id = await _create_buffer(
+            rdb_session_manager,
+            session_id=session_id,
+            user_id=user_id,
+            content="stale head",
+            attachments=["exchange://exchange/workspace-1/session/report.txt"],
+        )
+        replacement_id: str | None = None
+        created_model_file_id = "model-file-from-stale-materialization"
+
+        async def replace_head_during_materialization(
+            attachment_uris: list[str],
+            *,
+            agent_id: str,
+            session_id: str,
+            exchange_file_service: ExchangeFileService,
+            model_file_service: ModelFileService | None,
+            user_id: str,
+        ) -> MaterializedUserInputAttachments:
+            del (
+                attachment_uris,
+                agent_id,
+                exchange_file_service,
+                model_file_service,
+            )
+            nonlocal replacement_id
+            async with rdb_session_manager() as session:
+                await InputBufferRepository().delete_by_session_and_id(
+                    session,
+                    session_id,
+                    buffer_id,
+                )
+            replacement_id = await _create_buffer(
+                rdb_session_manager,
+                session_id=session_id,
+                user_id=user_id,
+                content="replacement head",
+            )
+            return MaterializedUserInputAttachments(
+                attachments=[],
+                file_parts=[
+                    FileOutputPart(
+                        model_file_id=created_model_file_id,
+                        media_type="text/plain",
+                        name="report.txt",
+                        size=5,
+                        kind="text",
+                        metadata={"source_kind": "user_upload"},
+                    )
+                ],
+            )
+
+        monkeypatch.setattr(
+            "azents.services.input_buffer."
+            "materialize_user_input_exchange_file_attachments",
+            replace_head_during_materialization,
+        )
+        model_file_service = _ModelFileService()
+        service = _input_buffer_service(
+            rdb_session_manager,
+            model_file_service=model_file_service,
+        )
+
+        with pytest.raises(InputBufferPreparationStaleError):
+            await service.flush_session_input_buffers(
+                session_id=session_id,
+                model="gpt-5.4",
+                required_inference_profile=None,
+                expected_buffer_id=buffer_id,
+                owner_generation=0,
+                prepared_inference_state=None,
+                profile_resolution_failure=None,
+                active_run_id=None,
+            )
+
+        assert replacement_id is not None
+        assert model_file_service.discarded_model_file_ids == [created_model_file_id]
+        async with rdb_session_manager() as session:
+            replacement = await InputBufferRepository().get_by_id(
+                session,
+                replacement_id,
+            )
+            stale_event = await EventTranscriptRepository().get_by_external_id(
+                session,
+                session_id,
+                f"{buffer_id}:user_message",
+            )
+        assert replacement is not None
+        assert stale_event is None
+
+    async def test_flush_discards_materialized_files_when_transaction_rolls_back(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """ModelFiles are compensated when durable event promotion fails."""
+        session_id, user_id = await _create_fixture(
+            rdb_session_manager,
+            "input-buffer-materialization-rollback",
+        )
+        buffer_id = await _create_buffer(
+            rdb_session_manager,
+            session_id=session_id,
+            user_id=user_id,
+            content="rollback this promotion",
+            attachments=["exchange://exchange/workspace-1/session/report.txt"],
+        )
+        created_model_file_id = "model-file-from-failed-promotion"
+
+        async def materialize(
+            attachment_uris: list[str],
+            *,
+            agent_id: str,
+            session_id: str,
+            exchange_file_service: ExchangeFileService,
+            model_file_service: ModelFileService | None,
+            user_id: str,
+        ) -> MaterializedUserInputAttachments:
+            del (
+                attachment_uris,
+                agent_id,
+                session_id,
+                exchange_file_service,
+                model_file_service,
+                user_id,
+            )
+            return MaterializedUserInputAttachments(
+                attachments=[],
+                file_parts=[
+                    FileOutputPart(
+                        model_file_id=created_model_file_id,
+                        media_type="text/plain",
+                        name="report.txt",
+                        size=5,
+                        kind="text",
+                        metadata={"source_kind": "user_upload"},
+                    )
+                ],
+            )
+
+        monkeypatch.setattr(
+            "azents.services.input_buffer."
+            "materialize_user_input_exchange_file_attachments",
+            materialize,
+        )
+        event_repository = EventTranscriptRepository()
+        monkeypatch.setattr(
+            event_repository,
+            "append",
+            AsyncMock(side_effect=RuntimeError("event append failed")),
+        )
+        model_file_service = _ModelFileService()
+        service = _input_buffer_service(
+            rdb_session_manager,
+            model_file_service=model_file_service,
+            event_transcript_repository=event_repository,
+        )
+
+        with pytest.raises(RuntimeError, match="event append failed"):
+            await service.flush_session_input_buffers(
+                session_id=session_id,
+                model="gpt-5.4",
+                required_inference_profile=None,
+                expected_buffer_id=buffer_id,
+                owner_generation=0,
+                prepared_inference_state=None,
+                profile_resolution_failure=None,
+                active_run_id=None,
+            )
+
+        assert model_file_service.discarded_model_file_ids == [created_model_file_id]
+        async with rdb_session_manager() as session:
+            remaining = await InputBufferRepository().get_by_id(session, buffer_id)
+        assert remaining is not None
+
+    async def test_flush_ownership_handoff_discards_stale_materialization(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A stale owner cannot promote but must discard its speculative file."""
+        session_id, user_id = await _create_fixture(
+            rdb_session_manager,
+            "input-buffer-ownership-handoff-during-materialization",
+        )
+        buffer_id = await _create_buffer(
+            rdb_session_manager,
+            session_id=session_id,
+            user_id=user_id,
+            content="stale owner input",
+            attachments=["exchange://exchange/workspace-1/session/report.txt"],
+        )
+        created_model_file_id = "model-file-from-stale-owner"
+
+        async def hand_off_during_materialization(
+            attachment_uris: list[str],
+            *,
+            agent_id: str,
+            session_id: str,
+            exchange_file_service: ExchangeFileService,
+            model_file_service: ModelFileService | None,
+            user_id: str,
+        ) -> MaterializedUserInputAttachments:
+            del (
+                attachment_uris,
+                agent_id,
+                exchange_file_service,
+                model_file_service,
+                user_id,
+            )
+            async with rdb_session_manager() as session:
+                generation = await AgentSessionRepository().claim_owner_generation(
+                    session,
+                    session_id,
+                )
+            assert generation == 1
+            return MaterializedUserInputAttachments(
+                attachments=[],
+                file_parts=[
+                    FileOutputPart(
+                        model_file_id=created_model_file_id,
+                        media_type="text/plain",
+                        name="report.txt",
+                        size=5,
+                        kind="text",
+                        metadata={"source_kind": "user_upload"},
+                    )
+                ],
+            )
+
+        monkeypatch.setattr(
+            "azents.services.input_buffer."
+            "materialize_user_input_exchange_file_attachments",
+            hand_off_during_materialization,
+        )
+        model_file_service = _ModelFileService()
+        service = _input_buffer_service(
+            rdb_session_manager,
+            model_file_service=model_file_service,
+        )
+
+        with pytest.raises(asyncio.CancelledError) as cancelled:
+            await service.flush_session_input_buffers(
+                session_id=session_id,
+                model="gpt-5.4",
+                required_inference_profile=None,
+                expected_buffer_id=buffer_id,
+                owner_generation=0,
+                prepared_inference_state=None,
+                profile_resolution_failure=None,
+                active_run_id=None,
+            )
+
+        assert cancelled.value.args == (OWNERSHIP_LOST_CANCEL_MESSAGE,)
+        assert model_file_service.discarded_model_file_ids == [created_model_file_id]
+        async with rdb_session_manager() as session:
+            remaining = await InputBufferRepository().get_by_id(session, buffer_id)
+            stale_event = await EventTranscriptRepository().get_by_external_id(
+                session,
+                session_id,
+                f"{buffer_id}:user_message",
+            )
+        assert remaining is not None
+        assert stale_event is None
+
+    async def test_flush_keeps_model_file_referenced_by_committed_event(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A newly materialized file survives when the durable event owns it."""
+        session_id, user_id = await _create_fixture(
+            rdb_session_manager,
+            "input-buffer-materialization-committed",
+        )
+        buffer_id = await _create_buffer(
+            rdb_session_manager,
+            session_id=session_id,
+            user_id=user_id,
+            content="commit this promotion",
+            attachments=["exchange://exchange/workspace-1/session/report.txt"],
+        )
+        created_model_file_id = "model-file-from-committed-promotion"
+
+        async def materialize(
+            attachment_uris: list[str],
+            *,
+            agent_id: str,
+            session_id: str,
+            exchange_file_service: ExchangeFileService,
+            model_file_service: ModelFileService | None,
+            user_id: str,
+        ) -> MaterializedUserInputAttachments:
+            del (
+                attachment_uris,
+                agent_id,
+                session_id,
+                exchange_file_service,
+                model_file_service,
+                user_id,
+            )
+            return MaterializedUserInputAttachments(
+                attachments=[],
+                file_parts=[
+                    FileOutputPart(
+                        model_file_id=created_model_file_id,
+                        media_type="text/plain",
+                        name="report.txt",
+                        size=5,
+                        kind="text",
+                        metadata={"source_kind": "user_upload"},
+                    )
+                ],
+            )
+
+        monkeypatch.setattr(
+            "azents.services.input_buffer."
+            "materialize_user_input_exchange_file_attachments",
+            materialize,
+        )
+        model_file_service = _ModelFileService()
+        service = _input_buffer_service(
+            rdb_session_manager,
+            model_file_service=model_file_service,
+        )
+
+        result = await service.flush_session_input_buffers(
+            session_id=session_id,
+            model="gpt-5.4",
+            required_inference_profile=None,
+            expected_buffer_id=buffer_id,
+            owner_generation=0,
+            prepared_inference_state=None,
+            profile_resolution_failure=None,
+            active_run_id=None,
+        )
+
+        assert model_file_service.discarded_model_file_ids == []
+        assert len(result.user_messages) == 1
+        content = result.user_messages[0].payload.content
+        assert isinstance(content, list)
+        assert any(
+            isinstance(part, FileOutputPart)
+            and part.model_file_id == created_model_file_id
+            for part in content
+        )
+
+    async def test_flush_recovers_materialized_file_after_commit_response_loss(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Exact durable evidence prevents compensation after a lost commit reply."""
+        session_id, user_id = await _create_fixture(
+            rdb_session_manager,
+            "input-buffer-materialization-commit-response-loss",
+        )
+        buffer_id = await _create_buffer(
+            rdb_session_manager,
+            session_id=session_id,
+            user_id=user_id,
+            content="commit despite response loss",
+            attachments=["exchange://exchange/workspace-1/session/report.txt"],
+        )
+        created_model_file_id = "model-file-from-ambiguous-commit"
+
+        async def materialize(*args: object, **kwargs: object) -> object:
+            del args, kwargs
+            return _materialized_model_file(created_model_file_id)
+
+        monkeypatch.setattr(
+            "azents.services.input_buffer."
+            "materialize_user_input_exchange_file_attachments",
+            materialize,
+        )
+        session_manager = _PromotionExitFailureSessionManager(
+            rdb_session_manager,
+            error=SQLAlchemyError("commit response lost"),
+            commit_before_failure=True,
+        )
+        model_file_service = _ModelFileService()
+        service = _input_buffer_service(
+            session_manager,
+            model_file_service=model_file_service,
+        )
+
+        result = await service.flush_session_input_buffers(
+            session_id=session_id,
+            model="gpt-5.4",
+            required_inference_profile=None,
+            expected_buffer_id=buffer_id,
+            owner_generation=0,
+            prepared_inference_state=None,
+            profile_resolution_failure=None,
+            active_run_id=None,
+        )
+
+        assert result.deleted_buffer_ids == [buffer_id]
+        assert model_file_service.discarded_model_file_ids == []
+        async with rdb_session_manager() as session:
+            remaining = await InputBufferRepository().get_by_id(session, buffer_id)
+            committed = await EventTranscriptRepository().get_by_external_id(
+                session,
+                session_id,
+                f"{buffer_id}:user_message",
+            )
+        assert remaining is None
+        assert committed is not None
+        assert isinstance(committed.payload, UserMessagePayload)
+        assert isinstance(committed.payload.content, list)
+        assert created_model_file_id in {
+            part.model_file_id
+            for part in committed.payload.content
+            if isinstance(part, FileOutputPart)
+        }
+
+    async def test_flush_preserves_committed_materialization_on_cancellation(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Cancellation after commit propagates without deleting referenced files."""
+        session_id, user_id = await _create_fixture(
+            rdb_session_manager,
+            "input-buffer-materialization-cancelled-commit",
+        )
+        buffer_id = await _create_buffer(
+            rdb_session_manager,
+            session_id=session_id,
+            user_id=user_id,
+            content="cancel after commit",
+            attachments=["exchange://exchange/workspace-1/session/report.txt"],
+        )
+        created_model_file_id = "model-file-from-cancelled-commit"
+
+        async def materialize(*args: object, **kwargs: object) -> object:
+            del args, kwargs
+            return _materialized_model_file(created_model_file_id)
+
+        monkeypatch.setattr(
+            "azents.services.input_buffer."
+            "materialize_user_input_exchange_file_attachments",
+            materialize,
+        )
+        session_manager = _PromotionExitFailureSessionManager(
+            rdb_session_manager,
+            error=asyncio.CancelledError("commit reply cancelled"),
+            commit_before_failure=True,
+        )
+        model_file_service = _ModelFileService()
+        service = _input_buffer_service(
+            session_manager,
+            model_file_service=model_file_service,
+        )
+
+        with pytest.raises(asyncio.CancelledError, match="commit reply cancelled"):
+            await service.flush_session_input_buffers(
+                session_id=session_id,
+                model="gpt-5.4",
+                required_inference_profile=None,
+                expected_buffer_id=buffer_id,
+                owner_generation=0,
+                prepared_inference_state=None,
+                profile_resolution_failure=None,
+                active_run_id=None,
+            )
+
+        assert model_file_service.discarded_model_file_ids == []
+        async with rdb_session_manager() as session:
+            remaining = await InputBufferRepository().get_by_id(session, buffer_id)
+            committed = await EventTranscriptRepository().get_by_external_id(
+                session,
+                session_id,
+                f"{buffer_id}:user_message",
+            )
+        assert remaining is None
+        assert committed is not None
+
+    async def test_flush_propagates_fresh_cancellation_during_reconciliation(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A new cancellation outranks the earlier ambiguous commit failure."""
+        session_id, user_id = await _create_fixture(
+            rdb_session_manager,
+            "input-buffer-materialization-reconcile-cancel",
+        )
+        buffer_id = await _create_buffer(
+            rdb_session_manager,
+            session_id=session_id,
+            user_id=user_id,
+            content="cancel reconciliation",
+            attachments=["exchange://exchange/workspace-1/session/report.txt"],
+        )
+        created_model_file_id = "model-file-from-reconcile-cancel"
+
+        async def materialize(*args: object, **kwargs: object) -> object:
+            del args, kwargs
+            return _materialized_model_file(created_model_file_id)
+
+        monkeypatch.setattr(
+            "azents.services.input_buffer."
+            "materialize_user_input_exchange_file_attachments",
+            materialize,
+        )
+        session_manager = _PromotionExitFailureSessionManager(
+            rdb_session_manager,
+            error=SQLAlchemyError("commit response lost"),
+            commit_before_failure=True,
+        )
+        model_file_service = _ModelFileService()
+        service = _input_buffer_service(
+            session_manager,
+            model_file_service=model_file_service,
+        )
+        monkeypatch.setattr(
+            service,
+            "_reconcile_materialized_promotion_commit",
+            AsyncMock(side_effect=asyncio.CancelledError("reconciliation cancelled")),
+        )
+
+        with pytest.raises(asyncio.CancelledError, match="reconciliation cancelled"):
+            await service.flush_session_input_buffers(
+                session_id=session_id,
+                model="gpt-5.4",
+                required_inference_profile=None,
+                expected_buffer_id=buffer_id,
+                owner_generation=0,
+                prepared_inference_state=None,
+                profile_resolution_failure=None,
+                active_run_id=None,
+            )
+
+        assert model_file_service.discarded_model_file_ids == []
+
+    async def test_fresh_reconciliation_cancel_still_cleans_proven_rollback(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Detached reconciliation compensates after caller cancellation."""
+        session_id, user_id = await _create_fixture(
+            rdb_session_manager,
+            "input-buffer-materialization-reconcile-cancel-rollback",
+        )
+        buffer_id = await _create_buffer(
+            rdb_session_manager,
+            session_id=session_id,
+            user_id=user_id,
+            content="cancel while proving rollback",
+            attachments=["exchange://exchange/workspace-1/session/report.txt"],
+        )
+        created_model_file_id = "model-file-from-cancelled-rollback-reconcile"
+
+        async def materialize(*args: object, **kwargs: object) -> object:
+            del args, kwargs
+            return _materialized_model_file(created_model_file_id)
+
+        monkeypatch.setattr(
+            "azents.services.input_buffer."
+            "materialize_user_input_exchange_file_attachments",
+            materialize,
+        )
+        session_manager = _PromotionExitFailureSessionManager(
+            rdb_session_manager,
+            error=SQLAlchemyError("commit failed before apply"),
+            commit_before_failure=False,
+        )
+        model_file_service = _ModelFileService()
+        service = _input_buffer_service(
+            session_manager,
+            model_file_service=model_file_service,
+        )
+        reconciliation_started = asyncio.Event()
+        release_reconciliation = asyncio.Event()
+        original_reconcile = service._reconcile_materialized_promotion_commit  # pyright: ignore[reportPrivateUsage]
+
+        async def delayed_reconcile(
+            *,
+            session_id: str,
+            buffer_id: str | None,
+            promoted: object,
+        ) -> bool:
+            reconciliation_started.set()
+            await release_reconciliation.wait()
+            return await original_reconcile(
+                session_id=session_id,
+                buffer_id=buffer_id,
+                promoted=promoted,  # pyright: ignore[reportArgumentType]
+            )
+
+        monkeypatch.setattr(
+            service,
+            "_reconcile_materialized_promotion_commit",
+            delayed_reconcile,
+        )
+        flush_task = asyncio.create_task(
+            service.flush_session_input_buffers(
+                session_id=session_id,
+                model="gpt-5.4",
+                required_inference_profile=None,
+                expected_buffer_id=buffer_id,
+                owner_generation=0,
+                prepared_inference_state=None,
+                profile_resolution_failure=None,
+                active_run_id=None,
+            )
+        )
+        await asyncio.wait_for(reconciliation_started.wait(), timeout=1)
+        flush_task.cancel("fresh reconciliation cancellation")
+
+        with pytest.raises(
+            asyncio.CancelledError,
+            match="fresh reconciliation cancellation",
+        ):
+            await asyncio.wait_for(flush_task, timeout=0.1)
+        assert model_file_service.discarded_model_file_ids == []
+
+        release_reconciliation.set()
+        await asyncio.wait_for(model_file_service.discard_completed.wait(), timeout=1)
+        assert model_file_service.discarded_model_file_ids == [created_model_file_id]
+        async with rdb_session_manager() as session:
+            remaining = await InputBufferRepository().get_by_id(session, buffer_id)
+            committed = await EventTranscriptRepository().get_by_external_id(
+                session,
+                session_id,
+                f"{buffer_id}:user_message",
+            )
+        assert remaining is not None
+        assert committed is None
+
+    async def test_flush_recovers_handled_failure_and_discards_unreferenced_file(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """An exact committed error Event still cleans its unused materialization."""
+        session_id, user_id = await _create_fixture(
+            rdb_session_manager,
+            "input-buffer-materialization-handled-failure",
+        )
+        buffer_id = await _create_action_buffer(
+            rdb_session_manager,
+            session_id=session_id,
+            user_id=user_id,
+            content="load a missing skill",
+            action=SkillAction(skill_path="/missing/SKILL.md"),
+            attachments=["exchange://exchange/workspace-1/session/report.txt"],
+        )
+        created_model_file_id = "model-file-from-handled-failure"
+
+        async def materialize(*args: object, **kwargs: object) -> object:
+            del args, kwargs
+            return _materialized_model_file(created_model_file_id)
+
+        monkeypatch.setattr(
+            "azents.services.input_buffer."
+            "materialize_user_input_exchange_file_attachments",
+            materialize,
+        )
+        session_manager = _PromotionExitFailureSessionManager(
+            rdb_session_manager,
+            error=SQLAlchemyError("commit response lost"),
+            commit_before_failure=True,
+        )
+        model_file_service = _ModelFileService()
+        service = _input_buffer_service(
+            session_manager,
+            model_file_service=model_file_service,
+        )
+
+        result = await service.flush_session_input_buffers(
+            session_id=session_id,
+            model="gpt-5.4",
+            required_inference_profile=None,
+            expected_buffer_id=buffer_id,
+            owner_generation=0,
+            prepared_inference_state=None,
+            profile_resolution_failure=None,
+            active_run_id=None,
+        )
+
+        assert result.turn_effect is TurnEffect.FAILED
+        assert [event.kind for event in result.events] == [EventKind.SYSTEM_ERROR]
+        assert model_file_service.discarded_model_file_ids == [created_model_file_id]
+
+    async def test_flush_discards_materialization_after_proven_commit_rollback(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Exact absence permits compensation after a failed commit attempt."""
+        session_id, user_id = await _create_fixture(
+            rdb_session_manager,
+            "input-buffer-materialization-commit-rollback",
+        )
+        buffer_id = await _create_buffer(
+            rdb_session_manager,
+            session_id=session_id,
+            user_id=user_id,
+            content="roll back the promotion",
+            attachments=["exchange://exchange/workspace-1/session/report.txt"],
+        )
+        created_model_file_id = "model-file-from-rolled-back-commit"
+
+        async def materialize(*args: object, **kwargs: object) -> object:
+            del args, kwargs
+            return _materialized_model_file(created_model_file_id)
+
+        monkeypatch.setattr(
+            "azents.services.input_buffer."
+            "materialize_user_input_exchange_file_attachments",
+            materialize,
+        )
+        session_manager = _PromotionExitFailureSessionManager(
+            rdb_session_manager,
+            error=SQLAlchemyError("commit failed before apply"),
+            commit_before_failure=False,
+        )
+        model_file_service = _ModelFileService()
+        service = _input_buffer_service(
+            session_manager,
+            model_file_service=model_file_service,
+        )
+
+        with pytest.raises(SQLAlchemyError, match="commit failed before apply"):
+            await service.flush_session_input_buffers(
+                session_id=session_id,
+                model="gpt-5.4",
+                required_inference_profile=None,
+                expected_buffer_id=buffer_id,
+                owner_generation=0,
+                prepared_inference_state=None,
+                profile_resolution_failure=None,
+                active_run_id=None,
+            )
+
+        assert model_file_service.discarded_model_file_ids == [created_model_file_id]
+        async with rdb_session_manager() as session:
+            remaining = await InputBufferRepository().get_by_id(session, buffer_id)
+            committed = await EventTranscriptRepository().get_by_external_id(
+                session,
+                session_id,
+                f"{buffer_id}:user_message",
+            )
+        assert remaining is not None
+        assert committed is None
+
+    async def test_flush_discards_model_file_not_referenced_by_deduped_event(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Dedupe winner, not the speculative payload, owns materialized files."""
+        session_id, user_id = await _create_fixture(
+            rdb_session_manager,
+            "input-buffer-materialization-deduped",
+        )
+        buffer_id = await _create_buffer(
+            rdb_session_manager,
+            session_id=session_id,
+            user_id=user_id,
+            content="losing duplicate",
+            attachments=["exchange://exchange/workspace-1/session/report.txt"],
+        )
+        external_id = f"{buffer_id}:user_message"
+        async with rdb_session_manager() as session:
+            existing = await EventTranscriptRepository().append(
+                session,
+                EventCreate(
+                    session_id=session_id,
+                    kind=EventKind.USER_MESSAGE,
+                    payload=UserMessagePayload(content="durable winner").model_dump(
+                        mode="json"
+                    ),
+                    external_id=external_id,
+                ),
+            )
+
+        created_model_file_id = "model-file-from-deduped-loser"
+
+        async def materialize(
+            attachment_uris: list[str],
+            *,
+            agent_id: str,
+            session_id: str,
+            exchange_file_service: ExchangeFileService,
+            model_file_service: ModelFileService | None,
+            user_id: str,
+        ) -> MaterializedUserInputAttachments:
+            del (
+                attachment_uris,
+                agent_id,
+                session_id,
+                exchange_file_service,
+                model_file_service,
+                user_id,
+            )
+            return MaterializedUserInputAttachments(
+                attachments=[],
+                file_parts=[
+                    FileOutputPart(
+                        model_file_id=created_model_file_id,
+                        media_type="text/plain",
+                        name="report.txt",
+                        size=5,
+                        kind="text",
+                        metadata={"source_kind": "user_upload"},
+                    )
+                ],
+            )
+
+        monkeypatch.setattr(
+            "azents.services.input_buffer."
+            "materialize_user_input_exchange_file_attachments",
+            materialize,
+        )
+        model_file_service = _ModelFileService()
+        service = _input_buffer_service(
+            rdb_session_manager,
+            model_file_service=model_file_service,
+        )
+
+        result = await service.flush_session_input_buffers(
+            session_id=session_id,
+            model="gpt-5.4",
+            required_inference_profile=None,
+            expected_buffer_id=buffer_id,
+            owner_generation=0,
+            prepared_inference_state=None,
+            profile_resolution_failure=None,
+            active_run_id=None,
+        )
+
+        assert model_file_service.discarded_model_file_ids == [created_model_file_id]
+        assert result.inserted_count == 0
+        assert result.deduped_count == 1
+        assert result.promoted_event_ids == [existing.id]
+        assert result.events == []
+        assert len(result.user_messages) == 1
+        assert result.user_messages[0].payload.content == "durable winner"
+        async with rdb_session_manager() as session:
+            remaining = await InputBufferRepository().get_by_id(session, buffer_id)
+        assert remaining is None
 
     async def test_flush_reuses_buffer_file_parts_without_rematerializing(
         self,
@@ -1135,6 +2220,7 @@ class TestInputBufferService:
             model="gpt-5.4",
             required_inference_profile=None,
             expected_buffer_id=image_buffer_id,
+            owner_generation=0,
             prepared_inference_state=None,
             profile_resolution_failure=None,
             active_run_id=None,
@@ -1174,6 +2260,7 @@ class TestInputBufferService:
             model="gpt-5.4",
             required_inference_profile=None,
             expected_buffer_id=None,
+            owner_generation=0,
             prepared_inference_state=None,
             profile_resolution_failure=None,
             active_run_id=None,

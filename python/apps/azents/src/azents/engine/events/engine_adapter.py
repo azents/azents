@@ -5,7 +5,7 @@ import contextlib
 import dataclasses
 import datetime
 import logging
-from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
 from typing import Annotated, Protocol
 
 from azcommon.uuid import uuid7
@@ -64,6 +64,7 @@ from azents.engine.events.output_parts import iter_output_parts
 from azents.engine.events.protocols import (
     AgentRunCreateRepository,
     ClientToolExecutor,
+    DurableRunWriteFence,
     ManualCompactor,
     NormalizedAdapterOutput,
     SessionHeadRepository,
@@ -111,13 +112,18 @@ from azents.engine.io.user_input import RunUserMessage
 from azents.engine.run.contracts import RunContext, RunRequest, ToolkitBinding
 from azents.engine.run.emit import Emit, durable, ephemeral
 from azents.engine.run.types import (
+    OWNERSHIP_LOST_CANCEL_MESSAGE,
     USER_STOP_CANCEL_MESSAGE,
     CheckStop,
     PollMessages,
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
-from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
+from azents.repos.agent_execution import (
+    AgentRunOwnershipLostError,
+    AgentRunRepository,
+    EventTranscriptRepository,
+)
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.model_file_pin import ModelFilePinRepository
@@ -127,13 +133,16 @@ from azents.services.model_file import ModelFileService
 
 logger = logging.getLogger(__name__)
 
+_RUN_TASK_CANCEL_DRAIN_TIMEOUT_SECONDS = 0.25
+_RETAINED_RUN_TASKS: set[asyncio.Task[AgentRunStatus]] = set()
+
 
 class RunExecution(Protocol):
     """Agent run execution protocol."""
 
     async def run(
         self,
-        session: AsyncSession,
+        session_manager: SessionManager[AsyncSession],
         request: AgentRunExecutionRequest,
         *,
         check_stop: CheckStop | None = None,
@@ -229,8 +238,15 @@ class AgentEngineAdapter:
         self, request: RunRequest, context: RunContext
     ) -> AsyncIterator[Emit]:
         """Run manual event compaction in append-only style."""
-        yield ephemeral(CompactionStarted())
+        write_fence = _run_write_fence(
+            self.run_repo,
+            run_id=context.run_id,
+            session_id=request.session_id,
+            owner_generation=context.owner_generation,
+        )
+        yield ephemeral(CompactionStarted(run_id=context.run_id))
         async with self.session_manager() as session:
+            await write_fence(session)
             await _ensure_agent_session(
                 session,
                 request.session_id,
@@ -255,6 +271,7 @@ class AgentEngineAdapter:
                     agent_id=request.agent_id,
                     session_id=request.session_id,
                     run_id=context.run_id,
+                    owner_generation=context.owner_generation,
                 ),
             )
 
@@ -266,6 +283,7 @@ class AgentEngineAdapter:
                 request,
                 summarize=self.summary_model_call,
             ),
+            write_fence=write_fence,
             on_started=on_compaction_started,
             summary_context_window_tokens=request.effective_max_input_tokens,
             reason="manual_command",
@@ -276,7 +294,7 @@ class AgentEngineAdapter:
                 run_id=context.run_id,
             ),
         )
-        yield ephemeral(CompactionComplete())
+        yield ephemeral(CompactionComplete(run_id=context.run_id))
 
     async def run(
         self,
@@ -287,7 +305,14 @@ class AgentEngineAdapter:
         check_stop: CheckStop | None = None,
     ) -> AsyncIterator[Emit]:
         """Run Event AgentRunExecution and yield terminal event."""
+        write_fence = _run_write_fence(
+            self.run_repo,
+            run_id=context.run_id,
+            session_id=request.session_id,
+            owner_generation=context.owner_generation,
+        )
         async with self.session_manager() as session:
+            await write_fence(session)
             await _ensure_agent_session(
                 session,
                 request.session_id,
@@ -304,7 +329,6 @@ class AgentEngineAdapter:
                 raise RuntimeError(
                     "AgentRun must be activated before engine invocation"
                 )
-            await session.commit()
         for event in user_message_events:
             yield durable(event)
         provider = _provider_name(request.provider)
@@ -317,7 +341,7 @@ class AgentEngineAdapter:
         )
         hook_dispatcher = RuntimeHookDispatcher()
         run_hook_providers = _runtime_hook_provider_refs(request.toolkits)
-        emit_queue = _AsyncEventEmitQueue()
+        emit_queue = _AsyncEventEmitQueue(run_id=context.run_id)
 
         async def prepare_model_call(
             *,
@@ -333,6 +357,7 @@ class AgentEngineAdapter:
                     run_id=context.run_id,
                     session_id=request.session_id,
                     run_index=run_state.run_index,
+                    owner_generation=context.owner_generation,
                     publish_event=context.publish_event,
                     check_stop=check_stop,
                 ),
@@ -347,6 +372,7 @@ class AgentEngineAdapter:
                     agent_id=request.agent_id,
                     session_id=request.session_id,
                     run_id=context.run_id,
+                    owner_generation=context.owner_generation,
                     turn_index=None,
                 ),
             )
@@ -385,6 +411,7 @@ class AgentEngineAdapter:
                 agent_id=request.agent_id,
                 session_id=request.session_id,
                 run_id=context.run_id,
+                owner_generation=context.owner_generation,
             )
 
             async def on_turn_end(reason: TurnEndReason) -> None:
@@ -407,8 +434,9 @@ class AgentEngineAdapter:
                     model=model,
                     system_prompt=system_prompt_result.prompt,
                 )
-            except asyncio.CancelledError:
-                await on_turn_end("cancelled")
+            except asyncio.CancelledError as exc:
+                if OWNERSHIP_LOST_CANCEL_MESSAGE not in exc.args:
+                    await on_turn_end("cancelled")
                 raise
             except Exception:
                 await on_turn_end("error")
@@ -422,7 +450,9 @@ class AgentEngineAdapter:
             )
 
         async def on_auto_compaction_started() -> None:
-            await emit_queue.put(ephemeral(CompactionStarted(continuing=True)))
+            await emit_queue.put(
+                ephemeral(CompactionStarted(run_id=context.run_id, continuing=True))
+            )
             await hook_dispatcher.dispatch_observation(
                 run_hook_providers,
                 "on_session_compact",
@@ -431,13 +461,17 @@ class AgentEngineAdapter:
                     agent_id=request.agent_id,
                     session_id=request.session_id,
                     run_id=context.run_id,
+                    owner_generation=context.owner_generation,
                 ),
             )
 
         pre_lower_filter = EventPreLowerFilterPipeline(
             [
-                EventAttachmentAvailabilityFilter(),
-                EventFilePartPlaceholderFilter(session_id=request.session_id),
+                EventAttachmentAvailabilityFilter(write_fence=write_fence),
+                EventFilePartPlaceholderFilter(
+                    session_id=request.session_id,
+                    write_fence=write_fence,
+                ),
                 EventAutoCompactionFilter(
                     session_id=request.session_id,
                     compactor=self.compactor,
@@ -445,6 +479,7 @@ class AgentEngineAdapter:
                         request,
                         summarize=self.summary_model_call,
                     ),
+                    write_fence=write_fence,
                     max_input_tokens=request.effective_max_input_tokens,
                     auto_compaction_threshold_tokens=(
                         request.auto_compaction_threshold_tokens
@@ -491,37 +526,48 @@ class AgentEngineAdapter:
         )
 
         async def execute_run() -> AgentRunStatus:
-            async with self.session_manager() as session:
-                return await execution.run(
-                    session,
-                    AgentRunExecutionRequest(
-                        run_id=context.run_id,
-                        session_id=request.session_id,
-                        owner_generation=context.owner_generation,
-                        tool_admission_barrier=context.tool_admission_barrier,
-                        run_index=run_state.run_index,
-                        model=request.model,
-                        max_turns=request.max_turns,
-                    ),
-                    check_stop=check_stop,
-                    poll_input_events=_make_input_poller(
-                        poll_messages,
-                        transcript_repo=self.transcript_repo,
-                    ),
-                )
+            return await execution.run(
+                self.session_manager,
+                AgentRunExecutionRequest(
+                    run_id=context.run_id,
+                    session_id=request.session_id,
+                    owner_generation=context.owner_generation,
+                    tool_admission_barrier=context.tool_admission_barrier,
+                    run_index=run_state.run_index,
+                    model=request.model,
+                    max_turns=request.max_turns,
+                ),
+                check_stop=check_stop,
+                poll_input_events=_make_input_poller(
+                    poll_messages,
+                    session_manager=self.session_manager,
+                    transcript_repo=self.transcript_repo,
+                    write_fence=write_fence,
+                ),
+            )
 
-        run_task = asyncio.create_task(execute_run())
+        run_task = asyncio.create_task(
+            execute_run(),
+            name=f"agent-run-execution:{context.run_id}",
+        )
         cancel_args: tuple[object, ...] | None = None
+        primary_cancellation: asyncio.CancelledError | None = None
         try:
             try:
                 while True:
                     if run_task.done() and emit_queue.empty():
                         break
                     get_task = asyncio.create_task(emit_queue.get())
-                    done, pending = await asyncio.wait(
-                        {run_task, get_task},
-                        return_when=asyncio.FIRST_COMPLETED,
-                    )
+                    try:
+                        done, pending = await asyncio.wait(
+                            {run_task, get_task},
+                            return_when=asyncio.FIRST_COMPLETED,
+                        )
+                    except asyncio.CancelledError:
+                        get_task.cancel()
+                        with contextlib.suppress(asyncio.CancelledError):
+                            await get_task
+                        raise
                     if get_task in pending:
                         get_task.cancel()
                         with contextlib.suppress(asyncio.CancelledError):
@@ -533,12 +579,36 @@ class AgentEngineAdapter:
                 status = run_task.result()
             except asyncio.CancelledError as exc:
                 cancel_args = exc.args
+                primary_cancellation = exc
                 raise
         finally:
-            if not run_task.done():
+            cancellation_cleanup = not run_task.done()
+            if cancellation_cleanup:
                 _cancel_run_task(run_task, cancel_args)
-                with contextlib.suppress(asyncio.CancelledError):
+                try:
+                    await _drain_cancelled_run_task(
+                        run_task,
+                        cancel_args=cancel_args,
+                    )
+                except asyncio.CancelledError as cleanup_cancellation:
+                    if primary_cancellation is not None:
+                        raise primary_cancellation from cleanup_cancellation
+                    raise
+            else:
+                try:
                     await run_task
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    if cancel_args is None:
+                        raise
+                    # The adapter cancellation remains authoritative. Replacing it
+                    # with a cleanup failure could make an ownership-fenced worker
+                    # perform stale failed-run finalization at the caller boundary.
+                    logger.warning(
+                        "Execution task failed during adapter cancellation cleanup",
+                        exc_info=True,
+                    )
 
         if status in {AgentRunStatus.COMPLETED, AgentRunStatus.FAILED}:
             yield ephemeral(RunComplete(run_id=context.run_id))
@@ -556,7 +626,83 @@ def _cancel_run_task(
     if cancel_args and USER_STOP_CANCEL_MESSAGE in cancel_args:
         run_task.cancel(USER_STOP_CANCEL_MESSAGE)
         return
+    if cancel_args and OWNERSHIP_LOST_CANCEL_MESSAGE in cancel_args:
+        run_task.cancel(OWNERSHIP_LOST_CANCEL_MESSAGE)
+        return
     run_task.cancel()
+
+
+def _consume_cancelled_run_task(
+    run_task: asyncio.Task[AgentRunStatus],
+) -> None:
+    """Observe bounded cancellation cleanup without replacing its primary exit."""
+    try:
+        run_task.result()
+    except asyncio.CancelledError:
+        pass
+    except Exception:
+        logger.warning(
+            "Execution task failed during adapter cancellation cleanup",
+            exc_info=True,
+        )
+
+
+def _on_retained_run_task_done(
+    run_task: asyncio.Task[AgentRunStatus],
+) -> None:
+    """Release and observe a quarantined execution task."""
+    _RETAINED_RUN_TASKS.discard(run_task)
+    try:
+        run_task.result()
+    except asyncio.CancelledError:
+        pass
+    except Exception:
+        logger.warning(
+            "Quarantined execution task failed after adapter cancellation",
+            exc_info=True,
+        )
+
+
+def _retain_run_task(run_task: asyncio.Task[AgentRunStatus]) -> None:
+    """Strongly retain a cancellation-resistant execution until completion."""
+    if run_task in _RETAINED_RUN_TASKS:
+        return
+    _RETAINED_RUN_TASKS.add(run_task)
+    run_task.add_done_callback(_on_retained_run_task_done)
+
+
+async def _drain_cancelled_run_task(
+    run_task: asyncio.Task[AgentRunStatus],
+    *,
+    cancel_args: tuple[object, ...] | None,
+) -> None:
+    """Bound cancellation cleanup, then quarantine an uncooperative execution."""
+    try:
+        done, _ = await asyncio.wait(
+            {run_task},
+            timeout=_RUN_TASK_CANCEL_DRAIN_TIMEOUT_SECONDS,
+        )
+    except asyncio.CancelledError:
+        if run_task.done():
+            _consume_cancelled_run_task(run_task)
+        else:
+            _cancel_run_task(run_task, cancel_args)
+            _retain_run_task(run_task)
+        raise
+
+    if run_task in done:
+        _consume_cancelled_run_task(run_task)
+        return
+
+    _cancel_run_task(run_task, cancel_args)
+    _retain_run_task(run_task)
+    logger.error(
+        "Execution task ignored adapter cancellation deadline; quarantined",
+        extra={
+            "run_task_name": run_task.get_name(),
+            "timeout": _RUN_TASK_CANCEL_DRAIN_TIMEOUT_SECONDS,
+        },
+    )
 
 
 async def _current_model_input_transcript(
@@ -590,7 +736,7 @@ async def _emit_phase_change(
     if phase == AgentRunPhase.PREPARING_INPUT:
         pre_lower_filter.was_compacted = False
     if phase == AgentRunPhase.WAITING_FOR_MODEL and pre_lower_filter.was_compacted:
-        await queue.put(ephemeral(CompactionComplete(continuing=True)))
+        await queue.put(ephemeral(CompactionComplete(run_id=run_id, continuing=True)))
         pre_lower_filter.was_compacted = False
     await queue.put(
         ephemeral(
@@ -626,6 +772,7 @@ class _HookedClientToolExecutor:
         agent_id: str,
         session_id: str,
         run_id: str,
+        owner_generation: int,
     ) -> None:
         self._inner = inner
         self._dispatcher = dispatcher
@@ -634,6 +781,7 @@ class _HookedClientToolExecutor:
         self._agent_id = agent_id
         self._session_id = session_id
         self._run_id = run_id
+        self._owner_generation = owner_generation
 
     def request_cancel(self, call: ClientToolCallPayload) -> None:
         """Forward running inner tool cancellation request."""
@@ -674,6 +822,7 @@ class _HookedClientToolExecutor:
                 agent_id=self._agent_id,
                 session_id=self._session_id,
                 run_id=self._run_id,
+                owner_generation=self._owner_generation,
                 output_text=output_text,
                 error_message=output_text if result.status == "failed" else None,
             ),
@@ -715,16 +864,15 @@ def _provider_name(provider: LLMProvider) -> str:
 def _make_input_poller(
     poll_messages: PollMessages | None,
     *,
+    session_manager: SessionManager[AsyncSession],
     transcript_repo: TranscriptRepository,
-) -> Callable[[AsyncSession, str], Awaitable[InputPollResult]] | None:
+    write_fence: DurableRunWriteFence,
+) -> InputPoller | None:
     """Convert boundary poll to event transcript append callback."""
     if poll_messages is None:
         return None
 
-    async def poll(
-        session: AsyncSession,
-        session_id: str,
-    ) -> InputPollResult:
+    async def poll(session_id: str) -> InputPollResult:
         result = await poll_messages()
         if not result.user_messages:
             return InputPollResult(
@@ -732,12 +880,14 @@ def _make_input_poller(
                 context_invalidated=result.context_invalidated,
                 complete_run=result.complete_run,
             )
-        events = await _append_run_user_messages(
-            session,
-            session_id,
-            result.user_messages,
-            transcript_repo=transcript_repo,
-        )
+        async with session_manager() as session:
+            await write_fence(session)
+            events = await _append_run_user_messages(
+                session,
+                session_id,
+                result.user_messages,
+                transcript_repo=transcript_repo,
+            )
         return InputPollResult(
             events=events,
             context_invalidated=result.context_invalidated,
@@ -745,6 +895,29 @@ def _make_input_poller(
         )
 
     return poll
+
+
+def _run_write_fence(
+    run_repo: AgentRunCreateRepository,
+    *,
+    run_id: str,
+    session_id: str,
+    owner_generation: int,
+) -> DurableRunWriteFence:
+    """Build a fail-closed DB fence for one engine Run owner."""
+
+    async def fence(session: AsyncSession) -> None:
+        try:
+            await run_repo.lock_active_owner(
+                session,
+                run_id=run_id,
+                session_id=session_id,
+                owner_generation=owner_generation,
+            )
+        except AgentRunOwnershipLostError as exc:
+            raise asyncio.CancelledError(OWNERSHIP_LOST_CANCEL_MESSAGE) from exc
+
+    return fence
 
 
 def _compaction_summary_enricher(
@@ -975,7 +1148,8 @@ def _event_text_content(content: object) -> str:
 class _AsyncEventEmitQueue:
     """Forward execution output to publishable emit async queue."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, run_id: str) -> None:
+        self._run_id = run_id
         self._queue: asyncio.Queue[Emit] = asyncio.Queue()
 
     async def extend_from_output(
@@ -985,7 +1159,7 @@ class _AsyncEventEmitQueue:
     ) -> None:
         """Put normalizer output into publish queue."""
         for projection in normalized.projections:
-            emit = _stream_projection_emit(projection)
+            emit = _stream_projection_emit(projection, run_id=self._run_id)
             if emit is not None:
                 await self._queue.put(emit)
         for event in appended:
@@ -1004,11 +1178,16 @@ class _AsyncEventEmitQueue:
         return self._queue.empty()
 
 
-def _stream_projection_emit(projection: StreamProjection) -> Emit | None:
+def _stream_projection_emit(
+    projection: StreamProjection,
+    *,
+    run_id: str,
+) -> Emit | None:
     """Convert UI stream projection to ephemeral emit."""
     if projection.type == "content_delta":
         return ephemeral(
             ContentDelta(
+                run_id=run_id,
                 delta=projection.delta or "",
                 content_index=projection.index or 0,
             )
@@ -1023,7 +1202,7 @@ def _stream_projection_emit(projection: StreamProjection) -> Emit | None:
             )
         )
     if projection.type == "reasoning_delta":
-        return ephemeral(ReasoningDelta(delta=projection.delta or ""))
+        return ephemeral(ReasoningDelta(run_id=run_id, delta=projection.delta or ""))
     return None
 
 

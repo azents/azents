@@ -32,8 +32,8 @@ code_paths:
 api_routes:
   - /toolkit/v1
   - /shell-environment/v1
-last_verified_at: 2026-07-10
-spec_version: 54
+last_verified_at: 2026-07-14
+spec_version: 56
 ---
 
 # Toolkit
@@ -100,7 +100,13 @@ To mount toolkit on Agent:
 
 ToolkitConfig `slug` is the DB-registered toolkit's model-visible namespace. It is unique within a workspace (`uq_toolkit_configs_workspace_slug`) and is used as the outer tool-name prefix for DB-registered toolkits.
 
-`resolve_agent_tools()` resolves DB-registered `AgentToolkit` rows into `ToolkitBinding` records with `slug=ToolkitConfig.slug` and `use_prefix=True`. During `build_tool_catalog()`, every `FunctionTool` returned by an enabled binding is renamed with `tool.with_prefix(f"{slug}__")` when `use_prefix=True`. The final model-visible name is therefore:
+`resolve_agent_tools()` reads DB-registered `AgentToolkit` and ToolkitConfig data into detached
+configuration snapshots in a short database session, closes that session, and only then invokes each
+Toolkit provider. Providers receive a session manager for their own bounded durable work rather than a
+caller-owned live session. Resolved records become `ToolkitBinding` values with
+`slug=ToolkitConfig.slug` and `use_prefix=True`. During `build_tool_catalog()`, every `FunctionTool`
+returned by an enabled binding is renamed with `tool.with_prefix(f"{slug}__")` when
+`use_prefix=True`. The final model-visible name is therefore:
 
 ```text
 {toolkit_slug}__{tool_name}
@@ -170,7 +176,12 @@ sequenceDiagram
     API->>DB: Upsert encrypted token fields
 ```
 
-Runtime loads `mcp_oauth_connections` by `toolkit_id`, refreshes near-expiry tokens lazily under `SELECT ... FOR UPDATE`, and retries MCP tool calls once after a 401-triggered refresh. `invalid_grant` marks the connection `reconnect_required`.
+Runtime loads a detached `mcp_oauth_connections` snapshot by `toolkit_id`, closes the database
+session, and performs near-expiry or 401-triggered token refresh over HTTP without holding a row lock.
+It then opens a short `SELECT ... FOR UPDATE` transaction, compares the current connection against the
+snapshot, and persists the result only when it is still current. A stale concurrent success or
+`invalid_grant` therefore cannot overwrite newer token state. MCP tool calls retry once after a
+401-triggered refresh; a current `invalid_grant` marks the connection `reconnect_required`.
 
 Toolkit config responses include an `oauth_connection` summary for UI status/actions. The toolkit edit page exposes connect/reconnect/disconnect actions for generic MCP OAuth, Notion, and Sentry.
 
@@ -349,9 +360,23 @@ one or more selected targets are still running, `wait_agent` polls until the req
 a terminal result becomes available; timeout responses are emitted only after that wait window. When an
 untargeted call has no descendants, it returns `No descendant agents to wait for.` instead of reporting
 an empty unread-result state. A target is considered running when either its latest run is running or
-its linked `AgentSession` is still marked running before the latest run row is available. `interrupt_agent` records stop intent only for the named
-target session and returns its previous projected status; it does not close, delete, or recursively stop
-descendants.
+its linked `AgentSession` is still marked running before the latest run row is available.
+`interrupt_agent` records stop intent for the named target session and every running descendant in its
+participant subtree, commits that state, and then sends best-effort stop signals to each target. It
+returns the named target's previous projected status and does not close or delete sessions.
+
+Every collaboration mutation first locks the root `SessionAgent` fence, then locks the exact source
+and target `AgentSession` rows in sorted ID order, and finally proves the active source `run_id` and
+`owner_generation` before changing state. Spawn, send, follow-up, wait-cursor advancement, and
+interrupt therefore reject a stale or terminal source Run instead of allowing a cancelled parent to
+write after handover. Sorting all participating Session rows also prevents reciprocal agent messages
+from acquiring them in opposite order.
+
+Foreground Tool cancellation has bounded cleanup. Tool execution tasks get 250 milliseconds to
+observe cancellation before the engine retains and quarantines any cancellation-resistant task; a
+tool-specific cancellation hook gets one second. These deadlines let stop finalization proceed while
+owner-generation and tool-admission fences prevent a detached stale task from committing new run
+state.
 
 The toolkit emits non-durable `subagent_tree_changed` events as invalidation signals. Durable tree
 state remains in `SessionAgent`, linked `AgentSession`, and latest `agent_runs` rows. Parent observation
@@ -362,7 +387,7 @@ human delivery guarantees.
 
 Goal and Todo auto-bound toolkits expose fixed tool definitions independent of current stored state. Their Toolkit prompts are fixed instruction text and do not include the current Goal objective/status or Todo list. The model can call `get_goal` when it needs exact Goal state; Todo UI/state snapshots remain the user-visible source of truth for Todo state. Goal Toolkit is root/user-facing and is filtered out of future subagent-mode auto-binding.
 
-`update_todo` persists the new state and publishes `TodoStateChanged`, but returns compact acknowledgement text (`Done`) instead of echoing the full Todo JSON. During compaction, Todo Toolkit appends a readable `Todo Snapshot` to the compaction summary only when the Todo list is non-empty. Goal Toolkit similarly appends a readable `Goal Snapshot` only for unfinished non-empty Goal state.
+`update_todo` persists the new state and publishes `TodoStateChanged`, but returns compact acknowledgement text (`Done`) instead of echoing the full Todo JSON. Publication is a hard-bounded post-commit projection: timeout or transport failure is logged without making the model retry an already committed state change, while caller cancellation still propagates. During compaction, Todo Toolkit appends a readable `Todo Snapshot` to the compaction summary only when the Todo list is non-empty. Goal Toolkit similarly appends a readable `Goal Snapshot` only for unfinished non-empty Goal state.
 
 ### Activation Conditions by Toolkit
 
@@ -394,6 +419,8 @@ Toolkit resolution receives an execution mode. Root sessions use root mode. Chil
 - `[workspace-scope-access]` WORKSPACE scope toolkit can be attached by workspace members. Toolkit visibility is workspace-only.
 - `[shell-is-not-toolkit-config]` Request creating ToolkitConfig with `toolkit_type="shell"` returns 400. Shell is managed only through ShellEnvironment. ([`api/public/toolkit/v1/__init__.py` L82-87](../../../../python/apps/azents/src/azents/api/public/toolkit/v1/__init__.py))
 - `[mcp-oauth-toolkit-level]` MCP OAuth connection is UNIQUE by `toolkit_id`. All runs mounting the same ToolkitConfig use the same OAuth connection.
+- `[toolkit-resolve-session-boundary]` Toolkit configuration is detached in a bounded database session; provider resolution and remote discovery run only after that session closes.
+- `[mcp-oauth-refresh-session-boundary]` OAuth token HTTP refresh never runs under a database transaction or row lock. A short compare-and-persist transaction prevents stale concurrent refresh results from replacing newer state.
 - `[mcp-oauth-no-per-user]` `oauth2_per_user`, `MCPAuthRequest`, and `MCPOAuth2Token` are removed current behavior. Runtime does not emit per-user authorization request events for MCP OAuth.
 - `[oauth-state-encrypted]` State passed through OAuth connect/exchange is AES-GCM encrypted with a key derived from the credential encryption key. State payload binds toolkit_id, workspace_id, manager user_id, redirect_uri, and PKCE verifier.
 - `[oauth-dcr-when-needed]` If no existing/client credentials are available and the OAuth server exposes `registration_endpoint`, connect performs Dynamic Client Registration and stores the returned client fields in `MCPOAuthConnection`.
@@ -546,6 +573,8 @@ OpenAPI spec is authoritative for all endpoints. Major operations:
 
 ## Changelog
 
+- **2026-07-14** (spec_version 56) — Standardized collaboration locking as root fence then sorted Session rows then exact source Run, and hard-bounded cancellation cleanup for Tool execution and cancel hooks.
+- **2026-07-14** (spec_version 55) — Detached Toolkit resolution from database sessions, moved MCP OAuth HTTP refresh outside row locks with stale-result protection, fenced collaboration writes to the exact source Run, bounded Todo publication, and made `interrupt_agent` cascade through the named target subtree.
 - **2026-07-10** (spec_version 54) — Aligned the root and child Subagent Toolkit prompts with the frozen Codex Multi-Agent V2 usage, workspace, concurrency, and explicit-delegation guidance.
 - **2026-07-10** (spec_version 53) — Made untargeted `wait_agent` calls report explicitly when no descendants exist.
 - **2026-07-10** (spec_version 52) — Identified children in forked-history boundaries and rejected self-targeted `wait_agent` calls.

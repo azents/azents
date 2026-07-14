@@ -1,5 +1,6 @@
 """Failed-run finalizer tests."""
 
+import asyncio
 import datetime
 from contextlib import AbstractAsyncContextManager
 from typing import cast
@@ -23,6 +24,7 @@ from azents.engine.run.failure import (
 )
 from azents.rdb.session import SessionManager
 from azents.repos.agent_execution.data import EventCreate
+from azents.worker.run import finalizer as finalizer_module
 from azents.worker.run.finalizer import (
     FailedRunErrorFinalizer,
     FailedRunFinalizationInput,
@@ -130,10 +132,12 @@ class _SessionLifecycle:
 
     def __init__(self) -> None:
         self.cleared_session_ids: list[str] = []
+        self.cleared = asyncio.Event()
 
     async def clear_session_activity(self, session_id: str) -> None:
         """Record session activity clear request."""
         self.cleared_session_ids.append(session_id)
+        self.cleared.set()
 
 
 def _payload_from_create(create: EventCreate) -> SystemErrorPayload | RunMarkerPayload:
@@ -206,4 +210,138 @@ async def test_failed_run_finalizer_appends_error_marker_and_run_complete() -> N
     terminal_event = dispatched[-1][1]
     assert isinstance(terminal_event, RunComplete)
     assert terminal_event.run_id == "run-001".rjust(32, "0")
+    assert lifecycle.cleared_session_ids == ["session-001"]
+
+
+@pytest.mark.asyncio
+async def test_failed_run_finalizer_continues_after_dispatch_failure() -> None:
+    """A failed error-event delivery cannot suppress terminal signals or cleanup."""
+    event_store = _FailedRunEventStore()
+    lifecycle = _SessionLifecycle()
+    dispatched: list[PublishedEvent] = []
+    fail_next = True
+    finalizer = FailedRunErrorFinalizer(
+        session_manager=cast(SessionManager[AsyncSession], _SessionManager()),
+        event_store=cast(FailedRunEventStore, event_store),
+        session_lifecycle=cast(SessionLifecycleService, lifecycle),
+    )
+
+    async def dispatch_event(session_id: str, event: PublishedEvent) -> None:
+        nonlocal fail_next
+        del session_id
+        if fail_next:
+            fail_next = False
+            raise RuntimeError("websocket unavailable")
+        dispatched.append(event)
+
+    await finalizer.finalize(
+        FailedRunFinalizationInput(
+            session_id="session-001",
+            run_id="run-001".rjust(32, "0"),
+            user_message="temporary failure",
+            retry_state=_retry_state(),
+            reason="retry_exhausted",
+        ),
+        dispatch_event=dispatch_event,
+    )
+
+    assert [
+        event.kind if isinstance(event, Event) else type(event) for event in dispatched
+    ] == [EventKind.RUN_MARKER, RunComplete]
+    assert lifecycle.cleared_session_ids == ["session-001"]
+
+
+@pytest.mark.asyncio
+async def test_failed_run_finalizer_bounds_hung_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A hung post-commit dispatch cannot strand later cleanup."""
+    monkeypatch.setattr(finalizer_module, "_EXTERNAL_STEP_TIMEOUT_SECONDS", 0.01)
+    event_store = _FailedRunEventStore()
+    lifecycle = _SessionLifecycle()
+    dispatched: list[PublishedEvent] = []
+    hang_next = True
+    finalizer = FailedRunErrorFinalizer(
+        session_manager=cast(SessionManager[AsyncSession], _SessionManager()),
+        event_store=cast(FailedRunEventStore, event_store),
+        session_lifecycle=cast(SessionLifecycleService, lifecycle),
+    )
+
+    async def dispatch_event(session_id: str, event: PublishedEvent) -> None:
+        nonlocal hang_next
+        del session_id
+        if hang_next:
+            hang_next = False
+            await asyncio.Event().wait()
+        dispatched.append(event)
+
+    await asyncio.wait_for(
+        finalizer.finalize(
+            FailedRunFinalizationInput(
+                session_id="session-001",
+                run_id="run-001".rjust(32, "0"),
+                user_message="temporary failure",
+                retry_state=_retry_state(),
+                reason="retry_exhausted",
+            ),
+            dispatch_event=dispatch_event,
+        ),
+        timeout=0.5,
+    )
+
+    assert [
+        event.kind if isinstance(event, Event) else type(event) for event in dispatched
+    ] == [EventKind.RUN_MARKER, RunComplete]
+    assert lifecycle.cleared_session_ids == ["session-001"]
+
+
+@pytest.mark.asyncio
+async def test_failed_run_finalizer_continues_delivery_after_caller_cancel() -> None:
+    """A committed failure still publishes its marker and clears activity."""
+    event_store = _FailedRunEventStore()
+    lifecycle = _SessionLifecycle()
+    dispatch_started = asyncio.Event()
+    release_dispatch = asyncio.Event()
+    dispatched: list[PublishedEvent] = []
+    block_next = True
+    finalizer = FailedRunErrorFinalizer(
+        session_manager=cast(SessionManager[AsyncSession], _SessionManager()),
+        event_store=cast(FailedRunEventStore, event_store),
+        session_lifecycle=cast(SessionLifecycleService, lifecycle),
+    )
+
+    async def dispatch_event(session_id: str, event: PublishedEvent) -> None:
+        nonlocal block_next
+        del session_id
+        if block_next:
+            block_next = False
+            dispatch_started.set()
+            await release_dispatch.wait()
+        dispatched.append(event)
+
+    finalize_task = asyncio.create_task(
+        finalizer.finalize(
+            FailedRunFinalizationInput(
+                session_id="session-001",
+                run_id="run-001".rjust(32, "0"),
+                user_message="temporary failure",
+                retry_state=_retry_state(),
+                reason="retry_exhausted",
+            ),
+            dispatch_event=dispatch_event,
+        )
+    )
+    await asyncio.wait_for(dispatch_started.wait(), timeout=0.5)
+
+    finalize_task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(finalize_task, timeout=0.1)
+    assert not release_dispatch.is_set()
+
+    release_dispatch.set()
+    await asyncio.wait_for(lifecycle.cleared.wait(), timeout=0.5)
+
+    assert [
+        event.kind if isinstance(event, Event) else type(event) for event in dispatched
+    ] == [EventKind.SYSTEM_ERROR, EventKind.RUN_MARKER, RunComplete]
     assert lifecycle.cleared_session_ids == ["session-001"]

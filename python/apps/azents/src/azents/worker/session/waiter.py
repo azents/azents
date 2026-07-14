@@ -54,11 +54,20 @@ class SessionRunnerWaiter:
             running_session_id=running_session_id,
             idle_started_at=idle_started_at,
         )
-        done, pending = await asyncio.wait(
-            [get_task, shutdown_task],
-            timeout=wait_timeout,
-            return_when=asyncio.FIRST_COMPLETED,
-        )
+        tasks = (get_task, shutdown_task)
+        try:
+            done, pending = await asyncio.wait(
+                tasks,
+                timeout=wait_timeout,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+        except asyncio.CancelledError:
+            for task in tasks:
+                task.cancel()
+            for task in tasks:
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+            raise
         for task in pending:
             task.cancel()
         for task in pending:

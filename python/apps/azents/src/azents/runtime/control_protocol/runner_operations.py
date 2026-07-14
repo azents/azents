@@ -3,10 +3,13 @@
 import asyncio
 import base64
 import dataclasses
+import logging
 import time
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Coroutine, Sequence
+from contextvars import ContextVar
 from datetime import datetime, timezone
-from typing import Literal
+from functools import wraps
+from typing import Any, Concatenate, Literal, ParamSpec, TypeVar
 
 from azents.runtime.control_protocol.data import (
     RuntimeDispatchResult,
@@ -30,6 +33,11 @@ from azents.runtime.coordination.store import RuntimeCoordinationStore
 _DEFAULT_POLL_INTERVAL_SECONDS = 0.01
 _DEFAULT_CANCEL_CHECK_INTERVAL_SECONDS = 1.0
 _DEFAULT_BODY_CHUNK_SIZE_BYTES = 1024 * 1024
+_LOCAL_FINALIZATION_TIMEOUT_SECONDS = 1.0
+_LOGGER = logging.getLogger(__name__)
+
+_P = ParamSpec("_P")
+_T = TypeVar("_T")
 
 type RuntimeOperationCancelCheck = Callable[[], Awaitable[bool]]
 type RuntimeOperationTextCallback = Callable[
@@ -54,6 +62,123 @@ class RuntimeRunnerOperationFailedError(RuntimeError):
 
 class RuntimeRunnerOperationCanceledError(RuntimeError):
     """Foreground Runner operation was cancelled by Control/User intent."""
+
+
+@dataclasses.dataclass
+class _RuntimeOperationBudget:
+    """One monotonic deadline shared by every stage of a Runtime operation."""
+
+    deadline_monotonic: float
+    reply_stream_id: str | None
+    request_id: str | None
+    operation_id: str | None
+    runtime_id: str | None
+    generation: int | None
+    finalization_attempted: bool
+
+    def bind_dispatch(
+        self,
+        dispatch: RuntimeDispatchResult,
+        operation: RuntimeRunnerOperation,
+    ) -> None:
+        """Record durable operation identifiers once dispatch returns."""
+        self.reply_stream_id = dispatch.reply_stream_id
+        self.request_id = dispatch.request_id
+        self.operation_id = dispatch.operation_id
+        self.runtime_id = operation.runtime_id
+        self.generation = operation.runner_generation
+
+    def bind_reply_wait(
+        self,
+        *,
+        reply_stream_id: str,
+        request_id: str | None,
+        operation_id: str | None,
+        runtime_id: str | None,
+        generation: int | None,
+    ) -> None:
+        """Fill identifiers supplied by a direct reply-stream resume."""
+        self.reply_stream_id = reply_stream_id
+        self.request_id = request_id
+        self.operation_id = operation_id
+        self.runtime_id = runtime_id
+        self.generation = generation
+
+
+_CURRENT_OPERATION_BUDGET: ContextVar[_RuntimeOperationBudget | None] = ContextVar(
+    "runtime_runner_operation_budget",
+    default=None,
+)
+
+
+def _with_runtime_operation_deadline(
+    method: Callable[
+        Concatenate["RuntimeRunnerOperationClient", _P],
+        Coroutine[Any, Any, _T],
+    ],
+) -> Callable[
+    Concatenate["RuntimeRunnerOperationClient", _P],
+    Coroutine[Any, Any, _T],
+]:
+    """Apply one monotonic budget across dispatch, body I/O, and reply polling."""
+
+    @wraps(method)
+    async def wrapped(
+        client: "RuntimeRunnerOperationClient",
+        *args: _P.args,
+        **kwargs: _P.kwargs,
+    ) -> _T:
+        deadline_at = kwargs.get("deadline_at")
+        if not isinstance(deadline_at, datetime):
+            raise TypeError("deadline_at must be a datetime")
+        budget = _new_operation_budget(deadline_at)
+        token = _CURRENT_OPERATION_BUDGET.set(budget)
+        try:
+            try:
+                async with asyncio.timeout_at(budget.deadline_monotonic):
+                    return await method(client, *args, **kwargs)
+            except asyncio.CancelledError:
+                await client._finalize_operation_budget(  # pyright: ignore[reportPrivateUsage]  # decorator owns the client lifecycle boundary
+                    budget,
+                    code="canceled",
+                    message="Runtime operation cancelled",
+                )
+                raise
+            except TimeoutError:
+                if _operation_clock() < budget.deadline_monotonic:
+                    raise
+                await client._finalize_operation_budget(  # pyright: ignore[reportPrivateUsage]  # decorator owns the client lifecycle boundary
+                    budget,
+                    code="operation_timeout",
+                    message="Runtime operation timed out",
+                )
+                raise RuntimeRunnerOperationFailedError(
+                    "Runtime operation timed out"
+                ) from None
+        finally:
+            _CURRENT_OPERATION_BUDGET.reset(token)
+
+    return wrapped
+
+
+def _new_operation_budget(deadline_at: datetime) -> _RuntimeOperationBudget:
+    remaining_seconds = max(
+        (deadline_at - datetime.now(timezone.utc)).total_seconds(),
+        0.0,
+    )
+    return _RuntimeOperationBudget(
+        deadline_monotonic=_operation_clock() + remaining_seconds,
+        reply_stream_id=None,
+        request_id=None,
+        operation_id=None,
+        runtime_id=None,
+        generation=None,
+        finalization_attempted=False,
+    )
+
+
+def _operation_clock() -> float:
+    return asyncio.get_running_loop().time()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -322,6 +447,7 @@ class RuntimeRunnerOperationClient:
         self._poll_interval_seconds = poll_interval_seconds
         self._body_chunk_size_bytes = body_chunk_size_bytes
 
+    @_with_runtime_operation_deadline
     async def run_bash(
         self,
         *,
@@ -364,6 +490,7 @@ class RuntimeRunnerOperationClient:
             cancel_check=cancel_check,
         )
 
+    @_with_runtime_operation_deadline
     async def read_file(
         self,
         *,
@@ -401,6 +528,7 @@ class RuntimeRunnerOperationClient:
             deadline_at=deadline_at,
         )
 
+    @_with_runtime_operation_deadline
     async def write_file(
         self,
         *,
@@ -442,6 +570,7 @@ class RuntimeRunnerOperationClient:
             deadline_at=deadline_at,
         )
 
+    @_with_runtime_operation_deadline
     async def delete_file(
         self,
         *,
@@ -474,6 +603,7 @@ class RuntimeRunnerOperationClient:
             deadline_at=deadline_at,
         )
 
+    @_with_runtime_operation_deadline
     async def bulk_delete_files(
         self,
         *,
@@ -506,6 +636,7 @@ class RuntimeRunnerOperationClient:
             deadline_at=deadline_at,
         )
 
+    @_with_runtime_operation_deadline
     async def mkdir_file(
         self,
         *,
@@ -538,6 +669,7 @@ class RuntimeRunnerOperationClient:
             deadline_at=deadline_at,
         )
 
+    @_with_runtime_operation_deadline
     async def move_file(
         self,
         *,
@@ -575,6 +707,7 @@ class RuntimeRunnerOperationClient:
             deadline_at=deadline_at,
         )
 
+    @_with_runtime_operation_deadline
     async def bulk_move_files(
         self,
         *,
@@ -612,6 +745,7 @@ class RuntimeRunnerOperationClient:
             deadline_at=deadline_at,
         )
 
+    @_with_runtime_operation_deadline
     async def list_files(
         self,
         *,
@@ -648,6 +782,7 @@ class RuntimeRunnerOperationClient:
             deadline_at=deadline_at,
         )
 
+    @_with_runtime_operation_deadline
     async def stat_file(
         self,
         *,
@@ -679,6 +814,7 @@ class RuntimeRunnerOperationClient:
             deadline_at=deadline_at,
         )
 
+    @_with_runtime_operation_deadline
     async def grep_files(
         self,
         *,
@@ -730,6 +866,7 @@ class RuntimeRunnerOperationClient:
             deadline_at=deadline_at,
         )
 
+    @_with_runtime_operation_deadline
     async def list_git_refs(
         self,
         *,
@@ -763,6 +900,7 @@ class RuntimeRunnerOperationClient:
             text_output_callback=text_output_callback,
         )
 
+    @_with_runtime_operation_deadline
     async def create_git_worktree(
         self,
         *,
@@ -804,6 +942,7 @@ class RuntimeRunnerOperationClient:
             text_output_callback=text_output_callback,
         )
 
+    @_with_runtime_operation_deadline
     async def remove_git_worktree(
         self,
         *,
@@ -843,6 +982,7 @@ class RuntimeRunnerOperationClient:
             text_output_callback=text_output_callback,
         )
 
+    @_with_runtime_operation_deadline
     async def delete_git_branch(
         self,
         *,
@@ -880,6 +1020,7 @@ class RuntimeRunnerOperationClient:
             text_output_callback=text_output_callback,
         )
 
+    @_with_runtime_operation_deadline
     async def start_process(
         self,
         *,
@@ -926,6 +1067,7 @@ class RuntimeRunnerOperationClient:
             process_output_callback=process_output_callback,
         )
 
+    @_with_runtime_operation_deadline
     async def write_process_stdin(
         self,
         *,
@@ -967,6 +1109,7 @@ class RuntimeRunnerOperationClient:
             process_output_callback=process_output_callback,
         )
 
+    @_with_runtime_operation_deadline
     async def terminate_session_processes(
         self,
         *,
@@ -1490,6 +1633,9 @@ class RuntimeRunnerOperationClient:
             raise RuntimeRunnerOperationGenerationError(
                 f"Runner generation is stale: {result.subject_id}:{result.generation}"
             )
+        budget = _CURRENT_OPERATION_BUDGET.get()
+        if budget is not None:
+            budget.bind_dispatch(result, operation)
         return result
 
     async def _append_body_chunks(
@@ -1538,77 +1684,136 @@ class RuntimeRunnerOperationClient:
         deadline_at: datetime,
         cancel_check: RuntimeOperationCancelCheck | None = None,
     ) -> RuntimeReplyRecord:
-        cursor = folder.after_cursor
-        next_cancel_check_at = 0.0
+        budget = _CURRENT_OPERATION_BUDGET.get()
+        owns_budget = budget is None
+        if budget is None:
+            budget = _new_operation_budget(deadline_at)
+        budget.bind_reply_wait(
+            reply_stream_id=reply_stream_id,
+            request_id=request_id,
+            operation_id=operation_id,
+            runtime_id=runtime_id,
+            generation=generation,
+        )
+        token = _CURRENT_OPERATION_BUDGET.set(budget) if owns_budget else None
         try:
-            while True:
-                now = datetime.now(timezone.utc)
-                if now >= deadline_at:
-                    await self._append_local_final_error(
-                        reply_stream_id=reply_stream_id,
-                        request_id=request_id,
-                        operation_id=operation_id,
-                        runtime_id=runtime_id,
-                        generation=generation,
-                        code="operation_timeout",
-                        message="Runtime operation timed out",
-                        created_at=now,
-                    )
-                    raise RuntimeRunnerOperationFailedError(
-                        "Runtime operation timed out"
-                    )
-                if (
-                    cancel_check is not None
-                    and time.monotonic() >= next_cancel_check_at
-                    and await cancel_check()
-                ):
-                    await self._append_local_final_error(
-                        reply_stream_id=reply_stream_id,
-                        request_id=request_id,
-                        operation_id=operation_id,
-                        runtime_id=runtime_id,
-                        generation=generation,
-                        code="canceled",
-                        message="Runtime operation cancelled",
-                        created_at=now,
-                    )
-                    raise RuntimeRunnerOperationCanceledError(
-                        "Runtime operation cancelled"
-                    )
-                next_cancel_check_at = (
-                    time.monotonic() + _DEFAULT_CANCEL_CHECK_INTERVAL_SECONDS
-                )
-                records = await self._control_protocol.read_replies(
-                    reply_stream_id=reply_stream_id,
-                    after_cursor=cursor,
-                    limit=100,
-                )
-                if not records:
-                    await asyncio.sleep(self._poll_interval_seconds)
-                    continue
-                for record in records:
-                    cursor = record.cursor
-                    if request_id is not None and record.event.request_id != request_id:
-                        continue
-                    await folder.apply(record)
-                    if record.event.final:
-                        if record.event.event_type == RuntimeReplyEventType.FINAL_ERROR:
-                            raise RuntimeRunnerOperationFailedError(
-                                _error_message(record.event.payload)
+            try:
+                timeout_at = budget.deadline_monotonic if owns_budget else None
+                async with asyncio.timeout_at(timeout_at):
+                    cursor = folder.after_cursor
+                    next_cancel_check_at = 0.0
+                    while True:
+                        if (
+                            cancel_check is not None
+                            and time.monotonic() >= next_cancel_check_at
+                            and await cancel_check()
+                        ):
+                            await self._finalize_operation_budget(
+                                budget,
+                                code="canceled",
+                                message="Runtime operation cancelled",
                             )
-                        return record
+                            raise RuntimeRunnerOperationCanceledError(
+                                "Runtime operation cancelled"
+                            )
+                        next_cancel_check_at = (
+                            time.monotonic() + _DEFAULT_CANCEL_CHECK_INTERVAL_SECONDS
+                        )
+                        records = await self._control_protocol.read_replies(
+                            reply_stream_id=reply_stream_id,
+                            after_cursor=cursor,
+                            limit=100,
+                        )
+                        if not records:
+                            await asyncio.sleep(self._poll_interval_seconds)
+                            continue
+                        for record in records:
+                            cursor = record.cursor
+                            if (
+                                request_id is not None
+                                and record.event.request_id != request_id
+                            ):
+                                continue
+                            await folder.apply(record)
+                            if record.event.final:
+                                if (
+                                    record.event.event_type
+                                    == RuntimeReplyEventType.FINAL_ERROR
+                                ):
+                                    raise RuntimeRunnerOperationFailedError(
+                                        _error_message(record.event.payload)
+                                    )
+                                return record
+            except TimeoutError:
+                if _operation_clock() < budget.deadline_monotonic:
+                    raise
+                await self._finalize_operation_budget(
+                    budget,
+                    code="operation_timeout",
+                    message="Runtime operation timed out",
+                )
+                raise RuntimeRunnerOperationFailedError(
+                    "Runtime operation timed out"
+                ) from None
+            except asyncio.CancelledError:
+                timed_out = _operation_clock() >= budget.deadline_monotonic
+                await self._finalize_operation_budget(
+                    budget,
+                    code="operation_timeout" if timed_out else "canceled",
+                    message=(
+                        "Runtime operation timed out"
+                        if timed_out
+                        else "Runtime operation cancelled"
+                    ),
+                )
+                raise
+        finally:
+            if token is not None:
+                _CURRENT_OPERATION_BUDGET.reset(token)
+
+    async def _finalize_operation_budget(
+        self,
+        budget: _RuntimeOperationBudget,
+        *,
+        code: str,
+        message: str,
+    ) -> None:
+        """Best-effort finalize a dispatched operation without masking its cause."""
+        if budget.finalization_attempted:
+            return
+        budget.finalization_attempted = True
+        if (
+            budget.reply_stream_id is None
+            or budget.request_id is None
+            or budget.operation_id is None
+            or budget.runtime_id is None
+            or budget.generation is None
+        ):
+            return
+        try:
+            async with asyncio.timeout(_LOCAL_FINALIZATION_TIMEOUT_SECONDS):
+                await self._append_local_final_error(
+                    reply_stream_id=budget.reply_stream_id,
+                    request_id=budget.request_id,
+                    operation_id=budget.operation_id,
+                    runtime_id=budget.runtime_id,
+                    generation=budget.generation,
+                    code=code,
+                    message=message,
+                    created_at=datetime.now(timezone.utc),
+                )
         except asyncio.CancelledError:
-            await self._append_local_final_error(
-                reply_stream_id=reply_stream_id,
-                request_id=request_id,
-                operation_id=operation_id,
-                runtime_id=runtime_id,
-                generation=generation,
-                code="canceled",
-                message="Runtime operation cancelled",
-                created_at=datetime.now(timezone.utc),
-            )
             raise
+        except Exception:
+            _LOGGER.exception(
+                "Runtime operation finalization failed",
+                extra={
+                    "operation_id": budget.operation_id,
+                    "request_id": budget.request_id,
+                    "runtime_id": budget.runtime_id,
+                    "error_code": code,
+                },
+            )
 
     async def _append_local_final_error(
         self,

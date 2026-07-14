@@ -19,6 +19,7 @@ from azents.engine.events.engine_events import (
     RunStopped,
     RuntimeErrorEvent,
     SubagentTreeChanged,
+    TodoStateChanged,
 )
 from azents.engine.events.types import (
     AssistantMessagePayload,
@@ -37,17 +38,24 @@ class TestSerializeEngineEvent:
 
     def test_content_delta(self) -> None:
         """Serialize ContentDelta with top-level type discriminator."""
-        result = serialize_event(ContentDelta(delta="hello", content_index=0))
+        result = serialize_event(
+            ContentDelta(run_id="run-1", delta="hello", content_index=0)
+        )
         assert result == {
             "type": "content_delta",
+            "run_id": "run-1",
             "delta": "hello",
             "content_index": 0,
         }
 
     def test_reasoning_delta(self) -> None:
         """Serialize ReasoningDelta."""
-        result = serialize_event(ReasoningDelta(delta="thinking..."))
-        assert result == {"type": "reasoning_delta", "delta": "thinking..."}
+        result = serialize_event(ReasoningDelta(run_id="run-1", delta="thinking..."))
+        assert result == {
+            "type": "reasoning_delta",
+            "run_id": "run-1",
+            "delta": "thinking...",
+        }
 
     def test_function_call_delta(self) -> None:
         """Serialize FunctionCallDelta."""
@@ -114,16 +122,28 @@ class TestSerializeEngineEvent:
 
     def test_compaction_started(self) -> None:
         """Serialize CompactionStarted."""
-        assert serialize_event(CompactionStarted()) == {
+        assert serialize_event(CompactionStarted(run_id="run-1")) == {
             "type": "compaction_started",
+            "run_id": "run-1",
             "continuing": False,
         }
 
     def test_compaction_complete(self) -> None:
         """Serialize CompactionComplete."""
-        assert serialize_event(CompactionComplete(continuing=True)) == {
+        assert serialize_event(CompactionComplete(run_id="run-1", continuing=True)) == {
             "type": "compaction_complete",
+            "run_id": "run-1",
             "continuing": True,
+        }
+
+    def test_todo_state_changed(self) -> None:
+        """Serialize Todo state with its authoritative Run identity."""
+        assert serialize_event(
+            TodoStateChanged(run_id="run-1", todo={"items": []})
+        ) == {
+            "type": "todo_state_changed",
+            "run_id": "run-1",
+            "todo": {"items": []},
         }
 
     def test_subagent_tree_changed(self) -> None:
@@ -256,9 +276,15 @@ class TestDeserializeEvent:
     def test_engine_event(self) -> None:
         """Restore flat engine event."""
         event = deserialize_event(
-            {"type": "content_delta", "delta": "x", "content_index": 0}
+            {
+                "type": "content_delta",
+                "run_id": "run-1",
+                "delta": "x",
+                "content_index": 0,
+            }
         )
         assert isinstance(event, ContentDelta)
+        assert event.run_id == "run-1"
         assert event.delta == "x"
 
     def test_event(self) -> None:

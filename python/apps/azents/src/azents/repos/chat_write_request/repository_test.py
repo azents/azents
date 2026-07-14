@@ -1,5 +1,6 @@
 """ChatWriteRequestRepository tests."""
 
+import dataclasses
 import datetime
 
 from azcommon.result import Success
@@ -16,8 +17,8 @@ from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
 from azents.testing.model_selection import make_test_model_selection_dict
 
-from . import ChatWriteRequestRepository
 from .data import ChatWriteRequestCreate
+from .repository import ChatWriteRequestRepository
 
 
 async def _create_workspace(session: AsyncSession, handle: str) -> str:
@@ -71,12 +72,20 @@ async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> 
     return agent.id
 
 
+@dataclasses.dataclass(frozen=True)
+class _ChatWriteScope:
+    """AgentSession and User identifiers for one repository test."""
+
+    session_id: str
+    user_id: str
+
+
 async def _create_agent_session(
     session: AsyncSession,
     *,
     handle: str,
     slug: str,
-) -> tuple[str, str]:
+) -> _ChatWriteScope:
     """Create AgentSession fixture satisfying ChatWriteRequest FK."""
     workspace_id = await _create_workspace(session, handle)
     user_id = await _create_user(session, f"{handle}@example.com")
@@ -86,7 +95,7 @@ async def _create_agent_session(
         workspace_id=workspace_id,
         agent_id=agent_id,
     )
-    return agent_session.id, user_id
+    return _ChatWriteScope(session_id=agent_session.id, user_id=user_id)
 
 
 def _create_payload(
@@ -116,26 +125,27 @@ class TestChatWriteRequestRepository:
         rdb_session: AsyncSession,
     ) -> None:
         """First request creates record and returns created=True."""
-        session_id, user_id = await _create_agent_session(
+        scope = await _create_agent_session(
             rdb_session,
             handle="chat-write-request-create",
             slug="chat-write-request-create",
         )
         repo = ChatWriteRequestRepository()
 
-        record, created = await repo.create_idempotent(
+        create_result = await repo.create_idempotent(
             rdb_session,
             _create_payload(
-                session_id=session_id,
-                user_id=user_id,
+                session_id=scope.session_id,
+                user_id=scope.user_id,
                 client_request_id="request-1",
             ),
         )
 
-        assert created is True
+        record = create_result.record
+        assert create_result.created is True
         assert len(record.id) == 32
-        assert record.session_id == session_id
-        assert record.user_id == user_id
+        assert record.session_id == scope.session_id
+        assert record.user_id == scope.user_id
         assert record.client_request_id == "request-1"
         assert record.write_type == ChatWriteRequestType.COMMAND
         assert record.accepted_id == "compact"
@@ -147,22 +157,22 @@ class TestChatWriteRequestRepository:
         rdb_session: AsyncSession,
     ) -> None:
         """Retry with same session/user/client_request_id returns existing record."""
-        session_id, user_id = await _create_agent_session(
+        scope = await _create_agent_session(
             rdb_session,
             handle="chat-write-request-retry",
             slug="chat-write-request-retry",
         )
         repo = ChatWriteRequestRepository()
         payload = _create_payload(
-            session_id=session_id,
-            user_id=user_id,
+            session_id=scope.session_id,
+            user_id=scope.user_id,
             client_request_id="request-1",
         )
 
-        first, first_created = await repo.create_idempotent(rdb_session, payload)
-        second, second_created = await repo.create_idempotent(rdb_session, payload)
+        first = await repo.create_idempotent(rdb_session, payload)
+        second = await repo.create_idempotent(rdb_session, payload)
 
-        assert first_created is True
-        assert second_created is False
-        assert second.id == first.id
-        assert second.payload == first.payload
+        assert first.created is True
+        assert second.created is False
+        assert second.record.id == first.record.id
+        assert second.record.payload == first.record.payload

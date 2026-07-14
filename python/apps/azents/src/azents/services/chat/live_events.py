@@ -1,5 +1,6 @@
 """Event chat live event projection store."""
 
+import asyncio
 import datetime
 import hashlib
 from collections.abc import AsyncIterator, Sequence
@@ -34,6 +35,7 @@ from azents.repos.input_buffer.data import InputBuffer
 from azents.utils.appctx import AppContext
 
 _LIVE_EVENT_TTL_SECONDS = 300
+_LIVE_EVENT_REDIS_OPERATION_TIMEOUT_SECONDS = 0.25
 _live_event_adapter = TypeAdapter(Event)
 _chat_action_adapter = TypeAdapter(ChatAction)
 _agent_message_adapter = TypeAdapter(AgentMessagePayload)
@@ -445,26 +447,31 @@ class RedisLiveEventStore(BaseLiveEventStore):
 
     async def list_by_session_id(self, session_id: str) -> list[Event]:
         """Fetch event live event projection list of session."""
-        values = await self._redis.hvals(_live_event_key(session_id))
+        async with asyncio.timeout(_LIVE_EVENT_REDIS_OPERATION_TIMEOUT_SECONDS):
+            values = await self._redis.hvals(_live_event_key(session_id))
         events = [_live_event_adapter.validate_json(value) for value in values]
         return sorted(events, key=lambda event: (event.created_at, event.id))
 
     async def upsert(self, event: Event) -> None:
         """Upsert Event live event projection."""
         key = _live_event_key(event.session_id)
-        await self._redis.hset(key, event.id, _live_event_adapter.dump_json(event))
-        await self._redis.expire(key, self._ttl_seconds)
+        async with asyncio.timeout(_LIVE_EVENT_REDIS_OPERATION_TIMEOUT_SECONDS):
+            await self._redis.hset(key, event.id, _live_event_adapter.dump_json(event))
+            await self._redis.expire(key, self._ttl_seconds)
 
     async def remove(self, session_id: str, event_id: str) -> None:
         """Remove one Event live event projection."""
-        await self._redis.hdel(_live_event_key(session_id), event_id)
+        async with asyncio.timeout(_LIVE_EVENT_REDIS_OPERATION_TIMEOUT_SECONDS):
+            await self._redis.hdel(_live_event_key(session_id), event_id)
 
     async def clear_session(self, session_id: str) -> None:
         """Remove all event live event projections of session."""
-        await self._redis.delete(_live_event_key(session_id))
+        async with asyncio.timeout(_LIVE_EVENT_REDIS_OPERATION_TIMEOUT_SECONDS):
+            await self._redis.delete(_live_event_key(session_id))
 
     async def _get(self, session_id: str, event_id: str) -> Event | None:
-        raw = await self._redis.hget(_live_event_key(session_id), event_id)
+        async with asyncio.timeout(_LIVE_EVENT_REDIS_OPERATION_TIMEOUT_SECONDS):
+            raw = await self._redis.hget(_live_event_key(session_id), event_id)
         if raw is None:
             return None
         return _live_event_adapter.validate_json(raw)

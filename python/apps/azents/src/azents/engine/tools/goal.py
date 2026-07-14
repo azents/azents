@@ -28,14 +28,18 @@ from azents.engine.hooks.types import (
 from azents.engine.run.types import FunctionTool, FunctionToolError
 from azents.engine.tooling.make_tool import make_tool
 from azents.engine.tooling.toolkit_state import (
+    RunFencedToolkitStateStore,
     ToolkitStateHandle,
     ToolkitStateIdentity,
     ToolkitStateModel,
+    ToolkitStateRunAuthority,
     ToolkitStateStore,
 )
 from azents.rdb.session import SessionManager
-from azents.repos.agent_execution import EventTranscriptRepository
+from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
+from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.toolkit_state import ToolkitStateRepository
 
 GOAL_TOOLKIT_NAMESPACE = "goal"
 GOAL_TOOLKIT_STATE_NAME = "goal"
@@ -94,9 +98,17 @@ class GoalStateStore:
         self,
         *,
         session_manager: SessionManager[AsyncSession],
+        agent_run_repository: AgentRunRepository,
+        agent_session_repository: AgentSessionRepository,
+        event_transcript_repository: EventTranscriptRepository,
+        toolkit_state_repository: ToolkitStateRepository,
     ) -> None:
         """Create goal state store."""
         self._session_manager = session_manager
+        self._agent_run_repository = agent_run_repository
+        self._agent_session_repository = agent_session_repository
+        self._event_transcript_repository = event_transcript_repository
+        self._toolkit_state_repository = toolkit_state_repository
 
     async def load(self, agent_id: str, session_id: str) -> GoalState:
         """Fetch session goal state."""
@@ -151,31 +163,98 @@ class GoalStateStore:
         await handle.update(default_factory=GoalState, mutator=capture)
         return saved_state or GoalState()
 
-    async def append_briefing_event(
+    async def update_for_run(
         self,
+        agent_id: str,
         session_id: str,
         *,
-        objective: str,
-        created_at: str,
-        completed_at: str,
-        duration_seconds: int | None,
-    ) -> None:
-        """Add Goal completion briefing event to durable transcript."""
+        run_id: str,
+        owner_generation: int,
+        mutator: Callable[[GoalState], GoalState],
+    ) -> GoalState:
+        """Update Goal state only for the authoritative active Run."""
         async with self._session_manager() as session:
-            await EventTranscriptRepository().append(
+            return await self._update_for_run_in_session(
+                session,
+                agent_id,
+                session_id,
+                run_id=run_id,
+                owner_generation=owner_generation,
+                mutator=mutator,
+            )
+
+    async def update_for_run_and_append_briefing(
+        self,
+        agent_id: str,
+        session_id: str,
+        *,
+        run_id: str,
+        owner_generation: int,
+        completed_at: str,
+        mutator: Callable[[GoalState], GoalState],
+    ) -> GoalState:
+        """Atomically complete a Goal and append its durable briefing event."""
+        async with self._session_manager() as session:
+            updated = await self._update_for_run_in_session(
+                session,
+                agent_id,
+                session_id,
+                run_id=run_id,
+                owner_generation=owner_generation,
+                mutator=mutator,
+            )
+            if updated.objective is None:
+                return updated
+            created_at = updated.created_at or completed_at
+            await self._event_transcript_repository.append(
                 session,
                 EventCreate(
                     session_id=session_id,
                     kind=EventKind.GOAL_BRIEFING,
                     payload={
-                        "objective": objective,
+                        "objective": updated.objective,
                         "created_at": created_at,
                         "completed_at": completed_at,
-                        "duration_seconds": duration_seconds,
+                        "duration_seconds": _duration_seconds(
+                            updated.created_at,
+                            completed_at,
+                        ),
                     },
                 ),
             )
-            await session.commit()
+            return updated
+
+    async def _update_for_run_in_session(
+        self,
+        session: AsyncSession,
+        agent_id: str,
+        session_id: str,
+        *,
+        run_id: str,
+        owner_generation: int,
+        mutator: Callable[[GoalState], GoalState],
+    ) -> GoalState:
+        """Fence and update Goal state in the caller's short transaction."""
+        handle = await self._make_run_fenced_handle(
+            session,
+            agent_id,
+            session_id,
+            ToolkitStateRunAuthority(
+                run_id=run_id,
+                owner_generation=owner_generation,
+            ),
+        )
+        if handle is None:
+            return GoalState()
+        saved_state: GoalState | None = None
+
+        def capture(current: GoalState) -> GoalState:
+            nonlocal saved_state
+            saved_state = mutator(current)
+            return saved_state
+
+        await handle.update(default_factory=GoalState, mutator=capture)
+        return saved_state or GoalState()
 
     async def _make_handle(
         self,
@@ -192,7 +271,34 @@ class GoalStateStore:
             toolkit_namespace=GOAL_TOOLKIT_NAMESPACE,
             state_name=GOAL_TOOLKIT_STATE_NAME,
         )
-        return ToolkitStateStore(session=session).handle(identity, GoalState)
+        return ToolkitStateStore(
+            session=session,
+            repository=self._toolkit_state_repository,
+        ).handle(identity, GoalState)
+
+    async def _make_run_fenced_handle(
+        self,
+        session: AsyncSession,
+        agent_id: str,
+        session_id: str,
+        run_authority: ToolkitStateRunAuthority,
+    ) -> ToolkitStateHandle[GoalState] | None:
+        """Create a Goal handle that rejects stale runtime writes."""
+        if not agent_id or not session_id:
+            return None
+        identity = ToolkitStateIdentity(
+            agent_id=agent_id,
+            session_id=session_id,
+            toolkit_namespace=GOAL_TOOLKIT_NAMESPACE,
+            state_name=GOAL_TOOLKIT_STATE_NAME,
+        )
+        return RunFencedToolkitStateStore(
+            session=session,
+            repository=self._toolkit_state_repository,
+            run_authority=run_authority,
+            agent_run_repository=self._agent_run_repository,
+            agent_session_repository=self._agent_session_repository,
+        ).handle(identity, GoalState)
 
 
 class GoalToolkitConfig(BaseModel):
@@ -224,7 +330,6 @@ class GoalToolkit(Toolkit[GoalToolkitConfig]):
 
     async def update_context(self, context: TurnContext) -> ToolkitState:
         """Return current goal prompt and goal tools."""
-        del context
         if not self._session_id:
             return ToolkitState(status=ToolkitStatus.ENABLED, tools=[])
         return ToolkitState(
@@ -239,11 +344,15 @@ class GoalToolkit(Toolkit[GoalToolkitConfig]):
                     store=self._store,
                     agent_id=self._agent_id,
                     session_id=self._session_id,
+                    run_id=context.run_id,
+                    owner_generation=context.owner_generation,
                 ),
                 make_update_goal_tool(
                     store=self._store,
                     agent_id=self._agent_id,
                     session_id=self._session_id,
+                    run_id=context.run_id,
+                    owner_generation=context.owner_generation,
                 ),
             ],
         )
@@ -397,6 +506,8 @@ def make_create_goal_tool(
     store: GoalStateStore,
     agent_id: str,
     session_id: str,
+    run_id: str,
+    owner_generation: int,
 ) -> FunctionTool:
     """Create create_goal FunctionTool."""
 
@@ -416,7 +527,13 @@ def make_create_goal_tool(
                 updated_at=now,
             )
 
-        updated = await store.update(agent_id, session_id, mutate)
+        updated = await store.update_for_run(
+            agent_id,
+            session_id,
+            run_id=run_id,
+            owner_generation=owner_generation,
+            mutator=mutate,
+        )
         return json.dumps(updated.model_dump(mode="json"), ensure_ascii=False)
 
     return make_tool(create_goal, input_model=CreateGoalInput)
@@ -427,6 +544,8 @@ def make_update_goal_tool(
     store: GoalStateStore,
     agent_id: str,
     session_id: str,
+    run_id: str,
+    owner_generation: int,
 ) -> FunctionTool:
     """Create update_goal FunctionTool."""
 
@@ -435,26 +554,31 @@ def make_update_goal_tool(
         if not session_id:
             raise FunctionToolError("Session ID is not available.")
 
-        previous: GoalState | None = None
         completed_at = _now_iso()
 
         def mutate(current: GoalState) -> GoalState:
-            nonlocal previous
             if current.status != "active" or not current.objective:
                 raise FunctionToolError("No active goal exists.")
-            previous = current
             return current.model_copy(
                 update={"status": args.status, "updated_at": completed_at}
             )
 
-        updated = await store.update(agent_id, session_id, mutate)
-        if args.status == "complete" and previous is not None and previous.objective:
-            await store.append_briefing_event(
+        if args.status == "complete":
+            updated = await store.update_for_run_and_append_briefing(
+                agent_id,
                 session_id,
-                objective=previous.objective,
-                created_at=previous.created_at or completed_at,
+                run_id=run_id,
+                owner_generation=owner_generation,
                 completed_at=completed_at,
-                duration_seconds=_duration_seconds(previous.created_at, completed_at),
+                mutator=mutate,
+            )
+        else:
+            updated = await store.update_for_run(
+                agent_id,
+                session_id,
+                run_id=run_id,
+                owner_generation=owner_generation,
+                mutator=mutate,
             )
         return json.dumps(updated.model_dump(mode="json"), ensure_ascii=False)
 

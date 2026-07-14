@@ -12,6 +12,7 @@ from typing import Any, Literal, Protocol
 import frontmatter
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
+from yaml import YAMLError
 
 from azents.core.tools import (
     ResolveContext,
@@ -28,9 +29,11 @@ from azents.engine.hooks.types import (
     ToolOutputReplace,
 )
 from azents.engine.tooling.toolkit_state import (
+    RunFencedToolkitStateStore,
     ToolkitStateHandle,
     ToolkitStateIdentity,
     ToolkitStateModel,
+    ToolkitStateRunAuthority,
     ToolkitStateStore,
 )
 from azents.engine.tools.builtin_agents import (
@@ -43,7 +46,10 @@ from azents.engine.tools.runtime_instruction_context import (
     RuntimeInstructionContextStore,
 )
 from azents.rdb.session import SessionManager
+from azents.repos.agent_execution import AgentRunRepository
+from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.session_workspace_project.data import SessionWorkspaceProject
+from azents.repos.toolkit_state import ToolkitStateRepository
 from azents.services.file_storage import FileStorage
 from azents.services.runtime_storage_error import RuntimeStorageError
 
@@ -75,6 +81,9 @@ class ClaudeRulesAppendixDedupeStateStore(Protocol):
         self,
         agent_id: str,
         session_id: str,
+        *,
+        run_id: str,
+        owner_generation: int,
         mutator: Callable[
             [ClaudeRulesAppendixDedupeState], ClaudeRulesAppendixDedupeState
         ],
@@ -90,9 +99,15 @@ class ToolkitClaudeRulesAppendixDedupeStateStore:
         self,
         *,
         session_manager: SessionManager[AsyncSession],
+        agent_run_repository: AgentRunRepository,
+        agent_session_repository: AgentSessionRepository,
+        toolkit_state_repository: ToolkitStateRepository,
     ) -> None:
         """Create Claude rules appendix dedupe store."""
         self._session_manager = session_manager
+        self._agent_run_repository = agent_run_repository
+        self._agent_session_repository = agent_session_repository
+        self._toolkit_state_repository = toolkit_state_repository
 
     async def load_appendix_dedupe(
         self, agent_id: str, session_id: str
@@ -108,13 +123,24 @@ class ToolkitClaudeRulesAppendixDedupeStateStore:
         self,
         agent_id: str,
         session_id: str,
+        *,
+        run_id: str,
+        owner_generation: int,
         mutator: Callable[
             [ClaudeRulesAppendixDedupeState], ClaudeRulesAppendixDedupeState
         ],
     ) -> None:
         """Retry-apply mutator to latest appendix dedupe state."""
         async with self._session_manager() as session:
-            handle = self._make_appendix_dedupe_handle(session, agent_id, session_id)
+            handle = self._make_run_fenced_appendix_dedupe_handle(
+                session,
+                agent_id,
+                session_id,
+                ToolkitStateRunAuthority(
+                    run_id=run_id,
+                    owner_generation=owner_generation,
+                ),
+            )
             if handle is None:
                 return
             await handle.update(
@@ -137,10 +163,37 @@ class ToolkitClaudeRulesAppendixDedupeStateStore:
             toolkit_namespace=CLAUDE_RULES_TOOLKIT_NAMESPACE,
             state_name=CLAUDE_RULES_APPENDIX_DEDUPE_TOOLKIT_STATE_NAME,
         )
-        return ToolkitStateStore(session=session).handle(
+        return ToolkitStateStore(
+            session=session,
+            repository=self._toolkit_state_repository,
+        ).handle(
             identity,
             ClaudeRulesAppendixDedupeState,
         )
+
+    def _make_run_fenced_appendix_dedupe_handle(
+        self,
+        session: AsyncSession,
+        agent_id: str,
+        session_id: str,
+        run_authority: ToolkitStateRunAuthority,
+    ) -> ToolkitStateHandle[ClaudeRulesAppendixDedupeState] | None:
+        """Create an appendix handle that rejects stale runtime writes."""
+        if not agent_id or not session_id:
+            return None
+        identity = ToolkitStateIdentity(
+            agent_id=agent_id,
+            session_id=session_id,
+            toolkit_namespace=CLAUDE_RULES_TOOLKIT_NAMESPACE,
+            state_name=CLAUDE_RULES_APPENDIX_DEDUPE_TOOLKIT_STATE_NAME,
+        )
+        return RunFencedToolkitStateStore(
+            session=session,
+            repository=self._toolkit_state_repository,
+            run_authority=run_authority,
+            agent_run_repository=self._agent_run_repository,
+            agent_session_repository=self._agent_session_repository,
+        ).handle(identity, ClaudeRulesAppendixDedupeState)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -255,13 +308,15 @@ class ClaudeRulesToolkit(Toolkit[ClaudeRulesToolkitConfig]):
         if not files:
             return None
         await self._update_appendix_dedupe_state(
-            lambda state: state.model_copy(
+            run_id=context.run_id,
+            owner_generation=context.owner_generation,
+            mutator=lambda state: state.model_copy(
                 update={
                     "appended_paths": sorted(
                         set(state.appended_paths) | {rule.path for rule in files}
                     )
                 }
-            )
+            ),
         )
         logger.info(
             "Appended Claude rules to read result",
@@ -281,9 +336,10 @@ class ClaudeRulesToolkit(Toolkit[ClaudeRulesToolkitConfig]):
         self, context: SessionCompactHookContext
     ) -> None:
         """Clear Claude rules appendix dedupe on compaction."""
-        del context
         await self._update_appendix_dedupe_state(
-            lambda state: state.model_copy(update={"appended_paths": []})
+            run_id=context.run_id,
+            owner_generation=context.owner_generation,
+            mutator=lambda state: state.model_copy(update={"appended_paths": []}),
         )
 
     def _instruction_context(self) -> RuntimeInstructionContext | None:
@@ -322,6 +378,9 @@ class ClaudeRulesToolkit(Toolkit[ClaudeRulesToolkitConfig]):
 
     async def _update_appendix_dedupe_state(
         self,
+        *,
+        run_id: str,
+        owner_generation: int,
         mutator: Callable[
             [ClaudeRulesAppendixDedupeState], ClaudeRulesAppendixDedupeState
         ],
@@ -330,7 +389,9 @@ class ClaudeRulesToolkit(Toolkit[ClaudeRulesToolkitConfig]):
         await self._store.update_appendix_dedupe(
             self._runtime_agent_id,
             self._runtime_session_id,
-            mutator,
+            run_id=run_id,
+            owner_generation=owner_generation,
+            mutator=mutator,
         )
 
 
@@ -512,7 +573,7 @@ def _root_for_rule_path(
 def _parse_frontmatter(content: str) -> dict[str, Any] | None:
     try:
         post = frontmatter.loads(content)
-    except Exception:
+    except YAMLError:
         return None
     return {str(key): value for key, value in post.metadata.items()}
 

@@ -94,6 +94,7 @@ def _make_context(
         workspace_id=workspace_id,
         model=model,
         run_id=run_id,
+        owner_generation=1,
         publish_event=AsyncMock(),
     )
 
@@ -113,7 +114,6 @@ def _make_resolve_context(
         agent_id=agent_id,
         session_id=session_id,
         user_id=user_id,
-        session=AsyncMock(),
         web_url="https://example.test",
         oauth_secret_key="test-secret",
         workspace_id=workspace_id,
@@ -196,9 +196,13 @@ class _FakeAgentsAppendixDedupeStateStore:
         self,
         agent_id: str,
         session_id: str,
+        *,
+        run_id: str,
+        owner_generation: int,
         mutator: Callable[[AgentsAppendixDedupeState], AgentsAppendixDedupeState],
     ) -> None:
         """Apply appendix dedupe state update."""
+        del run_id, owner_generation
         state = await self.load_appendix_dedupe(agent_id, session_id)
         self.dedupe_states[(agent_id, session_id)] = mutator(state)
 
@@ -894,6 +898,7 @@ class TestRuntimeToolkitUpdateContext:
                 agent_id="agent-1",
                 session_id="session-1",
                 run_id="run-1",
+                owner_generation=1,
             )
         )
         third = await toolkit.append_agents_after_read(

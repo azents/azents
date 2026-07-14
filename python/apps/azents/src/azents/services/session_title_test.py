@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from typing import Any, cast
 
 import pytest
+from azcommon.result import Success
 from openai import OpenAIError
 
 import azents.services.session_title as session_title_module
@@ -181,6 +182,62 @@ class TestSessionTitleHelpers:
                 },
             )
         ]
+
+    async def test_generate_title_releases_db_session_before_token_refresh(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """OAuth refresh runs after the metadata session has closed."""
+        active_sessions = 0
+
+        @asynccontextmanager
+        async def tracking_session_manager() -> AsyncIterator[object]:
+            nonlocal active_sessions
+            active_sessions += 1
+            try:
+                yield object()
+            finally:
+                active_sessions -= 1
+
+        async def assert_refresh_outside_session(**kwargs: object) -> Success[object]:
+            assert active_sessions == 0
+            return Success(kwargs["integration"])
+
+        async def fake_generate_title(**kwargs: object) -> str:
+            del kwargs
+            return "Generated title"
+
+        monkeypatch.setattr(
+            session_title_module,
+            "ensure_runtime_tokens",
+            assert_refresh_outside_session,
+        )
+        monkeypatch.setattr(
+            session_title_module,
+            "generate_session_title_with_model",
+            fake_generate_title,
+        )
+        service = SessionTitleService(
+            agent_repository=cast(AgentRepository, _AgentRepository()),
+            agent_session_repository=cast(
+                AgentSessionRepository,
+                _AgentSessionRepository(),
+            ),
+            integration_repository=cast(
+                LLMProviderIntegrationRepository,
+                _IntegrationRepository(),
+            ),
+            session_manager=cast(Any, tracking_session_manager),
+        )
+
+        result = await cast(Any, service)._generate_title(
+            agent_id="agent-001",
+            session_id="session-001",
+            context="Initial prompt",
+        )
+
+        assert result == "Generated title"
+        assert active_sessions == 0
 
     def test_initial_prompt_context_uses_only_user_text(self) -> None:
         """Initial prompt context excludes later transcript content."""

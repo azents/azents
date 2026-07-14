@@ -8,7 +8,13 @@
 
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { withRequestDeadline } from "@/features/chat/hooks/requestDeadline";
 import { trpc } from "@/trpc/client";
+import {
+  clientRequestIdForDraftSessionWrite,
+  draftSessionWriteKey,
+  type FailedDraftSessionWriteRequest,
+} from "./draftSessionWriteRequest";
 import type { UploadedFile } from "@/features/chat/hooks/useFileUpload";
 import type {
   ProjectDirectoryPickerEntry,
@@ -22,6 +28,8 @@ import type {
 } from "@azents/public-client";
 
 const WORKSPACE_TRANSITION_REFETCH_INTERVAL_MS = 2_000;
+const CHAT_WRITE_REQUEST_TIMEOUT_MS = 15_000;
+const SESSION_NAVIGATION_FALLBACK_MS = 5_000;
 
 export interface AgentDraftChatContainerProps {
   handle: string;
@@ -253,6 +261,17 @@ export function useAgentDraftChatContainer(
   const createMessageMutation =
     trpc.chat.createTeamAgentSessionMessage.useMutation();
   const [writeInFlight, setWriteInFlight] = useState(false);
+  const writeInFlightRef = useRef(false);
+  const failedCreateRequestRef = useRef<FailedDraftSessionWriteRequest | null>(
+    null,
+  );
+  const currentAgentIdRef = useRef(agent.id);
+  currentAgentIdRef.current = agent.id;
+  const writeGenerationRef = useRef(0);
+  const mountedRef = useRef(true);
+  const navigationFallbackTimerRef = useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null);
   const [workspaceItems, setWorkspaceItems] = useState<
     NewSessionWorkspaceItemState[]
   >([]);
@@ -267,6 +286,18 @@ export function useAgentDraftChatContainer(
   );
   const defaultsAppliedRef = useRef(false);
 
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      writeGenerationRef.current += 1;
+      if (navigationFallbackTimerRef.current !== null) {
+        clearTimeout(navigationFallbackTimerRef.current);
+        navigationFallbackTimerRef.current = null;
+      }
+    };
+  }, []);
+
   const projectPresetsQuery = trpc.chat.listAgentProjectPresets.useQuery({
     agentId: agent.id,
   });
@@ -276,7 +307,15 @@ export function useAgentDraftChatContainer(
     });
 
   useEffect(() => {
+    writeGenerationRef.current += 1;
+    writeInFlightRef.current = false;
+    setWriteInFlight(false);
+    if (navigationFallbackTimerRef.current !== null) {
+      clearTimeout(navigationFallbackTimerRef.current);
+      navigationFallbackTimerRef.current = null;
+    }
     defaultsAppliedRef.current = false;
+    failedCreateRequestRef.current = null;
     setWorkspaceItems([]);
     setActiveWorktreeItemId(null);
     setProjectPickerPath(null);
@@ -480,33 +519,78 @@ export function useAgentDraftChatContainer(
       inferenceProfile: RequestedInferenceProfile,
       attachments?: UploadedFile[],
     ): Promise<boolean> => {
-      if (writeInFlight || !canSendMessage) {
+      if (writeInFlightRef.current || !canSendMessage) {
         return false;
       }
       const attachmentUris = attachments?.map((attachment) => attachment.uri);
+      const setupActions = setupActionsFromWorkspaceItems(workspaceItems);
+      const writeKey = draftSessionWriteKey({
+        agentId: agent.id,
+        message,
+        inferenceProfile,
+        attachments: attachmentUris ?? [],
+        existingProjectPaths: selectedProjectPaths,
+        setupActions,
+      });
+      const clientRequestId = clientRequestIdForDraftSessionWrite(
+        failedCreateRequestRef.current,
+        writeKey,
+        () => crypto.randomUUID(),
+      );
+      const requestAgentId = agent.id;
+      const requestGeneration = writeGenerationRef.current + 1;
+      writeGenerationRef.current = requestGeneration;
+      const requestIsCurrent = (): boolean =>
+        mountedRef.current &&
+        currentAgentIdRef.current === requestAgentId &&
+        writeGenerationRef.current === requestGeneration;
+      let navigationStarted = false;
+      writeInFlightRef.current = true;
       setWriteInFlight(true);
       try {
-        const response = await createMessageMutation.mutateAsync({
-          agentId: agent.id,
-          clientRequestId: crypto.randomUUID(),
-          message,
-          inferenceProfile,
-          attachments: attachmentUris,
-          existingProjectPaths: selectedProjectPaths,
-          setupActions: setupActionsFromWorkspaceItems(workspaceItems),
-        });
-        await Promise.all([
-          utils.chat.listAgentSessions.invalidate({ agentId: agent.id }),
-          utils.chat.listAgentProjectPresets.invalidate({ agentId: agent.id }),
-        ]);
-        router.replace(
-          `/w/${handle}/agents/${agent.id}/sessions/${response.session_id}`,
+        const response = await withRequestDeadline(
+          createMessageMutation.mutateAsync({
+            agentId: agent.id,
+            clientRequestId,
+            message,
+            inferenceProfile,
+            attachments: attachmentUris,
+            existingProjectPaths: selectedProjectPaths,
+            setupActions,
+          }),
+          CHAT_WRITE_REQUEST_TIMEOUT_MS,
         );
+        if (!requestIsCurrent()) {
+          return false;
+        }
+        failedCreateRequestRef.current = null;
+        const sessionPath = `/w/${handle}/agents/${agent.id}/sessions/${response.session_id}`;
+        router.replace(sessionPath);
+        navigationStarted = true;
+        navigationFallbackTimerRef.current = setTimeout(() => {
+          navigationFallbackTimerRef.current = null;
+          if (requestIsCurrent()) {
+            window.location.replace(sessionPath);
+          }
+        }, SESSION_NAVIGATION_FALLBACK_MS);
+        void utils.chat.listAgentSessions.invalidate({ agentId: agent.id });
+        void utils.chat.listAgentProjectPresets.invalidate({
+          agentId: agent.id,
+        });
         return true;
       } catch {
+        if (requestIsCurrent()) {
+          failedCreateRequestRef.current = {
+            key: writeKey,
+            id: clientRequestId,
+          };
+        }
         return false;
       } finally {
-        setWriteInFlight(false);
+        if (!navigationStarted && requestIsCurrent()) {
+          writeInFlightRef.current = false;
+          setWriteInFlight(false);
+        }
       }
     },
     [
@@ -519,7 +603,6 @@ export function useAgentDraftChatContainer(
       selectedProjectPaths,
       utils.chat.listAgentSessions,
       workspaceItems,
-      writeInFlight,
     ],
   );
 
@@ -623,7 +706,7 @@ export function useAgentDraftChatContainer(
   return {
     handle,
     agent,
-    isWritePending: createMessageMutation.isPending || writeInFlight,
+    isWritePending: writeInFlight,
     canSendMessage,
     selectedProjectPaths,
     workspaceItems,

@@ -6,10 +6,13 @@ import asyncio
 import dataclasses
 import datetime
 import json
+import logging
 import time
+from collections.abc import Awaitable, Callable, Sequence
 from textwrap import dedent
 from typing import Literal
 
+from azcommon.uuid import uuid7
 from pydantic import BaseModel, Field, TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -54,11 +57,20 @@ from azents.rdb.models.event import JSONValue
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
-from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
+from azents.repos.agent_execution import (
+    AgentRunNotActiveError,
+    AgentRunOwnershipLostError,
+    AgentRunRepository,
+    EventTranscriptRepository,
+)
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession, SessionAgent
 from azents.services.input_buffer import InputBufferEnqueue, InputBufferService
+
+logger = logging.getLogger(__name__)
+_POST_COMMIT_EFFECT_TIMEOUT_SECONDS = 0.25
+_STOP_SIGNAL_PUBLISH_TIMEOUT_SECONDS = 0.25
 
 _ROOT_AGENT_USAGE_HINT_TEXT = """You are `/root`, the primary agent in a team of agents collaborating to fulfill the user's goals.
 
@@ -206,6 +218,12 @@ class _TargetResolution:
 
 
 @dataclasses.dataclass(frozen=True)
+class _RunAuthority:
+    run_id: str
+    owner_generation: int
+
+
+@dataclasses.dataclass(frozen=True)
 class _SpawnInferenceProfile:
     state: SessionInferenceState
 
@@ -246,14 +264,18 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
         self.session_id = context.session_id or self.session_id
         self.user_id = context.user_id
         self.publish_event = context.publish_event
+        run_authority = _RunAuthority(
+            run_id=context.run_id,
+            owner_generation=context.owner_generation,
+        )
         return ToolkitState(
             status=ToolkitStatus.ENABLED,
             tools=[
-                self._spawn_agent_tool(parent_run_id=context.run_id),
-                self._send_message_tool(),
-                self._followup_task_tool(),
-                self._wait_agent_tool(),
-                self._interrupt_agent_tool(),
+                self._spawn_agent_tool(run_authority=run_authority),
+                self._send_message_tool(run_authority=run_authority),
+                self._followup_task_tool(run_authority=run_authority),
+                self._wait_agent_tool(run_authority=run_authority),
+                self._interrupt_agent_tool(run_authority=run_authority),
                 self._list_agents_tool(),
             ],
         )
@@ -308,7 +330,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
         )
         return f"{guidance}{targets}"
 
-    def _spawn_agent_tool(self, *, parent_run_id: str) -> FunctionTool:
+    def _spawn_agent_tool(self, *, run_authority: _RunAuthority) -> FunctionTool:
         async def spawn_agent(input: SpawnAgentInput) -> str:
             """Create a child subagent and return its identity."""
             if input.agent_type != "default":
@@ -322,15 +344,19 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
 
             async with self.session_manager() as session:
                 current = await self._current_session_agent(session)
-                await self._enforce_spawn_limits(session, current)
+                locked_root = await self._enforce_spawn_limits(session, current)
                 parent_run = await self._validated_spawn_parent_run(
                     session,
                     current=current,
-                    parent_run_id=parent_run_id,
+                    run_authority=run_authority,
                 )
                 parent_session = await self._session_or_error(
                     session, current.agent_session_id
                 )
+                if parent_session.stop_requested_at is not None:
+                    raise FunctionToolError(
+                        "Cannot spawn subagent while the current Session is stopping"
+                    )
                 if parent_session.inference_state is None:
                     raise FunctionToolError(
                         "Current Session has no prepared inference state"
@@ -395,6 +421,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                     message_kind="spawn_agent",
                     content=input.task,
                     wake=True,
+                    locked_root=locked_root,
                 )
 
             await self._wake_session(child_session)
@@ -520,7 +547,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
             )
         )
 
-    def _send_message_tool(self) -> FunctionTool:
+    def _send_message_tool(self, *, run_authority: _RunAuthority) -> FunctionTool:
         async def send_message(input: SendMessageInput) -> str:
             """Queue a message for a target agent without waking it."""
             if not input.message.strip():
@@ -531,6 +558,19 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                     return _json(
                         {"status": "not_found", "agent_name": input.agent_name}
                     )
+                locked_root = await self._lock_root(session, resolution.current)
+                await self._lock_agent_sessions_in_order(
+                    session,
+                    session_ids=(
+                        resolution.current.agent_session_id,
+                        resolution.target.agent_session_id,
+                    ),
+                )
+                await self._validate_run_authority(
+                    session,
+                    current=resolution.current,
+                    run_authority=run_authority,
+                )
                 await self._enqueue_agent_message(
                     session,
                     source=resolution.current,
@@ -538,6 +578,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                     message_kind="send_message",
                     content=input.message,
                     wake=False,
+                    locked_root=locked_root,
                 )
                 session_agent_repo = self.agent_session_repository
                 await session_agent_repo.update_session_agent_last_task_message(
@@ -556,7 +597,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
 
         return make_tool(send_message, name="send_message")
 
-    def _followup_task_tool(self) -> FunctionTool:
+    def _followup_task_tool(self, *, run_authority: _RunAuthority) -> FunctionTool:
         async def followup_task(input: FollowupTaskInput) -> str:
             """Assign a follow-up task to an existing agent and wake it."""
             if not input.task.strip():
@@ -571,10 +612,20 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                     raise FunctionToolError(
                         "Follow-up tasks can't target the root agent"
                     )
-                target_session = await self._session_or_error(
+                locked_root = await self._lock_root(session, resolution.current)
+                locked_sessions = await self._lock_agent_sessions_in_order(
                     session,
-                    resolution.target.agent_session_id,
+                    session_ids=(
+                        resolution.current.agent_session_id,
+                        resolution.target.agent_session_id,
+                    ),
                 )
+                await self._validate_run_authority(
+                    session,
+                    current=resolution.current,
+                    run_authority=run_authority,
+                )
+                target_session = locked_sessions[resolution.target.agent_session_id]
                 await self._enqueue_agent_message(
                     session,
                     source=resolution.current,
@@ -582,6 +633,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                     message_kind="followup_task",
                     content=input.task,
                     wake=True,
+                    locked_root=locked_root,
                 )
                 session_agent_repo = self.agent_session_repository
                 await session_agent_repo.update_session_agent_last_task_message(
@@ -601,7 +653,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
 
         return make_tool(followup_task, name="followup_task")
 
-    def _wait_agent_tool(self) -> FunctionTool:
+    def _wait_agent_tool(self, *, run_authority: _RunAuthority) -> FunctionTool:
         async def wait_agent(input: WaitAgentInput) -> str:
             """Observe unread terminal child results."""
             deadline = (
@@ -623,6 +675,12 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                             else "No descendant agents to wait for."
                         )
                         return _json({"message": message, "timed_out": False})
+                    await self._lock_root(session, current)
+                    await self._validate_run_authority(
+                        session,
+                        current=current,
+                        run_authority=run_authority,
+                    )
                     latest_runs = (
                         await self.agent_run_repository.list_latest_by_session_ids(
                             session,
@@ -691,9 +749,10 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
 
         return make_tool(wait_agent, name="wait_agent")
 
-    def _interrupt_agent_tool(self) -> FunctionTool:
+    def _interrupt_agent_tool(self, *, run_authority: _RunAuthority) -> FunctionTool:
         async def interrupt_agent(input: InterruptAgentInput) -> str:
             """Interrupt the target agent's current run without deleting it."""
+            stop_request_id = uuid7().hex
             async with self.session_manager() as session:
                 resolution = await self._resolve_target(session, input.agent_name)
                 if resolution.target is None:
@@ -705,27 +764,100 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                         "an agent cannot interrupt itself; return your result and let "
                         "the parent interrupt you if needed"
                     )
-                target_session = await self._session_or_error(
+                locked_root = (
+                    await self.agent_session_repository.lock_session_agent_by_id(
+                        session,
+                        resolution.target.root_session_agent_id,
+                    )
+                )
+                if locked_root is None:
+                    raise FunctionToolError("Root SessionAgent was not found")
+                locked_target = (
+                    await self.agent_session_repository.lock_session_agent_by_id(
+                        session,
+                        resolution.target.id,
+                    )
+                )
+                if (
+                    locked_target is None
+                    or locked_target.root_session_agent_id != locked_root.id
+                ):
+                    return _json({"previous_status": "not_found"})
+                subtree = (
+                    await self.agent_session_repository.list_descendant_session_agents(
+                        session,
+                        session_agent_id=locked_target.id,
+                        include_self=True,
+                    )
+                )
+                await self._lock_agent_sessions_in_order(
                     session,
-                    resolution.target.agent_session_id,
+                    session_ids=(
+                        resolution.current.agent_session_id,
+                        *(target.agent_session_id for target in subtree),
+                    ),
+                )
+                await self._validate_run_authority(
+                    session,
+                    current=resolution.current,
+                    run_authority=run_authority,
                 )
                 previous_status = await self._project_agent_status(
-                    session, resolution.target
+                    session, locked_target
                 )
-                if target_session.run_state == AgentSessionRunState.RUNNING:
-                    await self.agent_session_repository.request_stop(
+                stop_request_ids_by_session: dict[str, str] = {}
+                for target in subtree:
+                    stopped = await self.agent_session_repository.request_stop(
                         session,
-                        session_id=target_session.id,
-                        stop_request_id="subagent_interrupt",
+                        session_id=target.agent_session_id,
+                        stop_request_id=stop_request_id,
                         user_id=self.user_id,
                     )
-            if target_session.run_state == AgentSessionRunState.RUNNING:
-                await self.broker.send_message(
-                    SessionStopSignal(
-                        session_id=target_session.id, user_id=self.user_id
+                    if stopped is not None:
+                        persisted_stop_request_id = stopped.stop_request_id
+                        if persisted_stop_request_id is None:
+                            raise RuntimeError(
+                                "Durable stop intent is missing its request ID"
+                            )
+                        stop_request_ids_by_session[target.agent_session_id] = (
+                            persisted_stop_request_id
+                        )
+
+            async def send_stop_signal(
+                session_id: str,
+                persisted_stop_request_id: str,
+            ) -> None:
+                try:
+                    async with asyncio.timeout(_STOP_SIGNAL_PUBLISH_TIMEOUT_SECONDS):
+                        await self.broker.send_message(
+                            SessionStopSignal(
+                                session_id=session_id,
+                                user_id=self.user_id,
+                                stop_request_id=persisted_stop_request_id,
+                            )
+                        )
+                except asyncio.CancelledError:
+                    raise
+                except TimeoutError:
+                    logger.warning(
+                        "Timed out publishing committed subagent stop signal",
+                        extra={"session_id": session_id},
+                    )
+                except Exception:
+                    logger.exception(
+                        "Failed to publish committed subagent stop signal",
+                        extra={"session_id": session_id},
+                    )
+
+            await asyncio.gather(
+                *(
+                    send_stop_signal(session_id, persisted_stop_request_id)
+                    for session_id, persisted_stop_request_id in (
+                        stop_request_ids_by_session.items()
                     )
                 )
-            await self._publish_tree_changed(resolution.target)
+            )
+            await self._publish_tree_changed(locked_target)
             return _json({"previous_status": previous_status})
 
         return make_tool(interrupt_agent, name="interrupt_agent")
@@ -775,18 +907,77 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
         session: AsyncSession,
         *,
         current: SessionAgent,
-        parent_run_id: str,
+        run_authority: _RunAuthority,
     ) -> AgentRunState:
-        """Load and validate the exact run invoking ``spawn_agent``."""
-        parent_run = await self.agent_run_repository.get_by_id(
+        """Lock and validate the exact Run invoking ``spawn_agent``."""
+        return await self._validate_run_authority(
             session,
-            parent_run_id,
+            current=current,
+            run_authority=run_authority,
         )
-        if parent_run is None or parent_run.session_id != current.agent_session_id:
-            raise FunctionToolError("Current AgentRun was not found")
-        if parent_run.status != AgentRunStatus.RUNNING:
-            raise FunctionToolError("Current AgentRun is not running")
-        return parent_run
+
+    async def _validate_run_authority(
+        self,
+        session: AsyncSession,
+        *,
+        current: SessionAgent,
+        run_authority: _RunAuthority,
+    ) -> AgentRunState:
+        """Lock the exact source Run through a collaboration durable write."""
+        try:
+            active_run = await self.agent_run_repository.lock_active_owner(
+                session,
+                run_id=run_authority.run_id,
+                session_id=current.agent_session_id,
+                owner_generation=run_authority.owner_generation,
+            )
+        except AgentRunNotActiveError, AgentRunOwnershipLostError, ValueError:
+            raise FunctionToolError("Current AgentRun is no longer active") from None
+        # lock_active_owner() already holds this AgentSession row. Re-read the
+        # locked snapshot so a subtree stop serialized by the shared root fence
+        # cannot be followed by a late collaboration mutation from the old Run.
+        current_session = await self.agent_session_repository.get_by_id(
+            session,
+            current.agent_session_id,
+        )
+        if current_session is None:
+            raise FunctionToolError("Current AgentSession was not found")
+        if current_session.stop_requested_at is not None:
+            raise FunctionToolError(
+                "Cannot mutate collaboration state while the current Session "
+                "is stopping"
+            )
+        return active_run
+
+    async def _lock_root(
+        self,
+        session: AsyncSession,
+        current: SessionAgent,
+    ) -> SessionAgent:
+        """Lock the shared tree root before any Session or Run row lock."""
+        locked_root = await self.agent_session_repository.lock_session_agent_by_id(
+            session,
+            current.root_session_agent_id,
+        )
+        if locked_root is None:
+            raise FunctionToolError("Root SessionAgent was not found")
+        return locked_root
+
+    async def _lock_agent_sessions_in_order(
+        self,
+        session: AsyncSession,
+        *,
+        session_ids: Sequence[str],
+    ) -> dict[str, AgentSession]:
+        """Lock a collaboration mutation's AgentSessions in canonical order."""
+        canonical_ids = sorted(set(session_ids))
+        locked = await self.agent_session_repository.lock_by_ids(
+            session,
+            agent_session_ids=canonical_ids,
+        )
+        if set(locked) != set(canonical_ids):
+            raise FunctionToolError("AgentSession was not found")
+        return locked
 
     async def _resolve_target(
         self,
@@ -842,14 +1033,9 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
         self,
         session: AsyncSession,
         current: SessionAgent,
-    ) -> None:
+    ) -> SessionAgent:
         """Raise a tool error when spawning would exceed configured limits."""
-        locked_root = await self.agent_session_repository.lock_session_agent_by_id(
-            session,
-            current.root_session_agent_id,
-        )
-        if locked_root is None:
-            raise FunctionToolError("Root SessionAgent was not found")
+        locked_root = await self._lock_root(session, current)
         next_depth = _session_agent_depth(current) + 1
         max_depth = self.subagent_settings.max_depth
         if next_depth > max_depth:
@@ -887,6 +1073,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                 "Cannot spawn subagent: max_subagents "
                 f"{max_subagents} is already reached for this root session."
             )
+        return locked_root
 
     async def _append_forked_history_boundary_reminder(
         self,
@@ -930,13 +1117,27 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
         message_kind: Literal["spawn_agent", "send_message", "followup_task"],
         content: str,
         wake: bool,
+        locked_root: SessionAgent | None,
     ) -> None:
+        if source.root_session_agent_id != target.root_session_agent_id:
+            raise ValueError("Source and target SessionAgents must share one root")
+        if locked_root is None:
+            locked_root = await self.agent_session_repository.lock_session_agent_by_id(
+                session,
+                source.root_session_agent_id,
+            )
+        if locked_root is None:
+            raise ValueError("Root SessionAgent not found")
+        if locked_root.id != source.root_session_agent_id:
+            raise ValueError("Locked root does not match the message tree")
         locked_target = await self.agent_session_repository.lock_by_id(
             session,
             target.agent_session_id,
         )
         if locked_target is None:
             raise ValueError("Target AgentSession not found")
+        if locked_target.stop_requested_at is not None:
+            raise FunctionToolError("Target AgentSession is stopping")
         await self.input_buffer_service.enqueue(
             session,
             InputBufferEnqueue(
@@ -974,27 +1175,60 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
 
     async def _publish_tree_changed(self, changed: SessionAgent) -> None:
         """Publish a non-durable Subagent Tree invalidation event."""
-        if self.publish_event is None:
+        publish_event = self.publish_event
+        if publish_event is None:
             return
-        await self.publish_event(
-            SubagentTreeChanged(
-                root_session_agent_id=changed.root_session_agent_id,
-                changed_session_agent_id=changed.id,
-            )
+        await self._run_post_commit_effect(
+            lambda: publish_event(
+                SubagentTreeChanged(
+                    root_session_agent_id=changed.root_session_agent_id,
+                    changed_session_agent_id=changed.id,
+                )
+            ),
+            effect_name="subagent_tree_changed",
+            session_id=changed.agent_session_id,
         )
 
     async def _wake_session(self, session: AgentSession) -> None:
-        await self.broker.send_message(
-            SessionWakeUp(
-                agent_id=session.agent_id,
-                session_id=session.id,
-                user_id=self.user_id,
-                additional_system_prompt=None,
-                interface=None,
-                workspace_id=session.workspace_id,
-                workspace_handle=None,
-            )
+        await self._run_post_commit_effect(
+            lambda: self.broker.send_message(
+                SessionWakeUp(
+                    agent_id=session.agent_id,
+                    session_id=session.id,
+                    user_id=self.user_id,
+                    additional_system_prompt=None,
+                    interface=None,
+                    workspace_id=session.workspace_id,
+                    workspace_handle=None,
+                )
+            ),
+            effect_name="session_wake_up",
+            session_id=session.id,
         )
+
+    async def _run_post_commit_effect(
+        self,
+        effect: Callable[[], Awaitable[None]],
+        *,
+        effect_name: str,
+        session_id: str,
+    ) -> None:
+        """Bound a non-authoritative projection after its DB commit."""
+        try:
+            async with asyncio.timeout(_POST_COMMIT_EFFECT_TIMEOUT_SECONDS):
+                await effect()
+        except asyncio.CancelledError:
+            raise
+        except TimeoutError:
+            logger.warning(
+                "Timed out running committed subagent post-commit effect",
+                extra={"effect_name": effect_name, "session_id": session_id},
+            )
+        except Exception:
+            logger.exception(
+                "Failed running committed subagent post-commit effect",
+                extra={"effect_name": effect_name, "session_id": session_id},
+            )
 
     async def _session_or_error(
         self,
@@ -1091,7 +1325,8 @@ class SubagentToolkitProvider(ToolkitProvider[SubagentToolkitConfig]):
     ) -> SubagentToolkit:
         """Resolve per-session subagent collaboration tools."""
         del config
-        agent = await self.agent_repository.get_by_id(context.session, context.agent_id)
+        async with self.session_manager() as session:
+            agent = await self.agent_repository.get_by_id(session, context.agent_id)
         if agent is None:
             raise ValueError("Agent not found while resolving subagent Toolkit")
         subagent_settings = agent.subagent_settings
