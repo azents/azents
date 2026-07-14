@@ -19,7 +19,7 @@ import json
 
 from pydantic import BaseModel, ConfigDict, StrictInt, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
-from azentsadminclient.models.llm_provider import LLMProvider
+from azentsadminclient.models.system_catalog_provider import SystemCatalogProvider
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -27,7 +27,7 @@ class SystemModelCatalogRefreshResponse(BaseModel):
     """
     System model catalog refresh response.
     """ # noqa: E501
-    provider: LLMProvider
+    provider: SystemCatalogProvider
     catalog_id: StrictStr
     snapshot_id: Optional[StrictStr]
     visible_count: StrictInt
@@ -133,5 +133,3 @@ class SystemModelCatalogRefreshResponse(BaseModel):
                 _obj.additional_properties[_key] = obj.get(_key)
 
         return _obj
-
-

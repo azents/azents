@@ -18,26 +18,21 @@ from enum import Enum
 from typing_extensions import Self
 
 
-class LLMProvider(str, Enum):
+class SystemCatalogProvider(str, Enum):
     """
-    LLM hosting provider.
+    Provider with a system-owned model catalog.
     """
 
     """
     allowed enum values
     """
     OPENAI = 'openai'
-    CHATGPT_OAUTH = 'chatgpt_oauth'
     XAI = 'xai'
     XAI_OAUTH = 'xai_oauth'
     ANTHROPIC = 'anthropic'
     GOOGLE_GEMINI = 'google_gemini'
-    AWS_BEDROCK = 'aws_bedrock'
-    GOOGLE_VERTEX_AI = 'google_vertex_ai'
 
     @classmethod
     def from_json(cls, json_str: str) -> Self:
-        """Create an instance of LLMProvider from a JSON string"""
+        """Create an instance of SystemCatalogProvider from a JSON string"""
         return cls(json.loads(json_str))
-
-

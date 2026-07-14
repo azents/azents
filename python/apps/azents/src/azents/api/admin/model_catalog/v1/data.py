@@ -1,6 +1,7 @@
 """Model catalog v1 Admin API data models."""
 
 import datetime
+import enum
 
 from pydantic import BaseModel
 
@@ -10,6 +11,20 @@ from azents.services.llm_catalog import (
     SystemCatalogListItem,
     SystemCatalogProjectionSummary,
 )
+
+
+class SystemCatalogProvider(enum.StrEnum):
+    """Provider with a system-owned model catalog."""
+
+    OPENAI = LLMProvider.OPENAI.value
+    XAI = LLMProvider.XAI.value
+    XAI_OAUTH = LLMProvider.XAI_OAUTH.value
+    ANTHROPIC = LLMProvider.ANTHROPIC.value
+    GOOGLE_GEMINI = LLMProvider.GOOGLE_GEMINI.value
+
+    def to_llm_provider(self) -> LLMProvider:
+        """Convert to the domain provider enum."""
+        return LLMProvider(self.value)
 
 
 class SystemModelCatalogSyncAttemptResponse(BaseModel):
@@ -39,7 +54,7 @@ class SystemModelCatalogSyncAttemptResponse(BaseModel):
 class SystemModelCatalogResponse(BaseModel):
     """System model catalog response."""
 
-    provider: LLMProvider
+    provider: SystemCatalogProvider
     catalog_id: str | None
     snapshot_id: str | None
     visible_count: int
@@ -53,7 +68,7 @@ class SystemModelCatalogResponse(BaseModel):
     ) -> "SystemModelCatalogResponse":
         """Convert service output to response model."""
         return cls(
-            provider=item.provider,
+            provider=SystemCatalogProvider(item.provider.value),
             catalog_id=item.catalog_id,
             snapshot_id=item.snapshot_id,
             visible_count=item.visible_count,
@@ -75,7 +90,7 @@ class SystemModelCatalogListResponse(BaseModel):
 class SystemModelCatalogRefreshResponse(BaseModel):
     """System model catalog refresh response."""
 
-    provider: LLMProvider
+    provider: SystemCatalogProvider
     catalog_id: str
     snapshot_id: str | None
     visible_count: int
@@ -92,7 +107,7 @@ class SystemModelCatalogRefreshResponse(BaseModel):
     ) -> "SystemModelCatalogRefreshResponse":
         """Convert service output to response model."""
         return cls(
-            provider=summary.provider,
+            provider=SystemCatalogProvider(summary.provider.value),
             catalog_id=summary.catalog_id,
             snapshot_id=summary.snapshot_id,
             visible_count=summary.visible_count,

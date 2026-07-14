@@ -6,13 +6,13 @@ Provides operational controls for system-owned model catalog projections.
 from textwrap import dedent
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends
 
-from azents.core.enums import LLMProvider
 from azents.services.llm_catalog import SystemCatalogProjectionService
 from azents.utils.fastapi.route import RouteMounter
 
 from .data import (
+    SystemCatalogProvider,
     SystemModelCatalogListResponse,
     SystemModelCatalogRefreshListResponse,
     SystemModelCatalogRefreshResponse,
@@ -20,15 +20,6 @@ from .data import (
 )
 
 router = APIRouter()
-
-_SYSTEM_CATALOG_PROVIDERS: tuple[LLMProvider, ...] = (
-    LLMProvider.OPENAI,
-    LLMProvider.CHATGPT_OAUTH,
-    LLMProvider.XAI,
-    LLMProvider.XAI_OAUTH,
-    LLMProvider.ANTHROPIC,
-    LLMProvider.GOOGLE_GEMINI,
-)
 
 
 @router.get("/system-catalogs")
@@ -59,15 +50,10 @@ async def refresh_system_model_catalogs(
 async def refresh_system_model_catalog(
     service: Annotated[SystemCatalogProjectionService, Depends()],
     *,
-    provider: LLMProvider,
+    provider: SystemCatalogProvider,
 ) -> SystemModelCatalogRefreshResponse:
     """Refresh one system model catalog projection by provider."""
-    if provider not in _SYSTEM_CATALOG_PROVIDERS:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="System model catalog provider was not found.",
-        )
-    summary = await service.sync_system_catalog(provider=provider)
+    summary = await service.sync_system_catalog(provider=provider.to_llm_provider())
     return SystemModelCatalogRefreshResponse.convert_from(summary)
 
 

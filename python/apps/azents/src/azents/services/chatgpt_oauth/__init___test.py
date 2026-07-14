@@ -13,8 +13,10 @@ from azents.core.chatgpt_oauth import (
     ChatGPTOAuthSessionStatus,
 )
 from azents.core.crypto import CredentialCipher
+from azents.core.enums import LLMCatalogScope
 from azents.rdb.session import SessionManager
 from azents.repos.chatgpt_oauth_session import ChatGPTOAuthSessionRepository
+from azents.repos.llm_catalog import LLMCatalogRepository
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
@@ -151,6 +153,7 @@ def _make_service(
         ),
         session_repo=ChatGPTOAuthSessionRepository(cipher),
         integration_repo=LLMProviderIntegrationRepository(cipher),
+        catalog_repo=LLMCatalogRepository(),
         client=cast(ChatGPTOAuthClient, fake_client),
     )
 
@@ -200,5 +203,12 @@ class TestChatGPTOAuthService:
         assert isinstance(connected, Success)
         assert connected.value.status == ChatGPTOAuthSessionStatus.CONNECTED
         assert connected.value.integration is not None
+        catalog = await LLMCatalogRepository().get_by_integration(
+            rdb_session,
+            integration_id=connected.value.integration.id,
+            workspace_id=workspace_id,
+        )
+        assert catalog is not None
+        assert catalog.scope == LLMCatalogScope.INTEGRATION
         assert isinstance(cancelled, Success)
         assert cancelled.value.status == ChatGPTOAuthSessionStatus.CANCELLED
