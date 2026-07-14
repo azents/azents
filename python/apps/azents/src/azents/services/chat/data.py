@@ -63,6 +63,7 @@ class ChatLiveRunState:
     phase: AgentRunPhase
     status: AgentRunStatus
     inference_profile: AppliedInferenceProfile
+    model_call_started_at: datetime.datetime | None
     retry: ChatLiveRunRetryState | None = None
 
 

@@ -63,7 +63,7 @@ logger = logging.getLogger(__name__)
 
 
 CheckStop = Callable[[], Awaitable[bool]]
-PhaseSink = Callable[[AgentRunPhase], Awaitable[None]]
+PhaseSink = Callable[[AgentRunPhase, datetime.datetime | None], Awaitable[None]]
 
 
 @dataclass(frozen=True)
@@ -953,14 +953,14 @@ class AgentRunExecution:
         active_tool_calls: list[ActiveToolCall] | None = None,
     ) -> None:
         """Reflect run phase in durable state and UI projection."""
-        await self._run_repo.update_phase(
+        run = await self._run_repo.update_phase(
             session,
             run_id,
             phase,
             active_tool_calls=active_tool_calls,
         )
         if self._phase_sink is not None:
-            await self._phase_sink(phase)
+            await self._phase_sink(phase, run.model_call_started_at)
 
 
 async def _finish_turn(

@@ -109,6 +109,7 @@ class _RunRepo:
         self.terminal: AgentRunStatus | None = None
         self.active_tool_calls: list[ActiveToolCall] = []
         self.active_tool_call_snapshots: list[list[ActiveToolCall]] = []
+        self.model_call_started_at: datetime.datetime | None = None
         self.terminal_result_event_id: str | None = None
         self.terminal_result_message: str | None = None
 
@@ -129,6 +130,7 @@ class _RunRepo:
             active_tool_calls=list(self.active_tool_calls),
             created_at=datetime.datetime.now(datetime.UTC),
             started_at=datetime.datetime.now(datetime.UTC),
+            model_call_started_at=self.model_call_started_at,
             updated_at=datetime.datetime.now(datetime.UTC),
         )
 
@@ -147,14 +149,17 @@ class _RunRepo:
         phase: AgentRunPhase,
         *,
         active_tool_calls: list[ActiveToolCall] | None = None,
-    ) -> object:
+    ) -> AgentRunState:
         """Record phase update."""
-        del session, run_id
         self.phases.append(phase)
+        if phase == AgentRunPhase.WAITING_FOR_MODEL:
+            self.model_call_started_at = datetime.datetime.now(datetime.UTC)
+        elif phase != AgentRunPhase.STREAMING_MODEL:
+            self.model_call_started_at = None
         if active_tool_calls is not None:
             self.active_tool_calls = list(active_tool_calls)
             self.active_tool_call_snapshots.append(list(active_tool_calls))
-        return object()
+        return await self.get_by_id(session, run_id)
 
     async def mark_terminal(
         self,
@@ -734,10 +739,13 @@ async def test_text_run_completes() -> None:
     """End as completed when there are no tool calls."""
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
-    emitted_phases: list[AgentRunPhase] = []
+    emitted_phases: list[tuple[AgentRunPhase, datetime.datetime | None]] = []
 
-    async def collect_phase(phase: AgentRunPhase) -> None:
-        emitted_phases.append(phase)
+    async def collect_phase(
+        phase: AgentRunPhase,
+        model_call_started_at: datetime.datetime | None,
+    ) -> None:
+        emitted_phases.append((phase, model_call_started_at))
 
     execution = AgentRunExecution(
         post_lower_filter=_PostFilter(),
@@ -767,7 +775,19 @@ async def test_text_run_completes() -> None:
     assert run_repo.terminal_result_message == "done"
     assert run_repo.terminal_result_event_id == transcript_repo.events[0].id
     assert AgentRunPhase.STREAMING_MODEL in run_repo.phases
-    assert emitted_phases == run_repo.phases
+    assert [phase for phase, _ in emitted_phases] == run_repo.phases
+    waiting_started_at = next(
+        started_at
+        for phase, started_at in emitted_phases
+        if phase == AgentRunPhase.WAITING_FOR_MODEL
+    )
+    streaming_started_at = next(
+        started_at
+        for phase, started_at in emitted_phases
+        if phase == AgentRunPhase.STREAMING_MODEL
+    )
+    assert waiting_started_at is not None
+    assert streaming_started_at == waiting_started_at
 
 
 async def test_model_delta_reaches_output_sink_before_stream_completion() -> None:

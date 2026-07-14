@@ -299,6 +299,7 @@ def _running_run(session_id: str) -> AgentRunState:
         stop_requested_at=None,
         created_at=now,
         started_at=now,
+        model_call_started_at=now,
         ended_at=None,
         updated_at=now,
     )

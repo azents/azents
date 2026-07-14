@@ -616,5 +616,6 @@ class AgentRunState(BaseModel):
     stop_requested_at: datetime.datetime | None = Field(default=None)
     created_at: datetime.datetime
     started_at: datetime.datetime | None
+    model_call_started_at: datetime.datetime | None
     ended_at: datetime.datetime | None = Field(default=None)
     updated_at: datetime.datetime

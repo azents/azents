@@ -17,6 +17,7 @@ import pprint
 import re  # noqa: F401
 import json
 
+from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.agent_run_phase import AgentRunPhase
@@ -34,9 +35,10 @@ class ChatLiveRunStateResponse(BaseModel):
     phase: AgentRunPhase = Field(description="Current run phase")
     status: AgentRunStatus = Field(description="Current run status")
     inference_profile: AppliedInferenceProfile = Field(description="Inference settings applied to the active turn")
+    model_call_started_at: Optional[datetime]
     retry: Optional[ChatLiveRunRetryStateResponse] = None
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["run_id", "phase", "status", "inference_profile", "retry"]
+    __properties: ClassVar[List[str]] = ["run_id", "phase", "status", "inference_profile", "model_call_started_at", "retry"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -90,6 +92,11 @@ class ChatLiveRunStateResponse(BaseModel):
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
 
+        # set to None if model_call_started_at (nullable) is None
+        # and model_fields_set contains the field
+        if self.model_call_started_at is None and "model_call_started_at" in self.model_fields_set:
+            _dict['model_call_started_at'] = None
+
         # set to None if retry (nullable) is None
         # and model_fields_set contains the field
         if self.retry is None and "retry" in self.model_fields_set:
@@ -111,6 +118,7 @@ class ChatLiveRunStateResponse(BaseModel):
             "phase": obj.get("phase"),
             "status": obj.get("status"),
             "inference_profile": AppliedInferenceProfile.from_dict(obj["inference_profile"]) if obj.get("inference_profile") is not None else None,
+            "model_call_started_at": obj.get("model_call_started_at"),
             "retry": ChatLiveRunRetryStateResponse.from_dict(obj["retry"]) if obj.get("retry") is not None else None
         })
         # store additional fields in additional_properties

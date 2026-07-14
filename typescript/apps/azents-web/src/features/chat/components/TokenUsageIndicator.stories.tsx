@@ -13,6 +13,7 @@ const activeRun = {
     model_display_name: "GPT 5.5",
     reasoning_effort: "high",
   },
+  modelCallStartedAt: new Date(Date.now() - 12_000).toISOString(),
   retry: null,
 } satisfies ChatLiveRunState;
 

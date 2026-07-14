@@ -158,6 +158,7 @@ class _RunRepo:
             active_tool_calls=[],
             created_at=now,
             started_at=now,
+            model_call_started_at=None,
             updated_at=now,
         )
 
@@ -188,6 +189,7 @@ class _RunRepo:
             active_tool_calls=[],
             created_at=datetime.datetime.now(datetime.UTC),
             started_at=datetime.datetime.now(datetime.UTC),
+            model_call_started_at=None,
             updated_at=datetime.datetime.now(datetime.UTC),
         )
         return self._state

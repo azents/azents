@@ -278,6 +278,7 @@ export const WithLiveRunRetry = {
         model_display_name: "GPT 5.5",
         reasoning_effort: null,
       },
+      modelCallStartedAt: new Date(Date.now() - 5_000).toISOString(),
       retry: {
         status: "running",
         lastErrorMessage: "The provider returned a temporary rate limit.",
@@ -331,6 +332,7 @@ export const StreamingModelWithPartialOutput = {
         model_display_name: "GPT 5.5",
         reasoning_effort: null,
       },
+      modelCallStartedAt: new Date(Date.now() - 12_000).toISOString(),
       retry: null,
     },
   },
@@ -342,6 +344,7 @@ export const StreamingModelWithPartialOutput = {
     await expect(
       canvas.getByRole("status", { name: "Agent is working" }),
     ).toBeVisible();
+    await expect(canvas.getByText(/^\d+s$/)).toBeVisible();
   },
 } satisfies Story;
 

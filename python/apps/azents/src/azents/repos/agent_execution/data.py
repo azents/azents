@@ -55,6 +55,10 @@ class AgentRunPatch(BaseModel):
     status: AgentRunStatus | None = Field(default=None, description="Run status")
     parent_agent_run_id: str | None = Field(default=None)
     started_at: datetime.datetime | None = Field(default=None)
+    model_call_started_at: datetime.datetime | None = Field(
+        default=None,
+        description="Current model call start time",
+    )
     active_tool_calls: list[ActiveToolCall] | None = Field(
         default=None,
         description="Active tool calls",

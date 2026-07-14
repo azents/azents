@@ -1113,6 +1113,11 @@ class RunExecutor:
             else None
         )
         current_retry_state = agent_run.retry_state if recovering_running_run else None
+        active_model_call_started_at = (
+            agent_run.model_call_started_at
+            if recovering_running_run and current_retry_state is None
+            else None
+        )
         live_retry_state = current_retry_state
 
         async def publish_live_run() -> None:
@@ -1124,6 +1129,7 @@ class RunExecutor:
                     phase=active_phase or AgentRunPhase.IDLE,
                     status=AgentRunStatus.RUNNING,
                     inference_profile=inference_profile,
+                    model_call_started_at=active_model_call_started_at,
                     retry=_chat_live_retry_state(live_retry_state),
                 ),
             )
@@ -1186,7 +1192,8 @@ class RunExecutor:
 
         async def consume_emit(item: Emit) -> None:
             """Apply run lifecycle side effects for one engine emit."""
-            nonlocal active_phase, run_completed, run_end_reason
+            nonlocal active_phase, active_model_call_started_at
+            nonlocal run_completed, run_end_reason
             nonlocal terminal_run_status, terminal_state_persisted
             match item.event:
                 case RunStarted():
@@ -1214,8 +1221,12 @@ class RunExecutor:
                     terminal_state_persisted = True
                     run_end_reason = "cancelled"
                     terminal_run_status = AgentRunStatus.STOPPED
-                case RunPhaseChanged(phase=phase):
+                case RunPhaseChanged(
+                    phase=phase,
+                    model_call_started_at=model_call_started_at,
+                ):
                     active_phase = phase
+                    active_model_call_started_at = model_call_started_at
                     await refresh_session_activity()
                 case _:
                     pass
@@ -1415,6 +1426,7 @@ class RunExecutor:
                     )
                     current_retry_state = retry_state
                     live_retry_state = retry_state
+                    active_model_call_started_at = None
                     await publish_live_run()
                     finalization_reason = _failed_run_finalization_reason(retry_state)
                     if finalization_reason is not None:
@@ -1474,6 +1486,7 @@ class RunExecutor:
                     )
                     current_retry_state = retry_state
                     live_retry_state = retry_state
+                    active_model_call_started_at = None
                     await publish_live_run()
                     logger.exception(
                         "Internal error during engine run attempt",

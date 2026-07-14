@@ -137,6 +137,12 @@ class RDBAgentRun(RDBModel):
         nullable=True,
         default=None,
     )
+    model_call_started_at: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime,
+        init=False,
+        nullable=True,
+        default=None,
+    )
     ended_at: Mapped[datetime.datetime | None] = mapped_column(
         TimeZoneDateTime,
         init=False,

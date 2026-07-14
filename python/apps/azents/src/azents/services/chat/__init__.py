@@ -1060,6 +1060,7 @@ class ChatSessionService:
                         inference_profile=_require_session_inference_profile(
                             agent_session
                         ),
+                        model_call_started_at=run.model_call_started_at,
                         retry=None
                         if run.retry_state is None
                         else ChatLiveRunRetryState(

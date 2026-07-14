@@ -453,6 +453,7 @@ class _AgentRunRepository:
             terminal_result_message=None,
             created_at=_NOW,
             started_at=_NOW,
+            model_call_started_at=None,
             ended_at=None,
             updated_at=_NOW,
         )
@@ -470,6 +471,7 @@ class _AgentRunRepository:
                 terminal_result_message="child result",
                 created_at=_NOW,
                 started_at=_NOW,
+                model_call_started_at=None,
                 ended_at=_NOW,
                 updated_at=_NOW,
             )
@@ -1543,6 +1545,7 @@ async def test_spawn_agent_counts_latest_running_run_toward_active_limit() -> No
         terminal_result_message=None,
         created_at=_NOW,
         started_at=_NOW,
+        model_call_started_at=None,
         ended_at=None,
         updated_at=_NOW,
     )

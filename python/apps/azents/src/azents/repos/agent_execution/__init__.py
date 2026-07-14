@@ -650,6 +650,7 @@ class AgentRunRepository:
                 status=status,
                 phase=AgentRunPhase.IDLE,
                 active_tool_calls=[],
+                model_call_started_at=None,
                 retry_state=None,
                 ended_at=ended_at,
             )
@@ -813,11 +814,28 @@ class AgentRunRepository:
         *,
         active_tool_calls: list[ActiveToolCall] | None = None,
     ) -> AgentRunState:
-        """Update phase and active tool call projection."""
-        if active_tool_calls is None:
-            patch = AgentRunPatch(phase=phase)
+        """Update phase and active model/tool call projections."""
+        model_call_started_at: datetime.datetime | None
+        if phase == AgentRunPhase.WAITING_FOR_MODEL:
+            model_call_started_at = datetime.datetime.now(datetime.UTC)
+        elif phase == AgentRunPhase.STREAMING_MODEL:
+            current = await self.get_by_id(session, run_id)
+            if current is None:
+                raise ValueError("Agent run not found")
+            model_call_started_at = current.model_call_started_at
         else:
-            patch = AgentRunPatch(phase=phase, active_tool_calls=active_tool_calls)
+            model_call_started_at = None
+        if active_tool_calls is None:
+            patch = AgentRunPatch(
+                phase=phase,
+                model_call_started_at=model_call_started_at,
+            )
+        else:
+            patch = AgentRunPatch(
+                phase=phase,
+                model_call_started_at=model_call_started_at,
+                active_tool_calls=active_tool_calls,
+            )
         return await self.update(session, run_id, patch)
 
     async def update_retry_state(
@@ -830,7 +848,10 @@ class AgentRunRepository:
         return await self.update(
             session,
             run_id,
-            AgentRunPatch(retry_state=retry_state),
+            AgentRunPatch(
+                retry_state=retry_state,
+                model_call_started_at=None,
+            ),
         )
 
     async def mark_terminal(
@@ -852,6 +873,7 @@ class AgentRunRepository:
                 status=status,
                 phase=AgentRunPhase.IDLE,
                 active_tool_calls=[],
+                model_call_started_at=None,
                 retry_state=None,
                 ended_at=ended_at,
                 last_completed_event_id=last_completed_event_id,
@@ -880,6 +902,7 @@ class AgentRunRepository:
         rdb.status = status
         rdb.phase = AgentRunPhase.IDLE
         rdb.active_tool_calls = []
+        rdb.model_call_started_at = None
         rdb.retry_state = None
         rdb.ended_at = ended_at
         rdb.last_completed_event_id = last_completed_event_id
@@ -911,6 +934,7 @@ class AgentRunRepository:
             stop_requested_at=rdb.stop_requested_at,
             created_at=rdb.created_at,
             started_at=rdb.started_at,
+            model_call_started_at=rdb.model_call_started_at,
             ended_at=rdb.ended_at,
             updated_at=rdb.updated_at,
         )

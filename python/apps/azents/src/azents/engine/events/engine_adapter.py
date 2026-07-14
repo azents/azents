@@ -3,6 +3,7 @@
 import asyncio
 import contextlib
 import dataclasses
+import datetime
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from typing import Annotated, Protocol
@@ -475,10 +476,11 @@ class AgentEngineAdapter:
             pre_lower_filter=pre_lower_filter,
             model_call_preparer=prepare_model_call,
             output_sink=emit_queue.extend_from_output,
-            phase_sink=lambda phase: _emit_phase_change(
+            phase_sink=lambda phase, model_call_started_at: _emit_phase_change(
                 emit_queue,
                 run_id=context.run_id,
                 phase=phase,
+                model_call_started_at=model_call_started_at,
                 pre_lower_filter=pre_lower_filter,
             ),
             pre_model_lower_hook=model_file_materializer.materialize,
@@ -581,6 +583,7 @@ async def _emit_phase_change(
     *,
     run_id: str,
     phase: AgentRunPhase,
+    model_call_started_at: datetime.datetime | None,
     pre_lower_filter: EventPreLowerFilterPipeline,
 ) -> None:
     """Reflect run phase and auto compaction lifecycle in legacy stream."""
@@ -589,7 +592,15 @@ async def _emit_phase_change(
     if phase == AgentRunPhase.WAITING_FOR_MODEL and pre_lower_filter.was_compacted:
         await queue.put(ephemeral(CompactionComplete(continuing=True)))
         pre_lower_filter.was_compacted = False
-    await queue.put(ephemeral(RunPhaseChanged(run_id=run_id, phase=phase)))
+    await queue.put(
+        ephemeral(
+            RunPhaseChanged(
+                run_id=run_id,
+                phase=phase,
+                model_call_started_at=model_call_started_at,
+            )
+        )
+    )
 
 
 def _runtime_hook_provider_refs(
