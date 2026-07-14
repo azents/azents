@@ -474,7 +474,7 @@ class InputBufferService:
                     and agent_session.agent_id != prepared_materialization.agent_id
                 ):
                     raise InputBufferPreparationStaleError(
-                        "Input buffer session Agent changed during preparation"
+                        "Session Agent changed during input buffer preparation"
                     )
                 oldest = await self.input_buffer_repository.lock_oldest_by_session_id(
                     session,

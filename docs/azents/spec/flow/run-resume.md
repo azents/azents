@@ -22,7 +22,7 @@ code_paths:
   - python/apps/azents/src/azents/engine/run/errors.py
   - python/apps/azents/src/azents/worker/session/**
 last_verified_at: 2026-07-14
-spec_version: 20
+spec_version: 21
 ---
 
 # Run Resume
@@ -60,6 +60,12 @@ The sticky lease and heartbeat timeout intentionally have different meanings:
 - The 120-second heartbeat timeout is a failure detector. If the heartbeat is stale, another worker
   may revoke the owner even if the 30-minute sticky lease has not expired.
 - A graceful shutdown must release both the owner lease and owner heartbeat immediately.
+
+The Session activity projection carries the worker identity that wrote it. Readers fetch the
+activity value, migration-authority marker, and sticky owner lock as one same-slot Lua snapshot.
+An activity whose marker or embedded legacy owner differs from the current lock is stale and is
+hidden or resolved through the compatible legacy projection. This prevents an ownership handoff
+from combining an old activity value with a newer authority marker and presenting stale Run state.
 
 ## Worker State And Routing
 
@@ -273,6 +279,7 @@ run to observe `check_stop()` as true.
 
 ## Changelog
 
+- **2026-07-14** (spec_version 21) — Made Session activity, migration marker, and owner-lock reads one same-slot authority snapshot across worker handoff.
 - **2026-07-14** (spec_version 20) — Made complete-message v2 Stream entries the atomic broker authority, added mixed-version dual delivery and legacy bridging, same-Stream owner assignment, deferred ACK, fair protocol polling, and atomic poison quarantine TTLs.
 - **2026-07-14** (spec_version 19) — Replaced operation resume with owner-generation-fenced live execution, atomic terminal snapshot/delete handover, 30-second graceful shutdown, and cancelled no-reexecution takeover recovery.
 - **2026-07-12** (spec_version 18) — Made ownership generation and durable call/result state authoritative for no-reexecution tool recovery.

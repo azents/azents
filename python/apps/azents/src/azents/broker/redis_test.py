@@ -1174,6 +1174,30 @@ class TestRedisBrokerMessages:
 class TestRedisBrokerActivity:
     """Session activity authority tests."""
 
+    async def test_reads_same_slot_authority_from_one_atomic_snapshot(self) -> None:
+        """Activity reads cannot mix values from opposite sides of a handoff."""
+        redis = AsyncMock()
+        redis.eval.return_value = [
+            b'{"run_id":"run-current","phase":null}',
+            b"worker-current",
+            b"worker-current",
+        ]
+        broker = RedisBroker(cast(Redis, redis))
+
+        activity = await broker.get_session_activity("session-1")
+
+        assert activity is not None
+        assert activity.run_id == "run-current"
+        redis.eval.assert_awaited_once_with(
+            redis_module._READ_ACTIVITY_AUTHORITY_SCRIPT,  # pyright: ignore[reportPrivateUsage]
+            3,
+            "azents:session:{session-1}:activity",
+            "azents:session:{session-1}:activity-migrated",
+            "azents:session:{session-1}:lock",
+        )
+        redis.get.assert_not_awaited()
+        redis.mget.assert_not_awaited()
+
     async def test_clear_for_run_preserves_newer_activity(self, redis: Redis) -> None:
         """An old Run finalizer cannot delete another Run's activity."""
         broker = RedisBroker(redis)
@@ -1306,6 +1330,18 @@ class TestRedisBrokerActivity:
         await redis.set("azents:session:session-1:activity", late_value, ex=60)
 
         assert await reader.get_session_activity("session-1") is None
+
+    async def test_unowned_activity_is_hidden_after_owner_acquisition(
+        self,
+        redis: Redis,
+    ) -> None:
+        """A projection created before ownership cannot impersonate its new owner."""
+        broker = RedisBroker(redis)
+        await broker.set_session_activity("session-1", run_id="run-unowned")
+
+        await redis.set("azents:session:{session-1}:lock", "worker-new", ex=60)
+
+        assert await broker.get_session_activity("session-1") is None
 
 
 class TestRedisBrokerOwnershipRenewal:
@@ -1495,13 +1531,17 @@ class TestRedisBrokerOwnershipRenewal:
     ) -> None:
         """Activity projection writes are fenced by current Redis ownership."""
         interface_broker = RedisBroker(redis)
+        current_worker = RedisBroker(redis, worker_id="worker-new")
         stale_worker = RedisBroker(redis, worker_id="worker-old")
-        await interface_broker.set_session_activity("session-1", run_id="run-new")
         await redis.set("azents:session:{session-1}:lock", "worker-new")
+        await current_worker.set_session_activity("session-1", run_id="run-new")
+        current_value = await redis.get("azents:session:{session-1}:activity")
+        assert current_value is not None
 
         with pytest.raises(SessionOwnershipLostError, match="session-1"):
             await stale_worker.set_session_activity("session-1", run_id="run-old")
 
+        assert await redis.get("azents:session:{session-1}:activity") == current_value
         activity = await interface_broker.get_session_activity("session-1")
         assert activity is not None
         assert activity.run_id == "run-new"
@@ -1512,9 +1552,12 @@ class TestRedisBrokerOwnershipRenewal:
     ) -> None:
         """Run-id matching alone cannot authorize a stale worker's cleanup."""
         interface_broker = RedisBroker(redis)
+        current_worker = RedisBroker(redis, worker_id="worker-new")
         stale_worker = RedisBroker(redis, worker_id="worker-old")
-        await interface_broker.set_session_activity("session-1", run_id="run-shared")
         await redis.set("azents:session:{session-1}:lock", "worker-new")
+        await current_worker.set_session_activity("session-1", run_id="run-shared")
+        current_value = await redis.get("azents:session:{session-1}:activity")
+        assert current_value is not None
 
         with pytest.raises(SessionOwnershipLostError, match="session-1"):
             await stale_worker.clear_session_activity_for_run(
@@ -1522,6 +1565,7 @@ class TestRedisBrokerOwnershipRenewal:
                 run_id="run-shared",
             )
 
+        assert await redis.get("azents:session:{session-1}:activity") == current_value
         activity = await interface_broker.get_session_activity("session-1")
         assert activity is not None
         assert activity.run_id == "run-shared"

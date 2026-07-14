@@ -805,6 +805,13 @@ class SessionGitWorktreeService:
                 worktree_id=allocation.id,
                 worktree_path=create_result.worktree_path,
             )
+            # Terminalization removed the live action that made the first cleanup
+            # attempt defer physical deletion.
+            await self.run_cleanup_for_session(
+                agent_id=agent_id,
+                session_id=session_id,
+                session_workspace_project_id=None,
+            )
             return GitWorktreeActionExecutionResult(
                 completed=True,
                 context_invalidated=False,
@@ -1912,6 +1919,13 @@ class SessionGitWorktreeService:
             reason=reason,
             on_projection_updated=on_projection_updated,
             on_history_event_appended=on_history_event_appended,
+        )
+        # Cleanup may have yielded to the live action before this failure was
+        # committed. Retry now that the action fence can admit physical deletion.
+        await self.run_cleanup_for_session(
+            agent_id=agent_id,
+            session_id=execution.session_id,
+            session_workspace_project_id=None,
         )
 
     async def _reconcile_cleanup_winner_projection(

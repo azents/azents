@@ -2,10 +2,18 @@
 
 import dataclasses
 import datetime
+import importlib.util
+import itertools
+from pathlib import Path
+from types import ModuleType, SimpleNamespace
 
 import pytest
+import sqlalchemy as sa
 from azcommon.result import Success
+from sqlalchemy.dialects import postgresql
+from sqlalchemy.dialects.postgresql import psycopg
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.schema import SchemaItem
 
 from azents.core.enums import LLMProvider
 from azents.rdb.models.agent import RDBAgent
@@ -25,6 +33,27 @@ from .data import AgentSessionCreateRequestClaim
 from .repository import AgentSessionCreateRequestRepository
 
 
+def _load_create_request_migration() -> ModuleType:
+    """Load the new-table migration without requiring an Alembic environment."""
+    migration_path = (
+        Path(__file__).resolve().parents[4]
+        / "db-schemas"
+        / "rdb"
+        / "migrations"
+        / "versions"
+        / "076e7b6ec5e2_add_agent_session_create_requests.py"
+    )
+    spec = importlib.util.spec_from_file_location(
+        "test_agent_session_create_request_migration",
+        migration_path,
+    )
+    if spec is None or spec.loader is None:
+        raise RuntimeError("Unable to load AgentSession create-request migration")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def test_accepted_session_identity_is_a_retained_tombstone() -> None:
     """Session deletion preserves authority while User deletion releases it."""
     table = RDBAgentSessionCreateRequest.__table__
@@ -33,6 +62,86 @@ def test_accepted_session_identity_is_a_retained_tombstone() -> None:
     assert {foreign_key.ondelete for foreign_key in table.c.user_id.foreign_keys} == {
         "CASCADE"
     }
+
+
+def test_pending_snapshot_none_binds_as_sql_null() -> None:
+    """Python None must satisfy the pending row's SQL-NULL invariant."""
+    snapshot_type = RDBAgentSessionCreateRequest.__table__.c.input_buffer_snapshot.type
+
+    assert isinstance(snapshot_type, postgresql.JSONB)
+    assert snapshot_type.none_as_null is True
+    bind_processor = snapshot_type.bind_processor(psycopg.dialect())
+    assert bind_processor is not None
+    assert bind_processor(None) is None
+
+
+def test_completion_constraint_accepts_only_pending_or_complete_states() -> None:
+    """The actual check SQL rejects every partially populated authority state."""
+    field_names = (
+        "agent_session_id",
+        "input_buffer_id",
+        "input_buffer_snapshot",
+        "completed_at",
+    )
+    projected_fields = ", ".join(
+        f":{field_name} AS {field_name}" for field_name in field_names
+    )
+    statement = sa.text(
+        "SELECT CASE WHEN "
+        f"{RDBAgentSessionCreateRequest.CK_COMPLETION.sqltext} "
+        "THEN 1 ELSE 0 END "
+        f"FROM (SELECT {projected_fields}) AS request_state"
+    )
+
+    with sa.create_engine("sqlite+pysqlite:///:memory:").connect() as connection:
+        for presence in itertools.product((False, True), repeat=len(field_names)):
+            values = {
+                field_name: 1 if is_present else None
+                for field_name, is_present in zip(
+                    field_names,
+                    presence,
+                    strict=True,
+                )
+            }
+            accepted = connection.scalar(statement, values)
+            expected = all(presence) or not any(presence)
+
+            assert accepted == int(expected), (presence, values)
+
+
+def test_migration_matches_model_completion_invariant() -> None:
+    """Migration and ORM agree on SQL NULL binding and completion check SQL."""
+    migration = _load_create_request_migration()
+    created_tables: dict[str, tuple[SchemaItem, ...]] = {}
+
+    def capture_table(name: str, *items: SchemaItem) -> None:
+        created_tables[name] = items
+
+    migration.__dict__["op"] = SimpleNamespace(
+        execute=lambda *_args, **_kwargs: None,
+        create_table=capture_table,
+        create_index=lambda *_args, **_kwargs: None,
+    )
+    migration.upgrade()
+
+    table_items = created_tables["agent_session_create_requests"]
+    snapshot_column = next(
+        item
+        for item in table_items
+        if isinstance(item, sa.Column) and item.name == "input_buffer_snapshot"
+    )
+    completion_check = next(
+        item
+        for item in table_items
+        if isinstance(item, sa.CheckConstraint)
+        and item.name == RDBAgentSessionCreateRequest.CK_COMPLETION.name
+    )
+
+    assert isinstance(snapshot_column.type, postgresql.JSONB)
+    assert snapshot_column.type.none_as_null is True
+    assert str(completion_check.sqltext) == str(
+        RDBAgentSessionCreateRequest.CK_COMPLETION.sqltext
+    )
 
 
 @dataclasses.dataclass(frozen=True)

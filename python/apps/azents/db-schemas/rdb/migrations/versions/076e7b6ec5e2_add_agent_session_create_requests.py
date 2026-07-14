@@ -24,7 +24,11 @@ def upgrade() -> None:
         sa.Column("payload_hash", sa.String(length=64), nullable=False),
         sa.Column("agent_session_id", sa.String(length=32), nullable=True),
         sa.Column("input_buffer_id", sa.String(length=32), nullable=True),
-        sa.Column("input_buffer_snapshot", postgresql.JSONB(), nullable=True),
+        sa.Column(
+            "input_buffer_snapshot",
+            postgresql.JSONB(none_as_null=True),
+            nullable=True,
+        ),
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),

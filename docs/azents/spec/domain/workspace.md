@@ -55,7 +55,7 @@ api_routes:
   - /chat/v1/agents/{agent_id}/git-refs
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-07-14
-spec_version: 44
+spec_version: 45
 ---
 
 # Workspace & Membership
@@ -326,12 +326,18 @@ and a failed cleanup may transition only `cleanup_pending` to `cleanup_failed`; 
 state to `cleaned`, treating an already cleaned row as idempotent success.
 
 Cleanup never calls Runner removal while the allocation's ActionExecution is still pending or running.
+If cleanup wins during a post-registration action step, action terminalization removes the live
+execution fence and then immediately re-drives the pending cleanup; the allocation cannot remain
+permanently `cleanup_pending` merely because the first cleanup attempt raced the live action.
 Session deletion takes the SessionAgent root fence, requests and runs cleanup for every AgentSession in
 the deleted subtree without holding a database session across Runner calls, then reacquires the root fence
 and locks the affected AgentSession rows for its final database-only check. Deletion proceeds only when
 every allocation is durably `cleaned` and no live ActionExecution remains. An incomplete cleanup returns a
 retryable conflict and preserves the Session and allocation rows. Ownership-loss cancellation performs no
 terminal/history/allocation writes from the stale worker, leaving reconciliation to the current owner.
+Hard root-tree deletion removes the root context's worktree association rows before the
+AgentSession/context cascade, avoiding a transient PostgreSQL `CASCADE`/`SET NULL` FK conflict. A child
+SessionAgent deletion retains its shared root context and the other participants' worktree associations.
 Both cleanup admission and final deletion lock the root fence, all affected Session rows in sorted ID
 order, and the requesting Workspace membership before changing state. Membership revocation before
 cleanup therefore prevents Runner removal entirely; revocation while cleanup is in flight is rechecked
@@ -500,6 +506,7 @@ stateDiagram-v2
 
 ## Changelog
 
+- **2026-07-14** — v45. Re-drove pending cleanup after a racing worktree action terminalized and fixed root-context worktree association deletion order.
 - **2026-07-14** — v44. Defined exact Project, catalog, and preallocated progress-event reconciliation after ambiguous worktree action commits and cancellation.
 - **2026-07-14** — v43. Revalidated locked Workspace membership at both Session cleanup admission and final deletion, before any Runner cleanup and after in-flight cleanup respectively.
 - **2026-07-14** — v42. Locked Project registration authority through commit; bounded post-commit Skill projection; fenced every worktree mutation with Session/action/allocation authority; made ownership-loss cancellation zero-write; and deferred hard Session deletion until live worktree actions are gone and cleanup is durably complete.

@@ -47,8 +47,11 @@ class RDBAgentSessionCreateRequest(RDBModel):
         sa.String(32),
         nullable=True,
     )
+    # The check constraint distinguishes a pending SQL NULL from a completed
+    # JSON snapshot.  PostgreSQL JSONB otherwise serializes Python None as the
+    # non-SQL JSON value `null`, which looks populated to `IS NULL` checks.
     input_buffer_snapshot: Mapped[dict[str, object] | None] = mapped_column(
-        JSONB,
+        JSONB(none_as_null=True),
         nullable=True,
     )
     created_at: Mapped[datetime.datetime] = mapped_column(

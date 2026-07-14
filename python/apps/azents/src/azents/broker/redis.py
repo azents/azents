@@ -162,6 +162,13 @@ if activity["run_id"] ~= ARGV[2] then
 end
 return redis.call("DEL", KEYS[1])
 """
+_READ_ACTIVITY_AUTHORITY_SCRIPT = """
+return {
+  redis.call("GET", KEYS[1]) or false,
+  redis.call("GET", KEYS[2]) or false,
+  redis.call("GET", KEYS[3]) or false
+}
+"""
 _APPEND_WITH_TTL_SCRIPT = """
 for index = 2, #ARGV do
   redis.call("RPUSH", KEYS[1], ARGV[index])
@@ -1670,8 +1677,13 @@ class RedisBroker:
         key = _session_activity_key(self._SESSION_PREFIX, session_id)
 
         async def read_activity() -> SessionActivity | None:
-            raw = await self._redis.get(key)
-            migration_authority, lock_owner = await self._redis.mget(
+            # These keys share the Session hash slot. Read them through one Lua
+            # snapshot so an ownership handoff cannot combine an old activity
+            # value with a new marker/lock pair from a later point in time.
+            raw, migration_authority, lock_owner = await self._redis.eval(
+                _READ_ACTIVITY_AUTHORITY_SCRIPT,
+                3,
+                key,
                 _session_activity_migration_key(self._SESSION_PREFIX, session_id),
                 _session_lock_key(self._SESSION_PREFIX, session_id),
             )

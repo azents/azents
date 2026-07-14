@@ -22,7 +22,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-07-14 | 7 |
 | [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-07-14 | 56 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-07-13 | 7 |
-| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-07-14 | 44 |
+| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-07-14 | 45 |
 
 _8 documents_
 
@@ -39,7 +39,7 @@ _8 documents_
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-07-14 | 15 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
 | [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-06-27 | 2 |
-| [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-07-14 | 20 |
+| [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-07-14 | 21 |
 | [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-07-12 | 14 |
 | [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-07-13 | 7 |
 | [xAI API Key Provider Flow](spec/flow/xai-api-key.md) | @Hardtack | 2026-07-10 | 1 |

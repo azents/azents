@@ -1843,10 +1843,21 @@ class TestInputBufferService:
             session_manager,
             model_file_service=model_file_service,
         )
+
+        async def cancel_reconciliation(
+            _service: InputBufferService,
+            *,
+            session_id: str,
+            buffer_id: str | None,
+            promoted: object,
+        ) -> bool:
+            del _service, session_id, buffer_id, promoted
+            raise asyncio.CancelledError("reconciliation cancelled")
+
         monkeypatch.setattr(
-            service,
+            InputBufferService,
             "_reconcile_materialized_promotion_commit",
-            AsyncMock(side_effect=asyncio.CancelledError("reconciliation cancelled")),
+            cancel_reconciliation,
         )
 
         with pytest.raises(asyncio.CancelledError, match="reconciliation cancelled"):
@@ -1903,9 +1914,10 @@ class TestInputBufferService:
         )
         reconciliation_started = asyncio.Event()
         release_reconciliation = asyncio.Event()
-        original_reconcile = service._reconcile_materialized_promotion_commit  # pyright: ignore[reportPrivateUsage]
+        original_reconcile = InputBufferService._reconcile_materialized_promotion_commit  # pyright: ignore[reportPrivateUsage]
 
         async def delayed_reconcile(
+            bound_service: InputBufferService,
             *,
             session_id: str,
             buffer_id: str | None,
@@ -1914,13 +1926,14 @@ class TestInputBufferService:
             reconciliation_started.set()
             await release_reconciliation.wait()
             return await original_reconcile(
+                bound_service,
                 session_id=session_id,
                 buffer_id=buffer_id,
                 promoted=promoted,  # pyright: ignore[reportArgumentType]
             )
 
         monkeypatch.setattr(
-            service,
+            InputBufferService,
             "_reconcile_materialized_promotion_commit",
             delayed_reconcile,
         )

@@ -31,6 +31,8 @@ from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_execution.data import AgentRunCreate
+from azents.repos.user import UserRepository
+from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
 from azents.testing.model_selection import (
@@ -333,29 +335,37 @@ class TestAgentSessionRepository:
                 parent_agent_run_id=None,
             ),
         )
+        first_user = await UserRepository().create(
+            rdb_session,
+            UserCreate(email="request-stop-first@example.com"),
+        )
+        second_user = await UserRepository().create(
+            rdb_session,
+            UserCreate(email="request-stop-second@example.com"),
+        )
 
         first = await session_repo.request_stop(
             rdb_session,
             session_id=agent_session.id,
             stop_request_id="stop-1",
-            user_id="user-1",
+            user_id=first_user.id,
         )
         second = await session_repo.request_stop(
             rdb_session,
             session_id=agent_session.id,
             stop_request_id="stop-2",
-            user_id="user-2",
+            user_id=second_user.id,
         )
         stopped_run = await run_repo.get_by_id(rdb_session, agent_run.id)
 
         assert first is not None
         assert first.stop_requested_at is not None
         assert first.stop_request_id == "stop-1"
-        assert first.stop_requested_by == "user-1"
+        assert first.stop_requested_by == first_user.id
         assert second is not None
         assert second.stop_requested_at == first.stop_requested_at
         assert second.stop_request_id == "stop-1"
-        assert second.stop_requested_by == "user-1"
+        assert second.stop_requested_by == first_user.id
         assert stopped_run is not None
         assert stopped_run.stop_requested_at == first.stop_requested_at
 
@@ -927,6 +937,7 @@ class TestAgentSessionRepository:
                 SessionAgent,
                 SimpleNamespace(
                     id="root-agent",
+                    context_id="root-context",
                     root_session_agent_id="root-agent",
                 ),
             )
@@ -974,8 +985,9 @@ class TestAgentSessionRepository:
 
         class RecordingSession:
             async def execute(self, statement: object) -> object:
-                del statement
-                order.append("delete_agent_sessions")
+                assert isinstance(statement, sa.Delete)
+                table_name = cast(sa.Table, statement.table).name
+                order.append(f"delete_{table_name}")
                 return object()
 
             async def flush(self) -> None:
@@ -997,6 +1009,7 @@ class TestAgentSessionRepository:
             "read_link",
             "read_subtree",
             "lock_agent_sessions",
+            "delete_session_agent_context_git_worktrees",
             "delete_agent_sessions",
             "flush",
         ]

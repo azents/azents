@@ -31,7 +31,10 @@ from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.event import RDBEvent
 from azents.rdb.models.session_agent import RDBSessionAgent
-from azents.rdb.models.session_agent_context import RDBSessionAgentContext
+from azents.rdb.models.session_agent_context import (
+    RDBSessionAgentContext,
+    RDBSessionAgentContextGitWorktree,
+)
 
 from .data import AgentSession, AgentSessionCreate, PendingSessionCommand, SessionAgent
 
@@ -629,6 +632,20 @@ class AgentSessionRepository:
             if linked_agent is None and missing_session_ids == {agent_session_id}:
                 return
             raise RuntimeError("SessionAgent subtree references missing AgentSessions")
+        if (
+            linked_agent is not None
+            and linked_agent.id == linked_agent.root_session_agent_id
+        ):
+            # Delete worktrees before the shared root context can cascade.
+            # Otherwise PostgreSQL can interleave that CASCADE with the creator
+            # AgentSession/SessionAgent SET NULL triggers and revalidate a row
+            # after its context has already disappeared.
+            await session.execute(
+                sa.delete(RDBSessionAgentContextGitWorktree).where(
+                    RDBSessionAgentContextGitWorktree.session_agent_context_id
+                    == linked_agent.context_id
+                )
+            )
         await session.execute(
             sa.delete(RDBAgentSession).where(RDBAgentSession.id.in_(session_ids))
         )

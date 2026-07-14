@@ -470,6 +470,24 @@ def _committing_session_manager(
     return session_manager
 
 
+async def _cleanup_committed_test_scope(
+    rdb_engine: AsyncEngine,
+    *,
+    workspace_handle: str,
+    user_id: str | None,
+) -> None:
+    """Delete independently committed test rows in FK-safe ownership order."""
+    async with AsyncSession(rdb_engine, expire_on_commit=False) as session:
+        # Workspace deletion cascades through AgentSession/InputBuffer and Agent
+        # ownership, including the create-request row's Agent FK.  Only then can
+        # the InputBuffer actor's RESTRICT FK no longer block User deletion.
+        await WorkspaceRepository().delete_by_handle(session, workspace_handle)
+        await session.flush()
+        if user_id is not None:
+            await UserRepository().delete(session, user_id)
+        await session.commit()
+
+
 async def _create_workspace(session: AsyncSession, handle: str) -> str:
     """Create Workspace for tests."""
     repo = WorkspaceRepository()
@@ -1223,77 +1241,94 @@ class TestAgentSessionInputService:
         """Concurrent global claims return one Session and one first input."""
         del latest_db_schema
         suffix = uuid4().hex[:8]
-        async with AsyncSession(rdb_engine, expire_on_commit=False) as session:
-            workspace_id = await _create_workspace(
-                session,
-                f"new-session-concurrent-{suffix}",
-            )
-            user_id = await _create_user(
-                session,
-                f"new-session-concurrent-{suffix}@example.com",
-            )
-            await _add_workspace_user(
-                session,
-                workspace_id=workspace_id,
-                user_id=user_id,
-            )
-            agent_id = await _create_agent(
-                session,
-                workspace_id,
-                f"new-session-concurrent-{suffix}",
-            )
-            await session.commit()
-        session_manager = _committing_session_manager(rdb_engine)
-        service = _agent_session_input_service(session_manager)
-
-        async def create(
-            timestamp: str,
-        ) -> Result[
-            CreatedAgentSessionInputResult,
-            AgentSessionInputError,
-        ]:
-            return await service.create_team_session_with_buffered_input(
-                agent_id=agent_id,
-                message=InputMessage(
-                    text="concurrent create",
+        workspace_handle = f"new-session-concurrent-{suffix}"
+        user_id: str | None = None
+        try:
+            async with AsyncSession(rdb_engine, expire_on_commit=False) as session:
+                workspace_id = await _create_workspace(
+                    session,
+                    workspace_handle,
+                )
+                user_id = await _create_user(
+                    session,
+                    f"new-session-concurrent-{suffix}@example.com",
+                )
+                await _add_workspace_user(
+                    session,
+                    workspace_id=workspace_id,
                     user_id=user_id,
-                    headers=[],
-                    metadata={"timestamp": timestamp},
-                    attachments=[],
-                ),
-                inference_profile=_TEST_INFERENCE_PROFILE,
-                user_id=user_id,
-                existing_project_paths=[],
-                setup_actions=[],
-                client_request_id="concurrent-create-1",
-            )
+                )
+                agent_id = await _create_agent(
+                    session,
+                    workspace_id,
+                    f"new-session-concurrent-{suffix}",
+                )
+                await session.commit()
+            assert user_id is not None
+            created_user_id = user_id
+            session_manager = _committing_session_manager(rdb_engine)
+            service = _agent_session_input_service(session_manager)
 
-        first, second = await asyncio.gather(create("first"), create("retry"))
+            async def create(
+                timestamp: str,
+            ) -> Result[
+                CreatedAgentSessionInputResult,
+                AgentSessionInputError,
+            ]:
+                return await service.create_team_session_with_buffered_input(
+                    agent_id=agent_id,
+                    message=InputMessage(
+                        text="concurrent create",
+                        user_id=created_user_id,
+                        headers=[],
+                        metadata={"timestamp": timestamp},
+                        attachments=[],
+                    ),
+                    inference_profile=_TEST_INFERENCE_PROFILE,
+                    user_id=created_user_id,
+                    existing_project_paths=[],
+                    setup_actions=[],
+                    client_request_id="concurrent-create-1",
+                )
 
-        assert isinstance(first, Success)
-        assert isinstance(second, Success)
-        assert first.value.agent_session.id == second.value.agent_session.id
-        assert first.value.input_buffer.id == second.value.input_buffer.id
-        async with AsyncSession(rdb_engine, expire_on_commit=False) as session:
-            sessions = await AgentSessionRepository().list_active_by_agent_id(
-                session,
-                agent_id,
-            )
-            buffers = await InputBufferRepository().list_by_session_id(
-                session,
-                first.value.agent_session.id,
-            )
-            request = await AgentSessionCreateRequestRepository().get_by_key(
-                session,
+            # TaskGroup drains or cancels both independent transactions before
+            # cleanup even if one side raises unexpectedly.
+            async with asyncio.TaskGroup() as task_group:
+                first_task = task_group.create_task(create("first"))
+                second_task = task_group.create_task(create("retry"))
+            first = first_task.result()
+            second = second_task.result()
+
+            assert isinstance(first, Success)
+            assert isinstance(second, Success)
+            assert first.value.agent_session.id == second.value.agent_session.id
+            assert first.value.input_buffer.id == second.value.input_buffer.id
+            async with AsyncSession(rdb_engine, expire_on_commit=False) as session:
+                sessions = await AgentSessionRepository().list_active_by_agent_id(
+                    session,
+                    agent_id,
+                )
+                buffers = await InputBufferRepository().list_by_session_id(
+                    session,
+                    first.value.agent_session.id,
+                )
+                request = await AgentSessionCreateRequestRepository().get_by_key(
+                    session,
+                    user_id=created_user_id,
+                    agent_id=agent_id,
+                    client_request_id="concurrent-create-1",
+                )
+            assert len(sessions) == 2
+            assert [buffer.id for buffer in buffers] == [first.value.input_buffer.id]
+            assert request is not None
+            assert request.agent_session_id == first.value.agent_session.id
+            assert request.input_buffer_id == first.value.input_buffer.id
+        finally:
+            await _cleanup_committed_test_scope(
+                rdb_engine,
+                workspace_handle=workspace_handle,
                 user_id=user_id,
-                agent_id=agent_id,
-                client_request_id="concurrent-create-1",
             )
-        assert len(sessions) == 2
-        assert [buffer.id for buffer in buffers] == [first.value.input_buffer.id]
-        assert request is not None
-        assert request.agent_session_id == first.value.agent_session.id
-        assert request.input_buffer_id == first.value.input_buffer.id
 
     async def test_buffered_agent_input_rejects_archived_session_after_rollover(
         self,
