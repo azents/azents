@@ -834,6 +834,22 @@
         "sequenceIndex": 3
       },
       "response": {
+        "error": {
+          "message": "Deterministic retry attempt 4 failed.",
+          "type": "rate_limit_error",
+          "code": "rate_limit"
+        },
+        "status": 429
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Failed run retry exhaust then manual recover",
+        "hasToolResult": false,
+        "sequenceIndex": 4
+      },
+      "response": {
         "content": "Manual failed-run retry recovered successfully."
       }
     },
@@ -879,6 +895,22 @@
       "response": {
         "error": {
           "message": "Deterministic stale retry attempt 3 failed.",
+          "type": "rate_limit_error",
+          "code": "rate_limit"
+        },
+        "status": 429
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Failed run retry stale conflict",
+        "hasToolResult": false,
+        "sequenceIndex": 3
+      },
+      "response": {
+        "error": {
+          "message": "Deterministic stale retry attempt 4 failed.",
           "type": "rate_limit_error",
           "code": "rate_limit"
         },
