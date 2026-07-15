@@ -1,6 +1,7 @@
 ---
 title: "Responses Stream Terminal Validation"
 created: 2026-07-15
+implemented: 2026-07-15
 tags: [backend, engine, llm, retry]
 ---
 # Responses Stream Terminal Validation

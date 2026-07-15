@@ -89,6 +89,7 @@ _PROVIDER_IDS_WITH_INPUT_MESSAGE_INSTRUCTIONS = _XAI_PROVIDER_IDS
 _PROVIDER_NAMES_WITH_INPUT_MESSAGE_INSTRUCTIONS = {"xai", "xai_oauth"}
 _PROMPT_CACHE_KEY_PREFIX = "azs"
 _OPENAI_PROMPT_CACHE_KEY_MAX_CHARS = 64
+_MODEL_CALL_ERROR_DETAIL_MAX_CHARS = 512
 _REASONING_ENCRYPTED_CONTENT_INCLUDE: ResponseIncludable = "reasoning.encrypted_content"
 _TOOLS_ADAPTER: TypeAdapter[list[ToolParam]] = TypeAdapter(list[ToolParam])
 _REASONING_ADAPTER: TypeAdapter[Reasoning] = TypeAdapter(Reasoning)
@@ -1420,6 +1421,7 @@ class _LiteLLMResponsesOutputStream:
         self._completed_output_items: list[dict[str, object]] = []
         self._completed_response: dict[str, object] | None = None
         self._completed_response_seen = False
+        self._terminal_error: ModelCallError | None = None
         self._usage: TokenUsagePayload | None = None
         self._partial_text: list[str] = []
 
@@ -1487,6 +1489,16 @@ class _LiteLLMResponsesOutputStream:
                     delta=str(item.get("delta", "")),
                 )
             )
+        elif event_type == "ResponseIncompleteEvent":
+            self._terminal_error = _incomplete_response_model_error(
+                _dict(item.get("response"))
+            )
+        elif event_type == "ResponseFailedEvent":
+            self._terminal_error = _failed_response_model_error(
+                _dict(item.get("response"))
+            )
+        elif event_type == "ResponseErrorEvent":
+            self._terminal_error = _response_error_event_model_error(item)
         elif event_type == "ResponseCompletedEvent":
             self._completed_response_seen = True
             self._completed_response = _dict(item.get("response"))
@@ -1497,28 +1509,27 @@ class _LiteLLMResponsesOutputStream:
         return NormalizedAdapterOutput(projections=projections)
 
     def complete(self) -> NormalizedAdapterOutput:
-        """Build durable events and usage after normal stream completion."""
-        events: list[Event] = []
-        if self._completed_response_seen:
-            events.extend(
-                self.normalizer.normalize_completed(
-                    self._session_id,
-                    self._completed_response or {},
-                    self._completed_output_items,
-                )
-            )
-        elif self._completed_output_items:
-            events.extend(
-                self.normalizer.normalize_output_items(
-                    self._session_id,
-                    self._completed_output_items,
-                )
-            )
+        """Build durable output only after explicit successful completion."""
+        if self._terminal_error is not None:
+            raise self._terminal_error
+        if not self._completed_response_seen:
+            raise ModelCallError("Model response stream ended before completion.")
+        return self._build_output()
+
+    def _build_output(self) -> NormalizedAdapterOutput:
+        """Build output from received state without validating terminal status."""
+        events = self.normalizer.normalize_completed(
+            self._session_id,
+            self._completed_response or {},
+            self._completed_output_items,
+        )
         return NormalizedAdapterOutput(events=events, usage=self._usage)
 
     def interrupt(self) -> NormalizedAdapterOutput:
         """Build completed output plus received partial assistant text."""
-        completed = self.complete()
+        if self._terminal_error is not None:
+            raise self._terminal_error
+        completed = self._build_output()
         partial_text = "".join(self._partial_text)
         if not partial_text or _has_assistant_text(completed.events):
             return completed
@@ -1529,6 +1540,68 @@ class _LiteLLMResponsesOutputStream:
         return completed.model_copy(
             update={"events": [*completed.events, partial_event]}
         )
+
+
+def _incomplete_response_model_error(
+    response: dict[str, object],
+) -> ModelCallError:
+    """Create a safe error for a provider-incomplete response."""
+    details = _dict(response.get("incomplete_details"))
+    return _terminal_model_call_error(
+        "Model response was incomplete",
+        message=_bounded_terminal_detail(details.get("reason")),
+    )
+
+
+def _failed_response_model_error(response: dict[str, object]) -> ModelCallError:
+    """Create a safe error for a provider-failed response."""
+    error = _dict(response.get("error"))
+    return _terminal_model_call_error(
+        "Model response failed",
+        message=_bounded_terminal_detail(error.get("message")),
+        code=_bounded_terminal_detail(error.get("code")),
+    )
+
+
+def _response_error_event_model_error(
+    item: dict[str, object],
+) -> ModelCallError:
+    """Create a safe error for a native Responses error event."""
+    return _terminal_model_call_error(
+        "Model call failed",
+        message=_bounded_terminal_detail(item.get("message")),
+        code=_bounded_terminal_detail(item.get("code")),
+    )
+
+
+def _terminal_model_call_error(
+    summary: str,
+    *,
+    message: str | None,
+    code: str | None = None,
+) -> ModelCallError:
+    """Format bounded terminal details as a user-visible model error."""
+    details: list[str] = []
+    if message is not None:
+        details.append(message)
+    if code is not None and code != message:
+        details.append(f"code: {code}")
+    if not details:
+        return ModelCallError(f"{summary}.")
+    return ModelCallError(f"{summary}: {'; '.join(details)}")
+
+
+def _bounded_terminal_detail(value: object) -> str | None:
+    """Return a bounded scalar provider terminal detail."""
+    if isinstance(value, str):
+        detail = value.strip()
+    elif isinstance(value, (int, float)) and not isinstance(value, bool):
+        detail = str(value)
+    else:
+        return None
+    if not detail:
+        return None
+    return detail[:_MODEL_CALL_ERROR_DETAIL_MAX_CHARS]
 
 
 def _has_assistant_text(events: Sequence[Event]) -> bool:

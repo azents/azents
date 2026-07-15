@@ -42,7 +42,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ChatView.tsx
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
 last_verified_at: 2026-07-15
-spec_version: 85
+spec_version: 86
 ---
 
 # Agent Execution Loop
@@ -76,9 +76,14 @@ Main steps:
 
 Streaming text, reasoning, and function-call deltas are UI projections only. The worker coalesces
 text and reasoning deltas for at most 75 milliseconds or 96 characters before Redis/WebSocket
-publication. Durable events are appended only from completed output items or completed responses;
-incomplete tool calls are never admitted. A user stop may durably preserve assistant text received
-before completion.
+publication. A normally exhausted LiteLLM Responses stream must contain an explicit native
+`response.completed` terminal event before its normalized output can be appended. Native
+`response.incomplete`, `response.failed`, and `error` outcomes, plus EOF without a recognized
+terminal event, raise `ModelCallError` before durable model events or markers are appended and flow
+through the failed-run retry/finalization boundary. Completed output items may reconstruct a
+successfully completed response but do not independently prove response completion. Incomplete tool
+calls are never admitted. A user stop remains a separate interruption path and may durably preserve
+assistant text received before completion.
 
 ## 2. Run State
 
@@ -675,6 +680,9 @@ updated by the user.
 
 ## Changelog
 
+- **2026-07-15** (spec_version 86) — Required explicit native `response.completed` before successful
+  Responses stream normalization and routed unsuccessful or terminal-less streams through failed-run
+  retry/finalization.
 - **2026-07-15** (spec_version 85) — Required preallocated blob keys with S3 outside database
   sessions, live PostgreSQL snapshot closure before Redis reads, and transparent lifecycle DB errors.
 - **2026-07-15** (spec_version 84) — Moved input-buffer attachment metadata resolution before the
