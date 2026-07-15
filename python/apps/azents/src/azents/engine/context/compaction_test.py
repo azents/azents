@@ -16,6 +16,7 @@ from azents.engine.context.compaction import (
     summarize_text_with_model,
 )
 from azents.engine.run.errors import CompactionFailedError
+from azents.testing.model_stream import make_test_model_stream_watchdog
 
 
 class _ResponsesOutputText:
@@ -154,6 +155,7 @@ class TestSummarizeTextWithModel:
         )
 
         result = await summarize_text_with_model(
+            watchdog=make_test_model_stream_watchdog(),
             provider=LLMProvider.CHATGPT_OAUTH,
             model="gpt-5.5",
             credential_kwargs={
@@ -196,6 +198,7 @@ class TestSummarizeTextWithModel:
         )
 
         await summarize_text_with_model(
+            watchdog=make_test_model_stream_watchdog(),
             provider=LLMProvider.OPENAI,
             model="gpt-5.5",
             credential_kwargs={"api_key": "test-key"},
@@ -237,6 +240,7 @@ class TestSummarizeTextWithModel:
         )
 
         result = await summarize_text_with_model(
+            watchdog=make_test_model_stream_watchdog(),
             provider=LLMProvider.ANTHROPIC,
             model="claude-sonnet-4-5",
             credential_kwargs={"api_key": "test-key"},
@@ -279,6 +283,7 @@ class TestSummarizeTextWithModel:
         )
 
         result = await summarize_text_with_model(
+            watchdog=make_test_model_stream_watchdog(),
             provider=LLMProvider.CHATGPT_OAUTH,
             model="gpt-5.5",
             credential_kwargs={"api_key": "test-key"},
@@ -327,6 +332,7 @@ class TestSummarizeTextWithModel:
         )
 
         result = await summarize_text_with_model(
+            watchdog=make_test_model_stream_watchdog(),
             provider=LLMProvider.CHATGPT_OAUTH,
             model="gpt-5.5",
             credential_kwargs={"api_key": "test-key"},
@@ -366,6 +372,7 @@ class TestSummarizeTextWithModel:
         )
 
         result = await summarize_text_with_model(
+            watchdog=make_test_model_stream_watchdog(),
             provider=LLMProvider.CHATGPT_OAUTH,
             model="gpt-5.5",
             credential_kwargs={"api_key": "test-key"},
@@ -408,6 +415,7 @@ class TestSummarizeTextWithModel:
         )
 
         result = await summarize_text_with_model(
+            watchdog=make_test_model_stream_watchdog(),
             provider=LLMProvider.CHATGPT_OAUTH,
             model="gpt-5.5",
             credential_kwargs={"api_key": "test-key"},
@@ -438,6 +446,7 @@ class TestSummarizeTextWithModel:
         )
 
         result = await summarize_text_with_model(
+            watchdog=make_test_model_stream_watchdog(),
             provider=LLMProvider.CHATGPT_OAUTH,
             model="gpt-5.5",
             credential_kwargs={"api_key": "test-key"},
@@ -497,6 +506,7 @@ class TestSummarizeTextWithModel:
         )
 
         result = await summarize_text_with_model(
+            watchdog=make_test_model_stream_watchdog(),
             provider=LLMProvider.CHATGPT_OAUTH,
             model="gpt-5.4-mini",
             credential_kwargs={"api_key": "test-key"},
@@ -552,6 +562,7 @@ class TestSummarizeTextWithModel:
 
         with pytest.raises(CompactionFailedError, match="bad_request"):
             await summarize_text_with_model(
+                watchdog=make_test_model_stream_watchdog(),
                 provider=LLMProvider.CHATGPT_OAUTH,
                 model="gpt-5.4-mini",
                 credential_kwargs={"api_key": "test-key"},
@@ -600,6 +611,7 @@ class TestSummarizeTextWithModel:
         )
 
         result = await summarize_text_with_model(
+            watchdog=make_test_model_stream_watchdog(),
             provider=LLMProvider.CHATGPT_OAUTH,
             model="gpt-5.4-mini",
             credential_kwargs={"api_key": "test-key"},

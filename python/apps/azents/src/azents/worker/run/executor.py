@@ -71,7 +71,11 @@ from azents.engine.run.contracts import (
     ToolkitBinding,
 )
 from azents.engine.run.emit import Emit, handle_engine_event
-from azents.engine.run.errors import UserVisibleRuntimeError
+from azents.engine.run.errors import (
+    CompactionModelStreamTimeoutError,
+    ModelStreamTimeoutError,
+    UserVisibleRuntimeError,
+)
 from azents.engine.run.failure import (
     FailedRunAttempt,
     FailedRunAttemptSource,
@@ -1475,10 +1479,20 @@ class RunExecutor:
                     await self.live_event_projector.discard_failed_attempt(
                         message.session_id
                     )
-                    retry_state = await self._record_failed_run_attempt(
-                        session_id=message.session_id,
-                        run_id=run_id,
-                        attempt=FailedRunAttempt(
+                    failed_attempt = (
+                        FailedRunAttempt(
+                            user_message=str(exc),
+                            internal_message=str(exc),
+                            error_type=exc.__class__.__name__,
+                            source="model",
+                            visibility="user_visible",
+                            attempt_number=attempt_number,
+                            occurred_at=datetime.datetime.now(datetime.UTC),
+                            retryability="transient",
+                            failure_code=exc.failure_code,
+                        )
+                        if isinstance(exc, CompactionModelStreamTimeoutError)
+                        else FailedRunAttempt(
                             user_message=_INTERNAL_ERROR_MESSAGE,
                             internal_message=str(exc),
                             error_type=exc.__class__.__name__,
@@ -1488,22 +1502,40 @@ class RunExecutor:
                             visibility="internal",
                             attempt_number=attempt_number,
                             occurred_at=datetime.datetime.now(datetime.UTC),
-                        ),
+                        )
+                    )
+                    retry_state = await self._record_failed_run_attempt(
+                        session_id=message.session_id,
+                        run_id=run_id,
+                        attempt=failed_attempt,
                         previous_retry_state=current_retry_state,
                     )
                     current_retry_state = retry_state
                     live_retry_state = retry_state
                     active_model_call_started_at = None
                     await publish_live_run()
-                    logger.exception(
-                        "Internal error during engine run attempt",
-                        extra={
-                            "session_id": message.session_id,
-                            "run_id": run_id,
-                            "attempt_number": attempt_number,
-                            "error_type": exc.__class__.__name__,
-                        },
-                    )
+                    if isinstance(exc, CompactionModelStreamTimeoutError):
+                        logger.warning(
+                            "Compaction model stream attempt timed out",
+                            extra={
+                                "session_id": message.session_id,
+                                "run_id": run_id,
+                                "attempt_number": attempt_number,
+                                "error_type": exc.__class__.__name__,
+                                "model_stream_failure_code": exc.failure_code,
+                                "model_stream_timeout_kind": exc.timeout_kind,
+                            },
+                        )
+                    else:
+                        logger.exception(
+                            "Internal error during engine run attempt",
+                            extra={
+                                "session_id": message.session_id,
+                                "run_id": run_id,
+                                "attempt_number": attempt_number,
+                                "error_type": exc.__class__.__name__,
+                            },
+                        )
                     finalization_reason = _failed_run_finalization_reason(retry_state)
                     if finalization_reason is not None:
                         run_end_reason = "error"
@@ -1638,7 +1670,10 @@ class RunExecutor:
         message = str(exc)
         retryability: FailedRunRetryability = "unknown"
         failure_code: str | None = None
-        if _FAILED_RUN_NO_FIXTURE_MATCH_CODE in message:
+        if isinstance(exc, ModelStreamTimeoutError):
+            retryability = "transient"
+            failure_code = exc.failure_code
+        elif _FAILED_RUN_NO_FIXTURE_MATCH_CODE in message:
             retryability = "non_retryable"
             failure_code = _FAILED_RUN_NO_FIXTURE_MATCH_CODE
         return FailedRunAttempt(

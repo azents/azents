@@ -20,6 +20,7 @@ from azents.broker.types import (
     BrokerMessage,
     SessionBroker,
 )
+from azents.engine.model_stream import ModelStreamWatchdog, get_model_stream_watchdog
 from azents.worker.deps import get_worker_broker
 from azents.worker.session.recovery import StuckSessionRecovery
 from azents.worker.session.runner import SessionRunner
@@ -70,6 +71,10 @@ class AgentWorker:
     ]
     session_runner_factory: Annotated[
         SessionRunnerFactory, Depends(SessionRunnerFactory)
+    ]
+    model_stream_watchdog: Annotated[
+        ModelStreamWatchdog,
+        Depends(get_model_stream_watchdog),
     ]
     shutdown_event: asyncio.Event = dataclasses.field(
         init=False,
@@ -139,6 +144,9 @@ class AgentWorker:
             await asyncio.gather(
                 *(r.shutdown() for r in runners.values()),
                 return_exceptions=True,
+            )
+            await self.model_stream_watchdog.cleanup_registry.drain(
+                grace_seconds=self.model_stream_watchdog.close_grace_seconds
             )
             logger.info("Agent worker stopped")
 

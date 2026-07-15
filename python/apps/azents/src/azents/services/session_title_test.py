@@ -46,6 +46,7 @@ from azents.services.session_title import (
     title_context_from_events,
     title_context_from_initial_prompt,
 )
+from azents.testing.model_stream import make_test_model_stream_watchdog
 
 
 class TestSessionTitleHelpers:
@@ -87,11 +88,14 @@ class TestSessionTitleHelpers:
             fake_call_responses_model,
         )
 
+        watchdog = make_test_model_stream_watchdog()
         title = await generate_session_title_with_model(
             provider=LLMProvider.ANTHROPIC,
             model="anthropic/test",
             credential_kwargs={},
             context="Compare two insurance options",
+            session_id=None,
+            watchdog=watchdog,
         )
 
         assert title == "Insurance option comparison"
@@ -110,6 +114,9 @@ class TestSessionTitleHelpers:
                 "instructions": calls[0]["instructions"],
                 "stream": True,
                 "max_output_tokens": 80,
+                "watchdog": watchdog,
+                "timeout_policy": calls[0]["timeout_policy"],
+                "call_context": calls[0]["call_context"],
             }
         ]
         assert isinstance(calls[0]["instructions"], str)
@@ -131,6 +138,7 @@ class TestSessionTitleHelpers:
                 _IntegrationRepository(),
             ),
             session_manager=cast(Any, _session_manager),
+            model_stream_watchdog=make_test_model_stream_watchdog(),
         )
 
         async def raise_bad_request(**kwargs: object) -> str | None:

@@ -108,6 +108,7 @@ from azents.engine.hooks.types import (
     TurnStartHookContext,
 )
 from azents.engine.io.user_input import RunUserMessage
+from azents.engine.model_stream import ModelStreamWatchdog, get_model_stream_watchdog
 from azents.engine.run.contracts import RunContext, RunRequest, ToolkitBinding
 from azents.engine.run.emit import Emit, durable, ephemeral
 from azents.engine.run.types import (
@@ -150,9 +151,35 @@ def _agent_run_execution_factory() -> RunExecutionFactory:
     return AgentRunExecution
 
 
-def _summary_model_call() -> SummaryModelCall:
-    """Summary model call dependency."""
-    return summarize_text_with_model
+def _summary_model_call(
+    watchdog: Annotated[ModelStreamWatchdog, Depends(get_model_stream_watchdog)],
+) -> SummaryModelCall:
+    """Bind the process-owned watchdog to compaction model calls."""
+
+    async def call_summary(
+        *,
+        provider: LLMProvider,
+        model: str,
+        credential_kwargs: dict[str, object],
+        system_prompt: str,
+        user_prompt: str,
+        conversation_text: str,
+        max_output_tokens: int,
+        session_id: str | None = None,
+    ) -> str:
+        return await summarize_text_with_model(
+            watchdog=watchdog,
+            provider=provider,
+            model=model,
+            credential_kwargs=credential_kwargs,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            conversation_text=conversation_text,
+            max_output_tokens=max_output_tokens,
+            session_id=session_id,
+        )
+
+    return call_summary
 
 
 @dataclasses.dataclass(frozen=True)
@@ -190,6 +217,10 @@ class AgentEngineAdapter:
     exchange_file_service: Annotated[ExchangeFileService, Depends(ExchangeFileService)]
     model_file_service: Annotated[ModelFileService, Depends(ModelFileService)]
     config: Annotated[EventEngineAdapterConfig, Depends(EventEngineAdapterConfig)]
+    model_stream_watchdog: Annotated[
+        ModelStreamWatchdog,
+        Depends(get_model_stream_watchdog),
+    ]
     execution_factory: Annotated[
         RunExecutionFactory, Depends(_agent_run_execution_factory)
     ]
@@ -467,6 +498,13 @@ class AgentEngineAdapter:
                 ]
             ),
             model_adapter=LiteLLMResponsesModelAdapter(),
+            model_stream_watchdog=self.model_stream_watchdog,
+            model_stream_provider=provider,
+            model_stream_inference_profile=(
+                request.inference_state.model_target_label
+                if request.inference_state is not None
+                else None
+            ),
             output_normalizer=LiteLLMResponsesOutputNormalizer(
                 provider=provider,
                 model=request.model,

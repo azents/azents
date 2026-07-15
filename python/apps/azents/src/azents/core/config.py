@@ -10,7 +10,7 @@ from typing import Literal, Self
 
 from azcommon.logging import RuntimeEnvironment
 from mypy_boto3_rds import RDSClient
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 RegistrationMode = Literal["closed", "signup_token", "open"]
@@ -80,6 +80,12 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379"
 
     runtime_default_provider_id: str | None = None
+
+    # Streaming model watchdog
+    model_stream_connect_timeout_seconds: float = 15.0
+    model_stream_idle_timeout_seconds: float = 300.0
+    model_stream_absolute_timeout_seconds: float = 1_800.0
+    model_stream_close_grace_seconds: float = 5.0
 
     # GitHub Platform App (JWT)
     github_platform_app_id: str | None = None
@@ -297,6 +303,15 @@ class RuntimeConfig(BaseModel):
     default_provider_id: str | None = None
 
 
+class ModelStreamTimeoutConfig(BaseModel):
+    """Validated process-wide streaming model watchdog settings."""
+
+    connect_timeout_seconds: float = Field(gt=0, allow_inf_nan=False)
+    parsed_event_idle_timeout_seconds: float = Field(gt=0, allow_inf_nan=False)
+    absolute_attempt_timeout_seconds: float = Field(gt=0, allow_inf_nan=False)
+    close_grace_seconds: float = Field(gt=0, allow_inf_nan=False)
+
+
 class FileLifecycleConfig(BaseModel):
     """File lifecycle retention settings."""
 
@@ -352,6 +367,7 @@ class Config(BaseModel):
     credential_encryption: CredentialEncryptionConfig
     redis: RedisConfig
     runtime: RuntimeConfig
+    model_stream_timeout: ModelStreamTimeoutConfig
     github: GitHubConfig | None = None
     web_url: str = ""
     api_url: str = ""
@@ -420,6 +436,16 @@ class Config(BaseModel):
             ),
             runtime=RuntimeConfig(
                 default_provider_id=settings.runtime_default_provider_id,
+            ),
+            model_stream_timeout=ModelStreamTimeoutConfig(
+                connect_timeout_seconds=(settings.model_stream_connect_timeout_seconds),
+                parsed_event_idle_timeout_seconds=(
+                    settings.model_stream_idle_timeout_seconds
+                ),
+                absolute_attempt_timeout_seconds=(
+                    settings.model_stream_absolute_timeout_seconds
+                ),
+                close_grace_seconds=settings.model_stream_close_grace_seconds,
             ),
             github=GitHubConfig(
                 platform_app_id=settings.github_platform_app_id,

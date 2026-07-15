@@ -13,6 +13,13 @@ from pydantic import TypeAdapter
 
 from azents.core.enums import LLMProvider
 from azents.engine.events.litellm_responses import guard_litellm_streaming_logging
+from azents.engine.model_stream import (
+    ModelStreamCallContext,
+    ModelStreamTimeoutPolicy,
+    ModelStreamWatchdog,
+    close_stream_response,
+    connect_only_http_timeout,
+)
 
 _RESPONSE_INPUT_ADAPTER: TypeAdapter[ResponseInputParam] = TypeAdapter(
     ResponseInputParam
@@ -114,6 +121,9 @@ async def call_responses_model(
     instructions: str,
     stream: bool,
     max_output_tokens: int | None,
+    watchdog: ModelStreamWatchdog,
+    timeout_policy: ModelStreamTimeoutPolicy,
+    call_context: ModelStreamCallContext,
     text: ResponseTextConfigParam = DEFAULT_RESPONSES_TEXT_CONFIG,
 ) -> object:
     """Call LiteLLM Responses API with Azents-standard endpoint handling."""
@@ -127,23 +137,34 @@ async def call_responses_model(
         request_input_items.insert(0, {"role": "system", "content": instructions})
         top_level_instructions = None
     input_payload = _RESPONSE_INPUT_ADAPTER.validate_python(request_input_items)
-    response = await aresponses(
-        model=model,
-        input=input_payload,
-        instructions=top_level_instructions,
-        stream=stream,
-        max_output_tokens=responses_max_output_tokens(provider, max_output_tokens),
-        text=text,
-        include=endpoint_kwargs.include,
-        custom_llm_provider=endpoint_kwargs.custom_llm_provider,
-        store=endpoint_kwargs.store,
-        api_key=endpoint_kwargs.api_key,
-        api_base=endpoint_kwargs.api_base,
-        base_url=endpoint_kwargs.base_url,
+
+    async def open_response() -> object:
+        response = await aresponses(
+            model=model,
+            input=input_payload,
+            instructions=top_level_instructions,
+            stream=stream,
+            max_output_tokens=responses_max_output_tokens(provider, max_output_tokens),
+            text=text,
+            include=endpoint_kwargs.include,
+            custom_llm_provider=endpoint_kwargs.custom_llm_provider,
+            store=endpoint_kwargs.store,
+            api_key=endpoint_kwargs.api_key,
+            api_base=endpoint_kwargs.api_base,
+            base_url=endpoint_kwargs.base_url,
+            timeout=connect_only_http_timeout(timeout_policy.connect_timeout_seconds),
+        )
+        if isinstance(response, AsyncIterable):
+            guard_litellm_streaming_logging(response)
+        return response
+
+    if not stream:
+        return await open_response()
+    return await watchdog.open_response(
+        open_response,
+        policy=timeout_policy,
+        context=call_context,
     )
-    if isinstance(response, AsyncIterable):
-        guard_litellm_streaming_logging(response)
-    return response
 
 
 async def extract_response_text(response: object) -> str:
@@ -221,32 +242,35 @@ async def _extract_stream_response_text(response: AsyncIterable[object]) -> str:
     """Extract assistant text from a streaming Responses event sequence."""
     deltas: list[str] = []
     completed_texts: list[str] = []
-    async for event in response:
-        raw = model_dump(event)
-        stream_error = _stream_error(raw)
-        if stream_error is not None:
-            raise stream_error
-        delta = _text_delta(raw)
-        if delta:
-            deltas.append(delta)
-        text = _event_text(raw)
-        if text:
-            completed_texts.append(text)
-        raw_item = raw.get("item")
-        item = model_dump(raw_item)
-        if item.get("type") == "message":
-            text = extract_message_item_text(item)
+    try:
+        async for event in response:
+            raw = model_dump(event)
+            stream_error = _stream_error(raw)
+            if stream_error is not None:
+                raise stream_error
+            delta = _text_delta(raw)
+            if delta:
+                deltas.append(delta)
+            text = _event_text(raw)
             if text:
                 completed_texts.append(text)
-        nested_item = model_dump(item.get("item"))
-        if nested_item.get("type") == "message":
-            text = extract_message_item_text(nested_item)
-            if text:
-                completed_texts.append(text)
-        response_dict = model_dump(raw.get("response"))
-        completed_texts.extend(extract_response_output_text(response_dict))
-        item_response_dict = model_dump(item.get("response"))
-        completed_texts.extend(extract_response_output_text(item_response_dict))
+            raw_item = raw.get("item")
+            item = model_dump(raw_item)
+            if item.get("type") == "message":
+                text = extract_message_item_text(item)
+                if text:
+                    completed_texts.append(text)
+            nested_item = model_dump(item.get("item"))
+            if nested_item.get("type") == "message":
+                text = extract_message_item_text(nested_item)
+                if text:
+                    completed_texts.append(text)
+            response_dict = model_dump(raw.get("response"))
+            completed_texts.extend(extract_response_output_text(response_dict))
+            item_response_dict = model_dump(item.get("response"))
+            completed_texts.extend(extract_response_output_text(item_response_dict))
+    finally:
+        await close_stream_response(response)
     if completed_texts:
         return "\n".join(_dedupe_adjacent(completed_texts))
     if deltas:
