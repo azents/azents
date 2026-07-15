@@ -13,6 +13,8 @@ code_paths:
   - python/apps/azents/src/azents/engine/tools/**
   - python/apps/azents/src/azents/engine/context/compaction.py
   - python/apps/azents/src/azents/engine/context/window.py
+  - python/apps/azents/src/azents/engine/model_stream.py
+  - python/apps/azents/src/azents/engine/responses.py
   - python/apps/azents/src/azents/engine/events/**
   - python/apps/azents/src/azents/engine/hooks/**
   - python/apps/azents/src/azents/engine/run/deps.py
@@ -26,6 +28,7 @@ code_paths:
   - python/apps/azents/src/azents/services/agent_runtime/**
   - python/apps/azents/src/azents/services/input_buffer.py
   - python/apps/azents/src/azents/services/model_file.py
+  - python/apps/azents/src/azents/services/session_title.py
   - python/apps/azents/src/azents/repos/input_buffer/**
   - python/apps/azents/src/azents/repos/action_execution/**
   - python/apps/azents/src/azents/repos/model_file/**
@@ -37,12 +40,13 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/model_file.py
   - python/apps/azents/src/azents/rdb/models/workspace_model_settings.py
   - python/apps/azents/src/azents/worker/worker.py
+  - python/apps/azents/src/azents/worker/live/**
   - python/apps/azents/src/azents/worker/run/**
   - python/apps/azents/src/azents/worker/session/**
   - typescript/apps/azents-web/src/features/chat/components/ChatView.tsx
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
 last_verified_at: 2026-07-15
-spec_version: 86
+spec_version: 87
 ---
 
 # Agent Execution Loop
@@ -84,6 +88,49 @@ through the failed-run retry/finalization boundary. Completed output items may r
 successfully completed response but do not independently prove response completion. Incomplete tool
 calls are never admitted. A user stop remains a separate interruption path and may durably preserve
 assistant text received before completion.
+
+### Model Stream Attempt Watchdog
+
+Azents owns the lifecycle bounds for every streaming Responses call used by primary sampling,
+context compaction, and automatic Session title generation. The process configuration supplies one
+default policy; there are no provider-, model-, inference-profile-, Session-, or legacy-fallback
+overrides. The production defaults are:
+
+| Bound | Default | Activity rule |
+| --- | ---: | --- |
+| Connection establishment | 15 seconds | Expires while acquiring the provider response handle. |
+| Parsed-event idle | 300 seconds | Resets after every parsed provider event, regardless of event type or payload. |
+| Absolute attempt | 1,800 seconds | Starts with response-handle acquisition and never resets. |
+| Provider close grace | 5 seconds | Bounds cooperative close before cleanup remains process-owned. |
+
+The LiteLLM HTTP client receives a connect-only `httpx.Timeout`; its read, write, and pool bounds
+remain disabled so transport idle behavior does not become a second stream-liveness policy. Response
+handle acquisition and async iteration share the same parsed-event idle and absolute deadlines. The
+watchdog does not classify semantic progress: metadata, reasoning, text, tool-call, terminal, and
+other parsed events all refresh idle equally.
+
+A watchdog expiry cancels the active response acquisition or iteration and raises a typed failure
+before normalized output can become durable. The stable failure codes are
+`model_connect_timeout`, `model_stream_idle_timeout`, and `model_attempt_timeout` for connection,
+parsed-event idle, and absolute expiry respectively. Sampling timeouts are transient failed-run
+attempts. Blocking compaction preserves the same timeout metadata through its compaction error and
+uses the command Run retry/finalization boundary; no partial summary is committed. Automatic Session
+title generation catches the timeout and keeps the deterministic initial title without failing the
+completed agent Run.
+
+Cancellation and response close are requested immediately, but retry, terminal failure handling,
+and User Stop do not wait indefinitely for a non-cooperative provider. A process-owned cleanup
+registry strongly retains late response handles and close tasks after the caller leaves. Worker
+shutdown cancels registered cleanup, waits for at most the configured close grace, and records how
+many non-cooperative tasks remain pending. Structured lifecycle logs carry only operational context
+such as call kind, provider, model, Session/Run identifiers, attempt number, deadline, elapsed time,
+failure code, and cleanup state;
+they do not include model content.
+
+User Stop has priority over a concurrent watchdog deadline. It cancels the model attempt
+preemptively, may promote the valid assistant prefix through the existing interruption path, and does
+not enter timeout retry. Failed non-Stop attempts follow the separate live-projection cleanup rule
+described below.
 
 ## 2. Run State
 
@@ -153,7 +200,18 @@ durable `system_error`, without appending a failed `run_marker`, and without mar
 terminal. `RunExecutor` converts the propagated failure into `FailedRunAttempt`, persists
 `agent_runs.retry_state`, waits until `next_retry_at` while observing stop/shutdown, and retries the
 same `run_id`. This keeps the run `running` and prevents durable failed history until retry is
-finalized.
+finalized. `max_retries` counts retries after the initial attempt, so a budget of three permits four
+total attempts and terminal attempt numbers remain one-based.
+
+Before a non-Stop model failure is recorded or its retry state is published, `RunExecutor` asks the
+live projector to discard that attempt's assistant and reasoning projections. The partial batcher
+serializes append, timer flush, durable replacement, and discard per Session so an in-flight flush
+cannot recreate an older prefix after removal. Cleanup targets only `azents-live` assistant and
+reasoning events; user inputs and active tool projections are not part of this attempt-local model
+cleanup. Redis/WebSocket cleanup is best-effort, but the cleanup attempt always precedes retry-state
+publication. A retry therefore starts from canonical durable history rather than concatenating the
+failed prefix with the next attempt. User Stop bypasses this discard because its interruption path
+may durably retain valid assistant text.
 
 When retry wait expires and the next attempt starts, `RunExecutor` clears `agent_runs.retry_state`
 and publishes a `live_run_updated` snapshot with `run.retry = null` so stale retry UI disappears
