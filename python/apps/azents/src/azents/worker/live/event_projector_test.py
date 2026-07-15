@@ -13,10 +13,10 @@ from azents.broker.broadcast import (
 )
 from azents.core.enums import AgentRunPhase, AgentRunStatus
 from azents.core.inference_profile import AppliedInferenceProfile
-from azents.engine.events.engine_events import RunComplete
+from azents.engine.events.engine_events import ContentDelta, ReasoningDelta, RunComplete
 from azents.engine.events.types import ActiveToolCall, AgentRunState
 from azents.services.chat.data import ChatLiveRunState
-from azents.services.chat.live_events import RedisLiveEventStore
+from azents.services.chat.live_events import InMemoryLiveEventStore, RedisLiveEventStore
 from azents.worker.live.event_projector import LiveEventProjector
 
 
@@ -73,6 +73,15 @@ class _LiveEventStore:
         self.clear_count += 1
 
 
+class _FailingDiscardStore(_LiveEventStore):
+    """Fail model-partial lookup during best-effort discard."""
+
+    async def list_by_session_id(self, session_id: str) -> list[object]:
+        """Simulate a live-store read failure."""
+        del session_id
+        raise RuntimeError("live store unavailable")
+
+
 class _Broadcast:
     """WebSocket broadcast test double."""
 
@@ -109,7 +118,7 @@ def _running_run(run_id: str) -> AgentRunState:
 
 
 def _projector(
-    store: _LiveEventStore,
+    store: object,
     broadcast: _Broadcast,
     *,
     current_run: AgentRunState | None = None,
@@ -246,3 +255,41 @@ async def test_live_run_broadcast_failure_is_non_fatal() -> None:
         ),
     )
     await projector.publish_live_run_cleared("session-001", run_id="run-a")
+
+
+@pytest.mark.asyncio
+async def test_failed_attempt_discard_store_failure_is_non_fatal() -> None:
+    """Live-store cleanup failure does not block durable retry handling."""
+    projector = _projector(_FailingDiscardStore(), _Broadcast())
+
+    await projector.discard_failed_attempt("session-001")
+
+
+@pytest.mark.asyncio
+async def test_failed_attempt_discards_published_model_partials() -> None:
+    """Failed-attempt cleanup removes assistant and reasoning live state."""
+    store = InMemoryLiveEventStore()
+    broadcast = _Broadcast()
+    projector = _projector(store, broadcast)
+
+    await projector.update(
+        "session-001",
+        ContentDelta(delta="failed prefix", content_index=0),
+    )
+    await projector.update(
+        "session-001",
+        ReasoningDelta(delta="failed reasoning"),
+    )
+    await projector.flush_session("session-001")
+
+    assert len(await store.list_by_session_id("session-001")) == 2
+
+    await projector.discard_failed_attempt("session-001")
+
+    assert await store.list_by_session_id("session-001") == []
+    assert [event[1]["type"] for event in broadcast.events] == [
+        "live_event_upserted",
+        "live_event_upserted",
+        "live_event_removed",
+        "live_event_removed",
+    ]

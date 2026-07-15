@@ -1166,7 +1166,7 @@ class TestAgentExecutionPersistence:
             server_url=azents_public_server_url,
             token=workspace.token,
             session_id=result.session_id,
-            expected_attempts=3,
+            expected_attempts=4,
         )
         failed_event = _failed_run_error_events(failed_payload)[-1]
         failed_event_id = failed_event.get("id")
@@ -1221,7 +1221,7 @@ class TestAgentExecutionPersistence:
             server_url=azents_public_server_url,
             token=workspace.token,
             session_id=result.session_id,
-            expected_attempts=3,
+            expected_attempts=4,
         )
         failed_event = _failed_run_error_events(failed_payload)[-1]
         failed_event_id = failed_event.get("id")
