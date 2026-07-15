@@ -1491,6 +1491,7 @@
     "removeWorkspaceItem": "Workspace 항목 제거",
     "localBranch": "Base branch",
     "localBranchPlaceholder": "로컬 브랜치를 선택하세요",
+    "noLocalBranchMatches": "검색 조건에 맞는 로컬 브랜치가 없습니다.",
     "localBranchesOnly": "Worktree 생성에는 로컬 브랜치만 표시됩니다.",
     "loadingLocalBranches": "로컬 브랜치 불러오는 중…",
     "noLocalBranches": "이 Project에서 사용할 수 있는 로컬 브랜치가 없습니다.",

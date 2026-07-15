@@ -386,7 +386,9 @@ function GitWorktreeRow({
             disabled={loading || error || noLocalBranches}
             label={t("localBranch")}
             leftSection={loading ? <Loader size="xs" /> : null}
+            nothingFoundMessage={t("noLocalBranchMatches")}
             placeholder={t("localBranchPlaceholder")}
+            searchable
             size="xs"
             value={item.startingRef}
             style={{ flex: 1 }}
