@@ -13,6 +13,14 @@ import * as Sentry from "@sentry/nextjs";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { trpc } from "@/trpc/client";
 import {
+  applyStoppedRunProjection,
+  createOptimisticInterruptedEvent,
+  eventInterruptsRun,
+  liveActivityResponsePending,
+  restoreRunActivityProjection,
+  shouldProjectLivePartialEvent,
+} from "../hooks/chatStopProjection";
+import {
   applyProviderToolCallItem,
   applyProviderToolCallOutput,
 } from "../hooks/providerToolCallProjection";
@@ -1541,6 +1549,16 @@ function upsertPartialHistoryEvent(
   };
 }
 
+function applyOptimisticRunStop(
+  state: ManagedLiveState,
+  event: ChatEventResponse,
+): ManagedLiveState {
+  return {
+    ...applyStoppedRunProjection(state),
+    partialHistory: upsertPartialHistoryEvent(state.partialHistory, event),
+  };
+}
+
 function removePartialHistoryById(
   partialHistory: PartialHistoryState,
   eventId: string,
@@ -1935,6 +1953,11 @@ export function useChatSessionContainer(
   const failedWriteRequestRef = useRef<{ key: string; id: string } | null>(
     null,
   );
+  const optimisticStopRef = useRef<{
+    runId: string;
+    event: ChatEventResponse;
+    previousState: ManagedLiveState;
+  } | null>(null);
   const liveObservationGenerationRef = useRef(0);
   const restSnapshotEpochRef = useRef(0);
   const hasFreshBaselineRef = useRef(false);
@@ -2077,9 +2100,14 @@ export function useChatSessionContainer(
         }
       }
       const markRunActive = (
+        runId: string,
         phase: AgentRunPhase | null,
         modelCallStartedAt?: string | null,
       ): void => {
+        if (optimisticStopRef.current?.runId === runId) {
+          return;
+        }
+        optimisticStopRef.current = null;
         setManagedLiveState((prev) => ({
           ...prev,
           liveRun:
@@ -2194,6 +2222,10 @@ export function useChatSessionContainer(
           reportInvalidLiveRun(event.run);
           return;
         }
+        if (optimisticStopRef.current?.runId === nextLiveRun.run_id) {
+          return;
+        }
+        optimisticStopRef.current = null;
         const nextLiveRunPhase = liveRunPhase(nextLiveRun);
         setManagedLiveState((prev) => ({
           ...prev,
@@ -2239,9 +2271,11 @@ export function useChatSessionContainer(
               ),
               pending,
             ],
-            isResponsePending:
-              prev.isResponsePending ||
+            isResponsePending: liveActivityResponsePending(
+              prev.isResponsePending,
               pendingInputBufferWaitsForModel(responseEvent),
+              optimisticStopRef.current !== null,
+            ),
           }));
           if (pending.sessionId !== sessionId) {
             void connectionInfoQuery.refetch();
@@ -2249,13 +2283,25 @@ export function useChatSessionContainer(
           return;
         }
         if (isPartialHistoryEvent(responseEvent)) {
+          if (
+            !shouldProjectLivePartialEvent(
+              responseEvent,
+              optimisticStopRef.current?.runId ?? null,
+            )
+          ) {
+            return;
+          }
           setManagedLiveState((prev) => ({
             ...prev,
             partialHistory: upsertPartialHistoryEvent(
               prev.partialHistory,
               responseEvent,
             ),
-            isResponsePending: true,
+            isResponsePending: liveActivityResponsePending(
+              prev.isResponsePending,
+              true,
+              optimisticStopRef.current !== null,
+            ),
           }));
         }
         return;
@@ -2263,6 +2309,13 @@ export function useChatSessionContainer(
 
       if ("type" in event && event.type === "history_event_appended") {
         const responseEvent = event.event;
+        const optimisticStop = optimisticStopRef.current;
+        if (
+          optimisticStop !== null &&
+          eventInterruptsRun(responseEvent, optimisticStop.runId)
+        ) {
+          optimisticStopRef.current = null;
+        }
         const appendedInferenceIntent = latestDurableInferenceIntent([
           responseEvent,
         ]);
@@ -2324,11 +2377,11 @@ export function useChatSessionContainer(
 
       switch (event.type) {
         case "run_started":
-          markRunActive(event.phase ?? null);
+          markRunActive(event.run_id, event.phase ?? null);
           void utils.chat.getSubagentTree.invalidate();
           break;
         case "run_phase_changed":
-          markRunActive(event.phase, event.model_call_started_at);
+          markRunActive(event.run_id, event.phase, event.model_call_started_at);
           break;
         case "run_complete":
           if ("item" in event) {
@@ -2377,7 +2430,9 @@ export function useChatSessionContainer(
           );
           break;
         case "compaction_started":
-          setManagedLiveState((prev) => ({ ...prev, isCompacting: true }));
+          if (optimisticStopRef.current === null) {
+            setManagedLiveState((prev) => ({ ...prev, isCompacting: true }));
+          }
           break;
         case "compaction_complete":
           setManagedLiveState((prev) => ({
@@ -2481,6 +2536,15 @@ export function useChatSessionContainer(
           return;
         }
 
+        const optimisticStop = optimisticStopRef.current;
+        if (
+          optimisticStop !== null &&
+          result.history.items.some((event) =>
+            eventInterruptsRun(event, optimisticStop.runId),
+          )
+        ) {
+          optimisticStopRef.current = null;
+        }
         const mapped = mapSessionEvents(result, null);
         hasFreshBaselineRef.current = true;
         const detached = chatTimelineStateRef.current;
@@ -2517,12 +2581,27 @@ export function useChatSessionContainer(
             if (next.invalidLiveRun !== null) {
               reportInvalidLiveRun(next.invalidLiveRun.value);
             }
+            const optimisticStop = optimisticStopRef.current;
+            const shouldPreserveOptimisticStop =
+              optimisticStop !== null &&
+              (next.liveState.liveRun === null ||
+                next.liveState.liveRun.run_id === optimisticStop.runId);
+            if (
+              optimisticStop !== null &&
+              next.liveState.liveRun !== null &&
+              next.liveState.liveRun.run_id !== optimisticStop.runId
+            ) {
+              optimisticStopRef.current = null;
+            }
+            const liveState = shouldPreserveOptimisticStop
+              ? applyOptimisticRunStop(next.liveState, optimisticStop.event)
+              : next.liveState;
             return {
-              ...next.liveState,
+              ...liveState,
               isResponsePending:
                 options.reason === "compaction" && options.continuing === true
-                  ? next.liveState.isResponsePending || prev.isResponsePending
-                  : next.liveState.isResponsePending,
+                  ? liveState.isResponsePending || prev.isResponsePending
+                  : liveState.isResponsePending,
             };
           });
           setHasMore(mapped.hasMore);
@@ -2957,16 +3036,48 @@ export function useChatSessionContainer(
   );
 
   const onStopRequest = useCallback(() => {
-    if (stopSessionRunMutation.isPending) {
+    const run = managedLiveState.liveRun;
+    if (stopSessionRunMutation.isPending || run === null) {
       return;
     }
-    setManagedLiveState((prev) => ({ ...prev, isStopPending: true }));
+    const optimisticEvent = createOptimisticInterruptedEvent(
+      sessionId,
+      run.run_id,
+      new Date().toISOString(),
+    );
+    optimisticStopRef.current = {
+      runId: run.run_id,
+      event: optimisticEvent,
+      previousState: managedLiveState,
+    };
+    setManagedLiveState((prev) =>
+      prev.liveRun?.run_id === run.run_id
+        ? applyOptimisticRunStop(
+            { ...prev, isStopPending: true },
+            optimisticEvent,
+          )
+        : prev,
+    );
     void stopSessionRunMutation
       .mutateAsync({ sessionId })
+      .catch(() => {
+        const optimisticStop = optimisticStopRef.current;
+        if (optimisticStop?.runId === run.run_id) {
+          optimisticStopRef.current = null;
+          setManagedLiveState((prev) => ({
+            ...restoreRunActivityProjection(prev, optimisticStop.previousState),
+            partialHistory: removePartialHistoryById(
+              prev.partialHistory,
+              optimisticEvent.id,
+            ),
+          }));
+        }
+        startResyncRef.current({ reason: "periodic" });
+      })
       .finally(() =>
         setManagedLiveState((prev) => ({ ...prev, isStopPending: false })),
       );
-  }, [sessionId, stopSessionRunMutation]);
+  }, [managedLiveState, sessionId, stopSessionRunMutation]);
 
   const onDeletePendingInputBuffer = useCallback(
     (bufferId: string) => {
