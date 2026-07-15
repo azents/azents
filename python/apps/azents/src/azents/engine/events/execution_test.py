@@ -899,6 +899,9 @@ async def test_model_follow_up_continues_without_tool_call() -> None:
     execution = AgentRunExecution(
         session_manager=_session_context,
         post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=normalizer,
         model_call_preparer=_model_call_preparer(),
