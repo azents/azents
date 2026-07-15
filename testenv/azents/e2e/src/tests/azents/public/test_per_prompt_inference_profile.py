@@ -551,6 +551,14 @@ class TestPerPromptInferenceProfile:
             "model_target_label": "Quality",
             "reasoning_effort": "xhigh",
         }
+        _wait_for_turn_provenance(
+            server_url=azents_public_server_url,
+            token=token,
+            session_id=session_id,
+            target="Quality",
+            effort="xhigh",
+            display_name="GPT 5.5 Deterministic",
+        )
 
         _write_profile(
             server_url=azents_public_server_url,
@@ -575,6 +583,14 @@ class TestPerPromptInferenceProfile:
             "model_target_label": "Fast",
             "reasoning_effort": None,
         }
+        _wait_for_turn_provenance(
+            server_url=azents_public_server_url,
+            token=token,
+            session_id=session_id,
+            target="Fast",
+            effort=None,
+            display_name="GPT 5.5 Mini Deterministic",
+        )
 
         _wait_for_mock_models(mock_openai_url, "gpt-5.5", "gpt-5.5-mini")
 
@@ -609,22 +625,6 @@ class TestPerPromptInferenceProfile:
         )
         assert session["current_model_target_label"] == "Fast"
         assert session["current_reasoning_effort"] is None
-        _wait_for_turn_provenance(
-            server_url=azents_public_server_url,
-            token=token,
-            session_id=session_id,
-            target="Quality",
-            effort="xhigh",
-            display_name="GPT 5.5 Deterministic",
-        )
-        _wait_for_turn_provenance(
-            server_url=azents_public_server_url,
-            token=token,
-            session_id=session_id,
-            target="Fast",
-            effort=None,
-            display_name="GPT 5.5 Mini Deterministic",
-        )
 
     def test_subagent_spawn_override_continuation(
         self,

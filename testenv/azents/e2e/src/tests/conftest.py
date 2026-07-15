@@ -170,7 +170,7 @@ def mock_openai_container(
     """AIMock t OpenAI Responses API mock container."""
     with (
         DockerContainer(
-            "ghcr.io/copilotkit/aimock:1.24.1",
+            "ghcr.io/copilotkit/aimock:1.36.1",
             docker_client_kw={"timeout": _DOCKER_CLIENT_TIMEOUT_SECONDS},
         )
         .with_volume_mapping(
@@ -445,6 +445,10 @@ def _configure_azents_server_container(
         .with_env("AZ_FAILED_RUN_BASE_BACKOFF_SECONDS", "1")
         .with_env("AZ_FAILED_RUN_BACKOFF_MULTIPLIER", "1")
         .with_env("AZ_FAILED_RUN_MAX_BACKOFF_SECONDS", "1")
+        .with_env("AZ_MODEL_STREAM_CONNECT_TIMEOUT_SECONDS", "2")
+        .with_env("AZ_MODEL_STREAM_IDLE_TIMEOUT_SECONDS", "0.5")
+        .with_env("AZ_MODEL_STREAM_ABSOLUTE_TIMEOUT_SECONDS", "1.5")
+        .with_env("AZ_MODEL_STREAM_CLOSE_GRACE_SECONDS", "0.25")
     )
 
 
