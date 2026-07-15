@@ -3,6 +3,30 @@
     {
       "match": {
         "endpoint": "chat",
+        "userMessage": "Watchdog session title timeout",
+        "systemMessage": "You are a session title generator"
+      },
+      "response": {
+        "content": "This title must time out."
+      },
+      "streamingProfile": {
+        "ttft": 1000,
+        "tps": 100,
+        "jitter": 0
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "systemMessage": "You are a session title generator"
+      },
+      "response": {
+        "content": "Upload session initialized."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
         "userMessage": "init",
         "hasToolResult": false
       },
@@ -347,7 +371,8 @@
     {
       "match": {
         "endpoint": "chat",
-        "systemMessage": "You are a helpful AI assistant tasked with summarizing conversations"
+        "systemMessage": "You are a helpful AI assistant tasked with summarizing conversations",
+        "userMessage": "Event durable compact seed"
       },
       "response": {
         "content": "Event compaction summary for E2E."
@@ -957,6 +982,276 @@
       },
       "response": {
         "content": "Fast profile response."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Watchdog idle before first event then recover",
+        "hasToolResult": false,
+        "sequenceIndex": 0
+      },
+      "response": {
+        "content": "This response must never become durable."
+      },
+      "streamingProfile": {
+        "ttft": 1000,
+        "tps": 100,
+        "jitter": 0
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Watchdog idle before first event then recover",
+        "hasToolResult": false,
+        "sequenceIndex": 1
+      },
+      "response": {
+        "content": "WATCHDOG_IDLE_RECOVERED"
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Watchdog idle after prefix then recover",
+        "hasToolResult": false,
+        "sequenceIndex": 0
+      },
+      "response": {
+        "content": "FAILED_IDLE_PREFIX_MUST_DISAPPEAR abcdefghijklmnopqrstuvwxyz"
+      },
+      "chunkSize": 40,
+      "recordedTimings": {
+        "ttftMs": 0,
+        "interChunkDelaysMs": [
+          0,
+          0,
+          0,
+          0,
+          1000
+        ],
+        "totalDurationMs": 1000
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Watchdog idle after prefix then recover",
+        "hasToolResult": false,
+        "sequenceIndex": 1
+      },
+      "response": {
+        "content": "WATCHDOG_IDLE_PREFIX_RECOVERED"
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Watchdog absolute cap cleans partial then recover",
+        "hasToolResult": false,
+        "sequenceIndex": 0
+      },
+      "response": {
+        "content": "FAILED_WATCHDOG_PREFIX_MUST_DISAPPEAR abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz"
+      },
+      "chunkSize": 4,
+      "streamingProfile": {
+        "ttft": 0,
+        "tps": 20,
+        "jitter": 0
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Watchdog absolute cap cleans partial then recover",
+        "hasToolResult": false,
+        "sequenceIndex": 1
+      },
+      "response": {
+        "content": "WATCHDOG_ABSOLUTE_RECOVERED"
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Watchdog parsed events reset idle",
+        "hasToolResult": false
+      },
+      "response": {
+        "content": "WATCHDOG_EVENTS_RESET_IDLE abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz"
+      },
+      "chunkSize": 5,
+      "streamingProfile": {
+        "ttft": 0,
+        "tps": 20,
+        "jitter": 0
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Watchdog retry exhaustion",
+        "hasToolResult": false,
+        "sequenceIndex": 0
+      },
+      "response": {
+        "content": "Attempt zero must time out."
+      },
+      "streamingProfile": {
+        "ttft": 1000,
+        "tps": 100,
+        "jitter": 0
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Watchdog retry exhaustion",
+        "hasToolResult": false,
+        "sequenceIndex": 1
+      },
+      "response": {
+        "content": "Attempt one must time out."
+      },
+      "streamingProfile": {
+        "ttft": 1000,
+        "tps": 100,
+        "jitter": 0
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Watchdog retry exhaustion",
+        "hasToolResult": false,
+        "sequenceIndex": 2
+      },
+      "response": {
+        "content": "Attempt two must time out."
+      },
+      "streamingProfile": {
+        "ttft": 1000,
+        "tps": 100,
+        "jitter": 0
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Watchdog retry exhaustion",
+        "hasToolResult": false,
+        "sequenceIndex": 3
+      },
+      "response": {
+        "content": "Attempt three must time out."
+      },
+      "streamingProfile": {
+        "ttft": 1000,
+        "tps": 100,
+        "jitter": 0
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Watchdog user stop preserves partial",
+        "hasToolResult": false,
+        "sequenceIndex": 0
+      },
+      "response": {
+        "content": "WATCHDOG_STOP_PARTIAL abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz"
+      },
+      "chunkSize": 4,
+      "streamingProfile": {
+        "ttft": 0,
+        "tps": 20,
+        "jitter": 0
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "systemMessage": "You are a helpful AI assistant tasked with summarizing conversations",
+        "userMessage": "Watchdog compaction timeout seed",
+        "sequenceIndex": 0
+      },
+      "response": {
+        "content": "Compaction attempt zero must time out."
+      },
+      "streamingProfile": {
+        "ttft": 1000,
+        "tps": 100,
+        "jitter": 0
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "systemMessage": "You are a helpful AI assistant tasked with summarizing conversations",
+        "userMessage": "Watchdog compaction timeout seed",
+        "sequenceIndex": 1
+      },
+      "response": {
+        "content": "Compaction attempt one must time out."
+      },
+      "streamingProfile": {
+        "ttft": 1000,
+        "tps": 100,
+        "jitter": 0
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "systemMessage": "You are a helpful AI assistant tasked with summarizing conversations",
+        "userMessage": "Watchdog compaction timeout seed",
+        "sequenceIndex": 2
+      },
+      "response": {
+        "content": "Compaction attempt two must time out."
+      },
+      "streamingProfile": {
+        "ttft": 1000,
+        "tps": 100,
+        "jitter": 0
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "systemMessage": "You are a helpful AI assistant tasked with summarizing conversations",
+        "userMessage": "Watchdog compaction timeout seed",
+        "sequenceIndex": 3
+      },
+      "response": {
+        "content": "Compaction attempt three must time out."
+      },
+      "streamingProfile": {
+        "ttft": 1000,
+        "tps": 100,
+        "jitter": 0
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Watchdog compaction timeout seed",
+        "hasToolResult": false
+      },
+      "response": {
+        "content": "Watchdog compaction timeout seed response."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Watchdog session title timeout",
+        "hasToolResult": false
+      },
+      "response": {
+        "content": "WATCHDOG_TITLE_RUN_COMPLETED"
       }
     }
   ]

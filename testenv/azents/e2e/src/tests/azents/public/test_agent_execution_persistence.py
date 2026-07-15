@@ -90,6 +90,7 @@ class _Workspace:
     """Agent execution E2E resource t."""
 
     token: str
+    refresh_token: str
     handle: str
     model_selection: AgentModelSelectionInput
 
@@ -293,7 +294,7 @@ def _setup_workspace(
 ) -> _Workspace:
     """workspacet model selection t t API t t."""
     uniq = unique()
-    token, _, _ = authenticate_user(
+    token, refresh_token, _ = authenticate_user(
         public_api_client,
         admin_api_client,
         email=f"agent-execution-{uniq}@example.com",
@@ -321,6 +322,7 @@ def _setup_workspace(
     )
     return _Workspace(
         token=token,
+        refresh_token=refresh_token,
         handle=handle,
         model_selection=model_selection_from_first_candidate(
             server_url,
@@ -834,6 +836,28 @@ def _wait_for_rest_contents(
             return payload
         time.sleep(0.5)
     raise TimeoutError(f"REST contents were not observed: {expected}, {last_payload!r}")
+
+
+# Shared public-path helpers used by focused execution reliability E2E modules.
+auth_headers = _headers
+connect_chat = _connect_chat
+create_agent = _create_agent
+failed_run_error_events = _failed_run_error_events
+history_events = _history_events
+json_object = _json_object
+json_object_list_payload = _json_object_list_payload
+json_object_payload = _json_object_payload
+list_history = _list_history
+list_live = _list_live
+message_contents = _message_contents
+message_roles = _message_roles
+run_message = _run_message
+setup_workspace = _setup_workspace
+system_error_events = _system_error_events
+team_primary_session_id = _team_primary_session_id
+wait_for_failed_run_error = _wait_for_failed_run_error
+wait_for_rest_contents = _wait_for_rest_contents
+wait_for_ws_action = _wait_for_ws_action
 
 
 class TestAgentExecutionPersistence:
