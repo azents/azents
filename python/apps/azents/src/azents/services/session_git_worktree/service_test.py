@@ -71,7 +71,6 @@ from azents.services.agent_project_catalog import AgentProjectCatalogService
 from azents.services.agent_session_input import AgentSessionInputService
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.input_buffer import InputBufferService
-from azents.services.model_file import ModelFileService
 from azents.services.session_git_worktree import (
     GitWorktreeCleanupNotFound,
     GitWorktreeCleanupSubagentReadOnly,
@@ -421,13 +420,6 @@ class _ExchangeFileService(ExchangeFileService):
         """Bypass base dataclass initialization."""
 
 
-class _ModelFileService(ModelFileService):
-    """ModelFileService test double."""
-
-    def __init__(self) -> None:
-        """Bypass base dataclass initialization."""
-
-
 async def _create_agent_context(
     session: AsyncSession, slug: str
 ) -> tuple[str, str, str]:
@@ -525,7 +517,6 @@ def _input_service(
             session_manager=session_manager,
             input_buffer_repository=InputBufferRepository(),
             exchange_file_service=_ExchangeFileService(),
-            model_file_service=_ModelFileService(),
             agent_session_repository=AgentSessionRepository(),
             event_transcript_repository=EventTranscriptRepository(),
             agent_run_repository=AgentRunRepository(),
@@ -554,7 +545,6 @@ async def _execute_first_setup_action(
         session_manager=rdb_session_manager,
         input_buffer_repository=InputBufferRepository(),
         exchange_file_service=_ExchangeFileService(),
-        model_file_service=_ModelFileService(),
         agent_session_repository=AgentSessionRepository(),
         event_transcript_repository=EventTranscriptRepository(),
         agent_run_repository=AgentRunRepository(),

@@ -9,6 +9,7 @@ code_paths:
   - python/apps/azents/src/azents/services/exchange_file/**
   - python/apps/azents/src/azents/services/artifact.py
   - python/apps/azents/src/azents/services/model_file.py
+  - python/apps/azents/src/azents/services/input_buffer.py
   - python/apps/azents/src/azents/repos/artifact/**
   - python/apps/azents/src/azents/repos/model_file/**
   - python/apps/azents/src/azents/rdb/models/artifact.py
@@ -29,8 +30,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/AttachmentPreviewBar.tsx
   - typescript/apps/azents-web/src/features/chat/components/FileAttachmentList.tsx
   - typescript/apps/azents-web/src/features/chat/components/AttachmentPreviewViewer.tsx
-last_verified_at: 2026-07-11
-spec_version: 13
+last_verified_at: 2026-07-15
+spec_version: 14
 ---
 
 # File Exchange Storage
@@ -108,6 +109,9 @@ When `spawn_agent` forks parent model-visible context into a child session, File
 
 ## Changelog
 
+- **2026-07-15** — v14. Clarified that input-buffer promotion resolves only Exchange attachment
+  metadata outside its locking transaction and reuses creation-boundary FileParts without download
+  or rematerialization.
 - **2026-07-11** — v13. Added persisted previews for uploaded text files and delegated original-image zooming to the browser's native image viewer.
 - **2026-07-11** — v12. Clarified universal preview activation, isolated download actions, unsupported-file fallback, and original-only Agent image galleries.
 - **2026-07-11** — v11. Documented compact attachment strips, Agent image galleries and mixed groups, dynamic overflow masks, and the shared responsive preview viewer.

@@ -32,6 +32,7 @@ from azents.engine.events.types import (
     SystemErrorPayload,
 )
 from azents.engine.events.user_messages import make_run_user_message
+from azents.engine.io.attachments import RuntimeAttachment
 from azents.engine.io.user_input import RunUserMessage
 from azents.engine.run.resolve import materialize_user_input_exchange_file_attachments
 from azents.engine.tools.goal import GoalState, GoalStateSnapshot, GoalStateStore
@@ -51,7 +52,6 @@ from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.input_buffer import InputBufferRepository
 from azents.repos.input_buffer.data import InputBuffer, InputBufferCreate
 from azents.services.exchange_file import ExchangeFileService
-from azents.services.model_file import ModelFileService
 from azents.services.session_title import initial_title_from_event
 
 logger = logging.getLogger(__name__)
@@ -157,6 +157,14 @@ class _PromotedInputBuffer:
 
 
 @dataclasses.dataclass(frozen=True)
+class PreparedInputBufferFiles:
+    """Attachment metadata and creation-boundary FileParts prepared for promotion."""
+
+    attachments: list[RuntimeAttachment]
+    file_parts: list[FileOutputPart]
+
+
+@dataclasses.dataclass(frozen=True)
 class InputBufferPreparationContext:
     """Shared context passed to one closed input-buffer processor."""
 
@@ -164,6 +172,7 @@ class InputBufferPreparationContext:
     session_id: str
     required_inference_profile: RequestedInferenceProfile | None
     prepared_inference_state: SessionInferenceState | None
+    prepared_files: PreparedInputBufferFiles
 
 
 @dataclasses.dataclass(frozen=True)
@@ -198,7 +207,6 @@ class InputBufferService:
         InputBufferRepository, Depends(InputBufferRepository)
     ]
     exchange_file_service: Annotated[ExchangeFileService, Depends(ExchangeFileService)]
-    model_file_service: Annotated[ModelFileService, Depends(ModelFileService)]
     agent_session_repository: Annotated[
         AgentSessionRepository, Depends(AgentSessionRepository)
     ]
@@ -379,6 +387,10 @@ class InputBufferService:
         """Flush pending buffers of session in claim, append, delete order."""
         del model
         del limit
+        prepared_files = await self._prepare_input_buffer_attachments(
+            session_id=session_id,
+            expected_buffer_id=expected_buffer_id,
+        )
         async with self.session_manager() as session:
             agent_session = await self.agent_session_repository.lock_by_id(
                 session,
@@ -416,6 +428,7 @@ class InputBufferService:
                 claimed=claimed,
                 required_inference_profile=required_inference_profile,
                 prepared_inference_state=prepared_inference_state,
+                prepared_files=prepared_files,
                 profile_resolution_failure=profile_resolution_failure,
                 include_action_messages=include_action_messages,
             )
@@ -534,6 +547,52 @@ class InputBufferService:
             deduped_count=len(deduped),
         )
 
+    async def _prepare_input_buffer_attachments(
+        self,
+        *,
+        session_id: str,
+        expected_buffer_id: str | None,
+    ) -> PreparedInputBufferFiles:
+        """Resolve the FIFO head attachments without holding a database session."""
+        async with self.session_manager() as session:
+            agent_session = await self.agent_session_repository.get_by_id(
+                session,
+                session_id,
+            )
+            pending = await self.input_buffer_repository.list_for_flush(
+                session,
+                session_id,
+                limit=1,
+            )
+        if agent_session is None:
+            raise ValueError("AgentSession not found")
+        buffer = pending[0] if pending else None
+        actual_buffer_id = buffer.id if buffer is not None else None
+        if actual_buffer_id != expected_buffer_id:
+            raise InputBufferPreparationStaleError(
+                "Input buffer FIFO head changed during preparation"
+            )
+        if buffer is None:
+            return PreparedInputBufferFiles(attachments=[], file_parts=[])
+
+        file_parts = list(buffer.file_parts)
+        if not buffer.attachments:
+            return PreparedInputBufferFiles(attachments=[], file_parts=file_parts)
+        if buffer.actor_user_id is None:
+            raise ValueError("Input buffer attachments require an actor user")
+        materialized = await materialize_user_input_exchange_file_attachments(
+            buffer.attachments,
+            agent_id=agent_session.agent_id,
+            session_id=buffer.session_id,
+            exchange_file_service=self.exchange_file_service,
+            model_file_service=None,
+            user_id=buffer.actor_user_id,
+        )
+        return PreparedInputBufferFiles(
+            attachments=materialized.attachments,
+            file_parts=file_parts,
+        )
+
     async def _promote_claimed_buffers(
         self,
         session: AsyncSession,
@@ -542,6 +601,7 @@ class InputBufferService:
         claimed: list[InputBuffer],
         required_inference_profile: RequestedInferenceProfile | None,
         prepared_inference_state: SessionInferenceState | None,
+        prepared_files: PreparedInputBufferFiles,
         profile_resolution_failure: str | None,
         include_action_messages: bool,
     ) -> InputBufferPreparationOutcome:
@@ -575,6 +635,7 @@ class InputBufferService:
             session_id=session_id,
             required_inference_profile=required_inference_profile,
             prepared_inference_state=prepared_inference_state,
+            prepared_files=prepared_files,
         )
         processor = self._processor_for(buffer)
         return await processor.process(context, buffer)
@@ -613,6 +674,7 @@ class InputBufferService:
         session_id: str,
         buffer: InputBuffer,
         prepared_inference_state: SessionInferenceState | None,
+        prepared_files: PreparedInputBufferFiles,
     ) -> list[_PromotedInputBuffer]:
         """Apply Goal create side effect for one action_message buffer."""
         objective = buffer.content.strip()
@@ -649,11 +711,12 @@ class InputBufferService:
         except _GoalActionError as exc:
             return [_system_error_promoted_buffer(buffer, exc.message)]
         snapshot = GoalStateSnapshot.from_state(updated)
-        user_message = await self.buffer_to_user_message(
+        user_message = self.buffer_to_user_message(
             buffer,
             external_id=f"{buffer.id}:user_message",
             fallback_profile=_requested_inference_profile(buffer),
             prepared_inference_state=prepared_inference_state,
+            prepared_files=prepared_files,
         )
         return [
             _PromotedInputBuffer(
@@ -680,6 +743,7 @@ class InputBufferService:
         buffer: InputBuffer,
         action: SkillAction,
         prepared_inference_state: SessionInferenceState | None,
+        prepared_files: PreparedInputBufferFiles,
     ) -> list[_PromotedInputBuffer]:
         """Create durable reminder for one Skill action_message buffer."""
         agent_session = await self.agent_session_repository.get_by_id(
@@ -715,11 +779,12 @@ class InputBufferService:
             )
         ]
         if buffer.content.strip():
-            user_message = await self.buffer_to_user_message(
+            user_message = self.buffer_to_user_message(
                 buffer,
                 external_id=f"{buffer.id}:user_message",
                 fallback_profile=_requested_inference_profile(buffer),
                 prepared_inference_state=prepared_inference_state,
+                prepared_files=prepared_files,
             )
             promoted.append(
                 _PromotedInputBuffer(
@@ -732,46 +797,16 @@ class InputBufferService:
             )
         return promoted
 
-    async def buffer_to_user_message(
-        self,
+    @staticmethod
+    def buffer_to_user_message(
         buffer: InputBuffer,
         *,
         external_id: str | None = None,
         fallback_profile: RequestedInferenceProfile | None,
         prepared_inference_state: SessionInferenceState | None,
+        prepared_files: PreparedInputBufferFiles,
     ) -> RunUserMessage:
-        """Convert InputBuffer domain row to event run user message."""
-        attachments = []
-        file_parts = list(buffer.file_parts)
-        if buffer.attachments:
-            if buffer.actor_user_id is None:
-                raise ValueError("Input buffer attachments require an actor user")
-            async with self.session_manager() as session:
-                agent_session = await self.agent_session_repository.get_by_id(
-                    session,
-                    buffer.session_id,
-                )
-            if agent_session is None:
-                logger.warning(
-                    "Input buffer session disappeared before attachment "
-                    "materialization",
-                    extra={"session_id": buffer.session_id, "buffer_id": buffer.id},
-                )
-            else:
-                materialized = await materialize_user_input_exchange_file_attachments(
-                    buffer.attachments,
-                    agent_id=agent_session.agent_id,
-                    session_id=buffer.session_id,
-                    exchange_file_service=self.exchange_file_service,
-                    model_file_service=(
-                        None if file_parts else self.model_file_service
-                    ),
-                    user_id=buffer.actor_user_id,
-                )
-                attachments = materialized.attachments
-                if not file_parts:
-                    file_parts = materialized.file_parts
-
+        """Convert a prepared InputBuffer snapshot to a run user message."""
         requested_profile = _requested_inference_profile(buffer) or fallback_profile
         if prepared_inference_state is not None:
             applied_profile = prepared_inference_state.applied_profile
@@ -786,8 +821,8 @@ class InputBufferService:
         user_message = make_run_user_message(
             content=buffer.content,
             metadata=buffer.metadata,
-            attachments=attachments,
-            file_parts=file_parts,
+            attachments=prepared_files.attachments,
+            file_parts=prepared_files.file_parts,
             external_id=external_id or buffer.id,
             attachment_source="input_buffer",
             requested_inference_profile=requested_profile,
@@ -840,11 +875,12 @@ class _UserMessageInputBufferProcessor:
         context: InputBufferPreparationContext,
         buffer: InputBuffer,
     ) -> InputBufferPreparationOutcome:
-        user_message = await self.service.buffer_to_user_message(
+        user_message = self.service.buffer_to_user_message(
             buffer,
             external_id=f"{buffer.id}:user_message",
             fallback_profile=context.required_inference_profile,
             prepared_inference_state=context.prepared_inference_state,
+            prepared_files=context.prepared_files,
         )
         return _preparation_outcome(
             [
@@ -871,11 +907,12 @@ class _GoalContinuationInputBufferProcessor:
         context: InputBufferPreparationContext,
         buffer: InputBuffer,
     ) -> InputBufferPreparationOutcome:
-        user_message = await self.service.buffer_to_user_message(
+        user_message = self.service.buffer_to_user_message(
             buffer,
             external_id=f"{buffer.id}:goal_continuation",
             fallback_profile=context.required_inference_profile,
             prepared_inference_state=context.prepared_inference_state,
+            prepared_files=context.prepared_files,
         )
         return _preparation_outcome(
             [
@@ -902,11 +939,12 @@ class _AgentMessageInputBufferProcessor:
         context: InputBufferPreparationContext,
         buffer: InputBuffer,
     ) -> InputBufferPreparationOutcome:
-        user_message = await self.service.buffer_to_user_message(
+        user_message = self.service.buffer_to_user_message(
             buffer,
             external_id=f"{buffer.id}:agent_message",
             fallback_profile=context.required_inference_profile,
             prepared_inference_state=context.prepared_inference_state,
+            prepared_files=context.prepared_files,
         )
         return _preparation_outcome(
             [
@@ -940,6 +978,7 @@ class _GoalActionInputBufferProcessor:
             session_id=context.session_id,
             buffer=buffer,
             prepared_inference_state=context.prepared_inference_state,
+            prepared_files=context.prepared_files,
         )
         return _preparation_outcome(promoted, _turn_effect_for_promoted(promoted))
 
@@ -962,6 +1001,7 @@ class _SkillActionInputBufferProcessor:
             buffer=buffer,
             action=self.action,
             prepared_inference_state=context.prepared_inference_state,
+            prepared_files=context.prepared_files,
         )
         return _preparation_outcome(promoted, _turn_effect_for_promoted(promoted))
 

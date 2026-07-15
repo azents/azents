@@ -1,5 +1,6 @@
 """InputBufferService tests."""
 
+import asyncio
 import dataclasses
 import datetime
 from unittest.mock import AsyncMock
@@ -51,7 +52,6 @@ from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.exchange_file.data import ExchangeFile
 from azents.repos.input_buffer import InputBufferRepository
 from azents.repos.input_buffer.data import InputBuffer, InputBufferCreate
-from azents.repos.model_file.data import ModelFile
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
@@ -63,11 +63,6 @@ from azents.services.exchange_file import (
     FileAccessDenied,
     FileNotFound,
     SessionNotFound,
-)
-from azents.services.model_file import (
-    ModelFileCreateError,
-    ModelFileInvalidImage,
-    ModelFileService,
 )
 from azents.testing.model_selection import make_test_model_selection_dict
 
@@ -372,35 +367,51 @@ class _ExchangeFileService(ExchangeFileService):
         return Failure(FileNotFound())
 
 
-class _ModelFileService(ModelFileService):
-    """ModelFileService for tests."""
+class _DeletingExchangeFileService(_ExchangeFileService):
+    """Delete the prepared FIFO head while attachment metadata is resolving."""
 
-    def __init__(self) -> None:
-        """Store whether called."""
-        self.create_for_agent_pending_input_called = False
-
-    async def create_for_agent_pending_input(
+    def __init__(
         self,
         *,
-        agent_id: str,
+        session_manager: SessionManager[AsyncSession],
         session_id: str,
+        buffer_id: str,
+        metadata_result: Result[
+            ExchangeFile,
+            SessionNotFound | FileNotFound | FileAccessDenied,
+        ],
+    ) -> None:
+        """Store the row mutation performed by the external resolution phase."""
+        super().__init__(metadata_result)
+        self.session_manager = session_manager
+        self.session_id = session_id
+        self.buffer_id = buffer_id
+
+    async def resolve_attachment_metadata_for_agent(
+        self,
+        *,
+        uri: str,
+        agent_id: str,
         user_id: str,
-        filename: str | None,
-        media_type: str,
-        body: bytes,
-        metadata: dict[str, object] | None = None,
-    ) -> Result[ModelFile, ModelFileCreateError]:
-        """Record call and treat as failure."""
-        del agent_id, session_id, user_id, filename, media_type, body, metadata
-        self.create_for_agent_pending_input_called = True
-        return Failure(ModelFileInvalidImage())
+    ) -> Result[ExchangeFile, SessionNotFound | FileNotFound | FileAccessDenied]:
+        """Mutate FIFO state through another session before returning metadata."""
+        async with self.session_manager() as session:
+            await InputBufferRepository().delete_by_session_and_id(
+                session,
+                self.session_id,
+                self.buffer_id,
+            )
+        return await super().resolve_attachment_metadata_for_agent(
+            uri=uri,
+            agent_id=agent_id,
+            user_id=user_id,
+        )
 
 
 def _input_buffer_service(
     rdb_session_manager: SessionManager[AsyncSession],
     *,
     exchange_file_service: ExchangeFileService | None = None,
-    model_file_service: _ModelFileService | None = None,
     event_transcript_repository: EventTranscriptRepository | None = None,
 ) -> InputBufferService:
     """Create InputBufferService for tests."""
@@ -408,7 +419,6 @@ def _input_buffer_service(
         session_manager=rdb_session_manager,
         input_buffer_repository=InputBufferRepository(),
         exchange_file_service=exchange_file_service or _ExchangeFileService(),
-        model_file_service=model_file_service or _ModelFileService(),
         agent_session_repository=AgentSessionRepository(),
         event_transcript_repository=(
             event_transcript_repository or EventTranscriptRepository()
@@ -549,7 +559,6 @@ class TestInputBufferService:
             session_manager=rdb_session_manager,
             input_buffer_repository=repository,
             exchange_file_service=_ExchangeFileService(),
-            model_file_service=_ModelFileService(),
             agent_session_repository=AgentSessionRepository(),
             event_transcript_repository=EventTranscriptRepository(),
             agent_run_repository=AgentRunRepository(),
@@ -688,6 +697,52 @@ class TestInputBufferService:
         async with rdb_session_manager() as session:
             remaining = await InputBufferRepository().get_by_id(session, buffer_id)
         assert remaining is not None
+
+    async def test_flush_resolves_attachments_before_locking_fifo_head(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Attachment resolution cannot self-deadlock on the claimed buffer."""
+        session_id, user_id = await _create_fixture(
+            rdb_session_manager,
+            "input-buffer-attachment-revalidation",
+        )
+        attachment_uri = "exchange://exchange/workspace-001/session/report.txt"
+        buffer_id = await _create_buffer(
+            rdb_session_manager,
+            session_id=session_id,
+            user_id=user_id,
+            content="resolve before lock",
+            attachments=[attachment_uri],
+        )
+        exchange_file_service = _DeletingExchangeFileService(
+            session_manager=rdb_session_manager,
+            session_id=session_id,
+            buffer_id=buffer_id,
+            metadata_result=Success(
+                _exchange_file(
+                    file_id="1234567890abcdef1234567890abcdef",
+                    user_id=user_id,
+                    object_key=attachment_uri.removeprefix("exchange://"),
+                )
+            ),
+        )
+        service = _input_buffer_service(
+            rdb_session_manager,
+            exchange_file_service=exchange_file_service,
+        )
+
+        with pytest.raises(InputBufferPreparationStaleError):
+            async with asyncio.timeout(2):
+                await service.flush_session_input_buffers(
+                    session_id=session_id,
+                    model="gpt-5.4",
+                    required_inference_profile=None,
+                    expected_buffer_id=buffer_id,
+                    prepared_inference_state=None,
+                    profile_resolution_failure=None,
+                    active_run_id=None,
+                )
 
     async def test_flush_rolls_back_inference_state_and_buffer_on_event_failure(
         self,
@@ -1087,6 +1142,7 @@ class TestInputBufferService:
         assert payload.attachments[0].preview_thumbnail_uri == thumbnail_uri
         assert len(result.events) == 1
         assert result.events[0].id == event.id
+        assert not exchange_file_service.resolve_attachment_for_agent_called
 
     async def test_flush_reuses_buffer_file_parts_without_rematerializing(
         self,
@@ -1123,11 +1179,9 @@ class TestInputBufferService:
                 )
             )
         )
-        model_file_service = _ModelFileService()
         service = _input_buffer_service(
             rdb_session_manager,
             exchange_file_service=exchange_file_service,
-            model_file_service=model_file_service,
         )
 
         result = await service.flush_session_input_buffers(
@@ -1143,7 +1197,6 @@ class TestInputBufferService:
         promoted = result.user_messages[0]
         assert isinstance(promoted.payload.content, list)
         assert promoted.payload.content[1] == existing_part
-        assert not model_file_service.create_for_agent_pending_input_called
         assert not exchange_file_service.resolve_attachment_for_agent_called
 
     async def test_deleted_buffer_is_not_promoted(
