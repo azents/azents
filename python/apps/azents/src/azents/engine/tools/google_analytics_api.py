@@ -54,8 +54,8 @@ class GoogleAnalyticsApiClient:
         data_client: BetaAnalyticsDataAsyncClient,
         admin_client: AnalyticsAdminServiceAsyncClient,
     ) -> None:
-        self._data = data_client
-        self._admin = admin_client
+        self.data = data_client
+        self.admin = admin_client
 
     # -----------------------------------------------------------------------
     # Data API
@@ -79,7 +79,7 @@ class GoogleAnalyticsApiClient:
             limit=limit,
             offset=offset,
         )
-        return await self._data.run_report(request=request)
+        return await self.data.run_report(request=request)
 
     async def run_realtime_report(
         self,
@@ -95,7 +95,7 @@ class GoogleAnalyticsApiClient:
             dimensions=([Dimension(name=d) for d in dimensions] if dimensions else []),
             limit=limit,
         )
-        resp = await self._data.run_realtime_report(request=request)
+        resp = await self.data.run_realtime_report(request=request)
         # Return RunRealtimeReportResponse unified as RunReportResponse
         # Same structure: dimension_headers, metric_headers, rows, row_count
         return RunReportResponse(
@@ -110,7 +110,7 @@ class GoogleAnalyticsApiClient:
         request = GetMetadataRequest(
             name=f"properties/{property_id}/metadata",
         )
-        resp = await self._data.get_metadata(request=request)
+        resp = await self.data.get_metadata(request=request)
 
         # Convert Metadata response to dict
         dimensions = [
@@ -142,7 +142,7 @@ class GoogleAnalyticsApiClient:
         self,
     ) -> list[dict[str, object]]:
         """Fetch GA4 account/property summary list."""
-        pager = await self._admin.list_account_summaries(
+        pager = await self.admin.list_account_summaries(
             request=ListAccountSummariesRequest(page_size=200),
         )
 
@@ -167,7 +167,7 @@ class GoogleAnalyticsApiClient:
 
     async def get_property_details(self, property_id: str) -> dict[str, object]:
         """Fetch GA4 property details."""
-        resp = await self._admin.get_property(
+        resp = await self.admin.get_property(
             request=GetPropertyRequest(
                 name=f"properties/{property_id}",
             ),
@@ -186,7 +186,7 @@ class GoogleAnalyticsApiClient:
 
     async def list_google_ads_links(self, property_id: str) -> list[dict[str, object]]:
         """Fetch Google Ads link list for GA4 property."""
-        pager = await self._admin.list_google_ads_links(
+        pager = await self.admin.list_google_ads_links(
             request=ListGoogleAdsLinksRequest(
                 parent=f"properties/{property_id}",
                 page_size=200,
@@ -208,7 +208,7 @@ class GoogleAnalyticsApiClient:
 
     async def list_key_events(self, property_id: str) -> list[dict[str, object]]:
         """Fetch Key Events (annotations) list for GA4 property."""
-        pager = await self._admin.list_key_events(
+        pager = await self.admin.list_key_events(
             request=ListKeyEventsRequest(
                 parent=f"properties/{property_id}",
                 page_size=200,

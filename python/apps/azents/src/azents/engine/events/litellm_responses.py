@@ -9,7 +9,7 @@ import hashlib
 import json
 import os
 from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Sequence
-from typing import Any, Protocol, cast, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from azcommon.uuid import uuid7
 from litellm.exceptions import OpenAIError as LiteLLMOpenAIError
@@ -92,6 +92,17 @@ _OPENAI_PROMPT_CACHE_KEY_MAX_CHARS = 64
 _REASONING_ENCRYPTED_CONTENT_INCLUDE: ResponseIncludable = "reasoning.encrypted_content"
 _TOOLS_ADAPTER: TypeAdapter[list[ToolParam]] = TypeAdapter(list[ToolParam])
 _REASONING_ADAPTER: TypeAdapter[Reasoning] = TypeAdapter(Reasoning)
+_INCLUDE_ADAPTER: TypeAdapter[list[ResponseIncludable]] = TypeAdapter(
+    list[ResponseIncludable]
+)
+
+
+@dataclasses.dataclass(frozen=True)
+class _PromptCacheInputs:
+    """Model input and tools after provider cache hints are applied."""
+
+    input_items: list[dict[str, object]]
+    tools: list[dict[str, object]]
 
 
 def _format_goal_updated_event_reminder(payload: UserMessagePayload) -> str:
@@ -171,10 +182,17 @@ class _ResponseEventWithResponse(Protocol):
     response: ResponsesAPIResponse | dict[str, object]
 
 
-class _StreamingLoggingObject(Protocol):
-    """LiteLLM streaming iterator logging object."""
+@runtime_checkable
+class _SyncStreamingLogger(Protocol):
+    """LiteLLM streaming logger with a synchronous success handler."""
 
     success_handler: Any
+
+
+@runtime_checkable
+class _AsyncStreamingLogger(Protocol):
+    """LiteLLM streaming logger with an asynchronous success handler."""
+
     async_success_handler: Any
 
 
@@ -242,7 +260,7 @@ class LiteLLMResponsesLowerer:
                 self._model_capabilities
             )
         )
-        self._model_file_resolver = model_file_resolver
+        self.model_file_resolver = model_file_resolver
         self.compat_key = build_native_compat_key(
             adapter=self.adapter,
             native_format=self.native_format,
@@ -297,12 +315,14 @@ class LiteLLMResponsesLowerer:
             model_capabilities=self._model_capabilities,
         )
         tools = [*self._tools, *hosted.tools]
-        input_items, tools = _apply_provider_prompt_cache_hints(
+        prompt_cache_inputs = _apply_provider_prompt_cache_hints(
             input_items,
             tools,
             provider_id=self._provider_id,
             model_developer=self._model_developer,
         )
+        input_items = prompt_cache_inputs.input_items
+        tools = prompt_cache_inputs.tools
         kwargs.update(hosted.kwargs)
         if self._uses_responses_lite():
             return self._lower_responses_lite_request(
@@ -485,7 +505,7 @@ class LiteLLMResponsesLowerer:
                         content,
                         attachments,
                         capabilities=self._file_part_capabilities,
-                        model_file_resolver=self._model_file_resolver,
+                        model_file_resolver=self.model_file_resolver,
                     ),
                 }
             case AssistantMessagePayload(content=content):
@@ -540,7 +560,7 @@ class LiteLLMResponsesLowerer:
         return _lower_tool_output(
             output,
             capabilities=self._file_part_capabilities,
-            model_file_resolver=self._model_file_resolver,
+            model_file_resolver=self.model_file_resolver,
         )
 
 
@@ -629,13 +649,13 @@ def _apply_provider_prompt_cache_hints(
     *,
     provider_id: LLMProvider | None,
     model_developer: LLMModelDeveloper | None,
-) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+) -> _PromptCacheInputs:
     """Apply provider-native prompt caching hints without overriding defaults."""
     if not _uses_anthropic_cache_control(
         provider_id=provider_id,
         model_developer=model_developer,
     ):
-        return list(input_items), list(tools)
+        return _PromptCacheInputs(input_items=list(input_items), tools=list(tools))
     return _apply_anthropic_cache_control(input_items, tools)
 
 
@@ -663,7 +683,7 @@ def _uses_anthropic_cache_control(
 def _apply_anthropic_cache_control(
     input_items: Sequence[dict[str, object]],
     tools: Sequence[dict[str, object]],
-) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+) -> _PromptCacheInputs:
     """Mark stable prefix blocks for Anthropic/Claude prompt caching."""
     input_with_cache = [_copy_item(item) for item in input_items]
     tools_with_cache = [_copy_item(tool) for tool in tools]
@@ -678,7 +698,10 @@ def _apply_anthropic_cache_control(
             break
         if _set_item_cache_control_if_absent(item):
             remaining -= 1
-    return input_with_cache, tools_with_cache
+    return _PromptCacheInputs(
+        input_items=input_with_cache,
+        tools=tools_with_cache,
+    )
 
 
 def _copy_item(item: dict[str, object]) -> dict[str, object]:
@@ -1042,7 +1065,7 @@ def _optional_reasoning(kwargs: dict[str, object], key: str) -> Reasoning | None
         return None
     validated = _REASONING_ADAPTER.validate_python(value)
     if isinstance(value, dict) and value.get("context") == "all_turns":
-        return cast(Reasoning, {**validated, "context": "all_turns"})
+        validated["context"] = "all_turns"
     return validated
 
 
@@ -1067,7 +1090,7 @@ def _optional_include(
     if value is None:
         return None
     if isinstance(value, list) and all(isinstance(item, str) for item in value):
-        return cast(list[ResponseIncludable], value)
+        return _INCLUDE_ADAPTER.validate_python(value)
     raise TypeError(f"LiteLLM kwarg {key} must be list[str]")
 
 
@@ -1095,7 +1118,6 @@ def guard_litellm_streaming_logging(response: AsyncIterable[object]) -> None:
     logging_obj = getattr(response, "logging_obj", None)
     if logging_obj is None:
         return
-    logging_obj = cast(_StreamingLoggingObject, logging_obj)
     original_success_handler = getattr(logging_obj, "success_handler", None)
     original_async_success_handler = getattr(
         logging_obj,
@@ -1144,9 +1166,13 @@ def guard_litellm_streaming_logging(response: AsyncIterable[object]) -> None:
             **kwargs,
         )
 
-    if original_success_handler is not None:
+    if original_success_handler is not None and isinstance(
+        logging_obj, _SyncStreamingLogger
+    ):
         logging_obj.success_handler = guarded_success_handler
-    if original_async_success_handler is not None:
+    if original_async_success_handler is not None and isinstance(
+        logging_obj, _AsyncStreamingLogger
+    ):
         logging_obj.async_success_handler = guarded_async_success_handler
 
 
@@ -1388,7 +1414,7 @@ class _LiteLLMResponsesOutputStream:
         normalizer: LiteLLMResponsesOutputNormalizer,
         session_id: str,
     ) -> None:
-        self._normalizer = normalizer
+        self.normalizer = normalizer
         self._session_id = session_id
         self._tool_refs: dict[int, tuple[str, str]] = {}
         self._completed_output_items: list[dict[str, object]] = []
@@ -1475,7 +1501,7 @@ class _LiteLLMResponsesOutputStream:
         events: list[Event] = []
         if self._completed_response_seen:
             events.extend(
-                self._normalizer.normalize_completed(
+                self.normalizer.normalize_completed(
                     self._session_id,
                     self._completed_response or {},
                     self._completed_output_items,
@@ -1483,7 +1509,7 @@ class _LiteLLMResponsesOutputStream:
             )
         elif self._completed_output_items:
             events.extend(
-                self._normalizer.normalize_output_items(
+                self.normalizer.normalize_output_items(
                     self._session_id,
                     self._completed_output_items,
                 )
@@ -1496,7 +1522,7 @@ class _LiteLLMResponsesOutputStream:
         partial_text = "".join(self._partial_text)
         if not partial_text or _has_assistant_text(completed.events):
             return completed
-        partial_event = self._normalizer.normalize_partial_assistant(
+        partial_event = self.normalizer.normalize_partial_assistant(
             self._session_id,
             partial_text,
         )

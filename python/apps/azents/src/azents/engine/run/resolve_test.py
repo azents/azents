@@ -3,10 +3,12 @@
 import datetime
 from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
+from typing import ClassVar
 from unittest.mock import AsyncMock
 
 import pytest
 from azcommon.result import Failure, Success
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.credentials import ApiKeySecrets
@@ -14,11 +16,15 @@ from azents.core.enums import AgentType, LLMProvider
 from azents.core.inference_profile import RequestedInferenceProfile
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.tools import (
+    ResolveContext,
     SessionType,
+    Toolkit,
     ToolkitContext,
     ToolkitExecutionMode,
+    ToolkitProvider,
     TurnContext,
 )
+from azents.engine.run.contracts import ToolkitBinding
 from azents.engine.run.input import InputMessage, InvokeInput
 from azents.engine.tools.builtin import BuiltinToolkitProvider
 from azents.engine.tools.builtin_agents import AgentsAppendixDedupeState
@@ -31,6 +37,7 @@ from azents.engine.tools.subagent import SubagentToolkitProvider
 from azents.rdb.session import SessionManager
 from azents.repos.agent.data import Agent
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationWithSecrets
+from azents.repos.toolkit.data import AgentToolkit, ToolkitConfig
 from azents.runtime.types import RuntimeDomainConfig
 from azents.testing.model_selection import (
     make_test_model_selection,
@@ -153,6 +160,34 @@ class _FakeAgentsAppendixDedupeStateStore:
         del agent_id, session_id, mutator
 
 
+class _TestToolkitConfig(BaseModel):
+    """Minimal registered Toolkit config for resolution failure tests."""
+
+    value: str
+
+
+class _FailingToolkitProvider(ToolkitProvider[_TestToolkitConfig]):
+    """Registered Toolkit provider that raises the configured exception."""
+
+    slug: ClassVar[str] = "test"
+    name: ClassVar[str] = "Test"
+    description: ClassVar[str] = "Test Toolkit"
+    system_prompt: ClassVar[str] = ""
+    config_model: ClassVar[type[BaseModel]] = _TestToolkitConfig
+
+    def __init__(self, exception: Exception) -> None:
+        self.exception = exception
+
+    async def resolve(
+        self,
+        config: _TestToolkitConfig,
+        context: ResolveContext,
+    ) -> Toolkit[_TestToolkitConfig]:
+        """Raise the configured resolution failure."""
+        del config, context
+        raise self.exception
+
+
 def _make_toolkit_context() -> ToolkitContext:
     """Create ToolkitContext for resolve_agent_tools tests."""
     return ToolkitContext(
@@ -165,6 +200,57 @@ def _make_toolkit_context() -> ToolkitContext:
         session_type=SessionType.USER,
         interface_type=None,
         interface_channel_id=None,
+    )
+
+
+async def _resolve_failing_registered_toolkit(
+    provider: ToolkitProvider[_TestToolkitConfig],
+    *,
+    toolkit_config: dict[str, object] | None = None,
+) -> list[ToolkitBinding]:
+    """Resolve one registered Toolkit using the supplied provider."""
+    agent_toolkit_repository = AsyncMock()
+    agent_toolkit_repository.list_by_agent.return_value = [
+        AgentToolkit(
+            id="agent-toolkit-1",
+            agent_id="agent-1",
+            toolkit_id="toolkit-1",
+            toolkit_type="test",
+            created_at=_NOW,
+        )
+    ]
+    toolkit_repository = AsyncMock()
+    toolkit_repository.get_by_id.return_value = ToolkitConfig(
+        id="toolkit-1",
+        workspace_id="ws-1",
+        toolkit_type="test",
+        slug="test",
+        name="Test",
+        description=None,
+        config={"value": "valid"} if toolkit_config is None else toolkit_config,
+        prompt=None,
+        credentials=None,
+        enabled=True,
+        created_at=_NOW,
+        updated_at=_NOW,
+    )
+    return await resolve_agent_tools(
+        "agent-1",
+        _make_toolkit_context(),
+        execution_mode=ToolkitExecutionMode.ROOT,
+        toolkit_registry={"test": provider},
+        agent_toolkit_repository=agent_toolkit_repository,
+        toolkit_repository=toolkit_repository,
+        session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
+        web_url="https://example.test",
+        oauth_secret_key="secret",
+        mcp_proxy_url=None,
+        runtime_domain_config=RuntimeDomainConfig(
+            allowed_domains=(),
+            denied_domains=(),
+        ),
+        memory_enabled=False,
+        runtime_tools_enabled=False,
     )
 
 
@@ -489,6 +575,34 @@ class TestResolveInvokeInput:
 
 class TestResolveAgentTools:
     """resolve_agent_tools auto-bound Toolkit tests."""
+
+    async def test_skips_registered_toolkit_with_invalid_persisted_config(
+        self,
+    ) -> None:
+        """Expected persisted config errors disable only that Toolkit."""
+        bindings = await _resolve_failing_registered_toolkit(
+            _FailingToolkitProvider(ValueError("invalid persisted credential"))
+        )
+
+        assert bindings == []
+
+    async def test_skips_registered_toolkit_with_invalid_persisted_schema(
+        self,
+    ) -> None:
+        """Schema-invalid persisted config disables only that Toolkit."""
+        bindings = await _resolve_failing_registered_toolkit(
+            _FailingToolkitProvider(RuntimeError("must not resolve")),
+            toolkit_config={},
+        )
+
+        assert bindings == []
+
+    async def test_propagates_unexpected_registered_toolkit_failure(self) -> None:
+        """Unexpected provider bugs are not disguised as a missing Toolkit."""
+        with pytest.raises(RuntimeError, match="provider bug"):
+            await _resolve_failing_registered_toolkit(
+                _FailingToolkitProvider(RuntimeError("provider bug"))
+            )
 
     async def test_auto_binds_claude_rules_when_runtime_tools_enabled(self) -> None:
         """Claude rules Toolkit is auto-bound after runtime shell Toolkit."""

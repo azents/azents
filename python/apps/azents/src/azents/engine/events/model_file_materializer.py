@@ -50,8 +50,8 @@ class ModelFileMaterializer:
         agent_id: str,
     ) -> None:
         """Store ModelFileService and resolver."""
-        self._model_file_service = model_file_service
-        self._resolver = resolver
+        self.model_file_service = model_file_service
+        self.resolver = resolver
         self._user_id = user_id
         self._agent_id = agent_id
 
@@ -61,11 +61,11 @@ class ModelFileMaterializer:
         transcript: Sequence[Event],
     ) -> None:
         """Make Transcript FilePart blobs available only within current request."""
-        self._resolver.clear()
+        self.resolver.clear()
         if self._user_id is None:
             return
         for model_file_id in unique_model_file_ids(transcript):
-            resolved = await self._model_file_service.download_for_agent(
+            resolved = await self.model_file_service.download_for_agent(
                 model_file_id=model_file_id,
                 agent_id=self._agent_id,
                 user_id=self._user_id,
@@ -74,7 +74,7 @@ class ModelFileMaterializer:
                 _log_unavailable_model_file(model_file_id, resolved.error)
                 continue
             download = resolved.value
-            self._resolver.put(
+            self.resolver.put(
                 model_file_id=model_file_id,
                 content=ModelFileLoweringContent(
                     data_url=make_model_file_data_url(

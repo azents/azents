@@ -11,7 +11,7 @@ import logging
 import tempfile
 import urllib.request
 from collections.abc import Mapping
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, NamedTuple
 
 import boto3
 import google.auth.transport.requests
@@ -29,6 +29,13 @@ from pydantic import BaseModel, Field
 from azents.core.tools import ClusterConfig
 
 logger = logging.getLogger(__name__)
+
+
+class GkeClusterInfo(NamedTuple):
+    """GKE API endpoint and base64-encoded cluster CA certificate."""
+
+    endpoint: str
+    ca_cert_b64: str
 
 
 # ---------------------------------------------------------------------------
@@ -345,7 +352,7 @@ def _get_gke_cluster_info(
     project_id: str,
     cluster_name: str,
     location: str,
-) -> tuple[str, str]:
+) -> GkeClusterInfo:
     """Fetch cluster endpoint and CA cert with GKE API.
 
     :param credentials: google-auth credentials object
@@ -372,7 +379,7 @@ def _get_gke_cluster_info(
 
     endpoint: str = f"https://{data['endpoint']}"
     ca_cert_b64: str = data["masterAuth"]["clusterCaCertificate"]
-    return endpoint, ca_cert_b64
+    return GkeClusterInfo(endpoint=endpoint, ca_cert_b64=ca_cert_b64)
 
 
 async def _create_gke_client(
@@ -413,7 +420,7 @@ async def _create_gke_client(
     )
 
     # Fetch endpoint + CA cert with GKE API; HTTP call is synchronous, so use to_thread
-    endpoint, ca_cert_b64 = await asyncio.to_thread(
+    cluster_info = await asyncio.to_thread(
         _get_gke_cluster_info,
         credentials,
         cluster.project_id,
@@ -423,8 +430,8 @@ async def _create_gke_client(
 
     # Configure Configuration
     configuration = Configuration()
-    configuration.host = endpoint
-    configuration.ssl_ca_cert = _write_ca_cert(ca_cert_b64)
+    configuration.host = cluster_info.endpoint
+    configuration.ssl_ca_cert = _write_ca_cert(cluster_info.ca_cert_b64)
 
     # Set initial token
     configuration.api_key["BearerToken"] = f"Bearer {credentials.token}"
@@ -644,7 +651,7 @@ async def _create_lightkube_gke_client(
         credential.service_account_key, scopes=scopes
     )
 
-    endpoint, ca_cert_b64 = await asyncio.to_thread(
+    cluster_info = await asyncio.to_thread(
         _get_gke_cluster_info,
         credentials,
         cluster.project_id,
@@ -659,7 +666,10 @@ async def _create_lightkube_gke_client(
         raise ValueError(msg)
 
     config = KubeConfig.from_one(
-        cluster=LightkubeCluster(server=endpoint, certificate_auth_data=ca_cert_b64),
+        cluster=LightkubeCluster(
+            server=cluster_info.endpoint,
+            certificate_auth_data=cluster_info.ca_cert_b64,
+        ),
         user=LightkubeUser(token=token),
     )
     return AsyncClient(config=config, proxy=proxy_url)

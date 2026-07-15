@@ -83,10 +83,10 @@ class RuntimeHookDispatcher:
         trace_sink: RuntimeHookTraceSink | None = None,
         logger_: logging.Logger | None = None,
     ) -> None:
-        self._trace_sink = (
+        self.trace_sink = (
             trace_sink if trace_sink is not None else NoopRuntimeHookTraceSink()
         )
-        self._logger = logger_ if logger_ is not None else logger
+        self.logger = logger_ if logger_ is not None else logger
 
     async def dispatch_observation(
         self,
@@ -107,7 +107,7 @@ class RuntimeHookDispatcher:
                 raise
             except Exception as exc:
                 await self._record_failed(provider.slug, lifecycle, started_at, exc)
-                self._logger.warning(
+                self.logger.warning(
                     "Runtime hook failed",
                     exc_info=True,
                     extra={
@@ -145,7 +145,7 @@ class RuntimeHookDispatcher:
                 raise
             except Exception as exc:
                 await self._record_failed(provider.slug, lifecycle, started_at, exc)
-                self._logger.warning(
+                self.logger.warning(
                     "Runtime hook failed",
                     exc_info=True,
                     extra={
@@ -193,7 +193,7 @@ class RuntimeHookDispatcher:
                 raise
             except Exception as exc:
                 await self._record_failed(provider.slug, lifecycle, started_at, exc)
-                self._logger.warning(
+                self.logger.warning(
                     "Runtime hook failed",
                     exc_info=True,
                     extra={
@@ -245,7 +245,7 @@ class RuntimeHookDispatcher:
             except Exception as exc:
                 decision = CompactionSummaryUnchanged()
                 await self._record_failed(provider.slug, lifecycle, started_at, exc)
-                self._logger.warning(
+                self.logger.warning(
                     "Runtime hook failed",
                     exc_info=True,
                     extra={
@@ -286,7 +286,7 @@ class RuntimeHookDispatcher:
             except Exception as exc:
                 decision = ToolCallAllow()
                 await self._record_failed(provider.slug, lifecycle, started_at, exc)
-                self._logger.warning(
+                self.logger.warning(
                     "Runtime hook failed",
                     exc_info=True,
                     extra={
@@ -333,7 +333,7 @@ class RuntimeHookDispatcher:
             except Exception as exc:
                 decision = ToolOutputUnchanged()
                 await self._record_failed(provider.slug, lifecycle, started_at, exc)
-                self._logger.warning(
+                self.logger.warning(
                     "Runtime hook failed",
                     exc_info=True,
                     extra={
@@ -421,7 +421,7 @@ class RuntimeHookDispatcher:
                     reason="hooks_resolution_failed",
                 )
             )
-            self._logger.warning(
+            self.logger.warning(
                 "Runtime hooks mapping resolution failed",
                 exc_info=True,
                 extra={
@@ -541,11 +541,11 @@ class RuntimeHookDispatcher:
     async def _record_event(self, event: RuntimeHookTraceEvent) -> None:
         """Isolate trace sink failure from hook dispatch."""
         try:
-            await self._trace_sink.record(event)
+            await self.trace_sink.record(event)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            self._logger.warning(
+            self.logger.warning(
                 "Runtime hook trace sink failed",
                 exc_info=True,
                 extra={

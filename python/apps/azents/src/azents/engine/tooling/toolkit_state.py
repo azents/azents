@@ -63,16 +63,16 @@ class ToolkitStateHandle(Generic[StateT]):
         model_type: type[StateT],
     ) -> None:
         """Create Toolkit State handle."""
-        self._session = session
-        self._repository = repository
+        self.session = session
+        self.repository = repository
         self._identity = identity
         self._model_type = model_type
         self._loaded_version: int | None = None
 
     async def load(self, default_factory: Callable[[], StateT]) -> StateT:
         """Load stored state and return default_factory result when absent."""
-        record = await self._repository.get(
-            self._session,
+        record = await self.repository.get(
+            self.session,
             agent_id=self._identity.agent_id,
             session_id=self._identity.session_id,
             toolkit_namespace=self._identity.toolkit_namespace,
@@ -118,8 +118,8 @@ class ToolkitStateHandle(Generic[StateT]):
 
     async def _save(self, state: StateT) -> SavedToolkitState:
         """Replace and store entire state."""
-        record = await self._repository.save(
-            self._session,
+        record = await self.repository.save(
+            self.session,
             ToolkitStateUpsert(
                 agent_id=self._identity.agent_id,
                 session_id=self._identity.session_id,
@@ -152,8 +152,8 @@ class ToolkitStateStore:
         repository: ToolkitStateRepository | None = None,
     ) -> None:
         """Create Toolkit State Store."""
-        self._session = session
-        self._repository = repository or ToolkitStateRepository()
+        self.session = session
+        self.repository = repository or ToolkitStateRepository()
 
     def handle(
         self,
@@ -162,8 +162,8 @@ class ToolkitStateStore:
     ) -> ToolkitStateHandle[StateT]:
         """Return typed handle for identity."""
         return ToolkitStateHandle(
-            session=self._session,
-            repository=self._repository,
+            session=self.session,
+            repository=self.repository,
             identity=identity,
             model_type=model_type,
         )

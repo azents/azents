@@ -42,7 +42,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ChatView.tsx
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
 last_verified_at: 2026-07-15
-spec_version: 82
+spec_version: 83
 ---
 
 # Agent Execution Loop
@@ -394,6 +394,12 @@ contains entered toolkit instances only. The engine then calls
 `update_context(TurnContext)` on that snapshot to build current tool specs and prompt
 fragments.
 
+A DB-registered Toolkit is omitted only when its persisted configuration or credentials fail
+validation. Unexpected provider implementation failures propagate through run preparation instead of
+being logged and disguised as a successfully resolved run with a missing Toolkit. Runtime instruction
+appendix discovery similarly ignores only absent or non-file candidates; unexpected storage failures
+remain visible to the execution failure boundary.
+
 `TurnContext` carries current run values such as `run_id`, `publish_event`, current
 actor `user_id`, model, and optional stop checker. Session-scoped toolkit instances
 must create run-sensitive handlers from this current turn context instead of retaining
@@ -658,6 +664,8 @@ updated by the user.
 
 ## Changelog
 
+- **2026-07-15** (spec_version 83) — Required unexpected Toolkit resolution and runtime instruction
+  storage failures to propagate instead of being silently represented as missing optional context.
 - **2026-07-15** (spec_version 82) — Required short run-owned database sessions, external-I/O
   separation, and lock/revalidation boundaries for tool finalization and MCP OAuth refresh.
 - **2026-07-14** (spec_version 81) — Added durable per-model-call start time to live Run projections and a once-per-second duration beside the LLM indicator after ten elapsed seconds.

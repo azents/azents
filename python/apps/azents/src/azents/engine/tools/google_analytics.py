@@ -15,6 +15,8 @@ from google.analytics.data_v1beta import (
     DateRange,
     RunReportResponse,
 )
+from google.api_core.exceptions import GoogleAPIError
+from google.auth.exceptions import GoogleAuthError
 from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -328,20 +330,20 @@ class GoogleAnalyticsToolkit(Toolkit[GoogleAnalyticsToolkitConfig]):
         api_client: GoogleAnalyticsApiClient,
     ) -> None:
         self._config = config
-        self._api = api_client
+        self.api = api_client
 
     async def update_context(self, context: TurnContext) -> ToolkitState:
         """Return seven GA4 native tools."""
         default_pid = self._config.default_property_id
 
         tools: list[FunctionTool] = [
-            _make_run_report_tool(self._api, default_pid),
-            _make_run_realtime_report_tool(self._api, default_pid),
-            _make_get_custom_dimensions_and_metrics_tool(self._api, default_pid),
-            _make_get_account_summaries_tool(self._api),
-            _make_get_property_details_tool(self._api, default_pid),
-            _make_list_google_ads_links_tool(self._api, default_pid),
-            _make_list_property_annotations_tool(self._api, default_pid),
+            _make_run_report_tool(self.api, default_pid),
+            _make_run_realtime_report_tool(self.api, default_pid),
+            _make_get_custom_dimensions_and_metrics_tool(self.api, default_pid),
+            _make_get_account_summaries_tool(self.api),
+            _make_get_property_details_tool(self.api, default_pid),
+            _make_list_google_ads_links_tool(self.api, default_pid),
+            _make_list_property_annotations_tool(self.api, default_pid),
         ]
 
         return ToolkitState(status=ToolkitStatus.ENABLED, tools=tools)
@@ -461,9 +463,8 @@ class GoogleAnalyticsToolkitProvider(
                 supports_dcr=None,
             )
 
-        credentials = create_credentials(secrets.service_account_key)
-
         try:
+            credentials = create_credentials(secrets.service_account_key)
             data_client = BetaAnalyticsDataAsyncClient(credentials=credentials)
             admin_client = AnalyticsAdminServiceAsyncClient(
                 credentials=credentials,
@@ -481,8 +482,8 @@ class GoogleAnalyticsToolkitProvider(
                 discovered_token_url=None,
                 supports_dcr=None,
             )
-        except Exception:
-            logger.exception("GA4 connection test failed")
+        except GoogleAPIError, GoogleAuthError, ValueError:
+            logger.warning("GA4 connection test failed", exc_info=True)
             return TestConnectionResult(
                 success=False,
                 message="Connection test failed",

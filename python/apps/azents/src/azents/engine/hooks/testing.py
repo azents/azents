@@ -2,7 +2,6 @@
 
 import asyncio
 import dataclasses
-from typing import cast
 
 from pydantic import BaseModel
 
@@ -12,6 +11,8 @@ from azents.engine.hooks.types import (
     BeforeToolCallHookContext,
     CompactionSummaryDecision,
     CompactionSummaryHookContext,
+    CompactionSummaryReplace,
+    CompactionSummaryUnchanged,
     RunEndHookContext,
     RunStartHookContext,
     RuntimeHibernateHookContext,
@@ -21,8 +22,12 @@ from azents.engine.hooks.types import (
     SessionClearHookContext,
     SessionCompactHookContext,
     SessionStartHookContext,
+    ToolCallAllow,
     ToolCallDecision,
+    ToolCallDeny,
     ToolOutputDecision,
+    ToolOutputReplace,
+    ToolOutputUnchanged,
     TurnEndHookContext,
     TurnStartHookContext,
     TurnStartResult,
@@ -106,7 +111,12 @@ class DeterministicRuntimeHookProvider(Toolkit[BaseModel]):
         self, context: CompactionSummaryHookContext
     ) -> CompactionSummaryDecision | None:
         result = await self._run("on_compaction_summary", context)
-        return cast(CompactionSummaryDecision | None, result)
+        if result is None or isinstance(
+            result,
+            CompactionSummaryReplace | CompactionSummaryUnchanged,
+        ):
+            return result
+        raise TypeError("Invalid deterministic compaction summary hook result")
 
     async def _on_run_start(self, context: RunStartHookContext) -> None:
         await self._run("on_run_start", context)
@@ -118,7 +128,9 @@ class DeterministicRuntimeHookProvider(Toolkit[BaseModel]):
         self, context: TurnStartHookContext
     ) -> TurnStartResult | None:
         result = await self._run("on_turn_start", context)
-        return cast(TurnStartResult | None, result)
+        if result is None or isinstance(result, TurnStartResult):
+            return result
+        raise TypeError("Invalid deterministic turn start hook result")
 
     async def _on_turn_end(self, context: TurnEndHookContext) -> None:
         await self._run("on_turn_end", context)
@@ -127,13 +139,20 @@ class DeterministicRuntimeHookProvider(Toolkit[BaseModel]):
         self, context: BeforeToolCallHookContext
     ) -> ToolCallDecision | None:
         result = await self._run("on_before_tool_call", context)
-        return cast(ToolCallDecision | None, result)
+        if result is None or isinstance(result, ToolCallAllow | ToolCallDeny):
+            return result
+        raise TypeError("Invalid deterministic before-tool hook result")
 
     async def _on_after_tool_call(
         self, context: AfterToolCallHookContext
     ) -> ToolOutputDecision | None:
         result = await self._run("on_after_tool_call", context)
-        return cast(ToolOutputDecision | None, result)
+        if result is None or isinstance(
+            result,
+            ToolOutputReplace | ToolOutputUnchanged,
+        ):
+            return result
+        raise TypeError("Invalid deterministic after-tool hook result")
 
     async def _on_runtime_hibernate(self, context: RuntimeHibernateHookContext) -> None:
         await self._run("on_runtime_hibernate", context)

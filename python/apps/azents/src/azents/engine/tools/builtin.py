@@ -364,8 +364,8 @@ class MemoryReadToolkit(Toolkit[ShellToolkitConfig]):
         self._config = config
         self._agent_id = agent_id
         self._session_id = ""
-        self._session_manager = session_manager
-        self._memory_repo = memory_repo
+        self.session_manager = session_manager
+        self.memory_repo = memory_repo
 
     def set_agent_id(self, agent_id: str) -> None:
         """Inject agent_id.
@@ -389,22 +389,22 @@ class MemoryReadToolkit(Toolkit[ShellToolkitConfig]):
             tools.extend(
                 [
                     make_list_memories_tool(
-                        self._memory_repo,
+                        self.memory_repo,
                         self._agent_id,
                         user_id,
-                        self._session_manager,
+                        self.session_manager,
                     ),
                     make_get_memory_tool(
-                        self._memory_repo,
+                        self.memory_repo,
                         self._agent_id,
                         user_id,
-                        self._session_manager,
+                        self.session_manager,
                     ),
                     make_search_memories_tool(
-                        self._memory_repo,
+                        self.memory_repo,
                         self._agent_id,
                         user_id,
-                        self._session_manager,
+                        self.session_manager,
                     ),
                 ]
             )
@@ -414,9 +414,9 @@ class MemoryReadToolkit(Toolkit[ShellToolkitConfig]):
         """Return dynamic memory read prompt for the current turn."""
         if not self._config.memory_enabled:
             return ""
-        async with self._session_manager() as mem_session:
+        async with self.session_manager() as mem_session:
             return await collect_memory_prompt(
-                self._memory_repo,
+                self.memory_repo,
                 mem_session,
                 self._agent_id,
                 context.user_id or "",
@@ -437,8 +437,8 @@ class MemoryWriteToolkit(Toolkit[ShellToolkitConfig]):
         self._config = config
         self._agent_id = agent_id
         self._session_id = ""
-        self._session_manager = session_manager
-        self._memory_repo = memory_repo
+        self.session_manager = session_manager
+        self.memory_repo = memory_repo
 
     def set_agent_id(self, agent_id: str) -> None:
         """Inject agent_id.
@@ -462,16 +462,16 @@ class MemoryWriteToolkit(Toolkit[ShellToolkitConfig]):
             tools.extend(
                 [
                     make_save_memory_tool(
-                        self._memory_repo,
+                        self.memory_repo,
                         self._agent_id,
                         user_id,
-                        self._session_manager,
+                        self.session_manager,
                     ),
                     make_delete_memory_tool(
-                        self._memory_repo,
+                        self.memory_repo,
                         self._agent_id,
                         user_id,
-                        self._session_manager,
+                        self.session_manager,
                     ),
                 ]
             )
@@ -503,8 +503,8 @@ class BuiltinToolkit(Toolkit[ShellToolkitConfig]):
         self._config = config
         self._agent_id = agent_id
         self._session_id = ""
-        self._session_manager = session_manager
-        self._memory_repo = memory_repo
+        self.session_manager = session_manager
+        self.memory_repo = memory_repo
 
     def set_agent_id(self, agent_id: str) -> None:
         """Inject agent_id.
@@ -531,34 +531,34 @@ class BuiltinToolkit(Toolkit[ShellToolkitConfig]):
             tools.extend(
                 [
                     make_save_memory_tool(
-                        self._memory_repo,
+                        self.memory_repo,
                         agent_id,
                         user_id,
-                        self._session_manager,
+                        self.session_manager,
                     ),
                     make_list_memories_tool(
-                        self._memory_repo,
+                        self.memory_repo,
                         agent_id,
                         user_id,
-                        self._session_manager,
+                        self.session_manager,
                     ),
                     make_get_memory_tool(
-                        self._memory_repo,
+                        self.memory_repo,
                         agent_id,
                         user_id,
-                        self._session_manager,
+                        self.session_manager,
                     ),
                     make_search_memories_tool(
-                        self._memory_repo,
+                        self.memory_repo,
                         agent_id,
                         user_id,
-                        self._session_manager,
+                        self.session_manager,
                     ),
                     make_delete_memory_tool(
-                        self._memory_repo,
+                        self.memory_repo,
                         agent_id,
                         user_id,
-                        self._session_manager,
+                        self.session_manager,
                     ),
                 ]
             )
@@ -570,9 +570,9 @@ class BuiltinToolkit(Toolkit[ShellToolkitConfig]):
         config = self._config
         if not config.memory_enabled:
             return ""
-        async with self._session_manager() as mem_session:
+        async with self.session_manager() as mem_session:
             return await collect_memory_prompt(
-                self._memory_repo,
+                self.memory_repo,
                 mem_session,
                 self._agent_id,
                 context.user_id or "",
@@ -605,28 +605,28 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         project_repo: SessionWorkspaceProjectRepository,
     ) -> None:
         self._config = config
-        self._runner_operations = runner_operations
-        self._exchange_file_service = exchange_file_service
-        self._artifact_service = artifact_service
-        self._model_file_service = model_file_service
+        self.runner_operations = runner_operations
+        self.exchange_file_service = exchange_file_service
+        self.artifact_service = artifact_service
+        self.model_file_service = model_file_service
         self._agent_id = agent_id
         self._runtime_agent_id = agent_id
         self._session_id: str = ""
         self._runtime_session_id: str = ""
         self._excluded_tools: AbstractSet[str] = frozenset()
         self._peer_toolkits: Sequence[RuntimeEnvProvider] = ()
-        self._session_manager = session_manager
-        self._agent_runtime_repo = agent_runtime_repo
-        self._project_repo = project_repo
-        self._agents_store = agents_store
+        self.session_manager = session_manager
+        self.agent_runtime_repo = agent_runtime_repo
+        self.project_repo = project_repo
+        self.agents_store = agents_store
         self._agents_context: RuntimeInstructionContext | None = None
-        self._instruction_context_store: RuntimeInstructionContextStore | None = None
+        self.instruction_context_store: RuntimeInstructionContextStore | None = None
 
     def set_instruction_context_store(
         self, store: RuntimeInstructionContextStore
     ) -> None:
         """Register shared Runtime instruction context store."""
-        self._instruction_context_store = store
+        self.instruction_context_store = store
 
     def set_peer_toolkits(self, peers: Sequence[RuntimeEnvProvider]) -> None:
         """Register peer toolkits that collect env during Shell execution.
@@ -700,32 +700,32 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         user_id = context.user_id
 
         file_ss = RuntimeRunnerFileStorage(
-            runner_operations=self._runner_operations,
-            agent_runtime_repo=self._agent_runtime_repo,
-            session_manager=self._session_manager,
+            runner_operations=self.runner_operations,
+            agent_runtime_repo=self.agent_runtime_repo,
+            session_manager=self.session_manager,
         )
 
         tools = [
             make_exec_command_tool(
-                self._runner_operations,
-                agent_runtime_repo=self._agent_runtime_repo,
-                session_manager=self._session_manager,
+                self.runner_operations,
+                agent_runtime_repo=self.agent_runtime_repo,
+                session_manager=self.session_manager,
                 agent_id=runtime_agent_id,
                 publish_event=context.publish_event,
                 owner_session_id=self._session_id,
                 peer_toolkits=self._peer_toolkits,
             ),
             make_write_stdin_tool(
-                self._runner_operations,
-                agent_runtime_repo=self._agent_runtime_repo,
-                session_manager=self._session_manager,
+                self.runner_operations,
+                agent_runtime_repo=self.agent_runtime_repo,
+                session_manager=self.session_manager,
                 agent_id=runtime_agent_id,
                 publish_event=context.publish_event,
                 owner_session_id=self._session_id,
             ),
             make_read_image_tool(
                 session_storage=file_ss,
-                model_file_service=self._model_file_service,
+                model_file_service=self.model_file_service,
                 session_id=self._session_id,
                 agent_id=agent_id,
                 user_id=user_id or "",
@@ -733,15 +733,15 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
             ),
             make_import_file_tool(
                 session_storage=file_ss,
-                exchange_file_service=self._exchange_file_service,
-                artifact_service=self._artifact_service,
+                exchange_file_service=self.exchange_file_service,
+                artifact_service=self.artifact_service,
                 session_id=self._session_id,
                 agent_id=agent_id,
                 user_id=user_id or "",
             ),
             make_present_file_tool(
                 session_storage=file_ss,
-                exchange_file_service=self._exchange_file_service,
+                exchange_file_service=self.exchange_file_service,
                 session_id=self._session_id,
                 agent_id=agent_id,
                 user_id=user_id or "",
@@ -783,8 +783,8 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
 
         instruction_context = await self._make_instruction_context(file_ss)
         self.register_agents_context(instruction_context)
-        if self._instruction_context_store is not None:
-            self._instruction_context_store.set(instruction_context)
+        if self.instruction_context_store is not None:
+            self.instruction_context_store.set(instruction_context)
         return ToolkitState(status=ToolkitStatus.ENABLED, tools=tools)
 
     async def get_static_prompt(self, context: TurnContext) -> str:
@@ -821,8 +821,8 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         """Fetch Project list registered to AgentSession."""
         if not session_id:
             return []
-        async with self._session_manager() as session:
-            return await self._project_repo.list_projects(
+        async with self.session_manager() as session:
+            return await self.project_repo.list_projects(
                 session,
                 session_id=session_id,
             )
@@ -952,15 +952,15 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
         runner_operations: RuntimeRunnerOperationClient,
         project_repo: SessionWorkspaceProjectRepository,
     ) -> None:
-        self._exchange_file_service = exchange_file_service
-        self._artifact_service = artifact_service
-        self._model_file_service = model_file_service
-        self._session_manager = session_manager
-        self._memory_repo = memory_repo
-        self._agent_runtime_repo = agent_runtime_repo
-        self._runner_operations = runner_operations
-        self._project_repo = project_repo
-        self._agents_store = agents_store
+        self.exchange_file_service = exchange_file_service
+        self.artifact_service = artifact_service
+        self.model_file_service = model_file_service
+        self.session_manager = session_manager
+        self.memory_repo = memory_repo
+        self.agent_runtime_repo = agent_runtime_repo
+        self.runner_operations = runner_operations
+        self.project_repo = project_repo
+        self.agents_store = agents_store
 
     async def resolve(
         self,
@@ -979,15 +979,15 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
         """
         return RuntimeToolkit(
             config=config,
-            runner_operations=self._runner_operations,
-            exchange_file_service=self._exchange_file_service,
-            artifact_service=self._artifact_service,
-            model_file_service=self._model_file_service,
+            runner_operations=self.runner_operations,
+            exchange_file_service=self.exchange_file_service,
+            artifact_service=self.artifact_service,
+            model_file_service=self.model_file_service,
             agent_id=context.agent_id,
-            session_manager=self._session_manager,
-            agent_runtime_repo=self._agent_runtime_repo,
-            project_repo=self._project_repo,
-            agents_store=self._agents_store,
+            session_manager=self.session_manager,
+            agent_runtime_repo=self.agent_runtime_repo,
+            project_repo=self.project_repo,
+            agents_store=self.agents_store,
         )
 
     async def resolve_builtin(
@@ -1004,8 +1004,8 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
         return BuiltinToolkit(
             config=config,
             agent_id=context.agent_id,
-            session_manager=self._session_manager,
-            memory_repo=self._memory_repo,
+            session_manager=self.session_manager,
+            memory_repo=self.memory_repo,
         )
 
     async def resolve_memory_read(
@@ -1017,8 +1017,8 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
         return MemoryReadToolkit(
             config=config,
             agent_id=context.agent_id,
-            session_manager=self._session_manager,
-            memory_repo=self._memory_repo,
+            session_manager=self.session_manager,
+            memory_repo=self.memory_repo,
         )
 
     async def resolve_memory_write(
@@ -1030,8 +1030,8 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
         return MemoryWriteToolkit(
             config=config,
             agent_id=context.agent_id,
-            session_manager=self._session_manager,
-            memory_repo=self._memory_repo,
+            session_manager=self.session_manager,
+            memory_repo=self.memory_repo,
         )
 
 
@@ -1157,15 +1157,15 @@ class RuntimeRunnerFileStorage:
         agent_runtime_repo: AgentRuntimeRepository,
         session_manager: SessionManager[AsyncSession] | None,
     ) -> None:
-        self._runner_operations = runner_operations
-        self._agent_runtime_repo = agent_runtime_repo
-        self._session_manager = session_manager
+        self.runner_operations = runner_operations
+        self.agent_runtime_repo = agent_runtime_repo
+        self.session_manager = session_manager
 
     async def get(self, path: str, *, agent_id: str) -> bytes:
         """Read file bytes through the Runtime Runner."""
         runtime = await self._ready_runtime(agent_id)
         try:
-            result = await self._runner_operations.read_file(
+            result = await self.runner_operations.read_file(
                 runtime_id=runtime.id,
                 runner_generation=runtime.runner_generation,
                 owner_session_id=None,
@@ -1182,7 +1182,7 @@ class RuntimeRunnerFileStorage:
         """Fetch Runtime path metadata with file.stat."""
         runtime = await self._ready_runtime(agent_id)
         try:
-            result = await self._runner_operations.stat_file(
+            result = await self.runner_operations.stat_file(
                 runtime_id=runtime.id,
                 runner_generation=runtime.runner_generation,
                 owner_session_id=None,
@@ -1209,7 +1209,7 @@ class RuntimeRunnerFileStorage:
         """Write file bytes through the Runtime Runner."""
         runtime = await self._ready_runtime(agent_id)
         try:
-            result = await self._runner_operations.write_file(
+            result = await self.runner_operations.write_file(
                 runtime_id=runtime.id,
                 runner_generation=runtime.runner_generation,
                 owner_session_id=None,
@@ -1231,7 +1231,7 @@ class RuntimeRunnerFileStorage:
         """Delete a Runtime path through a shell operation."""
         runtime = await self._ready_runtime(agent_id)
         try:
-            result = await self._runner_operations.run_bash(
+            result = await self.runner_operations.run_bash(
                 runtime_id=runtime.id,
                 runner_generation=runtime.runner_generation,
                 owner_session_id=None,
@@ -1316,7 +1316,7 @@ class RuntimeRunnerFileStorage:
         """Search Runtime files through a single Runner grep operation."""
         runtime = await self._ready_runtime(agent_id)
         try:
-            result = await self._runner_operations.grep_files(
+            result = await self.runner_operations.grep_files(
                 runtime_id=runtime.id,
                 runner_generation=runtime.runner_generation,
                 owner_session_id=None,
@@ -1347,8 +1347,8 @@ class RuntimeRunnerFileStorage:
 
     async def _ready_runtime(self, agent_id: str) -> AgentRuntime:
         return await _ready_runtime_for_agent(
-            agent_runtime_repo=self._agent_runtime_repo,
-            session_manager=self._session_manager,
+            agent_runtime_repo=self.agent_runtime_repo,
+            session_manager=self.session_manager,
             agent_id=agent_id,
         )
 
@@ -1361,7 +1361,7 @@ class RuntimeRunnerFileStorage:
         exclude_patterns: list[str] | None = None,
     ) -> tuple[RuntimeFileListEntry, ...]:
         try:
-            result = await self._runner_operations.list_files(
+            result = await self.runner_operations.list_files(
                 runtime_id=runtime.id,
                 runner_generation=runtime.runner_generation,
                 owner_session_id=None,

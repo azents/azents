@@ -78,22 +78,7 @@ async def build_tool_catalog(
     active_toolkit_bindings: list[ToolkitBinding] = []
     for index, binding in enumerate(toolkit_bindings):
         update_started_at = time.monotonic()
-        try:
-            state = await binding.toolkit.update_context(context)
-        except Exception:
-            duration_seconds = time.monotonic() - update_started_at
-            if duration_seconds > _SLOW_TOOLKIT_UPDATE_CONTEXT_SECONDS:
-                logger.warning(
-                    "Toolkit update_context failed after slow duration",
-                    extra=_toolkit_update_context_log_extra(
-                        binding=binding,
-                        context=context,
-                        index=index,
-                        duration_seconds=duration_seconds,
-                    ),
-                    exc_info=True,
-                )
-            raise
+        state = await binding.toolkit.update_context(context)
         duration_seconds = time.monotonic() - update_started_at
         if duration_seconds > _SLOW_TOOLKIT_UPDATE_CONTEXT_SECONDS:
             logger.warning(
@@ -222,11 +207,11 @@ class ToolCatalogClientToolExecutor(ClientToolExecutor):
     """Event client tool call executor."""
 
     def __init__(self, catalog: ToolCatalog) -> None:
-        self._catalog = catalog
+        self.catalog = catalog
 
     async def execute(self, call: ClientToolCallPayload) -> ClientToolResultPayload:
         """Run Tool handler and convert to event tool result."""
-        tool = self._catalog.tools.get(call.name)
+        tool = self.catalog.tools.get(call.name)
         if tool is None:
             return ClientToolResultPayload(
                 call_id=call.call_id,
@@ -252,7 +237,7 @@ class ToolCatalogClientToolExecutor(ClientToolExecutor):
 
     def request_cancel(self, call: ClientToolCallPayload) -> None:
         """Call Tool cancellation hook fire-and-forget."""
-        tool = self._catalog.tools.get(call.name)
+        tool = self.catalog.tools.get(call.name)
         if tool is None or tool.cancel_handler is None:
             return
         request = FunctionToolCancelRequest(
