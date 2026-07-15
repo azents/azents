@@ -481,7 +481,10 @@ class _StreamingExecution:
         )
         if self.output_sink is None:
             raise AssertionError("output sink was not injected")
-        await self.output_sink(NormalizedAdapterOutput(events=[]), [event])
+        await self.output_sink(
+            NormalizedAdapterOutput(needs_follow_up=False, events=[]),
+            [event],
+        )
         try:
             await self._done.wait()
         except asyncio.CancelledError as exc:
