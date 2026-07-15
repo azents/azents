@@ -45,8 +45,8 @@ code_paths:
   - python/apps/azents/src/azents/worker/session/**
   - typescript/apps/azents-web/src/features/chat/components/ChatView.tsx
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
-last_verified_at: 2026-07-15
-spec_version: 87
+last_verified_at: 2026-07-16
+spec_version: 88
 ---
 
 # Agent Execution Loop
@@ -93,6 +93,30 @@ as a failed-attempt retry. `end_turn` set to `true`, omitted, or malformed does 
 request follow-up. Foreground client tool calls continue to require follow-up regardless of
 `end_turn`. Incomplete tool calls are never admitted. A user stop remains a separate interruption path
 and may durably preserve assistant text received before completion without requesting follow-up.
+
+### OpenAI HTTP incremental input continuation
+
+OpenAI Platform Responses calls may reuse the immediately preceding stored response within one
+`AgentRunExecution` tool loop. The lowerer and post-lower size guard still operate on the complete
+logical request. Only the model adapter's physical HTTP request is reduced: when the current input
+exactly equals the preceding full request input, followed by that response's ordered native output
+items, followed by non-empty new input, the adapter sends only the new input and supplies the
+preceding response ID as `previous_response_id`.
+
+Continuation is enabled only for `LLMProvider.OPENAI` requests whose `store` setting is not `false`.
+The request model, tools, and all kwargs must match exactly. Any changed property, edited or compacted
+prefix, output mismatch, missing completion data, empty delta, cancellation, or failed/incomplete
+stream causes the next call to use the complete logical request. Continuation state is in memory for
+one adapter lifetime and is committed only after a successful `response.completed` event with a
+non-empty response ID. Durable event history remains the recovery source across worker retries,
+restarts, and adapter recreation. Stored output items use the same raw-blob sanitization as durable
+native artifacts before they participate in prefix comparison.
+
+If OpenAI rejects an incremental request with the exact `previous_response_not_found` error code
+before a response stream opens, the adapter disables continuation for its remaining lifetime and
+retries that logical request once with full input. Other provider errors retain their normal failure
+classification. ChatGPT OAuth, Responses Lite, non-OpenAI providers, and explicit `store=false`
+requests always use full-context HTTP requests.
 
 ### Model Stream Attempt Watchdog
 

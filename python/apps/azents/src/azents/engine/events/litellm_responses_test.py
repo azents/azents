@@ -43,6 +43,7 @@ from azents.engine.events.protocols import (
     NativeModelRequest,
     StreamProjection,
 )
+from azents.engine.events.responses_continuation import ResponsesContinuationPlanner
 from azents.engine.events.system_reminders import (
     format_compaction_summary_reminder,
     format_goal_continuation_reminder,
@@ -129,6 +130,21 @@ def _event(kind: EventKind, payload: EventPayload) -> Event:
         payload=payload,
         created_at=datetime.datetime.now(datetime.UTC),
     )
+
+
+def _response_stream_event(
+    event_type: str,
+    item: dict[str, object],
+) -> object:
+    """Create a model-dumpable event with the requested native class name."""
+
+    class TestResponseEvent:
+        def model_dump(self) -> dict[str, object]:
+            """Return the fixed native event payload."""
+            return item
+
+    TestResponseEvent.__name__ = event_type
+    return TestResponseEvent()
 
 
 class TestLiteLLMResponsesLowerer:
@@ -1832,6 +1848,12 @@ class TestLiteLLMResponsesLowerer:
 class _TestLiteLLMResponsesModelAdapter(LiteLLMResponsesModelAdapter):
     """Bind standard watchdog inputs for adapter behavior tests."""
 
+    def __init__(
+        self,
+        continuation_planner: ResponsesContinuationPlanner | None = None,
+    ) -> None:
+        super().__init__(continuation_planner)
+
     async def stream(
         self,
         request: NativeModelRequest,
@@ -1991,6 +2013,231 @@ class TestLiteLLMResponsesModelAdapter:
             "effort": ModelReasoningEffort.MAX,
             "summary": "auto",
         }
+
+    async def test_stream_continues_with_previous_response_and_delta_input(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Send only new tool output after an exact completed response boundary."""
+        calls: list[dict[str, object]] = []
+        function_call = {
+            "type": "function_call",
+            "id": "fc-1",
+            "call_id": "call-1",
+            "name": "read",
+            "arguments": "{}",
+        }
+
+        async def streaming_call(**kwargs: object) -> object:
+            calls.append(kwargs)
+            response_id = f"resp-{len(calls)}"
+
+            async def response_iter() -> AsyncIterator[object]:
+                if len(calls) == 1:
+                    yield _response_stream_event(
+                        "ResponseOutputItemDoneEvent",
+                        {"item": function_call},
+                    )
+                yield _response_stream_event(
+                    "ResponseCompletedEvent",
+                    {"response": {"id": response_id, "output": []}},
+                )
+
+            return response_iter()
+
+        monkeypatch.setattr(
+            "azents.engine.events.litellm_responses.aresponses",
+            streaming_call,
+        )
+        adapter = _TestLiteLLMResponsesModelAdapter(ResponsesContinuationPlanner())
+        first = NativeModelRequest(
+            model="gpt-5.1",
+            input=[{"role": "user", "content": "read"}],
+            kwargs={"store": True},
+        )
+        tool_output = {
+            "type": "function_call_output",
+            "call_id": "call-1",
+            "output": "contents",
+        }
+        second = first.model_copy(
+            update={"input": [*first.input, function_call, tool_output]}
+        )
+
+        _ = [event async for event in adapter.stream(first)]
+        _ = [event async for event in adapter.stream(second)]
+
+        assert calls[0]["input"] == first.input
+        assert calls[0]["previous_response_id"] is None
+        assert calls[1]["input"] == [tool_output]
+        assert calls[1]["previous_response_id"] == "resp-1"
+
+    async def test_stream_does_not_continue_without_successful_terminal_response(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Do not commit state when a stream ends without response.completed."""
+        calls: list[dict[str, object]] = []
+
+        async def streaming_call(**kwargs: object) -> object:
+            calls.append(kwargs)
+
+            async def response_iter() -> AsyncIterator[object]:
+                if False:
+                    yield object()
+
+            return response_iter()
+
+        monkeypatch.setattr(
+            "azents.engine.events.litellm_responses.aresponses",
+            streaming_call,
+        )
+        adapter = _TestLiteLLMResponsesModelAdapter(ResponsesContinuationPlanner())
+        first = NativeModelRequest(
+            model="gpt-5.1",
+            input=[{"role": "user", "content": "first"}],
+        )
+        second = NativeModelRequest(
+            model="gpt-5.1",
+            input=[*first.input, {"role": "user", "content": "second"}],
+        )
+
+        _ = [event async for event in adapter.stream(first)]
+        _ = [event async for event in adapter.stream(second)]
+
+        assert calls[1]["input"] == second.input
+        assert calls[1]["previous_response_id"] is None
+
+    async def test_failed_continuation_discards_the_prior_boundary(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Use full input after an incremental stream reaches a failed terminal."""
+        calls: list[dict[str, object]] = []
+        function_call = {
+            "type": "function_call",
+            "id": "fc-1",
+            "call_id": "call-1",
+            "name": "read",
+            "arguments": "{}",
+        }
+
+        async def streaming_call(**kwargs: object) -> object:
+            calls.append(kwargs)
+
+            async def response_iter() -> AsyncIterator[object]:
+                if len(calls) == 1:
+                    yield _response_stream_event(
+                        "ResponseCompletedEvent",
+                        {"response": {"id": "resp-1", "output": [function_call]}},
+                    )
+                elif len(calls) == 2:
+                    yield _response_stream_event(
+                        "ResponseIncompleteEvent",
+                        {"response": {"id": "resp-2", "output": []}},
+                    )
+
+            return response_iter()
+
+        monkeypatch.setattr(
+            "azents.engine.events.litellm_responses.aresponses",
+            streaming_call,
+        )
+        adapter = _TestLiteLLMResponsesModelAdapter(ResponsesContinuationPlanner())
+        first = NativeModelRequest(
+            model="gpt-5.1",
+            input=[{"role": "user", "content": "read"}],
+            kwargs={"store": True},
+        )
+        tool_output = {
+            "type": "function_call_output",
+            "call_id": "call-1",
+            "output": "contents",
+        }
+        second = first.model_copy(
+            update={"input": [*first.input, function_call, tool_output]}
+        )
+        third = second.model_copy(
+            update={"input": [*second.input, {"role": "user", "content": "retry"}]}
+        )
+
+        _ = [event async for event in adapter.stream(first)]
+        _ = [event async for event in adapter.stream(second)]
+        _ = [event async for event in adapter.stream(third)]
+
+        assert calls[1]["previous_response_id"] == "resp-1"
+        assert calls[2]["previous_response_id"] is None
+        assert calls[2]["input"] == third.input
+
+    async def test_missing_previous_response_retries_full_request_once(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Recover a rejected stored response by disabling and retrying full input."""
+        calls: list[dict[str, object]] = []
+        function_call = {
+            "type": "function_call",
+            "id": "fc-1",
+            "call_id": "call-1",
+            "name": "read",
+            "arguments": "{}",
+        }
+
+        async def streaming_call(**kwargs: object) -> object:
+            calls.append(kwargs)
+            if kwargs.get("previous_response_id") == "resp-1":
+                raise BadRequestError(
+                    message="Previous response was not found",
+                    model="gpt-5.1",
+                    llm_provider="openai",
+                    body={
+                        "error": {
+                            "code": "previous_response_not_found",
+                            "message": "Previous response was not found",
+                        }
+                    },
+                )
+
+            async def response_iter() -> AsyncIterator[object]:
+                yield _response_stream_event(
+                    "ResponseCompletedEvent",
+                    {
+                        "response": {
+                            "id": f"resp-{len(calls)}",
+                            "output": [function_call] if len(calls) == 1 else [],
+                        }
+                    },
+                )
+
+            return response_iter()
+
+        monkeypatch.setattr(
+            "azents.engine.events.litellm_responses.aresponses",
+            streaming_call,
+        )
+        adapter = _TestLiteLLMResponsesModelAdapter(ResponsesContinuationPlanner())
+        first = NativeModelRequest(
+            model="gpt-5.1",
+            input=[{"role": "user", "content": "read"}],
+            kwargs={"store": True},
+        )
+        tool_output = {
+            "type": "function_call_output",
+            "call_id": "call-1",
+            "output": "contents",
+        }
+        second = first.model_copy(
+            update={"input": [*first.input, function_call, tool_output]}
+        )
+
+        _ = [event async for event in adapter.stream(first)]
+        _ = [event async for event in adapter.stream(second)]
+
+        assert len(calls) == 3
+        assert calls[1]["input"] == [tool_output]
+        assert calls[1]["previous_response_id"] == "resp-1"
+        assert calls[2]["input"] == second.input
+        assert calls[2]["previous_response_id"] is None
 
     async def test_litellm_bad_request_stays_internal(
         self,

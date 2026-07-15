@@ -72,6 +72,7 @@ from azents.engine.events.protocols import (
     SummaryGenerator,
     TranscriptRepository,
 )
+from azents.engine.events.responses_continuation import ResponsesContinuationPlanner
 from azents.engine.events.system_prompt import build_system_prompt
 from azents.engine.events.tools import (
     ToolCatalogClientToolExecutor,
@@ -497,7 +498,11 @@ class AgentEngineAdapter:
                     ),
                 ]
             ),
-            model_adapter=LiteLLMResponsesModelAdapter(),
+            model_adapter=LiteLLMResponsesModelAdapter(
+                ResponsesContinuationPlanner()
+                if request.provider == LLMProvider.OPENAI
+                else None
+            ),
             model_stream_watchdog=self.model_stream_watchdog,
             model_stream_provider=provider,
             model_stream_inference_profile=(

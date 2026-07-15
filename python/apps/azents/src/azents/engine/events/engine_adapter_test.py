@@ -42,12 +42,14 @@ from azents.engine.events.filters import (
     EventPreLowerFilterPipeline,
     PostLowerFilterPipeline,
 )
+from azents.engine.events.litellm_responses import LiteLLMResponsesModelAdapter
 from azents.engine.events.protocols import (
     NormalizedAdapterOutput,
     OutputSink,
     SummaryEnricher,
     SummaryGenerator,
 )
+from azents.engine.events.responses_continuation import ResponsesContinuationPlanner
 from azents.engine.events.types import (
     AgentRunState,
     ClientToolCallPayload,
@@ -900,8 +902,10 @@ async def test_adapter_propagates_user_visible_model_call_error() -> None:
 async def test_model_kwargs_routes_chatgpt_oauth_to_backend_api() -> None:
     """ChatGPT OAuth calls chatgpt backend-api/codex endpoint."""
     execution = _Execution()
+    captured: dict[str, object] = {}
 
     def factory(**kwargs: object) -> _Execution:
+        captured.update(kwargs)
         return (
             setattr(
                 execution,
@@ -958,6 +962,9 @@ async def test_model_kwargs_routes_chatgpt_oauth_to_backend_api() -> None:
     assert result["api_base"] == CHATGPT_OAUTH_BACKEND_BASE_URL
     assert result["store"] is False
     assert result["instructions"] == "You are a helpful assistant."
+    model_adapter = captured["model_adapter"]
+    assert isinstance(model_adapter, LiteLLMResponsesModelAdapter)
+    assert model_adapter.continuation_planner is None
 
 
 async def test_adapter_wires_event_filters_and_session_head_repo() -> None:
@@ -1022,6 +1029,12 @@ async def test_adapter_wires_event_filters_and_session_head_repo() -> None:
         "NativeRequestSizeGuard",
     ]
     assert captured["session_repo"] is session_head_repo
+    model_adapter = captured["model_adapter"]
+    assert isinstance(model_adapter, LiteLLMResponsesModelAdapter)
+    assert isinstance(
+        model_adapter.continuation_planner,
+        ResponsesContinuationPlanner,
+    )
 
 
 async def test_manual_compact_runs_append_only_event_compactor() -> None:
