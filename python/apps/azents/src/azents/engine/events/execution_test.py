@@ -488,6 +488,14 @@ class _StaticOutputStream:
         return self._output
 
 
+class _CompletionFailingOutputStream(_StaticOutputStream):
+    """Incremental normalizer stream that fails at completion."""
+
+    def complete(self) -> NormalizedAdapterOutput:
+        """Raise a model error instead of returning durable output."""
+        raise ModelCallError("Model response stream ended before completion.")
+
+
 class _ProjectingOutputStream(_StaticOutputStream):
     """Return a live content projection for the test delta event."""
 
@@ -520,6 +528,15 @@ class _ProjectingNormalizer:
         return _ProjectingOutputStream(
             NormalizedAdapterOutput(events=self._events, usage=_usage())
         )
+
+
+class _CompletionFailingNormalizer:
+    """Create streams that reject normal completion."""
+
+    def start(self, session_id: str) -> _CompletionFailingOutputStream:
+        """Return one completion-failing output stream."""
+        del session_id
+        return _CompletionFailingOutputStream(NormalizedAdapterOutput())
 
 
 class _Normalizer:
@@ -2282,6 +2299,38 @@ async def test_pre_model_lower_hook_runs_before_lowerer() -> None:
     assert status == AgentRunStatus.COMPLETED
     assert hook.called is True
     assert lowerer.transcripts[0] == transcript_repo.events[:1]
+
+
+async def test_model_completion_error_propagates_for_retry() -> None:
+    """Normalizer completion failure propagates before durable output append."""
+    run_repo = _RunRepo()
+    transcript_repo = _TranscriptRepo()
+    execution = AgentRunExecution(
+        session_manager=_session_context,
+        post_lower_filter=_PostFilter(),
+        model_adapter=_ModelAdapter(),
+        output_normalizer=_CompletionFailingNormalizer(),
+        model_call_preparer=_model_call_preparer(
+            lowerer=_Lowerer(), tool_executor=_ToolExecutor()
+        ),
+        run_repo=run_repo,
+        transcript_repo=transcript_repo,
+    )
+
+    with pytest.raises(ModelCallError, match="stream ended before completion"):
+        await execution.run(
+            AgentRunExecutionRequest(
+                owner_generation=1,
+                tool_admission_barrier=_OpenToolAdmissionBarrier(),
+                run_id="run-1",
+                session_id="session-1",
+                model="gpt-5.1",
+            ),
+        )
+
+    assert run_repo.terminal is None
+    assert AgentRunPhase.APPENDING_EVENTS not in run_repo.phases
+    assert transcript_repo.events == []
 
 
 async def test_empty_model_output_propagates_for_retry() -> None:

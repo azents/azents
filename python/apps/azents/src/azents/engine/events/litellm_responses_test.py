@@ -2333,10 +2333,185 @@ class TestLiteLLMResponsesOutputNormalizer:
         )
 
         assert incremental.events == []
+        output_stream.process_event(
+            NativeEvent(
+                type="ResponseCompletedEvent",
+                item={"response": {"output": []}},
+            )
+        )
         completed = output_stream.complete()
         assert [event.kind for event in completed.events] == [
             EventKind.CLIENT_TOOL_CALL
         ]
+
+    def test_rejects_completed_output_item_without_terminal_event(self) -> None:
+        """Do not treat output-item completion as response completion."""
+        normalizer = LiteLLMResponsesOutputNormalizer(
+            provider="openai",
+            model="gpt-5.1",
+        )
+        output_stream = normalizer.start("session-1")
+        output_stream.process_event(
+            NativeEvent(
+                type="OutputItemDoneEvent",
+                item={
+                    "item": {
+                        "type": "reasoning",
+                        "summary": [{"text": "unfinished"}],
+                    }
+                },
+            )
+        )
+
+        with pytest.raises(
+            ModelCallError,
+            match="stream ended before completion",
+        ):
+            output_stream.complete()
+
+    def test_rejects_empty_stream_without_terminal_event(self) -> None:
+        """Reject EOF when no native response terminal event was observed."""
+        normalizer = LiteLLMResponsesOutputNormalizer(
+            provider="openai",
+            model="gpt-5.1",
+        )
+        output_stream = normalizer.start("session-1")
+
+        with pytest.raises(
+            ModelCallError,
+            match="stream ended before completion",
+        ):
+            output_stream.complete()
+
+    @pytest.mark.parametrize(
+        ("event_type", "item", "message"),
+        [
+            (
+                "ResponseIncompleteEvent",
+                {"response": {"incomplete_details": {"reason": "max_output_tokens"}}},
+                "Model response was incomplete: max_output_tokens",
+            ),
+            (
+                "ResponseFailedEvent",
+                {
+                    "response": {
+                        "error": {
+                            "message": "Provider rejected the response",
+                            "code": "provider_failed",
+                        }
+                    }
+                },
+                (
+                    "Model response failed: Provider rejected the response; "
+                    "code: provider_failed"
+                ),
+            ),
+            (
+                "ResponseErrorEvent",
+                {
+                    "message": "Provider stream failed",
+                    "code": "stream_failed",
+                },
+                "Model call failed: Provider stream failed; code: stream_failed",
+            ),
+        ],
+    )
+    def test_rejects_unsuccessful_terminal_event(
+        self,
+        event_type: str,
+        item: dict[str, object],
+        message: str,
+    ) -> None:
+        """Convert native unsuccessful terminal outcomes to model errors."""
+        normalizer = LiteLLMResponsesOutputNormalizer(
+            provider="openai",
+            model="gpt-5.1",
+        )
+        output_stream = normalizer.start("session-1")
+        output_stream.process_event(
+            NativeEvent(
+                type="OutputItemDoneEvent",
+                item={
+                    "item": {
+                        "type": "reasoning",
+                        "summary": [{"text": "unfinished"}],
+                    }
+                },
+            )
+        )
+        output_stream.process_event(NativeEvent(type=event_type, item=item))
+
+        with pytest.raises(ModelCallError, match=message):
+            output_stream.complete()
+
+    def test_interrupt_does_not_mask_unsuccessful_terminal_event(self) -> None:
+        """Keep provider failure authoritative over later cancellation."""
+        normalizer = LiteLLMResponsesOutputNormalizer(
+            provider="openai",
+            model="gpt-5.1",
+        )
+        output_stream = normalizer.start("session-1")
+        output_stream.process_event(
+            NativeEvent(
+                type="ResponseIncompleteEvent",
+                item={
+                    "response": {"incomplete_details": {"reason": "max_output_tokens"}}
+                },
+            )
+        )
+
+        with pytest.raises(ModelCallError, match="max_output_tokens"):
+            output_stream.interrupt()
+
+    def test_bounds_unsuccessful_terminal_details(self) -> None:
+        """Keep provider terminal details bounded and scalar-only."""
+        normalizer = LiteLLMResponsesOutputNormalizer(
+            provider="openai",
+            model="gpt-5.1",
+        )
+        output_stream = normalizer.start("session-1")
+        output_stream.process_event(
+            NativeEvent(
+                type="ResponseErrorEvent",
+                item={
+                    "message": "x" * 600,
+                    "code": {"raw": "not user safe"},
+                },
+            )
+        )
+
+        with pytest.raises(ModelCallError) as raised:
+            output_stream.complete()
+
+        assert str(raised.value) == f"Model call failed: {'x' * 512}"
+
+    def test_accepts_explicitly_completed_reasoning_only_response(self) -> None:
+        """Keep explicit completed reasoning-only output in current scope."""
+        normalizer = LiteLLMResponsesOutputNormalizer(
+            provider="openai",
+            model="gpt-5.1",
+        )
+
+        output = normalizer.normalize(
+            "session-1",
+            [
+                NativeEvent(
+                    type="ResponseCompletedEvent",
+                    item={
+                        "response": {
+                            "output": [
+                                {
+                                    "type": "reasoning",
+                                    "summary": [{"text": "completed reasoning"}],
+                                }
+                            ]
+                        }
+                    },
+                )
+            ],
+        )
+
+        assert [event.kind for event in output.events] == [EventKind.REASONING]
 
     def test_normalizes_completed_output_items(self) -> None:
         """Convert completed response output item to event."""
@@ -2795,6 +2970,10 @@ class TestLiteLLMResponsesOutputNormalizer:
                     type=delta_type,
                     item={"output_index": 2, "delta": '{"path"'},
                 ),
+                NativeEvent(
+                    type="ResponseCompletedEvent",
+                    item={"response": {"output": []}},
+                ),
             ],
         )
 
@@ -2815,7 +2994,11 @@ class TestLiteLLMResponsesOutputNormalizer:
                 NativeEvent(
                     type="ResponseTextDeltaEvent",
                     item={"delta": "hello"},
-                )
+                ),
+                NativeEvent(
+                    type="ResponseCompletedEvent",
+                    item={"response": {"output": []}},
+                ),
             ],
         )
 
