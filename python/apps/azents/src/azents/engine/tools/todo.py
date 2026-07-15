@@ -99,10 +99,19 @@ class TodoStateStore:
     async def load(self, agent_id: str, session_id: str) -> TodoState:
         """Fetch session todo state."""
         async with self.session_manager() as session:
-            handle = await self._make_handle(session, agent_id, session_id)
-            if handle is None:
-                return TodoState()
-            return await handle.load(default_factory=TodoState)
+            return await self.load_in_session(session, agent_id, session_id)
+
+    async def load_in_session(
+        self,
+        session: AsyncSession,
+        agent_id: str,
+        session_id: str,
+    ) -> TodoState:
+        """Fetch session todo state inside the caller's transaction."""
+        handle = await self._make_handle(session, agent_id, session_id)
+        if handle is None:
+            return TodoState()
+        return await handle.load(default_factory=TodoState)
 
     async def update(
         self,

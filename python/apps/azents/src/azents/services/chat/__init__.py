@@ -996,11 +996,6 @@ class ChatSessionService:
             input_buffers = await self.input_buffer_service.list_by_session_id(
                 session, session_id
             )
-            partial_history_events = []
-            if live_event_store is not None:
-                partial_history_events = await live_event_store.list_by_session_id(
-                    session_id
-                )
             input_buffer_events = [
                 input_buffer_to_live_event(input_buffer)
                 for input_buffer in input_buffers
@@ -1009,24 +1004,21 @@ class ChatSessionService:
                 session,
                 session_id=session_id,
             )
-            partial_history_events = [
-                event
-                for event in partial_history_events
-                if not isinstance(event.payload, ClientToolCallPayload)
-            ]
-            if run is not None:
-                partial_history_events.extend(
-                    active_tool_call_to_live_event(session_id, active)
-                    for active in run.active_tool_calls
-                )
-            partial_history_events.sort(key=lambda event: (event.created_at, event.id))
             goal_store = GoalStateStore(session_manager=self.session_manager)
             goal = GoalStateSnapshot.from_state(
-                await goal_store.load(agent_session.agent_id, session_id)
+                await goal_store.load_in_session(
+                    session,
+                    agent_session.agent_id,
+                    session_id,
+                )
             )
             todo_store = TodoStateStore(session_manager=self.session_manager)
             todo = TodoStateSnapshot.from_state(
-                await todo_store.load(agent_session.agent_id, session_id)
+                await todo_store.load_in_session(
+                    session,
+                    agent_session.agent_id,
+                    session_id,
+                )
             )
             action_executions = (
                 await self.action_execution_repository.list_projections_by_session_id(
@@ -1035,64 +1027,85 @@ class ChatSessionService:
                 )
             )
             session_run_state = agent_session.run_state
-            if run is not None:
-                if session_run_state != AgentSessionRunState.RUNNING:
-                    logger.warning(
-                        "Active AgentRun contradicts persisted Session run state",
-                        extra={
-                            "session_id": session_id,
-                            "run_id": run.id,
-                            "run_status": run.status,
-                            "session_run_state": session_run_state,
-                        },
-                    )
-                session_run_state = AgentSessionRunState.RUNNING
-            return Success(
-                ChatLiveStateSnapshot(
-                    partial_history_events=partial_history_events,
-                    input_buffer_events=input_buffer_events,
-                    run=None
-                    if run is None
-                    else ChatLiveRunState(
-                        run_id=run.id,
-                        phase=run.phase,
-                        status=run.status,
-                        inference_profile=_require_session_inference_profile(
-                            agent_session
-                        ),
-                        model_call_started_at=run.model_call_started_at,
-                        retry=None
-                        if run.retry_state is None
-                        else ChatLiveRunRetryState(
-                            status=run.retry_state.status,
-                            last_error_message=run.retry_state.last_user_message,
-                            failed_attempt_count=run.retry_state.failed_attempt_count,
-                            max_retries=run.retry_state.max_retries,
-                            backoff_seconds=run.retry_state.backoff_seconds,
-                            next_retry_at=run.retry_state.next_retry_at.isoformat(),
-                            attempts=[
-                                ChatLiveRunRetryAttempt(
-                                    attempt_number=attempt.attempt_number,
-                                    user_message=attempt.user_message,
-                                    error_type=attempt.error_type,
-                                    source=attempt.source,
-                                    failed_at=attempt.failed_at.isoformat(),
-                                    backoff_seconds=attempt.backoff_seconds,
-                                    next_retry_at=attempt.next_retry_at.isoformat(),
-                                    retryability=attempt.retryability,
-                                    failure_code=attempt.failure_code,
-                                    truncated=attempt.truncated,
-                                )
-                                for attempt in run.retry_state.attempts
-                            ],
-                        ),
-                    ),
-                    session_run_state=session_run_state,
-                    todo=todo,
-                    goal=goal,
-                    action_executions=action_executions,
-                )
+            inference_profile = (
+                None
+                if run is None
+                else _require_session_inference_profile(agent_session)
             )
+
+        partial_history_events = []
+        if live_event_store is not None:
+            partial_history_events = await live_event_store.list_by_session_id(
+                session_id
+            )
+        partial_history_events = [
+            event
+            for event in partial_history_events
+            if not isinstance(event.payload, ClientToolCallPayload)
+        ]
+        if run is not None:
+            partial_history_events.extend(
+                active_tool_call_to_live_event(session_id, active)
+                for active in run.active_tool_calls
+            )
+        partial_history_events.sort(key=lambda event: (event.created_at, event.id))
+        live_run = None
+        if run is not None:
+            assert inference_profile is not None
+            if session_run_state != AgentSessionRunState.RUNNING:
+                logger.warning(
+                    "Active AgentRun contradicts persisted Session run state",
+                    extra={
+                        "session_id": session_id,
+                        "run_id": run.id,
+                        "run_status": run.status,
+                        "session_run_state": session_run_state,
+                    },
+                )
+            session_run_state = AgentSessionRunState.RUNNING
+            live_run = ChatLiveRunState(
+                run_id=run.id,
+                phase=run.phase,
+                status=run.status,
+                inference_profile=inference_profile,
+                model_call_started_at=run.model_call_started_at,
+                retry=None
+                if run.retry_state is None
+                else ChatLiveRunRetryState(
+                    status=run.retry_state.status,
+                    last_error_message=run.retry_state.last_user_message,
+                    failed_attempt_count=run.retry_state.failed_attempt_count,
+                    max_retries=run.retry_state.max_retries,
+                    backoff_seconds=run.retry_state.backoff_seconds,
+                    next_retry_at=run.retry_state.next_retry_at.isoformat(),
+                    attempts=[
+                        ChatLiveRunRetryAttempt(
+                            attempt_number=attempt.attempt_number,
+                            user_message=attempt.user_message,
+                            error_type=attempt.error_type,
+                            source=attempt.source,
+                            failed_at=attempt.failed_at.isoformat(),
+                            backoff_seconds=attempt.backoff_seconds,
+                            next_retry_at=attempt.next_retry_at.isoformat(),
+                            retryability=attempt.retryability,
+                            failure_code=attempt.failure_code,
+                            truncated=attempt.truncated,
+                        )
+                        for attempt in run.retry_state.attempts
+                    ],
+                ),
+            )
+        return Success(
+            ChatLiveStateSnapshot(
+                partial_history_events=partial_history_events,
+                input_buffer_events=input_buffer_events,
+                run=live_run,
+                session_run_state=session_run_state,
+                todo=todo,
+                goal=goal,
+                action_executions=action_executions,
+            )
+        )
 
     async def delete_session(
         self,

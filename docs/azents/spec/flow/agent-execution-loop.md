@@ -42,7 +42,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ChatView.tsx
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
 last_verified_at: 2026-07-15
-spec_version: 84
+spec_version: 85
 ---
 
 # Agent Execution Loop
@@ -594,6 +594,14 @@ likewise runs after its snapshot session closes; promotion then locks and revali
 before applying any durable changes. Flush reuses only the FileParts stored at the input boundary and
 never downloads an attachment or creates a ModelFile while holding the Session/FIFO lock.
 
+ExchangeFile, ModelFile, and Artifact creation preallocates the entity ID and object key, closes its
+authorization snapshot, uploads the blob without an open database session, and then revalidates
+ownership in the short metadata transaction. A failed revalidation or metadata commit deletes the
+preuploaded object. Live snapshot reads finish their PostgreSQL-backed state snapshot, including
+Toolkit state, before reading Redis live projections. Lifecycle state helpers propagate database
+failures; they must not report a safe idle or terminal boundary from a failed durable check. Run-ID
+terminal and retry updates re-read the Run in the same short transaction and reject a Session mismatch.
+
 Row locks remain limited to persistence invariants. Tool-result finalization locks its `AgentRun`
 while appending the deterministic result and removing that call from `active_tool_calls`, so parallel
 tool completions cannot overwrite each other. MCP OAuth refresh reads a credential snapshot, closes
@@ -667,6 +675,8 @@ updated by the user.
 
 ## Changelog
 
+- **2026-07-15** (spec_version 85) — Required preallocated blob keys with S3 outside database
+  sessions, live PostgreSQL snapshot closure before Redis reads, and transparent lifecycle DB errors.
 - **2026-07-15** (spec_version 84) — Moved input-buffer attachment metadata resolution before the
   locking transaction, required FIFO revalidation afterward, and prohibited execution-time
   attachment-to-ModelFile rematerialization.

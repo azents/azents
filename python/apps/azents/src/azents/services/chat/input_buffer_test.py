@@ -1,6 +1,9 @@
 """ChatSessionService InputBuffer tests."""
 
 import datetime
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
+from typing import cast
 from unittest.mock import patch
 
 from azcommon.result import Failure, Success
@@ -53,6 +56,39 @@ from azents.testing.model_selection import (
 
 from . import ChatSessionService
 from .data import SessionAccessDenied
+from .live_events import LiveEventStore
+
+
+class _TrackingSessionManager:
+    """Reject nested DB sessions and expose the active session count."""
+
+    def __init__(self, delegate: SessionManager[AsyncSession]) -> None:
+        self.delegate = delegate
+        self.active = 0
+
+    @asynccontextmanager
+    async def __call__(self) -> AsyncGenerator[AsyncSession]:
+        """Open exactly one delegated DB session at a time."""
+        assert self.active == 0
+        self.active += 1
+        try:
+            async with self.delegate() as session:
+                yield session
+        finally:
+            self.active -= 1
+
+
+class _BoundaryCheckingLiveEventStore:
+    """Live store asserting that Redis I/O runs after DB scope closure."""
+
+    def __init__(self, session_manager: _TrackingSessionManager) -> None:
+        self.session_manager = session_manager
+
+    async def list_by_session_id(self, session_id: str) -> list[object]:
+        """Return no live events after checking the transaction boundary."""
+        del session_id
+        assert self.session_manager.active == 0
+        return []
 
 
 async def _create_workspace(session: AsyncSession, handle: str) -> str:
@@ -227,6 +263,33 @@ class TestChatSessionInputBuffer:
         )
         assert result.value.partial_history_events == []
         assert result.value.session_run_state == AgentSessionRunState.IDLE
+
+    async def test_list_live_events_closes_db_before_live_store_io(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Live output reads Redis only after its single DB snapshot closes."""
+        async with rdb_session_manager() as session:
+            session_id, user_id, _ = await _create_session_with_buffer(
+                session,
+                handle="chat-live-db-boundary",
+                slug="chat-live-db-boundary",
+            )
+        tracking_manager = _TrackingSessionManager(rdb_session_manager)
+
+        result = await _service(
+            cast(SessionManager[AsyncSession], tracking_manager)
+        ).list_live_events(
+            session_id,
+            user_id=user_id,
+            live_event_store=cast(
+                LiveEventStore,
+                _BoundaryCheckingLiveEventStore(tracking_manager),
+            ),
+        )
+
+        assert isinstance(result, Success)
+        assert tracking_manager.active == 0
 
     async def test_list_live_events_running_run_overrides_idle_session_state(
         self,

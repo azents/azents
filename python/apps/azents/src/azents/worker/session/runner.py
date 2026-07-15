@@ -59,7 +59,7 @@ class AgentSessionCommandReader(Protocol):
 
 @dataclasses.dataclass(frozen=True)
 class _PendingIdleBoundary:
-    """stale wake-up 뒤에 닫아야 하는 terminal run boundary."""
+    """Terminal run boundary to close after a stale wake-up."""
 
     message: SessionWakeUp
     toolkits: list[ToolkitBinding]

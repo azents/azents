@@ -110,10 +110,13 @@ class _AgentRunRepository:
         running_run: AgentRunState | None,
         *,
         activated_run: AgentRunState | None = None,
+        active_lookup_error: Exception | None = None,
     ) -> None:
         self.running_run = running_run
         self.activated_run = activated_run
+        self.active_lookup_error = active_lookup_error
         self.terminal_session_ids: list[str] = []
+        self.terminal_run_ids: list[str] = []
         self.activation_run_ids: list[str] = []
 
     async def get_active_by_session_id(
@@ -124,6 +127,32 @@ class _AgentRunRepository:
     ) -> AgentRunState | None:
         """Return test-specified active run."""
         del session, session_id
+        if self.active_lookup_error is not None:
+            raise self.active_lookup_error
+        return self.running_run
+
+    async def get_by_id(
+        self,
+        session: AsyncSession,
+        run_id: str,
+    ) -> AgentRunState | None:
+        """Return the configured run only when its ID matches."""
+        del session
+        if self.running_run is None or self.running_run.id != run_id:
+            return None
+        return self.running_run
+
+    async def mark_terminal_if_running(
+        self,
+        session: AsyncSession,
+        run_id: str,
+        status: AgentRunStatus,
+        *,
+        ended_at: datetime,
+    ) -> AgentRunState | None:
+        """Record a run-level terminal transition."""
+        del session, status, ended_at
+        self.terminal_run_ids.append(run_id)
         return self.running_run
 
     async def activate_pending(
@@ -244,6 +273,43 @@ async def test_mark_session_idle_allows_terminal_run_boundary() -> None:
     assert marked_idle
     assert agent_session_repository.idle_session_ids == ["session-001"]
     assert agent_run_repository.terminal_session_ids == []
+
+
+@pytest.mark.asyncio
+async def test_mark_session_idle_propagates_db_failure() -> None:
+    """A failed DB check cannot be reported as a safe idle boundary."""
+    service = _service(
+        agent_run_repository=_AgentRunRepository(
+            None,
+            active_lookup_error=RuntimeError("database unavailable"),
+        ),
+        agent_session_repository=_AgentSessionRepository(),
+        pending_input=False,
+    )
+
+    with pytest.raises(RuntimeError, match="database unavailable"):
+        await service.mark_session_idle("session-001")
+
+
+@pytest.mark.asyncio
+async def test_terminal_update_rejects_cross_session_run() -> None:
+    """A stale session runner cannot close another session's run by ID."""
+    run = _running_run().model_copy(update={"session_id": "session-002"})
+    agent_run_repository = _AgentRunRepository(run)
+    service = _service(
+        agent_run_repository=agent_run_repository,
+        agent_session_repository=_AgentSessionRepository(),
+        pending_input=False,
+    )
+
+    with pytest.raises(ValueError, match="AgentRun session mismatch"):
+        await service.mark_agent_run_terminal_if_running(
+            "session-001",
+            run_id=run.id,
+            status=AgentRunStatus.STOPPED,
+        )
+
+    assert agent_run_repository.terminal_run_ids == []
 
 
 @pytest.mark.asyncio

@@ -13,9 +13,14 @@ from azents.rdb.models.model_file_pin import RDBModelFilePin
 from .data import ModelFile, ModelFileCreate
 
 
-def _storage_key(rdb: RDBModelFile) -> str:
+def model_file_storage_key(
+    *,
+    workspace_id: str,
+    session_id: str,
+    model_file_id: str,
+) -> str:
     """Create ModelFile object storage key."""
-    return f"model-files/{rdb.workspace_id}/{rdb.session_id}/{rdb.id}"
+    return f"model-files/{workspace_id}/{session_id}/{model_file_id}"
 
 
 class ModelFileRepository:
@@ -41,7 +46,12 @@ class ModelFileRepository:
             sha256=create.sha256,
             metadata_=create.metadata,
         )
-        rdb.storage_key = _storage_key(rdb)
+        rdb.id = create.id
+        rdb.storage_key = model_file_storage_key(
+            workspace_id=create.workspace_id,
+            session_id=create.session_id,
+            model_file_id=create.id,
+        )
         session.add(rdb)
         await session.flush()
         return self._build(rdb)

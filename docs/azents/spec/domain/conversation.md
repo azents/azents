@@ -92,7 +92,7 @@ api_routes:
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-07-15
-spec_version: 101
+spec_version: 102
 ---
 
 # Conversation & Events
@@ -488,6 +488,9 @@ Redis, while tests may use the in-memory implementation. Pending input buffers a
 input-buffer table and are exposed through `/live` as projections with metadata marking the projection
 source. Goal continuation starts as a pending `goal_continuation` input buffer and becomes a durable
 `goal_continuation` event only when the session runner flushes buffers into the next model input.
+The `/live` reader obtains access, pending input, active Run, Goal/Todo Toolkit state, and action
+execution projections in one short PostgreSQL session. It closes that session before reading Redis
+live projections and performs no nested database session reads inside the snapshot.
 `goal_updated` is appended when the user updates the session Goal. User-requested stop appends
 `interrupted` before the terminal run marker. The UI must not render these control events as user
 bubbles or delete controls; it may render non-interactive timeline indicators such as goal controls or
@@ -711,6 +714,8 @@ Current verification:
 
 ## 11. Changelog
 
+- **2026-07-15** — v102. Required `/live` to close its single PostgreSQL snapshot before Redis I/O
+  and prohibited nested Goal/Todo database sessions during output reconstruction.
 - **2026-07-15** — v101. Required input-buffer attachment metadata resolution outside the locking
   transaction, FIFO head revalidation afterward, and creation-boundary-only FileParts.
 - **2026-07-14** — v100. Defined action execution tables as active operation state, with owner-generation admission, atomic durable terminal snapshot/delete handover, explicit live removal, and cancelled no-reexecution recovery.

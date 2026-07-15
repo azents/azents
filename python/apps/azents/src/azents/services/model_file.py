@@ -9,6 +9,7 @@ from typing import Annotated, Literal
 from azcommon.infra.s3.service import S3Service
 from azcommon.result import Failure, Result, Success
 from azcommon.types import JSONValue
+from azcommon.uuid import uuid7
 from fastapi import Depends
 from PIL import Image, ImageOps, UnidentifiedImageError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,10 +20,9 @@ from azents.core.enums import ModelFileStatus
 from azents.core.s3.deps import get_s3_service
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
-from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.model_file import ModelFileRepository
+from azents.repos.model_file import ModelFileRepository, model_file_storage_key
 from azents.repos.model_file.data import ModelFile, ModelFileCreate
 from azents.repos.workspace_user import WorkspaceUserRepository
 
@@ -109,7 +109,6 @@ class ModelFileService:
     """Coordinate ModelFile metadata and object storage."""
 
     model_file_repository: Annotated[ModelFileRepository, Depends(ModelFileRepository)]
-    agent_repository: Annotated[AgentRepository, Depends(AgentRepository)]
     agent_session_repository: Annotated[
         AgentSessionRepository,
         Depends(AgentSessionRepository),
@@ -145,10 +144,37 @@ class ModelFileService:
         if isinstance(normalized, Failure):
             return Failure(normalized.error)
 
-        uploaded_object_key: str | None = None
+        async with self.session_manager() as session:
+            agent_session = await self.agent_session_repository.get_by_id(
+                session,
+                session_id,
+            )
+            if agent_session is None:
+                return Failure(ModelFileSessionNotFound())
+            if not await self._has_workspace_access(
+                session,
+                workspace_id=agent_session.workspace_id,
+                user_id=user_id,
+            ):
+                return Failure(ModelFileAccessDenied())
+            workspace_id = agent_session.workspace_id
+            agent_id = agent_session.agent_id
+
+        normalized_body = normalized.value
+        model_file_id = uuid7().hex
+        uploaded_object_key = model_file_storage_key(
+            workspace_id=workspace_id,
+            session_id=session_id,
+            model_file_id=model_file_id,
+        )
         succeeded = False
         try:
-            created_result: Success[ModelFile] | None = None
+            await self.s3_service.upload(
+                bucket=self.config.workspace_s3.bucket,
+                key=uploaded_object_key,
+                body=normalized_body.body,
+                content_type=normalized_body.media_type,
+            )
             async with self.session_manager() as session:
                 agent_session = await self.agent_session_repository.get_by_id(
                     session,
@@ -162,11 +188,15 @@ class ModelFileService:
                     user_id=user_id,
                 ):
                     return Failure(ModelFileAccessDenied())
-
-                normalized_body = normalized.value
+                if (
+                    agent_session.workspace_id != workspace_id
+                    or agent_session.agent_id != agent_id
+                ):
+                    return Failure(ModelFileSessionNotFound())
                 created = await self.model_file_repository.create(
                     session,
                     ModelFileCreate(
+                        id=model_file_id,
                         workspace_id=agent_session.workspace_id,
                         session_id=session_id,
                         agent_id=agent_session.agent_id,
@@ -180,16 +210,8 @@ class ModelFileService:
                         metadata=_json_metadata(metadata),
                     ),
                 )
-                await self.s3_service.upload(
-                    bucket=self.config.workspace_s3.bucket,
-                    key=created.storage_key,
-                    body=normalized_body.body,
-                    content_type=normalized_body.media_type,
-                )
-                uploaded_object_key = created.storage_key
-                created_result = Success(created)
             succeeded = True
-            return created_result
+            return Success(created)
         finally:
             if not succeeded:
                 await self._cleanup_uploaded_object(uploaded_object_key)
@@ -236,17 +258,50 @@ class ModelFileService:
         if isinstance(normalized, Failure):
             return Failure(normalized.error)
 
-        uploaded_object_key: str | None = None
+        async with self.session_manager() as session:
+            agent_session = await self.agent_session_repository.get_by_id(
+                session,
+                session_id,
+            )
+            if agent_session is None or agent_session.agent_id != agent_id:
+                return Failure(ModelFileSessionNotFound())
+            if not await self._has_workspace_access(
+                session,
+                workspace_id=agent_session.workspace_id,
+                user_id=user_id,
+            ):
+                return Failure(ModelFileAccessDenied())
+            workspace_id = agent_session.workspace_id
+
+        normalized_body = normalized.value
+        model_file_id = uuid7().hex
+        uploaded_object_key = model_file_storage_key(
+            workspace_id=workspace_id,
+            session_id=session_id,
+            model_file_id=model_file_id,
+        )
         succeeded = False
         try:
-            created_result: Success[ModelFile] | None = None
+            await self.s3_service.upload(
+                bucket=self.config.workspace_s3.bucket,
+                key=uploaded_object_key,
+                body=normalized_body.body,
+                content_type=normalized_body.media_type,
+            )
             async with self.session_manager() as session:
-                agent = await self.agent_repository.get_by_id(session, agent_id)
-                if agent is None:
+                agent_session = await self.agent_session_repository.get_by_id(
+                    session,
+                    session_id,
+                )
+                if (
+                    agent_session is None
+                    or agent_session.agent_id != agent_id
+                    or agent_session.workspace_id != workspace_id
+                ):
                     return Failure(ModelFileSessionNotFound())
                 if not await self._has_workspace_access(
                     session,
-                    workspace_id=agent.workspace_id,
+                    workspace_id=agent_session.workspace_id,
                     user_id=user_id,
                 ):
                     return Failure(ModelFileAccessDenied())
@@ -255,13 +310,13 @@ class ModelFileService:
                     session_id=session_id,
                 )
 
-                normalized_body = normalized.value
                 created = await self.model_file_repository.create(
                     session,
                     ModelFileCreate(
-                        workspace_id=agent.workspace_id,
+                        id=model_file_id,
+                        workspace_id=agent_session.workspace_id,
                         session_id=session_id,
-                        agent_id=agent.id,
+                        agent_id=agent_session.agent_id,
                         name=_sanitize_display_filename(filename),
                         media_type=normalized_body.media_type,
                         kind=normalized_body.kind,
@@ -272,16 +327,8 @@ class ModelFileService:
                         metadata=_json_metadata(metadata),
                     ),
                 )
-                await self.s3_service.upload(
-                    bucket=self.config.workspace_s3.bucket,
-                    key=created.storage_key,
-                    body=normalized_body.body,
-                    content_type=normalized_body.media_type,
-                )
-                uploaded_object_key = created.storage_key
-                created_result = Success(created)
             succeeded = True
-            return created_result
+            return Success(created)
         finally:
             if not succeeded:
                 await self._cleanup_uploaded_object(uploaded_object_key)
