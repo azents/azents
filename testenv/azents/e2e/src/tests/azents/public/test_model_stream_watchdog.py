@@ -312,7 +312,7 @@ def _wait_for_interrupted_partial(
     return observed
 
 
-def _open_authenticated_session(
+def _open_authenticated_raw_events(
     driver: WebDriver,
     *,
     main_web_url: str,
@@ -321,7 +321,7 @@ def _open_authenticated_session(
     agent_id: str,
     session_id: str,
 ) -> None:
-    """Log in and open the real Main Web session page."""
+    """Log in and open the real Main Web raw-events page."""
     driver.delete_all_cookies()
     driver.get(f"{main_web_url}/login")
     wait = WebDriverWait(driver, 30)
@@ -332,7 +332,8 @@ def _open_authenticated_session(
     password_input.send_keys("TestPass123!", Keys.ENTER)
     wait.until(ec.url_contains("/workspaces"))
     driver.get(
-        f"{main_web_url}/w/{workspace_handle}/agents/{agent_id}/sessions/{session_id}"
+        f"{main_web_url}/w/{workspace_handle}/agents/{agent_id}"
+        f"/sessions/{session_id}?page=raw-events"
     )
 
 
@@ -508,7 +509,7 @@ class TestModelStreamWatchdog:
             for content in message_contents(payload)
         )
 
-        _open_authenticated_session(
+        _open_authenticated_raw_events(
             browser_driver,
             main_web_url=azents_main_web_url,
             email=workspace.email,
@@ -516,7 +517,17 @@ class TestModelStreamWatchdog:
             agent_id=agent_id,
             session_id=result.session_id,
         )
-        WebDriverWait(browser_driver, 30).until(
+        browser_wait = WebDriverWait(browser_driver, 30)
+        assistant_event = browser_wait.until(
+            ec.element_to_be_clickable(
+                (
+                    By.XPATH,
+                    "//button[.//*[normalize-space()='assistant_message']]",
+                )
+            )
+        )
+        assistant_event.click()
+        browser_wait.until(
             lambda driver: _ABSOLUTE_RECOVERY_RESPONSE in driver.page_source
         )
         assert _ABSOLUTE_FAILED_PREFIX not in browser_driver.page_source
