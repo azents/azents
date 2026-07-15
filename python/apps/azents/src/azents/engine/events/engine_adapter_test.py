@@ -2,6 +2,7 @@
 
 import asyncio
 import datetime
+import functools
 from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
 
 import pytest
@@ -78,6 +79,7 @@ from azents.repos.model_file_pin import ModelFilePinRepository
 from azents.services.artifact import ArtifactService
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.model_file import ModelFileService
+from azents.testing.model_stream import make_test_model_stream_watchdog
 
 
 class _OpenToolAdmissionBarrier:
@@ -1419,12 +1421,14 @@ def _agent_engine_adapter(
     summary_model_call: SummaryModelCall | None = None,
 ) -> AgentEngineAdapter:
     """Create AgentEngineAdapter for tests."""
+    watchdog = make_test_model_stream_watchdog()
     return AgentEngineAdapter(
         session_manager=session_manager,
         artifact_service=artifact_service or _ArtifactService(),
         exchange_file_service=exchange_file_service or _ExchangeFileService(),
         model_file_service=model_file_service or _ModelFileService(),
         config=config or EventEngineAdapterConfig(),
+        model_stream_watchdog=watchdog,
         execution_factory=execution_factory or (lambda **kwargs: _Execution()),
         run_repo=run_repo or _RunRepo(),
         agent_session_repo=agent_session_repo or _AgentSessionRepo(),
@@ -1432,7 +1436,8 @@ def _agent_engine_adapter(
         transcript_repo=transcript_repo or _TranscriptRepo([]),
         model_file_pin_repo=_ModelFilePinRepo(),
         compactor=compactor or _Compactor(),
-        summary_model_call=summary_model_call or summarize_text_with_model,
+        summary_model_call=summary_model_call
+        or functools.partial(summarize_text_with_model, watchdog=watchdog),
     )
 
 

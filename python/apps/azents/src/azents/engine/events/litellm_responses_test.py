@@ -76,8 +76,17 @@ from azents.engine.events.types import (
     UserMessagePayload,
     build_native_compat_key,
 )
+from azents.engine.model_stream import (
+    ModelStreamCallContext,
+    ModelStreamTimeoutPolicy,
+    ModelStreamWatchdog,
+)
 from azents.engine.run.errors import ModelCallError
 from azents.engine.run.types import BuiltinToolSpec
+from azents.testing.model_stream import (
+    make_test_model_stream_context,
+    make_test_model_stream_watchdog,
+)
 
 
 class _StaticModelFileResolver:
@@ -1820,6 +1829,33 @@ class TestLiteLLMResponsesLowerer:
         ]
 
 
+class _TestLiteLLMResponsesModelAdapter(LiteLLMResponsesModelAdapter):
+    """Bind standard watchdog inputs for adapter behavior tests."""
+
+    async def stream(
+        self,
+        request: NativeModelRequest,
+        *,
+        watchdog: ModelStreamWatchdog | None = None,
+        timeout_policy: ModelStreamTimeoutPolicy | None = None,
+        call_context: ModelStreamCallContext | None = None,
+    ) -> AsyncIterator[LiteLLMEvent]:
+        """Run the production adapter with the standard test policy."""
+        effective_watchdog = watchdog or make_test_model_stream_watchdog()
+        effective_policy = timeout_policy or effective_watchdog.resolve_policy(
+            provider="test",
+            model=request.model,
+            inference_profile=None,
+        )
+        async for event in super().stream(
+            request,
+            watchdog=effective_watchdog,
+            timeout_policy=effective_policy,
+            call_context=call_context or make_test_model_stream_context(),
+        ):
+            yield event
+
+
 class TestLiteLLMResponsesModelAdapter:
     """LiteLLM Responses model adapter tests."""
 
@@ -1845,7 +1881,7 @@ class TestLiteLLMResponsesModelAdapter:
             "azents.engine.events.litellm_responses.aresponses",
             streaming_call,
         )
-        adapter = LiteLLMResponsesModelAdapter()
+        adapter = _TestLiteLLMResponsesModelAdapter()
 
         events = [
             event
@@ -1880,7 +1916,7 @@ class TestLiteLLMResponsesModelAdapter:
             "azents.engine.events.litellm_responses.aresponses",
             streaming_call,
         )
-        adapter = LiteLLMResponsesModelAdapter()
+        adapter = _TestLiteLLMResponsesModelAdapter()
 
         _ = [
             event
@@ -1933,7 +1969,7 @@ class TestLiteLLMResponsesModelAdapter:
             "azents.engine.events.litellm_responses.aresponses",
             streaming_call,
         )
-        adapter = LiteLLMResponsesModelAdapter()
+        adapter = _TestLiteLLMResponsesModelAdapter()
 
         _ = [
             event
@@ -1974,7 +2010,7 @@ class TestLiteLLMResponsesModelAdapter:
             "azents.engine.events.litellm_responses.aresponses",
             fail_call,
         )
-        adapter = LiteLLMResponsesModelAdapter()
+        adapter = _TestLiteLLMResponsesModelAdapter()
 
         with pytest.raises(BadRequestError, match="Instructions are required"):
             _ = [
@@ -2002,7 +2038,7 @@ class TestLiteLLMResponsesModelAdapter:
             "azents.engine.events.litellm_responses.aresponses",
             fail_call,
         )
-        adapter = LiteLLMResponsesModelAdapter()
+        adapter = _TestLiteLLMResponsesModelAdapter()
 
         with pytest.raises(ModelCallError, match="Model call failed \\(401\\)"):
             _ = [
@@ -2030,7 +2066,7 @@ class TestLiteLLMResponsesModelAdapter:
             "azents.engine.events.litellm_responses.aresponses",
             fail_call,
         )
-        adapter = LiteLLMResponsesModelAdapter()
+        adapter = _TestLiteLLMResponsesModelAdapter()
 
         with pytest.raises(ModelCallError, match="Model call failed \\(503\\)"):
             _ = [
@@ -2042,7 +2078,7 @@ class TestLiteLLMResponsesModelAdapter:
 
     async def test_request_validation_error_stays_internal(self) -> None:
         """Propagate adapter request validation failure as internal error."""
-        adapter = LiteLLMResponsesModelAdapter()
+        adapter = _TestLiteLLMResponsesModelAdapter()
 
         with pytest.raises(ValidationError):
             _ = [
@@ -2081,7 +2117,7 @@ class TestLiteLLMResponsesModelAdapter:
             "azents.engine.events.litellm_responses.aresponses",
             streaming_call,
         )
-        adapter = LiteLLMResponsesModelAdapter()
+        adapter = _TestLiteLLMResponsesModelAdapter()
 
         _ = [
             event
@@ -2132,7 +2168,7 @@ class TestLiteLLMResponsesModelAdapter:
             "azents.engine.events.litellm_responses.aresponses",
             streaming_call,
         )
-        adapter = LiteLLMResponsesModelAdapter()
+        adapter = _TestLiteLLMResponsesModelAdapter()
 
         with pytest.raises(asyncio.CancelledError):
             _ = [
@@ -2186,7 +2222,7 @@ class TestLiteLLMResponsesModelAdapter:
             "azents.engine.events.litellm_responses.aresponses",
             streaming_call,
         )
-        adapter = LiteLLMResponsesModelAdapter()
+        adapter = _TestLiteLLMResponsesModelAdapter()
 
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")

@@ -1,5 +1,6 @@
 """Shared LiteLLM Responses helper tests."""
 
+import httpx
 import pytest
 from pytest import MonkeyPatch
 
@@ -7,6 +8,18 @@ import azents.engine.responses as responses_module
 from azents.core.enums import LLMProvider
 from azents.core.xai import XAI_API_BASE_URL
 from azents.engine.responses import call_responses_model, extract_response_text
+from azents.testing.model_stream import (
+    make_test_model_stream_context,
+    make_test_model_stream_watchdog,
+)
+
+_TEST_WATCHDOG = make_test_model_stream_watchdog()
+_TEST_POLICY = _TEST_WATCHDOG.resolve_policy(
+    provider="test",
+    model="test-model",
+    inference_profile=None,
+)
+_TEST_CONTEXT = make_test_model_stream_context(call_kind="session_title")
 
 
 async def test_call_responses_model_builds_standard_payload(
@@ -29,9 +42,18 @@ async def test_call_responses_model_builds_standard_payload(
         instructions="Generate a title",
         stream=False,
         max_output_tokens=80,
+        watchdog=_TEST_WATCHDOG,
+        timeout_policy=_TEST_POLICY,
+        call_context=_TEST_CONTEXT,
     )
 
     assert await extract_response_text(response) == "Insurance option comparison"
+    timeout = calls[0].pop("timeout")
+    assert isinstance(timeout, httpx.Timeout)
+    assert timeout.connect == 15
+    assert timeout.read is None
+    assert timeout.write is None
+    assert timeout.pool is None
     assert calls == [
         {
             "model": "anthropic/test",
@@ -74,6 +96,9 @@ async def test_call_responses_model_uses_openai_compatible_options(
         instructions="Generate a title",
         stream=False,
         max_output_tokens=80,
+        watchdog=_TEST_WATCHDOG,
+        timeout_policy=_TEST_POLICY,
+        call_context=_TEST_CONTEXT,
     )
 
     assert await extract_response_text(response) == "Config review"
@@ -113,6 +138,9 @@ async def test_call_responses_model_uses_xai_options(
         instructions="Generate a title",
         stream=False,
         max_output_tokens=80,
+        watchdog=_TEST_WATCHDOG,
+        timeout_policy=_TEST_POLICY,
+        call_context=_TEST_CONTEXT,
     )
 
     assert calls[0]["custom_llm_provider"] == "xai"

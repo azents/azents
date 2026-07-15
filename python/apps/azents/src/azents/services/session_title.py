@@ -20,11 +20,17 @@ from azents.engine.events.types import (
     OutputTextPart,
     UserMessagePayload,
 )
+from azents.engine.model_stream import (
+    ModelStreamCallContext,
+    ModelStreamWatchdog,
+    get_model_stream_watchdog,
+)
 from azents.engine.responses import (
     ResponsesOutputError,
     call_responses_model,
     extract_response_text,
 )
+from azents.engine.run.errors import ModelStreamTimeoutError
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
@@ -157,6 +163,10 @@ class SessionTitleService:
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
     ]
+    model_stream_watchdog: Annotated[
+        ModelStreamWatchdog,
+        Depends(get_model_stream_watchdog),
+    ]
 
     async def generate_from_initial_prompt(
         self,
@@ -231,7 +241,23 @@ class SessionTitleService:
                 credential_kwargs=build_credential_kwargs(integration),
                 context=context,
                 session_id=session_id,
+                watchdog=self.model_stream_watchdog,
             )
+        except ModelStreamTimeoutError as exc:
+            logger.warning(
+                "Automatic session title generation timed out",
+                extra={
+                    "session_id": session_id,
+                    "agent_id": agent_id,
+                    "provider": selection.provider.value,
+                    "model": model,
+                    "model_stream_timeout_kind": exc.timeout_kind,
+                    "model_stream_failure_code": exc.failure_code,
+                    "model_stream_deadline_seconds": exc.deadline_seconds,
+                    "model_stream_elapsed_seconds": exc.elapsed_seconds,
+                },
+            )
+            return None
         except OpenAIError, ResponsesOutputError:
             logger.exception(
                 "Automatic session title generation failed",
@@ -251,9 +277,24 @@ async def generate_session_title_with_model(
     model: str,
     credential_kwargs: dict[str, object],
     context: str,
-    session_id: str | None = None,
+    session_id: str | None,
+    watchdog: ModelStreamWatchdog,
 ) -> str | None:
     """Generate a session title with the standard LiteLLM Responses API path."""
+    timeout_policy = watchdog.resolve_policy(
+        provider=provider.value,
+        model=model,
+        inference_profile=None,
+    )
+    call_context = ModelStreamCallContext(
+        call_kind="session_title",
+        provider=provider.value,
+        model=model,
+        session_id=session_id,
+        run_id=None,
+        attempt_number=None,
+        check_stop=None,
+    )
     response = await call_responses_model(
         provider=provider,
         model=model,
@@ -267,8 +308,10 @@ async def generate_session_title_with_model(
         instructions=_TITLE_PROMPT,
         stream=True,
         max_output_tokens=_TITLE_RESPONSE_MAX_OUTPUT_TOKENS,
+        watchdog=watchdog,
+        timeout_policy=timeout_policy,
+        call_context=call_context,
     )
-    del session_id
     text = await extract_response_text(response)
     if not text:
         return None

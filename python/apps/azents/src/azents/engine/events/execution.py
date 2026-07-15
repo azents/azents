@@ -48,6 +48,7 @@ from azents.engine.events.types import (
     TurnMarkerPayload,
     UnknownAdapterOutputPayload,
 )
+from azents.engine.model_stream import ModelStreamCallContext, ModelStreamWatchdog
 from azents.engine.run.contracts import ToolAdmissionBarrier
 from azents.engine.run.errors import (
     ModelCallError,
@@ -197,6 +198,9 @@ class AgentRunExecution:
         session_manager: SessionManager[AsyncSession],
         post_lower_filter: PostLowerFilter,
         model_adapter: ModelAdapter,
+        model_stream_watchdog: ModelStreamWatchdog,
+        model_stream_provider: str,
+        model_stream_inference_profile: str | None,
         output_normalizer: AdapterOutputNormalizer,
         model_call_preparer: ModelCallPreparer,
         pre_lower_filter: PreLowerFilter | None = None,
@@ -213,6 +217,9 @@ class AgentRunExecution:
         self.session_manager = session_manager
         self.post_lower_filter = post_lower_filter
         self.model_adapter = model_adapter
+        self.model_stream_watchdog = model_stream_watchdog
+        self.model_stream_provider = model_stream_provider
+        self.model_stream_inference_profile = model_stream_inference_profile
         self.output_normalizer = output_normalizer
         self.pre_lower_filter = pre_lower_filter
         self.auto_compaction_filter = auto_compaction_filter
@@ -358,6 +365,7 @@ class AgentRunExecution:
                             request.run_id,
                             request.session_id,
                             native_request,
+                            check_stop=check_stop,
                         )
                     except _ModelStreamUserInterrupted as exc:
                         await finish_turn("cancelled")
@@ -566,15 +574,36 @@ class AgentRunExecution:
         run_id: str,
         session_id: str,
         native_request: NativeModelRequest,
+        *,
+        check_stop: CheckStop | None,
     ) -> AdapterOutputStream:
-        """Normalize and project model stream events as they arrive."""
+        """Normalize and project watched model stream events as they arrive."""
         await self._update_phase(
             run_id,
             AgentRunPhase.STREAMING_MODEL,
         )
         output_stream = self.output_normalizer.start(session_id)
+        timeout_policy = self.model_stream_watchdog.resolve_policy(
+            provider=self.model_stream_provider,
+            model=native_request.model,
+            inference_profile=self.model_stream_inference_profile,
+        )
+        call_context = ModelStreamCallContext(
+            call_kind="sampling",
+            provider=self.model_stream_provider,
+            model=native_request.model,
+            session_id=session_id,
+            run_id=run_id,
+            attempt_number=None,
+            check_stop=check_stop,
+        )
         try:
-            async for event in self.model_adapter.stream(native_request):
+            async for event in self.model_adapter.stream(
+                native_request,
+                watchdog=self.model_stream_watchdog,
+                timeout_policy=timeout_policy,
+                call_context=call_context,
+            ):
                 incremental = output_stream.process_event(event)
                 if self.output_sink is not None and incremental.projections:
                     await self.output_sink(incremental, [])

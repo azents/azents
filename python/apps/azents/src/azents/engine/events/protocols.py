@@ -17,6 +17,11 @@ from azents.engine.events.types import (
     EventPayload,
     TokenUsagePayload,
 )
+from azents.engine.model_stream import (
+    ModelStreamCallContext,
+    ModelStreamTimeoutPolicy,
+    ModelStreamWatchdog,
+)
 from azents.engine.run.failure import FailedRunRetryState
 from azents.repos.agent_execution.data import (
     AgentRunCreate,
@@ -125,6 +130,10 @@ class ModelAdapter(Protocol):
     def stream(
         self,
         request: NativeModelRequest,
+        *,
+        watchdog: ModelStreamWatchdog,
+        timeout_policy: ModelStreamTimeoutPolicy,
+        call_context: ModelStreamCallContext,
     ) -> AsyncIterator[NativeEvent]:
         """Return native stream event."""
         ...

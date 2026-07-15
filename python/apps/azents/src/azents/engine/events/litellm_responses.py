@@ -2,13 +2,12 @@
 
 import asyncio
 import base64
-import contextlib
 import dataclasses
 import datetime
 import hashlib
 import json
 import os
-from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Sequence
+from collections.abc import AsyncIterable, AsyncIterator, Sequence
 from typing import Any, Protocol, runtime_checkable
 
 from azcommon.uuid import uuid7
@@ -79,6 +78,13 @@ from azents.engine.events.types import (
     UserContentPart,
     UserMessagePayload,
     build_native_compat_key,
+)
+from azents.engine.model_stream import (
+    ModelStreamCallContext,
+    ModelStreamTimeoutPolicy,
+    ModelStreamWatchdog,
+    close_stream_response,
+    connect_only_http_timeout,
 )
 from azents.engine.run.errors import ModelCallError
 from azents.engine.run.types import BuiltinToolSpec
@@ -832,8 +838,12 @@ class LiteLLMResponsesModelAdapter:
     async def stream(
         self,
         request: NativeModelRequest,
+        *,
+        watchdog: ModelStreamWatchdog,
+        timeout_policy: ModelStreamTimeoutPolicy,
+        call_context: ModelStreamCallContext,
     ) -> AsyncIterator[LiteLLMEvent]:
-        """Return LiteLLM Responses stream as LiteLLM event wrapper."""
+        """Return a watched LiteLLM Responses stream as native events."""
         kwargs = {
             "model": request.model,
             "input": request.input,
@@ -841,14 +851,28 @@ class LiteLLMResponsesModelAdapter:
             **request.kwargs,
             "stream": True,
         }
+
+        async def open_response() -> object:
+            response = await _call_litellm_responses(
+                request,
+                kwargs,
+                connect_timeout_seconds=timeout_policy.connect_timeout_seconds,
+            )
+            if isinstance(response, AsyncIterable):
+                guard_litellm_streaming_logging(response)
+            return response
+
         response: object | None = None
         try:
-            response = await _call_litellm_responses(request, kwargs)
+            response = await watchdog.open_response(
+                open_response,
+                policy=timeout_policy,
+                context=call_context,
+            )
             if not isinstance(response, AsyncIterable):
                 raise RuntimeError(
                     "LiteLLM Responses call returned non-streaming response"
                 )
-            guard_litellm_streaming_logging(response)
             async for event in response:
                 coerce_litellm_completed_response_for_logging(event)
                 if isinstance(event, _ModelDumpable):
@@ -859,7 +883,6 @@ class LiteLLMResponsesModelAdapter:
                 else:
                     yield LiteLLMEvent(type=event.__class__.__name__, item={})
         except asyncio.CancelledError:
-            await _close_stream_response(response)
             raise
         except (LiteLLMOpenAIError, OpenAIBaseError) as exc:
             # LiteLLM retry finishes inside aresponses, then
@@ -867,24 +890,15 @@ class LiteLLMResponsesModelAdapter:
             if not _is_user_visible_provider_error(exc):
                 raise
             raise ModelCallError(_format_model_call_error(exc)) from exc
-
-
-async def _close_stream_response(response: object | None) -> None:
-    """Call provider stream response close hook best-effort."""
-    if response is None:
-        return
-    close = getattr(response, "aclose", None) or getattr(response, "close", None)
-    if not callable(close):
-        return
-    with contextlib.suppress(Exception):
-        result = close()
-        if isinstance(result, Awaitable):
-            await result
+        finally:
+            await close_stream_response(response)
 
 
 async def _call_litellm_responses(
     request: NativeModelRequest,
     kwargs: dict[str, object],
+    *,
+    connect_timeout_seconds: float,
 ) -> object:
     """Call LiteLLM Responses API."""
     tools: Any | None = None
@@ -915,6 +929,7 @@ async def _call_litellm_responses(
         api_base=_optional_str(kwargs, "api_base"),
         stop=_optional_stop(kwargs, "stop"),
         include=_optional_include(kwargs, "include"),
+        timeout=connect_only_http_timeout(connect_timeout_seconds),
         **extra_kwargs,
     )
 
@@ -977,6 +992,7 @@ def _extra_litellm_kwargs(kwargs: dict[str, object]) -> dict[str, Any]:
         "api_base",
         "stop",
         "include",
+        "timeout",
     }
     return {key: value for key, value in kwargs.items() if key not in excluded}
 

@@ -52,6 +52,7 @@ from azents.engine.run.errors import ModelCallError
 from azents.engine.run.types import USER_STOP_CANCEL_MESSAGE
 from azents.repos.agent_execution.data import EventCreate
 from azents.testing.model_selection import make_test_model_selection
+from azents.testing.model_stream import make_test_model_stream_watchdog
 
 
 class _Session(AsyncSession):
@@ -411,6 +412,7 @@ class _ModelAdapter:
     async def stream(
         self,
         request: NativeModelRequest,
+        **kwargs: object,
     ) -> AsyncIterator[NativeEvent]:
         """Return one completed event."""
         yield NativeEvent(type="done", item={})
@@ -426,6 +428,7 @@ class _BlockingModelAdapter:
     async def stream(
         self,
         request: NativeModelRequest,
+        **kwargs: object,
     ) -> AsyncIterator[NativeEvent]:
         """Yield a delta, wait, then finish the native stream."""
         del request
@@ -441,6 +444,7 @@ class _CancellingModelAdapter:
     async def stream(
         self,
         request: NativeModelRequest,
+        **kwargs: object,
     ) -> AsyncIterator[NativeEvent]:
         """Return user stop cancellation after partial model stream."""
         del request
@@ -458,6 +462,7 @@ class _FailingModelAdapter:
     async def stream(
         self,
         request: NativeModelRequest,
+        **kwargs: object,
     ) -> AsyncIterator[NativeEvent]:
         """Return model call failure."""
         del request
@@ -830,6 +835,9 @@ async def test_text_run_completes() -> None:
     execution = AgentRunExecution(
         session_manager=_session_context,
         post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
         model_call_preparer=_model_call_preparer(
@@ -936,10 +944,12 @@ async def test_external_run_callbacks_observe_no_open_db_session() -> None:
 
     class AssertingModelAdapter(_ModelAdapter):
         async def stream(
-            self, request: NativeModelRequest
+            self,
+            request: NativeModelRequest,
+            **kwargs: object,
         ) -> AsyncIterator[NativeEvent]:
             assert open_sessions == 0
-            async for event in super().stream(request):
+            async for event in super().stream(request, **kwargs):
                 yield event
 
     class AssertingToolExecutor(_ToolExecutor):
@@ -983,6 +993,9 @@ async def test_external_run_callbacks_observe_no_open_db_session() -> None:
     execution = AgentRunExecution(
         session_manager=session_manager,
         post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_inference_profile=None,
         model_adapter=AssertingModelAdapter(),
         output_normalizer=_SequenceNormalizer(
             [[_tool_call_event()], [_assistant_event()]]
@@ -1026,6 +1039,9 @@ async def test_model_delta_reaches_output_sink_before_stream_completion() -> Non
     execution = AgentRunExecution(
         session_manager=_session_context,
         post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_inference_profile=None,
         model_adapter=model_adapter,
         output_normalizer=_ProjectingNormalizer([_assistant_event()]),
         model_call_preparer=_model_call_preparer(),
@@ -1081,6 +1097,9 @@ async def test_text_run_commits_durable_events_before_output_sink() -> None:
     execution = AgentRunExecution(
         session_manager=_session_manager_for(session),
         post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
         model_call_preparer=_model_call_preparer(
@@ -1122,6 +1141,9 @@ async def test_text_run_output_sink_receives_run_marker() -> None:
     execution = AgentRunExecution(
         session_manager=_session_context,
         post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
         model_call_preparer=_model_call_preparer(
@@ -1190,6 +1212,9 @@ async def test_model_usage_is_appended_as_turn_marker(
     execution = AgentRunExecution(
         session_manager=_session_context,
         post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()], usage=usage),
         model_call_preparer=_model_call_preparer(
@@ -1256,6 +1281,9 @@ async def test_model_input_uses_session_head_event_id() -> None:
     execution = AgentRunExecution(
         session_manager=_session_context,
         post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
         model_call_preparer=_model_call_preparer(
@@ -1287,6 +1315,9 @@ async def test_closed_admission_barrier_prevents_call_and_handler_start() -> Non
     execution = AgentRunExecution(
         session_manager=_session_context,
         post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_tool_call_event()]),
         model_call_preparer=_model_call_preparer(
@@ -1320,6 +1351,9 @@ async def test_tool_run_with_turn_limit_interrupts_after_tool_result() -> None:
     execution = AgentRunExecution(
         session_manager=_session_context,
         post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_tool_call_event(), _assistant_event()]),
         model_call_preparer=_model_call_preparer(
@@ -1361,6 +1395,9 @@ async def test_parallel_calls_finalize_independently() -> None:
     execution = AgentRunExecution(
         session_manager=_session_context,
         post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer(
             [_tool_call_event("call-1"), _tool_call_event("call-2")]
@@ -1421,6 +1458,9 @@ async def test_term_after_admission_keeps_normal_result_and_run_recoverable() ->
     execution = AgentRunExecution(
         session_manager=_session_context,
         post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_tool_call_event("call-2")]),
         model_call_preparer=_model_call_preparer(
@@ -1471,6 +1511,9 @@ async def test_unlimited_tool_run_executes_tool_then_completes() -> None:
     execution = AgentRunExecution(
         session_manager=_session_context,
         post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_SequenceNormalizer(
             [
@@ -1532,6 +1575,9 @@ async def test_model_call_preparer_runs_for_each_model_turn() -> None:
     execution = AgentRunExecution(
         session_manager=_session_context,
         post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_SequenceNormalizer(
             [
@@ -1594,6 +1640,9 @@ async def test_model_call_preparer_turn_end_receives_error_reason() -> None:
     execution = AgentRunExecution(
         session_manager=_session_context,
         post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_inference_profile=None,
         model_adapter=_FailingModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
         model_call_preparer=prepare_model_call,
@@ -1622,6 +1671,9 @@ async def test_provider_tool_call_completes_without_next_model_turn() -> None:
     execution = AgentRunExecution(
         session_manager=_session_context,
         post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_SequenceNormalizer(
             [
@@ -1662,6 +1714,9 @@ async def test_provider_tool_call_with_message_completes_one_turn() -> None:
     execution = AgentRunExecution(
         session_manager=_session_context,
         post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_SequenceNormalizer(
             [
@@ -1723,6 +1778,9 @@ async def test_compacted_run_continues_with_summary_without_terminal_marker() ->
     execution = AgentRunExecution(
         session_manager=_session_context,
         post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
         model_call_preparer=_model_call_preparer(
@@ -1787,6 +1845,9 @@ async def test_tool_turn_polls_input_before_next_model_call() -> None:
     execution = AgentRunExecution(
         session_manager=_session_context,
         post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_SequenceNormalizer(
             [
@@ -1849,6 +1910,9 @@ async def test_context_invalidation_yields_for_request_refresh() -> None:
     execution = AgentRunExecution(
         session_manager=_session_context,
         post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_SequenceNormalizer(
             [
@@ -1894,6 +1958,9 @@ async def test_orphan_tool_call_without_state_is_cancelled_before_lowering() -> 
     execution = AgentRunExecution(
         session_manager=_session_context,
         post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
         model_call_preparer=_model_call_preparer(
@@ -1945,6 +2012,9 @@ async def test_active_unresolved_tool_call_is_cancelled_before_lowering() -> Non
     execution = AgentRunExecution(
         session_manager=_session_context,
         post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
         model_call_preparer=_model_call_preparer(
@@ -1994,6 +2064,9 @@ async def test_stale_active_entry_with_result_is_removed_without_replacement() -
     execution = AgentRunExecution(
         session_manager=_session_context,
         post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
         model_call_preparer=_model_call_preparer(),
@@ -2039,6 +2112,9 @@ async def test_active_entry_without_call_event_fails_invariant() -> None:
     execution = AgentRunExecution(
         session_manager=_session_context,
         post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
         model_call_preparer=_model_call_preparer(),
@@ -2075,6 +2151,9 @@ async def test_model_stream_user_stop_appends_only_assistant_text() -> None:
     execution = AgentRunExecution(
         session_manager=_session_context,
         post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_inference_profile=None,
         model_adapter=_CancellingModelAdapter(),
         output_normalizer=_Normalizer([assistant, reasoning, _tool_call_event()]),
         model_call_preparer=_model_call_preparer(
@@ -2112,6 +2191,9 @@ async def test_model_stream_user_stop_without_text_appends_only_marker() -> None
     execution = AgentRunExecution(
         session_manager=_session_context,
         post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_inference_profile=None,
         model_adapter=_CancellingModelAdapter(),
         output_normalizer=_Normalizer([]),
         model_call_preparer=_model_call_preparer(
@@ -2145,6 +2227,9 @@ async def test_shutdown_tool_cancellation_repairs_before_reraising() -> None:
     execution = AgentRunExecution(
         session_manager=_session_context,
         post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_tool_call_event()]),
         model_call_preparer=_model_call_preparer(
@@ -2186,6 +2271,9 @@ async def test_tool_user_stop_appends_cancelled_result_and_interrupts() -> None:
     execution = AgentRunExecution(
         session_manager=_session_context,
         post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_tool_call_event()]),
         model_call_preparer=_model_call_preparer(
@@ -2239,6 +2327,9 @@ async def test_tool_result_output_sink_receives_tool_result() -> None:
     execution = AgentRunExecution(
         session_manager=_session_context,
         post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_tool_call_event()]),
         model_call_preparer=_model_call_preparer(
@@ -2271,6 +2362,9 @@ async def test_tool_failure_appends_failed_tool_result() -> None:
     execution = AgentRunExecution(
         session_manager=_session_context,
         post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_tool_call_event()]),
         model_call_preparer=_model_call_preparer(
@@ -2311,6 +2405,9 @@ async def test_run_input_preparation_does_not_run_lifecycle_cleanup() -> None:
     execution = AgentRunExecution(
         session_manager=_session_context,
         post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
         model_call_preparer=_model_call_preparer(
@@ -2353,6 +2450,9 @@ async def test_pre_model_lower_hook_runs_before_lowerer() -> None:
     execution = AgentRunExecution(
         session_manager=_session_context,
         post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
         model_call_preparer=_model_call_preparer(
@@ -2387,6 +2487,9 @@ async def test_model_completion_error_propagates_for_retry() -> None:
     execution = AgentRunExecution(
         session_manager=_session_context,
         post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_CompletionFailingNormalizer(),
         model_call_preparer=_model_call_preparer(
@@ -2419,6 +2522,9 @@ async def test_empty_model_output_propagates_for_retry() -> None:
     execution = AgentRunExecution(
         session_manager=_session_context,
         post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([]),
         model_call_preparer=_model_call_preparer(
@@ -2455,6 +2561,9 @@ async def test_blank_assistant_message_propagates_for_retry() -> None:
     execution = AgentRunExecution(
         session_manager=_session_context,
         post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([blank_message]),
         model_call_preparer=_model_call_preparer(
@@ -2486,6 +2595,9 @@ async def test_model_call_error_propagates_for_retry() -> None:
     execution = AgentRunExecution(
         session_manager=_session_context,
         post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_inference_profile=None,
         model_adapter=_FailingModelAdapter(),
         output_normalizer=_Normalizer([]),
         model_call_preparer=_model_call_preparer(

@@ -12,6 +12,10 @@ from azcommon.logging import bind_extra
 from litellm.exceptions import ContextWindowExceededError, OpenAIError
 
 from azents.core.enums import LLMProvider
+from azents.engine.model_stream import (
+    ModelStreamCallContext,
+    ModelStreamWatchdog,
+)
 from azents.engine.responses import (
     ResponsesOutputError,
     call_responses_model,
@@ -21,6 +25,8 @@ from azents.engine.responses import (
 from azents.engine.run.errors import (
     CompactionContextWindowExceededError,
     CompactionFailedError,
+    CompactionModelStreamTimeoutError,
+    ModelStreamTimeoutError,
 )
 
 logger = logging.getLogger(__name__)
@@ -223,6 +229,7 @@ def _clamp(value: int, minimum: int, maximum: int) -> int:
 
 async def summarize_text_with_model(
     *,
+    watchdog: ModelStreamWatchdog,
     provider: LLMProvider,
     model: str,
     credential_kwargs: dict[str, object],
@@ -266,6 +273,7 @@ async def summarize_text_with_model(
                 },
             )
             summary = await _summarize_text_attempt(
+                watchdog=watchdog,
                 provider=provider,
                 model=model,
                 credential_kwargs=credential_kwargs,
@@ -273,6 +281,7 @@ async def summarize_text_with_model(
                 user_prompt=user_prompt,
                 conversation_text=current_conversation_text,
                 endpoint_max_output_tokens=endpoint_max_output_tokens,
+                session_id=session_id,
             )
         except CompactionContextWindowExceededError:
             if retry_index >= len(_SUMMARY_CONTEXT_RETRY_KEEP_RATIOS):
@@ -312,6 +321,7 @@ async def summarize_text_with_model(
 
 async def _summarize_text_attempt(
     *,
+    watchdog: ModelStreamWatchdog,
     provider: LLMProvider,
     model: str,
     credential_kwargs: dict[str, object],
@@ -319,8 +329,23 @@ async def _summarize_text_attempt(
     user_prompt: str,
     conversation_text: str,
     endpoint_max_output_tokens: int | None,
+    session_id: str | None,
 ) -> str:
     """Try creating summary once with LiteLLM Responses API."""
+    timeout_policy = watchdog.resolve_policy(
+        provider=provider.value,
+        model=model,
+        inference_profile=None,
+    )
+    call_context = ModelStreamCallContext(
+        call_kind="compaction",
+        provider=provider.value,
+        model=model,
+        session_id=session_id,
+        run_id=None,
+        attempt_number=None,
+        check_stop=None,
+    )
     try:
         response = await call_responses_model(
             provider=provider,
@@ -330,8 +355,13 @@ async def _summarize_text_attempt(
             instructions=system_prompt,
             stream=True,
             max_output_tokens=endpoint_max_output_tokens,
+            watchdog=watchdog,
+            timeout_policy=timeout_policy,
+            call_context=call_context,
         )
         return await extract_response_text(response)
+    except ModelStreamTimeoutError as exc:
+        raise CompactionModelStreamTimeoutError(exc) from exc
     except ResponsesOutputError as exc:
         raise _compaction_error_from_responses_output(exc) from exc
     except ContextWindowExceededError as exc:
