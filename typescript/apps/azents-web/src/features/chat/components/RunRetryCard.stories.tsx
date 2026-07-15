@@ -108,6 +108,19 @@ export const TerminalRetryPending = {
   ),
 } satisfies Story;
 
+export const TerminalLongMessage = {
+  render: () => (
+    <RunRetryCard
+      variant="terminal"
+      message={`Model call failed (500): litellm.InternalServerError: OpenAIException - <html><head><meta name="viewport" content="width=device-width, initial-scale=1" /><style>body{font-family:Arial,Helvetica,sans-serif}.container{align-items:center;display:flex;flex-direction:column;gap:2rem;height:100%;justify-content:center;width:100%}@keyframes enlarge-appear{0%{opacity:0;transform:scale(75%) rotate(-90deg)}to{opacity:1;transform:scale(100%) rotate(0deg)}}.logo{color:#8e8ea0}.scale-appear{animation:enlarge-appear .4s ease-out}</style></head><body><div class="container">Provider error response</div></body></html>`}
+      failure={terminalFailure}
+      canRetry={true}
+      isRetryPending={false}
+      onRetry={() => {}}
+    />
+  ),
+} satisfies Story;
+
 export const TerminalRetryUnavailable = {
   render: () => (
     <RunRetryCard
