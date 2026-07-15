@@ -371,7 +371,7 @@
     {
       "match": {
         "endpoint": "chat",
-        "systemMessage": "You are a helpful AI assistant tasked with summarizing conversations",
+        "systemMessage": "You are a context compaction engine for a long-running coding agent.",
         "userMessage": "Event durable compact seed"
       },
       "response": {
@@ -1173,7 +1173,7 @@
     {
       "match": {
         "endpoint": "chat",
-        "systemMessage": "You are a helpful AI assistant tasked with summarizing conversations",
+        "systemMessage": "You are a context compaction engine for a long-running coding agent.",
         "userMessage": "Watchdog compaction timeout seed",
         "sequenceIndex": 0
       },
@@ -1189,7 +1189,7 @@
     {
       "match": {
         "endpoint": "chat",
-        "systemMessage": "You are a helpful AI assistant tasked with summarizing conversations",
+        "systemMessage": "You are a context compaction engine for a long-running coding agent.",
         "userMessage": "Watchdog compaction timeout seed",
         "sequenceIndex": 1
       },
@@ -1205,7 +1205,7 @@
     {
       "match": {
         "endpoint": "chat",
-        "systemMessage": "You are a helpful AI assistant tasked with summarizing conversations",
+        "systemMessage": "You are a context compaction engine for a long-running coding agent.",
         "userMessage": "Watchdog compaction timeout seed",
         "sequenceIndex": 2
       },
@@ -1221,7 +1221,7 @@
     {
       "match": {
         "endpoint": "chat",
-        "systemMessage": "You are a helpful AI assistant tasked with summarizing conversations",
+        "systemMessage": "You are a context compaction engine for a long-running coding agent.",
         "userMessage": "Watchdog compaction timeout seed",
         "sequenceIndex": 3
       },

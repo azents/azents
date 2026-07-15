@@ -52,7 +52,9 @@ _ABSOLUTE_RECOVERY_PROMPT = "Watchdog absolute cap cleans partial then recover"
 _ABSOLUTE_FAILED_PREFIX = "FAILED_WATCHDOG_PREFIX_MUST_DISAPPEAR"
 _ABSOLUTE_RECOVERY_RESPONSE = "WATCHDOG_ABSOLUTE_RECOVERED"
 _EVENTS_RESET_PROMPT = "Watchdog parsed events reset idle"
-_EVENTS_RESET_RESPONSE = "WATCHDOG_EVENTS_RESET_IDLE"
+_EVENTS_RESET_RESPONSE = (
+    "WATCHDOG_EVENTS_RESET_IDLE abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz"
+)
 _RETRY_EXHAUSTION_PROMPT = "Watchdog retry exhaustion"
 _USER_STOP_PROMPT = "Watchdog user stop preserves partial"
 _USER_STOP_PARTIAL = "WATCHDOG_STOP_PARTIAL"
@@ -329,10 +331,11 @@ def _open_authenticated_session(
 ) -> None:
     """Open the real Main Web session page with normal auth cookies."""
     driver.get(f"{main_web_url}/login")
+    driver.delete_all_cookies()
     cookies = {
         "az-token": access_token,
         "az-refresh": refresh_token,
-        "az-token-expires-at": str(int(time.time() * 1000) + 300_000),
+        "az-token-expires-at": str(int(time.time() * 1000) + 1_800_000),
     }
     cookie_writer = cast(_CookieWriter, driver)
     for name, value in cookies.items():
