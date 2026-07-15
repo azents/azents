@@ -194,10 +194,18 @@ class LiveEventProjector:
 
     async def discard_failed_attempt(self, session_id: str) -> None:
         """Discard failed-attempt model partials after earlier mutations settle."""
-        await self._partial_batcher.discard_session(
-            session_id,
-            lambda: self._remove_model_partials(session_id),
-        )
+        try:
+            await self._partial_batcher.discard_session(
+                session_id,
+                lambda: self._remove_model_partials(session_id),
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception(
+                "Failed to discard failed-attempt live model partials",
+                extra={"session_id": session_id},
+            )
 
     async def _remove_model_partials(self, session_id: str) -> None:
         """Remove published assistant and reasoning partial projections."""

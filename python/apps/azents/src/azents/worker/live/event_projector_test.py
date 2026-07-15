@@ -73,6 +73,15 @@ class _LiveEventStore:
         self.clear_count += 1
 
 
+class _FailingDiscardStore(_LiveEventStore):
+    """Fail model-partial lookup during best-effort discard."""
+
+    async def list_by_session_id(self, session_id: str) -> list[object]:
+        """Simulate a live-store read failure."""
+        del session_id
+        raise RuntimeError("live store unavailable")
+
+
 class _Broadcast:
     """WebSocket broadcast test double."""
 
@@ -246,6 +255,14 @@ async def test_live_run_broadcast_failure_is_non_fatal() -> None:
         ),
     )
     await projector.publish_live_run_cleared("session-001", run_id="run-a")
+
+
+@pytest.mark.asyncio
+async def test_failed_attempt_discard_store_failure_is_non_fatal() -> None:
+    """Live-store cleanup failure does not block durable retry handling."""
+    projector = _projector(_FailingDiscardStore(), _Broadcast())
+
+    await projector.discard_failed_attempt("session-001")
 
 
 @pytest.mark.asyncio
