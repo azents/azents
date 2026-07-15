@@ -94,11 +94,11 @@ class TodoStateStore:
         session_manager: SessionManager[AsyncSession],
     ) -> None:
         """Create todo state store."""
-        self._session_manager = session_manager
+        self.session_manager = session_manager
 
     async def load(self, agent_id: str, session_id: str) -> TodoState:
         """Fetch session todo state."""
-        async with self._session_manager() as session:
+        async with self.session_manager() as session:
             handle = await self._make_handle(session, agent_id, session_id)
             if handle is None:
                 return TodoState()
@@ -111,7 +111,7 @@ class TodoStateStore:
         mutator: Callable[[TodoState], TodoState],
     ) -> TodoState:
         """Update session todo state with optimistic retry."""
-        async with self._session_manager() as session:
+        async with self.session_manager() as session:
             handle = await self._make_handle(session, agent_id, session_id)
             if handle is None:
                 return TodoState()
@@ -158,7 +158,7 @@ class TodoToolkit(Toolkit[TodoToolkitConfig]):
         session_id: str = "",
     ) -> None:
         """Create Todo Toolkit."""
-        self._store = store
+        self.store = store
         self._agent_id = agent_id
         self._session_id = session_id
 
@@ -181,7 +181,7 @@ class TodoToolkit(Toolkit[TodoToolkitConfig]):
         """Append current Todo state to compaction summary."""
         if not self._agent_id or not self._session_id:
             return None
-        state = await self._store.load(self._agent_id, self._session_id)
+        state = await self.store.load(self._agent_id, self._session_id)
         snapshot = render_todo_snapshot(state)
         if snapshot is None:
             return None
@@ -206,7 +206,7 @@ class TodoToolkit(Toolkit[TodoToolkitConfig]):
             status=ToolkitStatus.ENABLED,
             tools=[
                 make_update_todo_tool(
-                    store=self._store,
+                    store=self.store,
                     agent_id=self._agent_id,
                     session_id=self._session_id,
                     publish_changed=publish_todo_changed,
@@ -226,7 +226,7 @@ class TodoToolkitProvider(ToolkitProvider[TodoToolkitConfig]):
 
     def __init__(self, *, store: TodoStateStore) -> None:
         """Create Todo Toolkit provider."""
-        self._store = store
+        self.store = store
 
     async def resolve(
         self,
@@ -234,7 +234,7 @@ class TodoToolkitProvider(ToolkitProvider[TodoToolkitConfig]):
         context: ResolveContext,
     ) -> Toolkit[TodoToolkitConfig]:
         """Return executable Todo Toolkit."""
-        return TodoToolkit(store=self._store)
+        return TodoToolkit(store=self.store)
 
 
 def render_todo_prompt(state: TodoState | None = None) -> str:

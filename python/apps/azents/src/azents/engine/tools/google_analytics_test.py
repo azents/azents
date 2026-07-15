@@ -12,6 +12,7 @@ from google.analytics.data_v1beta import (
     Row,
     RunReportResponse,
 )
+from google.api_core.exceptions import GoogleAPIError
 
 from azents.core.tools import (
     GoogleAnalyticsToolkitConfig,
@@ -202,6 +203,88 @@ class TestGoogleAnalyticsProviderTestConnection:
         )
         assert not result.success
 
+    @pytest.mark.asyncio
+    async def test_invalid_service_account_key_returns_connection_failure(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Credential construction errors remain an expected test failure."""
+        monkeypatch.setattr(
+            "azents.engine.tools.google_analytics.create_credentials",
+            MagicMock(side_effect=ValueError("invalid private key")),
+        )
+        provider = GoogleAnalyticsToolkitProvider()
+
+        result = await provider.test_connection(
+            config=GoogleAnalyticsToolkitConfig(),
+            credentials_json='{"service_account_key": {}}',
+        )
+
+        assert not result.success
+
+    @pytest.mark.asyncio
+    async def test_expected_google_api_failure_returns_connection_failure(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Provider failures are represented by TestConnectionResult."""
+        monkeypatch.setattr(
+            "azents.engine.tools.google_analytics.create_credentials",
+            lambda _key: object(),
+        )
+        monkeypatch.setattr(
+            "azents.engine.tools.google_analytics.BetaAnalyticsDataAsyncClient",
+            MagicMock(return_value=AsyncMock()),
+        )
+        monkeypatch.setattr(
+            "azents.engine.tools.google_analytics.AnalyticsAdminServiceAsyncClient",
+            MagicMock(return_value=AsyncMock()),
+        )
+        monkeypatch.setattr(
+            GoogleAnalyticsApiClient,
+            "get_account_summaries",
+            AsyncMock(side_effect=GoogleAPIError("provider unavailable")),
+        )
+        provider = GoogleAnalyticsToolkitProvider()
+
+        result = await provider.test_connection(
+            config=GoogleAnalyticsToolkitConfig(),
+            credentials_json='{"service_account_key": {}}',
+        )
+
+        assert not result.success
+
+    @pytest.mark.asyncio
+    async def test_unexpected_connection_test_bug_propagates(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Programming errors are not disguised as connection failures."""
+        monkeypatch.setattr(
+            "azents.engine.tools.google_analytics.create_credentials",
+            lambda _key: object(),
+        )
+        monkeypatch.setattr(
+            "azents.engine.tools.google_analytics.BetaAnalyticsDataAsyncClient",
+            MagicMock(return_value=AsyncMock()),
+        )
+        monkeypatch.setattr(
+            "azents.engine.tools.google_analytics.AnalyticsAdminServiceAsyncClient",
+            MagicMock(return_value=AsyncMock()),
+        )
+        monkeypatch.setattr(
+            GoogleAnalyticsApiClient,
+            "get_account_summaries",
+            AsyncMock(side_effect=RuntimeError("implementation bug")),
+        )
+        provider = GoogleAnalyticsToolkitProvider()
+
+        with pytest.raises(RuntimeError, match="implementation bug"):
+            await provider.test_connection(
+                config=GoogleAnalyticsToolkitConfig(),
+                credentials_json='{"service_account_key": {}}',
+            )
+
 
 # -------------------------------------------------------------------
 # Report formatter
@@ -276,7 +359,7 @@ class TestToolExecution:
             ],
             row_count=1,
         )
-        api._data.run_report = AsyncMock(return_value=mock_resp)  # pyright: ignore[reportPrivateUsage]  # directly set mock SDK client in tests
+        api.data.run_report = AsyncMock(return_value=mock_resp)
 
         toolkit = _make_toolkit(api_client=api)
         state = await toolkit.update_context(_make_context())
@@ -310,7 +393,7 @@ class TestToolExecution:
         mock_account.property_summaries = []
 
         mock_pager = _AsyncIteratorMock([mock_account])
-        api._admin.list_account_summaries = AsyncMock(  # pyright: ignore[reportPrivateUsage]  # directly set mock SDK client in tests
+        api.admin.list_account_summaries = AsyncMock(
             return_value=mock_pager,
         )
 

@@ -10,6 +10,7 @@ from collections.abc import Callable, Sequence
 from typing import Any, Literal, Protocol
 
 import frontmatter
+import yaml
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -92,13 +93,13 @@ class ToolkitClaudeRulesAppendixDedupeStateStore:
         session_manager: SessionManager[AsyncSession],
     ) -> None:
         """Create Claude rules appendix dedupe store."""
-        self._session_manager = session_manager
+        self.session_manager = session_manager
 
     async def load_appendix_dedupe(
         self, agent_id: str, session_id: str
     ) -> ClaudeRulesAppendixDedupeState:
         """Fetch Claude rules appendix dedupe state."""
-        async with self._session_manager() as session:
+        async with self.session_manager() as session:
             handle = self._make_appendix_dedupe_handle(session, agent_id, session_id)
             if handle is None:
                 return ClaudeRulesAppendixDedupeState()
@@ -113,7 +114,7 @@ class ToolkitClaudeRulesAppendixDedupeStateStore:
         ],
     ) -> None:
         """Retry-apply mutator to latest appendix dedupe state."""
-        async with self._session_manager() as session:
+        async with self.session_manager() as session:
             handle = self._make_appendix_dedupe_handle(session, agent_id, session_id)
             if handle is None:
                 return
@@ -176,12 +177,12 @@ class ClaudeRulesToolkit(Toolkit[ClaudeRulesToolkitConfig]):
         session_id: str = "",
     ) -> None:
         """Create Claude rules Toolkit."""
-        self._store = store
+        self.store = store
         self._agent_id = agent_id
         self._session_id = session_id
         self._runtime_agent_id = agent_id
         self._runtime_session_id = session_id
-        self._instruction_context_store: RuntimeInstructionContextStore | None = None
+        self.instruction_context_store: RuntimeInstructionContextStore | None = None
 
     def set_agent_id(self, agent_id: str) -> None:
         """Inject agent_id."""
@@ -205,7 +206,7 @@ class ClaudeRulesToolkit(Toolkit[ClaudeRulesToolkitConfig]):
         self, store: RuntimeInstructionContextStore
     ) -> None:
         """Register shared Runtime instruction context store."""
-        self._instruction_context_store = store
+        self.instruction_context_store = store
 
     def hooks(self) -> RuntimeHooks:
         """Register Claude rules appendix hooks."""
@@ -287,7 +288,7 @@ class ClaudeRulesToolkit(Toolkit[ClaudeRulesToolkitConfig]):
         )
 
     def _instruction_context(self) -> RuntimeInstructionContext | None:
-        store = self._instruction_context_store
+        store = self.instruction_context_store
         if store is None:
             return None
         return store.get()
@@ -315,7 +316,7 @@ class ClaudeRulesToolkit(Toolkit[ClaudeRulesToolkitConfig]):
 
     async def _load_appendix_dedupe_state(self) -> ClaudeRulesAppendixDedupeState:
         """Fetch persistent Claude rules appendix dedupe state."""
-        return await self._store.load_appendix_dedupe(
+        return await self.store.load_appendix_dedupe(
             self._runtime_agent_id,
             self._runtime_session_id,
         )
@@ -327,7 +328,7 @@ class ClaudeRulesToolkit(Toolkit[ClaudeRulesToolkitConfig]):
         ],
     ) -> None:
         """Retry-update persistent appendix dedupe state."""
-        await self._store.update_appendix_dedupe(
+        await self.store.update_appendix_dedupe(
             self._runtime_agent_id,
             self._runtime_session_id,
             mutator,
@@ -345,7 +346,7 @@ class ClaudeRulesToolkitProvider(ToolkitProvider[ClaudeRulesToolkitConfig]):
 
     def __init__(self, *, store: ClaudeRulesAppendixDedupeStateStore) -> None:
         """Create Claude rules Toolkit provider."""
-        self._store = store
+        self.store = store
 
     async def resolve(
         self,
@@ -355,7 +356,7 @@ class ClaudeRulesToolkitProvider(ToolkitProvider[ClaudeRulesToolkitConfig]):
         """Return executable Claude rules Toolkit."""
         del config
         return ClaudeRulesToolkit(
-            store=self._store,
+            store=self.store,
             agent_id=context.agent_id,
             session_id=context.session_id,
         )
@@ -512,7 +513,7 @@ def _root_for_rule_path(
 def _parse_frontmatter(content: str) -> dict[str, Any] | None:
     try:
         post = frontmatter.loads(content)
-    except Exception:
+    except ValueError, yaml.YAMLError:
         return None
     return {str(key): value for key, value in post.metadata.items()}
 

@@ -625,8 +625,8 @@ class _HookedClientToolExecutor:
         session_id: str,
         run_id: str,
     ) -> None:
-        self._inner = inner
-        self._dispatcher = dispatcher
+        self.inner = inner
+        self.dispatcher = dispatcher
         self._providers = list(providers)
         self._workspace_id = workspace_id
         self._agent_id = agent_id
@@ -635,12 +635,12 @@ class _HookedClientToolExecutor:
 
     def request_cancel(self, call: ClientToolCallPayload) -> None:
         """Forward running inner tool cancellation request."""
-        self._inner.request_cancel(call)
+        self.inner.request_cancel(call)
 
     async def execute(self, call: ClientToolCallPayload) -> ClientToolResultPayload:
         """Run tool after applying before/after tool hooks."""
         toolkit_slug = _toolkit_slug_from_tool_name(call.name)
-        before = await self._dispatcher.dispatch_before_tool_call(
+        before = await self.dispatcher.dispatch_before_tool_call(
             self._providers,
             BeforeToolCallHookContext(
                 tool_name=call.name,
@@ -660,9 +660,9 @@ class _HookedClientToolExecutor:
                 output=[OutputTextPart(text=before.message)],
             )
 
-        result = await self._inner.execute(call)
+        result = await self.inner.execute(call)
         output_text = _tool_result_text(result)
-        after = await self._dispatcher.dispatch_after_tool_call(
+        after = await self.dispatcher.dispatch_after_tool_call(
             self._providers,
             AfterToolCallHookContext(
                 tool_name=call.name,

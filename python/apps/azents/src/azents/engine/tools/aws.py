@@ -253,12 +253,12 @@ class AwsToolkit(Toolkit[AwsToolkitConfig]):
         state_name: str,
     ) -> None:
         self._config = config
-        self._credential_provider = credential_provider
+        self.credential_provider = credential_provider
         self._default_region = default_region
         self._timeout = timeout
         self._proxy_url = proxy_url
-        self._artifact_service = artifact_service
-        self._session_manager = session_manager
+        self.artifact_service = artifact_service
+        self.session_manager = session_manager
         self._agent_id = agent_id
         self._session_id = session_id
         self._state_name = state_name
@@ -274,7 +274,7 @@ class AwsToolkit(Toolkit[AwsToolkitConfig]):
         """Update Artifact sink for current run from TurnContext."""
         self._artifact_sink = build_mcp_artifact_sink(
             context,
-            self._artifact_service,
+            self.artifact_service,
         )
 
     async def __aenter__(self) -> AwsToolkit:
@@ -302,7 +302,7 @@ class AwsToolkit(Toolkit[AwsToolkitConfig]):
     async def _refresh_tool_snapshot(self) -> None:
         """Refresh the AWS MCP tool snapshot in the background."""
         try:
-            credentials = await self._credential_provider.get_credentials()
+            credentials = await self.credential_provider.get_credentials()
             sigv4_auth = AwsSigV4Auth(credentials, _AWS_MCP_REGION, _AWS_MCP_SERVICE)
             mcp_tools, use_streamable_http = await mcp_list_tools(
                 _AWS_MCP_ENDPOINT,
@@ -346,9 +346,9 @@ class AwsToolkit(Toolkit[AwsToolkitConfig]):
 
     async def _load_tool_snapshot(self) -> McpToolSnapshotState | None:
         """Load the latest successful AWS MCP tool snapshot."""
-        if self._session_manager is None:
+        if self.session_manager is None:
             return None
-        async with self._session_manager() as session:
+        async with self.session_manager() as session:
             handle = self._tool_snapshot_handle(session)
             if handle is None:
                 return None
@@ -359,9 +359,9 @@ class AwsToolkit(Toolkit[AwsToolkitConfig]):
 
     async def _save_tool_snapshot(self, snapshot: McpToolSnapshotState) -> None:
         """Atomically save a successful AWS MCP tool snapshot."""
-        if self._session_manager is None:
+        if self.session_manager is None:
             return
-        async with self._session_manager() as session:
+        async with self.session_manager() as session:
             handle = self._tool_snapshot_handle(session)
             if handle is None:
                 return
@@ -390,7 +390,7 @@ class AwsToolkit(Toolkit[AwsToolkitConfig]):
         return [
             _wrap_aws_snapshot_tool(
                 item=item,
-                credential_provider=self._credential_provider,
+                credential_provider=self.credential_provider,
                 timeout=self._timeout,
                 proxy_url=self._proxy_url,
                 artifact_sink_getter=self._current_artifact_sink,
@@ -527,8 +527,8 @@ class AwsToolkitProvider(ToolkitProvider[AwsToolkitConfig]):
         session_manager: SessionManager[AsyncSession] | None = None,
     ) -> None:
         """Initialize AwsToolkitProvider."""
-        self._artifact_service = artifact_service
-        self._session_manager = session_manager
+        self.artifact_service = artifact_service
+        self.session_manager = session_manager
 
     async def resolve(
         self,
@@ -556,8 +556,8 @@ class AwsToolkitProvider(ToolkitProvider[AwsToolkitConfig]):
             default_region=config.region,
             timeout=config.timeout,
             proxy_url=context.mcp_proxy_url,
-            artifact_service=self._artifact_service,
-            session_manager=self._session_manager,
+            artifact_service=self.artifact_service,
+            session_manager=self.session_manager,
             agent_id=context.agent_id,
             session_id=context.session_id,
             state_name=_aws_snapshot_state_name(

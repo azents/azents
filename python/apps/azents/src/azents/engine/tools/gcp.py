@@ -266,13 +266,13 @@ class GcpToolkit(Toolkit[GcpToolkitConfig]):
         state_name: str,
     ) -> None:
         self._config = config
-        self._token_provider = token_provider
+        self.token_provider = token_provider
         self._server_configs = server_configs
         self._project_id = project_id
         self._writable_services = writable_services
         self._proxy_url = proxy_url
-        self._artifact_service = artifact_service
-        self._session_manager = session_manager
+        self.artifact_service = artifact_service
+        self.session_manager = session_manager
         self._agent_id = agent_id
         self._session_id = session_id
         self._state_name = state_name
@@ -288,7 +288,7 @@ class GcpToolkit(Toolkit[GcpToolkitConfig]):
         """Update Artifact sink for current run from TurnContext."""
         self._artifact_sink = build_mcp_artifact_sink(
             context,
-            self._artifact_service,
+            self.artifact_service,
         )
 
     async def __aenter__(self) -> GcpToolkit:
@@ -364,7 +364,7 @@ class GcpToolkit(Toolkit[GcpToolkitConfig]):
         server: _GcpServerConfig,
     ) -> list[McpToolSnapshotItem]:
         """Refresh one GCP service and return snapshot items."""
-        access_token = await self._token_provider.get_token()
+        access_token = await self.token_provider.get_token()
         headers = {
             "Authorization": f"Bearer {access_token}",
             "x-goog-user-project": self._project_id,
@@ -408,9 +408,9 @@ class GcpToolkit(Toolkit[GcpToolkitConfig]):
 
     async def _load_tool_snapshot(self) -> McpToolSnapshotState | None:
         """Load the latest successful GCP MCP tool snapshot."""
-        if self._session_manager is None:
+        if self.session_manager is None:
             return None
-        async with self._session_manager() as session:
+        async with self.session_manager() as session:
             handle = self._tool_snapshot_handle(session)
             if handle is None:
                 return None
@@ -421,9 +421,9 @@ class GcpToolkit(Toolkit[GcpToolkitConfig]):
 
     async def _save_tool_snapshot(self, snapshot: McpToolSnapshotState) -> None:
         """Atomically save a successful GCP MCP tool snapshot."""
-        if self._session_manager is None:
+        if self.session_manager is None:
             return
-        async with self._session_manager() as session:
+        async with self.session_manager() as session:
             handle = self._tool_snapshot_handle(session)
             if handle is None:
                 return
@@ -456,7 +456,7 @@ class GcpToolkit(Toolkit[GcpToolkitConfig]):
             _wrap_gcp_snapshot_tool(
                 item=item,
                 timeout=server_timeout[item.server_url],
-                token_provider=self._token_provider,
+                token_provider=self.token_provider,
                 project_id=self._project_id,
                 proxy_url=self._proxy_url,
                 artifact_sink_getter=self._current_artifact_sink,
@@ -635,8 +635,8 @@ class GcpToolkitProvider(ToolkitProvider[GcpToolkitConfig]):
         session_manager: SessionManager[AsyncSession] | None = None,
     ) -> None:
         """Initialize GcpToolkitProvider."""
-        self._artifact_service = artifact_service
-        self._session_manager = session_manager
+        self.artifact_service = artifact_service
+        self.session_manager = session_manager
 
     async def resolve(
         self,
@@ -676,8 +676,8 @@ class GcpToolkitProvider(ToolkitProvider[GcpToolkitConfig]):
             project_id=config.project_id,
             writable_services=set(config.writable_services),
             proxy_url=context.mcp_proxy_url,
-            artifact_service=self._artifact_service,
-            session_manager=self._session_manager,
+            artifact_service=self.artifact_service,
+            session_manager=self.session_manager,
             agent_id=context.agent_id,
             session_id=context.session_id,
             state_name=_gcp_snapshot_state_name(

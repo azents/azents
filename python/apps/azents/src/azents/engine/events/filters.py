@@ -81,6 +81,14 @@ _EXCHANGE_URI_PREFIX = "exchange://"
 AttachmentAvailability = Literal["available", "expired", "unavailable"]
 
 
+@dataclasses.dataclass(frozen=True)
+class _ChangedValue[T]:
+    """Value returned by a transformation together with its change flag."""
+
+    value: T
+    changed: bool
+
+
 class ModelFileStatusRepository(Protocol):
     """ModelFile status lookup repository."""
 
@@ -160,10 +168,10 @@ class EventAttachmentAvailabilityFilter:
         exchange_file_repository: ExchangeFileStatusRepository | None = None,
         transcript_repo: EventPayloadRepository | None = None,
     ) -> None:
-        self._exchange_file_repository = (
+        self.exchange_file_repository = (
             exchange_file_repository or ExchangeFileRepository()
         )
-        self._transcript_repo = transcript_repo or EventTranscriptRepository()
+        self.transcript_repo = transcript_repo or EventTranscriptRepository()
 
     async def apply(
         self,
@@ -174,7 +182,7 @@ class EventAttachmentAvailabilityFilter:
         object_keys = _exchange_attachment_object_keys(transcript)
         if not object_keys:
             return list(transcript)
-        statuses = await self._exchange_file_repository.list_statuses_by_object_key(
+        statuses = await self.exchange_file_repository.list_statuses_by_object_key(
             session,
             object_keys=object_keys,
         )
@@ -185,7 +193,7 @@ class EventAttachmentAvailabilityFilter:
                 updated.append(event)
                 continue
             updated.append(
-                await self._transcript_repo.update_payload(session, event.id, payload)
+                await self.transcript_repo.update_payload(session, event.id, payload)
             )
         return updated
 
@@ -203,8 +211,8 @@ class EventFilePartPlaceholderFilter:
         transcript_repo: EventPayloadRepository | None = None,
     ) -> None:
         self._session_id = session_id
-        self._model_file_repository = model_file_repository or ModelFileRepository()
-        self._transcript_repo = transcript_repo or EventTranscriptRepository()
+        self.model_file_repository = model_file_repository or ModelFileRepository()
+        self.transcript_repo = transcript_repo or EventTranscriptRepository()
 
     async def apply(
         self,
@@ -215,7 +223,7 @@ class EventFilePartPlaceholderFilter:
         model_file_ids = _model_file_ids(transcript)
         if not model_file_ids:
             return list(transcript)
-        statuses = await self._model_file_repository.list_statuses_for_session(
+        statuses = await self.model_file_repository.list_statuses_for_session(
             session,
             session_id=self._session_id,
             model_file_ids=model_file_ids,
@@ -227,7 +235,7 @@ class EventFilePartPlaceholderFilter:
                 updated.append(event)
                 continue
             updated.append(
-                await self._transcript_repo.update_payload(session, event.id, payload)
+                await self.transcript_repo.update_payload(session, event.id, payload)
             )
         return updated
 
@@ -248,17 +256,17 @@ class EventAutoCompactionFilter:
         summary_enricher: SummaryEnricher | None = None,
     ) -> None:
         self._session_id = session_id
-        self._compactor = compactor
-        self._summarize = summarize
+        self.compactor = compactor
+        self.summarize = summarize
         self._max_input_tokens = max_input_tokens
         self._threshold_tokens = (
             auto_compaction_threshold_tokens
             if auto_compaction_threshold_tokens is not None
             else compute_auto_compaction_threshold_tokens(max_input_tokens)
         )
-        self._compaction_id_factory = compaction_id_factory
-        self._on_compaction_started = on_compaction_started
-        self._summary_enricher = summary_enricher
+        self.compaction_id_factory = compaction_id_factory
+        self.on_compaction_started = on_compaction_started
+        self.summary_enricher = summary_enricher
         self.was_compacted = False
 
     async def compact(self, transcript: Sequence[Event]) -> list[Event]:
@@ -268,15 +276,15 @@ class EventAutoCompactionFilter:
         if _compaction_input_tokens(events) <= self._threshold_tokens:
             return events
 
-        summary = await self._compactor.compact(
+        summary = await self.compactor.compact(
             session_id=self._session_id,
             transcript=events,
-            compaction_id=self._compaction_id_factory(),
-            summarize=self._summarize,
-            on_started=self._on_compaction_started,
+            compaction_id=self.compaction_id_factory(),
+            summarize=self.summarize,
+            on_started=self.on_compaction_started,
             summary_context_window_tokens=self._max_input_tokens,
             reason="auto_threshold_exceeded",
-            summary_enricher=self._summary_enricher,
+            summary_enricher=self.summary_enricher,
         )
         if summary is None:
             return events
@@ -1157,55 +1165,59 @@ def _refresh_attachment_availability(
 ) -> EventPayload | None:
     """Update exchange attachment availability in payload."""
     if isinstance(payload, UserMessagePayload):
-        attachments, changed = _refresh_attachment_list(payload.attachments, statuses)
-        if not changed:
+        refreshed = _refresh_attachment_list(payload.attachments, statuses)
+        if not refreshed.changed:
             return None
-        return payload.model_copy(update={"attachments": attachments})
+        return payload.model_copy(update={"attachments": refreshed.value})
     if isinstance(payload, AssistantMessagePayload):
-        attachments, attachments_changed = _refresh_attachment_list(
+        attachments = _refresh_attachment_list(
             payload.attachments,
             statuses,
         )
-        content, content_changed = _refresh_output_attachment_parts(
+        content = _refresh_output_attachment_parts(
             payload.content,
             statuses,
         )
-        if not attachments_changed and not content_changed:
+        if not attachments.changed and not content.changed:
             return None
         return payload.model_copy(
-            update={"attachments": attachments, "content": content}
+            update={"attachments": attachments.value, "content": content.value}
         )
     if isinstance(payload, ClientToolResultPayload):
-        attachments, attachments_changed = _refresh_attachment_list(
+        attachments = _refresh_attachment_list(
             payload.attachments,
             statuses,
         )
-        output, output_changed = _refresh_tool_output_attachment_parts(
+        output = _refresh_tool_output_attachment_parts(
             payload.output,
             statuses,
         )
-        if not attachments_changed and not output_changed:
+        if not attachments.changed and not output.changed:
             return None
-        return payload.model_copy(update={"attachments": attachments, "output": output})
+        return payload.model_copy(
+            update={"attachments": attachments.value, "output": output.value}
+        )
     if isinstance(payload, ProviderToolResultPayload):
-        attachments, attachments_changed = _refresh_attachment_list(
+        attachments = _refresh_attachment_list(
             payload.attachments,
             statuses,
         )
-        output, output_changed = _refresh_tool_output_attachment_parts(
+        output = _refresh_tool_output_attachment_parts(
             payload.output,
             statuses,
         )
-        if not attachments_changed and not output_changed:
+        if not attachments.changed and not output.changed:
             return None
-        return payload.model_copy(update={"attachments": attachments, "output": output})
+        return payload.model_copy(
+            update={"attachments": attachments.value, "output": output.value}
+        )
     return None
 
 
 def _refresh_attachment_list(
     attachments: Sequence[Attachment],
     statuses: dict[str, ExchangeFileStatus],
-) -> tuple[list[Attachment], bool]:
+) -> _ChangedValue[list[Attachment]]:
     """Update availability of attachment list."""
     changed = False
     refreshed: list[Attachment] = []
@@ -1216,16 +1228,16 @@ def _refresh_attachment_list(
             continue
         refreshed.append(attachment.model_copy(update={"availability": availability}))
         changed = True
-    return refreshed, changed
+    return _ChangedValue(value=refreshed, changed=changed)
 
 
 def _refresh_output_attachment_parts(
     content: str | Sequence[OutputContentPart],
     statuses: dict[str, ExchangeFileStatus],
-) -> tuple[str | list[OutputContentPart], bool]:
+) -> _ChangedValue[str | list[OutputContentPart]]:
     """Update assistant output attachment part availability."""
     if isinstance(content, str):
-        return content, False
+        return _ChangedValue(value=content, changed=False)
     changed = False
     refreshed: list[OutputContentPart] = []
     for part in content:
@@ -1233,16 +1245,16 @@ def _refresh_output_attachment_parts(
         if refreshed_part != part:
             changed = True
         refreshed.append(refreshed_part)
-    return refreshed, changed
+    return _ChangedValue(value=refreshed, changed=changed)
 
 
 def _refresh_tool_output_attachment_parts(
     output: str | Sequence[ToolOutputPart],
     statuses: dict[str, ExchangeFileStatus],
-) -> tuple[str | list[ToolOutputPart], bool]:
+) -> _ChangedValue[str | list[ToolOutputPart]]:
     """Update tool output attachment part availability."""
     if isinstance(output, str):
-        return output, False
+        return _ChangedValue(value=output, changed=False)
     changed = False
     refreshed: list[ToolOutputPart] = []
     for part in output:
@@ -1250,7 +1262,7 @@ def _refresh_tool_output_attachment_parts(
         if refreshed_part != part:
             changed = True
         refreshed.append(refreshed_part)
-    return refreshed, changed
+    return _ChangedValue(value=refreshed, changed=changed)
 
 
 def _refresh_attachment_output_part(
@@ -1306,34 +1318,34 @@ def _replace_unavailable_file_parts(
     if isinstance(payload, UserMessagePayload):
         if isinstance(payload.content, str):
             return None
-        content, changed = _replace_user_file_parts(payload.content, statuses)
-        if not changed:
+        content = _replace_user_file_parts(payload.content, statuses)
+        if not content.changed:
             return None
-        return payload.model_copy(update={"content": content})
+        return payload.model_copy(update={"content": content.value})
     if isinstance(payload, AssistantMessagePayload):
         if isinstance(payload.content, str):
             return None
-        content, changed = _replace_output_file_parts(payload.content, statuses)
-        if not changed:
+        content = _replace_output_file_parts(payload.content, statuses)
+        if not content.changed:
             return None
-        return payload.model_copy(update={"content": content})
+        return payload.model_copy(update={"content": content.value})
     if isinstance(payload, ClientToolResultPayload):
-        output, changed = _replace_tool_output_file_parts(payload.output, statuses)
-        if not changed:
+        output = _replace_tool_output_file_parts(payload.output, statuses)
+        if not output.changed:
             return None
-        return payload.model_copy(update={"output": output})
+        return payload.model_copy(update={"output": output.value})
     if isinstance(payload, ProviderToolResultPayload):
-        output, changed = _replace_tool_output_file_parts(payload.output, statuses)
-        if not changed:
+        output = _replace_tool_output_file_parts(payload.output, statuses)
+        if not output.changed:
             return None
-        return payload.model_copy(update={"output": output})
+        return payload.model_copy(update={"output": output.value})
     return None
 
 
 def _replace_user_file_parts(
     content: Sequence[UserContentPart],
     statuses: dict[str, ModelFileStatus],
-) -> tuple[list[UserContentPart], bool]:
+) -> _ChangedValue[list[UserContentPart]]:
     """Replace user content FilePart with InputTextPart placeholder."""
     changed = False
     output: list[UserContentPart] = []
@@ -1349,13 +1361,13 @@ def _replace_user_file_parts(
                 changed = True
                 continue
         output.append(part)
-    return output, changed
+    return _ChangedValue(value=output, changed=changed)
 
 
 def _replace_output_file_parts(
     content: Sequence[OutputContentPart],
     statuses: dict[str, ModelFileStatus],
-) -> tuple[list[OutputContentPart], bool]:
+) -> _ChangedValue[list[OutputContentPart]]:
     """Replace assistant output FilePart with OutputTextPart placeholder."""
     changed = False
     output: list[OutputContentPart] = []
@@ -1371,16 +1383,16 @@ def _replace_output_file_parts(
                 changed = True
                 continue
         output.append(part)
-    return output, changed
+    return _ChangedValue(value=output, changed=changed)
 
 
 def _replace_tool_output_file_parts(
     output: str | list[ToolOutputPart],
     statuses: dict[str, ModelFileStatus],
-) -> tuple[str | list[ToolOutputPart], bool]:
+) -> _ChangedValue[str | list[ToolOutputPart]]:
     """Replace tool output FilePart with OutputTextPart placeholder."""
     if isinstance(output, str):
-        return output, False
+        return _ChangedValue(value=output, changed=False)
     changed = False
     replaced: list[ToolOutputPart] = []
     for part in output:
@@ -1395,7 +1407,7 @@ def _replace_tool_output_file_parts(
                 changed = True
                 continue
         replaced.append(part)
-    return replaced, changed
+    return _ChangedValue(value=replaced, changed=changed)
 
 
 def _unavailable_file_reason(

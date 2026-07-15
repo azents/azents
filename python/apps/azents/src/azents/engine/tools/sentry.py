@@ -110,21 +110,21 @@ class SentryToolkit(Toolkit[SentryToolkitConfig]):
         :param mcp_toolkit: Credential-bound McpToolkit
         :param enabled_skills: Skill group list to enable
         """
-        self._mcp = mcp_toolkit
+        self.mcp = mcp_toolkit
         self._enabled_skills = enabled_skills
 
     async def __aenter__(self) -> SentryToolkit:
         """Delegate to internal McpToolkit to start background connection."""
-        await self._mcp.__aenter__()
+        await self.mcp.__aenter__()
         return self
 
     async def __aexit__(self, *exc: object) -> None:
         """Delegate to internal McpToolkit to clean up background connection."""
-        await self._mcp.__aexit__(*exc)
+        await self.mcp.__aexit__(*exc)
 
     async def update_context(self, context: TurnContext) -> ToolkitState:
         """Apply skill group filtering to MCP tool list."""
-        state = await self._mcp.update_context(context)
+        state = await self.mcp.update_context(context)
         if not self._enabled_skills:
             return state
         filtered = filter_tools_by_skills(state.tools, self._enabled_skills)
@@ -185,7 +185,7 @@ class SentryToolkitProvider(ToolkitProvider[SentryToolkitConfig]):
         :param session_manager: DB session manager
         :param artifact_service: MCP binary output storage service
         """
-        self._mcp_provider = McpToolkitProvider(
+        self.mcp_provider = McpToolkitProvider(
             connection_repo=connection_repo,
             session_manager=session_manager,
             artifact_service=artifact_service,
@@ -210,7 +210,7 @@ class SentryToolkitProvider(ToolkitProvider[SentryToolkitConfig]):
         :return: Connection test result
         """
         mcp_config = _build_mcp_config(config)
-        return await self._mcp_provider.test_connection(
+        return await self.mcp_provider.test_connection(
             mcp_config, credentials_json, proxy_url=proxy_url
         )
 
@@ -229,7 +229,7 @@ class SentryToolkitProvider(ToolkitProvider[SentryToolkitConfig]):
         :return: Credential-bound SentryToolkit instance
         """
         mcp_config = _build_mcp_config(config)
-        resolved = await self._mcp_provider.resolve(mcp_config, context)
+        resolved = await self.mcp_provider.resolve(mcp_config, context)
         if not isinstance(resolved, McpToolkit):
             msg = f"Expected McpToolkit, got {type(resolved).__name__}"
             raise TypeError(msg)

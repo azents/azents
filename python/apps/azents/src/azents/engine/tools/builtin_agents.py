@@ -73,13 +73,13 @@ class ToolkitAgentsAppendixDedupeStateStore:
         session_manager: SessionManager[AsyncSession],
     ) -> None:
         """Create AGENTS.md appendix dedupe store."""
-        self._session_manager = session_manager
+        self.session_manager = session_manager
 
     async def load_appendix_dedupe(
         self, agent_id: str, session_id: str
     ) -> AgentsAppendixDedupeState:
         """Fetch AGENTS.md appendix dedupe state."""
-        async with self._session_manager() as session:
+        async with self.session_manager() as session:
             handle = self._make_appendix_dedupe_handle(session, agent_id, session_id)
             if handle is None:
                 return AgentsAppendixDedupeState()
@@ -92,7 +92,7 @@ class ToolkitAgentsAppendixDedupeStateStore:
         mutator: Callable[[AgentsAppendixDedupeState], AgentsAppendixDedupeState],
     ) -> None:
         """Retry-apply mutator to latest appendix dedupe state."""
-        async with self._session_manager() as session:
+        async with self.session_manager() as session:
             handle = self._make_appendix_dedupe_handle(session, agent_id, session_id)
             if handle is None:
                 return
@@ -204,7 +204,7 @@ def truncate_agents_content(content: bytes) -> str:
 class AgentsAppendixMixin:
     """Append AGENTS.md instructions to successful read tool results."""
 
-    _agents_store: AgentsAppendixDedupeStateStore
+    agents_store: AgentsAppendixDedupeStateStore
     _agents_context: RuntimeInstructionContext | None
     _runtime_agent_id: str
     _runtime_session_id: str
@@ -339,18 +339,11 @@ class AgentsAppendixMixin:
             content = await file_storage.get(path, agent_id=self._runtime_agent_id)
         except FileNotFoundError:
             return None
-        except Exception:
-            logger.warning(
-                "Failed to read AGENTS.md appendix candidate",
-                extra={"agent_id": self._runtime_agent_id, "path": path},
-                exc_info=True,
-            )
-            return None
         return truncate_agents_content(content)
 
     async def _load_appendix_dedupe_state(self) -> AgentsAppendixDedupeState:
         """Fetch persistent AGENTS.md appendix dedupe state."""
-        return await self._agents_store.load_appendix_dedupe(
+        return await self.agents_store.load_appendix_dedupe(
             self._runtime_agent_id,
             self._runtime_session_id,
         )
@@ -360,7 +353,7 @@ class AgentsAppendixMixin:
         mutator: Callable[[AgentsAppendixDedupeState], AgentsAppendixDedupeState],
     ) -> None:
         """Retry-update persistent appendix dedupe state."""
-        await self._agents_store.update_appendix_dedupe(
+        await self.agents_store.update_appendix_dedupe(
             self._runtime_agent_id,
             self._runtime_session_id,
             mutator,

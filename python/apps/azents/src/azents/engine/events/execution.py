@@ -76,6 +76,14 @@ class InputPollResult:
     complete_run: bool
 
 
+@dataclass(frozen=True)
+class TerminalResult:
+    """User-safe terminal event projection for a run."""
+
+    event_id: str | None
+    message: str | None
+
+
 InputPoller = Callable[[str], Awaitable[InputPollResult]]
 TurnEndReason = Literal["completed", "error", "cancelled", "unknown"]
 TurnEndCallback = Callable[[TurnEndReason], Awaitable[None]]
@@ -201,20 +209,20 @@ class AgentRunExecution:
         session_repo: SessionHeadRepository | None = None,
     ) -> None:
         """Inject loop dependencies."""
-        self._session_manager = session_manager
-        self._post_lower_filter = post_lower_filter
-        self._model_adapter = model_adapter
-        self._output_normalizer = output_normalizer
-        self._pre_lower_filter = pre_lower_filter
-        self._auto_compaction_filter = auto_compaction_filter
-        self._model_call_preparer = model_call_preparer
-        self._output_sink = output_sink
-        self._phase_sink = phase_sink
-        self._pre_model_lower_hook = pre_model_lower_hook
-        self._model_file_pin_repo = model_file_pin_repo
-        self._run_repo = run_repo or AgentRunRepository()
-        self._transcript_repo = transcript_repo or EventTranscriptRepository()
-        self._session_repo = session_repo
+        self.session_manager = session_manager
+        self.post_lower_filter = post_lower_filter
+        self.model_adapter = model_adapter
+        self.output_normalizer = output_normalizer
+        self.pre_lower_filter = pre_lower_filter
+        self.auto_compaction_filter = auto_compaction_filter
+        self.model_call_preparer = model_call_preparer
+        self.output_sink = output_sink
+        self.phase_sink = phase_sink
+        self.pre_model_lower_hook = pre_model_lower_hook
+        self.model_file_pin_repo = model_file_pin_repo
+        self.run_repo = run_repo or AgentRunRepository()
+        self.transcript_repo = transcript_repo or EventTranscriptRepository()
+        self.session_repo = session_repo
 
     async def run(
         self,
@@ -229,7 +237,7 @@ class AgentRunExecution:
                 if await _stopped(check_stop):
                     if request.tool_admission_barrier.closed:
                         return AgentRunStatus.RUNNING
-                    async with self._session_manager() as session:
+                    async with self.session_manager() as session:
                         await self._mark_terminal(
                             session,
                             request.run_id,
@@ -240,7 +248,7 @@ class AgentRunExecution:
                 if poll_input_events is not None:
                     poll_result = await poll_input_events(request.session_id)
                     if poll_result.complete_run:
-                        async with self._session_manager() as session:
+                        async with self.session_manager() as session:
                             await self._mark_terminal(
                                 session,
                                 request.run_id,
@@ -250,12 +258,12 @@ class AgentRunExecution:
                     if poll_result.context_invalidated:
                         return AgentRunStatus.RUNNING
 
-                async with self._session_manager() as session:
+                async with self.session_manager() as session:
                     head_event_id = await self._model_input_head_event_id(
                         session,
                         request.session_id,
                     )
-                    transcript = await self._transcript_repo.list_for_model_input(
+                    transcript = await self.transcript_repo.list_for_model_input(
                         session,
                         request.session_id,
                         head_event_id=head_event_id,
@@ -266,7 +274,7 @@ class AgentRunExecution:
                         transcript,
                     )
                     if repaired_events:
-                        transcript = await self._transcript_repo.list_for_model_input(
+                        transcript = await self.transcript_repo.list_for_model_input(
                             session,
                             request.session_id,
                             head_event_id=head_event_id,
@@ -276,13 +284,13 @@ class AgentRunExecution:
                         request.run_id,
                         AgentRunPhase.PREPARING_INPUT,
                     )
-                    if self._pre_lower_filter is not None:
-                        transcript = await self._pre_lower_filter.apply(
+                    if self.pre_lower_filter is not None:
+                        transcript = await self.pre_lower_filter.apply(
                             session, transcript
                         )
-                if self._output_sink is not None:
+                if self.output_sink is not None:
                     for repaired_event in repaired_events:
-                        await self._output_sink(
+                        await self.output_sink(
                             NormalizedAdapterOutput(events=[]),
                             [repaired_event],
                         )
@@ -292,23 +300,23 @@ class AgentRunExecution:
                 )
 
                 compacted = (
-                    self._pre_lower_filter.was_compacted
-                    if self._pre_lower_filter is not None
+                    self.pre_lower_filter.was_compacted
+                    if self.pre_lower_filter is not None
                     else False
                 )
-                if self._auto_compaction_filter is not None:
-                    transcript = await self._auto_compaction_filter.compact(transcript)
-                    compacted = compacted or self._auto_compaction_filter.was_compacted
-                if self._model_file_pin_repo is not None:
-                    async with self._session_manager() as session:
-                        await self._model_file_pin_repo.pin_many(
+                if self.auto_compaction_filter is not None:
+                    transcript = await self.auto_compaction_filter.compact(transcript)
+                    compacted = compacted or self.auto_compaction_filter.was_compacted
+                if self.model_file_pin_repo is not None:
+                    async with self.session_manager() as session:
+                        await self.model_file_pin_repo.pin_many(
                             session,
                             session_id=request.session_id,
                             run_id=request.run_id,
                             model_file_ids=unique_model_file_ids(transcript),
                         )
-                if self._pre_model_lower_hook is not None:
-                    await self._pre_model_lower_hook(transcript=transcript)
+                if self.pre_model_lower_hook is not None:
+                    await self.pre_model_lower_hook(transcript=transcript)
                 model_input_transcript = (
                     _without_existing_terminal_run_markers(transcript)
                     if compacted
@@ -333,7 +341,7 @@ class AgentRunExecution:
                     await _finish_turn(callback, reason)
 
                 try:
-                    native_request = self._post_lower_filter.apply(
+                    native_request = self.post_lower_filter.apply(
                         prepared.native_request
                     )
 
@@ -388,7 +396,7 @@ class AgentRunExecution:
                         """Append output and admit its complete foreground call set."""
                         nonlocal appended, turn_marker
                         model_call_started_at: datetime.datetime | None = None
-                        async with self._session_manager() as session:
+                        async with self.session_manager() as session:
                             appended = await self._append_events(
                                 session,
                                 normalized_output.events,
@@ -442,33 +450,31 @@ class AgentRunExecution:
                         if isinstance(event.payload, ClientToolCallPayload)
                     ]
                     if not client_tool_calls:
-                        async with self._session_manager() as session:
+                        async with self.session_manager() as session:
                             run_marker = await self._append_run_marker(
                                 session,
                                 request.session_id,
                                 request.run_id,
                                 "completed",
                             )
-                            terminal_event_id, terminal_message = (
-                                _terminal_result_from_events(appended)
-                            )
+                            terminal_result = _terminal_result_from_events(appended)
                             await self._mark_terminal(
                                 session,
                                 request.run_id,
                                 AgentRunStatus.COMPLETED,
-                                terminal_result_event_id=terminal_event_id,
-                                terminal_result_message=terminal_message,
+                                terminal_result_event_id=terminal_result.event_id,
+                                terminal_result_message=terminal_result.message,
                             )
-                        if self._output_sink is not None:
-                            await self._output_sink(
+                        if self.output_sink is not None:
+                            await self.output_sink(
                                 normalized,
                                 [*appended, *turn_events, run_marker],
                             )
                         await finish_turn("completed")
                         return AgentRunStatus.COMPLETED
 
-                    if self._output_sink is not None:
-                        await self._output_sink(normalized, [*appended, *turn_events])
+                    if self.output_sink is not None:
+                        await self.output_sink(normalized, [*appended, *turn_events])
                     try:
                         await self._execute_tools(
                             request.run_id,
@@ -478,8 +484,8 @@ class AgentRunExecution:
                         )
                     except _ToolExecutionUserInterrupted:
                         run_marker: Event | None = None
-                        async with self._session_manager() as session:
-                            current_run = await self._run_repo.get_by_id(
+                        async with self.session_manager() as session:
+                            current_run = await self.run_repo.get_by_id(
                                 session,
                                 request.run_id,
                             )
@@ -498,8 +504,8 @@ class AgentRunExecution:
                                     request.run_id,
                                     AgentRunStatus.INTERRUPTED,
                                 )
-                        if run_marker is not None and self._output_sink is not None:
-                            await self._output_sink(
+                        if run_marker is not None and self.output_sink is not None:
+                            await self.output_sink(
                                 NormalizedAdapterOutput(events=[]),
                                 [run_marker],
                             )
@@ -514,7 +520,7 @@ class AgentRunExecution:
         except UserVisibleRuntimeError:
             raise
 
-        async with self._session_manager() as session:
+        async with self.session_manager() as session:
             await self._append_run_marker(
                 session,
                 request.session_id,
@@ -533,7 +539,7 @@ class AgentRunExecution:
         model: str,
     ) -> PreparedModelCall:
         """Prepare turn-local model request and tool executor."""
-        return await self._model_call_preparer(
+        return await self.model_call_preparer(
             transcript=transcript,
             model=model,
         )
@@ -549,12 +555,12 @@ class AgentRunExecution:
             run_id,
             AgentRunPhase.STREAMING_MODEL,
         )
-        output_stream = self._output_normalizer.start(session_id)
+        output_stream = self.output_normalizer.start(session_id)
         try:
-            async for event in self._model_adapter.stream(native_request):
+            async for event in self.model_adapter.stream(native_request):
                 incremental = output_stream.process_event(event)
-                if self._output_sink is not None and incremental.projections:
-                    await self._output_sink(incremental, [])
+                if self.output_sink is not None and incremental.projections:
+                    await self.output_sink(incremental, [])
         except asyncio.CancelledError as exc:
             if _is_user_stop_cancellation(exc):
                 raise _ModelStreamUserInterrupted(output_stream.interrupt()) from exc
@@ -578,7 +584,7 @@ class AgentRunExecution:
             and isinstance(event.payload, AssistantMessagePayload)
             and _assistant_content_is_non_empty(event.payload.content)
         ]
-        async with self._session_manager() as session:
+        async with self.session_manager() as session:
             appended = await self._append_events(session, assistant_events)
             run_marker = await self._append_run_marker(
                 session,
@@ -586,16 +592,16 @@ class AgentRunExecution:
                 request.run_id,
                 "interrupted",
             )
-            terminal_event_id, terminal_message = _terminal_result_from_events(appended)
+            terminal_result = _terminal_result_from_events(appended)
             await self._mark_terminal(
                 session,
                 request.run_id,
                 AgentRunStatus.INTERRUPTED,
-                terminal_result_event_id=terminal_event_id,
-                terminal_result_message=terminal_message,
+                terminal_result_event_id=terminal_result.event_id,
+                terminal_result_message=terminal_result.message,
             )
-        if self._output_sink is not None:
-            await self._output_sink(
+        if self.output_sink is not None:
+            await self.output_sink(
                 NormalizedAdapterOutput(events=assistant_events),
                 [*appended, run_marker],
             )
@@ -620,7 +626,7 @@ class AgentRunExecution:
                     event.payload.call_id,
                 )
             appended.append(
-                await self._transcript_repo.append(
+                await self.transcript_repo.append(
                     session,
                     EventCreate(
                         session_id=event.session_id,
@@ -684,8 +690,8 @@ class AgentRunExecution:
             if _is_user_stop_cancellation(exc):
                 stopping_updated = False
                 stopping_started_at: datetime.datetime | None = None
-                async with self._session_manager() as session:
-                    run_state = await self._run_repo.get_by_id(session, run_id)
+                async with self.session_manager() as session:
+                    run_state = await self.run_repo.get_by_id(session, run_id)
                     if (
                         run_state is not None
                         and run_state.status == AgentRunStatus.RUNNING
@@ -724,7 +730,7 @@ class AgentRunExecution:
         result: ClientToolResultPayload,
     ) -> Event:
         """Append one terminal result and remove only its active ownership entry."""
-        async with self._session_manager() as session:
+        async with self.session_manager() as session:
             event = await self._finalize_tool_result_in_session(
                 session,
                 run_id=run_id,
@@ -732,8 +738,8 @@ class AgentRunExecution:
                 call=call,
                 result=result,
             )
-        if self._output_sink is not None:
-            await self._output_sink(NormalizedAdapterOutput(events=[]), [event])
+        if self.output_sink is not None:
+            await self.output_sink(NormalizedAdapterOutput(events=[]), [event])
         return event
 
     async def _finalize_tool_result_in_session(
@@ -748,8 +754,8 @@ class AgentRunExecution:
         """Finalize one tool result in the caller's DB transaction."""
         return await finalize_tool_result(
             session,
-            run_repo=self._run_repo,
-            transcript_repo=self._transcript_repo,
+            run_repo=self.run_repo,
+            transcript_repo=self.transcript_repo,
             run_id=run_id,
             session_id=session_id,
             call=call,
@@ -763,7 +769,7 @@ class AgentRunExecution:
         transcript: Sequence[Event],
     ) -> list[Event]:
         """Reconcile durable tool calls before any resumed model dispatch."""
-        run_state = await self._run_repo.get_by_id(session, request.run_id)
+        run_state = await self.run_repo.get_by_id(session, request.run_id)
         if run_state is None:
             raise ValueError("Agent run not found")
 
@@ -801,7 +807,7 @@ class AgentRunExecution:
             if active.call_id in result_call_ids
         }
         if stale_resolved_ids:
-            refreshed = await self._run_repo.get_by_id(session, request.run_id)
+            refreshed = await self.run_repo.get_by_id(session, request.run_id)
             if refreshed is None:
                 raise ValueError("Agent run not found")
             remaining = [
@@ -891,9 +897,9 @@ class AgentRunExecution:
         session_id: str,
     ) -> str | None:
         """Fetch model input head of event session."""
-        if self._session_repo is None:
+        if self.session_repo is None:
             return None
-        state = await self._session_repo.get_by_id(session, session_id)
+        state = await self.session_repo.get_by_id(session, session_id)
         if state is None:
             return None
         return state.model_input_head_event_id
@@ -938,14 +944,14 @@ class AgentRunExecution:
     ) -> Event:
         """Append run marker."""
         external_id = f"run-marker:{run_id}:{status}"
-        existing = await self._transcript_repo.get_by_external_id(
+        existing = await self.transcript_repo.get_by_external_id(
             session,
             session_id,
             external_id,
         )
         if existing is not None:
             return existing
-        return await self._transcript_repo.append(
+        return await self.transcript_repo.append(
             session,
             EventCreate(
                 session_id=session_id,
@@ -994,7 +1000,7 @@ class AgentRunExecution:
             payload["applied_inference_profile"] = applied_profile.model_dump(
                 mode="json"
             )
-        return await self._transcript_repo.append(
+        return await self.transcript_repo.append(
             session,
             EventCreate(
                 session_id=session_id,
@@ -1013,7 +1019,7 @@ class AgentRunExecution:
         terminal_result_message: str | None = None,
     ) -> None:
         """Record run terminal state."""
-        await self._run_repo.mark_terminal(
+        await self.run_repo.mark_terminal(
             session,
             run_id,
             status,
@@ -1021,8 +1027,8 @@ class AgentRunExecution:
             terminal_result_event_id=terminal_result_event_id,
             terminal_result_message=terminal_result_message,
         )
-        if self._model_file_pin_repo is not None:
-            await self._model_file_pin_repo.release_run(session, run_id=run_id)
+        if self.model_file_pin_repo is not None:
+            await self.model_file_pin_repo.release_run(session, run_id=run_id)
 
     async def _update_phase(
         self,
@@ -1032,7 +1038,7 @@ class AgentRunExecution:
         active_tool_calls: list[ActiveToolCall] | None = None,
     ) -> None:
         """Reflect run phase in durable state and UI projection."""
-        async with self._session_manager() as session:
+        async with self.session_manager() as session:
             model_call_started_at = await self._update_phase_in_session(
                 session,
                 run_id,
@@ -1050,7 +1056,7 @@ class AgentRunExecution:
         active_tool_calls: list[ActiveToolCall] | None = None,
     ) -> datetime.datetime | None:
         """Update the durable phase inside the caller's DB transaction."""
-        run = await self._run_repo.update_phase(
+        run = await self.run_repo.update_phase(
             session,
             run_id,
             phase,
@@ -1064,8 +1070,8 @@ class AgentRunExecution:
         model_call_started_at: datetime.datetime | None,
     ) -> None:
         """Publish a committed phase after its DB session has closed."""
-        if self._phase_sink is not None:
-            await self._phase_sink(phase, model_call_started_at)
+        if self.phase_sink is not None:
+            await self.phase_sink(phase, model_call_started_at)
 
 
 async def _finish_turn(
@@ -1125,15 +1131,15 @@ def _log_model_token_usage(
 
 def _terminal_result_from_events(
     events: Sequence[Event],
-) -> tuple[str | None, str | None]:
+) -> TerminalResult:
     """Project the latest assistant text from terminal run events."""
     for event in reversed(events):
         payload = event.payload
         if isinstance(payload, AssistantMessagePayload):
             text = _assistant_content_text(payload.content)
             if text is not None:
-                return event.id, text
-    return None, None
+                return TerminalResult(event_id=event.id, message=text)
+    return TerminalResult(event_id=None, message=None)
 
 
 def _assistant_content_text(content: object) -> str | None:

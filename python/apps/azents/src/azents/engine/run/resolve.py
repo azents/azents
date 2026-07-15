@@ -170,17 +170,7 @@ async def _resolve_toolkit_with_logging(
         toolkit_name=toolkit_name,
     )
     started_at = time.monotonic()
-    try:
-        resolved = await resolve
-    except Exception:
-        logger.exception(
-            "Toolkit resolve failed",
-            extra={
-                **log_extra,
-                "duration_seconds": round(time.monotonic() - started_at, 3),
-            },
-        )
-        raise
+    resolved = await resolve
     duration_seconds = time.monotonic() - started_at
     if duration_seconds > _SLOW_TOOLKIT_RESOLVE_SECONDS:
         logger.warning(
@@ -958,7 +948,6 @@ async def resolve_agent_tools(
         if toolkit is None or not toolkit.enabled:
             continue
 
-        validated_config = type(provider).validate_config(toolkit.config)
         resolve_ctx = ResolveContext(
             toolkit_id=at.toolkit_id,
             toolkit_name=toolkit.name,
@@ -974,6 +963,7 @@ async def resolve_agent_tools(
             mcp_proxy_url=mcp_proxy_url,
         )
         try:
+            validated_config = type(provider).validate_config(toolkit.config)
             resolved = await _resolve_toolkit_with_logging(
                 agent_id=agent_id,
                 context=context,
@@ -986,7 +976,17 @@ async def resolve_agent_tools(
                 resolve=provider.resolve(validated_config, resolve_ctx),
             )
             resolved.display_name = provider.name
-        except Exception:
+        except ValidationError, ValueError:
+            logger.warning(
+                "Skipping Toolkit with invalid persisted configuration",
+                exc_info=True,
+                extra={
+                    "agent_id": agent_id,
+                    "toolkit_id": at.toolkit_id,
+                    "toolkit_type": at.toolkit_type,
+                    "toolkit_slug": toolkit.slug,
+                },
+            )
             continue
 
         pending.append(

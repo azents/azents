@@ -201,7 +201,7 @@ class GitHubSelectedInstallationStore:
         session_id: str,
     ) -> None:
         """Create selected installation store."""
-        self._session_manager = session_manager
+        self.session_manager = session_manager
         self._agent_id = agent_id
         self._session_id = session_id
 
@@ -209,7 +209,7 @@ class GitHubSelectedInstallationStore:
         """Load selected installation ID."""
         if not self._agent_id or not self._session_id:
             return None
-        async with self._session_manager() as session:
+        async with self.session_manager() as session:
             handle = ToolkitStateStore(session=session).handle(
                 self._identity(),
                 GitHubSelectedInstallationState,
@@ -227,7 +227,7 @@ class GitHubSelectedInstallationStore:
         """Persist selected installation ID."""
         if not self._agent_id or not self._session_id:
             return
-        async with self._session_manager() as session:
+        async with self.session_manager() as session:
             handle = ToolkitStateStore(session=session).handle(
                 self._identity(),
                 GitHubSelectedInstallationState,
@@ -383,7 +383,7 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
         self._config = config
         self._mcp = mcp_toolkit
         self._toolsets = toolsets
-        self._runtime_environment_token_provider = runtime_environment_token_provider
+        self.runtime_environment_token_provider = runtime_environment_token_provider
         self._runtime_environment_token_ttl_seconds = (
             runtime_environment_token_ttl_seconds
         )
@@ -402,7 +402,7 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
         }
         self._installation_bindings = installation_bindings or []
         self._installation_token_cache: dict[str, tuple[str, float]] = {}
-        self._selected_installation_store = selected_installation_store
+        self.selected_installation_store = selected_installation_store
 
     async def expose_env(self) -> dict[str, str]:
         """Inject GH_TOKEN / GITHUB_TOKEN as Runtime environment variables.
@@ -414,7 +414,7 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
             return {}
         if self._installation_token_providers:
             return await self._expose_multi_installation_env()
-        if self._runtime_environment_token_provider is None:
+        if self.runtime_environment_token_provider is None:
             return {}
         token = await self._get_cached_runtime_environment_token()
         if not token:
@@ -428,8 +428,8 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
             cached_token, expires_at = self._runtime_environment_token_cache
             if expires_at > now:
                 return cached_token
-        assert self._runtime_environment_token_provider is not None  # noqa: S101
-        token = await self._runtime_environment_token_provider()
+        assert self.runtime_environment_token_provider is not None  # noqa: S101
+        token = await self.runtime_environment_token_provider()
         if token is not None:
             self._runtime_environment_token_cache = (
                 token,
@@ -485,8 +485,8 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
         if not self._installation_targets:
             return None
         selected_id: str | None = None
-        if self._selected_installation_store is not None:
-            selected_id = await self._selected_installation_store.load()
+        if self.selected_installation_store is not None:
+            selected_id = await self.selected_installation_store.load()
         if selected_id is not None:
             for target in self._installation_targets:
                 if target.installation_id == selected_id:
@@ -773,7 +773,7 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
             tools.extend(
                 _with_tool_prefix(tool, binding.target) for tool in installation_tools
             )
-        if len(self._installation_targets) > 1 and self._selected_installation_store:
+        if len(self._installation_targets) > 1 and self.selected_installation_store:
             tools.append(self._create_switch_installation_tool())
         return ToolkitState(
             status=ToolkitStatus.ENABLED,
@@ -802,9 +802,9 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
                     "Unknown GitHub installation. Available installations: "
                     f"{self._installation_options_text()}."
                 )
-            if self._selected_installation_store is None:
+            if self.selected_installation_store is None:
                 raise FunctionToolError("GitHub installation selection is unavailable.")
-            await self._selected_installation_store.save(target.installation_id)
+            await self.selected_installation_store.save(target.installation_id)
             return (
                 "Selected GitHub installation: "
                 f"{target.account_login} ({target.installation_id}). "
@@ -872,7 +872,7 @@ class GitHubToolkitProvider(ToolkitProvider[GitHubToolkitConfig]):
         """
         self._platform_app_id = platform_app_id
         self._platform_private_key = platform_private_key
-        self._session_manager = session_manager
+        self.session_manager = session_manager
 
     def to_mcp_config(self, config: GitHubToolkitConfig) -> McpToolkitConfig:
         """Convert to fixed GitHub MCP settings."""
@@ -1022,7 +1022,7 @@ class GitHubToolkitProvider(ToolkitProvider[GitHubToolkitConfig]):
             mcp_toolkit = McpToolkit(
                 config=mcp_config,
                 proxy_url=proxy_url,
-                session_manager=self._session_manager,
+                session_manager=self.session_manager,
                 agent_id=context.agent_id,
                 session_id=context.session_id,
                 state_name=_github_snapshot_state_name(
@@ -1076,7 +1076,7 @@ class GitHubToolkitProvider(ToolkitProvider[GitHubToolkitConfig]):
             config=mcp_config,
             secret=secrets.token,
             proxy_url=proxy_url,
-            session_manager=self._session_manager,
+            session_manager=self.session_manager,
             agent_id=context.agent_id,
             session_id=context.session_id,
             state_name=_github_snapshot_state_name(
@@ -1109,10 +1109,10 @@ class GitHubToolkitProvider(ToolkitProvider[GitHubToolkitConfig]):
         context: ResolveContext,
     ) -> GitHubSelectedInstallationStore | None:
         """Create selected installation store when session identity is available."""
-        if self._session_manager is None:
+        if self.session_manager is None:
             return None
         return GitHubSelectedInstallationStore(
-            session_manager=self._session_manager,
+            session_manager=self.session_manager,
             agent_id=context.agent_id,
             session_id=context.session_id,
         )
@@ -1142,7 +1142,7 @@ class GitHubToolkitProvider(ToolkitProvider[GitHubToolkitConfig]):
             private_key=secrets.private_key,
             targets=secrets.installations,
             proxy_url=proxy_url,
-            session_manager=self._session_manager,
+            session_manager=self.session_manager,
             agent_id=context.agent_id,
             session_id=context.session_id,
             toolkit_id=context.toolkit_id,
@@ -1186,7 +1186,7 @@ class GitHubToolkitProvider(ToolkitProvider[GitHubToolkitConfig]):
             private_key=self._platform_private_key,
             targets=secrets.installations,
             proxy_url=proxy_url,
-            session_manager=self._session_manager,
+            session_manager=self.session_manager,
             agent_id=context.agent_id,
             session_id=context.session_id,
             toolkit_id=context.toolkit_id,

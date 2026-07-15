@@ -17,7 +17,7 @@ import mimetypes
 import time
 from abc import ABC
 from collections.abc import Awaitable, Callable
-from typing import Generic, TypeVar
+from typing import Generic, NamedTuple, TypeVar
 from urllib.parse import urlparse
 
 import httpx
@@ -81,6 +81,14 @@ class McpArtifactSink:
 
 
 ArtifactSinkGetter = Callable[[], McpArtifactSink | None]
+
+
+class McpCredentials(NamedTuple):
+    """Credential values exposed to derived MCP Toolkits."""
+
+    secret: str | None
+    auth_scheme: None
+    proxy_url: str | None
 
 
 class McpToolSnapshotItem(BaseModel):
@@ -568,11 +576,11 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
 
     _config: McpConfigT
     _secret: str | None
-    _on_auth_failure: Callable[[], Awaitable[str | None]] | None
+    on_auth_failure: Callable[[], Awaitable[str | None]] | None
     _proxy_url: str | None
     _session_type: SessionType
-    _artifact_service: ArtifactService | None
-    _session_manager: SessionManager[AsyncSession] | None
+    artifact_service: ArtifactService | None
+    session_manager: SessionManager[AsyncSession] | None
     _agent_id: str
     _session_id: str
     _state_namespace: str
@@ -595,7 +603,8 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
         self._entered = False
         self._agent_id = getattr(self, "_agent_id", "")
         self._session_id = getattr(self, "_session_id", "")
-        self._session_manager = getattr(self, "_session_manager", None)
+        self.session_manager = getattr(self, "session_manager", None)
+        self.on_auth_failure = getattr(self, "on_auth_failure", None)
         self._state_namespace = getattr(self, "_state_namespace", "mcp")
         self._state_name = getattr(self, "_state_name", MCP_TOOL_SNAPSHOT_STATE_NAME)
 
@@ -615,20 +624,24 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
         """Update Artifact sink for current run from TurnContext."""
         self._artifact_sink = build_mcp_artifact_sink(
             context,
-            self._artifact_service,
+            self.artifact_service,
         )
 
     def get_credentials(
         self,
-    ) -> tuple[str | None, None, str | None]:
+    ) -> McpCredentials:
         """Return bound credential.
 
         Interface for passing credential resolved by McpToolkitProvider when composing
         derived Toolkits such as Notion and Sentry.
 
-        :return: (secret, None, proxy_url) tuple
+        :return: Bound secret, empty auth scheme, and proxy URL
         """
-        return self._secret, None, self._proxy_url
+        return McpCredentials(
+            secret=self._secret,
+            auth_scheme=None,
+            proxy_url=self._proxy_url,
+        )
 
     async def __aenter__(self) -> McpBasedToolkit[McpConfigT]:
         """Start MCP server connection in background."""
@@ -721,9 +734,9 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
 
     async def _load_tool_snapshot(self) -> McpToolSnapshotState | None:
         """Load the latest successful MCP tool snapshot from Toolkit State."""
-        if self._session_manager is None:
+        if self.session_manager is None:
             return None
-        async with self._session_manager() as session:
+        async with self.session_manager() as session:
             handle = self._tool_snapshot_handle(session)
             if handle is None:
                 return None
@@ -736,9 +749,9 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
 
     async def _save_tool_snapshot(self, snapshot: McpToolSnapshotState) -> None:
         """Atomically save a successful MCP tool snapshot."""
-        if self._session_manager is None:
+        if self.session_manager is None:
             return
-        async with self._session_manager() as session:
+        async with self.session_manager() as session:
             handle = self._tool_snapshot_handle(session)
             if handle is None:
                 return
@@ -782,7 +795,7 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
                 headers,
                 config.timeout,
                 use_streamable_http=item.use_streamable_http,
-                on_auth_failure=self._on_auth_failure,
+                on_auth_failure=self.on_auth_failure,
                 proxy_url=self._proxy_url,
                 artifact_sink_getter=self._current_artifact_sink,
             )

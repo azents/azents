@@ -85,11 +85,11 @@ class McpToolkit(McpBasedToolkit[McpToolkitConfig]):
         """
         self._config = config or McpToolkitConfig(server_url="", auth_type="none")
         self._secret = secret
-        self._on_auth_failure = on_auth_failure
+        self.on_auth_failure = on_auth_failure
         self._proxy_url = proxy_url
         self._session_type = session_type
-        self._artifact_service = artifact_service
-        self._session_manager = session_manager
+        self.artifact_service = artifact_service
+        self.session_manager = session_manager
         self._agent_id = agent_id
         self._session_id = session_id
         self._state_namespace = "mcp"
@@ -127,9 +127,9 @@ class McpToolkitProvider(ToolkitProvider[McpToolkitConfig]):
         :param session_manager: DB session manager
         :param artifact_service: MCP binary output storage service
         """
-        self._connection_repo = connection_repo
-        self._session_manager = session_manager
-        self._artifact_service = artifact_service
+        self.connection_repo = connection_repo
+        self.session_manager = session_manager
+        self.artifact_service = artifact_service
 
     async def test_connection(
         self,
@@ -172,12 +172,12 @@ class McpToolkitProvider(ToolkitProvider[McpToolkitConfig]):
         secret: str | None = None
         on_auth_failure: Callable[[], Awaitable[str | None]] | None = None
 
-        if config.auth_type == "oauth2" and self._connection_repo is not None:
-            if self._session_manager is None:
+        if config.auth_type == "oauth2" and self.connection_repo is not None:
+            if self.session_manager is None:
                 raise RuntimeError("MCP OAuth requires a DB session manager")
             connection = await _ensure_oauth_connection_token(
-                connection_repo=self._connection_repo,
-                session_manager=self._session_manager,
+                connection_repo=self.connection_repo,
+                session_manager=self.session_manager,
                 toolkit_id=context.toolkit_id,
                 proxy_url=context.mcp_proxy_url,
             )
@@ -188,8 +188,8 @@ class McpToolkitProvider(ToolkitProvider[McpToolkitConfig]):
                 secret = connection.access_token
             on_auth_failure = _make_oauth_refresh_callback(
                 toolkit_id=context.toolkit_id,
-                connection_repo=self._connection_repo,
-                session_manager=self._session_manager,
+                connection_repo=self.connection_repo,
+                session_manager=self.session_manager,
                 proxy_url=context.mcp_proxy_url,
             )
         else:
@@ -203,8 +203,8 @@ class McpToolkitProvider(ToolkitProvider[McpToolkitConfig]):
             session_type=SessionType.SYSTEM
             if context.user_id is None
             else SessionType.USER,
-            artifact_service=self._artifact_service,
-            session_manager=self._session_manager,
+            artifact_service=self.artifact_service,
+            session_manager=self.session_manager,
             agent_id=context.agent_id,
             session_id=context.session_id,
             state_name=_mcp_snapshot_state_name(

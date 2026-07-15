@@ -96,11 +96,11 @@ class GoalStateStore:
         session_manager: SessionManager[AsyncSession],
     ) -> None:
         """Create goal state store."""
-        self._session_manager = session_manager
+        self.session_manager = session_manager
 
     async def load(self, agent_id: str, session_id: str) -> GoalState:
         """Fetch session goal state."""
-        async with self._session_manager() as session:
+        async with self.session_manager() as session:
             return await self.load_in_session(session, agent_id, session_id)
 
     async def load_in_session(
@@ -122,7 +122,7 @@ class GoalStateStore:
         mutator: Callable[[GoalState], GoalState],
     ) -> GoalState:
         """Update session goal state with optimistic retry."""
-        async with self._session_manager() as session:
+        async with self.session_manager() as session:
             return await self.update_in_session(
                 session,
                 agent_id,
@@ -161,7 +161,7 @@ class GoalStateStore:
         duration_seconds: int | None,
     ) -> None:
         """Add Goal completion briefing event to durable transcript."""
-        async with self._session_manager() as session:
+        async with self.session_manager() as session:
             await EventTranscriptRepository().append(
                 session,
                 EventCreate(
@@ -210,7 +210,7 @@ class GoalToolkit(Toolkit[GoalToolkitConfig]):
         session_id: str = "",
     ) -> None:
         """Create Goal Toolkit."""
-        self._store = store
+        self.store = store
         self._agent_id = agent_id
         self._session_id = session_id
 
@@ -231,17 +231,17 @@ class GoalToolkit(Toolkit[GoalToolkitConfig]):
             status=ToolkitStatus.ENABLED,
             tools=[
                 make_get_goal_tool(
-                    store=self._store,
+                    store=self.store,
                     agent_id=self._agent_id,
                     session_id=self._session_id,
                 ),
                 make_create_goal_tool(
-                    store=self._store,
+                    store=self.store,
                     agent_id=self._agent_id,
                     session_id=self._session_id,
                 ),
                 make_update_goal_tool(
-                    store=self._store,
+                    store=self.store,
                     agent_id=self._agent_id,
                     session_id=self._session_id,
                 ),
@@ -262,7 +262,7 @@ class GoalToolkit(Toolkit[GoalToolkitConfig]):
         """Append current unfinished Goal state to compaction summary."""
         if not self._session_id:
             return None
-        goal_state = await self._store.load(self._agent_id, self._session_id)
+        goal_state = await self.store.load(self._agent_id, self._session_id)
         snapshot = render_goal_snapshot(goal_state)
         if snapshot is None:
             return None
@@ -276,7 +276,7 @@ class GoalToolkit(Toolkit[GoalToolkitConfig]):
         """Return continuation input when active goal exists."""
         if not self._session_id:
             return None
-        goal_state = await self._store.load(self._agent_id, self._session_id)
+        goal_state = await self.store.load(self._agent_id, self._session_id)
         if goal_state.status != "active" or not goal_state.objective:
             return None
         return SessionIdleResult(
@@ -308,7 +308,7 @@ class GoalToolkitProvider(ToolkitProvider[GoalToolkitConfig]):
 
     def __init__(self, *, store: GoalStateStore) -> None:
         """Create Goal Toolkit provider."""
-        self._store = store
+        self.store = store
 
     async def resolve(
         self,
@@ -317,7 +317,7 @@ class GoalToolkitProvider(ToolkitProvider[GoalToolkitConfig]):
     ) -> Toolkit[GoalToolkitConfig]:
         """Return executable Goal Toolkit."""
         del config, context
-        return GoalToolkit(store=self._store)
+        return GoalToolkit(store=self.store)
 
 
 def render_goal_snapshot(state: GoalState) -> str | None:
