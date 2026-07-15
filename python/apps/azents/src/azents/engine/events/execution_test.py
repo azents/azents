@@ -477,7 +477,7 @@ class _StaticOutputStream:
     ) -> NormalizedAdapterOutput:
         """Ignore one native event because output is predefined."""
         del native_event
-        return NormalizedAdapterOutput()
+        return NormalizedAdapterOutput(needs_follow_up=False)
 
     def complete(self) -> NormalizedAdapterOutput:
         """Return predefined completed output."""
@@ -505,14 +505,15 @@ class _ProjectingOutputStream(_StaticOutputStream):
     ) -> NormalizedAdapterOutput:
         """Project the test adapter's native text delta."""
         if native_event.type != "text_delta":
-            return NormalizedAdapterOutput()
+            return NormalizedAdapterOutput(needs_follow_up=False)
         return NormalizedAdapterOutput(
+            needs_follow_up=False,
             projections=[
                 StreamProjection(
                     type="content_delta",
                     delta=str(native_event.item.get("delta", "")),
                 )
-            ]
+            ],
         )
 
 
@@ -526,7 +527,11 @@ class _ProjectingNormalizer:
         """Start one projecting output stream."""
         del session_id
         return _ProjectingOutputStream(
-            NormalizedAdapterOutput(events=self._events, usage=_usage())
+            NormalizedAdapterOutput(
+                needs_follow_up=False,
+                events=self._events,
+                usage=_usage(),
+            )
         )
 
 
@@ -536,7 +541,9 @@ class _CompletionFailingNormalizer:
     def start(self, session_id: str) -> _CompletionFailingOutputStream:
         """Return one completion-failing output stream."""
         del session_id
-        return _CompletionFailingOutputStream(NormalizedAdapterOutput())
+        return _CompletionFailingOutputStream(
+            NormalizedAdapterOutput(needs_follow_up=False)
+        )
 
 
 class _Normalizer:
@@ -554,7 +561,11 @@ class _Normalizer:
         """Return one predefined output stream."""
         del session_id
         return _StaticOutputStream(
-            NormalizedAdapterOutput(events=self._events, usage=self._usage)
+            NormalizedAdapterOutput(
+                needs_follow_up=False,
+                events=self._events,
+                usage=self._usage,
+            )
         )
 
 
@@ -574,8 +585,27 @@ class _SequenceNormalizer:
             events = self._event_batches[self._index]
         self._index += 1
         return _StaticOutputStream(
-            NormalizedAdapterOutput(events=events, usage=_usage())
+            NormalizedAdapterOutput(
+                needs_follow_up=False,
+                events=events,
+                usage=_usage(),
+            )
         )
+
+
+class _OutputSequenceNormalizer:
+    """Return complete normalized outputs by stream call order."""
+
+    def __init__(self, outputs: Sequence[NormalizedAdapterOutput]) -> None:
+        self._outputs = list(outputs)
+        self.call_count = 0
+
+    def start(self, session_id: str) -> _StaticOutputStream:
+        """Return the next complete normalized output."""
+        del session_id
+        output = self._outputs[self.call_count]
+        self.call_count += 1
+        return _StaticOutputStream(output)
 
 
 class _ToolExecutor:
@@ -838,6 +868,55 @@ async def test_text_run_completes() -> None:
     )
     assert waiting_started_at is not None
     assert streaming_started_at == waiting_started_at
+
+
+async def test_model_follow_up_continues_without_tool_call() -> None:
+    """Run another model step when completed output requests follow-up."""
+    run_repo = _RunRepo()
+    transcript_repo = _TranscriptRepo()
+    normalizer = _OutputSequenceNormalizer(
+        [
+            NormalizedAdapterOutput(
+                needs_follow_up=True,
+                events=[_assistant_event()],
+                usage=_usage(),
+            ),
+            NormalizedAdapterOutput(
+                needs_follow_up=False,
+                events=[_assistant_event()],
+                usage=_usage(),
+            ),
+        ]
+    )
+    execution = AgentRunExecution(
+        session_manager=_session_context,
+        post_lower_filter=_PostFilter(),
+        model_adapter=_ModelAdapter(),
+        output_normalizer=normalizer,
+        model_call_preparer=_model_call_preparer(),
+        run_repo=run_repo,
+        transcript_repo=transcript_repo,
+    )
+
+    status = await execution.run(
+        AgentRunExecutionRequest(
+            owner_generation=1,
+            tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            run_id="run-1",
+            session_id="session-1",
+            model="gpt-5.1",
+        )
+    )
+
+    assert status == AgentRunStatus.COMPLETED
+    assert normalizer.call_count == 2
+    assert [event.kind for event in transcript_repo.events] == [
+        EventKind.ASSISTANT_MESSAGE,
+        EventKind.TURN_MARKER,
+        EventKind.ASSISTANT_MESSAGE,
+        EventKind.TURN_MARKER,
+        EventKind.RUN_MARKER,
+    ]
 
 
 async def test_external_run_callbacks_observe_no_open_db_session() -> None:

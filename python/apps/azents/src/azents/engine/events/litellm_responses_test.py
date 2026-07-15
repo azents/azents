@@ -2294,6 +2294,7 @@ class TestLiteLLMResponsesOutputNormalizer:
 
         interrupted = output_stream.interrupt()
 
+        assert interrupted.needs_follow_up is False
         assert len(interrupted.events) == 1
         payload = interrupted.events[0].payload
         assert isinstance(payload, AssistantMessagePayload)
@@ -2512,6 +2513,81 @@ class TestLiteLLMResponsesOutputNormalizer:
         )
 
         assert [event.kind for event in output.events] == [EventKind.REASONING]
+
+    @pytest.mark.parametrize(
+        ("end_turn", "expected_follow_up"),
+        [
+            (False, True),
+            (True, False),
+            (None, False),
+            ("false", False),
+            (0, False),
+        ],
+    )
+    def test_maps_optional_end_turn_to_follow_up(
+        self,
+        end_turn: object,
+        expected_follow_up: bool,
+    ) -> None:
+        """Continue only when a completed response explicitly sets end_turn false."""
+        normalizer = LiteLLMResponsesOutputNormalizer(
+            provider="openai",
+            model="gpt-5.1",
+        )
+
+        output = normalizer.normalize(
+            "session-1",
+            [
+                NativeEvent(
+                    type="ResponseCompletedEvent",
+                    item={
+                        "response": {
+                            "end_turn": end_turn,
+                            "output": [
+                                {
+                                    "type": "message",
+                                    "content": [
+                                        {"type": "output_text", "text": "continue"}
+                                    ],
+                                }
+                            ],
+                        }
+                    },
+                )
+            ],
+        )
+
+        assert output.needs_follow_up is expected_follow_up
+
+    def test_missing_end_turn_does_not_request_follow_up(self) -> None:
+        """Keep existing completion behavior when the provider omits end_turn."""
+        normalizer = LiteLLMResponsesOutputNormalizer(
+            provider="openai",
+            model="gpt-5.1",
+        )
+
+        output = normalizer.normalize(
+            "session-1",
+            [
+                NativeEvent(
+                    type="ResponseCompletedEvent",
+                    item={
+                        "response": {
+                            "output": [
+                                {
+                                    "type": "message",
+                                    "content": [
+                                        {"type": "output_text", "text": "done"}
+                                    ],
+                                }
+                            ]
+                        }
+                    },
+                )
+            ],
+        )
+
+        assert output.needs_follow_up is False
 
     def test_normalizes_completed_output_items(self) -> None:
         """Convert completed response output item to event."""

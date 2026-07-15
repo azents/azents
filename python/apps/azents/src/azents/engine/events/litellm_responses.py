@@ -1506,7 +1506,10 @@ class _LiteLLMResponsesOutputStream:
                 _normalize_response_usage(self._completed_response) or self._usage
             )
 
-        return NormalizedAdapterOutput(projections=projections)
+        return NormalizedAdapterOutput(
+            needs_follow_up=False,
+            projections=projections,
+        )
 
     def complete(self) -> NormalizedAdapterOutput:
         """Build durable output only after explicit successful completion."""
@@ -1523,13 +1526,17 @@ class _LiteLLMResponsesOutputStream:
             self._completed_response or {},
             self._completed_output_items,
         )
-        return NormalizedAdapterOutput(events=events, usage=self._usage)
+        return NormalizedAdapterOutput(
+            needs_follow_up=(self._completed_response or {}).get("end_turn") is False,
+            events=events,
+            usage=self._usage,
+        )
 
     def interrupt(self) -> NormalizedAdapterOutput:
         """Build completed output plus received partial assistant text."""
         if self._terminal_error is not None:
             raise self._terminal_error
-        completed = self._build_output()
+        completed = self._build_output().model_copy(update={"needs_follow_up": False})
         partial_text = "".join(self._partial_text)
         if not partial_text or _has_assistant_text(completed.events):
             return completed

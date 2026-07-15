@@ -42,7 +42,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ChatView.tsx
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
 last_verified_at: 2026-07-15
-spec_version: 86
+spec_version: 87
 ---
 
 # Agent Execution Loop
@@ -81,9 +81,14 @@ publication. A normally exhausted LiteLLM Responses stream must contain an expli
 `response.incomplete`, `response.failed`, and `error` outcomes, plus EOF without a recognized
 terminal event, raise `ModelCallError` before durable model events or markers are appended and flow
 through the failed-run retry/finalization boundary. Completed output items may reconstruct a
-successfully completed response but do not independently prove response completion. Incomplete tool
-calls are never admitted. A user stop remains a separate interruption path and may durably preserve
-assistant text received before completion.
+successfully completed response but do not independently prove response completion. When the
+completed response includes the optional provider extension `end_turn` with the exact boolean value
+`false`, normalization marks the successful model step as needing follow-up. The execution loop
+appends that step's durable output and turn marker, then starts the next model step without treating it
+as a failed-attempt retry. `end_turn` set to `true`, omitted, or malformed does not independently
+request follow-up. Foreground client tool calls continue to require follow-up regardless of
+`end_turn`. Incomplete tool calls are never admitted. A user stop remains a separate interruption path
+and may durably preserve assistant text received before completion without requesting follow-up.
 
 ## 2. Run State
 
@@ -680,6 +685,8 @@ updated by the user.
 
 ## Changelog
 
+- **2026-07-15** (spec_version 87) — Continued the Agent Run with another successful model step when
+  a completed Responses payload explicitly sets the optional `end_turn` extension to `false`.
 - **2026-07-15** (spec_version 86) — Required explicit native `response.completed` before successful
   Responses stream normalization and routed unsuccessful or terminal-less streams through failed-run
   retry/finalization.

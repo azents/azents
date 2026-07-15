@@ -6,6 +6,7 @@ import itertools
 import logging
 from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass
+from functools import partial
 from typing import Literal, Protocol
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -291,7 +292,10 @@ class AgentRunExecution:
                 if self.output_sink is not None:
                     for repaired_event in repaired_events:
                         await self.output_sink(
-                            NormalizedAdapterOutput(events=[]),
+                            NormalizedAdapterOutput(
+                                needs_follow_up=False,
+                                events=[],
+                            ),
                             [repaired_event],
                         )
                 await self._publish_phase(
@@ -387,11 +391,12 @@ class AgentRunExecution:
                     ]
                     appended: list[Event] = []
                     turn_marker: Event | None = None
+                    model_needs_follow_up = normalized.needs_follow_up
 
                     async def append_model_output(
-                        normalized_output: NormalizedAdapterOutput = normalized,
-                        prepared_call: PreparedModelCall = prepared,
-                        tool_calls: list[ClientToolCallPayload] = normalized_tool_calls,
+                        normalized_output: NormalizedAdapterOutput,
+                        prepared_call: PreparedModelCall,
+                        tool_calls: list[ClientToolCallPayload],
                     ) -> None:
                         """Append output and admit its complete foreground call set."""
                         nonlocal appended, turn_marker
@@ -433,15 +438,21 @@ class AgentRunExecution:
                                 model_call_started_at,
                             )
 
+                    bound_append_model_output = partial(
+                        append_model_output,
+                        normalized,
+                        prepared,
+                        normalized_tool_calls,
+                    )
                     if normalized_tool_calls:
                         admitted = await request.tool_admission_barrier.run_if_open(
-                            append_model_output
+                            bound_append_model_output
                         )
                         if not admitted:
                             await finish_turn("cancelled")
                             return AgentRunStatus.RUNNING
                     else:
-                        await append_model_output()
+                        await bound_append_model_output()
 
                     turn_events = [turn_marker] if turn_marker is not None else []
                     client_tool_calls = [
@@ -449,7 +460,7 @@ class AgentRunExecution:
                         for event in appended
                         if isinstance(event.payload, ClientToolCallPayload)
                     ]
-                    if not client_tool_calls:
+                    if not client_tool_calls and not model_needs_follow_up:
                         async with self.session_manager() as session:
                             run_marker = await self._append_run_marker(
                                 session,
@@ -475,6 +486,9 @@ class AgentRunExecution:
 
                     if self.output_sink is not None:
                         await self.output_sink(normalized, [*appended, *turn_events])
+                    if not client_tool_calls:
+                        await finish_turn("completed")
+                        continue
                     try:
                         await self._execute_tools(
                             request.run_id,
@@ -506,7 +520,10 @@ class AgentRunExecution:
                                 )
                         if run_marker is not None and self.output_sink is not None:
                             await self.output_sink(
-                                NormalizedAdapterOutput(events=[]),
+                                NormalizedAdapterOutput(
+                                    needs_follow_up=False,
+                                    events=[],
+                                ),
                                 [run_marker],
                             )
                         await finish_turn("cancelled")
@@ -602,7 +619,10 @@ class AgentRunExecution:
             )
         if self.output_sink is not None:
             await self.output_sink(
-                NormalizedAdapterOutput(events=assistant_events),
+                NormalizedAdapterOutput(
+                    needs_follow_up=False,
+                    events=assistant_events,
+                ),
                 [*appended, run_marker],
             )
         return AgentRunStatus.INTERRUPTED
@@ -739,7 +759,10 @@ class AgentRunExecution:
                 result=result,
             )
         if self.output_sink is not None:
-            await self.output_sink(NormalizedAdapterOutput(events=[]), [event])
+            await self.output_sink(
+                NormalizedAdapterOutput(needs_follow_up=False, events=[]),
+                [event],
+            )
         return event
 
     async def _finalize_tool_result_in_session(
