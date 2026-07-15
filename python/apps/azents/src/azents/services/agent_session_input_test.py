@@ -43,7 +43,6 @@ from azents.repos.workspace.data import WorkspaceCreate
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.repos.workspace_user.data import WorkspaceUserCreate
 from azents.services.exchange_file import ExchangeFileService
-from azents.services.model_file import ModelFileService
 from azents.testing.model_selection import make_test_model_selection_dict
 
 from .agent_session_input import (
@@ -200,13 +199,6 @@ class _ExchangeFileService(ExchangeFileService):
         """Bypass Base dataclass initialization."""
 
 
-class _ModelFileService(ModelFileService):
-    """ModelFileService for tests."""
-
-    def __init__(self) -> None:
-        """Bypass Base dataclass initialization."""
-
-
 def _input_buffer_service(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> InputBufferService:
@@ -215,7 +207,6 @@ def _input_buffer_service(
         session_manager=rdb_session_manager,
         input_buffer_repository=InputBufferRepository(),
         exchange_file_service=_ExchangeFileService(),
-        model_file_service=_ModelFileService(),
         agent_session_repository=AgentSessionRepository(),
         event_transcript_repository=EventTranscriptRepository(),
         agent_run_repository=AgentRunRepository(),

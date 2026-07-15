@@ -56,7 +56,6 @@ from azents.repos.workspace.data import WorkspaceCreate
 from azents.services.chat_write import ChatWriteService
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.input_buffer import InputBufferService
-from azents.services.model_file import ModelFileService
 from azents.testing.model_selection import (
     make_test_model_selection_dict,
 )
@@ -159,7 +158,6 @@ def _service(
         session_manager=rdb_session_manager,
         input_buffer_repository=InputBufferRepository(),
         exchange_file_service=_ExchangeFileService(),
-        model_file_service=_ModelFileService(),
         agent_session_repository=AgentSessionRepository(),
         event_transcript_repository=EventTranscriptRepository(),
         agent_run_repository=AgentRunRepository(),
@@ -177,13 +175,6 @@ def _service(
 
 class _ExchangeFileService(ExchangeFileService):
     """ExchangeFileService for tests."""
-
-    def __init__(self) -> None:
-        """Bypass Base dataclass initialization."""
-
-
-class _ModelFileService(ModelFileService):
-    """ModelFileService for tests."""
 
     def __init__(self) -> None:
         """Bypass Base dataclass initialization."""
@@ -296,7 +287,6 @@ class TestChatWriteService:
                 session_manager=rdb_session_manager,
                 input_buffer_repository=InputBufferRepository(),
                 exchange_file_service=_ExchangeFileService(),
-                model_file_service=_ModelFileService(),
                 agent_session_repository=AgentSessionRepository(),
                 event_transcript_repository=EventTranscriptRepository(),
                 agent_run_repository=AgentRunRepository(),

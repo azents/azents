@@ -91,8 +91,8 @@ api_routes:
   - /chat/v1/exchange-files/{file_id}/download
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
-last_verified_at: 2026-07-14
-spec_version: 100
+last_verified_at: 2026-07-15
+spec_version: 101
 ---
 
 # Conversation & Events
@@ -569,10 +569,13 @@ profile, then the Agent default when the Session has no snapshot.
 `InputBufferService` owns input-buffer reads and writes. Enqueue commits only the pending row;
 producers own wake-up and run-state transitions. Preparation handles exactly one FIFO head per
 transaction. The worker first reads the head's identity and inference requirement, resolves the
-profile outside the transaction when needed, then locks the Session and the same FIFO head. If the
-identity changed, it discards the stale preparation result and starts again. Successful preparation
-atomically updates the complete Session inference snapshot, applies Goal/Skill state changes, appends
-canonical events, associates input events with the active run, and deletes the source buffer.
+profile and attachment metadata outside any database session when needed, then locks the Session and
+the same FIFO head. Attachment resolution is metadata-only during promotion: it never downloads the
+Exchange file or creates a replacement ModelFile, and model rich input comes only from FileParts
+stored on the buffer at its creation boundary. If the identity changed while external preparation
+ran, the worker discards the stale result and starts again. Successful preparation atomically updates
+the complete Session inference snapshot, applies Goal/Skill state changes, appends canonical events,
+associates input events with the active run, and deletes the source buffer.
 
 Canonical outcomes are:
 
@@ -708,6 +711,8 @@ Current verification:
 
 ## 11. Changelog
 
+- **2026-07-15** — v101. Required input-buffer attachment metadata resolution outside the locking
+  transaction, FIFO head revalidation afterward, and creation-boundary-only FileParts.
 - **2026-07-14** — v100. Defined action execution tables as active operation state, with owner-generation admission, atomic durable terminal snapshot/delete handover, explicit live removal, and cancelled no-reexecution recovery.
 - **2026-07-13** — v99. Promoted raw-page cursor ownership, cross-page semantic projection identity, provider/internal-agent rendering, durable-over-live promotion, and explicit public WebSocket delivery boundaries.
 - **2026-07-12** — v98. Made PostgreSQL active tool ownership authoritative for execution and live reconstruction, and removed the Background flag from active calls.

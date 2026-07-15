@@ -42,7 +42,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ChatView.tsx
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
 last_verified_at: 2026-07-15
-spec_version: 83
+spec_version: 84
 ---
 
 # Agent Execution Loop
@@ -59,7 +59,7 @@ worker/UI stream boundaries, but the DB source of truth is the event transcript 
 
 Main steps:
 
-1. Worker reads exactly one FIFO InputBuffer head, resolves the requested profile when that input requires inference, and then locks the same head for atomic preparation.
+1. Worker reads exactly one FIFO InputBuffer head, resolves the requested profile and attachment metadata outside a database session, and then locks the same head for atomic preparation.
 2. Preparation atomically updates the Session inference snapshot, applies Goal/Skill side effects, appends canonical events, associates run input, and deletes the source buffer. A changed FIFO head restarts preparation instead of applying a stale resolution.
 3. Worker executes buffer-keyed operation TurnActions such as `create_git_worktree` before the next model dispatch. The current Session owner generation admits the execution before buffer deletion; active state and progress remain in execution tables until one atomic terminal handover appends durable history and deletes live state.
 4. `AgentRunExecution` repeats model steps and tool steps while updating `agent_runs.phase`.
@@ -589,7 +589,10 @@ Run execution uses short database sessions around one durable read or state tran
 preparation callbacks, model streaming, runtime hooks, foreground tools, Toolkit provider resolution,
 OAuth token HTTP requests, broker calls, and live event publication run only after the preceding
 database session has closed. Boundary input polling also completes its external queue read before it
-opens the short session that appends promoted messages.
+opens the short session that appends promoted messages. Input-buffer attachment metadata resolution
+likewise runs after its snapshot session closes; promotion then locks and revalidates the FIFO head
+before applying any durable changes. Flush reuses only the FileParts stored at the input boundary and
+never downloads an attachment or creates a ModelFile while holding the Session/FIFO lock.
 
 Row locks remain limited to persistence invariants. Tool-result finalization locks its `AgentRun`
 while appending the deterministic result and removing that call from `active_tool_calls`, so parallel
@@ -664,6 +667,9 @@ updated by the user.
 
 ## Changelog
 
+- **2026-07-15** (spec_version 84) — Moved input-buffer attachment metadata resolution before the
+  locking transaction, required FIFO revalidation afterward, and prohibited execution-time
+  attachment-to-ModelFile rematerialization.
 - **2026-07-15** (spec_version 83) — Required unexpected Toolkit resolution and runtime instruction
   storage failures to propagate instead of being silently represented as missing optional context.
 - **2026-07-15** (spec_version 82) — Required short run-owned database sessions, external-I/O
