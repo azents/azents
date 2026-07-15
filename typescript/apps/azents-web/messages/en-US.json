@@ -1491,6 +1491,7 @@
     "removeWorkspaceItem": "Remove workspace item",
     "localBranch": "Base branch",
     "localBranchPlaceholder": "Select a local branch",
+    "noLocalBranchMatches": "No local branches match your search.",
     "localBranchesOnly": "Only local branches are shown for worktree creation.",
     "loadingLocalBranches": "Loading local branches…",
     "noLocalBranches": "No local branches are available for this Project.",

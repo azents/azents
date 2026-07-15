@@ -1491,6 +1491,7 @@
     "removeWorkspaceItem": "Remove workspace item",
     "localBranch": "Base branch",
     "localBranchPlaceholder": "Select a local branch",
+    "noLocalBranchMatches": "検索条件に一致するローカルブランチがありません。",
     "localBranchesOnly": "Only local branches are shown for worktree creation.",
     "loadingLocalBranches": "Loading local branches…",
     "noLocalBranches": "No local branches are available for this Project.",

@@ -311,11 +311,13 @@ export function useAgentDraftChatContainer(
     { agentId: agent.id, sourceProjectPath: activeSourceProjectPath ?? "" },
     {
       enabled: activeSourceProjectPath !== null,
+      refetchOnMount: "always",
+      staleTime: 0,
     },
   );
 
   useEffect(() => {
-    if (!activeWorktreeItem || !gitRefsQuery.data) {
+    if (!activeWorktreeItem || !gitRefsQuery.data || gitRefsQuery.isFetching) {
       return;
     }
     const refs = localBranchRefs(gitRefsQuery.data.refs);
@@ -334,7 +336,7 @@ export function useAgentDraftChatContainer(
           : item,
       ),
     );
-  }, [activeWorktreeItem, gitRefsQuery.data]);
+  }, [activeWorktreeItem, gitRefsQuery.data, gitRefsQuery.isFetching]);
 
   const workspaceQuery = trpc.chat.getAgentWorkspace.useQuery(
     { agentId: agent.id },
@@ -554,7 +556,7 @@ export function useAgentDraftChatContainer(
     if (activeSourceProjectPath === null) {
       return { type: "IDLE" };
     }
-    if (gitRefsQuery.isLoading) {
+    if (gitRefsQuery.isFetching) {
       return { type: "LOADING" };
     }
     if (gitRefsQuery.isError) {
@@ -569,7 +571,7 @@ export function useAgentDraftChatContainer(
     gitRefsQuery.data?.refs,
     gitRefsQuery.error,
     gitRefsQuery.isError,
-    gitRefsQuery.isLoading,
+    gitRefsQuery.isFetching,
   ]);
 
   const projectPickerState = useMemo<ProjectDirectoryPickerState>(() => {

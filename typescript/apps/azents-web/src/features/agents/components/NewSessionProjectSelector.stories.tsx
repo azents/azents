@@ -1,4 +1,5 @@
 import { rem } from "@mantine/core";
+import { expect, fn, userEvent, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { NewSessionProjectSelector } from "./NewSessionProjectSelector";
 import type {
@@ -142,5 +143,45 @@ export const WorktreeNoLocalBranches = {
     ],
     activeWorktreeItemId: "worktree-azents",
     gitRefPreviewState: { type: "READY", refs: [] },
+  },
+} satisfies Story;
+
+export const BranchSearch = {
+  args: {
+    workspaceItems: [
+      {
+        id: "worktree-api",
+        type: "git_worktree",
+        sourceProjectPath: "/workspace/agent/azents/python/apps/azents",
+        startingRef: "refs/heads/main",
+      },
+    ],
+    activeWorktreeItemId: "worktree-api",
+    gitRefPreviewState: { type: "READY", refs },
+    onSetWorktreeStartingRef: fn(),
+  },
+  play: async ({ args, canvasElement }) => {
+    const canvas = within(canvasElement);
+    const page = within(canvasElement.ownerDocument.body);
+    const branchSelect = canvas.getByLabelText("Base branch");
+
+    await userEvent.click(branchSelect);
+    await userEvent.clear(branchSelect);
+    await userEvent.type(branchSelect, "session");
+
+    await expect(
+      page.getByRole("option", { name: "feature/session-init" }),
+    ).toBeVisible();
+    await expect(
+      page.queryByRole("option", { name: "main (default)" }),
+    ).toBeNull();
+
+    await userEvent.click(
+      page.getByRole("option", { name: "feature/session-init" }),
+    );
+    await expect(args.onSetWorktreeStartingRef).toHaveBeenCalledWith(
+      "worktree-api",
+      "refs/heads/feature/session-init",
+    );
   },
 } satisfies Story;
