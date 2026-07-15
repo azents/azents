@@ -117,6 +117,24 @@ class SessionGitWorktreeRepository:
             return None
         return self._build(rdb)
 
+    async def get_source_project_path_by_worktree_path(
+        self,
+        session: AsyncSession,
+        *,
+        worktree_path: str,
+    ) -> str | None:
+        """Fetch the original source Project path for an owned worktree path."""
+        result = await session.execute(
+            sa.select(RDBSessionAgentContextGitWorktree.source_project_path)
+            .where(RDBSessionAgentContextGitWorktree.worktree_path == worktree_path)
+            .order_by(
+                RDBSessionAgentContextGitWorktree.created_at.desc(),
+                RDBSessionAgentContextGitWorktree.id.desc(),
+            )
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
     async def list_by_session_id(
         self,
         session: AsyncSession,
