@@ -11,7 +11,6 @@ tags: [backend, engine, testenv, testing]
 This report validates the Model Stream Timeout Watchdog implementation described in:
 
 - `docs/azents/design/model-stream-timeout-watchdog.md`
-- `docs/azents/design/model-stream-timeout-watchdog-implementation-plan.md`
 - `docs/azents/adr/0145-model-stream-parsed-event-idle-and-attempt-bounds.md`
 - `docs/azents/adr/0146-serialize-live-partial-attempts-and-unify-tool-projection-identity.md`
 
