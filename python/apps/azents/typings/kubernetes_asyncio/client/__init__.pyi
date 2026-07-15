@@ -10,18 +10,26 @@ Agent Home은 lightkube로 마이그레이션 완료.
 from collections.abc import Callable, Coroutine
 from typing import Any
 
+from aiohttp import ClientSession
+
 # ── Configuration / ApiClient ──────────────────────────
 
 class Configuration:
     host: str
     proxy: str | None
+    proxy_headers: dict[str, str] | None
     ssl_ca_cert: str | None
+    tls_server_name: str | None
     api_key: dict[str, str]
     refresh_api_key_hook: Callable[[ApiClient], None] | None
     def __init__(self) -> None: ...
 
+class RESTClientObject:
+    pool_manager: ClientSession
+
 class ApiClient:
     configuration: Configuration
+    rest_client: RESTClientObject
     def __init__(self, configuration: Configuration | None = None) -> None: ...
     async def close(self) -> None: ...
 

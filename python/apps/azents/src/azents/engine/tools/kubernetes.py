@@ -12,7 +12,9 @@ import logging
 from collections.abc import Awaitable, Callable
 from textwrap import dedent
 from typing import Any, ClassVar
+from urllib.parse import urlencode
 
+import aiohttp
 import httpx
 import jmespath
 import yaml
@@ -21,6 +23,12 @@ from jmespath.exceptions import JMESPathError
 from kubernetes_asyncio.client import ApiClient, CoreV1Api, VersionApi
 from kubernetes_asyncio.client.rest import ApiException
 from kubernetes_asyncio.stream import WsApiClient
+from kubernetes_asyncio.stream.ws_client import (
+    STDERR_CHANNEL,
+    STDOUT_CHANNEL,
+    WsResponse,
+    get_websocket_url,
+)
 from lightkube import ApiError, AsyncClient
 from lightkube.resources.core_v1 import Event
 from pydantic import BaseModel, Field, ValidationError
@@ -52,6 +60,72 @@ logger = logging.getLogger(__name__)
 _CLIENT_ERRORS = (ConnectionError, TimeoutError, OSError, ApiException, BotoClientError)
 KubernetesClusterClients = tuple[AsyncClient, ApiClient, ResourceDiscoveryCache]
 KubernetesClientResolver = Callable[[str], Awaitable[KubernetesClusterClients]]
+
+
+class _MethodAwareWsApiClient(WsApiClient):
+    """Preserve the generated Kubernetes exec HTTP method for WebSocket upgrade."""
+
+    async def request(
+        self,
+        method: str,
+        url: str,
+        query_params: list[tuple[str, Any]] | None = None,
+        headers: dict[str, str] | None = None,
+        post_params: object | None = None,
+        body: object | None = None,
+        _preload_content: bool = True,
+        _request_timeout: object | None = None,
+    ) -> object:
+        """Open the Kubernetes streaming WebSocket with the requested HTTP method.
+
+        ``WsApiClient`` drops ``method`` and always performs a GET handshake. Kubernetes
+        authorizes POST pod exec requests as ``create`` on ``pods/exec``, so a service
+        account with the standard create-only permission receives a 403 before the
+        command starts. aiohttp supports a method-aware WebSocket handshake, allowing
+        this client to preserve the generated POST request.
+        """
+        del post_params, body, _request_timeout
+
+        expanded_query_params: list[tuple[str, Any]] = []
+        for key, value in query_params or []:
+            if key == "command" and isinstance(value, list):
+                expanded_query_params.extend((key, command) for command in value)
+            else:
+                expanded_query_params.append((key, value))
+
+        request_headers = dict(headers or {})
+        request_headers.setdefault("sec-websocket-protocol", "v4.channel.k8s.io")
+        if expanded_query_params:
+            url = f"{url}?{urlencode(expanded_query_params)}"
+        websocket_url = get_websocket_url(url)
+        websocket_kwargs: dict[str, Any] = {
+            "method": method,
+            "headers": request_headers,
+            "heartbeat": self.heartbeat,
+            "proxy": self.configuration.proxy,
+            "proxy_headers": self.configuration.proxy_headers,
+            "server_hostname": self.configuration.tls_server_name,
+        }
+
+        websocket = self.rest_client.pool_manager.ws_connect(
+            websocket_url,
+            **websocket_kwargs,
+        )
+        if not _preload_content:
+            return websocket
+
+        output = ""
+        async with websocket as connection:
+            async for message in connection:
+                payload = message.data.decode("utf-8")
+                if len(payload) <= 1:
+                    continue
+                channel = ord(payload[0])
+                data = payload[1:]
+                if data and channel in (STDOUT_CHANNEL, STDERR_CHANNEL):
+                    output += data
+
+        return WsResponse(200, output.encode("utf-8"))
 
 
 async def _close_kubernetes_clients(
@@ -686,8 +760,7 @@ def _make_exec_tool(
         check_access(config, "Pod", ns)
 
         try:
-            # Run WebSocket-based exec with WsApiClient
-            ws_client = WsApiClient(configuration=api_client.configuration)
+            ws_client = _MethodAwareWsApiClient(configuration=api_client.configuration)
             try:
                 core_v1 = CoreV1Api(ws_client)
                 kwargs: dict[str, Any] = {
@@ -719,7 +792,12 @@ def _make_exec_tool(
             raise FunctionToolError(
                 f"Kubernetes API error ({exc.status}): {exc.reason}"
             ) from None
-        except httpx.ConnectError:
+        except aiohttp.WSServerHandshakeError as exc:
+            raise FunctionToolError(
+                f"Kubernetes exec WebSocket handshake failed ({exc.status}): "
+                f"{exc.message}"
+            ) from None
+        except aiohttp.ClientConnectionError, httpx.ConnectError:
             raise FunctionToolError(
                 "Failed to connect to Kubernetes cluster. "
                 "Check cluster connectivity and credentials."

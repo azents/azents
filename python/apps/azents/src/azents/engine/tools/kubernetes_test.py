@@ -4,7 +4,9 @@ import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import aiohttp
 import pytest
+from kubernetes_asyncio.client import Configuration
 from kubernetes_asyncio.client.rest import ApiException
 from lightkube import ApiError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,6 +24,7 @@ from azents.engine.tools.kubernetes import (
     K8sExecInput,
     KubernetesToolkit,
     KubernetesToolkitProvider,
+    _MethodAwareWsApiClient,  # pyright: ignore[reportPrivateUsage] — test the transport workaround directly
     check_access,
     resolve_namespace,
 )
@@ -1162,6 +1165,56 @@ def _find_tool(tools: list[FunctionTool], name: str) -> FunctionTool:
 
 
 # ---------------------------------------------------------------------------
+# WebSocket exec client tests
+# ---------------------------------------------------------------------------
+
+
+class TestMethodAwareWsApiClient:
+    """Verify Kubernetes exec preserves transport and authentication settings."""
+
+    @pytest.mark.asyncio
+    async def test_request_preserves_post_method_and_proxy(self) -> None:
+        """POST exec uses a POST WebSocket handshake through the configured proxy."""
+        configuration = Configuration()
+        configuration.host = "https://cluster.example.com"
+        configuration.proxy = "http://proxy.example.com:8080"
+        configuration.proxy_headers = {"X-Proxy-Header": "value"}
+        client = _MethodAwareWsApiClient(configuration=configuration)
+        websocket = MagicMock()
+        client.rest_client.pool_manager.ws_connect = MagicMock(return_value=websocket)
+
+        try:
+            response = await client.request(
+                "POST",
+                "https://cluster.example.com/api/v1/namespaces/default/"
+                "pods/example/exec",
+                query_params=[
+                    ("command", ["sh", "-c", "id"]),
+                    ("stdout", True),
+                ],
+                headers={"Authorization": "Bearer token"},
+                _preload_content=False,
+            )
+        finally:
+            await client.close()
+
+        assert response is websocket
+        client.rest_client.pool_manager.ws_connect.assert_called_once_with(
+            "wss://cluster.example.com/api/v1/namespaces/default/"
+            "pods/example/exec?command=sh&command=-c&command=id&stdout=True",
+            method="POST",
+            headers={
+                "Authorization": "Bearer token",
+                "sec-websocket-protocol": "v4.channel.k8s.io",
+            },
+            heartbeat=None,
+            proxy="http://proxy.example.com:8080",
+            proxy_headers={"X-Proxy-Header": "value"},
+            server_hostname=None,
+        )
+
+
+# ---------------------------------------------------------------------------
 # Tool handler feature tests
 # ---------------------------------------------------------------------------
 
@@ -1385,7 +1438,7 @@ class TestKubernetesToolHandlers:
 
         with (
             patch(
-                "azents.engine.tools.kubernetes.WsApiClient",
+                "azents.engine.tools.kubernetes._MethodAwareWsApiClient",
                 MagicMock(return_value=ws_client),
             ),
             patch(
@@ -1417,6 +1470,57 @@ class TestKubernetesToolHandlers:
             container="app",
         )
         core_v1.connect_get_namespaced_pod_exec.assert_not_called()
+        ws_client.close.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_k8s_exec_handler_maps_websocket_handshake_error(
+        self,
+        k8s_toolkit: KubernetesToolkit,
+    ) -> None:
+        """WebSocket handshake failures become actionable tool errors."""
+        context = _make_context()
+        state = await k8s_toolkit.update_context(context)
+        tool = _find_tool(state.tools, "k8s_exec")
+        ws_client = MagicMock()
+        ws_client.close = AsyncMock()
+        core_v1 = MagicMock()
+        core_v1.connect_post_namespaced_pod_exec = AsyncMock(
+            side_effect=aiohttp.WSServerHandshakeError(
+                MagicMock(),
+                (),
+                status=403,
+                message="Invalid response status",
+            )
+        )
+
+        with (
+            patch(
+                "azents.engine.tools.kubernetes._MethodAwareWsApiClient",
+                MagicMock(return_value=ws_client),
+            ),
+            patch(
+                "azents.engine.tools.kubernetes.CoreV1Api",
+                MagicMock(return_value=core_v1),
+            ),
+            pytest.raises(
+                FunctionToolError,
+                match=(
+                    "Kubernetes exec WebSocket handshake failed "
+                    r"\(403\): Invalid response status"
+                ),
+            ),
+        ):
+            await tool.handler(
+                json.dumps(
+                    {
+                        "cluster": "prod",
+                        "namespace": "default",
+                        "pod": "my-pod",
+                        "command": ["id"],
+                    }
+                )
+            )
+
         ws_client.close.assert_awaited_once()
 
     @pytest.mark.asyncio
