@@ -219,9 +219,15 @@ export function RunRetryCard(props: RunRetryCardProps): React.ReactElement {
               p="xs"
               bg="var(--mantine-color-default-hover)"
             >
-              <Text size="sm" style={{ overflowWrap: "anywhere" }}>
-                {message}
-              </Text>
+              <ScrollArea.Autosize mah={rem(110)} type="auto" scrollbars="y">
+                <Text
+                  size="sm"
+                  lh={rem(22)}
+                  style={{ overflowWrap: "anywhere" }}
+                >
+                  {message}
+                </Text>
+              </ScrollArea.Autosize>
             </Paper>
           )}
 
