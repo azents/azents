@@ -1,6 +1,5 @@
 """Exchange file service."""
 
-import asyncio
 import dataclasses
 import datetime
 import hashlib
@@ -11,6 +10,7 @@ from typing import Annotated
 
 from azcommon.infra.s3.service import S3Service
 from azcommon.result import Failure, Result, Success
+from azcommon.uuid import uuid7
 from fastapi import Depends
 from PIL import Image, ImageOps, UnidentifiedImageError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,7 +23,7 @@ from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.exchange_file import ExchangeFileRepository
+from azents.repos.exchange_file import ExchangeFileRepository, exchange_file_object_key
 from azents.repos.exchange_file.data import ExchangeFile, ExchangeFileCreate
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.services.file_lifecycle_policy import exchange_file_expires_at
@@ -93,6 +93,18 @@ class _PreviewThumbnail:
     width: int
     height: int
     generated_at: datetime.datetime
+
+
+@dataclasses.dataclass(frozen=True)
+class _PreparedExchangeFile:
+    """Exchange file metadata and blob prepared before persistence."""
+
+    create: ExchangeFileCreate
+    object_key: str
+    body: bytes
+    preview_width: int | None = None
+    preview_height: int | None = None
+    preview_generated_at: datetime.datetime | None = None
 
 
 def exchange_object_key_from_uri(uri: str) -> str | None:
@@ -259,35 +271,46 @@ class ExchangeFileService:
         origin_type: ExchangeFileOrigin,
     ) -> Result[ExchangeFile, SessionNotFound | FileAccessDenied]:
         """Create Exchange upload file without session by Agent."""
-        uploaded_object_keys: list[str] = []
+        async with self.session_manager() as session:
+            agent = await self.agent_repository.get_by_id(session, agent_id)
+            if agent is None:
+                return Failure(SessionNotFound())
+            if not await self._has_workspace_access(
+                session, workspace_id=agent.workspace_id, user_id=user_id
+            ):
+                return Failure(FileAccessDenied())
+            workspace_id = agent.workspace_id
+
+        prepared = self._prepare_files(
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+            user_id=user_id,
+            filename=filename,
+            media_type=media_type,
+            body=body,
+            origin_type=origin_type,
+        )
+        succeeded = False
         try:
+            await self._upload_prepared_files(prepared)
             async with self.session_manager() as session:
                 agent = await self.agent_repository.get_by_id(session, agent_id)
-                if agent is None:
+                if agent is None or agent.workspace_id != workspace_id:
                     return Failure(SessionNotFound())
                 if not await self._has_workspace_access(
-                    session, workspace_id=agent.workspace_id, user_id=user_id
+                    session,
+                    workspace_id=workspace_id,
+                    user_id=user_id,
                 ):
                     return Failure(FileAccessDenied())
-
-                created, object_keys = await self._create_file_in_scope(
-                    session=session,
-                    workspace_id=agent.workspace_id,
-                    agent_id=agent.id,
-                    user_id=user_id,
-                    filename=filename,
-                    media_type=media_type,
-                    body=body,
-                    origin_type=origin_type,
+                created = await self._persist_prepared_files(session, prepared)
+            succeeded = True
+            return Success(created)
+        finally:
+            if not succeeded:
+                await self._cleanup_uploaded_objects(
+                    [file.object_key for file in prepared]
                 )
-                uploaded_object_keys.extend(object_keys)
-                return Success(created)
-        except asyncio.CancelledError:
-            await self._cleanup_uploaded_objects(uploaded_object_keys)
-            raise
-        except Exception:
-            await self._cleanup_uploaded_objects(uploaded_object_keys)
-            raise
 
     async def _create_agent_session_file(
         self,
@@ -301,37 +324,54 @@ class ExchangeFileService:
         origin_type: ExchangeFileOrigin,
     ) -> Result[ExchangeFile, SessionNotFound | FileAccessDenied]:
         """Create Exchange file by AgentSession."""
-        uploaded_object_keys: list[str] = []
+        async with self.session_manager() as session:
+            agent_session = await self.agent_session_repository.get_by_id(
+                session, session_id
+            )
+            if agent_session is None or agent_session.agent_id != agent_id:
+                return Failure(SessionNotFound())
+            if not await self._has_workspace_access(
+                session, workspace_id=agent_session.workspace_id, user_id=user_id
+            ):
+                return Failure(FileAccessDenied())
+            workspace_id = agent_session.workspace_id
+
+        prepared = self._prepare_files(
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+            user_id=user_id,
+            filename=filename,
+            media_type=media_type,
+            body=body,
+            origin_type=origin_type,
+        )
+        succeeded = False
         try:
+            await self._upload_prepared_files(prepared)
             async with self.session_manager() as session:
                 agent_session = await self.agent_session_repository.get_by_id(
                     session, session_id
                 )
-                if agent_session is None or agent_session.agent_id != agent_id:
+                if (
+                    agent_session is None
+                    or agent_session.agent_id != agent_id
+                    or agent_session.workspace_id != workspace_id
+                ):
                     return Failure(SessionNotFound())
                 if not await self._has_workspace_access(
-                    session, workspace_id=agent_session.workspace_id, user_id=user_id
+                    session,
+                    workspace_id=workspace_id,
+                    user_id=user_id,
                 ):
                     return Failure(FileAccessDenied())
-
-                created, object_keys = await self._create_file_in_scope(
-                    session=session,
-                    workspace_id=agent_session.workspace_id,
-                    agent_id=agent_session.agent_id,
-                    user_id=user_id,
-                    filename=filename,
-                    media_type=media_type,
-                    body=body,
-                    origin_type=origin_type,
+                created = await self._persist_prepared_files(session, prepared)
+            succeeded = True
+            return Success(created)
+        finally:
+            if not succeeded:
+                await self._cleanup_uploaded_objects(
+                    [file.object_key for file in prepared]
                 )
-                uploaded_object_keys.extend(object_keys)
-                return Success(created)
-        except asyncio.CancelledError:
-            await self._cleanup_uploaded_objects(uploaded_object_keys)
-            raise
-        except Exception:
-            await self._cleanup_uploaded_objects(uploaded_object_keys)
-            raise
 
     async def _create_file(
         self,
@@ -344,42 +384,59 @@ class ExchangeFileService:
         origin_type: ExchangeFileOrigin,
     ) -> Result[ExchangeFile, SessionNotFound | FileAccessDenied]:
         """Create Exchange file metadata and object."""
-        uploaded_object_keys: list[str] = []
+        async with self.session_manager() as session:
+            agent_session = await self.agent_session_repository.get_by_id(
+                session, session_id
+            )
+            if agent_session is None:
+                return Failure(SessionNotFound())
+            if not await self._has_workspace_access(
+                session, workspace_id=agent_session.workspace_id, user_id=user_id
+            ):
+                return Failure(FileAccessDenied())
+            workspace_id = agent_session.workspace_id
+            agent_id = agent_session.agent_id
+
+        prepared = self._prepare_files(
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+            user_id=user_id,
+            filename=filename,
+            media_type=media_type,
+            body=body,
+            origin_type=origin_type,
+        )
+        succeeded = False
         try:
+            await self._upload_prepared_files(prepared)
             async with self.session_manager() as session:
                 agent_session = await self.agent_session_repository.get_by_id(
                     session, session_id
                 )
-                if agent_session is None:
+                if (
+                    agent_session is None
+                    or agent_session.agent_id != agent_id
+                    or agent_session.workspace_id != workspace_id
+                ):
                     return Failure(SessionNotFound())
                 if not await self._has_workspace_access(
-                    session, workspace_id=agent_session.workspace_id, user_id=user_id
+                    session,
+                    workspace_id=workspace_id,
+                    user_id=user_id,
                 ):
                     return Failure(FileAccessDenied())
-
-                created, object_keys = await self._create_file_in_scope(
-                    session=session,
-                    workspace_id=agent_session.workspace_id,
-                    agent_id=agent_session.agent_id,
-                    user_id=user_id,
-                    filename=filename,
-                    media_type=media_type,
-                    body=body,
-                    origin_type=origin_type,
+                created = await self._persist_prepared_files(session, prepared)
+            succeeded = True
+            return Success(created)
+        finally:
+            if not succeeded:
+                await self._cleanup_uploaded_objects(
+                    [file.object_key for file in prepared]
                 )
-                uploaded_object_keys.extend(object_keys)
-                return Success(created)
-        except asyncio.CancelledError:
-            await self._cleanup_uploaded_objects(uploaded_object_keys)
-            raise
-        except Exception:
-            await self._cleanup_uploaded_objects(uploaded_object_keys)
-            raise
 
-    async def _create_file_in_scope(
+    def _prepare_files(
         self,
         *,
-        session: AsyncSession,
         workspace_id: str,
         agent_id: str,
         user_id: str,
@@ -387,75 +444,117 @@ class ExchangeFileService:
         media_type: str,
         body: bytes,
         origin_type: ExchangeFileOrigin,
-    ) -> tuple[ExchangeFile, list[str]]:
-        """Create Exchange file row and object in verified workspace/agent scope."""
+    ) -> list[_PreparedExchangeFile]:
+        """Prepare stable metadata and object keys before external upload."""
         safe_filename = _sanitize_display_filename(filename)
         sha256 = hashlib.sha256(body).hexdigest()
         now = datetime.datetime.now(datetime.UTC)
         expires_at = exchange_file_expires_at(now=now, config=self.config)
-        uploaded_object_keys: list[str] = []
-        created = await self.exchange_file_repository.create(
-            session,
-            ExchangeFileCreate(
-                workspace_id=workspace_id,
-                agent_id=agent_id,
-                origin_type=origin_type,
-                filename=safe_filename,
-                media_type=media_type,
-                size_bytes=len(body),
-                sha256=sha256,
-                created_by_user_id=user_id,
-                expires_at=expires_at,
-                preview_title=safe_filename,
-                preview_summary=_make_text_preview(body, media_type),
-                preview_generated_at=now,
-            ),
-        )
-        await self.s3_service.upload(
-            bucket=self.config.workspace_s3.bucket,
-            key=created.object_key,
-            body=body,
-            content_type=media_type,
-        )
-        uploaded_object_keys.append(created.object_key)
+        file_id = uuid7().hex
+        prepared = [
+            _PreparedExchangeFile(
+                create=ExchangeFileCreate(
+                    id=file_id,
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                    origin_type=origin_type,
+                    filename=safe_filename,
+                    media_type=media_type,
+                    size_bytes=len(body),
+                    sha256=sha256,
+                    created_by_user_id=user_id,
+                    expires_at=expires_at,
+                    preview_title=safe_filename,
+                    preview_summary=_make_text_preview(body, media_type),
+                    preview_generated_at=now,
+                ),
+                object_key=exchange_file_object_key(
+                    workspace_id=workspace_id,
+                    file_id=file_id,
+                ),
+                body=body,
+            )
+        ]
 
         thumbnail_body = _make_preview_thumbnail(body, media_type)
         if thumbnail_body is None:
-            return created, uploaded_object_keys
+            return prepared
 
+        thumbnail_id = uuid7().hex
+        prepared.append(
+            _PreparedExchangeFile(
+                create=ExchangeFileCreate(
+                    id=thumbnail_id,
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                    origin_type=origin_type,
+                    filename=f"{safe_filename}.preview.jpg",
+                    media_type=_PREVIEW_THUMBNAIL_MEDIA_TYPE,
+                    size_bytes=len(thumbnail_body.body),
+                    sha256=hashlib.sha256(thumbnail_body.body).hexdigest(),
+                    created_by_user_id=user_id,
+                    expires_at=expires_at,
+                    preview_title=f"{safe_filename} preview",
+                    preview_generated_at=thumbnail_body.generated_at,
+                ),
+                object_key=exchange_file_object_key(
+                    workspace_id=workspace_id,
+                    file_id=thumbnail_id,
+                ),
+                body=thumbnail_body.body,
+                preview_width=thumbnail_body.width,
+                preview_height=thumbnail_body.height,
+                preview_generated_at=thumbnail_body.generated_at,
+            )
+        )
+        return prepared
+
+    async def _upload_prepared_files(
+        self,
+        prepared: list[_PreparedExchangeFile],
+    ) -> None:
+        """Upload prepared blobs without an open DB session."""
+        for file in prepared:
+            await self.s3_service.upload(
+                bucket=self.config.workspace_s3.bucket,
+                key=file.object_key,
+                body=file.body,
+                content_type=file.create.media_type,
+            )
+
+    async def _persist_prepared_files(
+        self,
+        session: AsyncSession,
+        prepared: list[_PreparedExchangeFile],
+    ) -> ExchangeFile:
+        """Persist uploaded file metadata atomically in the verified scope."""
+        source = await self.exchange_file_repository.create(
+            session,
+            prepared[0].create,
+        )
+        if len(prepared) == 1:
+            return source
+
+        thumbnail_prepared = prepared[1]
         thumbnail = await self.exchange_file_repository.create(
             session,
-            ExchangeFileCreate(
-                workspace_id=workspace_id,
-                agent_id=agent_id,
-                origin_type=origin_type,
-                filename=f"{safe_filename}.preview.jpg",
-                media_type=_PREVIEW_THUMBNAIL_MEDIA_TYPE,
-                size_bytes=len(thumbnail_body.body),
-                sha256=hashlib.sha256(thumbnail_body.body).hexdigest(),
-                created_by_user_id=user_id,
-                expires_at=expires_at,
-                preview_title=f"{safe_filename} preview",
-                preview_generated_at=thumbnail_body.generated_at,
-            ),
+            thumbnail_prepared.create,
         )
-        await self.s3_service.upload(
-            bucket=self.config.workspace_s3.bucket,
-            key=thumbnail.object_key,
-            body=thumbnail_body.body,
-            content_type=_PREVIEW_THUMBNAIL_MEDIA_TYPE,
-        )
-        uploaded_object_keys.append(thumbnail.object_key)
-        created = await self.exchange_file_repository.set_preview_thumbnail_file_id(
+        if (
+            thumbnail_prepared.preview_width is None
+            or thumbnail_prepared.preview_height is None
+            or thumbnail_prepared.preview_generated_at is None
+        ):
+            raise ValueError("Prepared thumbnail metadata is incomplete")
+        return await self.exchange_file_repository.set_preview_thumbnail_file_id(
             session,
-            file_id=created.id,
+            file_id=source.id,
             preview_thumbnail_file_id=thumbnail.id,
             preview_thumbnail_media_type=_PREVIEW_THUMBNAIL_MEDIA_TYPE,
-            preview_thumbnail_width=thumbnail_body.width,
-            preview_thumbnail_height=thumbnail_body.height,
-            preview_generated_at=thumbnail_body.generated_at,
+            preview_thumbnail_width=thumbnail_prepared.preview_width,
+            preview_thumbnail_height=thumbnail_prepared.preview_height,
+            preview_generated_at=thumbnail_prepared.preview_generated_at,
         )
-        return created, uploaded_object_keys
 
     async def download(
         self,

@@ -1,6 +1,5 @@
 """Artifact service."""
 
-import asyncio
 import dataclasses
 import datetime
 import hashlib
@@ -11,6 +10,7 @@ from typing import Annotated
 from azcommon.infra.s3.service import S3Service
 from azcommon.result import Failure, Result, Success
 from azcommon.types import JSONValue
+from azcommon.uuid import uuid7
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,7 +21,7 @@ from azents.core.s3.deps import get_s3_service
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.artifact import ArtifactRepository
+from azents.repos.artifact import ArtifactRepository, artifact_storage_key
 from azents.repos.artifact.data import Artifact, ArtifactCreate
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.services.file_lifecycle_policy import artifact_expires_at
@@ -128,8 +128,37 @@ class ArtifactService:
         metadata: dict[str, object] | None = None,
     ) -> Result[Artifact, ArtifactSessionNotFound | ArtifactAccessDenied]:
         """Create Artifact metadata and object."""
-        uploaded_object_key: str | None = None
+        async with self.session_manager() as session:
+            agent_session = await self.agent_session_repository.get_by_id(
+                session,
+                session_id,
+            )
+            if agent_session is None:
+                return Failure(ArtifactSessionNotFound())
+            if not await self._has_workspace_access(
+                session,
+                workspace_id=agent_session.workspace_id,
+                user_id=user_id,
+            ):
+                return Failure(ArtifactAccessDenied())
+            workspace_id = agent_session.workspace_id
+            agent_id = agent_session.agent_id
+
+        artifact_id = uuid7().hex
+        uploaded_object_key = artifact_storage_key(
+            workspace_id=workspace_id,
+            session_id=session_id,
+            created_run_index=created_run_index,
+            artifact_id=artifact_id,
+        )
+        succeeded = False
         try:
+            await self.s3_service.upload(
+                bucket=self.config.workspace_s3.bucket,
+                key=uploaded_object_key,
+                body=body,
+                content_type=media_type,
+            )
             async with self.session_manager() as session:
                 agent_session = await self.agent_session_repository.get_by_id(
                     session,
@@ -143,6 +172,11 @@ class ArtifactService:
                     user_id=user_id,
                 ):
                     return Failure(ArtifactAccessDenied())
+                if (
+                    agent_session.workspace_id != workspace_id
+                    or agent_session.agent_id != agent_id
+                ):
+                    return Failure(ArtifactSessionNotFound())
 
                 safe_filename = _sanitize_display_filename(filename)
                 sha256 = hashlib.sha256(body).hexdigest()
@@ -150,6 +184,7 @@ class ArtifactService:
                 created = await self.artifact_repository.create(
                     session,
                     ArtifactCreate(
+                        id=artifact_id,
                         workspace_id=agent_session.workspace_id,
                         session_id=session_id,
                         agent_id=agent_session.agent_id,
@@ -167,20 +202,11 @@ class ArtifactService:
                         metadata=_json_metadata(metadata),
                     ),
                 )
-                await self.s3_service.upload(
-                    bucket=self.config.workspace_s3.bucket,
-                    key=created.storage_key,
-                    body=body,
-                    content_type=media_type,
-                )
-                uploaded_object_key = created.storage_key
-                return Success(created)
-        except asyncio.CancelledError:
-            await self._cleanup_uploaded_object(uploaded_object_key)
-            raise
-        except Exception:
-            await self._cleanup_uploaded_object(uploaded_object_key)
-            raise
+            succeeded = True
+            return Success(created)
+        finally:
+            if not succeeded:
+                await self._cleanup_uploaded_object(uploaded_object_key)
 
     async def resolve(
         self,

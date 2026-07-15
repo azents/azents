@@ -107,6 +107,17 @@ class _AgentRunRepository:
         del session, session_id
         return self.running_run
 
+    async def get_by_id(
+        self,
+        session: AsyncSession,
+        run_id: str,
+    ) -> AgentRunState | None:
+        """Return the configured Run only when its ID matches."""
+        del session
+        if self.running_run is None or self.running_run.id != run_id:
+            return None
+        return self.running_run
+
     async def mark_session_running_terminal(
         self,
         session: AsyncSession,

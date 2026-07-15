@@ -48,7 +48,6 @@ class _FakeExchangeFileRepository:
 
     def __init__(self) -> None:
         self.files: dict[str, ExchangeFile] = {}
-        self.next_id = 1
 
     async def create(
         self,
@@ -57,8 +56,7 @@ class _FakeExchangeFileRepository:
     ) -> ExchangeFile:
         """Store create input as domain model as-is."""
         del session
-        file_id = f"{self.next_id:032x}"
-        self.next_id += 1
+        file_id = create.id
         file = ExchangeFile(
             id=file_id,
             workspace_id=create.workspace_id,
@@ -200,9 +198,10 @@ class _FakeExchangeFileRepository:
 class _FakeS3Service:
     """S3 service for tests."""
 
-    def __init__(self) -> None:
+    def __init__(self, session_boundary: "_SessionBoundary") -> None:
         self.objects: dict[str, bytes] = {}
         self.fail_delete = False
+        self.session_boundary = session_boundary
 
     async def upload(
         self,
@@ -214,16 +213,19 @@ class _FakeS3Service:
     ) -> None:
         """Store object."""
         del bucket, content_type
+        assert self.session_boundary.active == 0
         self.objects[key] = body
 
     async def download_bytes(self, bucket: str, key: str) -> bytes | None:
         """Fetch object bytes."""
         del bucket
+        assert self.session_boundary.active == 0
         return self.objects.get(key)
 
     async def delete(self, bucket: str, key: str) -> None:
         """Delete object."""
         del bucket
+        assert self.session_boundary.active == 0
         if self.fail_delete:
             msg = "delete failed"
             raise RuntimeError(msg)
@@ -249,10 +251,20 @@ class _Config:
     file_lifecycle = _FileLifecycleConfig()
 
 
-@asynccontextmanager
-async def _session_manager() -> AsyncGenerator[AsyncSession, None]:
-    """Session manager for tests."""
-    yield cast(AsyncSession, object())
+class _SessionBoundary:
+    """Track open DB scopes for external-I/O boundary assertions."""
+
+    def __init__(self) -> None:
+        self.active = 0
+
+    @asynccontextmanager
+    async def session_manager(self) -> AsyncGenerator[AsyncSession, None]:
+        """Yield a test DB session while tracking its lifetime."""
+        self.active += 1
+        try:
+            yield cast(AsyncSession, object())
+        finally:
+            self.active -= 1
 
 
 def _make_agent_session() -> AgentSession:
@@ -342,13 +354,14 @@ def _make_service(
     workspace_user_repository.get_by_workspace_and_user.return_value = workspace_user
 
     exchange_file_repository = _FakeExchangeFileRepository()
-    s3_service = _FakeS3Service()
+    session_boundary = _SessionBoundary()
+    s3_service = _FakeS3Service(session_boundary)
     service = ExchangeFileService(
         exchange_file_repository=cast(Any, exchange_file_repository),
         agent_repository=agent_repository,
         agent_session_repository=agent_session_repository,
         workspace_user_repository=workspace_user_repository,
-        session_manager=_session_manager,
+        session_manager=session_boundary.session_manager,
         s3_service=cast(Any, s3_service),
         config=cast(Any, _Config()),
     )

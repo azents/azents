@@ -39,6 +39,7 @@ class ModelFile(BaseModel):
 class ModelFileCreate(BaseModel):
     """ModelFile create schema."""
 
+    id: str = Field(description="ModelFile ID")
     workspace_id: str = Field(description="Workspace ID")
     session_id: str = Field(description="AgentSession ID")
     agent_id: str = Field(description="Agent ID")

@@ -31,7 +31,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/FileAttachmentList.tsx
   - typescript/apps/azents-web/src/features/chat/components/AttachmentPreviewViewer.tsx
 last_verified_at: 2026-07-15
-spec_version: 14
+spec_version: 15
 ---
 
 # File Exchange Storage
@@ -85,6 +85,10 @@ When `spawn_agent` forks parent model-visible context into a child session, File
 - There is no implicit conversion among Attachment, Artifact, and ModelFile/FilePart. URI is storage location, not entity reference, so do not add logic extracting entity id from URI string. A `model_file_id` is single-event scoped; reusing the same source bytes later requires materializing a new ModelFile/FilePart.
 - Attachment Exchange file and Artifact have time-based retention/TTL lifecycle. ModelFile has context-owned lifecycle based on model-input head cursor reachability and active run pins.
 - User upload, agent-presented file, and internal artifact must pass session/workspace ownership verification.
+- ExchangeFile, Artifact, and ModelFile creation preallocates the entity ID and storage key. It
+  validates ownership in a short DB session, closes that session before object-storage upload, and
+  revalidates ownership while atomically persisting metadata afterward. If revalidation or commit
+  fails, the preuploaded object is compensation-deleted; no DB transaction spans object-storage I/O.
 - Sandbox file query is possible only when active sandbox storage handle exists; inactive/hibernated state follows workspace API action contract.
 - General presigned upload such as Agent avatar uses `UploadService` category handler, but it is separate category/publish contract from chat exchange file.
 
@@ -109,6 +113,8 @@ When `spawn_agent` forks parent model-visible context into a child session, File
 
 ## Changelog
 
+- **2026-07-15** — v15. Required preallocated object keys, S3 upload outside DB sessions,
+  ownership revalidation, and compensation cleanup before metadata becomes visible.
 - **2026-07-15** — v14. Clarified that input-buffer promotion resolves only Exchange attachment
   metadata outside its locking transaction and reuses creation-boundary FileParts without download
   or rematerialization.

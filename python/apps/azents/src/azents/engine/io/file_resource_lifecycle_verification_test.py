@@ -49,12 +49,11 @@ class _FakeArtifactRepository:
 
     def __init__(self) -> None:
         self.artifacts: dict[str, Artifact] = {}
-        self.next_id = "a" * 32
 
     async def create(self, session: AsyncSession, create: ArtifactCreate) -> Artifact:
         """Store Artifact create input."""
         del session
-        artifact_id = self.next_id
+        artifact_id = create.id
         artifact = Artifact(
             id=artifact_id,
             workspace_id=create.workspace_id,

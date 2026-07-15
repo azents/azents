@@ -50,6 +50,7 @@ class Artifact(BaseModel):
 class ArtifactCreate(BaseModel):
     """Artifact create schema."""
 
+    id: str = Field(description="Artifact ID")
     workspace_id: str = Field(description="Workspace ID")
     session_id: str = Field(description="AgentSession ID")
     agent_id: str = Field(description="Agent ID")

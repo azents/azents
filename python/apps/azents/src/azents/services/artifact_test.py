@@ -35,7 +35,6 @@ class _FakeArtifactRepository:
 
     def __init__(self) -> None:
         self.artifacts: dict[str, Artifact] = {}
-        self.next_id = "a" * 32
 
     async def create(
         self,
@@ -44,7 +43,7 @@ class _FakeArtifactRepository:
     ) -> Artifact:
         """Store create input as domain model as-is."""
         del session
-        artifact_id = self.next_id
+        artifact_id = create.id
         artifact = Artifact(
             id=artifact_id,
             workspace_id=create.workspace_id,
@@ -177,9 +176,10 @@ class _FakeWorkspaceUserRepository:
 class _FakeS3Service:
     """S3 service for tests."""
 
-    def __init__(self) -> None:
+    def __init__(self, session_boundary: "_SessionBoundary") -> None:
         self.objects: dict[str, bytes] = {}
         self.deleted_keys: list[str] = []
+        self.session_boundary = session_boundary
 
     async def upload(
         self,
@@ -191,16 +191,19 @@ class _FakeS3Service:
     ) -> None:
         """Store object."""
         del bucket, content_type
+        assert self.session_boundary.active == 0
         self.objects[key] = body
 
     async def download_bytes(self, bucket: str, key: str) -> bytes | None:
         """Fetch object bytes."""
         del bucket
+        assert self.session_boundary.active == 0
         return self.objects.get(key)
 
     async def delete(self, bucket: str, key: str) -> None:
         """Delete object."""
         del bucket
+        assert self.session_boundary.active == 0
         self.deleted_keys.append(key)
         self.objects.pop(key, None)
 
@@ -224,10 +227,20 @@ class _Config:
     file_lifecycle = _FileLifecycleConfig()
 
 
-@asynccontextmanager
-async def _session_manager() -> AsyncGenerator[AsyncSession, None]:
-    """Session manager for tests."""
-    yield cast(AsyncSession, object())
+class _SessionBoundary:
+    """Track open DB scopes for external-I/O boundary assertions."""
+
+    def __init__(self) -> None:
+        self.active = 0
+
+    @asynccontextmanager
+    async def session_manager(self) -> AsyncGenerator[AsyncSession, None]:
+        """Yield a test DB session while tracking its lifetime."""
+        self.active += 1
+        try:
+            yield cast(AsyncSession, object())
+        finally:
+            self.active -= 1
 
 
 def _make_agent_session() -> AgentSession:
@@ -272,7 +285,8 @@ def _make_workspace_user() -> WorkspaceUser:
 def _make_service() -> tuple[ArtifactService, _FakeArtifactRepository, _FakeS3Service]:
     """Create ArtifactService for tests."""
     artifact_repo = _FakeArtifactRepository()
-    s3 = _FakeS3Service()
+    session_boundary = _SessionBoundary()
+    s3 = _FakeS3Service(session_boundary)
     service = ArtifactService(
         artifact_repository=cast(Any, artifact_repo),
         agent_session_repository=cast(
@@ -282,7 +296,7 @@ def _make_service() -> tuple[ArtifactService, _FakeArtifactRepository, _FakeS3Se
             Any,
             _FakeWorkspaceUserRepository(_make_workspace_user()),
         ),
-        session_manager=_session_manager,
+        session_manager=session_boundary.session_manager,
         s3_service=cast(Any, s3),
         config=cast(Any, _Config()),
     )
@@ -311,9 +325,9 @@ async def test_create_and_resolve_artifact() -> None:
 
     assert isinstance(created, Success)
     artifact = created.value
-    assert artifact.id == "a" * 32
+    assert len(artifact.id) == 32
     assert artifact.expires_at - datetime.timedelta(days=7) >= _NOW
-    assert artifact.storage_key == "artifacts/workspace-1/session-1/3/" + "a" * 32
+    assert artifact.storage_key == f"artifacts/workspace-1/session-1/3/{artifact.id}"
     assert artifact.uri == f"artifact://{artifact.storage_key}"
     assert s3.objects[artifact.storage_key] == b"hello"
     assert artifact_repo.artifacts[artifact.id].metadata == {"nested": {"count": 1}}
@@ -328,7 +342,6 @@ async def test_create_and_resolve_artifact() -> None:
 async def test_expired_artifact_is_denied_even_if_blob_exists() -> None:
     """Expired Artifact rejects resolution even when blob remains."""
     service, artifact_repo, s3 = _make_service()
-    artifact_repo.next_id = "b" * 32
     created = await service.create(
         session_id="session-1",
         user_id="user-1",

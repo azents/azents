@@ -1,6 +1,5 @@
 """Session lifecycle state and ownership management."""
 
-import asyncio
 import dataclasses
 import datetime
 import logging
@@ -84,9 +83,7 @@ class SessionLifecycleService:
     async def mark_session_running(self, session_id: str) -> None:
         """Transition ``run_state`` to RUNNING and initialize heartbeat."""
         await self.run_short_db(
-            lambda db: self.agent_session_repository.mark_running(db, session_id),
-            error_log="Failed to mark session running",
-            session_id=session_id,
+            lambda db: self.agent_session_repository.mark_running(db, session_id)
         )
 
     async def mark_session_idle(self, session_id: str) -> bool:
@@ -126,13 +123,7 @@ class SessionLifecycleService:
             await self.agent_session_repository.mark_idle(db_session, session_id)
             return True
 
-        marked_idle = await self.run_short_db(
-            mark_idle_if_no_run,
-            error_log="Failed to mark session idle",
-            session_id=session_id,
-            default=False,
-        )
-        return bool(marked_idle)
+        return await self.run_short_db(mark_idle_if_no_run)
 
     async def has_active_agent_run(self, session_id: str) -> bool:
         """Return whether the session still has a pending or running AgentRun."""
@@ -144,20 +135,12 @@ class SessionLifecycleService:
             )
             return active_run is not None
 
-        active = await self.run_short_db(
-            get_active,
-            error_log="Failed to check active agent run",
-            session_id=session_id,
-            default=True,
-        )
-        return bool(active)
+        return await self.run_short_db(get_active)
 
     async def heartbeat_session(self, session_id: str) -> None:
         """Refresh DB heartbeat and Redis owner heartbeat of RUNNING session."""
         await self.run_short_db(
-            lambda db: self.agent_session_repository.heartbeat_running(db, session_id),
-            error_log="Failed to heartbeat session",
-            session_id=session_id,
+            lambda db: self.agent_session_repository.heartbeat_running(db, session_id)
         )
         await self.broker.renew_session_owner_heartbeat(session_id)
 
@@ -300,8 +283,6 @@ class SessionLifecycleService:
                 status=status,
                 ended_at=datetime.datetime.now(datetime.UTC),
             ),
-            error_log="Failed to mark session agent runs terminal",
-            session_id=session_id,
         )
 
     async def mark_agent_run_terminal_if_running(
@@ -312,16 +293,19 @@ class SessionLifecycleService:
         status: AgentRunStatus,
     ) -> None:
         """Close AgentRun row as terminal state if still running."""
-        await self.run_short_db(
-            lambda db: self.agent_run_repository.mark_terminal_if_running(
-                db,
+
+        async def mark_terminal(db_session: AsyncSession) -> None:
+            run = await self.agent_run_repository.get_by_id(db_session, run_id)
+            if run is not None and run.session_id != session_id:
+                raise ValueError("AgentRun session mismatch")
+            await self.agent_run_repository.mark_terminal_if_running(
+                db_session,
                 run_id,
                 status,
                 ended_at=datetime.datetime.now(datetime.UTC),
-            ),
-            error_log="Failed to mark agent run terminal",
-            session_id=session_id,
-        )
+            )
+
+        await self.run_short_db(mark_terminal)
 
     async def update_agent_run_retry_state(
         self,
@@ -331,30 +315,23 @@ class SessionLifecycleService:
         retry_state: FailedRunRetryState | None,
     ) -> None:
         """Set or clear the AgentRun retry state."""
-        await self.run_short_db(
-            lambda db: self.agent_run_repository.update_retry_state(
-                db,
+
+        async def update_retry(db_session: AsyncSession) -> None:
+            run = await self.agent_run_repository.get_by_id(db_session, run_id)
+            if run is None or run.session_id != session_id:
+                raise ValueError("AgentRun not found in session")
+            await self.agent_run_repository.update_retry_state(
+                db_session,
                 run_id,
                 retry_state,
-            ),
-            error_log="Failed to update agent run retry state",
-            session_id=session_id,
-        )
+            )
+
+        await self.run_short_db(update_retry)
 
     async def run_short_db(
         self,
         action: Callable[[AsyncSession], Awaitable[_T]],
-        *,
-        error_log: str,
-        session_id: str,
-        default: _T | None = None,
-    ) -> _T | None:
+    ) -> _T:
         """Run ``action`` in short-lived DB transaction."""
-        try:
-            async with self.session_manager() as db_session:
-                return await action(db_session)
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.exception(error_log, extra={"session_id": session_id})
-            return default
+        async with self.session_manager() as db_session:
+            return await action(db_session)

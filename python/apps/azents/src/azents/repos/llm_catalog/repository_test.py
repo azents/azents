@@ -77,6 +77,71 @@ async def test_replace_current_snapshot_persists_snapshot_before_entries(
     assert entry_count == 1
 
 
+async def test_partial_catalog_upserts_survive_prepared_statement_reuse(
+    rdb_session: AsyncSession,
+) -> None:
+    """Partial-index upserts must remain inferable after psycopg prepares them."""
+    workspace_repository = WorkspaceRepository()
+    workspace_result = await workspace_repository.create(
+        rdb_session,
+        WorkspaceCreate(
+            name="Prepared catalog workspace",
+            handle="prepared-catalog-workspace",
+        ),
+    )
+    assert isinstance(workspace_result, Success)
+    workspace_id = await workspace_repository.resolve_id(
+        rdb_session, "prepared-catalog-workspace"
+    )
+    assert workspace_id is not None
+
+    integration = await LLMProviderIntegrationRepository(
+        CredentialCipher(Fernet.generate_key().decode())
+    ).create(
+        rdb_session,
+        LLMProviderIntegrationCreate(
+            workspace_id=workspace_id,
+            provider=LLMProvider.CHATGPT_OAUTH,
+            name="Prepared ChatGPT integration",
+            secrets=ChatGPTOAuthSecrets(
+                access_token="access-token",
+                refresh_token="refresh-token",
+                expires_at=datetime.datetime(2030, 1, 1, tzinfo=datetime.UTC),
+            ),
+            config=ChatGPTOAuthConfig(
+                connection_method="callback",
+                status="connected",
+            ),
+        ),
+    )
+
+    repository = LLMCatalogRepository()
+    integration_catalog_ids = {
+        (
+            await repository.ensure_integration_catalog(
+                rdb_session,
+                integration_id=integration.id,
+                provider=LLMProvider.CHATGPT_OAUTH,
+                lowerer_target=LLMCatalogLowererTarget.LITELLM,
+            )
+        ).id
+        for _ in range(8)
+    }
+    system_catalog_ids = {
+        (
+            await repository.ensure_system_catalog(
+                rdb_session,
+                provider=LLMProvider.OPENAI,
+                lowerer_target=LLMCatalogLowererTarget.LITELLM,
+            )
+        ).id
+        for _ in range(8)
+    }
+
+    assert len(integration_catalog_ids) == 1
+    assert len(system_catalog_ids) == 1
+
+
 async def test_chatgpt_integration_never_falls_back_to_system_catalog(
     rdb_session: AsyncSession,
 ) -> None:

@@ -336,14 +336,19 @@ class UserStopFinalizer:
         status: AgentRunStatus,
     ) -> None:
         """Close AgentRun row as terminal state if still running."""
-        await self._run_short_db(
-            lambda db: self.agent_run_repository.mark_terminal_if_running(
-                db,
+
+        async def mark_terminal(db_session: AsyncSession) -> None:
+            run = await self.agent_run_repository.get_by_id(db_session, run_id)
+            if run is not None and run.session_id != session_id:
+                raise ValueError("AgentRun session mismatch")
+            await self.agent_run_repository.mark_terminal_if_running(
+                db_session,
                 run_id,
                 status,
                 ended_at=datetime.datetime.now(datetime.UTC),
             )
-        )
+
+        await self._run_short_db(mark_terminal)
 
     async def _run_short_db(
         self,

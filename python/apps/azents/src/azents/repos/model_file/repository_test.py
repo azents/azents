@@ -3,6 +3,7 @@
 import datetime
 
 import sqlalchemy as sa
+from azcommon.uuid import uuid7
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
@@ -90,6 +91,7 @@ async def test_create_model_file_metadata(rdb_session: AsyncSession) -> None:
     created = await repo.create(
         rdb_session,
         ModelFileCreate(
+            id=uuid7().hex,
             workspace_id=workspace_id,
             session_id=session_id,
             agent_id=agent_id,
@@ -127,6 +129,7 @@ async def test_mark_deleted_if_unpinned_updates_available_rows(
     model_file = await repo.create(
         rdb_session,
         ModelFileCreate(
+            id=uuid7().hex,
             workspace_id=workspace_id,
             session_id=session_id,
             agent_id=agent_id,
@@ -164,6 +167,7 @@ async def test_list_statuses_for_session_returns_known_model_files(
     available = await repo.create(
         rdb_session,
         ModelFileCreate(
+            id=uuid7().hex,
             workspace_id=workspace_id,
             session_id=session_id,
             agent_id=agent_id,
@@ -180,6 +184,7 @@ async def test_list_statuses_for_session_returns_known_model_files(
     deleted = await repo.create(
         rdb_session,
         ModelFileCreate(
+            id=uuid7().hex,
             workspace_id=workspace_id,
             session_id=session_id,
             agent_id=agent_id,
@@ -219,6 +224,7 @@ async def test_release_terminal_run_pins_preserves_pending(
     model_file = await ModelFileRepository().create(
         rdb_session,
         ModelFileCreate(
+            id=uuid7().hex,
             workspace_id=workspace_id,
             session_id=session_id,
             agent_id=agent_id,
