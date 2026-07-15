@@ -418,6 +418,7 @@ class RunExecutor:
             if previous_retry_state is None
             else previous_retry_state.failed_attempt_count + 1
         )
+        await self.live_event_projector.discard_failed_attempt(session_id)
         retry_state = await self._record_failed_run_attempt(
             session_id=session_id,
             run_id=active_run.id,
@@ -1414,6 +1415,9 @@ class RunExecutor:
                         terminal_run_status = AgentRunStatus.COMPLETED
                     break
                 except UserVisibleRuntimeError as exc:
+                    await self.live_event_projector.discard_failed_attempt(
+                        message.session_id
+                    )
                     retry_state = await self._record_failed_run_attempt(
                         session_id=message.session_id,
                         run_id=run_id,
@@ -1468,6 +1472,9 @@ class RunExecutor:
                     await clear_live_retry_state()
                     attempt_number += 1
                 except Exception as exc:
+                    await self.live_event_projector.discard_failed_attempt(
+                        message.session_id
+                    )
                     retry_state = await self._record_failed_run_attempt(
                         session_id=message.session_id,
                         run_id=run_id,
@@ -2306,7 +2313,7 @@ def _failed_run_finalization_reason(
     """Return terminal retry finalization reason, if retry should stop."""
     if retry_state.retryability == "non_retryable":
         return "non_retryable"
-    if retry_state.failed_attempt_count >= retry_state.max_retries:
+    if retry_state.failed_attempt_count > retry_state.max_retries:
         return "retry_exhausted"
     return None
 

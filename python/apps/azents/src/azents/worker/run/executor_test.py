@@ -478,6 +478,8 @@ class _LiveEventProjector:
 
     def __init__(self) -> None:
         self.flushed_session_ids: list[str] = []
+        self.discarded_session_ids: list[str] = []
+        self.projection_operations: list[str] = []
         self.active_tool_calls: list[tuple[str, object]] = []
         self.live_run_updates: list[tuple[str, ChatLiveRunState]] = []
         self.live_run_clears: list[tuple[str, str]] = []
@@ -489,6 +491,8 @@ class _LiveEventProjector:
     ) -> None:
         """Record live run update broadcasts."""
         self.live_run_updates.append((session_id, run))
+        if run.retry is not None:
+            self.projection_operations.append("retry_update")
 
     async def publish_live_run_cleared(
         self,
@@ -513,6 +517,11 @@ class _LiveEventProjector:
     async def flush_session(self, session_id: str) -> None:
         """Record flushed sessions."""
         self.flushed_session_ids.append(session_id)
+
+    async def discard_failed_attempt(self, session_id: str) -> None:
+        """Record failed-attempt model partial discard."""
+        self.discarded_session_ids.append(session_id)
+        self.projection_operations.append("discard")
 
 
 class _Engine:
@@ -907,9 +916,11 @@ async def test_finalize_unhandled_active_run_uses_terminal_finalizer() -> None:
         recoverable_run=_PendingRun(status=AgentRunStatus.RUNNING)
     )
     failed_run_finalizer = _FailedRunFinalizer()
+    live_event_projector = _LiveEventProjector()
     executor = _executor(
         lifecycle,
         failed_run_finalizer=failed_run_finalizer,
+        live_event_projector=live_event_projector,
     )
     dispatched: list[tuple[str, PublishedEvent]] = []
 
@@ -932,6 +943,7 @@ async def test_finalize_unhandled_active_run_uses_terminal_finalizer() -> None:
     assert len(failed_run_finalizer.inputs) == 1
     assert failed_run_finalizer.inputs[0].run_id == "run-001"
     assert failed_run_finalizer.inputs[0].reason == "non_retryable"
+    assert live_event_projector.discarded_session_ids == ["session-001"]
     assert dispatched == []
 
 
@@ -1541,7 +1553,7 @@ async def test_execute_recovers_durable_retry_budget(
 
     assert result.terminal_run_status == AgentRunStatus.FAILED
     assert len(finalizer.inputs) == 1
-    assert finalizer.inputs[0].retry_state.failed_attempt_count == 2
+    assert finalizer.inputs[0].retry_state.failed_attempt_count == 3
 
 
 @pytest.mark.asyncio
@@ -2684,6 +2696,7 @@ async def test_execute_retries_failed_run_without_durable_error(
     ]
     assert retry_live_runs[0].model_call_started_at is None
     assert live_event_projector.live_run_updates[-1][1].retry is None
+    assert live_event_projector.projection_operations == ["discard", "retry_update"]
     assert finalizer.inputs == []
     assert not any(
         isinstance(event, Event) and event.kind == EventKind.SYSTEM_ERROR
@@ -2757,6 +2770,7 @@ async def test_execute_publishes_retry_state_after_internal_attempt_failure(
     assert len(retry_updates) == 1
     assert retry_updates[0].last_error_message == "An internal error occurred."
     assert retry_updates[0].attempts[0].error_type == "RuntimeError"
+    assert live_event_projector.projection_operations == ["discard", "retry_update"]
     assert all(
         run.inference_profile
         == AppliedInferenceProfile(
@@ -2916,10 +2930,11 @@ async def test_execute_finalizes_when_failed_run_retry_is_exhausted(
         tool_admission_barrier=ToolAdmissionBarrier(),
     )
 
-    assert engine.calls == 1
+    assert engine.calls == 2
     assert result.terminal_run_status == AgentRunStatus.FAILED
-    assert len(lifecycle.retry_states) == 1
+    assert len(lifecycle.retry_states) == 2
     assert len(finalizer.inputs) == 1
+    assert finalizer.inputs[0].retry_state.failed_attempt_count == 2
     assert finalizer.inputs[0].reason == "retry_exhausted"
 
 
@@ -2967,17 +2982,21 @@ async def test_execute_preserves_retry_attempt_history_after_live_retry_clear(
         tool_admission_barrier=ToolAdmissionBarrier(),
     )
 
-    assert engine.calls == 2
+    assert engine.calls == 3
     assert result.terminal_run_status == AgentRunStatus.FAILED
-    assert len(lifecycle.retry_states) == 2
-    final_retry_state = lifecycle.retry_states[1]
+    assert len(lifecycle.retry_states) == 3
+    final_retry_state = lifecycle.retry_states[2]
     assert final_retry_state is not None
-    assert final_retry_state.failed_attempt_count == 2
-    assert [attempt.attempt_number for attempt in final_retry_state.attempts] == [1, 2]
+    assert final_retry_state.failed_attempt_count == 3
+    assert [attempt.attempt_number for attempt in final_retry_state.attempts] == [
+        1,
+        2,
+        3,
+    ]
     assert len(finalizer.inputs) == 1
     assert [
         attempt.attempt_number for attempt in finalizer.inputs[0].retry_state.attempts
-    ] == [1, 2]
+    ] == [1, 2, 3]
 
 
 @pytest.mark.asyncio

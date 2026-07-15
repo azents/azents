@@ -128,7 +128,7 @@ class FailedRunRetryState(BaseModel):
             next_retry_at=next_retry_at,
         )
         previous_attempts = [] if previous is None else list(previous.attempts)
-        attempts = [*previous_attempts, attempt_summary][-max_retries:]
+        attempts = [*previous_attempts, attempt_summary][-(max_retries + 1) :]
         return cls(
             failed_attempt_count=attempt.attempt_number,
             max_retries=max_retries,

@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.broadcast import WebSocketBroadcast
 from azents.broker.types import PublishedEvent
+from azents.core.enums import EventKind
 from azents.engine.events.engine_events import (
     ContentDelta,
     ReasoningDelta,
@@ -98,7 +99,7 @@ class LiveEventProjector:
         """Reflect Runtime event to live projection store best-effort."""
         try:
             match event:
-                case Event() | RunComplete() | RunStopped():
+                case RunComplete() | RunStopped():
                     await self.flush_session(session_id)
                 case _:
                     pass
@@ -119,13 +120,9 @@ class LiveEventProjector:
                         delta=delta,
                     )
                 case Event():
-                    before = await self._live_event_store.list_by_session_id(session_id)
-                    await self._live_event_store.remove_live_counterpart(event)
-                    after = await self._live_event_store.list_by_session_id(session_id)
-                    await self._publish_removed_events(
+                    await self._partial_batcher.flush_session_and_transition(
                         session_id,
-                        before=before,
-                        after=after,
+                        lambda: self._replace_live_counterpart(session_id, event),
                     )
                 case RunComplete(run_id=run_id) | RunStopped(run_id=run_id):
                     if await self._terminal_matches_current_run(session_id, run_id):
@@ -180,8 +177,50 @@ class LiveEventProjector:
                 extra={"session_id": session_id},
             )
 
+    async def _replace_live_counterpart(
+        self,
+        session_id: str,
+        event: Event,
+    ) -> None:
+        """Remove a live counterpart while its durable event becomes canonical."""
+        before = await self._live_event_store.list_by_session_id(session_id)
+        await self._live_event_store.remove_live_counterpart(event)
+        after = await self._live_event_store.list_by_session_id(session_id)
+        await self._publish_removed_events(
+            session_id,
+            before=before,
+            after=after,
+        )
+
+    async def discard_failed_attempt(self, session_id: str) -> None:
+        """Discard failed-attempt model partials after earlier mutations settle."""
+        await self._partial_batcher.discard_session(
+            session_id,
+            lambda: self._remove_model_partials(session_id),
+        )
+
+    async def _remove_model_partials(self, session_id: str) -> None:
+        """Remove published assistant and reasoning partial projections."""
+        events = await self._live_event_store.list_by_session_id(session_id)
+        model_partials = [
+            event
+            for event in events
+            if event.adapter == "azents-live"
+            and event.kind in {EventKind.ASSISTANT_MESSAGE, EventKind.REASONING}
+        ]
+        for event in model_partials:
+            await self._live_event_store.remove(session_id, event.id)
+            await self._publish_event_removed(session_id, event.id)
+
     async def clear_session(self, session_id: str) -> None:
         """Clear streaming and active live projections and broadcast removals."""
+        await self._partial_batcher.discard_session(
+            session_id,
+            lambda: self._clear_session_projections(session_id),
+        )
+
+    async def _clear_session_projections(self, session_id: str) -> None:
+        """Clear stored projections while partial mutation is serialized."""
         events = await self._live_event_store.list_by_session_id(session_id)
         active_events = self._active_tool_events.pop(session_id, {})
         await self._live_event_store.clear_session(session_id)
