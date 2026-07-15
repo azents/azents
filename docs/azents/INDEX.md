@@ -198,8 +198,9 @@ _14 documents_
 - [ADR-0143: Make PostgreSQL Authoritative for Tool Call Ownership](adr/0143-make-postgresql-authoritative-for-tool-call-ownership.md)
 - [ADR-0144: OSS Admin Surface Authentication and Bootstrap](adr/0144-oss-admin-surface-auth-and-bootstrap.md)
 - [ADR-0145: Require Explicit Responses Stream Completion](adr/0145-require-explicit-responses-stream-completion.md)
+- [ADR-0146: Bound Model Streams by Parsed-Event Idle and Absolute Attempt Time](adr/0146-model-stream-parsed-event-idle-and-attempt-bounds.md)
 
-_149 documents_
+_150 documents_
 
 ## Issues (Bug Tracking)
 
@@ -233,4 +234,4 @@ _3 documents_
 
 ## Statistics
 
-- Total documents: 434
+- Total documents: 436
