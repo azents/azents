@@ -197,8 +197,9 @@ _14 documents_
 - [ADR-0142: Persist Inference Provenance on Turn Usage Markers](adr/0142-persist-turn-usage-inference-provenance.md)
 - [ADR-0143: Make PostgreSQL Authoritative for Tool Call Ownership](adr/0143-make-postgresql-authoritative-for-tool-call-ownership.md)
 - [ADR-0144: OSS Admin Surface Authentication and Bootstrap](adr/0144-oss-admin-surface-auth-and-bootstrap.md)
+- [ADR-0145: Require Explicit Responses Stream Completion](adr/0145-require-explicit-responses-stream-completion.md)
 
-_148 documents_
+_149 documents_
 
 ## Issues (Bug Tracking)
 
@@ -232,4 +233,4 @@ _3 documents_
 
 ## Statistics
 
-- Total documents: 432
+- Total documents: 434
