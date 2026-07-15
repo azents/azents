@@ -91,7 +91,7 @@ api_routes:
   - /chat/v1/exchange-files/{file_id}/download
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
-last_verified_at: 2026-07-15
+last_verified_at: 2026-07-16
 spec_version: 102
 ---
 
@@ -192,9 +192,12 @@ session list in the Agent rail and navigate selected sessions through
 `AgentSession` row. The draft route renders the Agent top bar plus the chat input surface, but it does
 not render session-scoped Projects or Context tabs. The draft composer shows a compact additive
 workspace selector where repository folders are added to one list and each selected folder can switch
-between repository and new worktree modes from the row-level type selector. The worktree base branch
-picker refreshes Git refs when mounted, selects the source Project's currently checked-out local
-branch by default, supports branch-name search, and shows local branches only. On first-message
+between repository and new worktree modes from the row-level type selector. Reusable defaults and
+presets resolve Azents-owned concrete worktree paths through their ownership records to the original
+source Project; a concrete worktree default is restored in new-worktree mode rather than as the old
+session path. The worktree base branch picker refreshes Git refs when mounted, selects that original
+source Project's currently checked-out local branch by default, supports branch-name search, and shows
+local branches only. On first-message
 success, azents-web replaces the draft
 URL with the created session URL and invalidates the Agent session list cache.
 

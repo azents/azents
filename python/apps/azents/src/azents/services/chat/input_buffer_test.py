@@ -40,6 +40,7 @@ from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.input_buffer import InputBufferRepository
 from azents.repos.input_buffer.data import InputBufferCreate
 from azents.repos.message import MessageRepository
+from azents.repos.session_git_worktree import SessionGitWorktreeRepository
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
@@ -179,6 +180,7 @@ def _service(
         agent_project_preset_repository=AgentProjectPresetRepository(),
         agent_project_catalog_repository=AgentProjectCatalogRepository(),
         agent_project_default_repository=AgentProjectDefaultRepository(),
+        session_git_worktree_repository=SessionGitWorktreeRepository(),
         agent_run_repository=AgentRunRepository(),
         action_execution_repository=ActionExecutionRepository(),
         event_transcript_repository=EventTranscriptRepository(),

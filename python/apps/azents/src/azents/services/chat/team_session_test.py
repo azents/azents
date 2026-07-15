@@ -15,6 +15,7 @@ from azents.core.enums import (
     LLMProvider,
     WorkspaceUserRole,
 )
+from azents.engine.events.action_messages import CreateGitWorktreeAction
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
@@ -29,6 +30,7 @@ from azents.repos.agent_project_preset import AgentProjectPresetRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.input_buffer import InputBufferRepository
 from azents.repos.message import MessageRepository
+from azents.repos.session_git_worktree import SessionGitWorktreeRepository
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
@@ -42,7 +44,11 @@ from azents.services.input_buffer import InputBufferService
 from azents.testing.model_selection import make_test_model_selection_dict
 
 from . import ChatSessionService
-from .data import PrimarySessionArchiveBlocked, RunningSessionArchiveBlocked
+from .data import (
+    NewSessionDefaultGitWorktreeWorkspaceItem,
+    PrimarySessionArchiveBlocked,
+    RunningSessionArchiveBlocked,
+)
 
 
 async def _create_workspace(session: AsyncSession, handle: str) -> str:
@@ -116,6 +122,8 @@ async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> 
 
 def _service(
     rdb_session_manager: SessionManager[AsyncSession],
+    *,
+    session_git_worktree_repository: SessionGitWorktreeRepository | None = None,
 ) -> ChatSessionService:
     """Create ChatSessionService for tests."""
     return ChatSessionService(
@@ -124,6 +132,9 @@ def _service(
         agent_project_preset_repository=AgentProjectPresetRepository(),
         agent_project_catalog_repository=AgentProjectCatalogRepository(),
         agent_project_default_repository=AgentProjectDefaultRepository(),
+        session_git_worktree_repository=(
+            session_git_worktree_repository or SessionGitWorktreeRepository()
+        ),
         agent_run_repository=AgentRunRepository(),
         action_execution_repository=ActionExecutionRepository(),
         event_transcript_repository=EventTranscriptRepository(),
@@ -148,6 +159,24 @@ class _ExchangeFileService(ExchangeFileService):
 
     def __init__(self) -> None:
         """Bypass Base dataclass initialization."""
+
+
+class _SourceMappingSessionGitWorktreeRepository(SessionGitWorktreeRepository):
+    """Resolve owned worktree paths from an in-memory test mapping."""
+
+    def __init__(self, sources: dict[str, str]) -> None:
+        """Initialize the worktree-to-source path mapping."""
+        self.sources = sources
+
+    async def get_source_project_path_by_worktree_path(
+        self,
+        session: AsyncSession,
+        *,
+        worktree_path: str,
+    ) -> str | None:
+        """Return the mapped original source Project path."""
+        del session
+        return self.sources.get(worktree_path)
 
 
 class TestChatSessionTeamSessions:
@@ -323,6 +352,123 @@ class TestChatSessionTeamSessions:
         ]
         assert replaced_defaults.value.source.type == "last_created_session"
         assert replaced_defaults.value.source.session_id is None
+
+    async def test_new_session_defaults_normalize_owned_worktree_projects(
+        self,
+        rdb_session: AsyncSession,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Owned worktree paths are reused as Worktree-mode source Projects."""
+        workspace_id = await _create_workspace(
+            rdb_session,
+            "team-session-worktree-defaults",
+        )
+        user_id = await _create_user(
+            rdb_session,
+            "team-session-worktree-defaults@example.com",
+        )
+        await _add_workspace_user(
+            rdb_session,
+            workspace_id=workspace_id,
+            user_id=user_id,
+        )
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id,
+            "team-worktree-defaults",
+        )
+        await AgentSessionRepository().ensure_team_primary_for_agent(
+            rdb_session,
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+        )
+        await rdb_session.commit()
+
+        worktree_path = "/workspace/agent/.azents/worktrees/example/azents"
+        parent_worktree_path = (
+            "/workspace/agent/.azents/worktrees/parent-example/azents"
+        )
+        source_path = "/workspace/agent/azents"
+        worktree_repository = _SourceMappingSessionGitWorktreeRepository(
+            {
+                worktree_path: parent_worktree_path,
+                parent_worktree_path: source_path,
+            }
+        )
+        service = _service(
+            rdb_session_manager,
+            session_git_worktree_repository=worktree_repository,
+        )
+
+        create_result = await service.create_team_session(
+            agent_id=agent_id,
+            user_id=user_id,
+            existing_project_paths=[worktree_path],
+            setup_actions=[],
+        )
+        assert isinstance(create_result, Success)
+
+        await AgentProjectDefaultRepository().replace_defaults(
+            rdb_session,
+            agent_id=agent_id,
+            paths=[worktree_path],
+        )
+        await AgentProjectPresetRepository().upsert_preset(
+            rdb_session,
+            agent_id=agent_id,
+            path=worktree_path,
+        )
+        await rdb_session.commit()
+
+        defaults_result = await service.get_new_session_project_defaults(
+            agent_id=agent_id,
+            user_id=user_id,
+        )
+        presets_result = await service.list_agent_project_presets(
+            agent_id=agent_id,
+            user_id=user_id,
+        )
+        async with rdb_session_manager() as verify_session:
+            projects = await SessionWorkspaceProjectRepository().list_projects(
+                verify_session,
+                session_id=create_result.value.id,
+            )
+
+        assert isinstance(defaults_result, Success)
+        assert defaults_result.value.project_paths == [source_path]
+        assert len(defaults_result.value.items) == 1
+        default_item = defaults_result.value.items[0]
+        assert isinstance(default_item, NewSessionDefaultGitWorktreeWorkspaceItem)
+        assert default_item.source_project_path == source_path
+        assert default_item.starting_ref is None
+        assert isinstance(presets_result, Success)
+        assert [preset.path for preset in presets_result.value] == [source_path]
+        assert [project.path for project in projects] == [worktree_path]
+
+        action_session_result = await service.create_team_session(
+            agent_id=agent_id,
+            user_id=user_id,
+            existing_project_paths=[],
+            setup_actions=[
+                CreateGitWorktreeAction(
+                    source_project_path=worktree_path,
+                    starting_ref="refs/heads/main",
+                )
+            ],
+        )
+        assert isinstance(action_session_result, Success)
+        async with rdb_session_manager() as verify_session:
+            buffers = await InputBufferRepository().list_by_session_id(
+                verify_session,
+                action_session_result.value.id,
+            )
+        assert [buffer.action for buffer in buffers] == [
+            {
+                "type": "create_git_worktree",
+                "source_project_path": source_path,
+                "starting_ref": "refs/heads/main",
+            }
+        ]
 
     async def test_update_session_title_trims_and_clears_title(
         self,
