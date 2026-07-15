@@ -90,7 +90,7 @@ class _Workspace:
     """Agent execution E2E resource t."""
 
     token: str
-    refresh_token: str
+    email: str
     handle: str
     model_selection: AgentModelSelectionInput
 
@@ -294,7 +294,7 @@ def _setup_workspace(
 ) -> _Workspace:
     """workspacet model selection t t API t t."""
     uniq = unique()
-    token, refresh_token, _ = authenticate_user(
+    token, _, email = authenticate_user(
         public_api_client,
         admin_api_client,
         email=f"agent-execution-{uniq}@example.com",
@@ -322,7 +322,7 @@ def _setup_workspace(
     )
     return _Workspace(
         token=token,
-        refresh_token=refresh_token,
+        email=email,
         handle=handle,
         model_selection=model_selection_from_first_candidate(
             server_url,

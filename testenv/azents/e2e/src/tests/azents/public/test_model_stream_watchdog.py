@@ -2,12 +2,14 @@
 
 import time
 from collections.abc import Callable
-from typing import Protocol, cast
 
 import azentsadminclient
 import azentspublicclient
 import requests
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.remote.webdriver import WebDriver
+from selenium.webdriver.support import expected_conditions as ec
 from selenium.webdriver.support.ui import WebDriverWait
 from websockets.sync.connection import Connection
 
@@ -33,15 +35,6 @@ from tests.azents.public.test_agent_execution_persistence import (
     wait_for_rest_contents,
     wait_for_ws_action,
 )
-
-
-class _CookieWriter(Protocol):
-    """Typed subset of Selenium cookie mutation used by this test."""
-
-    def add_cookie(self, cookie_dict: dict[str, object]) -> None:
-        """Add one browser cookie."""
-        ...
-
 
 _IDLE_RECOVERY_PROMPT = "Watchdog idle before first event then recover"
 _IDLE_RECOVERY_RESPONSE = "WATCHDOG_IDLE_RECOVERED"
@@ -323,32 +316,21 @@ def _open_authenticated_session(
     driver: WebDriver,
     *,
     main_web_url: str,
-    access_token: str,
-    refresh_token: str,
+    email: str,
     workspace_handle: str,
     agent_id: str,
     session_id: str,
 ) -> None:
-    """Open the real Main Web session page with normal auth cookies."""
-    driver.get(f"{main_web_url}/login")
+    """Log in and open the real Main Web session page."""
     driver.delete_all_cookies()
-    cookies = {
-        "az-token": access_token,
-        "az-refresh": refresh_token,
-        "az-token-expires-at": str(int(time.time() * 1000) + 1_800_000),
-    }
-    cookie_writer = cast(_CookieWriter, driver)
-    for name, value in cookies.items():
-        cookie_writer.add_cookie(
-            {
-                "name": name,
-                "value": value,
-                "path": "/",
-                "secure": True,
-                "httpOnly": True,
-                "sameSite": "Lax",
-            }
-        )
+    driver.get(f"{main_web_url}/login")
+    wait = WebDriverWait(driver, 30)
+    email_input = wait.until(ec.element_to_be_clickable((By.NAME, "email")))
+    email_input.send_keys(email, Keys.ENTER)
+    wait.until(ec.url_contains("/login/password"))
+    password_input = wait.until(ec.element_to_be_clickable((By.NAME, "password")))
+    password_input.send_keys("TestPass123!", Keys.ENTER)
+    wait.until(ec.url_contains("/workspaces"))
     driver.get(
         f"{main_web_url}/w/{workspace_handle}/agents/{agent_id}/sessions/{session_id}"
     )
@@ -529,8 +511,7 @@ class TestModelStreamWatchdog:
         _open_authenticated_session(
             browser_driver,
             main_web_url=azents_main_web_url,
-            access_token=workspace.token,
-            refresh_token=workspace.refresh_token,
+            email=workspace.email,
             workspace_handle=workspace.handle,
             agent_id=agent_id,
             session_id=result.session_id,
