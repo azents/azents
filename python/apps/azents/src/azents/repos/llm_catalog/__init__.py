@@ -179,7 +179,9 @@ class LLMCatalogRepository:
             )
             .on_conflict_do_nothing(
                 index_elements=["provider_integration_id", "lowerer_target"],
-                index_where=RDBLLMCatalog.scope == LLMCatalogScope.INTEGRATION,
+                # Keep this predicate literal so PostgreSQL can infer the partial
+                # unique index after psycopg prepares the repeated statement.
+                index_where=sa.text("scope = 'integration'"),
             )
             .returning(RDBLLMCatalog)
         )
@@ -214,7 +216,9 @@ class LLMCatalogRepository:
             )
             .on_conflict_do_nothing(
                 index_elements=["provider", "lowerer_target"],
-                index_where=RDBLLMCatalog.scope == LLMCatalogScope.SYSTEM,
+                # Keep this predicate literal so PostgreSQL can infer the partial
+                # unique index after psycopg prepares the repeated statement.
+                index_where=sa.text("scope = 'system'"),
             )
             .returning(RDBLLMCatalog)
         )
