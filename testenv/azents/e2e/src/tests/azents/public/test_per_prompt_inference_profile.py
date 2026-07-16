@@ -89,7 +89,7 @@ def _setup_profile_agent(
         handle=handle,
         llm_provider_integration_create_request=LLMProviderIntegrationCreateRequest(
             provider=LLMProvider.OPENAI,
-            name="__testenv_model_listing:deterministic-success",
+            name="__testenv_model_listing:deterministic-model-settings",
             secrets=Secrets(ApiKeySecrets(api_key="sk-per-prompt-profile-qa")),
         ),
         _headers=_headers(token),
@@ -140,38 +140,47 @@ def _setup_profile_agent(
             "model_identifier": identifier,
         }
 
+    agent_payload: dict[str, object] = {
+        "name": "Per Prompt Profile QA Agent",
+        "type": "public",
+        "selectable_model_options": [
+            {
+                "label": "Quality",
+                "model_selection": selection(
+                    cast(
+                        str,
+                        by_identifier["gpt-5.5"]["provider_model_identifier"],
+                    )
+                ),
+                "settings": {
+                    "context_window_tokens": 96_000,
+                    "max_output_tokens": 12_000,
+                    "builtin_tools": [{"name": "web_search"}],
+                },
+            },
+            {
+                "label": "Fast",
+                "model_selection": selection(
+                    cast(
+                        str,
+                        by_identifier["gpt-5.5-mini"]["provider_model_identifier"],
+                    )
+                ),
+                "settings": {
+                    "context_window_tokens": 32_000,
+                    "max_output_tokens": 4_000,
+                    "builtin_tools": [],
+                },
+            },
+        ],
+        "main_model_label": "Quality",
+        "lightweight_model_label": "Fast",
+    }
     created = _response_object(
         requests.post(
             f"{server_url}/agent/v1/workspaces/{handle}/agents",
             headers={**_headers(token), "Content-Type": "application/json"},
-            json={
-                "name": "Per Prompt Profile QA Agent",
-                "type": "public",
-                "selectable_model_options": [
-                    {
-                        "label": "Quality",
-                        "model_selection": selection(
-                            cast(
-                                str,
-                                by_identifier["gpt-5.5"]["provider_model_identifier"],
-                            )
-                        ),
-                    },
-                    {
-                        "label": "Fast",
-                        "model_selection": selection(
-                            cast(
-                                str,
-                                by_identifier["gpt-5.5-mini"][
-                                    "provider_model_identifier"
-                                ],
-                            )
-                        ),
-                    },
-                ],
-                "main_model_label": "Quality",
-                "lightweight_model_label": "Fast",
-            },
+            json=agent_payload,
             timeout=10,
         )
     )
@@ -369,6 +378,7 @@ def _wait_for_turn_provenance(
     target: str,
     effort: str | None,
     display_name: str,
+    effective_context_window_tokens: int,
     timeout: float = 120,
 ) -> dict[str, object]:
     """Wait for a durable turn marker with the exact public provenance."""
@@ -393,9 +403,12 @@ def _wait_for_turn_provenance(
             ):
                 continue
             assert profile.get("model_display_name") == display_name
-            assert isinstance(payload.get("effective_context_window_tokens"), int)
-            assert isinstance(
-                payload.get("effective_auto_compaction_threshold_tokens"), int
+            assert (
+                payload.get("effective_context_window_tokens")
+                == effective_context_window_tokens
+            )
+            assert payload.get("effective_auto_compaction_threshold_tokens") == int(
+                effective_context_window_tokens * 0.9
             )
             assert "provider" not in payload
             assert "model_selection" not in payload
@@ -426,6 +439,33 @@ def _wait_for_mock_models(mock_openai_url: str, *model_ids: str) -> str:
     )
     assert journal is not None
     return journal
+
+
+def _wait_for_mock_model_output_cap(
+    *,
+    mock_openai_url: str,
+    model_id: str,
+    max_output_tokens: int,
+    timeout: float = 120,
+) -> None:
+    """Wait until a mock request carries the selected model output cap."""
+    deadline = time.monotonic() + timeout
+    last_payload: object = None
+    while time.monotonic() < deadline:
+        response = requests.get(f"{mock_openai_url}/v1/_requests", timeout=10)
+        response.raise_for_status()
+        last_payload = response.json()
+        for item in _objects(last_payload, label="mock request journal"):
+            body = _object(item.get("body"), label="mock request body")
+            if body.get("model") != model_id:
+                continue
+            if body.get("max_tokens") == max_output_tokens:
+                return
+        time.sleep(0.5)
+    raise TimeoutError(
+        "Selected model output cap was not observed: "
+        f"{(model_id, max_output_tokens)!r}, {last_payload!r}"
+    )
 
 
 def _subagent_tree(
@@ -558,6 +598,7 @@ class TestPerPromptInferenceProfile:
             target="Quality",
             effort="xhigh",
             display_name="GPT 5.5 Deterministic",
+            effective_context_window_tokens=32_000,
         )
 
         _write_profile(
@@ -590,9 +631,20 @@ class TestPerPromptInferenceProfile:
             target="Fast",
             effort=None,
             display_name="GPT 5.5 Mini Deterministic",
+            effective_context_window_tokens=32_000,
         )
 
         _wait_for_mock_models(mock_openai_url, "gpt-5.5", "gpt-5.5-mini")
+        _wait_for_mock_model_output_cap(
+            mock_openai_url=mock_openai_url,
+            model_id="gpt-5.5",
+            max_output_tokens=12_000,
+        )
+        _wait_for_mock_model_output_cap(
+            mock_openai_url=mock_openai_url,
+            model_id="gpt-5.5-mini",
+            max_output_tokens=4_000,
+        )
 
         unsupported_message = "Unsupported effort must fail safely"
         _write_profile(

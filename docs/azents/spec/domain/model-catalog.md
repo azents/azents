@@ -23,7 +23,7 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
   - typescript/apps/azents-admin-web/src/features/model-catalog/containers/useModelCatalogPageContainer.ts
 last_verified_at: 2026-07-16
-spec_version: 8
+spec_version: 9
 ---
 
 # Model Catalog Domain Spec
@@ -69,6 +69,8 @@ ChatGPT OAuth integration catalogs additionally fetch the authenticated account-
 
 Reasoning capabilities are projected from LiteLLM's canonical provider model metadata schema. Explicit effort levels are reconstructed in the deterministic order `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. The optional `none`, `minimal`, `xhigh`, and `max` levels follow their corresponding LiteLLM support flags. Every model marked as reasoning-capable receives the baseline `low`, `medium`, and `high` levels, except that an explicit `supports_low_reasoning_effort: false` removes `low`. A model with no projected effort levels allows no explicit effort override; an empty list is not interpreted as unrestricted support.
 
+Built-in tool capability projection is filtered through the implemented configurable registry. The current registry contains only `web_search`; `web_fetch` and `image_generation` are not advertised because they do not have a complete supported runtime contract. A future built-in tool becomes selectable only after capability projection, validation, runtime lowering/handling, UI presentation, and deterministic coverage exist together.
+
 Each catalog sync records an attempt with status, counts, failure metadata, action hint, and diagnostics. Failed syncs keep the last successful snapshot available when one exists.
 
 ## Public read API
@@ -103,7 +105,7 @@ System catalog sync is not user-triggered from the public picker. It is invoked 
 
 ## Submit normalization
 
-Agent creation/update and Workspace model settings update accept selectable model option entries. Each entry contains a label plus a model selection input with an LLM provider integration id and provider model identifier. During submit normalization, services resolve every option entry through the stored catalog read service. The resolved catalog entry is copied into the stored Agent or Workspace `AgentModelSelection` snapshot inside that selectable option.
+Agent creation/update and Workspace model settings update accept selectable model option entries. Each entry contains a label, a model selection input with an LLM provider integration id and provider model identifier, and optional model-scoped settings. During submit normalization, services resolve every option entry through the stored catalog read service. The resolved catalog entry is copied into the stored Agent or Workspace `AgentModelSelection` snapshot, then the option settings are defaulted and validated against that snapshot's implemented capabilities. Omitted built-in tool intent enables every supported implemented tool; an explicit empty list preserves all-off intent.
 
 Transition compatibility direct model selection inputs use the same normalization path. If no selectable stored catalog entry matches a requested integration and model identifier, the service rejects the selection. Submit normalization must not refetch a dynamic provider listing as a fallback.
 
@@ -125,6 +127,7 @@ For user-scoped integration catalogs, the picker can trigger integration sync. F
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-07-16 | 9 | Scoped selectable settings to catalog-resolved options and limited advertised built-in tools to implemented contracts |
 | 2026-07-16 | 8 | Projected `web_search` for every selectable ChatGPT OAuth model under the Codex provider capability policy |
 | 2026-07-14 | 7 | Removed the ChatGPT OAuth system catalog and made integration catalogs authoritative from integration creation |
 | 2026-07-13 | 6 | Documented live system-administrator authorization for Admin model-catalog operations |

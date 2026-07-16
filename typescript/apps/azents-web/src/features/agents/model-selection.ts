@@ -210,18 +210,18 @@ export function fallbackSelectableModelLabel(
   label: string | null,
   options: SelectableModelOptionFormValue[],
 ): string | null {
-  const firstLabel = options[0]?.label.trim() ?? null;
-  if (firstLabel == null || firstLabel.length === 0) {
-    return null;
-  }
-  if (label == null) {
-    return firstLabel;
-  }
-  const trimmed = label.trim();
-  if (options.some((option) => option.label.trim() === trimmed)) {
+  const trimmed = label?.trim() ?? "";
+  if (
+    trimmed.length > 0 &&
+    options.some((option) => option.label.trim() === trimmed)
+  ) {
     return trimmed;
   }
-  return firstLabel;
+  return (
+    options
+      .map((option) => option.label.trim())
+      .find((optionLabel) => optionLabel.length > 0) ?? null
+  );
 }
 
 export function findSelectableModelOptionByLabel(

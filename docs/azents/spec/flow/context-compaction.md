@@ -16,8 +16,8 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_session.py
   - python/apps/azents/src/azents/rdb/models/agent_run.py
   - python/apps/azents/src/azents/rdb/models/agent.py
-last_verified_at: 2026-07-14
-spec_version: 21
+last_verified_at: 2026-07-16
+spec_version: 22
 ---
 
 # Context Compaction
@@ -26,12 +26,11 @@ Context compaction keeps long session history within model input limits without 
 history. The event runtime uses append-only compaction.
 
 Automatic compaction effective context window is computed by
-`engine/context/window.py:compute_effective_context_window_tokens()`. For each prepared inference-bearing input, the function takes the resolved main model input window, the Agent's effective lightweight/compaction model input window, and optional Agent
-`model_parameters.context_window_tokens`, then uses the smallest value as `effective_max_input_tokens`.
-The Agent context window cap is stored as intent and may be larger than current model limits; model
-limits still win. Effective lightweight resolution uses the Agent's stored
-`lightweight_model_selection` snapshot. Workspace default is copied into the Agent only at create/update
-time and is not read by runtime compaction. Automatic compaction threshold is then computed by
+`engine/context/window.py:compute_effective_context_window_tokens()`. For each prepared inference-bearing input, runtime takes the prompt-selected foreground option's capability-clamped context cap and the Agent lightweight option's capability-clamped context cap, then uses the smaller value as `effective_max_input_tokens`.
+An option context cap is stored as intent and may be larger than its current model limit; the model
+limit still wins. Effective lightweight resolution uses the Agent's stored lightweight option model
+snapshot and settings. Workspace defaults are copied into the Agent only at create time and are not read
+by runtime compaction. Automatic compaction threshold is then computed by
 `compute_auto_compaction_threshold_tokens()` as `int(effective_max_input_tokens * 0.9)`. Both values are stored in the current `AgentSession` inference snapshot and remain fixed for that prepared turn, automatic retry, and recovery. A later prepared profile may replace them at the next turn boundary, including within the same active run. The event runtime uses this Session-owned calculation as the compaction trigger source of truth and compares the threshold against the latest turn marker `usage.prompt_tokens` plus the
 model-visible token estimate for events appended after that marker. If no turn marker exists, it falls
 back to estimating the full selected transcript.
@@ -59,7 +58,7 @@ logical order, remains outside the fixed summary cutoff, and stays visible after
 ## Summary Model
 
 Summary generation uses LiteLLM Responses API from `engine/context/compaction.py`. The compaction model is
-resolved from the Agent `lightweight_model_selection` snapshot.
+resolved from the Agent lightweight option snapshot. Its model-scoped context cap participates in the effective input window, while its model-scoped `max_output_tokens` and built-in tools do not replace internal compaction request policy.
 
 Compaction summary generation is not user-facing streaming output. The runtime calls the summary
 model with `stream=False` and passes `max_output_tokens` from the dynamic summary budget. The summary
