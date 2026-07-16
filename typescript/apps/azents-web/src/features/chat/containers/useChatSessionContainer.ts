@@ -28,6 +28,7 @@ import {
   applyFunctionCallItem,
   applyFunctionCallOutput,
 } from "../hooks/toolCallMerge";
+import { shouldRenderIncompleteDurableToolCalls } from "../hooks/toolCallVisibility";
 import { useChatWebSocket } from "../hooks/useChatWebSocket";
 import type { UploadedFile } from "../hooks/useFileUpload";
 import type {
@@ -1995,12 +1996,17 @@ export function useChatSessionContainer(
     },
     [sessionId],
   );
+  const renderIncompleteDurableToolCalls =
+    shouldRenderIncompleteDurableToolCalls(
+      chatTimelineState,
+      managedLiveState.sessionRunState,
+    );
   const durableHistoryMessages = useMemo(
     () =>
       mapEvents(historyEvents, {
-        renderIncompleteToolCalls: false,
+        renderIncompleteToolCalls: renderIncompleteDurableToolCalls,
       }),
-    [historyEvents],
+    [historyEvents, renderIncompleteDurableToolCalls],
   );
   const messages = useMemo(() => {
     const durableAndTransient = [
