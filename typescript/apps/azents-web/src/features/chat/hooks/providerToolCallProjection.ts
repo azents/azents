@@ -12,9 +12,23 @@ interface ProviderToolCallOutput {
 }
 
 /**
- * Provider-native tool call  Azents client tool result and pair does not..
- * call event itself rendering unittext.
+ * Provider-hosted tool calls render independently from Azents client-tool pairs.
+ * The provider call event itself is the durable presentation unit.
  */
+export function providerToolCallStatusFromPayload(
+  payloadStatus: unknown,
+  messageStatus: ChatMessage["status"],
+): ProviderToolCall["status"] {
+  switch (payloadStatus) {
+    case "completed":
+    case "failed":
+    case "running":
+      return payloadStatus;
+    default:
+      return messageStatus === "partial" ? "running" : "unknown";
+  }
+}
+
 export function applyProviderToolCallItem(
   prev: ChatMessage[],
   providerToolCall: ProviderToolCall,
@@ -22,6 +36,7 @@ export function applyProviderToolCallItem(
   createdAt: string,
   messageStatus: ChatMessage["status"] = "complete",
 ): ChatMessage[] {
+  const semanticCallId = providerToolCall.callId ?? providerToolCall.id;
   const finalMsg: ChatMessage = {
     id: fallbackMsgId,
     role: "assistant",
@@ -30,7 +45,14 @@ export function applyProviderToolCallItem(
     status: messageStatus,
     providerToolCalls: [providerToolCall],
   };
-  const idx = prev.findIndex((m) => m.id === fallbackMsgId);
+  const idx = prev.findIndex(
+    (message) =>
+      message.id === fallbackMsgId ||
+      message.providerToolCalls?.some(
+        (toolCall) =>
+          toolCall.callId === semanticCallId || toolCall.id === semanticCallId,
+      ),
+  );
   if (idx !== -1) {
     const next = [...prev];
     next[idx] = finalMsg;

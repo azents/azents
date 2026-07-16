@@ -23,6 +23,7 @@ import {
 import {
   applyProviderToolCallItem,
   applyProviderToolCallOutput,
+  providerToolCallStatusFromPayload,
 } from "../hooks/providerToolCallProjection";
 import {
   applyFunctionCallItem,
@@ -345,22 +346,6 @@ function toolResultStatusFromPayload(
       return payload.status;
     default:
       return "completed";
-  }
-}
-
-function providerToolCallStatusFromPayload(
-  payload: Record<string, unknown>,
-): "completed" | "failed" | "running" | "unknown" {
-  switch (payload.status) {
-    case "completed":
-      return "completed";
-    case "failed":
-      return "failed";
-    case "running":
-    case "in_progress":
-      return "running";
-    default:
-      return "unknown";
   }
 }
 
@@ -1013,10 +998,10 @@ function mapEvents(
             callId,
             name,
             arguments: stringField(payload, "arguments") ?? "",
-            status:
-              messageStatus === "partial"
-                ? "running"
-                : providerToolCallStatusFromPayload(payload),
+            status: providerToolCallStatusFromPayload(
+              payload.status,
+              messageStatus,
+            ),
           },
           event.id,
           event.created_at,

@@ -180,6 +180,7 @@ export interface ProviderToolCallPayload {
   call_id: string;
   name: string;
   arguments?: string | null;
+  status?: "running" | "completed" | "failed" | null;
 }
 
 export interface ProviderToolResultPayload {

@@ -29,6 +29,12 @@ export const Running = {
       status: "running",
     },
   },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByText("Web search")).toBeVisible();
+    await expect(canvas.getByText("Searching the web")).toBeVisible();
+    await expect(canvas.getByText("Running")).toBeVisible();
+  },
 } satisfies Story;
 
 export const CompletedWithOutputAndAttachment = {
@@ -62,6 +68,18 @@ export const Failed = {
       arguments: "",
       status: "failed",
       output: "The provider rejected the request.",
+    },
+  },
+} satisfies Story;
+
+export const UnknownHistoricalStatus = {
+  args: {
+    toolCall: {
+      id: "provider-call-4",
+      callId: "provider-call-4",
+      name: "custom_retrieval",
+      arguments: "",
+      status: "unknown",
     },
   },
 } satisfies Story;
