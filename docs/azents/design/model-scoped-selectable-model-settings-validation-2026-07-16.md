@@ -39,7 +39,11 @@ The deterministic catalog now has a dedicated `deterministic-model-settings` var
 - distinct Workspace option settings and exact copy into a newly created Agent;
 - prompt-selected context caps and resulting automatic compaction thresholds;
 - prompt-selected maximum output tokens in the mock provider journal;
-- enabled `web_search` lowering for one target and explicit all-off behavior for the other target.
+- enabled `web_search` and explicit all-off option serialization through Workspace and Agent APIs.
+
+AIMock converts Responses requests into its Chat Completions fixture shape and intentionally filters
+non-function tools from the request journal. Provider-native `web_search` lowering therefore remains
+covered by the runtime lowerer and resolver tests rather than by a journal assertion.
 
 ## Implementation-to-Spec Comparison
 
@@ -47,7 +51,7 @@ The deterministic catalog now has a dedicated `deterministic-model-settings` var
 |---|---|---|
 | Settings belong to each selectable option | Core/API/repository contracts store `SelectableModelSettings` beside each model snapshot | Updated `domain/agent.md` |
 | Omitted settings default from resolved capability | Agent and Workspace normalization derives defaults after catalog resolution | Updated `domain/agent.md` and `domain/model-catalog.md` |
-| Explicit empty built-in tools means all-off | Normalization and runtime tests preserve `[]`; E2E request assertions distinguish enabled and disabled targets | Updated `domain/agent.md` |
+| Explicit empty built-in tools means all-off | Normalization and runtime tests preserve `[]`; E2E API assertions distinguish enabled and disabled option settings | Updated `domain/agent.md` |
 | Unsupported configurable tools are removed | Implemented registry and capability projection retain only `web_search`; migration strips removed identifiers | Updated `domain/model-catalog.md` |
 | Foreground runtime uses selected option settings | `RunRequest` resolution applies selected output cap, tools, and context cap | Updated `flow/agent-execution-loop.md` |
 | Retry and recovery retain prepared intent | `AgentSession.current_model_settings` is stored with the selected model snapshot | Updated `domain/agent.md` and `flow/agent-execution-loop.md` |

@@ -441,15 +441,14 @@ def _wait_for_mock_models(mock_openai_url: str, *model_ids: str) -> str:
     return journal
 
 
-def _wait_for_mock_model_settings(
+def _wait_for_mock_model_output_cap(
     *,
     mock_openai_url: str,
     model_id: str,
     max_output_tokens: int,
-    web_search_enabled: bool,
     timeout: float = 120,
 ) -> None:
-    """Wait until a mock request carries the selected model settings."""
+    """Wait until a mock request carries the selected model output cap."""
     deadline = time.monotonic() + timeout
     last_payload: object = None
     while time.monotonic() < deadline:
@@ -460,21 +459,12 @@ def _wait_for_mock_model_settings(
             body = _object(item.get("body"), label="mock request body")
             if body.get("model") != model_id:
                 continue
-            if body.get("max_output_tokens") != max_output_tokens:
-                continue
-            raw_tools = body.get("tools")
-            tools = (
-                []
-                if raw_tools is None
-                else _objects(raw_tools, label="mock request tools")
-            )
-            has_web_search = any(tool.get("type") == "web_search" for tool in tools)
-            if has_web_search == web_search_enabled:
+            if body.get("max_tokens") == max_output_tokens:
                 return
         time.sleep(0.5)
     raise TimeoutError(
-        "Selected model settings were not observed: "
-        f"{(model_id, max_output_tokens, web_search_enabled)!r}, {last_payload!r}"
+        "Selected model output cap was not observed: "
+        f"{(model_id, max_output_tokens)!r}, {last_payload!r}"
     )
 
 
@@ -645,17 +635,15 @@ class TestPerPromptInferenceProfile:
         )
 
         _wait_for_mock_models(mock_openai_url, "gpt-5.5", "gpt-5.5-mini")
-        _wait_for_mock_model_settings(
+        _wait_for_mock_model_output_cap(
             mock_openai_url=mock_openai_url,
             model_id="gpt-5.5",
             max_output_tokens=12_000,
-            web_search_enabled=True,
         )
-        _wait_for_mock_model_settings(
+        _wait_for_mock_model_output_cap(
             mock_openai_url=mock_openai_url,
             model_id="gpt-5.5-mini",
             max_output_tokens=4_000,
-            web_search_enabled=False,
         )
 
         unsupported_message = "Unsupported effort must fail safely"
