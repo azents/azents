@@ -453,7 +453,7 @@ class _InputBufferService:
         del session_id
         return PendingInputInferenceProfile(
             input_buffer_id="buffer-1",
-            requires_inference=False,
+            requires_inference=True,
             exists=True,
             requested_inference_profile=None,
         )
@@ -2288,6 +2288,93 @@ async def test_execute_cancels_pending_run_after_terminal_preparation_failure(
     assert any(isinstance(event, RunComplete) for event in dispatched)
 
 
+@pytest.mark.parametrize(
+    (
+        "recoverable_run",
+        "pending_input_exists",
+        "expected_pending_run_create_calls",
+    ),
+    [
+        (None, False, 1),
+        (_PendingRun(), False, 0),
+        (None, True, 1),
+    ],
+    ids=["fresh", "recoverable", "pending-neutral-input"],
+)
+@pytest.mark.asyncio
+async def test_execute_preserves_actionable_transcript_eligibility(
+    monkeypatch: pytest.MonkeyPatch,
+    recoverable_run: _PendingRun | None,
+    pending_input_exists: bool,
+    expected_pending_run_create_calls: int,
+) -> None:
+    """A direct control event remains eligible across pending-run states."""
+    order: list[str] = []
+    lifecycle = _SessionLifecycle(order, recoverable_run=recoverable_run)
+    engine = _RecordingEngine(order)
+    executor = _executor(lifecycle, engine=engine)
+    initial_turn_eligibility: list[bool] = []
+
+    async def peek_pending_input(
+        session_id: str,
+    ) -> PendingInputInferenceProfile:
+        del session_id
+        return PendingInputInferenceProfile(
+            input_buffer_id="buffer-1" if pending_input_exists else None,
+            exists=pending_input_exists,
+            requires_inference=False,
+            requested_inference_profile=None,
+        )
+
+    async def has_actionable_model_input(session_id: str) -> bool:
+        assert session_id == "session-001"
+        return True
+
+    async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
+        del args
+        initial_turn_eligibility.append(cast(bool, kwargs["initial_turn_eligible"]))
+        return RunInputPollResult(
+            context_invalidated=False,
+            complete_run=False,
+            requested_inference_profile=None,
+            promoted_event_ids=[],
+            user_messages=[],
+            has_actionable_work=True,
+        )
+
+    monkeypatch.setattr(
+        executor.input_buffer_service,
+        "peek_pending_inference_profile",
+        peek_pending_input,
+    )
+    monkeypatch.setattr(
+        executor,
+        "_has_actionable_model_input",
+        has_actionable_model_input,
+    )
+    monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
+    _patch_successful_resolution(monkeypatch)
+
+    async def dispatch_event(session_id: str, event: PublishedEvent) -> None:
+        del session_id, event
+
+    result = await executor.execute(
+        _message(),
+        poll_fn=None,
+        check_stop=None,
+        prepare_toolkits=None,
+        shutdown_event=asyncio.Event(),
+        dispatch_event=dispatch_event,
+        owner_generation=1,
+        tool_admission_barrier=ToolAdmissionBarrier(),
+    )
+
+    assert initial_turn_eligibility == [True]
+    assert "provider" in order
+    assert lifecycle.pending_run_create_calls == expected_pending_run_create_calls
+    assert result.terminal_run_status is AgentRunStatus.COMPLETED
+
+
 @pytest.mark.asyncio
 async def test_execute_ignores_wake_up_without_runtime_input(
     monkeypatch: pytest.MonkeyPatch,
@@ -2643,6 +2730,33 @@ def test_actionable_tail_detects_goal_continuation_after_run_marker() -> None:
     )
 
     assert has_actionable_tail([run_marker, continuation])
+
+
+def test_actionable_tail_detects_goal_update_after_run_marker() -> None:
+    """A Goal resume event after a run marker must wake the model."""
+    run_marker = Event(
+        id="1123456789abcdef0123456789abcdea",
+        session_id="session-1",
+        kind=EventKind.RUN_MARKER,
+        payload=RunMarkerPayload(run_id="run-1", status="completed"),
+        created_at=run_executor_module.tznow(),
+    )
+    goal_update = Event(
+        id="1123456789abcdef0123456789abcdeb",
+        session_id="session-1",
+        kind=EventKind.GOAL_UPDATED,
+        payload=UserMessagePayload(
+            content="",
+            metadata={
+                "source": "goal",
+                "goal_control_action": "resume",
+                "previous_goal_status": "blocked",
+            },
+        ),
+        created_at=run_executor_module.tznow(),
+    )
+
+    assert has_actionable_tail([run_marker, goal_update])
 
 
 @pytest.mark.asyncio

@@ -15,8 +15,8 @@ code_paths:
   - python/apps/azents/src/azents/services/chat/**
   - python/apps/azents/src/azents/api/public/chat/v1/**
   - typescript/apps/azents-web/src/features/chat/**
-last_verified_at: 2026-07-01
-spec_version: 8
+last_verified_at: 2026-07-16
+spec_version: 9
 ---
 
 # Goal Domain Spec
@@ -105,6 +105,10 @@ Hook providers do not write durable transcript events and do not send broker wak
 return `SessionContinuationInput`; the worker converts it into session-bound input buffers. Broker
 wake-up is only a signal. The recoverable source of truth is the pending input buffer plus the
 same-transaction `running` state transition.
+
+A broker wake-up with no pending InputBuffer still starts a turn when the transcript tail after the
+latest run marker contains an actionable direct control event, including `goal_updated`. A wake-up
+with neither pending input nor an actionable transcript tail is ignored.
 
 ## 4. Goal Control Events
 
@@ -241,4 +245,5 @@ Primary checks:
 
 ## Changelog
 
+- **2026-07-16** (spec_version 9) — Clarified that actionable direct Goal control events can start a run without a pending InputBuffer.
 - **2026-07-01** (spec_version 8) — Added unfinished Goal compaction summary enrichment behavior.
