@@ -44,6 +44,9 @@ const defaultOption: SelectableModelOptionFormValue = {
   model_display_name: "GPT 5.5",
   model_identifier: "gpt-5.5",
   normalized_capabilities: capabilities,
+  context_window_tokens: null,
+  max_output_tokens: null,
+  builtin_tools: ["web_search"],
 };
 
 const lightweightOption: SelectableModelOptionFormValue = {
@@ -58,6 +61,9 @@ const lightweightOption: SelectableModelOptionFormValue = {
     reasoning: { supported: false, effort_levels: [] },
     built_in_tools: { supported: [] },
   },
+  context_window_tokens: null,
+  max_output_tokens: null,
+  builtin_tools: [],
 };
 
 const options: SelectableModelOptionFormValue[] = [
@@ -122,6 +128,9 @@ export const PendingNewModel = {
         model_display_name: null,
         model_identifier: null,
         normalized_capabilities: null,
+        context_window_tokens: null,
+        max_output_tokens: null,
+        builtin_tools: [],
       },
     ],
   },
@@ -137,6 +146,9 @@ export const MissingModel = {
         model_display_name: null,
         model_identifier: null,
         normalized_capabilities: null,
+        context_window_tokens: null,
+        max_output_tokens: null,
+        builtin_tools: [],
       },
     ],
     lightweightModelLabel: "default",

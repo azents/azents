@@ -11,7 +11,6 @@ import {
   Alert,
   Anchor,
   Button,
-  Checkbox,
   Container,
   Divider,
   Group,
@@ -88,16 +87,6 @@ interface AgentFormProps {
   cancelHref?: string;
 }
 
-function formatBuiltinToolLabel(tool: string): string {
-  const labels: Record<string, string> = {
-    web_search: "Web search",
-    web_fetch: "Web fetch",
-    image_generation: "Image generation",
-  };
-
-  return labels[tool] ?? tool;
-}
-
 export function AgentForm({
   handle,
   formState,
@@ -133,14 +122,11 @@ export function AgentForm({
       type: "public",
       enabled: true,
       reasoning_effort: null,
-      context_window_tokens: null,
-      max_output_tokens: null,
       shell_enabled: true,
       memory_enabled: true,
       max_turns: null,
       subagent_max_subagents: 3,
       subagent_max_depth: 1,
-      builtin_tools: [],
     },
     validate: (values) => {
       const result = agentFormSchema.safeParse(values);
@@ -188,16 +174,11 @@ export function AgentForm({
         type: agent.type,
         enabled: agent.enabled,
         reasoning_effort: defaultReasoningEffort,
-        context_window_tokens:
-          agent.model_parameters?.context_window_tokens ?? null,
-        max_output_tokens: agent.model_parameters?.max_output_tokens ?? null,
         shell_enabled: agent.shell_enabled,
         memory_enabled: agent.memory_enabled,
         max_turns: agent.max_turns ?? null,
         subagent_max_subagents: agent.subagent_settings.max_subagents ?? 3,
         subagent_max_depth: agent.subagent_settings.max_depth ?? 1,
-        builtin_tools:
-          agent.model_parameters?.builtin_tools?.map((bt) => bt.name) ?? [],
       });
       form.resetDirty();
       setHasSubmitAttempted(false);
@@ -249,13 +230,6 @@ export function AgentForm({
     [selectedModelCapabilities],
   );
   const selectedModelSupportsReasoning = selectedModelEffortLevels.length > 0;
-
-  const selectedModelBuiltinTools = useMemo(() => {
-    if (selectedMainModelOption == null) {
-      return [];
-    }
-    return selectedModelCapabilities?.built_in_tools?.supported ?? [];
-  }, [selectedMainModelOption, selectedModelCapabilities]);
 
   const reasoningEffortOptions = useMemo(
     () => selectedModelEffortLevels.map((value) => ({ value, label: value })),
@@ -385,41 +359,13 @@ export function AgentForm({
               onChangeOptions={(options) =>
                 form.setFieldValue("selectable_model_options", options)
               }
-              onChangeMainModelLabel={(label) => {
-                form.setFieldValue("main_model_label", label);
-                form.setFieldValue("builtin_tools", []);
-              }}
+              onChangeMainModelLabel={(label) =>
+                form.setFieldValue("main_model_label", label)
+              }
               onChangeLightweightModelLabel={(label) =>
                 form.setFieldValue("lightweight_model_label", label)
               }
             />
-          )}
-
-          {showCapabilities && selectedModelBuiltinTools.length > 0 && (
-            <>
-              <Divider label={t("builtinToolsLabel")} labelPosition="left" />
-              <Checkbox.Group
-                value={form.values.builtin_tools}
-                onChange={(value) => form.setFieldValue("builtin_tools", value)}
-              >
-                <Stack gap="xs">
-                  {selectedModelBuiltinTools.map((tool) => (
-                    <Stack key={tool} gap={4}>
-                      <Checkbox
-                        value={tool}
-                        label={formatBuiltinToolLabel(tool)}
-                      />
-                      {mutationState.type === "IDLE" &&
-                        mutationState.builtinToolErrors?.[tool]?.map((msg) => (
-                          <Text key={msg} c="red" size="xs" ml="xl">
-                            {msg}
-                          </Text>
-                        ))}
-                    </Stack>
-                  ))}
-                </Stack>
-              </Checkbox.Group>
-            </>
           )}
 
           {showProfile && (
@@ -430,46 +376,6 @@ export function AgentForm({
               autosize
               key={form.key("system_prompt")}
               {...form.getInputProps("system_prompt")}
-            />
-          )}
-
-          {showModel && (
-            <NumberInput
-              label={t("contextWindowTokensLabel")}
-              description={t("contextWindowTokensDescription")}
-              placeholder={t("contextWindowTokensPlaceholder")}
-              min={1}
-              step={1}
-              allowDecimal={false}
-              allowNegative={false}
-              value={form.values.context_window_tokens ?? ""}
-              onChange={(value) => {
-                form.setFieldValue(
-                  "context_window_tokens",
-                  typeof value === "number" ? value : null,
-                );
-              }}
-              error={form.errors.context_window_tokens}
-            />
-          )}
-
-          {showModel && (
-            <NumberInput
-              label={t("maxOutputTokensLabel")}
-              description={t("maxOutputTokensDescription")}
-              placeholder={t("maxOutputTokensPlaceholder")}
-              min={1}
-              step={1}
-              allowDecimal={false}
-              allowNegative={false}
-              value={form.values.max_output_tokens ?? ""}
-              onChange={(value) => {
-                form.setFieldValue(
-                  "max_output_tokens",
-                  typeof value === "number" ? value : null,
-                );
-              }}
-              error={form.errors.max_output_tokens}
             />
           )}
 

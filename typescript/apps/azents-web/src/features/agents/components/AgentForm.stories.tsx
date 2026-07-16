@@ -90,8 +90,24 @@ const baseAgent: AgentResponse = {
   model_selection: mainSelection,
   lightweight_model_selection: lightweightSelection,
   selectable_model_options: [
-    { label: "default", model_selection: mainSelection },
-    { label: "lightweight", model_selection: lightweightSelection },
+    {
+      label: "default",
+      model_selection: mainSelection,
+      settings: {
+        context_window_tokens: null,
+        max_output_tokens: null,
+        builtin_tools: [{ name: "web_search" }],
+      },
+    },
+    {
+      label: "lightweight",
+      model_selection: lightweightSelection,
+      settings: {
+        context_window_tokens: null,
+        max_output_tokens: null,
+        builtin_tools: [],
+      },
+    },
   ],
   main_model_label: "default",
   lightweight_model_label: "lightweight",
@@ -99,7 +115,6 @@ const baseAgent: AgentResponse = {
   effective_auto_compaction_threshold_tokens: 900_000,
   model_parameters: {
     reasoning_effort: "medium",
-    builtin_tools: [{ name: "web_search" }],
   },
   system_prompt: "Help the workspace team with engineering tasks.",
   enabled: true,
@@ -130,7 +145,7 @@ const meta = {
   args: {
     handle: "acme",
     formState: { type: "EDIT", agent: baseAgent },
-    mutationState: { type: "IDLE", error: null, builtinToolErrors: null },
+    mutationState: { type: "IDLE", error: null },
     adminListState: { type: "READY", admins: [] },
     catalogStates: new Map(),
     modelsLoading: false,
