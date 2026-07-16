@@ -23,7 +23,6 @@ from pydantic import ValidationError
 from azents.core.enums import EventKind, LLMModelDeveloper, LLMProvider
 from azents.core.llm_catalog import (
     ModelCapabilities,
-    ModelCompatibilityCapabilities,
     ModelModalities,
     ModelModality,
     ModelReasoningEffort,
@@ -419,172 +418,26 @@ class TestLiteLLMResponsesLowerer:
         assert request.kwargs["include"] == ["reasoning.encrypted_content"]
         assert request.kwargs["store"] is False
 
-    def test_chatgpt_oauth_responses_lite_uses_saved_capability_contract(
-        self,
-    ) -> None:
-        """Lower Responses Lite entirely from the saved model capability snapshot."""
-        capabilities = ModelCapabilities(
-            modalities=ModelModalities(input=[ModelModality.IMAGE]),
-            compatibility=ModelCompatibilityCapabilities(responses_lite=True),
-        )
+    def test_chatgpt_oauth_uses_standard_responses_request(self) -> None:
+        """ChatGPT requests retain top-level tools and instructions."""
+        tool: dict[str, object] = {
+            "type": "function",
+            "name": "lookup",
+            "description": "Look up a value",
+            "parameters": {"type": "object"},
+        }
         lowerer = LiteLLMResponsesLowerer(
             provider="openai",
             model="gpt-5.6-luna",
             provider_id=LLMProvider.CHATGPT_OAUTH,
-            model_capabilities=capabilities,
-            prompt_cache_scope="00000000-0000-0000-0000-000000000001",
-            credential_kwargs={
-                "extra_headers": {
-                    "originator": "azents",
-                    "ChatGPT-Account-Id": "account-id",
-                }
-            },
-            reasoning_effort="high",
-            tools=[
-                {
-                    "type": "function",
-                    "name": "inspect_image",
-                    "description": "Inspect an image",
-                    "parameters": {"type": "object"},
-                }
-            ],
-            model_file_resolver=_StaticModelFileResolver(
-                ModelFileLoweringContent(data_url="data:image/png;base64,abc")
-            ),
-        )
-        transcript = [
-            _event(
-                EventKind.CLIENT_TOOL_CALL,
-                ClientToolCallPayload(
-                    call_id="call-1",
-                    name="inspect_image",
-                    arguments="{}",
-                    native_artifact=_artifact(
-                        {
-                            "type": "function_call",
-                            "call_id": "call-1",
-                            "name": "inspect_image",
-                            "arguments": "{}",
-                        }
-                    ),
-                ),
-            ),
-            _event(
-                EventKind.CLIENT_TOOL_RESULT,
-                ClientToolResultPayload(
-                    call_id="call-1",
-                    name="inspect_image",
-                    status="completed",
-                    output=[
-                        FileOutputPart(
-                            model_file_id="model-file-1",
-                            media_type="image/png",
-                            name="plot.png",
-                            size=123,
-                            kind="image",
-                        )
-                    ],
-                ),
-            ),
-        ]
-
-        request = lowerer.lower(
-            transcript,
-            model="gpt-5.6-luna",
-            system_prompt="Be useful.",
-        )
-
-        assert request.tools == []
-        assert request.input[:2] == [
-            {
-                "type": "additional_tools",
-                "role": "developer",
-                "tools": [
-                    {
-                        "type": "function",
-                        "name": "inspect_image",
-                        "description": "Inspect an image",
-                        "parameters": {"type": "object"},
-                    }
-                ],
-            },
-            {
-                "type": "message",
-                "role": "developer",
-                "content": [{"type": "input_text", "text": "Be useful."}],
-            },
-        ]
-        assert request.input[2] == {
-            "type": "function_call",
-            "call_id": "call-1",
-            "name": "inspect_image",
-            "arguments": "{}",
-        }
-        assert request.input[3] == {
-            "type": "function_call_output",
-            "call_id": "call-1",
-            "output": [
-                {
-                    "type": "input_image",
-                    "image_url": "data:image/png;base64,abc",
-                }
-            ],
-        }
-        assert request.kwargs["parallel_tool_calls"] is False
-        assert request.kwargs["store"] is False
-        assert request.kwargs["reasoning"] == {
-            "effort": "high",
-            "summary": "auto",
-            "context": "all_turns",
-        }
-        assert request.kwargs["prompt_cache_key"] == (
-            "00000000-0000-0000-0000-000000000001"
-        )
-        assert request.kwargs["extra_headers"] == {
-            "originator": "azents",
-            "ChatGPT-Account-Id": "account-id",
-            "session-id": "00000000-0000-0000-0000-000000000001",
-            "x-session-affinity": "00000000-0000-0000-0000-000000000001",
-            "version": "0.144.0",
-            "x-openai-internal-codex-responses-lite": "true",
-        }
-
-    def test_chatgpt_oauth_responses_lite_omits_empty_instructions(self) -> None:
-        """Explicitly empty Lite instructions do not create a developer message."""
-        lowerer = LiteLLMResponsesLowerer(
-            provider="openai",
-            model="gpt-5.6-luna",
-            provider_id=LLMProvider.CHATGPT_OAUTH,
-            model_capabilities=ModelCapabilities(
-                compatibility=ModelCompatibilityCapabilities(responses_lite=True)
-            ),
             prompt_cache_scope="session-1",
-        )
-
-        request = lowerer.lower([], model="gpt-5.6-luna", system_prompt="")
-
-        assert request.input == [
-            {
-                "type": "additional_tools",
-                "role": "developer",
-                "tools": [],
-            }
-        ]
-
-    def test_chatgpt_oauth_standard_responses_ignores_lite_model_name(self) -> None:
-        """A Lite-looking model name does not select the Lite transport."""
-        lowerer = LiteLLMResponsesLowerer(
-            provider="openai",
-            model="gpt-5.6-luna",
-            provider_id=LLMProvider.CHATGPT_OAUTH,
-            model_capabilities=ModelCapabilities(),
-            prompt_cache_scope="session-1",
+            tools=[tool],
         )
 
         request = lowerer.lower([], model="gpt-5.6-luna", system_prompt="Be useful.")
 
         assert request.input == []
-        assert request.tools == []
+        assert request.tools == [tool]
         assert request.kwargs["instructions"] == "Be useful."
         assert "parallel_tool_calls" not in request.kwargs
         assert "extra_headers" not in request.kwargs
@@ -1609,19 +1462,26 @@ class TestLiteLLMResponsesLowerer:
 
         assert request.tools == []
 
-    def test_lowers_openai_web_search_hosted_tool(self) -> None:
-        """Lower OpenAI web_search opt-in to Responses tool shape."""
+    @pytest.mark.parametrize(
+        "provider_id",
+        [LLMProvider.OPENAI, LLMProvider.CHATGPT_OAUTH],
+    )
+    def test_lowers_openai_compatible_web_search_hosted_tool(
+        self,
+        provider_id: LLMProvider,
+    ) -> None:
+        """Lower hosted web search into the standard Responses tools field."""
         capabilities = ModelCapabilities()
         capabilities.built_in_tools.supported = ["web_search"]
         lowerer = LiteLLMResponsesLowerer(
             provider="openai",
-            model="gpt-5.1",
-            provider_id=LLMProvider.OPENAI,
+            model="gpt-5.6-luna",
+            provider_id=provider_id,
             hosted_tools=[BuiltinToolSpec(name="web_search", config={})],
             model_capabilities=capabilities,
         )
 
-        request = lowerer.lower([], model="gpt-5.1")
+        request = lowerer.lower([], model="gpt-5.6-luna")
 
         assert request.tools == [{"type": "web_search"}]
 
@@ -1919,59 +1779,6 @@ class TestLiteLLMResponsesModelAdapter:
                 item={"type": "response.completed"},
             )
         ]
-
-    async def test_stream_preserves_responses_lite_extensions(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        """Pass Responses Lite reasoning and header extensions through LiteLLM."""
-        captured: dict[str, object] = {}
-
-        async def response_iter() -> AsyncIterator[object]:
-            if False:
-                yield object()
-
-        async def streaming_call(**kwargs: object) -> object:
-            captured.update(kwargs)
-            return response_iter()
-
-        monkeypatch.setattr(
-            "azents.engine.events.litellm_responses.aresponses",
-            streaming_call,
-        )
-        adapter = _TestLiteLLMResponsesModelAdapter()
-
-        _ = [
-            event
-            async for event in adapter.stream(
-                NativeModelRequest(
-                    model="gpt-5.6-luna",
-                    input=[],
-                    kwargs={
-                        "reasoning": {
-                            "effort": "high",
-                            "summary": "auto",
-                            "context": "all_turns",
-                        },
-                        "parallel_tool_calls": False,
-                        "extra_headers": {
-                            "x-openai-internal-codex-responses-lite": "true"
-                        },
-                    },
-                )
-            )
-        ]
-
-        assert captured["reasoning"] == {
-            "effort": "high",
-            "summary": "auto",
-            "context": "all_turns",
-        }
-        assert captured["parallel_tool_calls"] is False
-        assert captured["extra_headers"] == {
-            "x-openai-internal-codex-responses-lite": "true"
-        }
-        assert captured["stream"] is True
 
     async def test_stream_accepts_max_reasoning_effort(
         self,

@@ -17,7 +17,7 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_run.py
   - python/apps/azents/src/azents/rdb/models/agent.py
 last_verified_at: 2026-07-16
-spec_version: 23
+spec_version: 24
 ---
 
 # Context Compaction
@@ -66,8 +66,8 @@ model-scoped `max_output_tokens` and built-in tools do not replace internal comp
 Compaction summary generation is not user-facing streaming output, although the transport uses a
 stream so the common watchdog can enforce parsed-event idle and absolute attempt deadlines. The
 standard OpenAI-compatible helper sends ordinary user input plus top-level instructions and omits
-`max_output_tokens`; it does not use sampling continuation or Responses Lite. ChatGPT OAuth also
-uses complete input, `store=false`, encrypted reasoning inclusion, and no `previous_response_id`.
+`max_output_tokens`; it does not use sampling continuation. ChatGPT OAuth also uses complete input,
+`store=false`, encrypted reasoning inclusion, and no `previous_response_id`.
 Non-migrated providers receive `max_output_tokens` from the dynamic summary budget through the
 LiteLLM helper. The summary budget is based on the model context window:
 

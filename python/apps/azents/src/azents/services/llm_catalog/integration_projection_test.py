@@ -100,11 +100,10 @@ def test_project_chatgpt_entries_does_not_require_litellm_metadata() -> None:
                     compatibility=ModelCompatibilityCapabilities(
                         provider_family="chatgpt",
                         responses_api=True,
-                        responses_lite=True,
                     )
                 ),
                 model_snapshot={},
-                source_metadata={"use_responses_lite": True},
+                source_metadata={"context_window": 272000},
                 last_refreshed_at=fetched_at,
             )
         ],
@@ -126,9 +125,12 @@ def test_project_chatgpt_entries_does_not_require_litellm_metadata() -> None:
     [entry] = entries
     assert entry.visibility_status == LLMCatalogEntryVisibility.SELECTABLE
     assert entry.runtime_model_identifier == "gpt-5.6-luna"
-    assert entry.normalized_capabilities["compatibility"]["responses_lite"] is True
+    assert entry.normalized_capabilities["compatibility"] == {
+        "provider_family": "chatgpt",
+        "responses_api": True,
+        "unsupported_media_policy": None,
+    }
     assert entry.projection_metadata == {
         "lowerer_target": "litellm",
         "freshness_rank": 5060,
-        "responses_lite": True,
     }

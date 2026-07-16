@@ -144,7 +144,6 @@ class _FakeAsyncClient:
                         "display_name": "GPT-5.6 Luna",
                         "visibility": "list",
                         "supported_in_api": True,
-                        "use_responses_lite": True,
                         "context_window": 272000,
                         "input_modalities": ["text", "image"],
                         "supports_parallel_tool_calls": False,
@@ -163,7 +162,6 @@ class _FakeAsyncClient:
                         "display_name": "GPT-5.5 Standard",
                         "visibility": "list",
                         "supported_in_api": True,
-                        "use_responses_lite": False,
                         "input_modalities": ["text"],
                         "supported_reasoning_levels": [],
                     },
@@ -204,7 +202,7 @@ class _FakeAsyncClient:
 async def test_list_chatgpt_models_uses_backend_capability_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """ChatGPT listing filters visibility and preserves Responses Lite metadata."""
+    """ChatGPT listing filters visibility and preserves supported metadata."""
     monkeypatch.setattr(httpx, "AsyncClient", _FakeAsyncClient)
 
     result = await providers.list_chatgpt_models_for_integration(_chatgpt_integration())
@@ -220,7 +218,8 @@ async def test_list_chatgpt_models_uses_backend_capability_metadata(
         result.models
     )
     assert candidate.model_identifier == "gpt-5.6-luna"
-    assert candidate.normalized_capabilities.compatibility.responses_lite is True
+    assert candidate.normalized_capabilities.compatibility.provider_family == "chatgpt"
+    assert candidate.normalized_capabilities.compatibility.responses_api is True
     assert candidate.normalized_capabilities.context_window.max_input_tokens == 272000
     assert candidate.normalized_capabilities.tool_calling.parallel_tool_calls is False
     assert candidate.normalized_capabilities.reasoning.effort_levels == [
@@ -232,9 +231,6 @@ async def test_list_chatgpt_models_uses_backend_capability_metadata(
     assert candidate.source_metadata["tool_mode"] == "code_mode_only"
     assert "base_instructions" not in candidate.source_metadata
     assert standard_candidate.model_identifier == "gpt-5.5-standard"
-    assert (
-        standard_candidate.normalized_capabilities.compatibility.responses_lite is False
-    )
     assert legacy_candidate.normalized_capabilities.modalities.input == [
         ModelModality.TEXT,
         ModelModality.IMAGE,

@@ -16,7 +16,6 @@ CHATGPT_OAUTH_DEVICE_REDIRECT_URI = f"{CHATGPT_OAUTH_ISSUER}/deviceauth/callback
 CHATGPT_OAUTH_BACKEND_BASE_URL = "https://chatgpt.com/backend-api/codex"
 AZENTS_VERSION: Final = "0.1.0"
 CHATGPT_OAUTH_PROTOCOL_VERSION: Final = "0.144.0"
-CHATGPT_RESPONSES_LITE_HEADER: Final = "x-openai-internal-codex-responses-lite"
 
 
 def build_chatgpt_oauth_headers(*, account_id: str | None) -> dict[str, str]:
