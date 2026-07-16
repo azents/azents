@@ -147,6 +147,7 @@ from azentspublicclient.models.invitation_status import InvitationStatus
 from azentspublicclient.models.join_request_list_response import JoinRequestListResponse
 from azentspublicclient.models.join_request_response import JoinRequestResponse
 from azentspublicclient.models.join_request_status import JoinRequestStatus
+from azentspublicclient.models.llm_catalog_scope import LLMCatalogScope
 from azentspublicclient.models.llm_model_developer import LLMModelDeveloper
 from azentspublicclient.models.llm_provider import LLMProvider
 from azentspublicclient.models.llm_provider_capability_list_response import LLMProviderCapabilityListResponse

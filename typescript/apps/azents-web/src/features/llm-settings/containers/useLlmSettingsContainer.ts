@@ -84,7 +84,7 @@ export interface LlmSettingsContainerOutput {
     integration: LlmProviderIntegrationResponse,
     enabled: boolean,
   ) => void;
-  onSyncCatalog: (integrationId: string) => void;
+  onSyncCatalog: (integrationId: string) => Promise<void>;
   onUpdateWorkspaceModelSettings: (data: {
     defaultSelectableModelOptions: SelectableModelOptionFormValue[];
     defaultMainModelLabel: string | null;
@@ -293,8 +293,8 @@ export function useLlmSettingsContainer(
   );
 
   const onSyncCatalog = useCallback(
-    (integrationId: string): void => {
-      syncCatalogMutation.mutate({ handle, integrationId });
+    async (integrationId: string): Promise<void> => {
+      await syncCatalogMutation.mutateAsync({ handle, integrationId });
     },
     [handle, syncCatalogMutation],
   );

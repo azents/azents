@@ -153,7 +153,7 @@ const meta = {
     providerOptions,
     modelOptions,
     workspaceModelSettings: null,
-    onSyncCatalog: () => {},
+    onSyncCatalog: () => Promise.resolve(),
     onSubmit: noopSubmit,
     onAddAdmin: () => {},
     onRemoveAdmin: () => {},

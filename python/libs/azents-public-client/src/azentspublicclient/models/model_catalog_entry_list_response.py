@@ -18,8 +18,9 @@ import re  # noqa: F401
 import json
 
 from datetime import datetime
-from pydantic import BaseModel, ConfigDict, StrictInt, StrictStr
+from pydantic import BaseModel, ConfigDict, StrictBool, StrictInt, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
+from azentspublicclient.models.llm_catalog_scope import LLMCatalogScope
 from azentspublicclient.models.model_catalog_entry_response import ModelCatalogEntryResponse
 from azentspublicclient.models.model_catalog_sync_attempt_response import ModelCatalogSyncAttemptResponse
 from typing import Optional, Set
@@ -30,15 +31,19 @@ class ModelCatalogEntryListResponse(BaseModel):
     Stored model catalog entry list response.
     """ # noqa: E501
     catalog_id: StrictStr
+    catalog_scope: LLMCatalogScope
     current_snapshot_id: Optional[StrictStr]
     current_snapshot_created_at: Optional[datetime]
     latest_attempt: Optional[ModelCatalogSyncAttemptResponse]
+    stale: StrictBool
+    sync_available_at: Optional[datetime]
+    automatic_retry_blocked: StrictBool
     entries: List[ModelCatalogEntryResponse]
     total: StrictInt
     limit: StrictInt
     offset: StrictInt
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["catalog_id", "current_snapshot_id", "current_snapshot_created_at", "latest_attempt", "entries", "total", "limit", "offset"]
+    __properties: ClassVar[List[str]] = ["catalog_id", "catalog_scope", "current_snapshot_id", "current_snapshot_created_at", "latest_attempt", "stale", "sync_available_at", "automatic_retry_blocked", "entries", "total", "limit", "offset"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -111,6 +116,11 @@ class ModelCatalogEntryListResponse(BaseModel):
         if self.latest_attempt is None and "latest_attempt" in self.model_fields_set:
             _dict['latest_attempt'] = None
 
+        # set to None if sync_available_at (nullable) is None
+        # and model_fields_set contains the field
+        if self.sync_available_at is None and "sync_available_at" in self.model_fields_set:
+            _dict['sync_available_at'] = None
+
         return _dict
 
     @classmethod
@@ -124,9 +134,13 @@ class ModelCatalogEntryListResponse(BaseModel):
 
         _obj = cls.model_validate({
             "catalog_id": obj.get("catalog_id"),
+            "catalog_scope": obj.get("catalog_scope"),
             "current_snapshot_id": obj.get("current_snapshot_id"),
             "current_snapshot_created_at": obj.get("current_snapshot_created_at"),
             "latest_attempt": ModelCatalogSyncAttemptResponse.from_dict(obj["latest_attempt"]) if obj.get("latest_attempt") is not None else None,
+            "stale": obj.get("stale"),
+            "sync_available_at": obj.get("sync_available_at"),
+            "automatic_retry_blocked": obj.get("automatic_retry_blocked"),
             "entries": [ModelCatalogEntryResponse.from_dict(_item) for _item in obj["entries"]] if obj.get("entries") is not None else None,
             "total": obj.get("total"),
             "limit": obj.get("limit"),

@@ -94,18 +94,6 @@ def _setup_profile_agent(
         ),
         _headers=_headers(token),
     )
-    sync_url = (
-        f"{server_url}/llm-provider-integration/v1/workspaces/{handle}/"
-        f"llm-provider-integrations/{integration.id}/catalog-sync"
-    )
-    sync_response = wait_until(
-        lambda: requests.post(sync_url, headers=_headers(token), timeout=10),
-        timeout=10,
-        interval=0.2,
-        message="Catalog sync did not become available",
-    )
-    sync_response.raise_for_status()
-
     entries_url = (
         f"{server_url}/llm-provider-integration/v1/workspaces/{handle}/"
         f"llm-provider-integrations/{integration.id}/catalog-entries"

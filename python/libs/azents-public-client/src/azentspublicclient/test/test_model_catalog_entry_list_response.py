@@ -36,6 +36,7 @@ class TestModelCatalogEntryListResponse(unittest.TestCase):
         if include_optional:
             return ModelCatalogEntryListResponse(
                 catalog_id = '',
+                catalog_scope = 'system',
                 current_snapshot_id = '',
                 current_snapshot_created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
                 latest_attempt = azentspublicclient.models.model_catalog_sync_attempt_response.ModelCatalogSyncAttemptResponse(
@@ -50,6 +51,9 @@ class TestModelCatalogEntryListResponse(unittest.TestCase):
                     matched_count = 56, 
                     skipped_count = 56, 
                     hidden_count = 56, ),
+                stale = True,
+                sync_available_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
+                automatic_retry_blocked = True,
                 entries = [
                     azentspublicclient.models.model_catalog_entry_response.ModelCatalogEntryResponse(
                         id = '', 
@@ -107,6 +111,7 @@ class TestModelCatalogEntryListResponse(unittest.TestCase):
         else:
             return ModelCatalogEntryListResponse(
                 catalog_id = '',
+                catalog_scope = 'system',
                 current_snapshot_id = '',
                 current_snapshot_created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
                 latest_attempt = azentspublicclient.models.model_catalog_sync_attempt_response.ModelCatalogSyncAttemptResponse(
@@ -121,6 +126,9 @@ class TestModelCatalogEntryListResponse(unittest.TestCase):
                     matched_count = 56, 
                     skipped_count = 56, 
                     hidden_count = 56, ),
+                stale = True,
+                sync_available_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
+                automatic_retry_blocked = True,
                 entries = [
                     azentspublicclient.models.model_catalog_entry_response.ModelCatalogEntryResponse(
                         id = '', 

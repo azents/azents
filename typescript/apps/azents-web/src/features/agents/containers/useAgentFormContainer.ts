@@ -56,7 +56,7 @@ export interface AgentFormContainerOutput {
   catalogStates: ReadonlyMap<string, ModelCatalogState>;
   modelsLoading: boolean;
   members: MemberItem[];
-  onSyncCatalog: (integrationId: string) => void;
+  onSyncCatalog: (integrationId: string) => Promise<void>;
   onSubmit: (values: AgentFormValues) => void;
   onAddAdmin: (workspaceUserId: string) => void;
   onRemoveAdmin: (admin: AgentAdminResponse) => void;
@@ -266,8 +266,8 @@ export function useAgentFormContainer(
   );
 
   const onSyncCatalog = useCallback(
-    (integrationId: string): void => {
-      syncCatalogMutation.mutate({ handle, integrationId });
+    async (integrationId: string): Promise<void> => {
+      await syncCatalogMutation.mutateAsync({ handle, integrationId });
     },
     [handle, syncCatalogMutation],
   );

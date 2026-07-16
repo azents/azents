@@ -35,6 +35,15 @@ class LLMProviderIntegrationUpdateInput(LLMProviderIntegrationUpdate):
     pass
 
 
+class LLMProviderIntegrationUpdateOutput(BaseModel):
+    """Updated integration and catalog synchronization effect."""
+
+    integration: LLMProviderIntegrationOutput = Field(description="Updated integration")
+    catalog_sync_required: bool = Field(
+        description="Whether the update changed catalog-affecting state"
+    )
+
+
 class LLMProviderIntegrationListOutput(BaseModel):
     """LLM Provider Integration list output model."""
 

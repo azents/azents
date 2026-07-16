@@ -20,6 +20,7 @@ from azents.core.deps import get_credential_cipher
 from azents.core.enums import (
     LLMCatalogEntryVisibility,
     LLMCatalogLowererTarget,
+    LLMCatalogScope,
     LLMModelDeveloper,
     LLMModelLifecycleStatus,
     LLMProvider,
@@ -35,6 +36,14 @@ from azents.core.llm_catalog import (
     ModelReasoningCapabilities,
     ModelReasoningEffort,
     ModelToolCallingCapabilities,
+)
+from azents.core.llm_catalog_sync import (
+    CatalogSyncAttemptState,
+    IntegrationCatalogSyncDenialReason,
+    IntegrationCatalogSyncPolicyDecision,
+    IntegrationCatalogSyncPolicyInput,
+    IntegrationCatalogSyncTrigger,
+    evaluate_integration_catalog_sync_policy,
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
@@ -138,6 +147,69 @@ class IntegrationCatalogSyncAlreadyRunning:
 
     catalog_id: str
     attempt_id: str
+
+
+@dataclasses.dataclass(frozen=True)
+class IntegrationCatalogSyncSuperseded:
+    """Integration catalog sync was superseded before it could publish."""
+
+    catalog_id: str
+    superseding_attempt_id: str
+
+
+@dataclasses.dataclass(frozen=True)
+class IntegrationCatalogSyncThrottled:
+    """Integration catalog sync is temporarily throttled."""
+
+    retry_at: datetime.datetime
+
+
+@dataclasses.dataclass(frozen=True)
+class IntegrationCatalogAutomaticRetryBlocked:
+    """Automatic retry is blocked until explicit retry or configuration change."""
+
+    pass
+
+
+@dataclasses.dataclass(frozen=True)
+class IntegrationCatalogSyncNotStale:
+    """Stale refresh was requested for a fresh catalog."""
+
+    pass
+
+
+def _sync_policy_failure(
+    catalog_id: str,
+    decision: IntegrationCatalogSyncPolicyDecision,
+) -> (
+    IntegrationCatalogSyncAlreadyRunning
+    | IntegrationCatalogSyncThrottled
+    | IntegrationCatalogAutomaticRetryBlocked
+    | IntegrationCatalogSyncNotStale
+):
+    """Convert a synchronization policy denial to a service error."""
+    match decision.denial_reason:
+        case IntegrationCatalogSyncDenialReason.ALREADY_RUNNING:
+            if decision.retry_at is None:
+                raise RuntimeError("Running sync policy did not provide an expiry.")
+            if decision.blocking_attempt_id is None:
+                raise RuntimeError("Running sync policy did not identify the attempt.")
+            return IntegrationCatalogSyncAlreadyRunning(
+                catalog_id=catalog_id,
+                attempt_id=decision.blocking_attempt_id,
+            )
+        case IntegrationCatalogSyncDenialReason.THROTTLED:
+            if decision.retry_at is None:
+                raise RuntimeError("Throttled sync policy did not provide retry time.")
+            return IntegrationCatalogSyncThrottled(retry_at=decision.retry_at)
+        case IntegrationCatalogSyncDenialReason.AUTOMATIC_RETRY_BLOCKED:
+            return IntegrationCatalogAutomaticRetryBlocked()
+        case IntegrationCatalogSyncDenialReason.NOT_STALE:
+            return IntegrationCatalogSyncNotStale()
+        case None:
+            raise RuntimeError("Allowed sync policy decision cannot be a failure.")
+        case _:
+            assert_never(decision.denial_reason)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -251,6 +323,7 @@ class ModelCatalogEntryListOutput(BaseModel):
     """Catalog entry list output."""
 
     catalog_id: str = Field(description="Catalog ID")
+    catalog_scope: LLMCatalogScope = Field(description="Catalog ownership scope")
     current_snapshot_id: str | None = Field(description="Current snapshot ID")
     current_snapshot_created_at: datetime.datetime | None = Field(
         description="Current snapshot creation time"
@@ -258,10 +331,33 @@ class ModelCatalogEntryListOutput(BaseModel):
     latest_attempt: ModelCatalogSyncAttemptOutput | None = Field(
         description="Latest sync attempt"
     )
+    stale: bool = Field(description="Whether the current projection is stale")
+    sync_available_at: datetime.datetime | None = Field(
+        description="Earliest time an explicit sync can start"
+    )
+    automatic_retry_blocked: bool = Field(
+        description="Whether automatic stale retry is blocked by configuration failure"
+    )
     entries: list[ModelCatalogEntryOutput] = Field(description="Entry page")
     total: int = Field(description="Total matching entries")
     limit: int = Field(description="Requested limit")
     offset: int = Field(description="Requested offset")
+
+
+def _sync_policy_attempt(
+    attempt: LLMCatalogSyncAttempt | None,
+) -> CatalogSyncAttemptState | None:
+    """Convert persisted attempt state into synchronization policy input."""
+    if attempt is None:
+        return None
+    diagnostics = attempt.diagnostics or {}
+    return CatalogSyncAttemptState(
+        id=attempt.id,
+        status=attempt.status,
+        started_at=attempt.started_at,
+        finished_at=attempt.finished_at,
+        automatic_retry_blocked=(diagnostics.get("automatic_retry_blocked") is True),
+    )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -340,11 +436,34 @@ class ModelCatalogReadService:
                 limit=limit,
                 offset=offset,
             )
-        if result is None:
-            return Failure(CatalogNotFound(integration_id=integration_id))
+            if result is None:
+                return Failure(CatalogNotFound(integration_id=integration_id))
+            latest_workspace_attempt = None
+            if result.catalog.scope == LLMCatalogScope.INTEGRATION:
+                latest_workspace_attempt = await (
+                    self.catalog_repository.get_latest_integration_attempt_for_workspace
+                )(
+                    session,
+                    workspace_id=workspace_id,
+                )
+        policy = evaluate_integration_catalog_sync_policy(
+            IntegrationCatalogSyncPolicyInput(
+                trigger=IntegrationCatalogSyncTrigger.EXPLICIT,
+                now=_utcnow(),
+                current_snapshot_created_at=result.current_snapshot_created_at,
+                latest_catalog_attempt=_sync_policy_attempt(result.latest_attempt),
+                latest_workspace_attempt=_sync_policy_attempt(latest_workspace_attempt),
+            )
+        )
+        automatic_retry_blocked = (
+            result.latest_attempt is not None
+            and (result.latest_attempt.diagnostics or {}).get("automatic_retry_blocked")
+            is True
+        )
         return Success(
             ModelCatalogEntryListOutput(
                 catalog_id=result.catalog.id,
+                catalog_scope=result.catalog.scope,
                 current_snapshot_id=result.catalog.current_snapshot_id,
                 current_snapshot_created_at=result.current_snapshot_created_at,
                 latest_attempt=(
@@ -352,6 +471,9 @@ class ModelCatalogReadService:
                     if result.latest_attempt is not None
                     else None
                 ),
+                stale=policy.stale,
+                sync_available_at=policy.retry_at,
+                automatic_retry_blocked=automatic_retry_blocked,
                 entries=[
                     ModelCatalogEntryOutput.convert_from(entry)
                     for entry in result.entries
@@ -581,11 +703,16 @@ class IntegrationCatalogProjectionService:
         *,
         integration_id: str,
         workspace_id: str,
+        trigger: IntegrationCatalogSyncTrigger = IntegrationCatalogSyncTrigger.EXPLICIT,
     ) -> Result[
         SystemCatalogProjectionSummary,
         IntegrationCatalogSyncNotFound
         | IntegrationCatalogSyncUnsupportedProvider
-        | IntegrationCatalogSyncAlreadyRunning,
+        | IntegrationCatalogSyncAlreadyRunning
+        | IntegrationCatalogSyncSuperseded
+        | IntegrationCatalogSyncThrottled
+        | IntegrationCatalogAutomaticRetryBlocked
+        | IntegrationCatalogSyncNotStale,
     ]:
         """Refresh one integration catalog projection."""
         async with self.session_manager() as session:
@@ -607,8 +734,6 @@ class IntegrationCatalogProjectionService:
                 IntegrationCatalogSyncUnsupportedProvider(integration.provider)
             )
 
-        source_snapshot = await self.source_sync_service.sync_current_source()
-
         async with self.session_manager() as session:
             catalog = await self.catalog_repository.ensure_integration_catalog(
                 session,
@@ -616,24 +741,27 @@ class IntegrationCatalogProjectionService:
                 provider=integration.provider,
                 lowerer_target=LLMCatalogLowererTarget.LITELLM,
             )
-            attempt = await self.catalog_repository.begin_attempt(
+        started_at = _utcnow()
+        async with self.session_manager() as session:
+            claim = await self.catalog_repository.begin_integration_attempt(
                 session,
                 catalog_id=catalog.id,
-                source_key=source_snapshot.source_key,
-                started_at=_utcnow(),
+                workspace_id=workspace_id,
+                source_key=_LITELLM_SOURCE_KEY,
+                started_at=started_at,
+                trigger=trigger,
             )
-            if isinstance(attempt, CatalogSyncAlreadyRunning):
-                return Failure(
-                    IntegrationCatalogSyncAlreadyRunning(
-                        catalog_id=attempt.catalog_id,
-                        attempt_id=attempt.attempt_id,
-                    )
-                )
-            attempt_id = attempt
+        if isinstance(claim, IntegrationCatalogSyncPolicyDecision):
+            return Failure(_sync_policy_failure(catalog.id, claim))
+        attempt_id = claim
 
         try:
+            source_snapshot = await self.source_sync_service.sync_current_source()
             if deterministic_failure:
-                raise ListingProviderError("Deterministic user catalog listing failed.")
+                raise ListingProviderError(
+                    "Deterministic user catalog listing failed.",
+                    automatic_retry_blocked=True,
+                )
             if integration.provider == LLMProvider.CHATGPT_OAUTH:
                 token_result = await ensure_runtime_tokens(
                     integration=integration,
@@ -645,11 +773,16 @@ class IntegrationCatalogProjectionService:
                         integration = refreshed_integration
                     case Failure(error):
                         match error:
-                            case (
-                                ProviderRejected(reason=reason)
-                                | ProviderUnavailable(reason=reason)
-                            ):
-                                raise ListingProviderError(reason)
+                            case ProviderRejected(reason=reason):
+                                raise ListingProviderError(
+                                    reason,
+                                    automatic_retry_blocked=True,
+                                )
+                            case ProviderUnavailable(reason=reason):
+                                raise ListingProviderError(
+                                    reason,
+                                    automatic_retry_blocked=False,
+                                )
                             case _:
                                 assert_never(error)
             listing = deterministic_listing or await _list_provider_visible_models(
@@ -676,7 +809,24 @@ class IntegrationCatalogProjectionService:
                     source_snapshot=source_snapshot,
                 )
             async with self.session_manager() as session:
-                snapshot_id = await (self.catalog_repository.replace_current_snapshot)(
+                current_attempt_id = await (
+                    self.catalog_repository.lock_catalog_for_attempt_completion
+                )(
+                    session,
+                    catalog_id=catalog.id,
+                )
+                if current_attempt_id is None:
+                    raise RuntimeError(
+                        "Integration catalog has no attempt allowed to publish."
+                    )
+                if current_attempt_id != attempt_id:
+                    return Failure(
+                        IntegrationCatalogSyncSuperseded(
+                            catalog_id=catalog.id,
+                            superseding_attempt_id=current_attempt_id,
+                        )
+                    )
+                snapshot_id = await self.catalog_repository.replace_current_snapshot(
                     session,
                     catalog=catalog,
                     source_snapshot_id=source_snapshot.id,
@@ -706,43 +856,40 @@ class IntegrationCatalogProjectionService:
                     diagnostics=_projection_diagnostics(
                         entries=entries,
                         listing=listing,
-                        context={"integration_id": integration.id},
+                        context={
+                            "integration_id": integration.id,
+                            "trigger": trigger.value,
+                        },
                     ),
                 )
         except ListingProviderError as exc:
-            failure_code = (
-                type(exc.__cause__).__name__ if exc.__cause__ else type(exc).__name__
+            return Success(
+                await self._record_listing_failure(
+                    catalog_id=catalog.id,
+                    snapshot_id=catalog.current_snapshot_id,
+                    attempt_id=attempt_id,
+                    integration=integration,
+                    trigger=trigger,
+                    error=exc,
+                )
             )
-            failure_message = str(exc.__cause__ or exc)
-            action_hint = "Check integration credentials and provider permissions."
+        except Exception as exc:
             async with self.session_manager() as session:
                 await self.catalog_repository.mark_attempt_failed(
                     session,
                     attempt_id=attempt_id,
                     finished_at=_utcnow(),
-                    failure_code=failure_code,
-                    failure_message=failure_message,
-                    action_hint=action_hint,
+                    failure_code=type(exc).__name__,
+                    failure_message=str(exc),
+                    action_hint="Retry after the catalog service failure is resolved.",
                     diagnostics={
                         "integration_id": integration.id,
-                        "failure_category": "user_catalog_credentials_or_permissions",
-                        "automatic_retry_blocked": True,
-                        "retry_policy": "explicit_retry_or_integration_update_only",
+                        "failure_category": "catalog_service_failure",
+                        "automatic_retry_blocked": False,
+                        "trigger": trigger.value,
                     },
                 )
-            return Success(
-                SystemCatalogProjectionSummary(
-                    provider=integration.provider,
-                    catalog_id=catalog.id,
-                    snapshot_id=catalog.current_snapshot_id,
-                    visible_count=0,
-                    hidden_count=0,
-                    status="failed",
-                    failure_code=failure_code,
-                    failure_message=failure_message,
-                    action_hint=action_hint,
-                )
-            )
+            raise
         return Success(
             SystemCatalogProjectionSummary(
                 provider=integration.provider,
@@ -751,6 +898,62 @@ class IntegrationCatalogProjectionService:
                 visible_count=visible_count,
                 hidden_count=len(entries) - visible_count,
             )
+        )
+
+    async def _record_listing_failure(
+        self,
+        *,
+        catalog_id: str,
+        snapshot_id: str | None,
+        attempt_id: str,
+        integration: LLMProviderIntegrationWithSecrets,
+        trigger: IntegrationCatalogSyncTrigger,
+        error: ListingProviderError,
+    ) -> SystemCatalogProjectionSummary:
+        """Persist a provider failure and return its catalog state."""
+        cause = error.__cause__
+        failure_code = type(cause).__name__ if cause else type(error).__name__
+        failure_message = str(cause or error)
+        automatic_retry_blocked = error.automatic_retry_blocked
+        action_hint = (
+            "Check integration credentials and provider permissions."
+            if automatic_retry_blocked
+            else "Retry after the provider becomes available."
+        )
+        async with self.session_manager() as session:
+            await self.catalog_repository.mark_attempt_failed(
+                session,
+                attempt_id=attempt_id,
+                finished_at=_utcnow(),
+                failure_code=failure_code,
+                failure_message=failure_message,
+                action_hint=action_hint,
+                diagnostics={
+                    "integration_id": integration.id,
+                    "failure_category": (
+                        "user_catalog_credentials_or_permissions"
+                        if automatic_retry_blocked
+                        else "provider_transient_failure"
+                    ),
+                    "automatic_retry_blocked": automatic_retry_blocked,
+                    "retry_policy": (
+                        "explicit_retry_or_integration_update_only"
+                        if automatic_retry_blocked
+                        else "throttled_backoff"
+                    ),
+                    "trigger": trigger.value,
+                },
+            )
+        return SystemCatalogProjectionSummary(
+            provider=integration.provider,
+            catalog_id=catalog_id,
+            snapshot_id=snapshot_id,
+            visible_count=0,
+            hidden_count=0,
+            status="failed",
+            failure_code=failure_code,
+            failure_message=failure_message,
+            action_hint=action_hint,
         )
 
 

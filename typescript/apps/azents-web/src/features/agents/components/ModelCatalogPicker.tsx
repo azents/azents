@@ -34,7 +34,7 @@ export interface ModelCatalogPickerProps {
   onClose: () => void;
   onSelectIntegration: (integrationId: string) => void;
   onSelectModel: (model: SelectableModelCandidate) => void;
-  onSyncCatalog: (integrationId: string) => void;
+  onSyncCatalog: (integrationId: string) => Promise<void>;
 }
 
 interface LoadedCatalogPage {
@@ -177,7 +177,12 @@ export function ModelCatalogPicker({
   const [search, setSearch] = useState("");
   const [offset, setOffset] = useState(0);
   const [pages, setPages] = useState<LoadedCatalogPage[]>([]);
+  const [syncPending, setSyncPending] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [clock, setClock] = useState(() => Date.now());
   const sentinelRef = useRef<HTMLDivElement | null>(null);
+  const snapshotIdRef = useRef<string | null>(null);
+  const snapshotObservedRef = useRef(false);
 
   const selectedIntegration = integrations.find(
     (integration) => integration.value === selectedIntegrationId,
@@ -187,11 +192,29 @@ export function ModelCatalogPicker({
   const catalogState = pages.at(-1)?.catalog ?? null;
   const latestAttempt = catalogState?.latestAttempt ?? null;
   const syncRunning = latestAttempt?.status === "running";
+  const syncAvailableAt = catalogState?.syncAvailableAt ?? null;
+  const syncAvailableAtMillis =
+    syncAvailableAt == null ? null : new Date(syncAvailableAt).getTime();
+  const syncThrottled =
+    syncAvailableAtMillis != null && syncAvailableAtMillis > clock;
   const canSync =
     selectedIntegrationOrNull != null &&
     !selectedIntegrationOrNull.disabled &&
     !syncRunning &&
+    !syncPending &&
+    !syncThrottled &&
     syncSupported;
+
+  useEffect(() => {
+    if (syncAvailableAtMillis == null || syncAvailableAtMillis <= Date.now()) {
+      setClock(Date.now());
+      return;
+    }
+    const timeout = window.setTimeout(() => {
+      setClock(Date.now());
+    }, syncAvailableAtMillis - Date.now());
+    return () => window.clearTimeout(timeout);
+  }, [syncAvailableAtMillis]);
 
   const query = trpc.llmProviderIntegration.listModels.useQuery(
     {
@@ -203,12 +226,33 @@ export function ModelCatalogPicker({
     },
     {
       enabled: opened && selectedIntegrationId != null,
+      refetchInterval: (activeQuery) => {
+        const catalog = activeQuery.state.data?.catalog;
+        if (catalog == null || catalog.catalog_scope !== "integration") {
+          return false;
+        }
+        if (catalog.latest_attempt?.status === "running") {
+          return 1_000;
+        }
+        if (!catalog.stale || catalog.automatic_retry_blocked) {
+          return false;
+        }
+        if (catalog.sync_available_at == null) {
+          return 1_000;
+        }
+        return Math.max(
+          new Date(catalog.sync_available_at).getTime() - Date.now(),
+          1_000,
+        );
+      },
     },
   );
 
   useEffect(() => {
     setOffset(0);
     setPages([]);
+    snapshotIdRef.current = null;
+    snapshotObservedRef.current = false;
   }, [opened, selectedIntegrationId, search]);
 
   useEffect(() => {
@@ -219,22 +263,39 @@ export function ModelCatalogPicker({
       models: query.data.models,
       catalog: {
         catalogId: query.data.catalog.catalog_id,
+        catalogScope: query.data.catalog.catalog_scope,
         currentSnapshotId: query.data.catalog.current_snapshot_id,
         currentSnapshotCreatedAt:
           query.data.catalog.current_snapshot_created_at,
         latestAttempt: query.data.catalog.latest_attempt,
+        stale: query.data.catalog.stale,
+        syncAvailableAt: query.data.catalog.sync_available_at,
+        automaticRetryBlocked: query.data.catalog.automatic_retry_blocked,
         total: query.data.catalog.total,
         loaded: query.data.catalog.offset + query.data.models.length,
       },
     };
+    const snapshotChanged =
+      snapshotObservedRef.current &&
+      snapshotIdRef.current !== page.catalog.currentSnapshotId;
+    snapshotIdRef.current = page.catalog.currentSnapshotId;
+    snapshotObservedRef.current = true;
+    if (query.data.catalog.offset !== 0 && snapshotChanged) {
+      setOffset(0);
+      setPages([]);
+      return;
+    }
     setPages((current) => {
       if (query.data.catalog.offset === 0) {
         return [page];
       }
-      if (current.some((item) => item.catalog.loaded === page.catalog.loaded)) {
-        return current;
+      const pageIndex = current.findIndex(
+        (item) => item.catalog.loaded === page.catalog.loaded,
+      );
+      if (pageIndex === -1) {
+        return [...current, page];
       }
-      return [...current, page];
+      return current.map((item, index) => (index === pageIndex ? page : item));
     });
   }, [query.data]);
 
@@ -257,6 +318,18 @@ export function ModelCatalogPicker({
     observer.observe(sentinel);
     return () => observer.disconnect();
   }, [hasNextPage, loadedCount, opened, query.isFetching]);
+
+  async function handleSyncCatalog(integrationId: string): Promise<void> {
+    setSyncPending(true);
+    setSyncError(null);
+    try {
+      await onSyncCatalog(integrationId);
+    } catch (error) {
+      setSyncError(error instanceof Error ? error.message : t("syncFailed"));
+    } finally {
+      setSyncPending(false);
+    }
+  }
 
   const uiState = catalogUiState({
     selectedIntegrationId,
@@ -324,15 +397,30 @@ export function ModelCatalogPicker({
                   <Button
                     variant="light"
                     disabled={!canSync}
-                    loading={syncRunning}
-                    onClick={() =>
-                      onSyncCatalog(selectedIntegrationOrNull.value)
-                    }
+                    loading={syncRunning || syncPending}
+                    onClick={() => {
+                      void handleSyncCatalog(selectedIntegrationOrNull.value);
+                    }}
                   >
-                    {syncRunning ? t("syncRunning") : t("syncCatalog")}
+                    {syncRunning || syncPending
+                      ? t("syncRunning")
+                      : t("syncCatalog")}
                   </Button>
                 )}
               </Group>
+              {catalogState?.catalogScope === "integration" &&
+                catalogState.stale &&
+                !catalogState.automaticRetryBlocked && (
+                  <Alert color="blue">{t("staleRefreshQueued")}</Alert>
+                )}
+              {syncThrottled && syncAvailableAt != null && (
+                <Alert color="gray">
+                  {t("syncThrottledUntil", {
+                    value: formatDate(syncAvailableAt, t("never")),
+                  })}
+                </Alert>
+              )}
+              {syncError != null && <Alert color="red">{syncError}</Alert>}
               {uiState.type === "READY_WITH_FAILED_ATTEMPT" && (
                 <Alert color="yellow" title={t("catalogSyncFailedTitle")}>
                   <Stack gap={4}>

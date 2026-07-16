@@ -153,9 +153,13 @@ export const llmProviderIntegrationRouter = router({
           skips: [],
           catalog: {
             catalog_id: data.catalog_id,
+            catalog_scope: data.catalog_scope,
             current_snapshot_id: data.current_snapshot_id,
             current_snapshot_created_at: data.current_snapshot_created_at,
             latest_attempt: data.latest_attempt,
+            stale: data.stale,
+            sync_available_at: data.sync_available_at,
+            automatic_retry_blocked: data.automatic_retry_blocked,
             total: data.total,
             limit: data.limit,
             offset: data.offset,
@@ -199,6 +203,7 @@ export const llmProviderIntegrationRouter = router({
           404: "NOT_FOUND",
           409: "CONFLICT",
           422: "BAD_REQUEST",
+          429: "TOO_MANY_REQUESTS",
         });
       }
     }),

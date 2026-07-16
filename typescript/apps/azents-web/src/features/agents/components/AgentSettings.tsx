@@ -46,7 +46,7 @@ interface AgentSettingsProps {
   catalogStates: ReadonlyMap<string, ModelCatalogState>;
   modelsLoading: boolean;
   members: MemberItem[];
-  onSyncCatalog: (integrationId: string) => void;
+  onSyncCatalog: (integrationId: string) => Promise<void>;
   onSubmit: (values: AgentFormValues) => void;
   onAddAdmin: (workspaceUserId: string) => void;
   onRemoveAdmin: (admin: AgentAdminResponse) => void;

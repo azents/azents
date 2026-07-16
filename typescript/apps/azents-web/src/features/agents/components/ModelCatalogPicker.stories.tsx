@@ -44,7 +44,7 @@ function OpenStory(): React.ReactElement {
         onClose={close}
         onSelectIntegration={() => {}}
         onSelectModel={() => {}}
-        onSyncCatalog={() => {}}
+        onSyncCatalog={() => Promise.resolve()}
       />
     </>
   );

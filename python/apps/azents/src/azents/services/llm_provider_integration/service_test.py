@@ -14,10 +14,50 @@ from azents.repos.llm_catalog import LLMCatalogRepository
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
-from azents.services.llm_provider_integration import LLMProviderIntegrationService
+from azents.services.llm_provider_integration import (
+    LLMProviderIntegrationService,
+    catalog_sync_required_for_update,
+)
 from azents.services.llm_provider_integration.data import (
     LLMProviderIntegrationCreateInput,
+    LLMProviderIntegrationUpdateInput,
 )
+
+
+def test_catalog_sync_required_for_catalog_affecting_update() -> None:
+    assert catalog_sync_required_for_update(
+        LLMProviderIntegrationUpdateInput(config=None),
+        previously_enabled=True,
+    )
+    assert catalog_sync_required_for_update(
+        LLMProviderIntegrationUpdateInput(
+            secrets=ChatGPTOAuthSecrets(
+                access_token="updated-access-token",
+                refresh_token="updated-refresh-token",
+                expires_at=datetime.datetime(2030, 1, 1, tzinfo=datetime.UTC),
+            )
+        ),
+        previously_enabled=True,
+    )
+    assert catalog_sync_required_for_update(
+        LLMProviderIntegrationUpdateInput(enabled=True),
+        previously_enabled=False,
+    )
+
+
+def test_catalog_sync_not_required_for_non_affecting_update() -> None:
+    assert not catalog_sync_required_for_update(
+        LLMProviderIntegrationUpdateInput(name="Renamed"),
+        previously_enabled=True,
+    )
+    assert not catalog_sync_required_for_update(
+        LLMProviderIntegrationUpdateInput(enabled=False),
+        previously_enabled=True,
+    )
+    assert not catalog_sync_required_for_update(
+        LLMProviderIntegrationUpdateInput(enabled=True),
+        previously_enabled=True,
+    )
 
 
 async def test_create_chatgpt_oauth_creates_integration_catalog(

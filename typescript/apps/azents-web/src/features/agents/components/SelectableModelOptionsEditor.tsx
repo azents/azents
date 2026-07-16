@@ -62,7 +62,7 @@ export interface SelectableModelOptionsEditorProps {
   providerOptions: ProviderIntegrationOption[];
   canEdit: boolean;
   showValidationErrors?: boolean;
-  onSyncCatalog: (integrationId: string) => void;
+  onSyncCatalog: (integrationId: string) => Promise<void>;
   onChangeOptions: (options: SelectableModelOptionFormValue[]) => void;
   onChangeMainModelLabel: (label: string | null) => void;
   onChangeLightweightModelLabel: (label: string | null) => void;
