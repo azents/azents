@@ -32,7 +32,7 @@ export interface WorkspaceModelSettingsCardProps {
   canManage: boolean;
   submitting: boolean;
   error: string | null;
-  onSyncCatalog: (integrationId: string) => void;
+  onSyncCatalog: (integrationId: string) => Promise<void>;
   onSubmit: (values: WorkspaceModelSettingsFormValues) => void;
 }
 

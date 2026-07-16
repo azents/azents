@@ -44,9 +44,13 @@ export interface ModelCatalogAttemptState {
 
 export interface ModelCatalogState {
   catalogId: string;
+  catalogScope: "system" | "integration";
   currentSnapshotId: string | null;
   currentSnapshotCreatedAt: string | null;
   latestAttempt: ModelCatalogAttemptState | null;
+  stale: boolean;
+  syncAvailableAt: string | null;
+  automaticRetryBlocked: boolean;
   total: number;
   loaded: number;
 }

@@ -16,6 +16,13 @@ from azents.core.enums import (
     LLMProvider,
 )
 from azents.core.llm_catalog import INTEGRATION_SCOPED_CATALOG_PROVIDERS
+from azents.core.llm_catalog_sync import (
+    CatalogSyncAttemptState,
+    IntegrationCatalogSyncPolicyDecision,
+    IntegrationCatalogSyncPolicyInput,
+    IntegrationCatalogSyncTrigger,
+    evaluate_integration_catalog_sync_policy,
+)
 from azents.rdb.models.llm_catalog import (
     RDBLiteLLMSourceSnapshot,
     RDBLLMCatalog,
@@ -24,6 +31,7 @@ from azents.rdb.models.llm_catalog import (
     RDBLLMCatalogSyncAttempt,
 )
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
+from azents.rdb.models.workspace import RDBWorkspace
 
 from .data import (
     CatalogSyncAlreadyRunning,
@@ -68,6 +76,11 @@ class LLMCatalogRepository:
     ) -> str | CatalogSyncAlreadyRunning:
         """Create a running sync attempt and mark it latest for a catalog."""
         if catalog_id is not None:
+            await session.execute(
+                sa.select(RDBLLMCatalog.id)
+                .where(RDBLLMCatalog.id == catalog_id)
+                .with_for_update()
+            )
             existing = await self.get_latest_attempt_by_catalog_id(
                 session,
                 catalog_id=catalog_id,
@@ -102,6 +115,102 @@ class LLMCatalogRepository:
             )
         await session.flush()
         return attempt_id
+
+    async def begin_integration_attempt(
+        self,
+        session: AsyncSession,
+        *,
+        catalog_id: str,
+        workspace_id: str,
+        source_key: str,
+        started_at: datetime.datetime,
+        trigger: IntegrationCatalogSyncTrigger,
+    ) -> str | IntegrationCatalogSyncPolicyDecision:
+        """Atomically apply sync policy and create an integration attempt."""
+        workspace_lock = await session.execute(
+            sa.select(RDBWorkspace.id)
+            .where(RDBWorkspace.id == workspace_id)
+            .with_for_update()
+        )
+        if workspace_lock.scalar_one_or_none() is None:
+            raise RuntimeError("Integration catalog workspace was not found.")
+        catalog_result = await session.execute(
+            sa.select(RDBLLMCatalog)
+            .where(RDBLLMCatalog.id == catalog_id)
+            .with_for_update()
+        )
+        catalog_rdb = catalog_result.scalar_one()
+        catalog = self._build_catalog(catalog_rdb)
+        latest_catalog_attempt = await self.get_latest_attempt(
+            session,
+            catalog=catalog,
+        )
+        latest_workspace_attempt = await (
+            self.get_latest_integration_attempt_for_workspace
+        )(
+            session,
+            workspace_id=workspace_id,
+        )
+        current_snapshot_created_at = await self.get_current_snapshot_created_at(
+            session,
+            catalog=catalog,
+        )
+        decision = evaluate_integration_catalog_sync_policy(
+            IntegrationCatalogSyncPolicyInput(
+                trigger=trigger,
+                now=started_at,
+                current_snapshot_created_at=current_snapshot_created_at,
+                latest_catalog_attempt=self._policy_attempt(latest_catalog_attempt),
+                latest_workspace_attempt=self._policy_attempt(latest_workspace_attempt),
+            )
+        )
+        if not decision.allowed:
+            return decision
+        if decision.expired_running_attempt_id is not None:
+            await self.mark_attempt_failed(
+                session,
+                attempt_id=decision.expired_running_attempt_id,
+                finished_at=started_at,
+                failure_code="CatalogSyncRunningTimeout",
+                failure_message="The previous catalog sync exceeded its running lease.",
+                action_hint="The stale attempt was recovered automatically.",
+                diagnostics={
+                    "failure_category": "sync_lease_timeout",
+                    "automatic_retry_blocked": False,
+                },
+            )
+        attempt_id = uuid7().hex
+        session.add(
+            RDBLLMCatalogSyncAttempt(
+                id=attempt_id,
+                catalog_id=catalog_id,
+                source_key=source_key,
+                status=LLMCatalogAttemptStatus.RUNNING,
+                started_at=started_at,
+                fetched_count=0,
+                matched_count=0,
+                skipped_count=0,
+                hidden_count=0,
+                diagnostics={"trigger": trigger.value},
+            )
+        )
+        catalog_rdb.latest_attempt_id = attempt_id
+        await session.flush()
+        return attempt_id
+
+    async def lock_catalog_for_attempt_completion(
+        self,
+        session: AsyncSession,
+        *,
+        catalog_id: str,
+    ) -> str | None:
+        """Lock a catalog and return the attempt currently allowed to publish."""
+        result = await session.execute(
+            sa.select(RDBLLMCatalog.latest_attempt_id)
+            .where(RDBLLMCatalog.id == catalog_id)
+            .with_for_update()
+        )
+        return result.scalar_one()
 
     async def mark_attempt_succeeded(
         self,
@@ -428,6 +537,48 @@ class LLMCatalogRepository:
             return None
         return self._build_attempt(rdb)
 
+    async def get_latest_integration_attempt_for_workspace(
+        self,
+        session: AsyncSession,
+        *,
+        workspace_id: str,
+    ) -> LLMCatalogSyncAttempt | None:
+        """Fetch the latest integration catalog attempt in a workspace."""
+        result = await session.execute(
+            sa.select(RDBLLMCatalogSyncAttempt)
+            .join(
+                RDBLLMCatalog,
+                RDBLLMCatalog.id == RDBLLMCatalogSyncAttempt.catalog_id,
+            )
+            .join(
+                RDBLLMProviderIntegration,
+                RDBLLMProviderIntegration.id == RDBLLMCatalog.provider_integration_id,
+            )
+            .where(RDBLLMProviderIntegration.workspace_id == workspace_id)
+            .order_by(RDBLLMCatalogSyncAttempt.started_at.desc())
+            .limit(1)
+        )
+        rdb = result.scalar_one_or_none()
+        if rdb is None:
+            return None
+        return self._build_attempt(rdb)
+
+    async def get_current_snapshot_created_at(
+        self,
+        session: AsyncSession,
+        *,
+        catalog: LLMCatalog,
+    ) -> datetime.datetime | None:
+        """Fetch the creation time of the current catalog snapshot."""
+        if catalog.current_snapshot_id is None:
+            return None
+        result = await session.execute(
+            sa.select(RDBLLMCatalogSnapshot.created_at).where(
+                RDBLLMCatalogSnapshot.id == catalog.current_snapshot_id
+            )
+        )
+        return result.scalar_one_or_none()
+
     async def get_selectable_entry_by_integration_model(
         self,
         session: AsyncSession,
@@ -527,6 +678,23 @@ class LLMCatalogRepository:
         if rdb is None:
             return None
         return self._build_catalog(rdb)
+
+    def _policy_attempt(
+        self,
+        attempt: LLMCatalogSyncAttempt | None,
+    ) -> CatalogSyncAttemptState | None:
+        if attempt is None:
+            return None
+        diagnostics = attempt.diagnostics or {}
+        return CatalogSyncAttemptState(
+            id=attempt.id,
+            status=attempt.status,
+            started_at=attempt.started_at,
+            finished_at=attempt.finished_at,
+            automatic_retry_blocked=(
+                diagnostics.get("automatic_retry_blocked") is True
+            ),
+        )
 
     def _build_catalog(self, rdb: RDBLLMCatalog) -> LLMCatalog:
         return LLMCatalog(

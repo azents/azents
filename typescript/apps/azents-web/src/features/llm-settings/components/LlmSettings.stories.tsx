@@ -57,7 +57,7 @@ const meta = {
     onUpdate: () => {},
     onDelete: () => {},
     onToggleEnabled: () => {},
-    onSyncCatalog: () => {},
+    onSyncCatalog: () => Promise.resolve(),
     onUpdateWorkspaceModelSettings: () => {},
   },
 } satisfies Meta<typeof LlmSettings>;

@@ -162,6 +162,7 @@ azentspublicclient/docs/JoinRequestListResponse.md
 azentspublicclient/docs/JoinRequestResponse.md
 azentspublicclient/docs/JoinRequestStatus.md
 azentspublicclient/docs/JoinRequestV1Api.md
+azentspublicclient/docs/LLMCatalogScope.md
 azentspublicclient/docs/LLMModelDeveloper.md
 azentspublicclient/docs/LLMProvider.md
 azentspublicclient/docs/LLMProviderCapabilityListResponse.md
@@ -442,6 +443,7 @@ azentspublicclient/models/join_request_list_response.py
 azentspublicclient/models/join_request_response.py
 azentspublicclient/models/join_request_status.py
 azentspublicclient/models/live_event_list_response.py
+azentspublicclient/models/llm_catalog_scope.py
 azentspublicclient/models/llm_model_developer.py
 azentspublicclient/models/llm_provider.py
 azentspublicclient/models/llm_provider_capability_list_response.py
@@ -720,6 +722,7 @@ azentspublicclient/test/test_join_request_response.py
 azentspublicclient/test/test_join_request_status.py
 azentspublicclient/test/test_join_request_v1_api.py
 azentspublicclient/test/test_live_event_list_response.py
+azentspublicclient/test/test_llm_catalog_scope.py
 azentspublicclient/test/test_llm_model_developer.py
 azentspublicclient/test/test_llm_provider.py
 azentspublicclient/test/test_llm_provider_capability_list_response.py

@@ -4,6 +4,9 @@ import datetime
 
 import httpx
 import pytest
+from botocore.exceptions import ClientError, EndpointConnectionError, InvalidRegionError
+from google.auth.exceptions import TransportError as GoogleTransportError
+from pydantic import TypeAdapter, ValidationError
 
 from azents.core.chatgpt_oauth import (
     CHATGPT_OAUTH_BACKEND_BASE_URL,
@@ -38,6 +41,73 @@ def _chatgpt_integration() -> LLMProviderIntegrationWithSecrets:
             refresh_token="refresh-token",
             expires_at=now + datetime.timedelta(hours=1),
         ),
+    )
+
+
+@pytest.mark.parametrize(
+    ("code", "status_code", "blocked"),
+    [
+        ("AccessDeniedException", 403, True),
+        ("UnrecognizedClientException", 401, True),
+        ("ThrottlingException", 400, False),
+        ("InternalServerException", 500, False),
+    ],
+)
+def test_aws_failure_classification(
+    code: str,
+    status_code: int,
+    blocked: bool,
+) -> None:
+    error = ClientError(
+        {
+            "Error": {"Code": code, "Message": "failure"},
+            "ResponseMetadata": {
+                "RequestId": "request-id",
+                "HostId": "host-id",
+                "HTTPStatusCode": status_code,
+                "HTTPHeaders": {},
+                "RetryAttempts": 0,
+            },
+        },
+        "ListFoundationModels",
+    )
+
+    assert providers.automatic_retry_blocked_for_listing_error(error) is blocked
+
+
+def test_aws_transport_and_configuration_failure_classification() -> None:
+    transport_error = EndpointConnectionError(endpoint_url="https://bedrock.example")
+    configuration_error = InvalidRegionError(region_name="invalid region")
+
+    assert not providers.automatic_retry_blocked_for_listing_error(transport_error)
+    assert providers.automatic_retry_blocked_for_listing_error(configuration_error)
+
+
+@pytest.mark.parametrize(
+    ("status_code", "blocked"),
+    [(401, True), (403, True), (429, False), (500, False)],
+)
+def test_http_failure_classification(status_code: int, blocked: bool) -> None:
+    request = httpx.Request("GET", "https://provider.example/models")
+    response = httpx.Response(status_code, request=request)
+    error = httpx.HTTPStatusError("failure", request=request, response=response)
+
+    assert providers.automatic_retry_blocked_for_listing_error(error) is blocked
+
+
+def test_google_auth_transport_failure_remains_retryable() -> None:
+    error = GoogleTransportError("temporary token endpoint outage")
+
+    assert not providers.automatic_retry_blocked_for_listing_error(error)
+
+
+def test_invalid_provider_response_remains_retryable() -> None:
+    with pytest.raises(ValidationError) as caught:
+        TypeAdapter(dict[str, object]).validate_python(["not", "an", "object"])
+
+    assert not providers.automatic_retry_blocked_for_listing_error(caught.value)
+    assert not providers.automatic_retry_blocked_for_listing_error(
+        providers.InvalidProviderResponseError("missing models")
     )
 
 

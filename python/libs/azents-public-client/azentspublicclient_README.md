@@ -360,6 +360,7 @@ Class | Method | HTTP request | Description
  - [JoinRequestListResponse](azentspublicclient/docs/JoinRequestListResponse.md)
  - [JoinRequestResponse](azentspublicclient/docs/JoinRequestResponse.md)
  - [JoinRequestStatus](azentspublicclient/docs/JoinRequestStatus.md)
+ - [LLMCatalogScope](azentspublicclient/docs/LLMCatalogScope.md)
  - [LLMModelDeveloper](azentspublicclient/docs/LLMModelDeveloper.md)
  - [LLMProvider](azentspublicclient/docs/LLMProvider.md)
  - [LLMProviderCapabilityListResponse](azentspublicclient/docs/LLMProviderCapabilityListResponse.md)

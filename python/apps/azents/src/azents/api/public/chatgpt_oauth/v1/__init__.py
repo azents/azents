@@ -9,6 +9,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
 from azents.core.auth.deps import WorkspaceMember, get_workspace_member
 from azents.core.auth.permissions import Permissions
+from azents.core.llm_catalog_sync import IntegrationCatalogSyncTrigger
 from azents.services.chatgpt_oauth import ChatGPTOAuthService
 from azents.services.chatgpt_oauth.data import (
     InvalidSession,
@@ -128,6 +129,7 @@ async def _run_initial_catalog_sync(
         await service.sync_integration_catalog(
             integration_id=integration_id,
             workspace_id=workspace_id,
+            trigger=IntegrationCatalogSyncTrigger.CREATE,
         )
     except Exception:
         logger.exception(

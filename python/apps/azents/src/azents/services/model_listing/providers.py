@@ -10,10 +10,24 @@ from datetime import datetime, timezone
 import boto3
 import google.auth.transport.requests
 import httpx
-from botocore.exceptions import BotoCoreError, ClientError
-from google.auth.exceptions import GoogleAuthError
+from botocore.exceptions import (
+    BotoCoreError,
+    ClientError,
+    HTTPClientError,
+    NoCredentialsError,
+    PartialCredentialsError,
+)
+from botocore.exceptions import (
+    ConnectionError as BotoConnectionError,
+)
+from google.auth.exceptions import (
+    GoogleAuthError,
+)
+from google.auth.exceptions import (
+    TransportError as GoogleTransportError,
+)
 from google.oauth2 import service_account
-from pydantic import TypeAdapter
+from pydantic import TypeAdapter, ValidationError
 
 from azents.core.chatgpt_oauth import (
     CHATGPT_OAUTH_BACKEND_BASE_URL,
@@ -62,7 +76,15 @@ _VERTEX_MODEL_ADAPTER = TypeAdapter[dict[str, object]](dict[str, object])
 
 
 class ListingProviderError(Exception):
-    """Provider listing adapter failure."""
+    """Provider listing adapter failure with automatic retry policy."""
+
+    def __init__(self, message: str, *, automatic_retry_blocked: bool) -> None:
+        super().__init__(message)
+        self.automatic_retry_blocked = automatic_retry_blocked
+
+
+class InvalidProviderResponseError(ValueError):
+    """Provider returned a response that cannot be projected."""
 
 
 async def list_bedrock_models_for_integration(
@@ -72,7 +94,10 @@ async def list_bedrock_models_for_integration(
     try:
         return await _list_bedrock_models(integration)
     except (BotoCoreError, ClientError, ValueError) as exc:
-        raise ListingProviderError("AWS Bedrock model listing failed.") from exc
+        raise ListingProviderError(
+            "AWS Bedrock model listing failed.",
+            automatic_retry_blocked=automatic_retry_blocked_for_listing_error(exc),
+        ) from exc
 
 
 async def list_vertex_models_for_integration(
@@ -82,7 +107,10 @@ async def list_vertex_models_for_integration(
     try:
         return await _list_vertex_models(integration)
     except (GoogleAuthError, httpx.HTTPError, json.JSONDecodeError, ValueError) as exc:
-        raise ListingProviderError("Google Vertex AI model listing failed.") from exc
+        raise ListingProviderError(
+            "Google Vertex AI model listing failed.",
+            automatic_retry_blocked=automatic_retry_blocked_for_listing_error(exc),
+        ) from exc
 
 
 async def list_chatgpt_models_for_integration(
@@ -92,7 +120,51 @@ async def list_chatgpt_models_for_integration(
     try:
         return await _list_chatgpt_models(integration)
     except (httpx.HTTPError, json.JSONDecodeError, ValueError) as exc:
-        raise ListingProviderError("ChatGPT model listing failed.") from exc
+        raise ListingProviderError(
+            "ChatGPT model listing failed.",
+            automatic_retry_blocked=automatic_retry_blocked_for_listing_error(exc),
+        ) from exc
+
+
+def automatic_retry_blocked_for_listing_error(exc: Exception) -> bool:
+    """Return whether a provider failure requires user configuration changes."""
+    if isinstance(exc, (NoCredentialsError, PartialCredentialsError)):
+        return True
+    if isinstance(exc, GoogleTransportError):
+        return False
+    if isinstance(exc, ClientError):
+        response = exc.response
+        error = response.get("Error", {})
+        code = str(error.get("Code", ""))
+        metadata = response.get("ResponseMetadata", {})
+        status_code = metadata.get("HTTPStatusCode")
+        return code not in {
+            "InternalFailure",
+            "InternalServerException",
+            "RequestLimitExceeded",
+            "ServiceUnavailable",
+            "Throttling",
+            "ThrottlingException",
+            "TooManyRequestsException",
+        } and not (isinstance(status_code, int) and status_code >= 500)
+    if isinstance(exc, httpx.HTTPStatusError):
+        status_code = exc.response.status_code
+        return status_code not in {408, 409, 425, 429} and status_code < 500
+    if isinstance(exc, (BotoConnectionError, HTTPClientError)):
+        return False
+    if isinstance(
+        exc,
+        (
+            httpx.TransportError,
+            json.JSONDecodeError,
+            ValidationError,
+            InvalidProviderResponseError,
+        ),
+    ):
+        return False
+    if isinstance(exc, (GoogleAuthError, BotoCoreError)):
+        return True
+    return isinstance(exc, ValueError)
 
 
 async def _list_bedrock_models(
@@ -218,7 +290,9 @@ async def _list_chatgpt_models(
         payload = response.json()
     raw_models = payload.get("models") if isinstance(payload, dict) else None
     if not isinstance(raw_models, list):
-        raise ValueError("ChatGPT model listing response must contain models.")
+        raise InvalidProviderResponseError(
+            "ChatGPT model listing response must contain models."
+        )
     models: list[NormalizedModelCandidate] = []
     skipped = 0
     for raw_model in raw_models:

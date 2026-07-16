@@ -4,6 +4,7 @@ Workspace-scoped LLM provider integration CRUD endpoints.
 """
 
 import logging
+from email.utils import format_datetime
 from textwrap import dedent
 from typing import Annotated, assert_never
 
@@ -13,14 +14,19 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from azents.core.auth.deps import WorkspaceMember, get_workspace_member
 from azents.core.auth.permissions import Permissions
 from azents.core.credentials import PROVIDER_SECRET_TYPES
-from azents.core.enums import LLMProvider
+from azents.core.enums import LLMCatalogScope, LLMProvider
 from azents.core.llm_catalog import INTEGRATION_SCOPED_CATALOG_PROVIDERS
+from azents.core.llm_catalog_sync import IntegrationCatalogSyncTrigger
 from azents.repos.llm_catalog.data import CatalogNotFound
 from azents.repos.llm_provider_integration.data import NotFound
 from azents.services.llm_catalog import (
+    IntegrationCatalogAutomaticRetryBlocked,
     IntegrationCatalogProjectionService,
     IntegrationCatalogSyncAlreadyRunning,
     IntegrationCatalogSyncNotFound,
+    IntegrationCatalogSyncNotStale,
+    IntegrationCatalogSyncSuperseded,
+    IntegrationCatalogSyncThrottled,
     IntegrationCatalogSyncUnsupportedProvider,
     ModelCatalogReadService,
 )
@@ -128,13 +134,15 @@ async def create_integration(
         enabled=request_body.enabled,
     )
     integration = await service.create(create_input)
-    _enqueue_initial_catalog_sync(
+    enqueue_initial_catalog_sync(
         background_tasks,
         service=catalog_sync_service,
         integration_id=integration.id,
         workspace_id=member.workspace_id,
         provider=integration.provider,
         name=integration.name,
+        enabled=integration.enabled,
+        trigger=IntegrationCatalogSyncTrigger.CREATE,
     )
     return LLMProviderIntegrationResponse.convert_from(integration)
 
@@ -200,6 +208,8 @@ async def get_integration(
 async def list_integration_catalog_entries(
     member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
     service: Annotated[ModelCatalogReadService, Depends()],
+    catalog_sync_service: Annotated[IntegrationCatalogProjectionService, Depends()],
+    background_tasks: BackgroundTasks,
     *,
     integration_id: str,
     search: str | None = None,
@@ -236,6 +246,14 @@ async def list_integration_catalog_entries(
     )
     match result:
         case Success(value):
+            enqueue_stale_catalog_sync(
+                background_tasks,
+                service=catalog_sync_service,
+                integration_id=integration_id,
+                workspace_id=member.workspace_id,
+                catalog_scope=value.catalog_scope,
+                stale=value.stale,
+            )
             return ModelCatalogEntryListResponse.convert_from(value)
         case Failure(error):
             match error:
@@ -294,6 +312,28 @@ async def sync_integration_catalog(
                         status_code=status.HTTP_409_CONFLICT,
                         detail="Integration catalog sync is already running.",
                     )
+                case IntegrationCatalogSyncSuperseded():
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=(
+                            "Integration catalog sync was superseded by a newer "
+                            "attempt."
+                        ),
+                    )
+                case IntegrationCatalogSyncThrottled(retry_at=retry_at):
+                    raise HTTPException(
+                        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                        detail=(
+                            "Integration catalog sync is throttled until "
+                            f"{retry_at.isoformat()}."
+                        ),
+                        headers={"Retry-After": format_datetime(retry_at, usegmt=True)},
+                    )
+                case (
+                    IntegrationCatalogAutomaticRetryBlocked()
+                    | IntegrationCatalogSyncNotStale()
+                ):
+                    raise RuntimeError("Explicit catalog sync was denied unexpectedly.")
                 case _:
                     assert_never(error)
         case _:
@@ -325,15 +365,18 @@ async def update_integration(
     )
     match result:
         case Success(value):
-            _enqueue_initial_catalog_sync(
-                background_tasks,
-                service=catalog_sync_service,
-                integration_id=value.id,
-                workspace_id=member.workspace_id,
-                provider=value.provider,
-                name=value.name,
-            )
-            return LLMProviderIntegrationResponse.convert_from(value)
+            if value.catalog_sync_required:
+                enqueue_initial_catalog_sync(
+                    background_tasks,
+                    service=catalog_sync_service,
+                    integration_id=value.integration.id,
+                    workspace_id=member.workspace_id,
+                    provider=value.integration.provider,
+                    name=value.integration.name,
+                    enabled=value.integration.enabled,
+                    trigger=IntegrationCatalogSyncTrigger.CONFIG_UPDATE,
+                )
+            return LLMProviderIntegrationResponse.convert_from(value.integration)
         case Failure(error):
             match error:
                 case NotFound() | NotBelongToWorkspace():
@@ -386,7 +429,28 @@ async def delete_integration(
             assert_never(result)
 
 
-def _enqueue_initial_catalog_sync(
+def enqueue_stale_catalog_sync(
+    background_tasks: BackgroundTasks,
+    *,
+    service: IntegrationCatalogProjectionService,
+    integration_id: str,
+    workspace_id: str,
+    catalog_scope: LLMCatalogScope,
+    stale: bool,
+) -> None:
+    """Queue lazy refresh after returning a stale stored projection."""
+    if catalog_scope != LLMCatalogScope.INTEGRATION or not stale:
+        return
+    background_tasks.add_task(
+        _run_catalog_sync,
+        service=service,
+        integration_id=integration_id,
+        workspace_id=workspace_id,
+        trigger=IntegrationCatalogSyncTrigger.STALE_REFRESH,
+    )
+
+
+def enqueue_initial_catalog_sync(
     background_tasks: BackgroundTasks,
     *,
     service: IntegrationCatalogProjectionService,
@@ -394,32 +458,40 @@ def _enqueue_initial_catalog_sync(
     workspace_id: str,
     provider: LLMProvider,
     name: str,
+    enabled: bool,
+    trigger: IntegrationCatalogSyncTrigger,
 ) -> None:
-    """Queue best-effort initial sync for providers with user-scoped catalogs."""
-    deterministic_variant = parse_deterministic_fixture_variant(name)
-    if deterministic_variant is not None:
+    """Queue best-effort sync after an integration lifecycle change."""
+    if not enabled:
         return
-    if provider not in INTEGRATION_SCOPED_CATALOG_PROVIDERS:
+    deterministic_variant = parse_deterministic_fixture_variant(name)
+    if (
+        deterministic_variant is None
+        and provider not in INTEGRATION_SCOPED_CATALOG_PROVIDERS
+    ):
         return
     background_tasks.add_task(
-        _run_initial_catalog_sync,
+        _run_catalog_sync,
         service=service,
         integration_id=integration_id,
         workspace_id=workspace_id,
+        trigger=trigger,
     )
 
 
-async def _run_initial_catalog_sync(
+async def _run_catalog_sync(
     *,
     service: IntegrationCatalogProjectionService,
     integration_id: str,
     workspace_id: str,
+    trigger: IntegrationCatalogSyncTrigger,
 ) -> None:
-    """Run initial catalog sync without affecting create/update responses."""
+    """Run best-effort catalog sync without affecting the initiating response."""
     try:
         await service.sync_integration_catalog(
             integration_id=integration_id,
             workspace_id=workspace_id,
+            trigger=trigger,
         )
     except Exception:
         logger.exception(

@@ -25,6 +25,7 @@ from .data import (
     LLMProviderIntegrationListOutput,
     LLMProviderIntegrationOutput,
     LLMProviderIntegrationUpdateInput,
+    LLMProviderIntegrationUpdateOutput,
     NotBelongToWorkspace,
 )
 
@@ -34,6 +35,19 @@ def _get_repo(
 ) -> LLMProviderIntegrationRepository:
     """LLMProviderIntegrationRepository dependency."""
     return LLMProviderIntegrationRepository(cipher=cipher)
+
+
+def catalog_sync_required_for_update(
+    update: LLMProviderIntegrationUpdateInput,
+    *,
+    previously_enabled: bool,
+) -> bool:
+    """Return whether an update changed catalog-affecting integration state."""
+    return (
+        "secrets" in update
+        or "config" in update
+        or (update.get("enabled") is True and not previously_enabled)
+    )
 
 
 @dataclasses.dataclass
@@ -97,7 +111,7 @@ class LLMProviderIntegrationService:
         update: LLMProviderIntegrationUpdateInput,
         *,
         workspace_id: str,
-    ) -> Result[LLMProviderIntegrationOutput, NotFound | NotBelongToWorkspace]:
+    ) -> Result[LLMProviderIntegrationUpdateOutput, NotFound | NotBelongToWorkspace]:
         """Update LLM Provider Integration by ID."""
         async with self.session_manager() as session:
             existing = await self.repository.get_by_id(session, integration_id)
@@ -105,6 +119,10 @@ class LLMProviderIntegrationService:
             return Failure(NotFound(integration_id=integration_id))
         if existing.workspace_id != workspace_id:
             return Failure(NotBelongToWorkspace(integration_id=integration_id))
+        catalog_sync_required = catalog_sync_required_for_update(
+            update,
+            previously_enabled=existing.enabled,
+        )
 
         async with self.session_manager() as session:
             result = await self.repository.update_by_id(session, integration_id, update)
@@ -124,7 +142,12 @@ class LLMProviderIntegrationService:
 
         match result:
             case Success(value):
-                return Success(LLMProviderIntegrationOutput.convert_from(value))
+                return Success(
+                    LLMProviderIntegrationUpdateOutput(
+                        integration=LLMProviderIntegrationOutput.convert_from(value),
+                        catalog_sync_required=catalog_sync_required,
+                    )
+                )
             case Failure(error):
                 return Failure(error)
             case _:

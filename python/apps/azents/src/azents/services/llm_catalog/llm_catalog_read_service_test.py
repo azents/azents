@@ -22,7 +22,7 @@ from azents.services.llm_catalog import ModelCatalogReadService
 
 
 class _SessionManager:
-    """테스트용 async session manager."""
+    """Async session manager used by tests."""
 
     async def __aenter__(self) -> object:
         return object()
@@ -35,7 +35,7 @@ class _SessionManager:
 
 
 class _CatalogRepository:
-    """테스트용 catalog repository."""
+    """Catalog repository used by tests."""
 
     def __init__(self, page: LLMCatalogEntryList) -> None:
         self.page = page
@@ -52,10 +52,18 @@ class _CatalogRepository:
     ) -> LLMCatalogEntryList:
         return self.page
 
+    async def get_latest_integration_attempt_for_workspace(
+        self,
+        _session: object,
+        *,
+        workspace_id: str,
+    ) -> LLMCatalogSyncAttempt | None:
+        return None
+
 
 @pytest.mark.asyncio
 async def test_read_service_returns_latest_failed_attempt_without_snapshot() -> None:
-    """현재 snapshot이 없어도 latest 실패 attempt를 domain state로 반환한다."""
+    """Return the latest failed attempt even when no snapshot exists."""
     now = datetime.datetime.now(datetime.UTC)
     page = LLMCatalogEntryList(
         catalog=LLMCatalog(

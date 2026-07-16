@@ -17,6 +17,11 @@ from azents.core.enums import (
     LLMProvider,
 )
 from azents.core.llm_catalog import ModelCapabilities
+from azents.core.llm_catalog_sync import (
+    IntegrationCatalogSyncDenialReason,
+    IntegrationCatalogSyncPolicyDecision,
+    IntegrationCatalogSyncTrigger,
+)
 from azents.rdb.models.llm_catalog import RDBLLMCatalogEntry, RDBLLMCatalogSnapshot
 from azents.repos.llm_catalog import LLMCatalogRepository
 from azents.repos.llm_catalog.data import LLMCatalogEntryCreate
@@ -224,3 +229,109 @@ async def test_chatgpt_integration_never_falls_back_to_system_catalog(
     )
 
     assert result is None
+
+
+async def test_integration_attempt_claim_enforces_running_and_cooldown(
+    rdb_session: AsyncSession,
+) -> None:
+    """Integration attempt claims serialize starts and enforce cooldown."""
+    workspace_repository = WorkspaceRepository()
+    workspace_result = await workspace_repository.create(
+        rdb_session,
+        WorkspaceCreate(
+            name="Catalog policy workspace",
+            handle="catalog-policy-workspace",
+        ),
+    )
+    assert isinstance(workspace_result, Success)
+    workspace_id = await workspace_repository.resolve_id(
+        rdb_session, "catalog-policy-workspace"
+    )
+    assert workspace_id is not None
+    integration = await LLMProviderIntegrationRepository(
+        CredentialCipher(Fernet.generate_key().decode())
+    ).create(
+        rdb_session,
+        LLMProviderIntegrationCreate(
+            workspace_id=workspace_id,
+            provider=LLMProvider.CHATGPT_OAUTH,
+            name="Catalog policy ChatGPT integration",
+            secrets=ChatGPTOAuthSecrets(
+                access_token="access-token",
+                refresh_token="refresh-token",
+                expires_at=datetime.datetime(2030, 1, 1, tzinfo=datetime.UTC),
+            ),
+            config=ChatGPTOAuthConfig(
+                connection_method="callback",
+                status="connected",
+            ),
+        ),
+    )
+    repository = LLMCatalogRepository()
+    catalog = await repository.ensure_integration_catalog(
+        rdb_session,
+        integration_id=integration.id,
+        provider=integration.provider,
+        lowerer_target=LLMCatalogLowererTarget.LITELLM,
+    )
+    now = datetime.datetime(2026, 7, 16, 12, 0, tzinfo=datetime.UTC)
+
+    first = await repository.begin_integration_attempt(
+        rdb_session,
+        catalog_id=catalog.id,
+        workspace_id=workspace_id,
+        source_key="litellm_model_cost",
+        started_at=now,
+        trigger=IntegrationCatalogSyncTrigger.CREATE,
+    )
+    assert isinstance(first, str)
+
+    duplicate = await repository.begin_integration_attempt(
+        rdb_session,
+        catalog_id=catalog.id,
+        workspace_id=workspace_id,
+        source_key="litellm_model_cost",
+        started_at=now + datetime.timedelta(seconds=1),
+        trigger=IntegrationCatalogSyncTrigger.CONFIG_UPDATE,
+    )
+    assert isinstance(duplicate, IntegrationCatalogSyncPolicyDecision)
+    assert duplicate.denial_reason == IntegrationCatalogSyncDenialReason.ALREADY_RUNNING
+    assert duplicate.blocking_attempt_id == first
+
+    await repository.mark_attempt_succeeded(
+        rdb_session,
+        attempt_id=first,
+        finished_at=now + datetime.timedelta(seconds=2),
+        produced_snapshot_id=None,
+        fetched_count=0,
+        matched_count=0,
+        skipped_count=0,
+        hidden_count=0,
+        diagnostics={"trigger": IntegrationCatalogSyncTrigger.CREATE.value},
+    )
+    throttled = await repository.begin_integration_attempt(
+        rdb_session,
+        catalog_id=catalog.id,
+        workspace_id=workspace_id,
+        source_key="litellm_model_cost",
+        started_at=now + datetime.timedelta(seconds=10),
+        trigger=IntegrationCatalogSyncTrigger.EXPLICIT,
+    )
+    assert isinstance(throttled, IntegrationCatalogSyncPolicyDecision)
+    assert throttled.denial_reason == IntegrationCatalogSyncDenialReason.THROTTLED
+
+    after_cooldown = await repository.begin_integration_attempt(
+        rdb_session,
+        catalog_id=catalog.id,
+        workspace_id=workspace_id,
+        source_key="litellm_model_cost",
+        started_at=now + datetime.timedelta(seconds=31),
+        trigger=IntegrationCatalogSyncTrigger.EXPLICIT,
+    )
+    assert isinstance(after_cooldown, str)
+    current_attempt_id = await repository.lock_catalog_for_attempt_completion(
+        rdb_session,
+        catalog_id=catalog.id,
+    )
+    assert current_attempt_id == after_cooldown
+    assert current_attempt_id != first

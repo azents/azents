@@ -1,7 +1,5 @@
 """Workspace model selection readiness E2E test."""
 
-import time
-
 import azentsadminclient
 import azentspublicclient
 import requests
@@ -65,32 +63,147 @@ def _headers(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-def _sync_catalog(
+def _wait_for_initial_catalog_sync(
     server_url: str,
     token: str,
     handle: str,
     integration_id: str,
-) -> None:
-    """Sync stored catalog for deterministic integration."""
-    last_response: requests.Response | None = None
-    for _ in range(3):
-        response = requests.post(
+) -> requests.Response:
+    """Wait for the create-triggered deterministic catalog sync to finish."""
+
+    def terminal_attempt() -> requests.Response | None:
+        response = requests.get(
             f"{server_url}/llm-provider-integration/v1/workspaces/"
-            f"{handle}/llm-provider-integrations/{integration_id}/catalog-sync",
+            f"{handle}/llm-provider-integrations/{integration_id}/catalog-entries",
             headers=_headers(token),
             timeout=10,
         )
-        last_response = response
-        if response.status_code < 500:
-            break
-        time.sleep(0.2)
-    if last_response is None or last_response.status_code >= 400:
-        message = "" if last_response is None else last_response.text
-        raise AssertionError(f"Catalog sync failed: {message}")
+        if response.status_code != 200:
+            return None
+        latest_attempt = response.json().get("latest_attempt")
+        if latest_attempt is None:
+            return None
+        if latest_attempt.get("status") not in {"succeeded", "failed"}:
+            return None
+        return response
+
+    response = wait_until(
+        terminal_attempt,
+        timeout=10,
+        interval=0.2,
+        message="Create-triggered catalog sync did not finish",
+    )
+    if response is None:
+        raise AssertionError("Catalog sync wait returned no response.")
+    return response
 
 
 class TestModelSelectionReadiness:
     """Model selection API readiness t."""
+
+    def test_explicit_sync_is_throttled_after_initial_sync(
+        self,
+        public_api_client: azentspublicclient.ApiClient,
+        admin_api_client: azentsadminclient.ApiClient,
+        azents_public_server_url: str,
+    ) -> None:
+        """A recent initial sync throttles repeated explicit provider work."""
+        token, handle, integration_id = _workspace_with_deterministic_integration(
+            public_api_client,
+            admin_api_client,
+            variant="deterministic-success",
+        )
+        _wait_for_initial_catalog_sync(
+            azents_public_server_url,
+            token,
+            handle,
+            integration_id,
+        )
+
+        response = requests.post(
+            f"{azents_public_server_url}/llm-provider-integration/v1/workspaces/"
+            f"{handle}/llm-provider-integrations/{integration_id}/catalog-sync",
+            headers=_headers(token),
+            timeout=10,
+        )
+
+        assert response.status_code == 429
+        assert response.headers.get("Retry-After")
+
+    def test_only_catalog_affecting_update_triggers_initial_sync(
+        self,
+        public_api_client: azentspublicclient.ApiClient,
+        admin_api_client: azentsadminclient.ApiClient,
+        azents_public_server_url: str,
+    ) -> None:
+        """Name-only updates do not sync, while credential updates do."""
+        token, handle, integration_id = _workspace_with_deterministic_integration(
+            public_api_client,
+            admin_api_client,
+            variant="deterministic-success",
+        )
+        initial = _wait_for_initial_catalog_sync(
+            azents_public_server_url,
+            token,
+            handle,
+            integration_id,
+        ).json()
+        initial_attempt_id = initial["latest_attempt"]["id"]
+        integration_url = (
+            f"{azents_public_server_url}/llm-provider-integration/v1/workspaces/"
+            f"{handle}/llm-provider-integrations/{integration_id}"
+        )
+        catalog_url = f"{integration_url}/catalog-entries"
+
+        renamed = requests.patch(
+            integration_url,
+            headers=_headers(token),
+            json={"name": "__testenv_model_listing:deterministic-success"},
+            timeout=10,
+        )
+        renamed.raise_for_status()
+        after_rename = requests.get(
+            catalog_url,
+            headers=_headers(token),
+            timeout=10,
+        )
+        after_rename.raise_for_status()
+        assert after_rename.json()["latest_attempt"]["id"] == initial_attempt_id
+
+        updated = requests.patch(
+            integration_url,
+            headers=_headers(token),
+            json={
+                "secrets": {
+                    "type": "api_key",
+                    "api_key": "sk-updated-test-key",
+                }
+            },
+            timeout=10,
+        )
+        updated.raise_for_status()
+
+        def refreshed_attempt() -> requests.Response | None:
+            response = requests.get(
+                catalog_url,
+                headers=_headers(token),
+                timeout=10,
+            )
+            if response.status_code != 200:
+                return None
+            attempt = response.json().get("latest_attempt")
+            if attempt is None or attempt.get("id") == initial_attempt_id:
+                return None
+            if attempt.get("status") != "succeeded":
+                return None
+            return response
+
+        wait_until(
+            refreshed_attempt,
+            timeout=10,
+            interval=0.2,
+            message="Credential update did not trigger catalog sync",
+        )
 
     def test_deterministic_listing_exposes_candidates_and_skips(
         self,
@@ -104,7 +217,9 @@ class TestModelSelectionReadiness:
             admin_api_client,
             variant="deterministic-success",
         )
-        _sync_catalog(azents_public_server_url, token, handle, integration_id)
+        _wait_for_initial_catalog_sync(
+            azents_public_server_url, token, handle, integration_id
+        )
 
         response = wait_until(
             lambda: requests.get(
@@ -139,7 +254,9 @@ class TestModelSelectionReadiness:
             admin_api_client,
             variant="deterministic-failure",
         )
-        _sync_catalog(azents_public_server_url, token, handle, integration_id)
+        _wait_for_initial_catalog_sync(
+            azents_public_server_url, token, handle, integration_id
+        )
 
         response = requests.get(
             f"{azents_public_server_url}/llm-provider-integration/v1/workspaces/"
@@ -167,7 +284,9 @@ class TestModelSelectionReadiness:
             admin_api_client,
             variant="deterministic-success",
         )
-        _sync_catalog(azents_public_server_url, token, handle, integration_id)
+        _wait_for_initial_catalog_sync(
+            azents_public_server_url, token, handle, integration_id
+        )
         listing = wait_until(
             lambda: requests.get(
                 f"{azents_public_server_url}/llm-provider-integration/v1/workspaces/"
@@ -221,7 +340,9 @@ class TestModelSelectionReadiness:
             admin_api_client,
             variant="deterministic-model-settings",
         )
-        _sync_catalog(azents_public_server_url, token, handle, integration_id)
+        _wait_for_initial_catalog_sync(
+            azents_public_server_url, token, handle, integration_id
+        )
         listing = wait_until(
             lambda: requests.get(
                 f"{azents_public_server_url}/llm-provider-integration/v1/workspaces/"

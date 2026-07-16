@@ -12791,6 +12791,15 @@
         "title": "JoinRequestStatus",
         "description": "Workspace join request status."
       },
+      "LLMCatalogScope": {
+        "type": "string",
+        "enum": [
+          "system",
+          "integration"
+        ],
+        "title": "LLMCatalogScope",
+        "description": "LLM catalog ownership scope."
+      },
       "LLMModelDeveloper": {
         "type": "string",
         "enum": [
@@ -13532,6 +13541,9 @@
             "type": "string",
             "title": "Catalog Id"
           },
+          "catalog_scope": {
+            "$ref": "#/components/schemas/LLMCatalogScope"
+          },
           "current_snapshot_id": {
             "anyOf": [
               {
@@ -13565,6 +13577,26 @@
               }
             ]
           },
+          "stale": {
+            "type": "boolean",
+            "title": "Stale"
+          },
+          "sync_available_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sync Available At"
+          },
+          "automatic_retry_blocked": {
+            "type": "boolean",
+            "title": "Automatic Retry Blocked"
+          },
           "entries": {
             "items": {
               "$ref": "#/components/schemas/ModelCatalogEntryResponse"
@@ -13588,9 +13620,13 @@
         "type": "object",
         "required": [
           "catalog_id",
+          "catalog_scope",
           "current_snapshot_id",
           "current_snapshot_created_at",
           "latest_attempt",
+          "stale",
+          "sync_available_at",
+          "automatic_retry_blocked",
           "entries",
           "total",
           "limit",

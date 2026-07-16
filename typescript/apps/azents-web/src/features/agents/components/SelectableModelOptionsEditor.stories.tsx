@@ -89,7 +89,7 @@ function SelectableModelOptionsEditorHarness(): React.ReactElement {
       lightweightModelLabel={lightweightLabel}
       providerOptions={providerOptions}
       canEdit
-      onSyncCatalog={() => {}}
+      onSyncCatalog={() => Promise.resolve()}
       onChangeOptions={setCurrentOptions}
       onChangeMainModelLabel={setMainLabel}
       onChangeLightweightModelLabel={setLightweightLabel}
@@ -116,7 +116,7 @@ const meta = {
     lightweightModelLabel: "lightweight",
     providerOptions,
     canEdit: true,
-    onSyncCatalog: () => {},
+    onSyncCatalog: () => Promise.resolve(),
     onChangeOptions: () => {},
     onChangeMainModelLabel: () => {},
     onChangeLightweightModelLabel: () => {},

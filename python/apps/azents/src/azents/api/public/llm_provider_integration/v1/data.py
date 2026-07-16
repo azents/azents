@@ -12,7 +12,7 @@ from azents.core.credentials import (
     ProviderConfig,
     ProviderSecrets,
 )
-from azents.core.enums import LLMProvider
+from azents.core.enums import LLMCatalogScope, LLMProvider
 from azents.core.llm_catalog import ModelCapabilities
 from azents.repos.llm_provider_integration.data import LLMProviderIntegration
 from azents.services.llm_catalog import (
@@ -92,9 +92,13 @@ class ModelCatalogEntryListResponse(BaseModel):
     """Stored model catalog entry list response."""
 
     catalog_id: str
+    catalog_scope: LLMCatalogScope
     current_snapshot_id: str | None
     current_snapshot_created_at: datetime.datetime | None
     latest_attempt: ModelCatalogSyncAttemptResponse | None
+    stale: bool
+    sync_available_at: datetime.datetime | None
+    automatic_retry_blocked: bool
     entries: list[ModelCatalogEntryResponse]
     total: int
     limit: int
@@ -108,6 +112,7 @@ class ModelCatalogEntryListResponse(BaseModel):
         """Convert service output to response model."""
         return cls(
             catalog_id=data.catalog_id,
+            catalog_scope=data.catalog_scope,
             current_snapshot_id=data.current_snapshot_id,
             current_snapshot_created_at=data.current_snapshot_created_at,
             latest_attempt=(
@@ -115,6 +120,9 @@ class ModelCatalogEntryListResponse(BaseModel):
                 if data.latest_attempt is not None
                 else None
             ),
+            stale=data.stale,
+            sync_available_at=data.sync_available_at,
+            automatic_retry_blocked=data.automatic_retry_blocked,
             entries=[ModelCatalogEntryResponse.convert_from(e) for e in data.entries],
             total=data.total,
             limit=data.limit,

@@ -6,6 +6,7 @@ spec_type: domain
 domain: model-catalog
 code_paths:
   - python/apps/azents/src/azents/core/llm_catalog.py
+  - python/apps/azents/src/azents/core/llm_catalog_sync.py
   - python/apps/azents/src/azents/services/llm_catalog/__init__.py
   - python/apps/azents/src/azents/services/llm_provider_integration/__init__.py
   - python/apps/azents/src/azents/services/chatgpt_oauth/__init__.py
@@ -23,7 +24,7 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
   - typescript/apps/azents-admin-web/src/features/model-catalog/containers/useModelCatalogPageContainer.ts
 last_verified_at: 2026-07-16
-spec_version: 9
+spec_version: 10
 ---
 
 # Model Catalog Domain Spec
@@ -77,10 +78,11 @@ Each catalog sync records an attempt with status, counts, failure metadata, acti
 
 The public catalog entry list endpoint returns the stored catalog entries for one integration. It supports search, limit, and offset. The response includes:
 
-- catalog id
+- catalog id and ownership scope
 - nullable current snapshot id
 - nullable current snapshot creation time
 - latest sync attempt, including failure metadata when no successful snapshot exists
+- stale state, earliest explicit sync time, and automatic-retry-blocked state
 - paged entries
 - total count
 - limit and offset
@@ -89,17 +91,32 @@ A catalog with no current snapshot still returns a successful status-aware respo
 
 Selectable entries are ordered by a stored or derived freshness rank before display name and model identifier tie breakers so newer model generations appear first.
 
-The read path must not call provider listing APIs, models.dev, or remote LiteLLM source fetch. Those operations belong to sync paths.
+The read path must not call provider listing APIs, models.dev, or remote LiteLLM source fetch. It returns the stored response first. When an integration-scoped projection is stale, the route queues a best-effort background refresh whose synchronization policy rechecks eligibility before provider work begins.
 
 ## Sync API
 
 The integration catalog sync endpoint refreshes the stored catalog for one integration.
 
-For AWS Bedrock and Google Vertex AI, sync fetches the provider-visible model list and projects it against the stored LiteLLM source snapshot. For ChatGPT OAuth, sync refreshes the OAuth token when necessary, calls the account-scoped Codex model endpoint with the fixed compatibility client version, and projects backend-visible models directly. Provider credential and permission failures are recorded as sync failure state instead of surfacing as unhandled server errors. User catalog failure diagnostics include a retry policy marker: automatic user-catalog retry is blocked, and retry occurs only through explicit user sync or integration create/update. Successful ChatGPT OAuth connection also queues an initial best-effort catalog sync.
+For AWS Bedrock and Google Vertex AI, sync fetches the provider-visible model list and projects it against the stored LiteLLM source snapshot. For ChatGPT OAuth, sync refreshes the OAuth token when necessary, calls the account-scoped Codex model endpoint with the fixed compatibility client version, and projects backend-visible models directly.
 
-Starting sync while the latest attempt for the catalog is still running returns a conflict instead of creating a duplicate running attempt.
+Integration catalog synchronization has four triggers:
 
-The deterministic E2E fixture integration can sync a deterministic test catalog for stable product tests. This fixture support is not a production provider behavior.
+- enabled integration creation or successful OAuth connection;
+- credential/configuration update or re-enable;
+- explicit user sync;
+- stale lazy refresh while the integration catalog is actively viewed.
+
+Name-only updates and disable operations do not trigger synchronization. Create/configuration-change triggers bypass cooldown and failure backoff because they represent new provider state, but they do not replace an active attempt. Explicit sync bypasses the credential-failure automatic block while respecting cooldown and transient backoff. Stale refresh respects all policy guards.
+
+Explicit and stale requests use a 30-second integration cooldown and a 5-second workspace cooldown. Retryable provider failures use a 5-minute backoff. A snapshot becomes stale after 15 minutes. A running attempt older than 15 minutes is marked failed and recovered by the next eligible request.
+
+Attempt claim locks the workspace and catalog rows before it evaluates policy and creates the running attempt. This makes duplicate-running and workspace/integration throttle decisions atomic. Attempt completion locks the catalog again and publishes only when the completing attempt is still the catalog's latest attempt, fencing work that was superseded after running-lease recovery. A current running attempt or superseded completion returns conflict; a cooldown or backoff denial returns HTTP 429 with `Retry-After` for explicit requests.
+
+Provider credential, configuration, and permission failures are recorded with `automatic_retry_blocked=true` instead of surfacing as unhandled server errors. Transport, rate-limit, provider 5xx, and invalid-provider-response failures remain eligible for automatic retry after backoff. Unexpected service failures mark the attempt failed before propagating.
+
+The picker disables sync while its mutation is pending, while an attempt is running, and until the server-provided sync availability time. It polls eligible stale/running integration state and stops automatic polling when a credential/configuration failure blocks retry.
+
+The deterministic E2E fixture integration participates in create/update background triggers so stable product tests can verify the lifecycle without live provider credentials. This fixture support is not a production provider behavior.
 
 System catalog sync is not user-triggered from the public picker. It is invoked by periodic execution infrastructure and can be operated separately from normal user reads. Admin model catalog operations can list system catalog states, refresh all supported system catalogs, or refresh one supported provider catalog, including the stable `xai` catalog. Every Admin model-catalog operation requires an authenticated Azents user bearer token with a live persisted `system_admin` assignment; no shared machine credential or unauthenticated mode is supported.
 
@@ -127,6 +144,7 @@ For user-scoped integration catalogs, the picker can trigger integration sync. F
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-07-16 | 10 | Completed create, configuration-update, explicit, and stale-refresh synchronization policy with atomic throttling, backoff, and picker status behavior |
 | 2026-07-16 | 9 | Scoped selectable settings to catalog-resolved options and limited advertised built-in tools to implemented contracts |
 | 2026-07-16 | 8 | Projected `web_search` for every selectable ChatGPT OAuth model under the Codex provider capability policy |
 | 2026-07-14 | 7 | Removed the ChatGPT OAuth system catalog and made integration catalogs authoritative from integration creation |

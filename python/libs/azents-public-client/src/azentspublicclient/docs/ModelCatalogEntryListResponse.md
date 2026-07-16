@@ -7,9 +7,13 @@ Stored model catalog entry list response.
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **catalog_id** | **str** |  | 
+**catalog_scope** | [**LLMCatalogScope**](LLMCatalogScope.md) |  | 
 **current_snapshot_id** | **str** |  | 
 **current_snapshot_created_at** | **datetime** |  | 
 **latest_attempt** | [**ModelCatalogSyncAttemptResponse**](ModelCatalogSyncAttemptResponse.md) |  | 
+**stale** | **bool** |  | 
+**sync_available_at** | **datetime** |  | 
+**automatic_retry_blocked** | **bool** |  | 
 **entries** | [**List[ModelCatalogEntryResponse]**](ModelCatalogEntryResponse.md) |  | 
 **total** | **int** |  | 
 **limit** | **int** |  | 

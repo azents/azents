@@ -178,6 +178,7 @@ __all__ = [
     "JoinRequestListResponse",
     "JoinRequestResponse",
     "JoinRequestStatus",
+    "LLMCatalogScope",
     "LLMModelDeveloper",
     "LLMProvider",
     "LLMProviderCapabilityListResponse",
@@ -479,6 +480,7 @@ from azentspublicclient.models.invitation_status import InvitationStatus as Invi
 from azentspublicclient.models.join_request_list_response import JoinRequestListResponse as JoinRequestListResponse
 from azentspublicclient.models.join_request_response import JoinRequestResponse as JoinRequestResponse
 from azentspublicclient.models.join_request_status import JoinRequestStatus as JoinRequestStatus
+from azentspublicclient.models.llm_catalog_scope import LLMCatalogScope as LLMCatalogScope
 from azentspublicclient.models.llm_model_developer import LLMModelDeveloper as LLMModelDeveloper
 from azentspublicclient.models.llm_provider import LLMProvider as LLMProvider
 from azentspublicclient.models.llm_provider_capability_list_response import LLMProviderCapabilityListResponse as LLMProviderCapabilityListResponse
