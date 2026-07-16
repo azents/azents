@@ -282,7 +282,7 @@ class TestModelSelectionReadiness:
         assert settings["default_selectable_model_options"][0]["settings"] == {
             "context_window_tokens": 100_000,
             "max_output_tokens": 12_000,
-            "builtin_tools": [{"name": "web_search"}],
+            "builtin_tools": [{"name": "web_search", "config": {}}],
         }
         assert settings["default_selectable_model_options"][1]["settings"] == {
             "context_window_tokens": 32_000,
@@ -311,7 +311,7 @@ class TestModelSelectionReadiness:
             {
                 "context_window_tokens": 100_000,
                 "max_output_tokens": 12_000,
-                "builtin_tools": [{"name": "web_search"}],
+                "builtin_tools": [{"name": "web_search", "config": {}}],
             },
             {
                 "context_window_tokens": 32_000,
