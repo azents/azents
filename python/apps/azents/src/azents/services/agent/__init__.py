@@ -18,12 +18,6 @@ from azents.core.agent import (
     ModelParameters,
     SelectableModelOptionInput,
 )
-from azents.core.builtin_tools import (
-    BuiltinToolCapabilities,
-    BuiltinToolModelCapabilities,
-    BuiltinToolValidationContext,
-    validate_builtin_tools,
-)
 from azents.core.config import Config
 from azents.core.deps import get_config
 from azents.core.enums import AgentType, WorkspaceUserRole
@@ -40,7 +34,6 @@ from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent, AgentCreate, AgentUpdate, NotFound
 from azents.repos.agent_admin import AgentAdminRepository
 from azents.repos.agent_admin.data import AgentAdminCreate
-from azents.repos.toolkit import AgentToolkitRepository
 from azents.repos.workspace_model_settings import WorkspaceModelSettingsRepository
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.services.llm_catalog import ModelCatalogReadService
@@ -71,7 +64,6 @@ from .data import (
     AgentUpdateInput,
     AvatarUploadRejected,
     AvatarUploadTicketOutput,
-    BuiltinToolValidationFailed,
     DuplicateAdmin,
     InvalidModelParameters,
     InvalidSelectableModelOptions,
@@ -83,44 +75,6 @@ from .data import (
     PrivateAgentAccessDenied,
     WorkspaceUserNotFound,
 )
-
-
-@dataclasses.dataclass
-class _SelectionBuiltinToolCapabilities:
-    """Capability view required for builtin tool validation."""
-
-    supported: list[str]
-
-
-@dataclasses.dataclass
-class _SelectionBuiltinToolModelCapabilities:
-    """Model capability view required for builtin tool validation."""
-
-    built_in_tools: BuiltinToolCapabilities
-
-
-@dataclasses.dataclass
-class _SelectionBuiltinToolProviderModel:
-    """Provider model view required by builtin tool validation."""
-
-    model_identifier: str
-    capabilities: BuiltinToolModelCapabilities
-
-
-def _builtin_tool_provider_model_from_selection(
-    selection: AgentModelSelection,
-) -> _SelectionBuiltinToolProviderModel:
-    """Convert model selection snapshot to view for builtin tool validation."""
-    return _SelectionBuiltinToolProviderModel(
-        model_identifier=selection.model_identifier,
-        capabilities=_SelectionBuiltinToolModelCapabilities(
-            built_in_tools=_SelectionBuiltinToolCapabilities(
-                supported=list(
-                    selection.normalized_capabilities.built_in_tools.supported
-                )
-            )
-        ),
-    )
 
 
 def _get_avatar_handler() -> AvatarUploadHandler:
@@ -162,9 +116,6 @@ class AgentService:
     workspace_user_repository: Annotated[
         WorkspaceUserRepository, Depends(WorkspaceUserRepository)
     ]
-    agent_toolkit_repository: Annotated[
-        AgentToolkitRepository, Depends(AgentToolkitRepository)
-    ]
     upload_service: Annotated[UploadService, Depends(get_upload_service)]
     avatar_handler: Annotated[AvatarUploadHandler, Depends(_get_avatar_handler)]
     s3_service: Annotated[S3Service, Depends(get_s3_service)]
@@ -177,19 +128,6 @@ class AgentService:
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
     ]
-
-    def _has_effective_reasoning(
-        self,
-        selection: AgentModelSelection,
-        params: ModelParameters,
-    ) -> bool:
-        """Return whether reasoning applies according to model capability contract."""
-        if params.reasoning_effort is None:
-            return False
-        reasoning = selection.normalized_capabilities.reasoning
-        if not reasoning.supported:
-            return False
-        return params.reasoning_effort in reasoning.effort_levels
 
     def _parse_model_parameters(
         self,
@@ -392,8 +330,7 @@ class AgentService:
         ModelRequired
         | ModelSelectionNotFound
         | InvalidSelectableModelOptions
-        | InvalidModelParameters
-        | BuiltinToolValidationFailed,
+        | InvalidModelParameters,
     ]:
         """Create Agent and add creator as first admin."""
         selections_result = await self._resolve_create_model_options(create)
@@ -409,31 +346,12 @@ class AgentService:
 
         params_result = self._parse_model_parameters(create.model_parameters)
         match params_result:
-            case Success(value):
-                effective_model_parameters = value
+            case Success():
+                pass
             case Failure(error):
                 return Failure(error)
             case _:
                 assert_never(params_result)
-
-        if effective_model_parameters and effective_model_parameters.builtin_tools:
-            bt_errors = validate_builtin_tools(
-                effective_model_parameters.builtin_tools,
-                BuiltinToolValidationContext(
-                    shell_enabled=create.shell_enabled,
-                    has_toolkits=False,
-                    provider_model=_builtin_tool_provider_model_from_selection(
-                        main_selection
-                    ),
-                    model_developer=main_selection.model_developer,
-                    reasoning_enabled=self._has_effective_reasoning(
-                        main_selection,
-                        effective_model_parameters,
-                    ),
-                ),
-            )
-            if bt_errors:
-                return Failure(BuiltinToolValidationFailed(errors=bt_errors))
 
         repo_create = AgentCreate(
             workspace_id=create.workspace_id,
@@ -533,8 +451,7 @@ class AgentService:
         | ModelRequired
         | ModelSelectionNotFound
         | InvalidSelectableModelOptions
-        | InvalidModelParameters
-        | BuiltinToolValidationFailed,
+        | InvalidModelParameters,
     ]:
         """Update Agent by ID."""
         async with self.session_manager() as session:
@@ -649,43 +566,18 @@ class AgentService:
         repo_update["selectable_model_options"] = model_options.selectable_model_options
         repo_update["main_model_label"] = model_options.main_model_label
         repo_update["lightweight_model_label"] = model_options.lightweight_model_label
-        main_selection = model_options.model_selection
 
         model_parameters = update.get("model_parameters", existing.model_parameters)
         params_result = self._parse_model_parameters(model_parameters)
         match params_result:
-            case Success(value):
-                effective_model_parameters = value
+            case Success():
+                pass
             case Failure(error):
                 return Failure(error)
             case _:
                 assert_never(params_result)
         if "model_parameters" in update:
             repo_update["model_parameters"] = update["model_parameters"]
-
-        if effective_model_parameters and effective_model_parameters.builtin_tools:
-            new_shell_enabled = update.get("shell_enabled", existing.shell_enabled)
-            async with self.session_manager() as session:
-                agent_toolkits = await self.agent_toolkit_repository.list_by_agent(
-                    session, agent_id
-                )
-            bt_errors = validate_builtin_tools(
-                effective_model_parameters.builtin_tools,
-                BuiltinToolValidationContext(
-                    shell_enabled=new_shell_enabled,
-                    has_toolkits=len(agent_toolkits) > 0,
-                    provider_model=_builtin_tool_provider_model_from_selection(
-                        main_selection
-                    ),
-                    model_developer=main_selection.model_developer,
-                    reasoning_enabled=self._has_effective_reasoning(
-                        main_selection,
-                        effective_model_parameters,
-                    ),
-                ),
-            )
-            if bt_errors:
-                return Failure(BuiltinToolValidationFailed(errors=bt_errors))
 
         for key in (
             "system_prompt",
@@ -1034,28 +926,37 @@ class AgentService:
         agent: Agent,
     ) -> EffectiveContextWindow | None:
         """Calculate effective context window using same criteria as Runtime."""
+        option_by_label = {
+            option.label: option for option in agent.selectable_model_options
+        }
+        main_option = option_by_label.get(agent.main_model_label)
+        lightweight_option = option_by_label.get(agent.lightweight_model_label)
+        if main_option is None or lightweight_option is None:
+            return None
+
         main_max_input_tokens = get_max_input_tokens(
-            agent.model_selection.normalized_capabilities.context_window.max_input_tokens,
+            main_option.model_selection.normalized_capabilities.context_window.max_input_tokens,
             to_runtime_model(
-                agent.model_selection.provider,
-                agent.model_selection.model_identifier,
+                main_option.model_selection.provider,
+                main_option.model_selection.model_identifier,
             ),
         )
         compaction_max_input_tokens = get_max_input_tokens(
-            agent.lightweight_model_selection.normalized_capabilities.context_window.max_input_tokens,
+            lightweight_option.model_selection.normalized_capabilities.context_window.max_input_tokens,
             to_runtime_model(
-                agent.lightweight_model_selection.provider,
-                agent.lightweight_model_selection.model_identifier,
+                lightweight_option.model_selection.provider,
+                lightweight_option.model_selection.model_identifier,
             ),
         )
+        if lightweight_option.settings.context_window_tokens is not None:
+            compaction_max_input_tokens = min(
+                compaction_max_input_tokens,
+                lightweight_option.settings.context_window_tokens,
+            )
         return compute_effective_context_window_tokens(
             main_max_input_tokens=main_max_input_tokens,
             compaction_max_input_tokens=compaction_max_input_tokens,
-            context_window_tokens=(
-                agent.model_parameters.context_window_tokens
-                if agent.model_parameters is not None
-                else None
-            ),
+            context_window_tokens=main_option.settings.context_window_tokens,
         )
 
     async def _resolve_avatar(self, stored: StoredImage | None) -> UploadedImage | None:

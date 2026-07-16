@@ -12,9 +12,25 @@ from azents.core.agent import (
     AgentModelSelection,
     SelectableModelOption,
     SelectableModelOptionInput,
+    SelectableModelSettings,
+    SelectableModelSettingsInput,
+    default_selectable_model_settings,
 )
+from azents.core.builtin_tools import (
+    BuiltinToolValidationContext,
+    validate_builtin_tools,
+)
+from azents.core.llm_catalog import ModelCapabilities
 
 TError = TypeVar("TError")
+
+
+@dataclasses.dataclass(frozen=True)
+class _SelectionProviderModel:
+    """Resolved model view used by built-in tool validation."""
+
+    model_identifier: str
+    capabilities: ModelCapabilities
 
 
 @dataclasses.dataclass(frozen=True)
@@ -43,6 +59,47 @@ def _select_label(
     if normalized_label is not None and normalized_label in labels:
         return normalized_label
     return options[0].label
+
+
+def _normalize_selectable_model_settings(
+    *,
+    settings_input: SelectableModelSettingsInput | None,
+    selection: AgentModelSelection,
+) -> Result[SelectableModelSettings, list[str]]:
+    """Normalize and validate settings against one resolved model snapshot."""
+    if settings_input is None:
+        return Success(default_selectable_model_settings(selection))
+
+    builtin_tools = settings_input.builtin_tools
+    if builtin_tools is None:
+        builtin_tools = default_selectable_model_settings(selection).builtin_tools
+
+    errors: list[str] = []
+    names = [tool.name for tool in builtin_tools]
+    if len(names) != len(set(names)):
+        errors.append("Built-in tool names must be unique.")
+
+    validation_errors = validate_builtin_tools(
+        builtin_tools,
+        BuiltinToolValidationContext(
+            provider_model=_SelectionProviderModel(
+                model_identifier=selection.model_identifier,
+                capabilities=selection.normalized_capabilities,
+            )
+        ),
+    )
+    for tool_errors in validation_errors.values():
+        errors.extend(tool_errors)
+    if errors:
+        return Failure(errors)
+
+    return Success(
+        SelectableModelSettings(
+            context_window_tokens=settings_input.context_window_tokens,
+            max_output_tokens=settings_input.max_output_tokens,
+            builtin_tools=list(builtin_tools),
+        )
+    )
 
 
 def normalize_stored_selectable_model_options(
@@ -86,6 +143,7 @@ def build_legacy_selectable_model_options(
             SelectableModelOption(
                 label=main_label,
                 model_selection=model_selection,
+                settings=default_selectable_model_settings(model_selection),
             )
         ]
         effective_lightweight_label = main_label
@@ -94,10 +152,12 @@ def build_legacy_selectable_model_options(
             SelectableModelOption(
                 label=main_label,
                 model_selection=model_selection,
+                settings=default_selectable_model_settings(model_selection),
             ),
             SelectableModelOption(
                 label=lightweight_label,
                 model_selection=lightweight_model_selection,
+                settings=default_selectable_model_settings(lightweight_model_selection),
             ),
         ]
         effective_lightweight_label = lightweight_label
@@ -119,7 +179,7 @@ async def normalize_selectable_model_options(
         [SelectableModelOptionInput], Awaitable[Result[AgentModelSelection, TError]]
     ],
 ) -> Result[NormalizedSelectableModelOptions, list[str] | TError]:
-    """Validate option labels and resolve model snapshots."""
+    """Validate option labels and resolve model snapshots and settings."""
     errors: list[str] = []
     if len(option_inputs) == 0:
         errors.append("At least one selectable model is required.")
@@ -149,12 +209,32 @@ async def normalize_selectable_model_options(
     for label, option_input in normalized_inputs:
         result = await resolve_model_selection(option_input)
         match result:
-            case Success(value):
-                options.append(
-                    SelectableModelOption(label=label, model_selection=value)
+            case Success(selection):
+                settings_result = _normalize_selectable_model_settings(
+                    settings_input=option_input.settings,
+                    selection=selection,
                 )
+                match settings_result:
+                    case Success(settings):
+                        options.append(
+                            SelectableModelOption(
+                                label=label,
+                                model_selection=selection,
+                                settings=settings,
+                            )
+                        )
+                    case Failure(settings_errors):
+                        errors.extend(
+                            f"Selectable model '{label}': {error}"
+                            for error in settings_errors
+                        )
+                    case _:
+                        raise AssertionError("Unhandled settings result")
             case Failure(error):
                 return Failure(error)
+
+    if errors:
+        return Failure(errors)
 
     selected_labels = {option.label for option in options}
     effective_main_label = _select_label(selected_labels, options, main_model_label)

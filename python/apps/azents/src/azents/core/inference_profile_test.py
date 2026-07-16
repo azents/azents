@@ -13,6 +13,7 @@ from azents.core.inference_profile import (
     SessionInferenceState,
 )
 from azents.core.llm_catalog import ModelCapabilities, ModelReasoningEffort
+from azents.testing.model_selection import make_test_model_settings
 
 
 def _selection() -> AgentModelSelection:
@@ -100,6 +101,7 @@ def test_session_state_projects_only_applied_public_settings() -> None:
     state = SessionInferenceState(
         model_target_label="Quality",
         model_selection=_selection(),
+        model_settings=make_test_model_settings(),
         reasoning_effort=ModelReasoningEffort.HIGH,
         effective_context_window_tokens=100_000,
         effective_auto_compaction_threshold_tokens=80_000,

@@ -17,19 +17,22 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, Field, StrictStr
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Any, ClassVar, Dict, List, Optional
+from typing_extensions import Annotated
+from azentspublicclient.models.builtin_tool_config import BuiltinToolConfig
 from typing import Optional, Set
 from typing_extensions import Self
 
-class BuiltinToolConfig(BaseModel):
+class SelectableModelSettingsInput(BaseModel):
     """
-    Built-in tool setting enabled for one selectable model option.
+    Optional user settings submitted for one selectable model option.
     """ # noqa: E501
-    name: StrictStr = Field(description="Built-in tool name, for example web_search")
-    config: Optional[Dict[str, Any]] = Field(default=None, description="Per-tool options")
+    context_window_tokens: Optional[Annotated[int, Field(strict=True, ge=1)]] = None
+    max_output_tokens: Optional[Annotated[int, Field(strict=True, ge=1)]] = None
+    builtin_tools: Optional[List[BuiltinToolConfig]] = None
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["name", "config"]
+    __properties: ClassVar[List[str]] = ["context_window_tokens", "max_output_tokens", "builtin_tools"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -49,7 +52,7 @@ class BuiltinToolConfig(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of BuiltinToolConfig from a JSON string"""
+        """Create an instance of SelectableModelSettingsInput from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -72,16 +75,38 @@ class BuiltinToolConfig(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
+        # override the default output from pydantic by calling `to_dict()` of each item in builtin_tools (list)
+        _items = []
+        if self.builtin_tools:
+            for _item_builtin_tools in self.builtin_tools:
+                if _item_builtin_tools:
+                    _items.append(_item_builtin_tools.to_dict())
+            _dict['builtin_tools'] = _items
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
 
+        # set to None if context_window_tokens (nullable) is None
+        # and model_fields_set contains the field
+        if self.context_window_tokens is None and "context_window_tokens" in self.model_fields_set:
+            _dict['context_window_tokens'] = None
+
+        # set to None if max_output_tokens (nullable) is None
+        # and model_fields_set contains the field
+        if self.max_output_tokens is None and "max_output_tokens" in self.model_fields_set:
+            _dict['max_output_tokens'] = None
+
+        # set to None if builtin_tools (nullable) is None
+        # and model_fields_set contains the field
+        if self.builtin_tools is None and "builtin_tools" in self.model_fields_set:
+            _dict['builtin_tools'] = None
+
         return _dict
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of BuiltinToolConfig from a dict"""
+        """Create an instance of SelectableModelSettingsInput from a dict"""
         if obj is None:
             return None
 
@@ -89,8 +114,9 @@ class BuiltinToolConfig(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "name": obj.get("name"),
-            "config": obj.get("config")
+            "context_window_tokens": obj.get("context_window_tokens"),
+            "max_output_tokens": obj.get("max_output_tokens"),
+            "builtin_tools": [BuiltinToolConfig.from_dict(_item) for _item in obj["builtin_tools"]] if obj.get("builtin_tools") is not None else None
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

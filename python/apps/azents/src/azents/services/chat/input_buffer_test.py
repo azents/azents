@@ -53,6 +53,7 @@ from azents.services.input_buffer import InputBufferService
 from azents.testing.model_selection import (
     make_test_model_selection,
     make_test_model_selection_dict,
+    make_test_model_settings,
 )
 
 from . import ChatSessionService
@@ -311,6 +312,7 @@ class TestChatSessionInputBuffer:
                 inference_state=SessionInferenceState(
                     model_target_label="main",
                     model_selection=make_test_model_selection(),
+                    model_settings=make_test_model_settings(),
                     reasoning_effort=ModelReasoningEffort.HIGH,
                     effective_context_window_tokens=100_000,
                     effective_auto_compaction_threshold_tokens=80_000,

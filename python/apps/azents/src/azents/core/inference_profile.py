@@ -6,7 +6,7 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, WithJsonSchema
 
-from azents.core.agent import AgentModelSelection
+from azents.core.agent import AgentModelSelection, SelectableModelSettings
 from azents.core.llm_catalog import ModelReasoningEffort
 
 PublicReasoningEffort = Annotated[
@@ -74,6 +74,7 @@ class SessionInferenceState(BaseModel):
 
     model_target_label: str = Field(min_length=1)
     model_selection: AgentModelSelection
+    model_settings: SelectableModelSettings
     reasoning_effort: ModelReasoningEffort | None
     effective_context_window_tokens: int = Field(gt=0)
     effective_auto_compaction_threshold_tokens: int = Field(gt=0)

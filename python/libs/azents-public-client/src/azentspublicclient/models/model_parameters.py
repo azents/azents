@@ -20,7 +20,6 @@ import json
 from pydantic import BaseModel, ConfigDict, Field, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional, Union
 from typing_extensions import Annotated
-from azentspublicclient.models.builtin_tool_config import BuiltinToolConfig
 from azentspublicclient.models.model_reasoning_effort import ModelReasoningEffort
 from typing import Optional, Set
 from typing_extensions import Self
@@ -30,15 +29,12 @@ class ModelParameters(BaseModel):
     LLM model parameters.  Every field is optional; unset fields use model defaults.
     """ # noqa: E501
     temperature: Optional[Union[Annotated[float, Field(le=2.0, strict=True, ge=0.0)], Annotated[int, Field(le=2, strict=True, ge=0)]]] = None
-    context_window_tokens: Optional[Annotated[int, Field(strict=True, ge=1)]] = None
-    max_output_tokens: Optional[Annotated[int, Field(strict=True, ge=1)]] = None
     top_p: Optional[Union[Annotated[float, Field(le=1.0, strict=True, ge=0.0)], Annotated[int, Field(le=1, strict=True, ge=0)]]] = None
     top_k: Optional[Annotated[int, Field(strict=True, ge=1)]] = None
     stop_sequences: Optional[Annotated[List[StrictStr], Field(max_length=4)]] = None
     reasoning_effort: Optional[ModelReasoningEffort] = None
-    builtin_tools: Optional[List[BuiltinToolConfig]] = Field(default=None, description="Built-in tool list to enable")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["temperature", "context_window_tokens", "max_output_tokens", "top_p", "top_k", "stop_sequences", "reasoning_effort", "builtin_tools"]
+    __properties: ClassVar[List[str]] = ["temperature", "top_p", "top_k", "stop_sequences", "reasoning_effort"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -81,13 +77,6 @@ class ModelParameters(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
-        # override the default output from pydantic by calling `to_dict()` of each item in builtin_tools (list)
-        _items = []
-        if self.builtin_tools:
-            for _item_builtin_tools in self.builtin_tools:
-                if _item_builtin_tools:
-                    _items.append(_item_builtin_tools.to_dict())
-            _dict['builtin_tools'] = _items
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
@@ -97,16 +86,6 @@ class ModelParameters(BaseModel):
         # and model_fields_set contains the field
         if self.temperature is None and "temperature" in self.model_fields_set:
             _dict['temperature'] = None
-
-        # set to None if context_window_tokens (nullable) is None
-        # and model_fields_set contains the field
-        if self.context_window_tokens is None and "context_window_tokens" in self.model_fields_set:
-            _dict['context_window_tokens'] = None
-
-        # set to None if max_output_tokens (nullable) is None
-        # and model_fields_set contains the field
-        if self.max_output_tokens is None and "max_output_tokens" in self.model_fields_set:
-            _dict['max_output_tokens'] = None
 
         # set to None if top_p (nullable) is None
         # and model_fields_set contains the field
@@ -141,13 +120,10 @@ class ModelParameters(BaseModel):
 
         _obj = cls.model_validate({
             "temperature": obj.get("temperature"),
-            "context_window_tokens": obj.get("context_window_tokens"),
-            "max_output_tokens": obj.get("max_output_tokens"),
             "top_p": obj.get("top_p"),
             "top_k": obj.get("top_k"),
             "stop_sequences": obj.get("stop_sequences"),
-            "reasoning_effort": obj.get("reasoning_effort"),
-            "builtin_tools": [BuiltinToolConfig.from_dict(_item) for _item in obj["builtin_tools"]] if obj.get("builtin_tools") is not None else None
+            "reasoning_effort": obj.get("reasoning_effort")
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

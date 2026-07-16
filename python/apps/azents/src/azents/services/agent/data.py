@@ -284,13 +284,6 @@ class WorkspaceUserNotFound:
 
 
 @dataclasses.dataclass(frozen=True)
-class BuiltinToolValidationFailed:
-    """Built-in tool validation failed."""
-
-    errors: dict[str, list[str]]
-
-
-@dataclasses.dataclass(frozen=True)
 class AvatarUploadRejected:
     """Avatar upload violates handler constraints."""
 

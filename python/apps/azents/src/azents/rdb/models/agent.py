@@ -45,6 +45,11 @@ class RDBAgent(RDBModel):
                 {
                     "label": "default",
                     "model_selection": self.model_selection,
+                    "settings": {
+                        "context_window_tokens": None,
+                        "max_output_tokens": None,
+                        "builtin_tools": [],
+                    },
                 }
             ]
             if self.model_selection != self.lightweight_model_selection:
@@ -52,6 +57,11 @@ class RDBAgent(RDBModel):
                     {
                         "label": "lightweight",
                         "model_selection": self.lightweight_model_selection,
+                        "settings": {
+                            "context_window_tokens": None,
+                            "max_output_tokens": None,
+                            "builtin_tools": [],
+                        },
                     }
                 )
             self.selectable_model_options = options

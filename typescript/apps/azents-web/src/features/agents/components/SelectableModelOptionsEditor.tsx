@@ -290,6 +290,9 @@ export function SelectableModelOptionsEditor({
         model_display_name: null,
         model_identifier: null,
         normalized_capabilities: null,
+        context_window_tokens: null,
+        max_output_tokens: null,
+        builtin_tools: [],
       },
     ];
     handleChangeOptions(nextOptions);
@@ -367,6 +370,9 @@ export function SelectableModelOptionsEditor({
                 model_display_name: null,
                 model_identifier: null,
                 normalized_capabilities: null,
+                context_window_tokens: null,
+                max_output_tokens: null,
+                builtin_tools: [],
               })),
             );
           }}
@@ -381,6 +387,12 @@ export function SelectableModelOptionsEditor({
                 model_display_name: model.model_display_name,
                 model_identifier: model.model_identifier,
                 normalized_capabilities: model.normalized_capabilities,
+                context_window_tokens: null,
+                max_output_tokens: null,
+                builtin_tools: [
+                  ...(model.normalized_capabilities.built_in_tools?.supported ??
+                    []),
+                ],
               })),
             );
           }}

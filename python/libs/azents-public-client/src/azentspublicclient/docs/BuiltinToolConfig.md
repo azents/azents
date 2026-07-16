@@ -1,6 +1,6 @@
 # BuiltinToolConfig
 
-Built-in tool setting to enable on an Agent.
+Built-in tool setting enabled for one selectable model option.
 
 ## Properties
 

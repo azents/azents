@@ -16,7 +16,10 @@ from azents.core.agent import (
 )
 from azents.core.enums import AgentType
 from azents.repos.agent.data import Agent
-from azents.testing.model_selection import make_test_model_selection
+from azents.testing.model_selection import (
+    make_test_model_selection,
+    make_test_model_settings,
+)
 
 from . import AgentService
 from .data import AgentCreateInput, ModelRequired
@@ -38,6 +41,7 @@ def _make_agent(agent_id: str = "agent-1") -> Agent:
             SelectableModelOption(
                 label=DEFAULT_MAIN_MODEL_OPTION_LABEL,
                 model_selection=selection,
+                settings=make_test_model_settings(),
             )
         ],
         main_model_label=DEFAULT_MAIN_MODEL_OPTION_LABEL,
@@ -63,7 +67,6 @@ def _make_service() -> AgentService:
     workspace_model_settings_repository = AsyncMock()
     model_catalog_read_service = AsyncMock()
     workspace_user_repository = AsyncMock()
-    agent_toolkit_repository = AsyncMock()
     upload_service = AsyncMock()
     avatar_handler = AsyncMock()
     s3_service = AsyncMock()
@@ -78,7 +81,6 @@ def _make_service() -> AgentService:
         workspace_model_settings_repository=workspace_model_settings_repository,
         model_catalog_read_service=model_catalog_read_service,
         workspace_user_repository=workspace_user_repository,
-        agent_toolkit_repository=agent_toolkit_repository,
         upload_service=upload_service,
         avatar_handler=avatar_handler,
         s3_service=s3_service,

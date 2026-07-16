@@ -8,6 +8,7 @@ Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **label** | **str** | Selectable model label | 
 **model_selection** | [**AgentModelSelection**](AgentModelSelection.md) | Selectable model selection snapshot | 
+**settings** | [**SelectableModelSettings**](SelectableModelSettings.md) | Stored model-scoped settings | 
 
 ## Example
 

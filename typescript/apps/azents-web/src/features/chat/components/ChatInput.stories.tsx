@@ -9,6 +9,7 @@ import type {
   AgentModelSelection,
   AgentResponse,
   RequestedInferenceProfile,
+  SelectableModelSettings,
 } from "@azents/public-client";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
@@ -76,9 +77,27 @@ const noEffortModel: AgentModelSelection = {
   },
 };
 
+function settingsForModel(model: AgentModelSelection): SelectableModelSettings {
+  return {
+    context_window_tokens: null,
+    max_output_tokens: null,
+    builtin_tools: (
+      model.normalized_capabilities.built_in_tools?.supported ?? []
+    ).map((name) => ({ name })),
+  };
+}
+
 const selectableModelOptions: AgentResponse["selectable_model_options"] = [
-  { label: "Default", model_selection: reasoningModel },
-  { label: "Fast", model_selection: noEffortModel },
+  {
+    label: "Default",
+    model_selection: reasoningModel,
+    settings: settingsForModel(reasoningModel),
+  },
+  {
+    label: "Fast",
+    model_selection: noEffortModel,
+    settings: settingsForModel(noEffortModel),
+  },
 ];
 
 function draftStorageKey(sessionId: string): string {
@@ -308,6 +327,7 @@ export const LongModelLabel = {
       {
         label: "Production reasoning model with a deliberately long label",
         model_selection: reasoningModel,
+        settings: settingsForModel(reasoningModel),
       },
       ...selectableModelOptions,
     ],
@@ -486,7 +506,11 @@ export const EmptyEffortList = {
     ...baseArgs,
     sessionId: "story-session-empty-effort-list",
     selectableModelOptions: [
-      { label: "Default", model_selection: emptyEffortModel },
+      {
+        label: "Default",
+        model_selection: emptyEffortModel,
+        settings: settingsForModel(emptyEffortModel),
+      },
     ],
   },
   play: async ({ canvasElement }) => {
@@ -502,8 +526,16 @@ export const DesktopFullReasoningEffort = {
     ...baseArgs,
     sessionId: "story-session-desktop-full-reasoning",
     selectableModelOptions: [
-      { label: "Default", model_selection: fullReasoningModel },
-      { label: "Fast", model_selection: noEffortModel },
+      {
+        label: "Default",
+        model_selection: fullReasoningModel,
+        settings: settingsForModel(fullReasoningModel),
+      },
+      {
+        label: "Fast",
+        model_selection: noEffortModel,
+        settings: settingsForModel(noEffortModel),
+      },
     ],
   },
   play: async ({ canvasElement }) => {
@@ -557,8 +589,16 @@ export const MobileFullReasoningEffort = {
     sessionId: "story-session-mobile-full-reasoning",
     isMobile: true,
     selectableModelOptions: [
-      { label: "Default", model_selection: fullReasoningModel },
-      { label: "Fast", model_selection: noEffortModel },
+      {
+        label: "Default",
+        model_selection: fullReasoningModel,
+        settings: settingsForModel(fullReasoningModel),
+      },
+      {
+        label: "Fast",
+        model_selection: noEffortModel,
+        settings: settingsForModel(noEffortModel),
+      },
     ],
   },
   decorators: [

@@ -38,7 +38,10 @@ from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession, SessionAgent
 from azents.services.input_buffer import InputBufferEnqueue, InputBufferService
-from azents.testing.model_selection import make_test_model_selection
+from azents.testing.model_selection import (
+    make_test_model_selection,
+    make_test_model_settings,
+)
 
 from .subagent import (
     SpawnAgentInput,
@@ -118,7 +121,11 @@ def _agent() -> Agent:
         model_selection=selection,
         lightweight_model_selection=selection,
         selectable_model_options=[
-            SelectableModelOption(label="Quality", model_selection=selection)
+            SelectableModelOption(
+                label="Quality",
+                model_selection=selection,
+                settings=make_test_model_settings(),
+            )
         ],
         main_model_label="Quality",
         lightweight_model_label="Quality",
@@ -153,6 +160,7 @@ def _agent_session(
         inference_state=SessionInferenceState(
             model_target_label="Quality",
             model_selection=_agent().model_selection,
+            model_settings=make_test_model_settings(),
             reasoning_effort=ModelReasoningEffort.HIGH,
             effective_context_window_tokens=64_000,
             effective_auto_compaction_threshold_tokens=51_200,
@@ -783,7 +791,11 @@ async def test_spawn_agent_schema_lists_labels_without_model_identity() -> None:
         ModelReasoningEffort.XHIGH,
     ]
     toolkit.agent.selectable_model_options.append(
-        SelectableModelOption(label="Research", model_selection=selection)
+        SelectableModelOption(
+            label="Research",
+            model_selection=selection,
+            settings=make_test_model_settings(),
+        )
     )
 
     state = await toolkit.update_context(
@@ -1272,7 +1284,11 @@ async def test_spawn_agent_applies_target_override_and_normalized_effort() -> No
         ModelReasoningEffort.MEDIUM,
     ]
     toolkit.agent.selectable_model_options.append(
-        SelectableModelOption(label="Research", model_selection=selection)
+        SelectableModelOption(
+            label="Research",
+            model_selection=selection,
+            settings=make_test_model_settings(),
+        )
     )
     state = await toolkit.update_context(
         TurnContext(

@@ -38,7 +38,8 @@ class TestSelectableModelOption(unittest.TestCase):
                 label = '',
                 model_selection = {
                     'key' : null
-                    }
+                    },
+                settings = { }
             )
         else:
             return SelectableModelOption(
@@ -46,6 +47,7 @@ class TestSelectableModelOption(unittest.TestCase):
                 model_selection = {
                     'key' : null
                     },
+                settings = { },
         )
         """
 

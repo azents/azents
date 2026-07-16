@@ -15,10 +15,19 @@ from azcommon.uuid import uuid7
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.agent import AgentModelSelection, ModelParameters
+from azents.core.agent import (
+    AgentModelSelection,
+    ModelParameters,
+    SelectableModelOption,
+    SelectableModelSettings,
+)
+from azents.core.builtin_tools import (
+    BuiltinToolValidationContext,
+    validate_builtin_tools,
+)
 from azents.core.enums import ExchangeFileStatus, LLMProvider
 from azents.core.inference_profile import RequestedInferenceProfile
-from azents.core.llm_catalog import ModelReasoningEffort
+from azents.core.llm_catalog import ModelCapabilities, ModelReasoningEffort
 from azents.core.llm_mapping import build_credential_kwargs, to_runtime_model
 from azents.core.tools import (
     ResolveContext,
@@ -185,11 +194,20 @@ async def _resolve_toolkit_with_logging(
 
 
 @dataclasses.dataclass(frozen=True)
+class _SelectionProviderModel:
+    """Selected model view used by runtime built-in tool validation."""
+
+    model_identifier: str
+    capabilities: ModelCapabilities
+
+
+@dataclasses.dataclass(frozen=True)
 class ResolvedInvokeInputProfile:
     """Run request plus the exact selected profile snapshot for activation."""
 
     run_request: RunRequest
     model_selection: AgentModelSelection
+    model_settings: SelectableModelSettings
     reasoning_effort: ModelReasoningEffort | None
 
 
@@ -199,6 +217,7 @@ class _ResolvedInvokeInputModelSource:
 
     run_request: RunRequest
     model_selection: AgentModelSelection
+    model_settings: SelectableModelSettings
 
 
 @dataclasses.dataclass(frozen=True)
@@ -232,6 +251,14 @@ RuntimeTokenRefreshError = (
     | XaiOAuthProviderEntitlementDenied
     | XaiOAuthProviderUnavailable
 )
+
+
+def _find_model_option(
+    options: list[SelectableModelOption],
+    label: str,
+) -> SelectableModelOption | None:
+    """Return one Agent-owned selectable option by label."""
+    return next((option for option in options if option.label == label), None)
 
 
 async def _ensure_provider_runtime_tokens(
@@ -277,6 +304,47 @@ def _resolve_reasoning_effort(
     return params.reasoning_effort
 
 
+def _effective_max_output_tokens(
+    selection: AgentModelSelection,
+    settings: SelectableModelSettings,
+) -> int | None:
+    """Clamp an explicit output cap to the selected model capability."""
+    requested = settings.max_output_tokens
+    if requested is None:
+        return None
+    supported = selection.normalized_capabilities.context_window.max_output_tokens
+    if supported is None:
+        return requested
+    return min(requested, supported)
+
+
+def _validate_model_settings(
+    *,
+    agent_id: str,
+    selection: AgentModelSelection,
+    settings: SelectableModelSettings,
+) -> Result[SelectableModelSettings, InvalidModelParameters]:
+    """Defensively validate a selected settings snapshot before runtime."""
+    errors: list[str] = []
+    names = [tool.name for tool in settings.builtin_tools]
+    if len(names) != len(set(names)):
+        errors.append("Built-in tool names must be unique.")
+    validation_errors = validate_builtin_tools(
+        settings.builtin_tools,
+        BuiltinToolValidationContext(
+            provider_model=_SelectionProviderModel(
+                model_identifier=selection.model_identifier,
+                capabilities=selection.normalized_capabilities,
+            )
+        ),
+    )
+    for tool_errors in validation_errors.values():
+        errors.extend(tool_errors)
+    if errors:
+        return Failure(InvalidModelParameters(agent_id=agent_id, errors=errors))
+    return Success(settings)
+
+
 def _validate_model_parameters(
     *,
     agent_id: str,
@@ -311,6 +379,7 @@ async def resolve_invoke_input(
         model_source_agent_id=invoke_input.agent_id,
         requested_profile=None,
         resolved_model_selection=None,
+        resolved_model_settings=None,
         agent_repository=agent_repository,
         integration_repository=integration_repository,
         session_manager=session_manager,
@@ -342,6 +411,7 @@ async def resolve_invoke_input_with_profile(
         model_source_agent_id=invoke_input.agent_id,
         requested_profile=requested_profile,
         resolved_model_selection=None,
+        resolved_model_settings=None,
         agent_repository=agent_repository,
         integration_repository=integration_repository,
         session_manager=session_manager,
@@ -354,6 +424,7 @@ async def resolve_invoke_input_with_profile(
                 ResolvedInvokeInputProfile(
                     run_request=value.run_request,
                     model_selection=value.model_selection,
+                    model_settings=value.model_settings,
                     reasoning_effort=requested_profile.reasoning_effort,
                 )
             )
@@ -367,6 +438,7 @@ async def resolve_invoke_input_with_resolved_profile(
     invoke_input: InvokeInput,
     *,
     resolved_model_selection: AgentModelSelection,
+    resolved_model_settings: SelectableModelSettings,
     resolved_reasoning_effort: ModelReasoningEffort | None,
     agent_repository: AgentRepository,
     integration_repository: LLMProviderIntegrationRepository,
@@ -380,6 +452,7 @@ async def resolve_invoke_input_with_resolved_profile(
         model_source_agent_id=invoke_input.agent_id,
         requested_profile=None,
         resolved_model_selection=resolved_model_selection,
+        resolved_model_settings=resolved_model_settings,
         agent_repository=agent_repository,
         integration_repository=integration_repository,
         session_manager=session_manager,
@@ -406,6 +479,7 @@ async def resolve_invoke_input_with_model_source(
     model_source_agent_id: str,
     requested_profile: RequestedInferenceProfile | None,
     resolved_model_selection: AgentModelSelection | None,
+    resolved_model_settings: SelectableModelSettings | None,
     agent_repository: AgentRepository,
     integration_repository: LLMProviderIntegrationRepository,
     session_manager: SessionManager[AsyncSession],
@@ -430,17 +504,25 @@ async def resolve_invoke_input_with_model_source(
             if model_agent is None:
                 return Failure(AgentNotFound(agent_id=model_source_agent_id))
 
-        main_selection = model_agent.model_selection
+        main_option = _find_model_option(
+            model_agent.selectable_model_options,
+            model_agent.main_model_label,
+        )
+        if main_option is None:
+            return Failure(
+                ModelTargetNotFound(model_target_label=model_agent.main_model_label)
+            )
+        main_selection = main_option.model_selection
+        main_settings = main_option.settings
         if resolved_model_selection is not None:
+            if resolved_model_settings is None:
+                raise ValueError("Resolved model settings are required")
             main_selection = resolved_model_selection
+            main_settings = resolved_model_settings
         elif requested_profile is not None:
-            selected_option = next(
-                (
-                    option
-                    for option in model_agent.selectable_model_options
-                    if option.label == requested_profile.model_target_label
-                ),
-                None,
+            selected_option = _find_model_option(
+                model_agent.selectable_model_options,
+                requested_profile.model_target_label,
             )
             if selected_option is None:
                 return Failure(
@@ -449,6 +531,7 @@ async def resolve_invoke_input_with_model_source(
                     )
                 )
             main_selection = selected_option.model_selection
+            main_settings = selected_option.settings
             requested_effort = requested_profile.reasoning_effort
             if requested_effort is not None:
                 reasoning = main_selection.normalized_capabilities.reasoning
@@ -462,7 +545,17 @@ async def resolve_invoke_input_with_model_source(
                             reasoning_effort=requested_effort,
                         )
                     )
-        lightweight_selection = model_agent.lightweight_model_selection
+        lightweight_option = _find_model_option(
+            model_agent.selectable_model_options,
+            model_agent.lightweight_model_label,
+        )
+        if lightweight_option is None:
+            return Failure(
+                ModelTargetNotFound(
+                    model_target_label=model_agent.lightweight_model_label
+                )
+            )
+        lightweight_selection = lightweight_option.model_selection
 
         integration = await integration_repository.get_by_id_with_secrets(
             session,
@@ -553,6 +646,19 @@ async def resolve_invoke_input_with_model_source(
         case _:
             assert_never(params_result)
 
+    settings_result = _validate_model_settings(
+        agent_id=invoke_input.agent_id,
+        selection=main_selection,
+        settings=main_settings,
+    )
+    match settings_result:
+        case Success():
+            pass
+        case Failure(error):
+            return Failure(error)
+        case _:
+            assert_never(settings_result)
+
     user_messages: list[RunUserMessage] = []
     for msg in invoke_input.messages:
         msg_attachments: list[RuntimeAttachment] = []
@@ -602,17 +708,17 @@ async def resolve_invoke_input_with_model_source(
         lightweight_selection.normalized_capabilities.context_window.max_input_tokens,
         compaction_model,
     )
+    if lightweight_option.settings.context_window_tokens is not None:
+        compaction_max_input_tokens = min(
+            compaction_max_input_tokens,
+            lightweight_option.settings.context_window_tokens,
+        )
 
     model_developer = main_selection.model_developer
-    builtin_tools: list[BuiltinToolSpec] = []
-    if params and params.builtin_tools:
-        for bt in params.builtin_tools:
-            builtin_tools.append(
-                BuiltinToolSpec(
-                    name=bt.name,
-                    config=bt.config,
-                )
-            )
+    builtin_tools = [
+        BuiltinToolSpec(name=tool.name, config=tool.config)
+        for tool in main_settings.builtin_tools
+    ]
 
     return Success(
         _ResolvedInvokeInputModelSource(
@@ -631,13 +737,16 @@ async def resolve_invoke_input_with_model_source(
                 auto_compaction_threshold_tokens=None,
                 inference_state=None,
                 temperature=params.temperature if params else None,
-                max_output_tokens=params.max_output_tokens if params else None,
+                max_output_tokens=_effective_max_output_tokens(
+                    main_selection,
+                    main_settings,
+                ),
                 top_p=params.top_p if params else None,
                 stop=params.stop_sequences if params else None,
                 reasoning_effort=reasoning_effort,
                 builtin_tools=builtin_tools,
                 max_input_tokens=max_input,
-                context_window_tokens=params.context_window_tokens if params else None,
+                context_window_tokens=main_settings.context_window_tokens,
                 max_turns=agent.max_turns,
                 compaction_model=compaction_model,
                 compaction_provider=compaction_provider,
@@ -645,6 +754,7 @@ async def resolve_invoke_input_with_model_source(
                 compaction_max_input_tokens=compaction_max_input_tokens,
             ),
             model_selection=main_selection,
+            model_settings=main_settings,
         )
     )
 

@@ -36,7 +36,8 @@ class TestSelectableModelOptionInput(unittest.TestCase):
         if include_optional:
             return SelectableModelOptionInput(
                 label = '0',
-                model_selection = { }
+                model_selection = { },
+                settings = { }
             )
         else:
             return SelectableModelOptionInput(

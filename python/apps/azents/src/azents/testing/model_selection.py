@@ -4,6 +4,8 @@ from azents.core.agent import (
     DEFAULT_MAIN_MODEL_OPTION_LABEL,
     AgentModelSelection,
     SelectableModelOption,
+    SelectableModelSettings,
+    default_selectable_model_settings,
 )
 from azents.core.enums import LLMModelDeveloper, LLMProvider
 from azents.core.llm_catalog import ModelCapabilities
@@ -47,13 +49,25 @@ def make_test_model_selection_dict(
     ).model_dump(mode="json")
 
 
+def make_test_model_settings() -> SelectableModelSettings:
+    """Create empty model-scoped settings for tests."""
+    return SelectableModelSettings(
+        context_window_tokens=None,
+        max_output_tokens=None,
+        builtin_tools=[],
+    )
+
+
 def make_test_selectable_model_options(
     selection: AgentModelSelection,
+    *,
+    label: str = DEFAULT_MAIN_MODEL_OPTION_LABEL,
 ) -> list[SelectableModelOption]:
     """Create selectable model options for tests."""
     return [
         SelectableModelOption(
-            label=DEFAULT_MAIN_MODEL_OPTION_LABEL,
+            label=label,
             model_selection=selection,
+            settings=default_selectable_model_settings(selection),
         )
     ]

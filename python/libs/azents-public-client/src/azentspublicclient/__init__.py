@@ -254,6 +254,8 @@ __all__ = [
     "Secrets1",
     "SelectableModelOption",
     "SelectableModelOptionInput",
+    "SelectableModelSettings",
+    "SelectableModelSettingsInput",
     "SendCodeRequest",
     "SendCodeResponse",
     "SendElevationCodeResponse",
@@ -553,6 +555,8 @@ from azentspublicclient.models.secrets import Secrets as Secrets
 from azentspublicclient.models.secrets1 import Secrets1 as Secrets1
 from azentspublicclient.models.selectable_model_option import SelectableModelOption as SelectableModelOption
 from azentspublicclient.models.selectable_model_option_input import SelectableModelOptionInput as SelectableModelOptionInput
+from azentspublicclient.models.selectable_model_settings import SelectableModelSettings as SelectableModelSettings
+from azentspublicclient.models.selectable_model_settings_input import SelectableModelSettingsInput as SelectableModelSettingsInput
 from azentspublicclient.models.send_code_request import SendCodeRequest as SendCodeRequest
 from azentspublicclient.models.send_code_response import SendCodeResponse as SendCodeResponse
 from azentspublicclient.models.send_elevation_code_response import SendElevationCodeResponse as SendElevationCodeResponse

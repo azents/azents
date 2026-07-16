@@ -24,6 +24,9 @@ export interface SelectableModelOptionFormValue {
   model_display_name: string | null;
   model_identifier: string | null;
   normalized_capabilities: ModelCapabilities | null;
+  context_window_tokens: number | null;
+  max_output_tokens: number | null;
+  builtin_tools: string[];
 }
 
 export interface ModelCatalogAttemptState {
@@ -164,6 +167,9 @@ export function selectableModelOptionFormValueFromStoredOption(
     model_display_name: option.model_selection.model_display_name,
     model_identifier: option.model_selection.model_identifier,
     normalized_capabilities: option.model_selection.normalized_capabilities,
+    context_window_tokens: option.settings.context_window_tokens,
+    max_output_tokens: option.settings.max_output_tokens,
+    builtin_tools: option.settings.builtin_tools.map((tool) => tool.name),
   };
 }
 
@@ -186,7 +192,17 @@ export function selectableModelOptionInputsFromFormValues(
     if (modelSelection == null || label.length === 0) {
       return [];
     }
-    return [{ label, model_selection: modelSelection }];
+    return [
+      {
+        label,
+        model_selection: modelSelection,
+        settings: {
+          context_window_tokens: option.context_window_tokens,
+          max_output_tokens: option.max_output_tokens,
+          builtin_tools: option.builtin_tools.map((name) => ({ name })),
+        },
+      },
+    ];
   });
 }
 

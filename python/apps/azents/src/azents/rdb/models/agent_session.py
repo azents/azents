@@ -123,12 +123,14 @@ class RDBAgentSession(RDBModel):
     CK_CURRENT_INFERENCE_STATE = sa.CheckConstraint(
         "(current_model_target_label IS NULL "
         "AND current_model_selection IS NULL "
+        "AND current_model_settings IS NULL "
         "AND current_reasoning_effort IS NULL "
         "AND current_effective_context_window_tokens IS NULL "
         "AND current_effective_auto_compaction_threshold_tokens IS NULL "
         "AND current_inference_resolved_at IS NULL) OR "
         "(current_model_target_label IS NOT NULL "
         "AND current_model_selection IS NOT NULL "
+        "AND current_model_settings IS NOT NULL "
         "AND current_effective_context_window_tokens IS NOT NULL "
         "AND current_effective_auto_compaction_threshold_tokens IS NOT NULL "
         "AND current_inference_resolved_at IS NOT NULL)",
@@ -208,6 +210,10 @@ class RDBAgentSession(RDBModel):
         nullable=True,
     )
     current_model_selection: Mapped[dict[str, object] | None] = mapped_column(
+        JSONB,
+        nullable=True,
+    )
+    current_model_settings: Mapped[dict[str, object] | None] = mapped_column(
         JSONB,
         nullable=True,
     )

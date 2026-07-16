@@ -9,6 +9,7 @@ from azents.core.agent import (
     DEFAULT_MAIN_MODEL_OPTION_LABEL,
     AgentModelSelection,
     SelectableModelOption,
+    default_selectable_model_settings,
 )
 from azents.rdb.models.workspace_model_settings import RDBWorkspaceModelSettings
 
@@ -128,6 +129,7 @@ class WorkspaceModelSettingsRepository:
                     SelectableModelOption(
                         label=DEFAULT_MAIN_MODEL_OPTION_LABEL,
                         model_selection=selection,
+                        settings=default_selectable_model_settings(selection),
                     ).model_dump(mode="json")
                 ],
                 default_main_model_label=DEFAULT_MAIN_MODEL_OPTION_LABEL,
@@ -145,6 +147,7 @@ class WorkspaceModelSettingsRepository:
                 SelectableModelOption(
                     label=DEFAULT_MAIN_MODEL_OPTION_LABEL,
                     model_selection=selection,
+                    settings=default_selectable_model_settings(selection),
                 ).model_dump(mode="json")
             ]
             row.default_main_model_label = DEFAULT_MAIN_MODEL_OPTION_LABEL

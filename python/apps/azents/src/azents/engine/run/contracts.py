@@ -96,7 +96,7 @@ class RunRequest:
     )
     max_input_tokens: int = 128_000
     context_window_tokens: int | None = None
-    """Agent-level context window cap for input budgeting. None means no override."""
+    """Selected model option context cap. None means no override."""
     max_turns: int | None = None
     """SDK Runner max_turns. None means no turn limit."""
     compaction_model: str | None = None

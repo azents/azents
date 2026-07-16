@@ -49,6 +49,56 @@ DEFAULT_MAIN_MODEL_OPTION_LABEL = "default"
 DEFAULT_LIGHTWEIGHT_MODEL_OPTION_LABEL = "lightweight"
 
 
+class BuiltinToolConfig(BaseModel):
+    """Built-in tool setting enabled for one selectable model option."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(description="Built-in tool name, for example web_search")
+    config: dict[str, object] = Field(
+        default_factory=dict, description="Per-tool options"
+    )
+
+
+class SelectableModelSettingsInput(BaseModel):
+    """Optional user settings submitted for one selectable model option."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    context_window_tokens: int | None = Field(
+        default=None,
+        ge=1,
+        description="Model-scoped context window cap for input budgeting",
+    )
+    max_output_tokens: int | None = Field(
+        default=None,
+        ge=1,
+        description="Model-scoped maximum output token count",
+    )
+    builtin_tools: list[BuiltinToolConfig] | None = Field(
+        default=None,
+        description="Enabled built-in tools; omitted enables every supported tool",
+    )
+
+
+class SelectableModelSettings(BaseModel):
+    """Stored user settings for one selectable model option."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    context_window_tokens: int | None = Field(
+        ge=1,
+        description="Model-scoped context window cap for input budgeting",
+    )
+    max_output_tokens: int | None = Field(
+        ge=1,
+        description="Model-scoped maximum output token count",
+    )
+    builtin_tools: list[BuiltinToolConfig] = Field(
+        description="Enabled built-in tools",
+    )
+
+
 class SelectableModelOptionInput(BaseModel):
     """Selectable model option input keyed by label."""
 
@@ -62,6 +112,10 @@ class SelectableModelOptionInput(BaseModel):
     model_selection: AgentModelSelectionInput = Field(
         description="Selectable model selection input"
     )
+    settings: SelectableModelSettingsInput | None = Field(
+        default=None,
+        description="Model-scoped settings; omitted uses capability defaults",
+    )
 
 
 class SelectableModelOption(BaseModel):
@@ -73,14 +127,24 @@ class SelectableModelOption(BaseModel):
     model_selection: AgentModelSelection = Field(
         description="Selectable model selection snapshot"
     )
+    settings: SelectableModelSettings = Field(
+        description="Stored model-scoped settings"
+    )
 
 
-class BuiltinToolConfig(BaseModel):
-    """Built-in tool setting to enable on an Agent."""
-
-    name: str = Field(description="Built-in tool name, for example web_search")
-    config: dict[str, object] = Field(
-        default_factory=dict, description="Per-tool options"
+def default_selectable_model_settings(
+    selection: AgentModelSelection,
+) -> SelectableModelSettings:
+    """Build model-scoped defaults from implemented capabilities."""
+    return SelectableModelSettings(
+        context_window_tokens=None,
+        max_output_tokens=None,
+        builtin_tools=[
+            BuiltinToolConfig(name=name)
+            for name in dict.fromkeys(
+                selection.normalized_capabilities.built_in_tools.supported
+            )
+        ],
     )
 
 
@@ -116,16 +180,6 @@ class ModelParameters(BaseModel):
     temperature: float | None = Field(
         default=None, ge=0.0, le=2.0, description="Generation temperature (0.0-2.0)"
     )
-    context_window_tokens: int | None = Field(
-        default=None,
-        ge=1,
-        description="Agent-level context window cap for input budgeting",
-    )
-    max_output_tokens: int | None = Field(
-        default=None,
-        ge=1,
-        description="Maximum output token count",
-    )
     top_p: float | None = Field(
         default=None, ge=0.0, le=1.0, description="Top-p sampling (0.0-1.0)"
     )
@@ -136,8 +190,4 @@ class ModelParameters(BaseModel):
     reasoning_effort: ModelReasoningEffort | None = Field(
         default=None,
         description="Reasoning effort, only for models with thinking support",
-    )
-    builtin_tools: list[BuiltinToolConfig] = Field(
-        default_factory=list,
-        description="Built-in tool list to enable",
     )

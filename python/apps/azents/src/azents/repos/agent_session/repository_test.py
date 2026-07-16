@@ -28,6 +28,7 @@ from azents.repos.workspace.data import WorkspaceCreate
 from azents.testing.model_selection import (
     make_test_model_selection,
     make_test_model_selection_dict,
+    make_test_model_settings,
 )
 
 from . import AgentSessionRepository
@@ -128,6 +129,7 @@ class TestAgentSessionRepository:
         default_state = SessionInferenceState(
             model_target_label="Quality",
             model_selection=make_test_model_selection(),
+            model_settings=make_test_model_settings(),
             reasoning_effort=None,
             effective_context_window_tokens=100_000,
             effective_auto_compaction_threshold_tokens=80_000,

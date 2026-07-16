@@ -12,6 +12,9 @@ const selectableModelOptionFormValueSchema = z.object({
   model_display_name: z.string().nullable(),
   model_identifier: z.string().nullable(),
   normalized_capabilities: z.custom<ModelCapabilities>().nullable(),
+  context_window_tokens: z.number().int().positive().nullable(),
+  max_output_tokens: z.number().int().positive().nullable(),
+  builtin_tools: z.array(z.string()),
 });
 
 /** Agent form schema. Agent model selections reference labels from a bounded selectable model list. */
@@ -32,14 +35,11 @@ export const agentFormSchema = z
       .enum(["none", "minimal", "low", "medium", "high", "xhigh", "max"])
       .nullable()
       .optional(),
-    context_window_tokens: z.number().int().positive().nullable().optional(),
-    max_output_tokens: z.number().int().positive().nullable().optional(),
     shell_enabled: z.boolean().optional(),
     memory_enabled: z.boolean().optional(),
     max_turns: z.number().int().positive().nullable().optional(),
     subagent_max_subagents: z.number().int().min(0),
     subagent_max_depth: z.number().int().min(0),
-    builtin_tools: z.array(z.string()).optional().default([]),
   })
   .superRefine((values, ctx) => {
     const labels = new Set<string>();

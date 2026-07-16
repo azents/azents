@@ -36,19 +36,12 @@ class TestModelParameters(unittest.TestCase):
         if include_optional:
             return ModelParameters(
                 temperature = 0.0,
-                context_window_tokens = 1.0,
-                max_output_tokens = 1.0,
                 top_p = 0.0,
                 top_k = 1.0,
                 stop_sequences = [
                     ''
                     ],
-                reasoning_effort = 'none',
-                builtin_tools = [
-                    azentspublicclient.models.builtin_tool_config.BuiltinToolConfig(
-                        name = '', 
-                        config = { }, )
-                    ]
+                reasoning_effort = 'none'
             )
         else:
             return ModelParameters(

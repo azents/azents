@@ -64,7 +64,10 @@ from azents.services.exchange_file import (
     FileNotFound,
     SessionNotFound,
 )
-from azents.testing.model_selection import make_test_model_selection_dict
+from azents.testing.model_selection import (
+    make_test_model_selection_dict,
+    make_test_model_settings,
+)
 
 from .input_buffer import (
     InputBufferEnqueue,
@@ -771,6 +774,7 @@ class TestInputBufferService:
                     model_identifier="prepared-model",
                 )
             ),
+            model_settings=make_test_model_settings(),
             reasoning_effort=ModelReasoningEffort.HIGH,
             effective_context_window_tokens=100_000,
             effective_auto_compaction_threshold_tokens=80_000,

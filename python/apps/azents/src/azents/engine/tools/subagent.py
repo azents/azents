@@ -437,6 +437,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
         requested_label = model_target_label or parent_state.model_target_label
         if model_target_label is None:
             selection = parent_state.model_selection
+            settings = parent_state.model_settings
         else:
             option = next(
                 (
@@ -451,6 +452,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                     f"Model target label '{model_target_label}' was not found"
                 )
             selection = option.model_selection
+            settings = option.settings
 
         supported_efforts = selection.normalized_capabilities.reasoning.effort_levels
         if reasoning_effort is not None:
@@ -480,25 +482,37 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                 selection.provider,
                 selection.model_identifier,
             )
-            lightweight = self.agent.lightweight_model_selection
+            lightweight_option = next(
+                (
+                    option
+                    for option in self.agent.selectable_model_options
+                    if option.label == self.agent.lightweight_model_label
+                ),
+                None,
+            )
+            if lightweight_option is None:
+                raise FunctionToolError("Agent lightweight model target was not found")
+            lightweight = lightweight_option.model_selection
             lightweight_model = to_runtime_model(
                 lightweight.provider,
                 lightweight.model_identifier,
             )
+            compaction_max_input_tokens = get_max_input_tokens(
+                lightweight.normalized_capabilities.context_window.max_input_tokens,
+                lightweight_model,
+            )
+            if lightweight_option.settings.context_window_tokens is not None:
+                compaction_max_input_tokens = min(
+                    compaction_max_input_tokens,
+                    lightweight_option.settings.context_window_tokens,
+                )
             context_window = compute_effective_context_window_tokens(
                 main_max_input_tokens=get_max_input_tokens(
                     selection.normalized_capabilities.context_window.max_input_tokens,
                     main_model,
                 ),
-                compaction_max_input_tokens=get_max_input_tokens(
-                    lightweight.normalized_capabilities.context_window.max_input_tokens,
-                    lightweight_model,
-                ),
-                context_window_tokens=(
-                    self.agent.model_parameters.context_window_tokens
-                    if self.agent.model_parameters is not None
-                    else None
-                ),
+                compaction_max_input_tokens=compaction_max_input_tokens,
+                context_window_tokens=settings.context_window_tokens,
             )
             effective_context_window_tokens = context_window.effective_max_input_tokens
             effective_auto_compaction_threshold_tokens = (
@@ -511,6 +525,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
             state=SessionInferenceState(
                 model_target_label=requested_label,
                 model_selection=selection,
+                model_settings=settings,
                 reasoning_effort=resolved_effort,
                 effective_context_window_tokens=effective_context_window_tokens,
                 effective_auto_compaction_threshold_tokens=(

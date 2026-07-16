@@ -30,26 +30,6 @@ import type {
   WorkspaceModelSettingsResponse,
 } from "@azents/public-client";
 
-/** Parse builtin_tool_errors from error message. */
-function _parseBuiltinToolErrors(
-  message: string,
-): Record<string, string[]> | null {
-  try {
-    const parsed: unknown = JSON.parse(message);
-    if (
-      typeof parsed === "object" &&
-      parsed !== null &&
-      "builtin_tool_errors" in parsed
-    ) {
-      return (parsed as { builtin_tool_errors: Record<string, string[]> })
-        .builtin_tool_errors;
-    }
-  } catch {
-    // JSON parse failure → not builtin tool error
-  }
-  return null;
-}
-
 export interface AgentFormContainerProps {
   handle: string;
   agentId?: string;
@@ -83,33 +63,10 @@ export interface AgentFormContainerOutput {
 }
 
 function buildModelParameters(values: AgentFormValues): ModelParameters | null {
-  const hasBuiltinTools = values.builtin_tools.length > 0;
-  const hasContextWindowTokens = values.context_window_tokens != null;
-  const hasMaxOutputTokens = values.max_output_tokens != null;
-  const hasModelParams =
-    values.reasoning_effort ||
-    hasContextWindowTokens ||
-    hasMaxOutputTokens ||
-    hasBuiltinTools;
-  if (!hasModelParams) {
+  if (values.reasoning_effort == null) {
     return null;
   }
-  return {
-    ...(values.reasoning_effort
-      ? { reasoning_effort: values.reasoning_effort }
-      : {}),
-    ...(hasContextWindowTokens
-      ? { context_window_tokens: values.context_window_tokens }
-      : {}),
-    ...(hasMaxOutputTokens
-      ? { max_output_tokens: values.max_output_tokens }
-      : {}),
-    ...(hasBuiltinTools
-      ? {
-          builtin_tools: values.builtin_tools.map((name) => ({ name })),
-        }
-      : {}),
-  };
+  return { reasoning_effort: values.reasoning_effort };
 }
 
 export function useAgentFormContainer(
@@ -123,7 +80,6 @@ export function useAgentFormContainer(
   const [mutationState, setMutationState] = useState<MutationState>({
     type: "IDLE",
     error: null,
-    builtinToolErrors: null,
   });
 
   const isEditMode = agentId != null;
@@ -209,23 +165,18 @@ export function useAgentFormContainer(
 
   const createMutation = trpc.agent.create.useMutation({
     onSuccess: () => {
-      setMutationState({ type: "IDLE", error: null, builtinToolErrors: null });
+      setMutationState({ type: "IDLE", error: null });
       void utils.agent.list.invalidate({ handle });
       router.push(successPath);
     },
     onError: (error) => {
-      const btErrors = _parseBuiltinToolErrors(error.message);
-      setMutationState({
-        type: "IDLE",
-        error: btErrors ? null : error.message,
-        builtinToolErrors: btErrors,
-      });
+      setMutationState({ type: "IDLE", error: error.message });
     },
   });
 
   const updateMutation = trpc.agent.update.useMutation({
     onSuccess: () => {
-      setMutationState({ type: "IDLE", error: null, builtinToolErrors: null });
+      setMutationState({ type: "IDLE", error: null });
       void utils.agent.list.invalidate({ handle });
       if (agentId) {
         void utils.agent.get.invalidate({ handle, agentId });
@@ -233,12 +184,7 @@ export function useAgentFormContainer(
       router.push(successPath);
     },
     onError: (error) => {
-      const btErrors = _parseBuiltinToolErrors(error.message);
-      setMutationState({
-        type: "IDLE",
-        error: btErrors ? null : error.message,
-        builtinToolErrors: btErrors,
-      });
+      setMutationState({ type: "IDLE", error: error.message });
     },
   });
 

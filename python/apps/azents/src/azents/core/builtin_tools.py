@@ -9,8 +9,6 @@ from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from typing import ClassVar, Protocol
 
-from azents.core.enums import LLMModelDeveloper
-
 
 class BuiltinToolConfigLike(Protocol):
     """Fields required for built-in tool settings."""
@@ -57,12 +55,7 @@ class BuiltinToolProviderModel(Protocol):
 class BuiltinToolValidationContext:
     """Context required for validation."""
 
-    shell_enabled: bool
-    has_toolkits: bool
     provider_model: BuiltinToolProviderModel
-    model_developer: LLMModelDeveloper | None = None
-    all_builtin_tools: list[str] = dataclasses.field(default_factory=list)
-    reasoning_enabled: bool = False
 
 
 class BuiltinToolRule(ABC):
@@ -104,68 +97,8 @@ class WebSearchRule(BuiltinToolRule):
         return errors
 
 
-class ImageGenerationRule(BuiltinToolRule):
-    """Image Generation: provider compatibility validation and Gemini exclusivity.
-
-    Gemini cannot be used with other builtin tools, requires shell disabled, and
-    requires reasoning disabled.
-    """
-
-    name = "image_generation"
-
-    def validate(self, ctx: BuiltinToolValidationContext) -> list[str]:
-        """Validate Image Generation compatibility."""
-        errors: list[str] = []
-
-        # Provider compatibility
-        supported = ctx.provider_model.capabilities.built_in_tools.supported
-        if self.name not in supported:
-            errors.append(
-                f"Model '{ctx.provider_model.model_identifier}'"
-                " does not support image generation."
-            )
-
-        # Gemini: exclusivity constraints
-        if ctx.model_developer == LLMModelDeveloper.GOOGLE:
-            other_tools = [t for t in ctx.all_builtin_tools if t != self.name]
-            if other_tools:
-                errors.append(
-                    "No other built-in tools allowed"
-                    " when image generation on Gemini is enabled."
-                )
-            if ctx.shell_enabled:
-                errors.append(
-                    "Shell must be disabled when image generation on Gemini is enabled."
-                )
-            if ctx.reasoning_enabled:
-                errors.append(
-                    "Reasoning must be disabled"
-                    " when image generation on Gemini is enabled."
-                )
-
-        return errors
-
-
-class WebFetchRule(BuiltinToolRule):
-    """Web Fetch: Anthropic provider-side URL fetch tool."""
-
-    name = "web_fetch"
-
-    def validate(self, ctx: BuiltinToolValidationContext) -> list[str]:
-        """Validate Web Fetch compatibility."""
-        supported = ctx.provider_model.capabilities.built_in_tools.supported
-        if self.name not in supported:
-            return [
-                f"Model '{ctx.provider_model.model_identifier}'"
-                " does not support Web Fetch."
-            ]
-        return []
-
-
 BUILTIN_TOOL_RULES: dict[str, BuiltinToolRule] = {
     "web_search": WebSearchRule(),
-    "web_fetch": WebFetchRule(),
-    "image_generation": ImageGenerationRule(),
 }
 """Registered built-in tool validation rule registry."""
 
@@ -180,16 +113,13 @@ def validate_builtin_tools(
     :param context: Validation context
     :return: Mapping of tool name to error messages; empty dict when there are no errors
     """
-    ctx = dataclasses.replace(
-        context, all_builtin_tools=[bt.name for bt in builtin_tools]
-    )
     errors: dict[str, list[str]] = {}
     for bt in builtin_tools:
         rule = BUILTIN_TOOL_RULES.get(bt.name)
         if rule is None:
             errors.setdefault(bt.name, []).append(f"Unknown built-in tool: '{bt.name}'")
             continue
-        tool_errors = rule.validate(ctx)
+        tool_errors = rule.validate(context)
         if tool_errors:
             errors[bt.name] = tool_errors
     return errors
