@@ -1,4 +1,6 @@
 import { rem } from "@mantine/core";
+import { useState } from "react";
+import { expect, userEvent, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { SelectableModelOptionsEditor } from "./SelectableModelOptionsEditor";
 import type {
@@ -44,8 +46,8 @@ const defaultOption: SelectableModelOptionFormValue = {
   model_display_name: "GPT 5.5",
   model_identifier: "gpt-5.5",
   normalized_capabilities: capabilities,
-  context_window_tokens: null,
-  max_output_tokens: null,
+  context_window_tokens: 128_000,
+  max_output_tokens: 8_000,
   builtin_tools: ["web_search"],
 };
 
@@ -70,6 +72,31 @@ const options: SelectableModelOptionFormValue[] = [
   defaultOption,
   lightweightOption,
 ];
+
+function SelectableModelOptionsEditorHarness(): React.ReactElement {
+  const [currentOptions, setCurrentOptions] = useState([defaultOption]);
+  const [mainLabel, setMainLabel] = useState<string | null>("default");
+  const [lightweightLabel, setLightweightLabel] = useState<string | null>(
+    "default",
+  );
+  return (
+    <SelectableModelOptionsEditor
+      handle="acme"
+      title="Selectable models"
+      description="Add a model and edit its label."
+      options={currentOptions}
+      mainModelLabel={mainLabel}
+      lightweightModelLabel={lightweightLabel}
+      providerOptions={providerOptions}
+      canEdit
+      onSyncCatalog={() => {}}
+      onChangeOptions={setCurrentOptions}
+      onChangeMainModelLabel={setMainLabel}
+      onChangeLightweightModelLabel={setLightweightLabel}
+    />
+  );
+}
+
 const meta = {
   component: SelectableModelOptionsEditor,
   decorators: [
@@ -102,6 +129,40 @@ type Story = StoryObj<typeof meta>;
 
 export const Default = {} satisfies Story;
 
+export const AddModelFocusesEmptyLabel = {
+  render: () => <SelectableModelOptionsEditorHarness />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(canvas.getByRole("button", { name: "Add model" }));
+    const labels = canvas.getAllByRole("textbox", { name: "Model label" });
+    await expect(labels).toHaveLength(2);
+    const newLabel = labels[1];
+    if (newLabel == null) {
+      throw new Error("New model label input was not rendered");
+    }
+    await expect(newLabel).toHaveValue("");
+    await expect(newLabel).toHaveFocus();
+  },
+} satisfies Story;
+
+export const SettingsModal = {
+  args: {
+    options: [defaultOption],
+    lightweightModelLabel: "default",
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(
+      canvas.getByRole("button", { name: "Model settings" }),
+    );
+    const body = within(document.body);
+    await expect(
+      body.getByRole("dialog", { name: "Settings for default" }),
+    ).toBeVisible();
+    await expect(body.getByLabelText("Web search")).toBeChecked();
+  },
+} satisfies Story;
+
 export const DuplicateLabel = {
   args: {
     showValidationErrors: true,
@@ -122,7 +183,7 @@ export const PendingNewModel = {
       lightweightOption,
       {
         id: "option-1",
-        label: "option-1",
+        label: "",
         model_provider_integration_id: null,
         model_selection_value: null,
         model_display_name: null,
@@ -146,9 +207,6 @@ export const MissingModel = {
         model_display_name: null,
         model_identifier: null,
         normalized_capabilities: null,
-        context_window_tokens: null,
-        max_output_tokens: null,
-        builtin_tools: [],
       },
     ],
     lightweightModelLabel: "default",

@@ -248,22 +248,3 @@ export function selectableModelLabelSelectData(
     return [{ value: label, label }];
   });
 }
-
-export function nextSelectableModelOptionLabel(
-  options: SelectableModelOptionFormValue[],
-): string {
-  const usedLabels = new Set(options.map((option) => option.label.trim()));
-  const preferred = ["default", "lightweight"];
-  for (const label of preferred) {
-    if (!usedLabels.has(label)) {
-      return label;
-    }
-  }
-  for (let index = 1; index <= MAX_SELECTABLE_MODEL_OPTIONS; index += 1) {
-    const label = `option-${index}`;
-    if (!usedLabels.has(label)) {
-      return label;
-    }
-  }
-  return "option";
-}

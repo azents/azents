@@ -22,7 +22,10 @@ import {
   Alert,
   Box,
   Button,
+  Checkbox,
   Group,
+  Modal,
+  NumberInput,
   Select,
   SimpleGrid,
   Stack,
@@ -30,13 +33,12 @@ import {
   TextInput,
   Tooltip,
 } from "@mantine/core";
-import { IconGripVertical, IconTrash } from "@tabler/icons-react";
-import { useTranslations } from "next-intl";
-import { useMemo, useState } from "react";
+import { IconGripVertical, IconSettings, IconTrash } from "@tabler/icons-react";
+import { useFormatter, useTranslations } from "next-intl";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   fallbackSelectableModelLabel,
   MAX_SELECTABLE_MODEL_OPTIONS,
-  nextSelectableModelOptionLabel,
   selectableModelLabelSelectData,
 } from "../model-selection";
 import { ModelCatalogPicker } from "./ModelCatalogPicker";
@@ -72,8 +74,10 @@ interface SelectableModelRowProps {
   canEdit: boolean;
   canRemove: boolean;
   showValidationErrors: boolean;
+  labelInputRef: (node: HTMLInputElement | null) => void;
   onChangeLabel: (value: string) => void;
   onChangeModel: () => void;
+  onOpenSettings: () => void;
   onRemove: () => void;
 }
 
@@ -120,8 +124,10 @@ function SelectableModelRow({
   canEdit,
   canRemove,
   showValidationErrors,
+  labelInputRef,
   onChangeLabel,
   onChangeModel,
+  onOpenSettings,
   onRemove,
 }: SelectableModelRowProps): React.ReactElement {
   const t = useTranslations("workspace.agents.selectableModelOptions");
@@ -162,6 +168,7 @@ function SelectableModelRow({
       </Box>
       <Box className={classes.label}>
         <TextInput
+          ref={labelInputRef}
           aria-label={t("optionLabel")}
           value={option.label}
           disabled={!canEdit}
@@ -194,6 +201,17 @@ function SelectableModelRow({
         >
           {t("changeModel")}
         </Button>
+        <Tooltip label={t("settingsAction")}>
+          <ActionIcon
+            aria-label={t("settingsAction")}
+            color="gray"
+            disabled={!canEdit || option.model_selection_value == null}
+            variant="subtle"
+            onClick={onOpenSettings}
+          >
+            <IconSettings size="1rem" />
+          </ActionIcon>
+        </Tooltip>
         <Tooltip label={t("remove")}>
           <ActionIcon
             className={classes.remove}
@@ -208,6 +226,117 @@ function SelectableModelRow({
         </Tooltip>
       </Box>
     </Box>
+  );
+}
+
+interface SelectableModelSettingsModalProps {
+  opened: boolean;
+  option: SelectableModelOptionFormValue;
+  onClose: () => void;
+  onChange: (option: SelectableModelOptionFormValue) => void;
+}
+
+function SelectableModelSettingsModal({
+  opened,
+  option,
+  onClose,
+  onChange,
+}: SelectableModelSettingsModalProps): React.ReactElement {
+  const t = useTranslations("workspace.agents.selectableModelOptions");
+  const format = useFormatter();
+  const contextLimit =
+    option.normalized_capabilities?.context_window?.max_input_tokens ?? null;
+  const outputLimit =
+    option.normalized_capabilities?.context_window?.max_output_tokens ?? null;
+  const supportedTools =
+    option.normalized_capabilities?.built_in_tools?.supported ?? [];
+  const formatToolLabel = (tool: string): string =>
+    tool === "web_search" ? t("builtinToolWebSearch") : tool;
+
+  return (
+    <Modal
+      opened={opened}
+      onClose={onClose}
+      title={t("settingsTitle", {
+        label: option.label || t("newOption"),
+      })}
+      centered
+    >
+      <Stack gap="md">
+        <NumberInput
+          label={t("contextWindowTokensLabel")}
+          description={
+            contextLimit == null
+              ? t("capabilityLimitUnknown")
+              : t("capabilityLimit", { tokens: format.number(contextLimit) })
+          }
+          placeholder={t("noTokenCap")}
+          min={1}
+          step={1}
+          allowDecimal={false}
+          allowNegative={false}
+          value={option.context_window_tokens ?? ""}
+          onChange={(value) =>
+            onChange({
+              ...option,
+              context_window_tokens: typeof value === "number" ? value : null,
+            })
+          }
+        />
+        <NumberInput
+          label={t("maxOutputTokensLabel")}
+          description={
+            outputLimit == null
+              ? t("capabilityLimitUnknown")
+              : t("capabilityLimit", { tokens: format.number(outputLimit) })
+          }
+          placeholder={t("noTokenCap")}
+          min={1}
+          step={1}
+          allowDecimal={false}
+          allowNegative={false}
+          value={option.max_output_tokens ?? ""}
+          onChange={(value) =>
+            onChange({
+              ...option,
+              max_output_tokens: typeof value === "number" ? value : null,
+            })
+          }
+        />
+        <Stack gap="xs">
+          <Text fw={500} size="sm">
+            {t("builtinToolsLabel")}
+          </Text>
+          {supportedTools.length === 0 ? (
+            <Text c="dimmed" size="sm">
+              {t("noBuiltinTools")}
+            </Text>
+          ) : (
+            <Checkbox.Group
+              value={option.builtin_tools}
+              onChange={(builtinTools) =>
+                onChange({ ...option, builtin_tools: builtinTools })
+              }
+            >
+              <Stack gap="xs">
+                {supportedTools.map((tool) => (
+                  <Checkbox
+                    key={tool}
+                    value={tool}
+                    label={formatToolLabel(tool)}
+                  />
+                ))}
+              </Stack>
+            </Checkbox.Group>
+          )}
+        </Stack>
+        <Group justify="flex-end">
+          <Button variant="light" onClick={onClose}>
+            {t("settingsDone")}
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
   );
 }
 
@@ -229,6 +358,11 @@ export function SelectableModelOptionsEditor({
 }: SelectableModelOptionsEditorProps): React.ReactElement {
   const t = useTranslations("workspace.agents.selectableModelOptions");
   const [pickerOptionId, setPickerOptionId] = useState<string | null>(null);
+  const [settingsOptionId, setSettingsOptionId] = useState<string | null>(null);
+  const [pendingFocusOptionId, setPendingFocusOptionId] = useState<
+    string | null
+  >(null);
+  const labelInputRefs = useRef(new Map<string, HTMLInputElement>());
   const sensors = useSensors(
     useSensor(MouseSensor),
     useSensor(TouchSensor),
@@ -251,6 +385,8 @@ export function SelectableModelOptionsEditor({
   );
   const activeOption =
     options.find((option) => option.id === pickerOptionId) ?? null;
+  const settingsOption =
+    options.find((option) => option.id === settingsOptionId) ?? null;
   const mainLabelValue = fallbackSelectableModelLabel(mainModelLabel, options);
   const lightweightLabelValue = fallbackSelectableModelLabel(
     lightweightModelLabel,
@@ -263,6 +399,18 @@ export function SelectableModelOptionsEditor({
   const hasDuplicateLabels = options.some((_, index) =>
     rowHasDuplicateLabel(options, index),
   );
+
+  useEffect(() => {
+    if (pendingFocusOptionId == null) {
+      return;
+    }
+    const input = labelInputRefs.current.get(pendingFocusOptionId);
+    if (input == null) {
+      return;
+    }
+    input.focus();
+    setPendingFocusOptionId(null);
+  }, [options, pendingFocusOptionId]);
 
   const handleChangeOptions = (
     nextOptions: SelectableModelOptionFormValue[],
@@ -280,11 +428,12 @@ export function SelectableModelOptionsEditor({
     if (options.length >= MAX_SELECTABLE_MODEL_OPTIONS) {
       return;
     }
+    const id = createOptionId();
     const nextOptions = [
       ...options,
       {
-        id: createOptionId(),
-        label: nextSelectableModelOptionLabel(options),
+        id,
+        label: "",
         model_provider_integration_id: null,
         model_selection_value: null,
         model_display_name: null,
@@ -295,6 +444,7 @@ export function SelectableModelOptionsEditor({
         builtin_tools: [],
       },
     ];
+    setPendingFocusOptionId(id);
     handleChangeOptions(nextOptions);
   };
 
@@ -316,23 +466,10 @@ export function SelectableModelOptionsEditor({
   return (
     <Stack gap="md">
       <Stack gap="xs">
-        <Group justify="space-between" align="flex-start">
-          <Stack gap="xs">
-            <Text fw={500}>{title}</Text>
-            <Text size="sm" c="dimmed">
-              {description}
-            </Text>
-          </Stack>
-          <Button
-            variant="light"
-            disabled={
-              !canEdit || options.length >= MAX_SELECTABLE_MODEL_OPTIONS
-            }
-            onClick={handleAddOption}
-          >
-            {t("addOption")}
-          </Button>
-        </Group>
+        <Text fw={500}>{title}</Text>
+        <Text size="sm" c="dimmed">
+          {description}
+        </Text>
         {showValidationErrors && options.length === 0 && (
           <Alert color="red">{t("emptyList")}</Alert>
         )}
@@ -400,6 +537,19 @@ export function SelectableModelOptionsEditor({
         />
       )}
 
+      {settingsOption != null && (
+        <SelectableModelSettingsModal
+          opened={settingsOptionId != null}
+          option={settingsOption}
+          onClose={() => setSettingsOptionId(null)}
+          onChange={(nextOption) => {
+            handleChangeOptions(
+              updateOption(options, nextOption.id, () => nextOption),
+            );
+          }}
+        />
+      )}
+
       <SimpleGrid cols={{ base: 1, sm: 2 }}>
         <Stack gap="sm">
           <Select
@@ -421,6 +571,16 @@ export function SelectableModelOptionsEditor({
           onChange={onChangeLightweightModelLabel}
         />
       </SimpleGrid>
+
+      <Group justify="flex-start">
+        <Button
+          variant="light"
+          disabled={!canEdit || options.length >= MAX_SELECTABLE_MODEL_OPTIONS}
+          onClick={handleAddOption}
+        >
+          {t("addOption")}
+        </Button>
+      </Group>
 
       {options.length > 0 && (
         <DndContext
@@ -449,6 +609,13 @@ export function SelectableModelOptionsEditor({
                   canEdit={canEdit}
                   canRemove={options.length > 1}
                   showValidationErrors={showValidationErrors}
+                  labelInputRef={(node) => {
+                    if (node == null) {
+                      labelInputRefs.current.delete(option.id);
+                    } else {
+                      labelInputRefs.current.set(option.id, node);
+                    }
+                  }}
                   onChangeLabel={(value) => {
                     handleChangeOptions(
                       updateOption(options, option.id, (current) => ({
@@ -458,6 +625,7 @@ export function SelectableModelOptionsEditor({
                     );
                   }}
                   onChangeModel={() => setPickerOptionId(option.id)}
+                  onOpenSettings={() => setSettingsOptionId(option.id)}
                   onRemove={() => {
                     handleChangeOptions(
                       options.filter((item) => item.id !== option.id),

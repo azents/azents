@@ -763,7 +763,18 @@
         "modelLabelColumn": "모델 라벨",
         "selectedModelColumn": "선택된 모델",
         "actionsColumn": "작업",
-        "dragHandleLabel": "모델 순서 변경"
+        "dragHandleLabel": "모델 순서 변경",
+        "settingsAction": "모델 설정",
+        "settingsTitle": "{label} 설정",
+        "contextWindowTokensLabel": "최대 컨텍스트 윈도우",
+        "maxOutputTokensLabel": "최대 출력 토큰",
+        "capabilityLimit": "카탈로그 지원 한도: {tokens}토큰. 더 큰 값을 저장해도 런타임에서 한도에 맞게 조정됩니다.",
+        "capabilityLimitUnknown": "카탈로그에 한도 정보가 없습니다. Provider 한도가 우선 적용됩니다.",
+        "noTokenCap": "사용자 한도 없음",
+        "builtinToolsLabel": "내장 도구",
+        "builtinToolWebSearch": "웹 검색",
+        "noBuiltinTools": "이 모델이 지원하는 내장 도구가 없습니다.",
+        "settingsDone": "완료"
       }
     },
     "toolkits": {
