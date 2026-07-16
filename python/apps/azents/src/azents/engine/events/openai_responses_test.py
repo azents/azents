@@ -13,6 +13,9 @@ from openai.types.responses import (
     Response,
     ResponseCompletedEvent,
     ResponseErrorEvent,
+    ResponseFunctionWebSearch,
+    ResponseOutputItemAddedEvent,
+    ResponseOutputItemDoneEvent,
     ResponseOutputMessage,
     ResponseOutputText,
     ResponseTextDeltaEvent,
@@ -20,6 +23,7 @@ from openai.types.responses import (
     ResponseWebSearchCallCompletedEvent,
     ResponseWebSearchCallInProgressEvent,
 )
+from openai.types.responses.response_function_web_search import ActionSearch
 from openai.types.responses.response_usage import (
     InputTokensDetails,
     OutputTokensDetails,
@@ -506,6 +510,64 @@ def test_typed_normalizer_projects_provider_tool_lifecycle() -> None:
         )
     ]
     assert regressive.projections == []
+
+
+def test_typed_normalizer_projects_generic_provider_tool_output_items() -> None:
+    """Treat generic output-item completion as a hosted-tool terminal state."""
+    output = OpenAIResponsesOutputNormalizer(
+        provider="openai",
+        model="gpt-5.1-codex",
+    ).start("session-1")
+    action = ActionSearch(
+        type="search",
+        query="provider-neutral activity",
+        queries=None,
+        sources=None,
+    )
+
+    running = output.process_event(
+        ResponseOutputItemAddedEvent(
+            item=ResponseFunctionWebSearch(
+                id="search-1",
+                action=action,
+                status="in_progress",
+                type="web_search_call",
+            ),
+            output_index=0,
+            sequence_number=1,
+            type="response.output_item.added",
+        )
+    )
+    completed = output.process_event(
+        ResponseOutputItemDoneEvent(
+            item=ResponseFunctionWebSearch(
+                id="search-1",
+                action=action,
+                status="completed",
+                type="web_search_call",
+            ),
+            output_index=0,
+            sequence_number=2,
+            type="response.output_item.done",
+        )
+    )
+
+    assert running.projections == [
+        ProviderToolActivityProjection(
+            call_id="search-1",
+            name="web_search",
+            status="running",
+            arguments=None,
+        )
+    ]
+    assert completed.projections == [
+        ProviderToolActivityProjection(
+            call_id="search-1",
+            name="web_search",
+            status="completed",
+            arguments=None,
+        )
+    ]
 
 
 def test_typed_normalizer_accepts_omitted_usage_details(

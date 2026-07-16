@@ -40,6 +40,8 @@ Expected sequence:
 | `pnpm --filter @azents/web build-storybook` | `typescript` | `dd9b966d` | Pass | Provider-tool lifecycle stories compiled successfully. |
 | `uv run ruff check --fix . && uv run ruff format . && uv run pyright .` | `testenv/azents/e2e` | `dd9b966d` | Pass | E2E fixture and test passed static validation. |
 | `uv run pytest -vv src/tests/azents/public/test_provider_tool_live_activity.py` | `testenv/azents/e2e` | `dd9b966d` | Environment unavailable | Local runtime has no Docker socket. Test setup failed before fixture startup with `FileNotFoundError` for the Docker Unix socket. Required PR CI remains the authoritative deterministic E2E run. |
+| `uv run pytest -q src/azents/engine/events/provider_tool_activity_test.py src/azents/engine/events/openai_responses_test.py src/azents/engine/events/litellm_responses_test.py src/azents/services/chat/live_events_test.py src/azents/worker/live/event_projector_test.py src/azents/broker/serialization_test.py` | `python/apps/azents` | validation fix | Pass | 153 passed, 1 skipped after adding generic output-item terminal normalization. |
+| `uv run ruff check --fix <changed engine files> && uv run ruff format <changed engine files> && uv run pyright` | `python/apps/azents` | validation fix | Pass | 0 errors, 0 warnings. |
 
 ## Design and Spec Comparison
 
@@ -62,4 +64,6 @@ The validation PR must not be considered complete until its deterministic E2E jo
 
 ## Findings
 
-No implementation defect was found by backend, frontend, Storybook, or E2E static checks. Local dynamic E2E execution was blocked only by the unavailable Docker daemon; the added test is expected to execute in the repository's deterministic E2E CI environment.
+The first deterministic CI execution exposed one adapter normalization defect. AIMock completed the hosted search with the generic `response.output_item.done` frame, while both normalizers terminalized only provider-specific completion frames. The live card therefore stayed `running` until durable replacement and never emitted the required `completed` upsert.
+
+The validation branch now treats generic output-item completion as a canonical terminal observation in both the official OpenAI SDK and LiteLLM adapters. Regression tests cover the matching added/done lifecycle for both adapters. The required deterministic E2E CI rerun remains the final validation gate.

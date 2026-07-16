@@ -1612,6 +1612,15 @@ def _litellm_provider_tool_observation(
             _dict(item.get("item")),
             default_status="running",
         )
+    if event_type in {
+        "OutputItemDoneEvent",
+        "ResponseOutputItemDoneEvent",
+        "response.output_item.done",
+    }:
+        return _provider_tool_output_item_observation(
+            _dict(item.get("item")),
+            default_status="completed",
+        )
     lifecycle: dict[
         str,
         tuple[str, Literal["running", "completed", "failed"]],

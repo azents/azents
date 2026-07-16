@@ -766,6 +766,14 @@ def _openai_provider_tool_observation(
             _sdk_model_dump(native_event.item),
             default_status="running",
         )
+    if (
+        isinstance(native_event, ResponseOutputItemDoneEvent)
+        and native_event.type == "response.output_item.done"
+    ):
+        return _provider_tool_output_item_observation(
+            _sdk_model_dump(native_event.item),
+            default_status="completed",
+        )
     if isinstance(
         native_event,
         (
