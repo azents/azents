@@ -2458,7 +2458,19 @@ class TestLiteLLMResponsesOutputNormalizer:
                     "item": {
                         "type": "web_search_call",
                         "id": "search-1",
-                        "status": "completed",
+                        "status": "in_progress",
+                    }
+                },
+            )
+        )
+        incomplete = output_stream.process_event(
+            NativeEvent(
+                type="ResponseOutputItemDoneEvent",
+                item={
+                    "item": {
+                        "type": "file_search_call",
+                        "id": "search-2",
+                        "status": "incomplete",
                     }
                 },
             )
@@ -2477,6 +2489,14 @@ class TestLiteLLMResponsesOutputNormalizer:
                 call_id="search-1",
                 name="web_search",
                 status="completed",
+                arguments=None,
+            )
+        ]
+        assert incomplete.projections == [
+            ProviderToolActivityProjection(
+                call_id="search-2",
+                name="file_search",
+                status="failed",
                 arguments=None,
             )
         ]

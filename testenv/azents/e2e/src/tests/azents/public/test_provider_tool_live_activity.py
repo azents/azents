@@ -98,6 +98,32 @@ def _provider_history_appended(action: dict[str, object]) -> bool:
     return _provider_call_event([event], status="completed") is not None
 
 
+def _wait_for_live_provider_call(
+    *,
+    server_url: str,
+    token: str,
+    session_id: str,
+    status: str,
+    timeout: float = 15,
+) -> dict[str, object]:
+    """Poll the public live snapshot until one provider call reaches status."""
+    deadline = time.monotonic() + timeout
+    latest: dict[str, object] | None = None
+    while time.monotonic() < deadline:
+        latest = list_live(
+            server_url=server_url,
+            token=token,
+            session_id=session_id,
+        )
+        event = _provider_call_event(_live_events(latest), status=status)
+        if event is not None:
+            return event
+        time.sleep(0.01)
+    raise TimeoutError(
+        f"provider-tool live status {status!r} was not restored: {latest!r}"
+    )
+
+
 def _submit_quality_prompt(
     *,
     server_url: str,
@@ -158,6 +184,23 @@ class TestProviderToolLiveActivity:
                 session_id=session_id,
             )
 
+            restored_event = _wait_for_live_provider_call(
+                server_url=azents_public_server_url,
+                token=token,
+                session_id=session_id,
+                status="running",
+            )
+            restored_payload = json_object_payload(
+                restored_event.get("payload"),
+                label="restored provider-tool payload",
+            )
+            call_id = restored_payload.get("call_id")
+            live_event_id = restored_event.get("id")
+            assert isinstance(call_id, str) and call_id
+            assert isinstance(live_event_id, str) and live_event_id
+            assert restored_event.get("adapter") == "azents-live"
+            assert restored_event.get("external_id") == call_id
+
             running_action = _wait_for_action(
                 websocket,
                 _provider_upsert_with_status("running"),
@@ -166,28 +209,7 @@ class TestProviderToolLiveActivity:
                 running_action.get("event"),
                 label="running provider-tool event",
             )
-            running_payload = json_object_payload(
-                running_event.get("payload"),
-                label="running provider-tool payload",
-            )
-            call_id = running_payload.get("call_id")
-            live_event_id = running_event.get("id")
-            assert isinstance(call_id, str) and call_id
-            assert isinstance(live_event_id, str) and live_event_id
-            assert running_event.get("adapter") == "azents-live"
-            assert running_event.get("external_id") == call_id
-
-            restored = list_live(
-                server_url=azents_public_server_url,
-                token=token,
-                session_id=session_id,
-            )
-            restored_event = _provider_call_event(
-                _live_events(restored),
-                status="running",
-            )
-            assert restored_event is not None
-            assert restored_event.get("id") == live_event_id
+            assert running_event.get("id") == live_event_id
 
             completed_action = _wait_for_action(
                 websocket,

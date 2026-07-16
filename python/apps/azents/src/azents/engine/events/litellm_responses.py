@@ -1723,8 +1723,34 @@ def _provider_tool_output_item_observation(
     return ProviderToolObservation(
         call_id=call_id,
         name=name,
-        status=_canonical_provider_tool_status(item.get("status")) or default_status,
+        status=_provider_tool_output_item_status(
+            item.get("status"),
+            default_status=default_status,
+        ),
     )
+
+
+def _provider_tool_output_item_status(
+    native_status: object,
+    *,
+    default_status: Literal["running", "completed", "failed"],
+) -> Literal["running", "completed", "failed"]:
+    """Resolve output-item status while respecting terminal done frames."""
+    canonical = _canonical_provider_tool_status(native_status)
+    if default_status != "completed":
+        return canonical or default_status
+    normalized = (
+        native_status.lower().replace("-", "_")
+        if isinstance(native_status, str)
+        else None
+    )
+    if canonical == "failed" or normalized in {
+        "incomplete",
+        "cancelled",
+        "canceled",
+    }:
+        return "failed"
+    return "completed"
 
 
 def _canonical_provider_tool_status(

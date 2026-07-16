@@ -13,6 +13,7 @@ from openai.types.responses import (
     Response,
     ResponseCompletedEvent,
     ResponseErrorEvent,
+    ResponseFileSearchToolCall,
     ResponseFunctionWebSearch,
     ResponseOutputItemAddedEvent,
     ResponseOutputItemDoneEvent,
@@ -543,11 +544,25 @@ def test_typed_normalizer_projects_generic_provider_tool_output_items() -> None:
             item=ResponseFunctionWebSearch(
                 id="search-1",
                 action=action,
-                status="completed",
+                status="in_progress",
                 type="web_search_call",
             ),
             output_index=0,
             sequence_number=2,
+            type="response.output_item.done",
+        )
+    )
+    incomplete = output.process_event(
+        ResponseOutputItemDoneEvent(
+            item=ResponseFileSearchToolCall(
+                id="search-2",
+                queries=["provider-neutral activity"],
+                status="incomplete",
+                type="file_search_call",
+                results=None,
+            ),
+            output_index=1,
+            sequence_number=3,
             type="response.output_item.done",
         )
     )
@@ -565,6 +580,14 @@ def test_typed_normalizer_projects_generic_provider_tool_output_items() -> None:
             call_id="search-1",
             name="web_search",
             status="completed",
+            arguments=None,
+        )
+    ]
+    assert incomplete.projections == [
+        ProviderToolActivityProjection(
+            call_id="search-2",
+            name="file_search",
+            status="failed",
             arguments=None,
         )
     ]

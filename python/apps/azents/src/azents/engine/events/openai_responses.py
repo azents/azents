@@ -923,19 +923,42 @@ def _provider_tool_output_item_observation(
     call_id = _string_value(item.get("call_id") or item.get("id"))
     if not call_id:
         return None
-    native_status = item.get("status")
-    status = (
-        _canonical_provider_tool_status(native_status)
-        if isinstance(native_status, str)
-        else default_status
+    status = _provider_tool_output_item_status(
+        item.get("status"),
+        default_status=default_status,
     )
-    if status is None:
-        status = default_status
     return ProviderToolObservation(
         call_id=call_id,
         name=name,
         status=status,
     )
+
+
+def _provider_tool_output_item_status(
+    native_status: object,
+    *,
+    default_status: Literal["running", "completed", "failed"],
+) -> Literal["running", "completed", "failed"]:
+    """Resolve output-item status while respecting terminal done frames."""
+    canonical = (
+        _canonical_provider_tool_status(native_status)
+        if isinstance(native_status, str)
+        else None
+    )
+    if default_status != "completed":
+        return canonical or default_status
+    normalized = (
+        native_status.lower().replace("-", "_")
+        if isinstance(native_status, str)
+        else None
+    )
+    if canonical == "failed" or normalized in {
+        "incomplete",
+        "cancelled",
+        "canceled",
+    }:
+        return "failed"
+    return "completed"
 
 
 def _canonical_provider_tool_status(
