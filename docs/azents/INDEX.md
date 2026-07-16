@@ -202,7 +202,7 @@ _14 documents_
 - [ADR-0145: Scope Failed-run Retry to One Model Turn](adr/0145-scope-failed-run-retry-to-model-turn.md)
 - [ADR-0146: Bound Model Streams by Parsed-Event Idle and Absolute Attempt Time](adr/0146-model-stream-parsed-event-idle-and-attempt-bounds.md)
 
-_151 documents_
+_152 documents_
 
 ## Issues (Bug Tracking)
 
@@ -236,4 +236,4 @@ _3 documents_
 
 ## Statistics
 
-- Total documents: 440
+- Total documents: 442
