@@ -1368,7 +1368,7 @@
         "interChunkDelaysMs": [
           0,
           0,
-          300,
+          3000,
           0,
           0,
           0,
@@ -1377,7 +1377,7 @@
           0,
           0
         ],
-        "totalDurationMs": 300
+        "totalDurationMs": 3000
       }
     }
   ]
