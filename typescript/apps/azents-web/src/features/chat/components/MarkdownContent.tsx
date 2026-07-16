@@ -158,7 +158,36 @@ function CodeBlock({
   }
 
   return (
-    <Box className={classes.codeBlock} component="pre" {...props}>
+    <Box className={classes.codeBlockFrame}>
+      {language ? (
+        <SyntaxHighlighter
+          PreTag="pre"
+          CodeTag="code"
+          className={classes.codeBlockScroller}
+          language={language}
+          style={codeTheme}
+          useInlineStyles
+          customStyle={{
+            background: "transparent",
+            color: "inherit",
+            margin: 0,
+            padding: "0.6em 0.8em",
+          }}
+          codeTagProps={{
+            className: classes.highlightedCode,
+            style: {
+              background: "transparent",
+              color: "inherit",
+            },
+          }}
+        >
+          {codeText}
+        </SyntaxHighlighter>
+      ) : (
+        <Box component="pre" {...props} className={classes.codeBlockScroller}>
+          {children}
+        </Box>
+      )}
       <Box className={classes.codeBlockCopyButton}>
         <ChatCopyButton
           value={codeText}
@@ -169,32 +198,6 @@ function CodeBlock({
           iconSize={12}
         />
       </Box>
-      {language ? (
-        <SyntaxHighlighter
-          PreTag="div"
-          CodeTag="code"
-          language={language}
-          style={codeTheme}
-          useInlineStyles
-          customStyle={{
-            background: "var(--azents-chat-code-background)",
-            color: "var(--azents-chat-code-foreground)",
-            margin: 0,
-            padding: 0,
-          }}
-          codeTagProps={{
-            className: classes.highlightedCode,
-            style: {
-              background: "var(--azents-chat-code-background)",
-              color: "var(--azents-chat-code-foreground)",
-            },
-          }}
-        >
-          {codeText}
-        </SyntaxHighlighter>
-      ) : (
-        children
-      )}
     </Box>
   );
 }
