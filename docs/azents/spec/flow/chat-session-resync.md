@@ -15,8 +15,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/agents/**
   - typescript/apps/azents-web/src/features/chat/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
-last_verified_at: 2026-07-14
-spec_version: 29
+last_verified_at: 2026-07-16
+spec_version: 30
 ---
 
 # Chat Session Resync
@@ -141,6 +141,12 @@ Response fields:
 | `session_run_state` | authoritative run state of session. |
 | `todo` | session-scoped TodoToolkit State snapshot. `null` if absent. |
 | `action_executions` | current nonterminal operation TurnAction execution projections, each with execution state and live progress events. Terminal completed, failed, and cancelled snapshots are recovered only from durable history events. |
+
+`run.retry` represents only the active model turn's retry cycle. It remains present during backoff and
+the in-flight retry model call so a reconnect can recover current progress. Successful model output
+admission clears the durable retry state in the output transaction, and the next authoritative REST
+or WebSocket run snapshot omits `run.retry`. A later turn or inference-profile change cannot inherit
+an earlier completed turn's retry card.
 
 `snapshot` in REST write response follows same taxonomy. `snapshot.partial_history_events` is partial history projection list synthesized into chat timeline, `snapshot.input_buffer_events` is pending user input buffer projection list, `snapshot.todo` is same session todo snapshot, and `snapshot.action_executions` is the current nonterminal operation TurnAction projection list.
 
@@ -417,6 +423,7 @@ finite transaction periodically.
 
 ## 11. Changelog
 
+- **2026-07-16** — v30. Limited live retry recovery to the active model turn and required successful output admission to remove durable retry state before later resync.
 - **2026-07-14** — v29. Added current model-call start time to REST and WebSocket live Run replacement snapshots for elapsed-duration recovery.
 - **2026-07-14** — v28. Defined active operation tail placement, explicit removal transport, stable-ID durable handover deduplication, cancelled terminal history, and detached durable-result rendering.
 - **2026-07-13** — v27. Promoted confirmed-generation WebSocket barriers, finite fresh-baseline resync, detached observation isolation, raw-page projection identity, durable output promotion, and exact follow/accessibility behavior.

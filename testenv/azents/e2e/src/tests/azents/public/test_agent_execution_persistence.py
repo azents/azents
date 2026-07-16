@@ -78,6 +78,8 @@ _TOOL_NAME = "bufferqa__runtime_hook_qa_probe"
 _TOOL_CALL_ID = "call_chat_input_buffer_delay"
 _RETRY_ONCE = "Failed run retry once then succeed"
 _RETRY_ONCE_RESPONSE = "Failed run retry recovered after one attempt."
+_RETRY_ACROSS_TURNS = "Failed run retry resets across model turns"
+_RETRY_ACROSS_TURNS_CALL_ID = "call_failed_run_retry_turn_boundary"
 _RETRY_MANUAL = "Failed run retry exhaust then manual recover"
 _RETRY_MANUAL_RESPONSE = "Manual failed-run retry recovered successfully."
 _RETRY_STALE = "Failed run retry stale conflict"
@@ -1162,6 +1164,62 @@ class TestAgentExecutionPersistence:
             expected=[_RETRY_ONCE, _RETRY_ONCE_RESPONSE],
         )
         assert _failed_run_error_events(final_payload) == []
+
+    def test_failed_run_retry_budget_resets_after_model_turn(
+        self,
+        public_api_client: azentspublicclient.ApiClient,
+        admin_api_client: azentsadminclient.ApiClient,
+        azents_public_server_url: str,
+        azents_engine_worker_container: object,
+    ) -> None:
+        """Each model turn receives a fresh failed-run retry budget."""
+        del azents_engine_worker_container
+        workspace = _setup_workspace(
+            public_api_client,
+            admin_api_client,
+            azents_public_server_url,
+        )
+        agent_id = _create_agent(public_api_client, workspace)
+
+        result = _run_message(
+            public_api_client=public_api_client,
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            message=_RETRY_ACROSS_TURNS,
+        )
+        failed_payload = _wait_for_failed_run_error(
+            server_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=result.session_id,
+            expected_attempts=4,
+        )
+        failed_event = _failed_run_error_events(failed_payload)[-1]
+        event_payload = _json_object_payload(
+            failed_event.get("payload"),
+            label="failed-run payload",
+        )
+        failure = _json_object_payload(
+            event_payload.get("failure"),
+            label="failed-run failure",
+        )
+        attempts = _json_object_list_payload(
+            failure.get("attempts"),
+            label="failed-run attempts",
+        )
+
+        attempt_messages = [attempt.get("user_message") for attempt in attempts]
+        assert failure.get("failed_attempt_count") == 4
+        assert failure.get("max_retries") == 3
+        assert [attempt.get("attempt_number") for attempt in attempts] == [1, 2, 3, 4]
+        assert all(isinstance(message, str) for message in attempt_messages)
+        for attempt_number, message in enumerate(attempt_messages, start=1):
+            expected_message = (
+                f"Deterministic model turn 2 attempt {attempt_number} failed."
+            )
+            assert expected_message in str(message)
+            assert "Deterministic model turn 1" not in str(message)
+        assert _RETRY_ACROSS_TURNS_CALL_ID in _tool_result_call_ids(failed_payload)
 
     def test_failed_run_manual_retry_soft_reverts_terminal_error(
         self,

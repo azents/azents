@@ -41,15 +41,18 @@ from azents.engine.events.engine_events import (
 )
 from azents.engine.events.types import (
     ActiveToolCall,
+    AssistantMessagePayload,
     Event,
+    NativeArtifact,
     RunMarkerPayload,
     SystemErrorPayload,
     UserMessagePayload,
+    build_native_compat_key,
 )
 from azents.engine.events.user_messages import make_run_user_message
 from azents.engine.run.commands import CommandHandler
 from azents.engine.run.contracts import AgentEngineProtocol, RunContext, RunRequest
-from azents.engine.run.emit import Emit, ephemeral
+from azents.engine.run.emit import Emit, durable, ephemeral
 from azents.engine.run.errors import (
     ModelCallError,
     UserVisibleRuntimeError,
@@ -640,6 +643,65 @@ class _FlakyEngine(_Engine):
                     )
                 )
                 raise ModelCallError("model temporarily unavailable")
+            yield ephemeral(RunComplete(run_id=context.run_id))
+
+        return iterator()
+
+
+def _successful_model_output_event() -> Event:
+    """Create committed model output without a usage turn marker."""
+    native_artifact = NativeArtifact(
+        compat_key=build_native_compat_key(
+            adapter="litellm",
+            native_format="responses",
+            provider="openai",
+            model="gpt-4o",
+            schema_version="1",
+        ),
+        adapter="litellm",
+        native_format="responses",
+        provider="openai",
+        model="gpt-4o",
+        schema_version="1",
+        item={"type": "message"},
+    )
+    return Event(
+        id="0" * 32,
+        session_id="session-001",
+        kind=EventKind.ASSISTANT_MESSAGE,
+        payload=AssistantMessagePayload(
+            content="first turn recovered",
+            native_artifact=native_artifact,
+        ),
+        created_at=datetime.datetime.now(datetime.UTC),
+    )
+
+
+class _RetryAcrossTurnsEngine(_Engine):
+    """Engine that fails once in each of two model turns."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def run(
+        self,
+        request: RunRequest,
+        context: object,
+        *,
+        poll_messages: object = None,
+        check_stop: object = None,
+    ) -> AsyncIterator[Emit]:
+        """Recover turn one, cross its output boundary, then fail turn two."""
+        del request, poll_messages, check_stop
+        assert isinstance(context, RunContext)
+
+        async def iterator() -> AsyncIterator[Emit]:
+            self.calls += 1
+            if self.calls == 1:
+                raise ModelCallError("first turn temporarily unavailable")
+            if self.calls == 2:
+                yield durable(_successful_model_output_event())
+                raise ModelCallError("second turn temporarily unavailable")
             yield ephemeral(RunComplete(run_id=context.run_id))
 
         return iterator()
@@ -2695,12 +2757,87 @@ async def test_execute_retries_failed_run_without_durable_error(
         run for _, run in live_event_projector.live_run_updates if run.retry is not None
     ]
     assert retry_live_runs[0].model_call_started_at is None
-    assert live_event_projector.live_run_updates[-1][1].retry is None
     assert live_event_projector.projection_operations == ["discard", "retry_update"]
+    assert live_event_projector.live_run_clears == [("session-001", result.run_id)]
     assert finalizer.inputs == []
     assert not any(
         isinstance(event, Event) and event.kind == EventKind.SYSTEM_ERROR
         for event in dispatched
+    )
+
+
+@pytest.mark.asyncio
+async def test_execute_resets_retry_budget_after_successful_model_turn(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A later model turn starts a fresh failed-attempt history and count."""
+    monkeypatch.setattr(run_executor_module, "_FAILED_RUN_RETRY_WAIT_POLL_SECONDS", 0)
+    lifecycle = _SessionLifecycle()
+    engine = _RetryAcrossTurnsEngine()
+    live_event_projector = _LiveEventProjector()
+    executor = _executor(
+        lifecycle,
+        engine=cast(AgentEngineProtocol, engine),
+        live_event_projector=live_event_projector,
+    )
+
+    async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
+        del args, kwargs
+        return RunInputPollResult(
+            context_invalidated=False,
+            complete_run=False,
+            requested_inference_profile=None,
+            promoted_event_ids=[],
+            user_messages=[],
+            has_actionable_work=True,
+        )
+
+    monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
+    _patch_successful_resolution(monkeypatch)
+
+    async def dispatch_event(session_id: str, event: PublishedEvent) -> None:
+        del session_id, event
+
+    result = await executor.execute(
+        _message(),
+        poll_fn=None,
+        check_stop=None,
+        prepare_toolkits=None,
+        shutdown_event=asyncio.Event(),
+        dispatch_event=dispatch_event,
+        owner_generation=1,
+        tool_admission_barrier=ToolAdmissionBarrier(),
+    )
+
+    assert result.terminal_run_status == AgentRunStatus.COMPLETED
+    assert engine.calls == 3
+    retry_states = [state for state in lifecycle.retry_states if state is not None]
+    assert [state.failed_attempt_count for state in retry_states] == [1, 1]
+    attempt_numbers = [
+        [attempt.attempt_number for attempt in state.attempts] for state in retry_states
+    ]
+    assert attempt_numbers == [[1], [1]]
+    assert [state.last_user_message for state in retry_states] == [
+        "first turn temporarily unavailable",
+        "second turn temporarily unavailable",
+    ]
+
+    live_runs = [run for _, run in live_event_projector.live_run_updates]
+    first_retry_index = next(
+        index
+        for index, run in enumerate(live_runs)
+        if run.retry is not None
+        and run.retry.last_error_message == "first turn temporarily unavailable"
+    )
+    second_retry_index = next(
+        index
+        for index, run in enumerate(live_runs)
+        if run.retry is not None
+        and run.retry.last_error_message == "second turn temporarily unavailable"
+    )
+    assert any(
+        run.retry is None
+        for run in live_runs[first_retry_index + 1 : second_retry_index]
     )
 
 
@@ -2780,8 +2917,8 @@ async def test_execute_publishes_retry_state_after_internal_attempt_failure(
         )
         for _, run in live_event_projector.live_run_updates
     )
+    assert live_event_projector.live_run_clears == [("session-001", result.run_id)]
     latest_live_run = live_event_projector.live_run_updates[-1][1]
-    assert latest_live_run.retry is None
     wire_event = chat_live_run_updated_dump("session-001", latest_live_run)
     wire_run = wire_event["run"]
     assert isinstance(wire_run, dict)

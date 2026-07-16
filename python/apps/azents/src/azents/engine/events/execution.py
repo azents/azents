@@ -423,6 +423,14 @@ class AgentRunExecution:
                                 inference_state=prepared_call.inference_state,
                                 system_prompt=prepared_call.system_prompt_analysis,
                             )
+                            # Successful output admission completes this model turn's
+                            # retry cycle. Keep the clear in the output transaction so
+                            # takeover cannot revive retry state after output commits.
+                            await self.run_repo.update_retry_state(
+                                session,
+                                request.run_id,
+                                None,
+                            )
                             if tool_calls:
                                 model_call_started_at = (
                                     await self._update_phase_in_session(

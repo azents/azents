@@ -92,7 +92,7 @@ api_routes:
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-07-16
-spec_version: 102
+spec_version: 103
 ---
 
 # Conversation & Events
@@ -345,7 +345,7 @@ before destructive cleanup can remove a path or branch.
 | `phase` | enum | UI activity source |
 | `status` | enum | `pending`, `running`, `completed`, `stopped`, `failed`, `interrupted`, or `cancelled` |
 | `active_tool_calls` | JSONB array | `call_id`, `name`, redacted/summarized `arguments`, `started_at`, and `owner_generation` |
-| `retry_state` | JSONB \| null | Durable failed-run retry state while the run remains `running`; cleared on terminal transition |
+| `retry_state` | JSONB \| null | Durable current-model-turn retry state; cleared on successful model output admission or terminal transition |
 | `parent_agent_run_id` | FK `agent_runs` \| null | Parent run lineage for a subagent's first run |
 | `last_completed_event_id` | `str(32)` \| null | Terminal run boundary event id when available |
 | `terminal_result_event_id` | `str(32)` \| null | Terminal assistant/error event used by parent subagent observation |
@@ -355,12 +355,13 @@ before destructive cleanup can remove a path or branch.
 Phase values are `idle`, `preparing_input`, `waiting_for_model`, `streaming_model`,
 `normalizing_output`, `executing_tools`, `appending_events`, `compacting`, and `stopping`.
 
-`retry_state` is the source of truth for failed-run retry progress while a retry attempt is waiting.
-While present, the run remains `running` and live run state may expose a retry projection. When retry
-wait expires and the next attempt starts, the worker clears `retry_state` and publishes live run state
-without `run.retry` so stale retry progress does not remain visible during later successful model or
-tool progress. Terminal run updates also clear `retry_state` so retry progress cannot leak into
-completed, stopped, failed, interrupted, or cancelled runs.
+`retry_state` is the source of truth for the current model turn's failed-run retry progress. While
+present, the run remains `running` and live run state exposes the active retry cycle during backoff
+and the in-flight retry attempt. Successful model output admission clears `retry_state` in the same
+transaction that appends the output, so a later model turn starts with a fresh retry budget and REST
+resync cannot recover an earlier turn's error. Terminal run updates also clear `retry_state`
+defensively so retry progress cannot leak into completed, stopped, failed, interrupted, or cancelled
+runs.
 
 A run is precreated as `pending` and associated with its ordered durable input events through
 `agent_run_input_events`. Normal buffered input resolves its requested profile before activation, then
@@ -719,6 +720,7 @@ Current verification:
 
 ## 11. Changelog
 
+- **2026-07-16** — v103. Scoped durable retry state to the active model turn and required successful output admission to clear it atomically before later turn progress.
 - **2026-07-15** — v102. Required `/live` to close its single PostgreSQL snapshot before Redis I/O
   and prohibited nested Goal/Todo database sessions during output reconstruction.
 - **2026-07-15** — v101. Required input-buffer attachment metadata resolution outside the locking

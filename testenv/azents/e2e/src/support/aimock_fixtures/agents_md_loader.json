@@ -806,6 +806,103 @@
     {
       "match": {
         "endpoint": "chat",
+        "userMessage": "Failed run retry resets across model turns",
+        "hasToolResult": false,
+        "sequenceIndex": 0
+      },
+      "response": {
+        "error": {
+          "message": "Deterministic model turn 1 attempt 1 failed.",
+          "type": "rate_limit_error",
+          "code": "rate_limit"
+        },
+        "status": 429
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Failed run retry resets across model turns",
+        "hasToolResult": false,
+        "sequenceIndex": 1
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_failed_run_retry_turn_boundary",
+            "name": "exec_command",
+            "arguments": {
+              "command": "printf '%s' 'TURN_RETRY_BOUNDARY'",
+              "yield_time_ms": 10000,
+              "max_output_bytes": 1000
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_failed_run_retry_turn_boundary",
+        "sequenceIndex": 0
+      },
+      "response": {
+        "error": {
+          "message": "Deterministic model turn 2 attempt 1 failed.",
+          "type": "rate_limit_error",
+          "code": "rate_limit"
+        },
+        "status": 429
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_failed_run_retry_turn_boundary",
+        "sequenceIndex": 1
+      },
+      "response": {
+        "error": {
+          "message": "Deterministic model turn 2 attempt 2 failed.",
+          "type": "rate_limit_error",
+          "code": "rate_limit"
+        },
+        "status": 429
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_failed_run_retry_turn_boundary",
+        "sequenceIndex": 2
+      },
+      "response": {
+        "error": {
+          "message": "Deterministic model turn 2 attempt 3 failed.",
+          "type": "rate_limit_error",
+          "code": "rate_limit"
+        },
+        "status": 429
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_failed_run_retry_turn_boundary",
+        "sequenceIndex": 3
+      },
+      "response": {
+        "error": {
+          "message": "Deterministic model turn 2 attempt 4 failed.",
+          "type": "rate_limit_error",
+          "code": "rate_limit"
+        },
+        "status": 429
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
         "userMessage": "Failed run retry exhaust then manual recover",
         "hasToolResult": false,
         "sequenceIndex": 0

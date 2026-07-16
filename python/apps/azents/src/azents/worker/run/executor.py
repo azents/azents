@@ -196,6 +196,14 @@ _NON_ACTIONABLE_TAIL_EVENT_KINDS = {
     EventKind.ACTION_EXECUTION_RESULT,
     EventKind.SYSTEM_ERROR,
 }
+_MODEL_TURN_OUTPUT_EVENT_KINDS = {
+    EventKind.ASSISTANT_MESSAGE,
+    EventKind.REASONING,
+    EventKind.CLIENT_TOOL_CALL,
+    EventKind.PROVIDER_TOOL_CALL,
+    EventKind.PROVIDER_TOOL_RESULT,
+    EventKind.UNKNOWN_ADAPTER_OUTPUT,
+}
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1118,6 +1126,11 @@ class RunExecutor:
             else None
         )
         current_retry_state = agent_run.retry_state if recovering_running_run else None
+        attempt_number = (
+            1
+            if current_retry_state is None
+            else current_retry_state.failed_attempt_count + 1
+        )
         active_model_call_started_at = (
             agent_run.model_call_started_at
             if recovering_running_run and current_retry_state is None
@@ -1138,19 +1151,6 @@ class RunExecutor:
                     retry=_chat_live_retry_state(live_retry_state),
                 ),
             )
-
-        async def clear_live_retry_state() -> None:
-            """Clear live retry UI while retaining durable takeover progress.
-
-            The durable state keeps the failed-attempt count until the next failure or
-            terminal transition. Its expired ``next_retry_at`` lets takeover replay the
-            in-flight attempt without repeating backoff or resetting the retry budget.
-            """
-            nonlocal live_retry_state
-            if live_retry_state is None:
-                return
-            live_retry_state = None
-            await publish_live_run()
 
         async def refresh_session_activity() -> None:
             """Publish the current run phase and active tool calls to the broker."""
@@ -1195,6 +1195,20 @@ class RunExecutor:
             nonlocal turn_boundary_context_invalidated
             turn_boundary_context_invalidated = True
 
+        def reset_model_turn_retry_state() -> bool:
+            """Reset local retry progress after successful model output admission."""
+            nonlocal attempt_number, current_retry_state, live_retry_state
+            if (
+                attempt_number == 1
+                and current_retry_state is None
+                and live_retry_state is None
+            ):
+                return False
+            attempt_number = 1
+            current_retry_state = None
+            live_retry_state = None
+            return True
+
         async def consume_emit(item: Emit) -> None:
             """Apply run lifecycle side effects for one engine emit."""
             nonlocal active_phase, active_model_call_started_at
@@ -1232,9 +1246,18 @@ class RunExecutor:
                 ):
                     active_phase = phase
                     active_model_call_started_at = model_call_started_at
+                    if phase is AgentRunPhase.EXECUTING_TOOLS:
+                        reset_model_turn_retry_state()
                     await refresh_session_activity()
                 case _:
                     pass
+            if (
+                item.mode == "durable"
+                and isinstance(item.event, Event)
+                and item.event.kind in _MODEL_TURN_OUTPUT_EVENT_KINDS
+                and reset_model_turn_retry_state()
+            ):
+                await refresh_session_activity()
             updated_tool_calls = apply_active_tool_call_event(
                 active_tool_calls,
                 item.event,
@@ -1264,9 +1287,7 @@ class RunExecutor:
         )
 
         try:
-            attempt_number = 1
             if current_retry_state is not None:
-                attempt_number = current_retry_state.failed_attempt_count + 1
                 finalization_reason = _failed_run_finalization_reason(
                     current_retry_state
                 )
@@ -1305,8 +1326,6 @@ class RunExecutor:
                             dispatch_event=dispatch_event,
                         )
                         run_completed = True
-                    else:
-                        await clear_live_retry_state()
             while not run_completed:
                 try:
                     if command_handler is None:
@@ -1473,7 +1492,6 @@ class RunExecutor:
                         )
                         run_completed = True
                         break
-                    await clear_live_retry_state()
                     attempt_number += 1
                 except Exception as exc:
                     await self.live_event_projector.discard_failed_attempt(
@@ -1573,7 +1591,6 @@ class RunExecutor:
                         )
                         run_completed = True
                         break
-                    await clear_live_retry_state()
                     attempt_number += 1
         except asyncio.CancelledError as exc:
             run_end_reason = "cancelled"
