@@ -608,7 +608,7 @@ class TestPerPromptInferenceProfile:
             target="Quality",
             effort="xhigh",
             display_name="GPT 5.5 Deterministic",
-            effective_context_window_tokens=64_000,
+            effective_context_window_tokens=32_000,
         )
 
         _write_profile(
