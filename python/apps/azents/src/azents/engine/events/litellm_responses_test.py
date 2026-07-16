@@ -2432,6 +2432,75 @@ class TestLiteLLMResponsesOutputNormalizer:
         ]
         assert duplicate.projections == []
 
+    def test_projects_generic_provider_tool_output_items(self) -> None:
+        """Treat generic output-item completion as a hosted-tool terminal state."""
+        output_stream = LiteLLMResponsesOutputNormalizer(
+            provider="openai",
+            model="gpt-5.1",
+        ).start("session-1")
+
+        running = output_stream.process_event(
+            NativeEvent(
+                type="ResponseOutputItemAddedEvent",
+                item={
+                    "item": {
+                        "type": "web_search_call",
+                        "id": "search-1",
+                        "status": "in_progress",
+                    }
+                },
+            )
+        )
+        completed = output_stream.process_event(
+            NativeEvent(
+                type="ResponseOutputItemDoneEvent",
+                item={
+                    "item": {
+                        "type": "web_search_call",
+                        "id": "search-1",
+                        "status": "in_progress",
+                    }
+                },
+            )
+        )
+        incomplete = output_stream.process_event(
+            NativeEvent(
+                type="ResponseOutputItemDoneEvent",
+                item={
+                    "item": {
+                        "type": "file_search_call",
+                        "id": "search-2",
+                        "status": "incomplete",
+                    }
+                },
+            )
+        )
+
+        assert running.projections == [
+            ProviderToolActivityProjection(
+                call_id="search-1",
+                name="web_search",
+                status="running",
+                arguments=None,
+            )
+        ]
+        assert completed.projections == [
+            ProviderToolActivityProjection(
+                call_id="search-1",
+                name="web_search",
+                status="completed",
+                arguments=None,
+            )
+        ]
+        assert incomplete.projections == [
+            ProviderToolActivityProjection(
+                call_id="search-2",
+                name="file_search",
+                status="failed",
+                arguments=None,
+            )
+        ]
+
     def test_interrupt_preserves_received_partial_assistant_text(self) -> None:
         """Create one incomplete assistant event from received text deltas."""
         normalizer = LiteLLMResponsesOutputNormalizer(
