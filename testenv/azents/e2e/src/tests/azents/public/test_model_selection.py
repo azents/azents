@@ -219,7 +219,7 @@ class TestModelSelectionReadiness:
         token, handle, integration_id = _workspace_with_deterministic_integration(
             public_api_client,
             admin_api_client,
-            variant="deterministic-success",
+            variant="deterministic-model-settings",
         )
         _sync_catalog(azents_public_server_url, token, handle, integration_id)
         listing = wait_until(
@@ -244,17 +244,34 @@ class TestModelSelectionReadiness:
             "model_identifier": entries[1]["provider_model_identifier"],
         }
 
+        workspace_settings_payload: dict[str, object] = {
+            "default_selectable_model_options": [
+                {
+                    "label": "default",
+                    "model_selection": main_selection,
+                    "settings": {
+                        "context_window_tokens": 100_000,
+                        "max_output_tokens": 12_000,
+                        "builtin_tools": [{"name": "web_search"}],
+                    },
+                },
+                {
+                    "label": "lightweight",
+                    "model_selection": lightweight_selection,
+                    "settings": {
+                        "context_window_tokens": 32_000,
+                        "max_output_tokens": 4_000,
+                        "builtin_tools": [],
+                    },
+                },
+            ],
+            "default_main_model_label": "default",
+            "default_lightweight_model_label": "lightweight",
+        }
         update = requests.put(
             f"{azents_public_server_url}/workspace-model-settings/v1/workspaces/{handle}",
             headers=_headers(token),
-            json={
-                "default_selectable_model_options": [
-                    {"label": "default", "model_selection": main_selection},
-                    {"label": "lightweight", "model_selection": lightweight_selection},
-                ],
-                "default_main_model_label": "default",
-                "default_lightweight_model_label": "lightweight",
-            },
+            json=workspace_settings_payload,
             timeout=10,
         )
         assert update.status_code == 200
@@ -262,6 +279,16 @@ class TestModelSelectionReadiness:
         assert [
             option["label"] for option in settings["default_selectable_model_options"]
         ] == ["default", "lightweight"]
+        assert settings["default_selectable_model_options"][0]["settings"] == {
+            "context_window_tokens": 100_000,
+            "max_output_tokens": 12_000,
+            "builtin_tools": [{"name": "web_search"}],
+        }
+        assert settings["default_selectable_model_options"][1]["settings"] == {
+            "context_window_tokens": 32_000,
+            "max_output_tokens": 4_000,
+            "builtin_tools": [],
+        }
         assert settings["default_model_selection"]["model_identifier"] == "gpt-5.5"
         assert (
             settings["default_lightweight_model_selection"]["model_identifier"]
@@ -279,6 +306,18 @@ class TestModelSelectionReadiness:
         assert [option["label"] for option in agent["selectable_model_options"]] == [
             "default",
             "lightweight",
+        ]
+        assert [option["settings"] for option in agent["selectable_model_options"]] == [
+            {
+                "context_window_tokens": 100_000,
+                "max_output_tokens": 12_000,
+                "builtin_tools": [{"name": "web_search"}],
+            },
+            {
+                "context_window_tokens": 32_000,
+                "max_output_tokens": 4_000,
+                "builtin_tools": [],
+            },
         ]
         assert agent["main_model_label"] == "default"
         assert agent["lightweight_model_label"] == "lightweight"

@@ -5,6 +5,7 @@ from typing import Literal
 
 from azents.core.enums import LLMModelDeveloper, LLMProvider
 from azents.core.llm_catalog import (
+    ModelBuiltInToolCapabilities,
     ModelCapabilities,
     ModelContextWindow,
     ModelModalities,
@@ -23,6 +24,7 @@ from azents.services.model_listing.data import (
 DETERMINISTIC_FIXTURE_NAME_PREFIX = "__testenv_model_listing:"
 DeterministicFixtureVariant = Literal[
     "deterministic-success",
+    "deterministic-model-settings",
     "deterministic-main-only",
     "deterministic-no-candidates",
     "deterministic-two-integrations",
@@ -30,6 +32,7 @@ DeterministicFixtureVariant = Literal[
 ]
 DETERMINISTIC_FIXTURE_VARIANTS: tuple[DeterministicFixtureVariant, ...] = (
     "deterministic-success",
+    "deterministic-model-settings",
     "deterministic-main-only",
     "deterministic-no-candidates",
     "deterministic-two-integrations",
@@ -59,7 +62,11 @@ def build_deterministic_listing(
     fetched_at = datetime.now(timezone.utc)
     source = f"testenv_fixture:{variant}"
     match variant:
-        case "deterministic-success" | "deterministic-two-integrations":
+        case (
+            "deterministic-success"
+            | "deterministic-model-settings"
+            | "deterministic-two-integrations"
+        ):
             models = [
                 _candidate(
                     provider=provider,
@@ -174,6 +181,14 @@ def _candidate(
                     else []
                 ),
                 summaries=not lightweight,
+            ),
+            built_in_tools=ModelBuiltInToolCapabilities(
+                supported=(
+                    ["web_search"]
+                    if source == "testenv_fixture:deterministic-model-settings"
+                    and not lightweight
+                    else []
+                )
             ),
         ),
         model_snapshot={

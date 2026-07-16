@@ -46,7 +46,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ChatView.tsx
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
 last_verified_at: 2026-07-16
-spec_version: 89
+spec_version: 90
 ---
 
 # Agent Execution Loop
@@ -202,8 +202,7 @@ snapshot, completes the active run, and is not retried.
 
 Requested profile selection precedence for implicit execution is the Session current requested
 profile then Agent `main_model_label`; explicit human input wins over both. The complete Session
-snapshot contains requested label, resolved physical selection, resolved effort, effective limits,
-and resolution time. Inputs accepted during a model/tool turn are applied only at the next turn
+snapshot contains requested label, resolved physical selection, the selected option's context/output/tool settings, resolved effort, effective limits, and resolution time. Inputs accepted during a model/tool turn are applied only at the next turn
 boundary. If that input changes the profile, the same `AgentRun` rebuilds the next model request from
 the newly prepared Session snapshot. It does not restore an older run-owned model selection or cancel
 the run merely to change profiles. Commands use the implicit selection but have no client-submitted
@@ -214,6 +213,8 @@ Model-call preparation carries that exact turn-local Session snapshot through `R
 applied profile and effective limits. A multi-turn run can therefore contain different immutable
 marker snapshots after a boundary profile change; it never stamps all turns with one run-start
 selection or queries a later Session value while appending an earlier turn.
+
+The foreground `RunRequest` uses the selected Session settings: `max_output_tokens` is clamped against the selected model capability, enabled built-in tools are lowered only from that option, and the effective input window combines the selected foreground context cap with the Agent lightweight option context cap. An explicit empty built-in tool list remains all-off. Automatic retry, recovery, and worker takeover rebuild from the Session-owned selection and settings snapshots rather than rematching the mutable Agent option list.
 
 `terminal_result_event_id` and `terminal_result_message` store the user-safe terminal output projection for a completed, failed, stopped, interrupted, or cancelled run. Subagent parent observation and Subagent Tree unread/result previews read this projection instead of scanning child transcript history.
 

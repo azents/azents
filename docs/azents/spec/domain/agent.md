@@ -45,8 +45,8 @@ api_routes:
   - /llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/start
   - /llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/{session_id}
   - /chat/v1
-last_verified_at: 2026-07-12
-spec_version: 46
+last_verified_at: 2026-07-16
+spec_version: 47
 ---
 
 # Agent Domain Spec
@@ -63,7 +63,7 @@ Agent is central execution unit of azents. Within Workspace, it bundles an order
 |---|---|
 | `workspace_id` | owning Workspace. cascades on Workspace deletion |
 | `name`, `description` | display name and description |
-| `selectable_model_options` | ordered JSONB array of selectable model options. Each option has a unique label and resolved `AgentModelSelection` snapshot |
+| `selectable_model_options` | ordered JSONB array of selectable model options. Each option has a unique label, resolved `AgentModelSelection` snapshot, and model-scoped runtime settings |
 | `main_model_label` | selected label from `selectable_model_options` for normal model turns |
 | `lightweight_model_label` | selected label from `selectable_model_options` for compaction/lightweight model turns |
 | `model_selection` | denormalized effective main runtime model selection snapshot resolved from `main_model_label`. required for every Agent |
@@ -87,7 +87,9 @@ Agent is central execution unit of azents. Within Workspace, it bundles an order
 - at most 10 options;
 - labels are trimmed, non-empty, case-sensitive, and unique within the list;
 - labels are at most 80 characters;
-- selected labels are normalized against the final list, and an absent selected label falls back to the first ordered option.
+- selected labels are normalized against the final list, and an absent selected label falls back to the first ordered option;
+- every option stores `settings.context_window_tokens`, `settings.max_output_tokens`, and `settings.builtin_tools` independently;
+- nullable token caps mean no user cap, while an explicit empty built-in tool list disables all provider-hosted tools for that option.
 
 `model_selection` and `lightweight_model_selection` are `AgentModelSelection` JSONB snapshots and are not FK targets. They are effective runtime snapshots owned by Agent service consistency logic:
 
@@ -132,7 +134,7 @@ Rules:
 - Once Workspace defaults are configured, the default selectable model list cannot be cleared to empty.
 - Workspace default selectable model list uses the same label, order, cap, and fallback invariants as Agent selectable model options.
 - Updating Workspace defaults recomputes the denormalized effective default snapshots from default labels.
-- Workspace default change does not change existing Agent selectable model options or effective snapshots.
+- New Agents copy each Workspace option's model snapshot and complete model-scoped settings; later Workspace changes do not change existing Agent options or effective snapshots.
 - During the direct-model transition, explicit legacy `default_model_selection` inputs are still accepted and converted into an equivalent default selectable option list.
 
 ### 1.3 Provider integration and model listing
@@ -157,6 +159,11 @@ Create/update requests accept selectable model options as the current model cont
       "model_selection": {
         "llm_provider_integration_id": "int_...",
         "model_identifier": "gpt-5"
+      },
+      "settings": {
+        "context_window_tokens": 128000,
+        "max_output_tokens": 8192,
+        "builtin_tools": [{"name": "web_search"}]
       }
     },
     {
@@ -164,6 +171,11 @@ Create/update requests accept selectable model options as the current model cont
       "model_selection": {
         "llm_provider_integration_id": "int_...",
         "model_identifier": "gpt-5.5-mini"
+      },
+      "settings": {
+        "context_window_tokens": null,
+        "max_output_tokens": 4096,
+        "builtin_tools": []
       }
     }
   ],
@@ -171,10 +183,7 @@ Create/update requests accept selectable model options as the current model cont
   "lightweight_model_label": "lightweight",
   "model_parameters": {
     "temperature": 0.7,
-    "context_window_tokens": 128000,
-    "max_output_tokens": 8192,
-    "reasoning_effort": "medium",
-    "builtin_tools": []
+    "reasoning_effort": "medium"
   },
   "subagent_settings": {
     "max_subagents": 3,
@@ -184,14 +193,14 @@ Create/update requests accept selectable model options as the current model cont
 ```
 
 - `selectable_model_options` omitted on create: copy Workspace default selectable model options into Agent.
-- `selectable_model_options` supplied: whole-list replacement. Every entry is resolved through stored catalog projection at submit time.
+- `selectable_model_options` supplied: whole-list replacement. Every entry is resolved through stored catalog projection at submit time, and its settings are normalized against that resolved option capability.
+- Omitted option settings default to null token caps and every supported implemented built-in tool enabled. Explicit null token caps preserve no user cap, and an explicit empty built-in tool list preserves all-off intent.
+- Positive token caps are stored even when they exceed catalog capability limits; runtime clamps them against the resolved model snapshot. Duplicate or unsupported built-in tool names are rejected per option.
 - Empty lists, more than 10 entries, empty labels, duplicate labels, and unresolved model selections are rejected.
 - `main_model_label` / `lightweight_model_label` omitted, null, or absent from the final list: fallback to the first ordered option label.
 - Effective `model_selection` and `lightweight_model_selection` are recomputed from the final labels and returned in responses.
 - During transition, legacy direct `model_selection` and `lightweight_model_selection` inputs remain accepted. They are converted into compatible selectable model options and effective snapshots. These fields are compatibility for the direct snapshot API, not the removed `ModelConfig` API.
-- `model_parameters` is whole-object replace. Unknown keys are rejected.
-- `model_parameters.context_window_tokens` is an optional Agent-level input budget cap. It is stored as user intent even when larger than current model limits, and runtime/API effective context calculation clamps it with model limits.
-- `model_parameters.max_output_tokens` is an optional output generation cap. When omitted/null, runtime does not set provider `max_output_tokens` and provider/model defaults apply.
+- `model_parameters` is whole-object replace for the remaining Agent-global inference parameters such as temperature and default reasoning effort. Unknown keys are rejected; context, output, and built-in tool settings do not exist at Agent scope.
 - `subagent_settings` is a whole-object replace when supplied. Omitted create requests use the default `{ "max_subagents": 3, "max_depth": 1 }`; omitted update requests leave the stored settings unchanged.
 - Response returns stored `selectable_model_options`, `main_model_label`, `lightweight_model_label`, effective `model_selection`, effective `lightweight_model_selection`, `model_parameters`, `subagent_settings`, and effective context window value.
 
@@ -212,6 +221,11 @@ PUT accepts Workspace default selectable model options and labels:
       "model_selection": {
         "llm_provider_integration_id": "int_...",
         "model_identifier": "gpt-5"
+      },
+      "settings": {
+        "context_window_tokens": null,
+        "max_output_tokens": null,
+        "builtin_tools": [{"name": "web_search"}]
       }
     }
   ],
@@ -222,7 +236,7 @@ PUT accepts Workspace default selectable model options and labels:
 
 - `default_selectable_model_options` is whole-list replacement.
 - Once configured, the Workspace default list cannot be cleared to empty.
-- Labels and option count use the same invariants as Agent selectable model options.
+- Labels, option count, model-scoped settings defaults, and per-option validation use the same invariants as Agent selectable model options.
 - Default labels normalize to the first option when omitted, null, or absent from the final list.
 - Response returns default selectable options, default labels, and denormalized effective default snapshots.
 - During transition, legacy direct `default_model_selection` and `default_lightweight_model_selection` inputs remain accepted and are converted into compatible default selectable options.
@@ -261,11 +275,11 @@ Before an inference-bearing FIFO head is atomically prepared, runtime resolution
 2. Resolves the requested label against the Agent's current `selectable_model_options`; missing labels fail with `model_target_not_found` and never fall back to another option.
 3. Validates every non-null requested effort against the selected snapshot's explicit normalized effort list; an empty list rejects every explicit effort, and unsupported effort fails with `reasoning_effort_unsupported` before provider invocation.
 4. Loads and validates the selected main integration plus the Agent's lightweight integration, including provider token refresh where required.
-5. Builds the main runtime model from the selected option while retaining the Agent's `lightweight_model_selection` for compaction.
-6. Computes the prepared turn's effective context window and automatic compaction threshold.
-7. Validates Agent model parameters, applies the requested effort, and materializes user attachments.
+5. Builds the foreground runtime model, output cap, and built-in tool list from the selected option while retaining the Agent's lightweight option for compaction.
+6. Computes the prepared turn's effective context window from the selected foreground option's capped input limit and the lightweight option's capped input limit, then derives the automatic compaction threshold.
+7. Validates remaining Agent model parameters, applies the requested effort, and materializes user attachments.
 
-Successful preparation atomically stores the full selected `AgentModelSelection`, resolved effort, effective limits, and resolution timestamp on `AgentSession` with the canonical input effects and buffer deletion. The Session snapshot is authoritative for the next model turn, automatic retry, recovery, and worker takeover. A later prepared profile may update that snapshot within the same active `AgentRun` and forces model/tool context to rebuild before the next model call. Resolution failures consume the failed FIFO head, preserve the previously committed Session snapshot, append a terminal typed user-safe error, and are never retried.
+Successful preparation atomically stores the full selected `AgentModelSelection`, selected `SelectableModelSettings`, resolved effort, effective limits, and resolution timestamp on `AgentSession` with the canonical input effects and buffer deletion. The Session snapshot is authoritative for the next model turn, automatic retry, recovery, and worker takeover; later Agent edits cannot change an already prepared turn. A later prepared profile may update that snapshot within the same active `AgentRun` and forces model/tool context to rebuild before the next model call. Resolution failures consume the failed FIFO head, preserve the previously committed Session snapshot, append a terminal typed user-safe error, and are never retried.
 
 `spawn_agent` exposes the current Agent's selectable labels and their explicit effort levels, but not integration ids, providers, physical model identifiers, display names, families, catalog metadata, context limits, pricing, or resolved snapshots. Omitted override fields preserve the exact concrete parent Session profile. An explicit target label or effort is allowed only with `fork_turns = none` or a positive bounded count; full-history forks reject overrides. A target-only override normalizes from the parent resolved effort using canonical effort order: preserve when supported, otherwise choose the greatest supported lower effort, otherwise the smallest supported effort, or null when no explicit levels exist. Explicit effort is validated exactly and never normalized. Static validation completes before child creation.
 
@@ -273,22 +287,17 @@ Runtime does not query Workspace defaults or model listing. Workspace defaults a
 
 ## 4. Built-in Tool Validation
 
-`model_parameters.builtin_tools` is provider-side hosted tool opt-in declaration. Model snapshot `normalized_capabilities.built_in_tools.supported` means only selectable capability, and even when capability exists, built-in tool not included in Agent setting is not exposed to run.
+Each selectable model option owns its provider-hosted built-in tool opt-in list. Model snapshot `normalized_capabilities.built_in_tools.supported` means only selectable capability; a supported tool omitted from that option's settings is not exposed when the option is selected.
 
-Agent create/update validates following with rules in `core/builtin_tools.py`.
+The configurable implemented registry currently contains only `web_search`. Capability projection filters out unimplemented identifiers such as `web_fetch` and `image_generation`. Agent and Workspace submit normalization rejects unknown, duplicate, or capability-unsupported names per option.
 
-- snapshot capability must support that built-in tool.
-- `web_search` validates only capability regardless of provider/model developer-specific native activation method. Gemini `web_search` also does not require shell disabled or no toolkit conditions.
-- Each built-in tool owns additional constraints. For example: provider-specific combination limits of `image_generation`, `web_fetch`.
-- built-in tool requiring reasoning effort checks snapshot reasoning capability and effort level.
-
-Runtime passes only `BuiltinToolSpec(name, config)`. LiteLLM Responses lowerer sees `RunRequest.model_developer`, provider, model capability and lowers semantic hosted tool into native `tools`/`kwargs`; to protect stale snapshot/direct RunRequest, it performs capability validation once more.
+Runtime passes the selected Session settings as `BuiltinToolSpec(name, config)`. LiteLLM Responses lowerer sees `RunRequest.model_developer`, provider, model capability and lowers semantic hosted tools into native `tools`/`kwargs`; to protect stale snapshots or direct `RunRequest` construction, it performs capability validation once more.
 
 ## 5. Context Window / Compaction
 
-`effective_context_window_tokens` in Agent response is calculated from the most restrictive value actually used by runtime among main model max input tokens, lightweight model max input tokens, and optional Agent `model_parameters.context_window_tokens`. The Agent context window cap is allowed to be larger than current model limits; in that case the current model limit still wins until the Agent model changes. `effective_auto_compaction_threshold_tokens` is 90% of effective context window.
+`effective_context_window_tokens` in Agent response is calculated from the default main option's capability-clamped context cap and the default lightweight option's capability-clamped context cap. A user cap may be larger than the model limit, in which case the model limit wins. `effective_auto_compaction_threshold_tokens` is 90% of the effective context window.
 
-Automatic compaction runs with `lightweight_model_selection` snapshot.
+Prepared foreground turns use the prompt-selected option instead of the default main option for the foreground side of the same calculation. Automatic compaction runs with the lightweight model snapshot; the lightweight option context cap participates in input budgeting, but its `max_output_tokens` setting does not replace the compactor's dynamic summary output budget.
 
 ## 6. Memory / toolkit / avatar
 
@@ -314,6 +323,7 @@ Following contracts do not exist in current system.
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-07-16 | 47 | Moved context, output, and built-in tool intent to selectable model options and persisted selected settings on AgentSession |
 | 2026-07-12 | 46 | Moved prepared turn inference authority and effective limits from AgentRun to AgentSession |
 | 2026-07-11 | 45 | Added label-only subagent spawn overrides, bounded-fork restrictions, and effort transition semantics |
 | 2026-07-10 | 44 | Required concrete user-facing effort selection when advertised and made explicit-effort validation strict for empty lists |

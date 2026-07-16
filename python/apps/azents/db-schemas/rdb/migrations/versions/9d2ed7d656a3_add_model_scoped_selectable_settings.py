@@ -56,20 +56,31 @@ def upgrade() -> None:
                             '{supported}',
                             COALESCE(
                                 (
-                                    SELECT jsonb_agg(tool_name ORDER BY ordinality)
-                                    FROM jsonb_array_elements_text(
-                                        CASE
-                                            WHEN jsonb_typeof(
-                                                capabilities #> '{built_in_tools,supported}'
-                                            ) = 'array'
-                                            THEN capabilities #> '{built_in_tools,supported}'
-                                            ELSE '[]'::jsonb
-                                        END
-                                    ) WITH ORDINALITY AS tools(tool_name, ordinality)
-                                    WHERE tool_name NOT IN (
-                                        'web_fetch',
-                                        'image_generation'
+                                    SELECT jsonb_agg(
+                                        tool_name ORDER BY first_ordinality
                                     )
+                                    FROM (
+                                        SELECT
+                                            tool_name,
+                                            MIN(ordinality) AS first_ordinality
+                                        FROM jsonb_array_elements_text(
+                                            CASE
+                                                WHEN jsonb_typeof(
+                                                    capabilities #> '{built_in_tools,supported}'
+                                                ) = 'array'
+                                                THEN capabilities #> '{built_in_tools,supported}'
+                                                ELSE '[]'::jsonb
+                                            END
+                                        ) WITH ORDINALITY AS tools(
+                                            tool_name,
+                                            ordinality
+                                        )
+                                        WHERE tool_name NOT IN (
+                                            'web_fetch',
+                                            'image_generation'
+                                        )
+                                        GROUP BY tool_name
+                                    ) AS unique_tools
                                 ),
                                 '[]'::jsonb
                             ),
@@ -112,17 +123,23 @@ def upgrade() -> None:
                                 'name', tool_name,
                                 'config', '{}'::jsonb
                             )
-                            ORDER BY ordinality
+                            ORDER BY first_ordinality
                         )
-                        FROM jsonb_array_elements_text(
-                            CASE
-                                WHEN jsonb_typeof(
-                                    selection #> '{normalized_capabilities,built_in_tools,supported}'
-                                ) = 'array'
-                                THEN selection #> '{normalized_capabilities,built_in_tools,supported}'
-                                ELSE '[]'::jsonb
-                            END
-                        ) WITH ORDINALITY AS tools(tool_name, ordinality)
+                        FROM (
+                            SELECT
+                                tool_name,
+                                MIN(ordinality) AS first_ordinality
+                            FROM jsonb_array_elements_text(
+                                CASE
+                                    WHEN jsonb_typeof(
+                                        selection #> '{normalized_capabilities,built_in_tools,supported}'
+                                    ) = 'array'
+                                    THEN selection #> '{normalized_capabilities,built_in_tools,supported}'
+                                    ELSE '[]'::jsonb
+                                END
+                            ) WITH ORDINALITY AS tools(tool_name, ordinality)
+                            GROUP BY tool_name
+                        ) AS unique_tools
                     ),
                     '[]'::jsonb
                 )
@@ -146,23 +163,31 @@ def upgrade() -> None:
                             AND jsonb_array_length(old_parameters->'builtin_tools') > 0
                         THEN COALESCE(
                             (
-                                SELECT jsonb_agg(tool ORDER BY ordinality)
-                                FROM jsonb_array_elements(
-                                    old_parameters->'builtin_tools'
-                                ) WITH ORDINALITY AS tools(tool, ordinality)
-                                WHERE EXISTS (
-                                    SELECT 1
-                                    FROM jsonb_array_elements_text(
-                                        CASE
-                                            WHEN jsonb_typeof(
-                                                selection #> '{normalized_capabilities,built_in_tools,supported}'
-                                            ) = 'array'
-                                            THEN selection #> '{normalized_capabilities,built_in_tools,supported}'
-                                            ELSE '[]'::jsonb
-                                        END
-                                    ) AS supported(tool_name)
-                                    WHERE tool_name = tool->>'name'
+                                SELECT jsonb_agg(
+                                    tool ORDER BY first_ordinality
                                 )
+                                FROM (
+                                    SELECT DISTINCT ON (tool->>'name')
+                                        tool,
+                                        ordinality AS first_ordinality
+                                    FROM jsonb_array_elements(
+                                        old_parameters->'builtin_tools'
+                                    ) WITH ORDINALITY AS tools(tool, ordinality)
+                                    WHERE EXISTS (
+                                        SELECT 1
+                                        FROM jsonb_array_elements_text(
+                                            CASE
+                                                WHEN jsonb_typeof(
+                                                    selection #> '{normalized_capabilities,built_in_tools,supported}'
+                                                ) = 'array'
+                                                THEN selection #> '{normalized_capabilities,built_in_tools,supported}'
+                                                ELSE '[]'::jsonb
+                                            END
+                                        ) AS supported(tool_name)
+                                        WHERE tool_name = tool->>'name'
+                                    )
+                                    ORDER BY tool->>'name', ordinality
+                                ) AS unique_tools
                             ),
                             '[]'::jsonb
                         )
