@@ -12,11 +12,16 @@ from azcommon.logging import bind_extra
 from litellm.exceptions import ContextWindowExceededError, OpenAIError
 
 from azents.core.enums import LLMProvider
+from azents.engine.events.openai_responses import (
+    OpenAIResponsesProviderError,
+    call_openai_responses_text,
+)
 from azents.engine.model_stream import (
     ModelStreamCallContext,
     ModelStreamWatchdog,
 )
 from azents.engine.responses import (
+    DEFAULT_RESPONSES_TEXT_CONFIG,
     ResponsesOutputError,
     call_responses_model,
     extract_response_text,
@@ -26,6 +31,7 @@ from azents.engine.run.errors import (
     CompactionContextWindowExceededError,
     CompactionFailedError,
     CompactionModelStreamTimeoutError,
+    ModelCallError,
     ModelStreamTimeoutError,
 )
 
@@ -347,11 +353,26 @@ async def _summarize_text_attempt(
         check_stop=None,
     )
     try:
+        input_items: list[dict[str, object]] = [
+            {"role": "user", "content": user_prompt + conversation_text}
+        ]
+        if provider in {LLMProvider.OPENAI, LLMProvider.CHATGPT_OAUTH}:
+            return await call_openai_responses_text(
+                provider=provider,
+                model=model,
+                credential_kwargs=credential_kwargs,
+                input_items=input_items,
+                instructions=system_prompt,
+                text=DEFAULT_RESPONSES_TEXT_CONFIG,
+                watchdog=watchdog,
+                timeout_policy=timeout_policy,
+                call_context=call_context,
+            )
         response = await call_responses_model(
             provider=provider,
             model=model,
             credential_kwargs=credential_kwargs,
-            input_items=[{"role": "user", "content": user_prompt + conversation_text}],
+            input_items=input_items,
             instructions=system_prompt,
             stream=True,
             max_output_tokens=endpoint_max_output_tokens,
@@ -364,6 +385,12 @@ async def _summarize_text_attempt(
         raise CompactionModelStreamTimeoutError(exc) from exc
     except ResponsesOutputError as exc:
         raise _compaction_error_from_responses_output(exc) from exc
+    except OpenAIResponsesProviderError as exc:
+        if exc.code == "context_length_exceeded":
+            raise CompactionContextWindowExceededError(str(exc)) from exc
+        raise CompactionFailedError(str(exc)) from exc
+    except ModelCallError as exc:
+        raise CompactionFailedError(exc.user_message) from exc
     except ContextWindowExceededError as exc:
         raise _compaction_error_from_litellm_exception(exc) from exc
     except OpenAIError as exc:

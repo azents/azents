@@ -60,11 +60,19 @@ from azents.engine.events.litellm_responses import (
     LiteLLMResponsesOutputNormalizer,
 )
 from azents.engine.events.model_file_materializer import ModelFileMaterializer
+from azents.engine.events.openai_responses import (
+    OpenAIResponsesLowerer,
+    OpenAIResponsesModelAdapter,
+    OpenAIResponsesOutputNormalizer,
+    OpenAIResponsesRequest,
+    create_openai_responses_client,
+)
 from azents.engine.events.output_parts import iter_output_parts
 from azents.engine.events.protocols import (
     AgentRunCreateRepository,
     ClientToolExecutor,
     ManualCompactor,
+    NativeModelRequest,
     NormalizedAdapterOutput,
     SessionHeadRepository,
     StreamProjection,
@@ -354,7 +362,7 @@ class AgentEngineAdapter:
             *,
             transcript: Sequence[Event],
             model: str,
-        ) -> PreparedModelCall:
+        ) -> PreparedModelCall[NativeModelRequest | OpenAIResponsesRequest]:
             catalog = await build_tool_catalog(
                 toolkit_bindings=request.toolkits,
                 context=TurnContext(
@@ -390,12 +398,21 @@ class AgentEngineAdapter:
                 dynamic_toolkit_prompts=catalog.dynamic_prompt_fragment_inputs,
                 injected_prompts=injected_prompts,
             )
-            lowerer = LiteLLMResponsesLowerer(
+            lowerer_type = (
+                OpenAIResponsesLowerer
+                if _uses_openai_sdk(request.provider)
+                else LiteLLMResponsesLowerer
+            )
+            lowerer = lowerer_type(
                 provider=provider,
                 model=model,
                 tools=catalog.native_tools,
                 provider_id=request.provider,
-                credential_kwargs=request.credential_kwargs,
+                credential_kwargs=(
+                    {}
+                    if _uses_openai_sdk(request.provider)
+                    else request.credential_kwargs
+                ),
                 temperature=request.temperature,
                 max_output_tokens=request.max_output_tokens,
                 top_p=request.top_p,
@@ -489,6 +506,29 @@ class AgentEngineAdapter:
                 run_id=context.run_id,
             ),
         )
+        if _uses_openai_sdk(request.provider):
+            model_adapter = OpenAIResponsesModelAdapter(
+                client=create_openai_responses_client(
+                    provider=request.provider,
+                    credential_kwargs=request.credential_kwargs,
+                ),
+                continuation_planner=(
+                    ResponsesContinuationPlanner()
+                    if request.provider == LLMProvider.OPENAI
+                    else None
+                ),
+            )
+            output_normalizer = OpenAIResponsesOutputNormalizer(
+                provider=provider,
+                model=request.model,
+            )
+        else:
+            model_adapter = LiteLLMResponsesModelAdapter(None)
+            output_normalizer = LiteLLMResponsesOutputNormalizer(
+                provider=provider,
+                model=request.model,
+            )
+
         execution = self.execution_factory(
             session_manager=self.session_manager,
             post_lower_filter=PostLowerFilterPipeline(
@@ -498,11 +538,7 @@ class AgentEngineAdapter:
                     ),
                 ]
             ),
-            model_adapter=LiteLLMResponsesModelAdapter(
-                ResponsesContinuationPlanner()
-                if request.provider == LLMProvider.OPENAI
-                else None
-            ),
+            model_adapter=model_adapter,
             model_stream_watchdog=self.model_stream_watchdog,
             model_stream_provider=provider,
             model_stream_inference_profile=(
@@ -510,10 +546,7 @@ class AgentEngineAdapter:
                 if request.inference_state is not None
                 else None
             ),
-            output_normalizer=LiteLLMResponsesOutputNormalizer(
-                provider=provider,
-                model=request.model,
-            ),
+            output_normalizer=output_normalizer,
             pre_lower_filter=pre_lower_filter,
             auto_compaction_filter=auto_compaction_filter,
             model_call_preparer=prepare_model_call,
@@ -751,6 +784,11 @@ def _tool_result_text(result: ClientToolResultPayload) -> str | None:
 def _provider_name(provider: LLMProvider) -> str:
     """Convert provider enum to string for native compat key."""
     return provider.value
+
+
+def _uses_openai_sdk(provider: LLMProvider) -> bool:
+    """Return whether the provider uses the official OpenAI HTTP adapter."""
+    return provider in {LLMProvider.OPENAI, LLMProvider.CHATGPT_OAUTH}
 
 
 def _make_input_poller(

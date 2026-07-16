@@ -19,12 +19,6 @@ from azents.engine.run.errors import CompactionFailedError
 from azents.testing.model_stream import make_test_model_stream_watchdog
 
 
-class _ResponsesOutputText:
-    """LiteLLM Responses response for tests."""
-
-    output_text = "summary"
-
-
 class _ResponsesStreamEvent:
     """Streaming Responses event for tests."""
 
@@ -145,13 +139,13 @@ class TestSummarizeTextWithModel:
         """Send system prompt as top-level instructions."""
         calls: list[dict[str, object]] = []
 
-        async def fake_aresponses(**kwargs: object) -> _ResponsesOutputText:
+        async def fake_openai_responses_text(**kwargs: object) -> str:
             calls.append(dict(kwargs))
-            return _ResponsesOutputText()
+            return "summary"
 
         monkeypatch.setattr(
-            "azents.engine.responses.aresponses",
-            fake_aresponses,
+            "azents.engine.context.compaction.call_openai_responses_text",
+            fake_openai_responses_text,
         )
 
         result = await summarize_text_with_model(
@@ -172,12 +166,11 @@ class TestSummarizeTextWithModel:
         assert result == "summary"
         assert len(calls) == 1
         call = calls[0]
+        assert call["provider"] == LLMProvider.CHATGPT_OAUTH
         assert call["instructions"] == "summarize system"
-        assert call["stream"] is True
-        assert call["max_output_tokens"] is None
-        assert call["include"] == ["reasoning.encrypted_content"]
+        assert "max_output_tokens" not in call
         assert call["text"] == {"format": {"type": "text"}, "verbosity": "low"}
-        assert call["input"] == [
+        assert call["input_items"] == [
             {"role": "user", "content": "summarize user\n[User]: hello"}
         ]
 
@@ -188,13 +181,13 @@ class TestSummarizeTextWithModel:
         """OpenAI/Codex Responses compaction call omits output token field."""
         calls: list[dict[str, object]] = []
 
-        async def fake_aresponses(**kwargs: object) -> _ResponsesOutputText:
+        async def fake_openai_responses_text(**kwargs: object) -> str:
             calls.append(dict(kwargs))
-            return _ResponsesOutputText()
+            return "summary"
 
         monkeypatch.setattr(
-            "azents.engine.responses.aresponses",
-            fake_aresponses,
+            "azents.engine.context.compaction.call_openai_responses_text",
+            fake_openai_responses_text,
         )
 
         await summarize_text_with_model(
@@ -209,8 +202,8 @@ class TestSummarizeTextWithModel:
             session_id="session-1",
         )
 
-        assert calls[0]["stream"] is True
-        assert calls[0]["max_output_tokens"] is None
+        assert calls[0]["provider"] == LLMProvider.OPENAI
+        assert "max_output_tokens" not in calls[0]
         assert calls[0]["text"] == {"format": {"type": "text"}, "verbosity": "low"}
 
     async def test_extracts_streaming_summary_text_helper(
@@ -284,7 +277,7 @@ class TestSummarizeTextWithModel:
 
         result = await summarize_text_with_model(
             watchdog=make_test_model_stream_watchdog(),
-            provider=LLMProvider.CHATGPT_OAUTH,
+            provider=LLMProvider.ANTHROPIC,
             model="gpt-5.5",
             credential_kwargs={"api_key": "test-key"},
             system_prompt="summarize system",
@@ -333,7 +326,7 @@ class TestSummarizeTextWithModel:
 
         result = await summarize_text_with_model(
             watchdog=make_test_model_stream_watchdog(),
-            provider=LLMProvider.CHATGPT_OAUTH,
+            provider=LLMProvider.ANTHROPIC,
             model="gpt-5.5",
             credential_kwargs={"api_key": "test-key"},
             system_prompt="summarize system",
@@ -373,7 +366,7 @@ class TestSummarizeTextWithModel:
 
         result = await summarize_text_with_model(
             watchdog=make_test_model_stream_watchdog(),
-            provider=LLMProvider.CHATGPT_OAUTH,
+            provider=LLMProvider.ANTHROPIC,
             model="gpt-5.5",
             credential_kwargs={"api_key": "test-key"},
             system_prompt="summarize system",
@@ -416,7 +409,7 @@ class TestSummarizeTextWithModel:
 
         result = await summarize_text_with_model(
             watchdog=make_test_model_stream_watchdog(),
-            provider=LLMProvider.CHATGPT_OAUTH,
+            provider=LLMProvider.ANTHROPIC,
             model="gpt-5.5",
             credential_kwargs={"api_key": "test-key"},
             system_prompt="summarize system",
@@ -447,7 +440,7 @@ class TestSummarizeTextWithModel:
 
         result = await summarize_text_with_model(
             watchdog=make_test_model_stream_watchdog(),
-            provider=LLMProvider.CHATGPT_OAUTH,
+            provider=LLMProvider.ANTHROPIC,
             model="gpt-5.5",
             credential_kwargs={"api_key": "test-key"},
             system_prompt="summarize system",
@@ -507,7 +500,7 @@ class TestSummarizeTextWithModel:
 
         result = await summarize_text_with_model(
             watchdog=make_test_model_stream_watchdog(),
-            provider=LLMProvider.CHATGPT_OAUTH,
+            provider=LLMProvider.ANTHROPIC,
             model="gpt-5.4-mini",
             credential_kwargs={"api_key": "test-key"},
             system_prompt="summarize system",
@@ -563,7 +556,7 @@ class TestSummarizeTextWithModel:
         with pytest.raises(CompactionFailedError, match="bad_request"):
             await summarize_text_with_model(
                 watchdog=make_test_model_stream_watchdog(),
-                provider=LLMProvider.CHATGPT_OAUTH,
+                provider=LLMProvider.ANTHROPIC,
                 model="gpt-5.4-mini",
                 credential_kwargs={"api_key": "test-key"},
                 system_prompt="summarize system",
@@ -612,7 +605,7 @@ class TestSummarizeTextWithModel:
 
         result = await summarize_text_with_model(
             watchdog=make_test_model_stream_watchdog(),
-            provider=LLMProvider.CHATGPT_OAUTH,
+            provider=LLMProvider.ANTHROPIC,
             model="gpt-5.4-mini",
             credential_kwargs={"api_key": "test-key"},
             system_prompt="summarize system",

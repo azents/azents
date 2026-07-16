@@ -92,7 +92,7 @@ api_routes:
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-07-16
-spec_version: 103
+spec_version: 104
 ---
 
 # Conversation & Events
@@ -434,11 +434,16 @@ Compaction keeps append-only storage while presenting future model input from a 
 `compaction_summary` head event.
 
 `NativeArtifact.item` is adapter-native opaque payload. Event core does not interpret it.
-Same-native pass-through is allowed only when the compat key matches:
+Same-native pass-through is allowed only when the compat key matches exactly:
 
 ```text
 adapter:native_format:provider:model:schema_version
 ```
+
+Official OpenAI SDK Responses artifacts use adapter identity `openai`; LiteLLM Responses artifacts
+use `litellm`. A mismatch always reconstructs provider input from canonical events. This includes
+forward cutover from old LiteLLM artifacts and a code-version rollback that reads newer OpenAI-native
+artifacts; cross-adapter objects are never replayed as though they shared schema ownership.
 
 ## 5. History And Live Event APIs
 
@@ -720,6 +725,8 @@ Current verification:
 
 ## 11. Changelog
 
+- **2026-07-16** — v104. Added strict cross-adapter native artifact ownership and canonical fallback
+  behavior for the official OpenAI SDK cutover and code-version rollback.
 - **2026-07-16** — v103. Scoped durable retry state to the active model turn and required successful output admission to clear it atomically before later turn progress.
 - **2026-07-15** — v102. Required `/live` to close its single PostgreSQL snapshot before Redis I/O
   and prohibited nested Goal/Todo database sessions during output reconstruction.

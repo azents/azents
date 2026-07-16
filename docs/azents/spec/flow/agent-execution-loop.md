@@ -46,7 +46,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ChatView.tsx
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
 last_verified_at: 2026-07-16
-spec_version: 90
+spec_version: 91
 ---
 
 # Agent Execution Loop
@@ -68,20 +68,23 @@ Main steps:
 3. Worker executes buffer-keyed operation TurnActions such as `create_git_worktree` before the next model dispatch. The current Session owner generation admits the execution before buffer deletion; active state and progress remain in execution tables until one atomic terminal handover appends durable history and deletes live state.
 4. `AgentRunExecution` repeats model steps and tool steps while updating `agent_runs.phase`.
 5. `PreLowerFilterPipeline` cleans up event transcript into DB-mutating event transcript.
-6. `LiteLLMResponsesLowerer` lowers event transcript, client tools, hosted tools, and model kwargs
-   into a LiteLLM Responses native request.
-7. `PostLowerFilterPipeline` applies adapter-native request size guard.
-8. `LiteLLMResponsesModelAdapter.stream()` calls the raw LiteLLM Responses API.
-9. `AdapterOutputNormalizer` incrementally processes native output into non-durable UI stream
-   projections while retaining only the state needed to build durable output at completion.
+6. The provider-selected lowerer converts the event transcript, client tools, hosted tools, and
+   model options into a complete adapter-owned logical request. OpenAI API-key and ChatGPT OAuth use
+   `OpenAIResponsesLowerer`; other providers use `LiteLLMResponsesLowerer`.
+7. `PostLowerFilterPipeline` applies adapter-native request guards to that complete logical request.
+8. OpenAI API-key and ChatGPT OAuth dispatch streaming HTTP through the official OpenAI SDK;
+   non-migrated providers continue through `LiteLLMResponsesModelAdapter`.
+9. The matching `AdapterOutputNormalizer` incrementally processes native output into non-durable UI
+   stream projections while retaining only the state needed to build durable output at completion.
 10. Foreground client tools execute in parallel and results are appended as event `client_tool_result`.
 11. When no foreground client tool call or pending follow-up remains, the runner observes the
     terminal `RunComplete` boundary and then transitions `AgentSession.run_state` to idle.
 
 Streaming text, reasoning, and function-call deltas are UI projections only. The worker coalesces
 text and reasoning deltas for at most 75 milliseconds or 96 characters before Redis/WebSocket
-publication. A normally exhausted LiteLLM Responses stream must contain an explicit native
-`response.completed` terminal event before its normalized output can be appended. Native
+publication. A normally exhausted Responses stream must contain an explicit native
+`response.completed` terminal event before its normalized output can be appended. The OpenAI SDK
+normalizer requires both the documented SDK event class and exact wire discriminator;
 `response.incomplete`, `response.failed`, and `error` outcomes, plus EOF without a recognized
 terminal event, raise `ModelCallError` before durable model events or markers are appended and flow
 through the failed-run retry/finalization boundary. Completed output items may reconstruct a
@@ -103,10 +106,10 @@ exactly equals the preceding full request input, followed by that response's ord
 items, followed by non-empty new input, the adapter sends only the new input and supplies the
 preceding response ID as `previous_response_id`.
 
-Continuation is enabled only for `LLMProvider.OPENAI` requests whose `store` setting is not `false`.
-The request model, tools, and all kwargs must match exactly. Any changed property, edited or compacted
-prefix, output mismatch, missing completion data, empty delta, cancellation, or failed/incomplete
-stream causes the next call to use the complete logical request. Continuation state is in memory for
+Continuation is enabled only for `LLMProvider.OPENAI` sampling requests whose `store` setting is not
+`false`. The request model, tools, and all presence-preserving logical options must match exactly. Any
+changed property, edited or compacted prefix, output mismatch, missing completion data, empty delta,
+cancellation, or failed/incomplete stream causes the next call to use the complete logical request. Continuation state is in memory for
 one adapter lifetime and is committed only after a successful `response.completed` event with a
 non-empty response ID. Durable event history remains the recovery source across worker retries,
 restarts, and adapter recreation. Stored output items use the same raw-blob sanitization as durable
@@ -135,11 +138,11 @@ overrides. The production defaults are:
 | Absolute attempt | 1,800 seconds | Starts with response-handle acquisition and never resets. |
 | Provider close grace | 5 seconds | Bounds cooperative close before cleanup remains process-owned. |
 
-The LiteLLM HTTP client receives a connect-only `httpx.Timeout`; its read, write, and pool bounds
-remain disabled so transport idle behavior does not become a second stream-liveness policy. Response
-handle acquisition and async iteration share the same parsed-event idle and absolute deadlines. The
-watchdog does not classify semantic progress: metadata, reasoning, text, tool-call, terminal, and
-other parsed events all refresh idle equally.
+The active LiteLLM or official OpenAI SDK HTTP client receives a connect-only `httpx.Timeout`; its
+read, write, and pool bounds remain disabled so transport idle behavior does not become a second
+stream-liveness policy. Response handle acquisition and async iteration share the same parsed-event
+idle and absolute deadlines. The watchdog does not classify semantic progress: metadata, reasoning,
+text, tool-call, terminal, and other parsed events all refresh idle equally.
 
 A watchdog expiry cancels the active response acquisition or iteration and raises a typed failure
 before normalized output can become durable. The stable failure codes are
@@ -306,8 +309,10 @@ Durable event kinds:
 - `unknown_adapter_output`
 
 Native/raw artifacts are not interpreted by event core. They are opaque same-native replay
-optimizations. The LiteLLM Responses lowerer replays a native artifact item as-is by default when
-this compat key matches. Canonical fallback lowering is used when the compat key does not match.
+optimizations. Each adapter lowerer replays a native artifact item only when this compatibility key
+matches exactly. OpenAI SDK artifacts use adapter identity `openai`; LiteLLM artifacts use `litellm`.
+Canonical fallback lowering is used across an adapter, provider, model, format, or schema mismatch,
+including a code-version rollback from a new OpenAI artifact to the preceding LiteLLM implementation.
 
 ```text
 adapter:native_format:provider:model:schema_version
@@ -318,21 +323,27 @@ Cross-model lowering drops reasoning text and summary. Reasoning is preserved as
 
 ## 4. Model Adapter Pipeline
 
-The model pipeline is deliberately adapter-specific and does not use a generic model request IR.
+The model pipeline is generic over adapter-owned request and event types; it does not force providers
+through one shared model request IR.
 
-```text
-event transcript
-  -> PreLowerFilterPipeline
-  -> LiteLLMResponsesLowerer
-  -> NativeRequestSizeGuard
-  -> LiteLLMResponsesModelAdapter.stream()
-  -> LiteLLMResponsesOutputNormalizer
-  -> events + stream projection
+```mermaid
+flowchart LR
+    E[Event transcript] --> P[PreLowerFilterPipeline]
+    P --> S{Provider route}
+    S -->|OpenAI or ChatGPT OAuth| OL[OpenAIResponsesLowerer]
+    S -->|Other providers| LL[LiteLLMResponsesLowerer]
+    OL --> G[NativeRequestSizeGuard]
+    LL --> G
+    G --> OA[Official OpenAI SDK adapter and typed normalizer]
+    G --> LA[LiteLLM adapter and normalizer]
+    OA --> C[Canonical events and stream projections]
+    LA --> C
 ```
 
-Pre-lower filters may mutate DB-backed event transcript state or shape an in-memory transcript
-clone for the next model call. Post-lower filters operate on adapter-native request payloads and must
-not mutate DB state.
+Pre-lower filters may mutate DB-backed event transcript state or shape an in-memory transcript clone
+for the next model call. Post-lower filters operate on the complete adapter-native logical request and
+must not mutate DB state. Continuation reduction, when eligible, happens only after materialization,
+compaction, and the complete-request size guard.
 
 The pre-lower order is significant. Event attachment/file availability filters run before automatic
 compaction. Scheduler-owned file cleanup does not run in run input preparation. The runtime does not omit old tool outputs in normal model input. If the lowered request
@@ -340,11 +351,23 @@ is still too large, `NativeRequestSizeGuard` remains the final post-lower hard g
 
 `AgentWorker` resolves the requested main target before the engine starts. The target label is resolved only against the current Agent-owned selectable option snapshots; Workspace defaults and model catalogs are not consulted. The selected main snapshot, requested effort, effective context limit, and compaction threshold become immutable `AgentRun` provenance. The Agent's lightweight snapshot remains the compaction model. The execution core receives physical selections and limits in `RunRequest`, never the target label.
 
-`LiteLLMResponsesLowerer` owns the full provider-native request surface for the Responses adapter:
-transport credential kwargs, generation kwargs, client function tool passthrough, and provider-hosted
-tool lowering. Agent `model_parameters.builtin_tools` stores semantic ids such as `web_search`; the
-lowerer maps them to provider/model-developer native shapes and fails before provider call if the
-selected model capability does not support the requested hosted tool.
+The selected lowerer owns the full provider-native request surface: generation options, client
+function tool passthrough, and provider-hosted tool lowering. OpenAI logical requests preserve
+omitted, explicit-null, and concrete option states but do not contain credentials, endpoint URLs,
+stream handles, timeouts, or continuation state. Credentials and endpoint identity configure an
+operation-scoped `AsyncOpenAI` client outside the request. Sampling reuses that client across turns in
+one execution; compaction and title generation each own one bounded-operation client. Streams and
+clients close on success, failure, timeout, cancellation, and User Stop. Agent
+`model_parameters.builtin_tools` stores semantic ids such as `web_search`; the lowerer maps them to
+provider/model-developer native shapes and fails before provider call if the selected model capability
+does not support the requested hosted tool.
+
+OpenAI SDK completion usage maps directly into the existing turn-marker token fields. Its raw usage is
+the SDK usage object serialized to plain JSON and does not synthesize LiteLLM hidden parameters.
+`cost_usd` is a content-free estimate from LiteLLM's public pricing function using provider usage,
+model, service tier, and required output-type metadata only. Pricing failures, unsupported prices,
+negative values, and non-finite values leave cost unset without failing completed output. ChatGPT
+OAuth cost is an API price-map estimate, not subscription billing.
 
 Both `xai` and `xai_oauth` use the xAI transport target in this lowerer. For either identity, system instructions become the first `system` input item instead of top-level `instructions`, hosted `web_search` uses the xAI Responses tool target, and Anthropic cache-control hints are omitted. Credential refresh is resolved before the adapter pipeline and remains exclusive to `xai_oauth`; the lowerer does not own OAuth lifecycle state.
 
@@ -540,10 +563,19 @@ payload reason. Explicit `/compact` writes `manual_command` to both payloads.
 
 Manual compaction uses the same summary-plus-continuity structure as automatic compaction. The
 runtime no longer keeps a separate raw tail by moving the compaction boundary; recent continuity is
-embedded into the summary payload with per-event truncation. Compaction summary generation uses
-LiteLLM Responses API directly from `engine/context/compaction.py`. If summary generation fails, the
+embedded into the summary payload with per-event truncation. OpenAI API-key and ChatGPT OAuth summary
+generation uses the operation-scoped official OpenAI SDK helper from
+`engine/context/compaction.py`; other providers continue through the shared LiteLLM Responses helper.
+The OpenAI-compatible helper uses standard Responses input and instructions, omits
+`max_output_tokens`, and never uses sampling continuation or Responses Lite. ChatGPT OAuth additionally
+uses full input, `store=false`, and encrypted reasoning inclusion. If summary generation fails, the
 failure is propagated to the caller instead of being published as a successful compaction. The
 existing transcript remains append-only.
+
+Automatic Session title generation follows the same provider routing and standard helper dialect.
+OpenAI-compatible title calls omit `max_output_tokens`; a timeout, premature EOF, terminal failure, or
+sanitized provider failure preserves the deterministic initial title and does not fail an otherwise
+completed agent Run.
 
 ## 7. Entrypoints And Projection
 
@@ -764,7 +796,7 @@ wake a run. A `goal_continuation` input buffer promotes to a durable `goal_conti
 the next buffer flush. That event uses a user-message compatible payload with empty attachments and
 metadata containing the event-time Goal snapshot (`goal_objective`, `goal_status`, `goal_created_at`,
 `goal_updated_at`) plus control fields such as `source=goal` and `provider_slug=goal`. It does not
-store the rendered continuation prompt. `LiteLLMResponsesLowerer` renders the model-visible
+store the rendered continuation prompt. The active Responses lowerer renders the model-visible
 continuation prompt at LLM input lowering time from the metadata snapshot. UI consumers must not show
 a pending user bubble or delete control for this internal control event; they may render a
 non-interactive continuation indicator.
@@ -776,6 +808,10 @@ updated by the user.
 
 ## Changelog
 
+- **2026-07-16** (spec_version 91) — Routed OpenAI API-key and ChatGPT OAuth sampling,
+  compaction, and Session title Responses HTTP calls through operation-scoped official OpenAI SDK
+  clients, with typed terminal handling, SDK usage provenance, public-map cost estimates, strict
+  native artifact boundaries, and code-version rollback.
 - **2026-07-16** (spec_version 90) — Scoped failed-run retry count, history, and backoff to one model
   turn; preserved active retry state through in-flight recovery and cleared it atomically with
   successful model output admission.

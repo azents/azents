@@ -17,9 +17,10 @@ from azents.engine.events.model_file_refs import unique_model_file_ids
 from azents.engine.events.protocols import (
     AdapterOutputNormalizer,
     AdapterOutputStream,
+    AsyncClosableAdapter,
     ClientToolExecutor,
     ModelAdapter,
-    NativeModelRequest,
+    NativeRequestInspection,
     NormalizedAdapterOutput,
     OutputSink,
     PostLowerFilter,
@@ -104,17 +105,17 @@ class PreModelLowerHook(Protocol):
 
 
 @dataclass(frozen=True)
-class PreparedModelCall:
+class PreparedModelCall[TNativeRequest]:
     """Turn-local model call dependencies."""
 
-    native_request: NativeModelRequest
+    native_request: TNativeRequest
     inference_state: SessionInferenceState | None
     system_prompt_analysis: SystemPromptAnalysisPayload | None
     tool_executor: ClientToolExecutor
     on_turn_end: TurnEndCallback | None
 
 
-class ModelCallPreparer(Protocol):
+class ModelCallPreparer[TNativeRequest](Protocol):
     """Prepare turn-local model request and tool executor."""
 
     async def __call__(
@@ -122,7 +123,7 @@ class ModelCallPreparer(Protocol):
         *,
         transcript: Sequence[Event],
         model: str,
-    ) -> PreparedModelCall:
+    ) -> PreparedModelCall[TNativeRequest]:
         """Prepare one model-call turn."""
         ...
 
@@ -189,20 +190,23 @@ class _ToolExecutionOutcome:
     result: ClientToolResultPayload
 
 
-class AgentRunExecution:
+class AgentRunExecution[
+    TNativeRequest: NativeRequestInspection,
+    TNativeStreamEvent,
+]:
     """ReAct loop based on event transcript."""
 
     def __init__(
         self,
         *,
         session_manager: SessionManager[AsyncSession],
-        post_lower_filter: PostLowerFilter,
-        model_adapter: ModelAdapter,
+        post_lower_filter: PostLowerFilter[TNativeRequest],
+        model_adapter: ModelAdapter[TNativeRequest, TNativeStreamEvent],
         model_stream_watchdog: ModelStreamWatchdog,
         model_stream_provider: str,
         model_stream_inference_profile: str | None,
-        output_normalizer: AdapterOutputNormalizer,
-        model_call_preparer: ModelCallPreparer,
+        output_normalizer: AdapterOutputNormalizer[TNativeStreamEvent],
+        model_call_preparer: ModelCallPreparer[TNativeRequest],
         pre_lower_filter: PreLowerFilter | None = None,
         auto_compaction_filter: AutoCompactionFilter | None = None,
         output_sink: OutputSink | None = None,
@@ -403,7 +407,7 @@ class AgentRunExecution:
 
                     async def append_model_output(
                         normalized_output: NormalizedAdapterOutput,
-                        prepared_call: PreparedModelCall,
+                        prepared_call: PreparedModelCall[TNativeRequest],
                         tool_calls: list[ClientToolCallPayload],
                     ) -> None:
                         """Append output and admit its complete foreground call set."""
@@ -552,6 +556,9 @@ class AgentRunExecution:
                     raise
         except UserVisibleRuntimeError:
             raise
+        finally:
+            if isinstance(self.model_adapter, AsyncClosableAdapter):
+                await self.model_adapter.close()
 
         async with self.session_manager() as session:
             await self._append_run_marker(
@@ -570,7 +577,7 @@ class AgentRunExecution:
         *,
         transcript: Sequence[Event],
         model: str,
-    ) -> PreparedModelCall:
+    ) -> PreparedModelCall[TNativeRequest]:
         """Prepare turn-local model request and tool executor."""
         return await self.model_call_preparer(
             transcript=transcript,
@@ -581,10 +588,10 @@ class AgentRunExecution:
         self,
         run_id: str,
         session_id: str,
-        native_request: NativeModelRequest,
+        native_request: TNativeRequest,
         *,
         check_stop: CheckStop | None,
-    ) -> AdapterOutputStream:
+    ) -> AdapterOutputStream[TNativeStreamEvent]:
         """Normalize and project watched model stream events as they arrive."""
         await self._update_phase(
             run_id,

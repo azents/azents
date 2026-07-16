@@ -42,8 +42,12 @@ from azents.engine.events.filters import (
     EventPreLowerFilterPipeline,
     PostLowerFilterPipeline,
 )
-from azents.engine.events.litellm_responses import LiteLLMResponsesModelAdapter
+from azents.engine.events.openai_responses import (
+    OpenAIResponsesModelAdapter,
+    OpenAIResponsesRequest,
+)
 from azents.engine.events.protocols import (
+    NativeRequestInspection,
     NormalizedAdapterOutput,
     OutputSink,
     SummaryEnricher,
@@ -415,8 +419,12 @@ class _Execution:
 
     def __init__(self) -> None:
         self.request: AgentRunExecutionRequest | None = None
-        self.model_call_preparer: ModelCallPreparer | None = None
-        self.prepared_model_call: PreparedModelCall | None = None
+        self.model_call_preparer: ModelCallPreparer[NativeRequestInspection] | None = (
+            None
+        )
+        self.prepared_model_call: PreparedModelCall[NativeRequestInspection] | None = (
+            None
+        )
 
     async def run(
         self,
@@ -659,8 +667,11 @@ async def test_event_engine_adapter_runs_execution() -> None:
     assert execution.request is not None
     assert execution.prepared_model_call is not None
     prepared_request = execution.prepared_model_call.native_request
-    assert prepared_request.kwargs["instructions"] == "## Agent prompt\n\nagent prompt"
-    assert isinstance(prepared_request.kwargs.get("prompt_cache_key"), str)
+    assert isinstance(prepared_request, OpenAIResponsesRequest)
+    assert prepared_request.options.get("instructions") == (
+        "## Agent prompt\n\nagent prompt"
+    )
+    assert isinstance(prepared_request.options.get("prompt_cache_key"), str)
     assert isinstance(_events(emits)[0], RunComplete)
 
 
@@ -847,7 +858,9 @@ async def test_event_engine_adapter_includes_turn_start_injected_prompts() -> No
     ]
 
     assert execution.prepared_model_call is not None
-    assert execution.prepared_model_call.native_request.kwargs["instructions"] == (
+    native_request = execution.prepared_model_call.native_request
+    assert isinstance(native_request, OpenAIResponsesRequest)
+    assert native_request.options.get("instructions") == (
         "## Agent prompt\n\nagent prompt\n\n"
         "## Static toolkit prompt: hooks\n\ntool prompt\n\n"
         "## Turn injected prompt from hooks\n\nvisible prompt\n\n"
@@ -954,16 +967,14 @@ async def test_model_kwargs_routes_chatgpt_oauth_to_backend_api() -> None:
         )
     ]
     assert execution.prepared_model_call is not None
-    result = execution.prepared_model_call.native_request.kwargs
-
-    assert result["api_key"] == "access-token"
-    assert result["custom_llm_provider"] == "openai"
-    assert result["base_url"] == CHATGPT_OAUTH_BACKEND_BASE_URL
-    assert result["api_base"] == CHATGPT_OAUTH_BACKEND_BASE_URL
-    assert result["store"] is False
-    assert result["instructions"] == "You are a helpful assistant."
+    native_request = execution.prepared_model_call.native_request
+    assert isinstance(native_request, OpenAIResponsesRequest)
+    assert native_request.options.get("store") is False
+    assert native_request.options.get("instructions") == "You are a helpful assistant."
+    assert "api_key" not in native_request.options
+    assert "base_url" not in native_request.options
     model_adapter = captured["model_adapter"]
-    assert isinstance(model_adapter, LiteLLMResponsesModelAdapter)
+    assert isinstance(model_adapter, OpenAIResponsesModelAdapter)
     assert model_adapter.continuation_planner is None
 
 
@@ -1030,7 +1041,7 @@ async def test_adapter_wires_event_filters_and_session_head_repo() -> None:
     ]
     assert captured["session_repo"] is session_head_repo
     model_adapter = captured["model_adapter"]
-    assert isinstance(model_adapter, LiteLLMResponsesModelAdapter)
+    assert isinstance(model_adapter, OpenAIResponsesModelAdapter)
     assert isinstance(
         model_adapter.continuation_planner,
         ResponsesContinuationPlanner,

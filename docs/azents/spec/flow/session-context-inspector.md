@@ -5,8 +5,8 @@ created: 2026-05-30
 spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, conversation]
-last_verified_at: 2026-07-12
-spec_version: 14
+last_verified_at: 2026-07-16
+spec_version: 15
 code_paths:
   - python/apps/azents/src/azents/services/agent/**
   - python/apps/azents/src/azents/api/public/agent/**
@@ -16,6 +16,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/agent_execution/__init__.py
   - python/apps/azents/src/azents/engine/events/types.py
   - python/apps/azents/src/azents/engine/events/execution.py
+  - python/apps/azents/src/azents/engine/events/openai_responses.py
   - typescript/apps/azents-web/src/features/agents/components/AgentSessionHeader.tsx
   - typescript/apps/azents-web/src/features/agents/AgentContextPage.tsx
   - typescript/apps/azents-web/src/features/chat/components/ChatSessionView.tsx
@@ -65,6 +66,12 @@ Latest usage comes from event `TurnMarkerPayload.usage`. Usage is value returned
 - `cost_usd`
 - raw provider usage payload
 
+For OpenAI API-key and ChatGPT OAuth turns, token fields and raw usage come directly from the official
+OpenAI SDK completed `ResponseUsage`; raw usage does not contain synthetic LiteLLM hidden parameters.
+Their `cost_usd` is a content-free LiteLLM public price-map estimate. Unsupported pricing or a
+calculator failure leaves cost absent while preserving provider token usage. ChatGPT OAuth cost is an
+API-pricing estimate rather than subscription billing.
+
 Chat tab header finds the most recent `turn_marker` usage from the loaded/live chat timeline and shows it in the token usage indicator. When clicked, the popup shows total, prompt, completion, cache read/write, and reasoning token counts. New markers also carry an immutable allowlisted snapshot of the exact Session inference state applied to that model call: target label, raw nullable reasoning effort, nullable model display name, effective context window, and effective automatic-compaction threshold. The popup renders this durable snapshot after terminal cleanup and reload. Historical markers without the snapshot remain valid; a matching active live Run may temporarily provide its applied profile, otherwise provenance and effective limits render as unavailable. Readers never substitute the current Session, Agent default, or Composer selection.
 
 ## Approximate Breakdown
@@ -107,7 +114,10 @@ Ready state includes this UI:
 
 ## Verification
 
-As of 2026-07-12, verified through the chat Run state hardening stack and existing context inspector checks. Version 14 persists immutable per-turn provenance and effective limits so historical usage remains interpretable after live Run cleanup, while preserving unavailable behavior for older markers.
+As of 2026-07-16, verified through the chat Run state checks, context inspector checks, and official
+OpenAI SDK usage-normalization coverage. Version 15 documents the SDK usage and content-free pricing
+provenance while retaining immutable per-turn profile and effective-limit snapshots. Historical
+markers remain readable, and unavailable fields remain unavailable rather than being synthesized.
 
 ```bash
 cd python/apps/azents && uv run ruff check src/azents/services/chat/context.py

@@ -17,11 +17,13 @@ code_paths:
   - python/apps/azents/src/azents/services/llm_catalog/__init__.py
   - python/apps/azents/src/azents/core/llm_mapping.py
   - python/apps/azents/src/azents/engine/events/**
+  - python/apps/azents/src/azents/engine/context/compaction.py
+  - python/apps/azents/src/azents/services/session_title.py
   - typescript/apps/azents-web/src/features/agents/components/ModelCatalogPicker.tsx
   - typescript/apps/azents-web/src/features/llm-settings/**
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
-last_verified_at: 2026-07-14
-spec_version: 8
+last_verified_at: 2026-07-16
+spec_version: 9
 ---
 
 # ChatGPT OAuth Flow
@@ -186,13 +188,27 @@ Rules:
 - Refresh applies only to integrations whose provider is `chatgpt_oauth`.
 - Transient provider failure is treated as retryable provider unavailable, and permanent rejection is stored as `refresh_required`.
 - Concurrent refresh race rereads latest integration and does not overwrite with failure if token is already refreshed.
-- `access_token` used in runtime request is passed only as OpenAI SDK `api_key`. It is not exposed in logs/API responses.
-- ChatGPT Codex backend does not allow Responses API server-side persistence, so runtime calls set `store=false` and request encrypted reasoning content for stateless replay.
+- Sampling, context compaction, and automatic Session title Responses HTTP calls use the official
+  OpenAI Python SDK. LiteLLM is not a ChatGPT OAuth transport fallback.
+- `access_token` used in runtime request is passed only as OpenAI SDK `api_key`. The SDK client is
+  scoped to one sampling execution, compaction operation, or title operation and closes with its
+  active stream on every exit. Credentials, requests, responses, and provider request/response
+  identifiers are not exposed in logs or API responses.
+- ChatGPT Codex backend does not allow Responses API server-side persistence, so runtime calls set
+  `store=false`, request encrypted reasoning content for stateless replay, send complete logical
+  input, and never use `previous_response_id`.
 - Immediately before a `store=false` runtime call, mask top-level Responses input item `id` values. Azents events and external ids remain preserved in the database, while provider response item ids are not replayed as stored references.
 - Runtime requests use `originator: azents`, an `azents/<version>` User-Agent, and the connected `ChatGPT-Account-Id` rather than impersonating Codex CLI identity.
 - A saved model capability with `responses_lite=false` uses the standard Responses contract regardless of model name.
 - A saved model capability with `responses_lite=true` moves tools and instructions into developer input items, strips image detail fields, disables parallel tool calls, sets reasoning context to `all_turns`, uses the Azents session id as prompt cache key and affinity id, and sends the fixed Responses Lite compatibility version and header.
+- Compaction and title generation use the standard Responses dialect regardless of the sampling-model
+  Responses Lite capability. They send ordinary user input plus top-level instructions, no sampling
+  tools or affinity fields, and omit `max_output_tokens` while retaining `store=false`, encrypted
+  reasoning inclusion, and common client identity headers.
 - Responses Lite failures follow the normal model-call error path. Runtime does not retry with the standard Responses contract.
+- Completed SDK usage maps directly into the existing turn marker. `cost_usd` is a LiteLLM public
+  price-map estimate based only on content-free usage metadata and represents API pricing rather than
+  ChatGPT subscription billing; missing or invalid pricing leaves the estimate unset.
 
 ## API Surface
 
@@ -229,6 +245,7 @@ Rules:
 
 | Date | Version | Change | Rationale |
 |---|---|---|---|
+| 2026-07-16 | 9 | Routed sampling, compaction, and title Responses HTTP through the official OpenAI SDK with full-context stateless ChatGPT requests | [`design/openai-compatible-responses-http-migration.md`](../../design/openai-compatible-responses-http-migration.md) |
 | 2026-07-14 | 8 | Removed the system-catalog fallback and made the account catalog transactional with OAuth integration creation | `python/apps/azents/src/azents/services/chatgpt_oauth/__init__.py` |
 | 2026-07-12 | 7 | Added account-scoped model discovery and saved-capability-driven Responses Lite lowering | [`design/chatgpt-responses-lite-catalog.md`](../../design/chatgpt-responses-lite-catalog.md) |
 | 2026-06-16 | 5 | Updated runtime refresh sequence from Agent model selection snapshot → Integration resolve | [`adr/0063-agent-model-selection-snapshot.md`](../../adr/0063-agent-model-selection-snapshot.md) |
