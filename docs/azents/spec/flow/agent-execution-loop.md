@@ -46,7 +46,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ChatView.tsx
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
 last_verified_at: 2026-07-16
-spec_version: 92
+spec_version: 93
 ---
 
 # Agent Execution Loop
@@ -74,15 +74,19 @@ Main steps:
 7. `PostLowerFilterPipeline` applies adapter-native request guards to that complete logical request.
 8. OpenAI API-key and ChatGPT OAuth dispatch streaming HTTP through the official OpenAI SDK;
    non-migrated providers continue through `LiteLLMResponsesModelAdapter`.
-9. The matching `AdapterOutputNormalizer` incrementally processes native output into non-durable UI
-   stream projections while retaining only the state needed to build durable output at completion.
+9. The matching `AdapterOutputNormalizer` incrementally processes native output into typed,
+   provider-neutral UI stream projections while retaining only the state needed to build durable
+   output at completion. Provider-native hosted-tool stages are adapter-local and become canonical
+   provider-tool activity snapshots when observed.
 10. Foreground client tools execute in parallel and results are appended as event `client_tool_result`.
 11. When no foreground client tool call or pending follow-up remains, the runner observes the
     terminal `RunComplete` boundary and then transitions `AgentSession.run_state` to idle.
 
-Streaming text, reasoning, and function-call deltas are UI projections only. The worker coalesces
-text and reasoning deltas for at most 75 milliseconds or 96 characters before Redis/WebSocket
-publication. A normally exhausted Responses stream must contain an explicit native
+Streaming text, reasoning, function-call deltas, and provider-tool activity are UI projections only.
+The worker coalesces text and reasoning deltas for at most 75 milliseconds or 96 characters before
+Redis/WebSocket publication. Provider-tool activity is emitted as a full canonical snapshot keyed by
+stable adapter-normalized `call_id`, with semantic name, status `running | completed | failed`, and
+optional canonical JSON arguments. A normally exhausted Responses stream must contain an explicit native
 `response.completed` terminal event before its normalized output can be appended. The OpenAI SDK
 normalizer requires both the documented SDK event class and exact wire discriminator;
 `response.incomplete`, `response.failed`, and `error` outcomes, plus EOF without a recognized
@@ -240,12 +244,12 @@ retry is finalized. `max_retries` counts retries after the initial attempt, so a
 permits four total attempts and terminal attempt numbers remain one-based within each model turn.
 
 Before a non-Stop model failure is recorded or its retry state is published, `RunExecutor` asks the
-live projector to discard that attempt's assistant and reasoning projections. The partial batcher
-serializes append, timer flush, durable replacement, and discard per Session so an in-flight flush
-cannot recreate an older prefix after removal. Cleanup targets only `azents-live` assistant and
-reasoning events; user inputs and active tool projections are not part of this attempt-local model
-cleanup. Redis/WebSocket cleanup is best-effort, but the cleanup attempt always precedes retry-state
-publication. A retry therefore starts from canonical durable history rather than concatenating the
+live projector to discard that attempt's assistant, reasoning, and provider-tool projections. The
+partial batcher serializes append, timer flush, durable replacement, and discard per Session so an
+in-flight flush cannot recreate an older prefix after removal. Cleanup targets only `azents-live`
+assistant, reasoning, and provider-tool events; user inputs and PostgreSQL-backed active client tools
+are not part of this attempt-local model cleanup. Redis/WebSocket cleanup is best-effort, but the
+cleanup attempt always precedes retry-state publication. A retry therefore starts from canonical durable history rather than concatenating the
 failed prefix with the next attempt. User Stop bypasses this discard because its interruption path
 may durably retain valid assistant text.
 
@@ -374,6 +378,13 @@ Both `xai` and `xai_oauth` use the xAI transport target in this lowerer. For eit
 Generated image/file output and provider-hosted tool output from the model are normalized as
 provider tool call/result events with attachments or text payloads. These provider tool events do not
 enter the client tool execution loop and do not by themselves continue the model turn.
+
+Each output stream owns one shared provider-tool activity accumulator. OpenAI SDK and LiteLLM
+normalizers extract adapter-native observations locally, normalize stable call identity and semantic
+hosted-tool names, and submit them to the accumulator. The accumulator suppresses duplicate
+snapshots, enriches later arguments, supports multiple calls, and prevents `completed` or `failed`
+state from regressing to `running`. Providers or transports that expose only final output do not
+produce guessed running activity.
 
 Synthetic model-visible reminders are durable events or control events whose model lowering role is
 `user`, even though they are not user-authored chat messages. The lowerer renders most
@@ -661,12 +672,15 @@ UI projection boundaries: they preserve `asyncio.CancelledError`, log other proj
 do not fail provider execution, durable event append, Run phase/terminal persistence, or subsequent
 cleanup.
 
-`ContentDelta` and `ReasoningDelta` are live projection events only. The worker coalesces each
-Session's text and reasoning deltas for at most 75 milliseconds or 96 characters before applying a
-batch to the Redis live projection and emitting `live_event_upserted`. It flushes pending batches at
-Session cleanup. Engine emit ordering keeps each flushed live update ahead of a later durable
-assistant/reasoning event, whose history action is published before the matching live projection is
-removed.
+`ContentDelta`, `ReasoningDelta`, and `ProviderToolActivityChanged` are live projection events only.
+The worker coalesces each Session's text and reasoning deltas for at most 75 milliseconds or 96
+characters before applying a batch to the Redis live projection and emitting
+`live_event_upserted`. Provider-tool activity directly upserts one deterministic `provider_tool_call`
+live Event per `call_id` while the Run remains in `streaming_model`; it never enters
+`agent_runs.active_tool_calls`. The worker flushes pending text/reasoning batches at Session cleanup.
+Engine emit ordering keeps each live update ahead of a later matching durable event. The publisher
+broadcasts the durable history action before removing and broadcasting removal of the matching live
+projection by semantic identity.
 
 The old `GET /chat/v1/sessions/{session_id}/messages` aggregate endpoint is removed. The POST
 `/chat/v1/sessions/{session_id}/messages` write endpoint is a separate REST commit boundary and does
@@ -701,6 +715,8 @@ Primary checks:
 
 ## Changelog
 
+- **2026-07-16** — v93. Added adapter-local provider-tool lifecycle extraction, shared canonical
+  accumulation, attempt-local live cleanup, and durable provider-tool handoff.
 - **2026-07-16** — v92. Removed Responses Lite routing and standardized ChatGPT OAuth sampling on the standard Responses contract.
 - **2026-07-12** — v73. Added exact terminal Run correlation, durable-before-publication ordering, and exact per-turn inference provenance.
 - **2026-07-12** — v71. Promoted sequential single-head preparation, Session-owned per-turn inference snapshots, buffer-only action transport, buffer-keyed operation execution, handled preparation failures, and same-run profile changes.
@@ -809,6 +825,9 @@ updated by the user.
 
 ## Changelog
 
+- **2026-07-16** (spec_version 93) — Added provider-neutral hosted-tool live activity with
+  adapter-local extraction, shared monotonic accumulation, retry cleanup, Redis resync, and
+  durable-before-live-removal handoff.
 - **2026-07-16** (spec_version 91) — Routed OpenAI API-key and ChatGPT OAuth sampling,
   compaction, and Session title Responses HTTP calls through operation-scoped official OpenAI SDK
   clients, with typed terminal handling, SDK usage provenance, public-map cost estimates, strict

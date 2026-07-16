@@ -2,6 +2,7 @@
 title: "Provider Tool Live Activity Design"
 created: 2026-07-16
 updated: 2026-07-16
+implemented: 2026-07-16
 tags: [backend, engine, frontend, llm, tools]
 ---
 

@@ -12,11 +12,12 @@ code_paths:
   - python/apps/azents/src/azents/transport/chat.py
   - python/apps/azents/src/azents/engine/tools/skill.py
   - python/apps/azents/src/azents/worker/deps.py
+  - python/apps/azents/src/azents/worker/live/**
   - typescript/apps/azents-web/src/features/agents/**
   - typescript/apps/azents-web/src/features/chat/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
 last_verified_at: 2026-07-16
-spec_version: 30
+spec_version: 31
 ---
 
 # Chat Session Resync
@@ -135,7 +136,7 @@ Response fields:
 
 | Field | Meaning |
 | --- | --- |
-| `partial_history.items` | ordered partial history projection list to synthesize after durable history. |
+| `partial_history.items` | ordered partial history projection list to synthesize after durable history, including current assistant/reasoning partials and provider-tool activity. |
 | `input_buffers` | pending user input buffer projection list not yet injected into model turn. |
 | `run` | currently running run projection. `null` if absent. Includes running profile provenance, nullable `model_call_started_at` for the current model turn, plus `run.retry` with failed-run retry status, latest user-safe error, attempt count, retry budget, next retry timestamp, and bounded attempt history when retry is active. |
 | `session_run_state` | authoritative run state of session. |
@@ -172,8 +173,11 @@ mutation response.
 Raw live partials remain separate from raw durable history until render selection. Assistant,
 reasoning, provider-tool, client-tool, and internal-agent rows use semantic projection identity so a
 durable history append replaces its live counterpart without duplicate frames or temporary
-disappearance. Provider results preserve completion/failure status, output text, and attachments.
-Live `agent_message` uses the same collapsed, source-labeled internal-agent row as the durable event.
+disappearance. Provider-tool live Events are keyed by stable `call_id`, restore the same deterministic
+Event identity through `/live`, and carry provider-neutral status `running`, `completed`, or `failed`.
+A missing live status is treated as running; a missing durable status remains the neutral historical
+fallback. Provider results preserve completion/failure status, output text, and attachments. Live
+`agent_message` uses the same collapsed, source-labeled internal-agent row as the durable event.
 Durable action execution results take precedence over any competing live projection.
 
 ## 5.2 REST Subagent Tree Contract
@@ -392,6 +396,12 @@ finite transaction periodically.
 - When: its completed, failed, or cancelled durable result arrives before or after `action_execution_removed`.
 - Then: the live card disappears, exactly one durable card remains at the result event position, and a delayed live update with the same execution ID cannot recreate a duplicate.
 
+**TC-14: Provider-tool activity resync and handover**
+
+- Given: a provider emits observed hosted-tool activity before completing the model response.
+- When: the running projection is received, `/live` is queried, the projection becomes completed, and the matching durable provider-tool event is appended.
+- Then: one semantic card keeps the same `call_id` and live Event identity through resync and status updates, durable history is observed before live removal, and no provider-tool live projection remains after handover.
+
 ## 10. Invariants
 
 - WebSocket open is not subscribe completion; `subscribed` and health-check ack require the current Redis-confirmed send-loop generation.
@@ -416,6 +426,7 @@ finite transaction periodically.
 - Legacy aggregate `/messages` fallback is not used.
 - Terminal worktree action execution results are chat history events of kind `action_execution_result`; clients reconcile in-progress action logs through `/live.action_executions` and `action_execution_updated`.
 - Durable semantic projections override matching live assistant, reasoning, provider-tool, client-tool, internal-agent, and action-execution projections without duplicate rows.
+- Provider-tool live projection identity is deterministic by `call_id`; canonical status updates do not create a second card, and durable history is published before live removal.
 - Provider result rendering preserves status, text output, and attachments.
 - The “new message” control is a semantic keyboard-accessible button.
 - Subagent Tree state is restored from the dedicated tree endpoint; `subagent_tree_changed` only invalidates/refetches cached tree queries.
@@ -423,6 +434,8 @@ finite transaction periodically.
 
 ## 11. Changelog
 
+- **2026-07-16** — v31. Added deterministic provider-tool live identity, canonical lifecycle status
+  resync, and durable-before-live-removal handoff without duplicate cards.
 - **2026-07-16** — v30. Limited live retry recovery to the active model turn and required successful output admission to remove durable retry state before later resync.
 - **2026-07-14** — v29. Added current model-call start time to REST and WebSocket live Run replacement snapshots for elapsed-duration recovery.
 - **2026-07-14** — v28. Defined active operation tail placement, explicit removal transport, stable-ID durable handover deduplication, cancelled terminal history, and detached durable-result rendering.
