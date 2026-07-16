@@ -30,6 +30,7 @@ from azents.core.credentials import (
 )
 from azents.core.enums import LLMModelDeveloper, LLMProvider
 from azents.core.llm_catalog import (
+    ModelBuiltInToolCapabilities,
     ModelCapabilities,
     ModelCompatibilityCapabilities,
     ModelContextWindow,
@@ -282,6 +283,7 @@ def _candidate_from_chatgpt_model(
             effort_levels=reasoning_efforts,
             summaries=reasoning_summaries,
         ),
+        built_in_tools=ModelBuiltInToolCapabilities(supported=["web_search"]),
         compatibility=ModelCompatibilityCapabilities(
             provider_family="chatgpt",
             responses_api=True,

@@ -22,8 +22,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/llm-settings/containers/useLlmSettingsContainer.ts
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
   - typescript/apps/azents-admin-web/src/features/model-catalog/containers/useModelCatalogPageContainer.ts
-last_verified_at: 2026-07-14
-spec_version: 7
+last_verified_at: 2026-07-16
+spec_version: 8
 ---
 
 # Model Catalog Domain Spec
@@ -65,7 +65,7 @@ Only entries with selectable visibility are returned by the public picker list A
 
 LiteLLM is the current lowerer target projection source. The source sync service records LiteLLM source snapshots before projection. System and integration projections use the stored LiteLLM source snapshot rather than fetching external model metadata from the picker read path.
 
-ChatGPT OAuth integration catalogs additionally fetch the authenticated account-visible model list from the ChatGPT Codex backend during sync. Backend metadata is authoritative for visibility, Responses Lite compatibility, reasoning efforts, modalities, context window, and tool capabilities. ChatGPT entries do not require a matching LiteLLM model metadata key; the LiteLLM source snapshot remains attached to the catalog snapshot because the existing lowerer-target catalog lifecycle requires one.
+ChatGPT OAuth integration catalogs additionally fetch the authenticated account-visible model list from the ChatGPT Codex backend during sync. Backend metadata is authoritative for visibility, Responses Lite compatibility, reasoning efforts, modalities, and context window. Following Codex's provider-level capability policy, every API-supported and picker-visible ChatGPT OAuth model is projected with the semantic `web_search` built-in tool capability. ChatGPT entries do not require a matching LiteLLM model metadata key; the LiteLLM source snapshot remains attached to the catalog snapshot because the existing lowerer-target catalog lifecycle requires one.
 
 Reasoning capabilities are projected from LiteLLM's canonical provider model metadata schema. Explicit effort levels are reconstructed in the deterministic order `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. The optional `none`, `minimal`, `xhigh`, and `max` levels follow their corresponding LiteLLM support flags. Every model marked as reasoning-capable receives the baseline `low`, `medium`, and `high` levels, except that an explicit `supports_low_reasoning_effort: false` removes `low`. A model with no projected effort levels allows no explicit effort override; an empty list is not interpreted as unrestricted support.
 
@@ -125,6 +125,7 @@ For user-scoped integration catalogs, the picker can trigger integration sync. F
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-07-16 | 8 | Projected `web_search` for every selectable ChatGPT OAuth model under the Codex provider capability policy |
 | 2026-07-14 | 7 | Removed the ChatGPT OAuth system catalog and made integration catalogs authoritative from integration creation |
 | 2026-07-13 | 6 | Documented live system-administrator authorization for Admin model-catalog operations |
 | 2026-07-12 | 5 | Added account-scoped ChatGPT OAuth integration catalogs and backend-authoritative Responses Lite capability projection |
