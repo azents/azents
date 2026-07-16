@@ -12,6 +12,7 @@ from azents.engine.events.engine_events import (
     CompactionStarted,
     ContentDelta,
     FunctionCallDelta,
+    ProviderToolActivityChanged,
     ReasoningDelta,
     RunComplete,
     RunPhaseChanged,
@@ -61,6 +62,26 @@ class TestSerializeEngineEvent:
             "name": "search",
             "arguments_delta": '{"q"',
         }
+
+    def test_provider_tool_activity(self) -> None:
+        """Serialize provider-neutral hosted-tool activity telemetry."""
+        event = ProviderToolActivityChanged(
+            call_id="search-1",
+            name="web_search",
+            status="running",
+            arguments=None,
+        )
+
+        serialized = serialize_event(event)
+
+        assert serialized == {
+            "type": "provider_tool_activity_changed",
+            "call_id": "search-1",
+            "name": "web_search",
+            "status": "running",
+            "arguments": None,
+        }
+        assert deserialize_event(serialized) == event
 
     def test_run_started(self) -> None:
         """Serialize RunStarted phase."""

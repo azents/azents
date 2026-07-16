@@ -13,8 +13,17 @@ from azents.broker.broadcast import (
 )
 from azents.core.enums import AgentRunPhase, AgentRunStatus
 from azents.core.inference_profile import AppliedInferenceProfile
-from azents.engine.events.engine_events import ContentDelta, ReasoningDelta, RunComplete
-from azents.engine.events.types import ActiveToolCall, AgentRunState
+from azents.engine.events.engine_events import (
+    ContentDelta,
+    ProviderToolActivityChanged,
+    ReasoningDelta,
+    RunComplete,
+)
+from azents.engine.events.types import (
+    ActiveToolCall,
+    AgentRunState,
+    ProviderToolCallPayload,
+)
 from azents.services.chat.data import ChatLiveRunState
 from azents.services.chat.live_events import InMemoryLiveEventStore, RedisLiveEventStore
 from azents.worker.live.event_projector import LiveEventProjector
@@ -255,6 +264,56 @@ async def test_live_run_broadcast_failure_is_non_fatal() -> None:
         ),
     )
     await projector.publish_live_run_cleared("session-001", run_id="run-a")
+
+
+@pytest.mark.asyncio
+async def test_provider_tool_activity_upserts_and_discards_with_model_attempt() -> None:
+    """Provider-tool snapshots share stable identity and retry cleanup."""
+    store = InMemoryLiveEventStore()
+    broadcast = _Broadcast()
+    projector = _projector(store, broadcast)
+
+    await projector.update(
+        "session-001",
+        ProviderToolActivityChanged(
+            call_id="search-1",
+            name="web_search",
+            status="running",
+            arguments=None,
+        ),
+    )
+    running_events = await store.list_by_session_id("session-001")
+    assert len(running_events) == 1
+    running = running_events[0]
+    assert isinstance(running.payload, ProviderToolCallPayload)
+    assert running.payload.status == "running"
+
+    await projector.update(
+        "session-001",
+        ProviderToolActivityChanged(
+            call_id="search-1",
+            name="web_search",
+            status="completed",
+            arguments='{"query":"azents"}',
+        ),
+    )
+    completed_events = await store.list_by_session_id("session-001")
+    assert len(completed_events) == 1
+    completed = completed_events[0]
+    assert completed.id == running.id
+    assert completed.created_at == running.created_at
+    assert isinstance(completed.payload, ProviderToolCallPayload)
+    assert completed.payload.status == "completed"
+    assert completed.payload.arguments == '{"query":"azents"}'
+
+    await projector.discard_failed_attempt("session-001")
+
+    assert await store.list_by_session_id("session-001") == []
+    assert [event[1]["type"] for event in broadcast.events] == [
+        "live_event_upserted",
+        "live_event_upserted",
+        "live_event_removed",
+    ]
 
 
 @pytest.mark.asyncio

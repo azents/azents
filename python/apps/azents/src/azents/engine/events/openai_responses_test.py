@@ -17,6 +17,8 @@ from openai.types.responses import (
     ResponseOutputText,
     ResponseTextDeltaEvent,
     ResponseUsage,
+    ResponseWebSearchCallCompletedEvent,
+    ResponseWebSearchCallInProgressEvent,
 )
 from openai.types.responses.response_usage import (
     InputTokensDetails,
@@ -34,6 +36,7 @@ from azents.engine.events.openai_responses import (
     OpenAISDKResponsesClient,
     openai_responses_client_config,
 )
+from azents.engine.events.protocols import ProviderToolActivityProjection
 from azents.engine.events.responses_continuation import ResponsesContinuationPlanner
 from azents.engine.events.types import (
     AssistantMessagePayload,
@@ -452,6 +455,57 @@ def test_typed_normalizer_builds_openai_artifact_usage_and_cost(
     ]
     assert "done" not in str(minimal_response)
     assert "resp_synthetic" not in str(minimal_response)
+
+
+def test_typed_normalizer_projects_provider_tool_lifecycle() -> None:
+    """Translate SDK-specific hosted-tool stages to canonical snapshots."""
+    output = OpenAIResponsesOutputNormalizer(
+        provider="openai",
+        model="gpt-5.1-codex",
+    ).start("session-1")
+
+    running = output.process_event(
+        ResponseWebSearchCallInProgressEvent(
+            item_id="search-1",
+            output_index=0,
+            sequence_number=1,
+            type="response.web_search_call.in_progress",
+        )
+    )
+    completed = output.process_event(
+        ResponseWebSearchCallCompletedEvent(
+            item_id="search-1",
+            output_index=0,
+            sequence_number=2,
+            type="response.web_search_call.completed",
+        )
+    )
+    regressive = output.process_event(
+        ResponseWebSearchCallInProgressEvent(
+            item_id="search-1",
+            output_index=0,
+            sequence_number=3,
+            type="response.web_search_call.in_progress",
+        )
+    )
+
+    assert running.projections == [
+        ProviderToolActivityProjection(
+            call_id="search-1",
+            name="web_search",
+            status="running",
+            arguments=None,
+        )
+    ]
+    assert completed.projections == [
+        ProviderToolActivityProjection(
+            call_id="search-1",
+            name="web_search",
+            status="completed",
+            arguments=None,
+        )
+    ]
+    assert regressive.projections == []
 
 
 def test_typed_normalizer_accepts_omitted_usage_details(

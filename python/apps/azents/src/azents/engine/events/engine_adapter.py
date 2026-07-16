@@ -6,7 +6,7 @@ import dataclasses
 import datetime
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
-from typing import Annotated, Protocol
+from typing import Annotated, Protocol, assert_never
 
 from azcommon.uuid import uuid7
 from fastapi import Depends
@@ -32,6 +32,7 @@ from azents.engine.events.engine_events import (
     CompactionStarted,
     ContentDelta,
     FunctionCallDelta,
+    ProviderToolActivityChanged,
     ReasoningDelta,
     RunComplete,
     RunPhaseChanged,
@@ -71,9 +72,13 @@ from azents.engine.events.output_parts import iter_output_parts
 from azents.engine.events.protocols import (
     AgentRunCreateRepository,
     ClientToolExecutor,
+    ContentDeltaProjection,
+    FunctionCallDeltaProjection,
     ManualCompactor,
     NativeModelRequest,
     NormalizedAdapterOutput,
+    ProviderToolActivityProjection,
+    ReasoningDeltaProjection,
     SessionHeadRepository,
     StreamProjection,
     SummaryEnricher,
@@ -1065,9 +1070,7 @@ class _AsyncEventEmitQueue:
     ) -> None:
         """Put normalizer output into publish queue."""
         for projection in normalized.projections:
-            emit = _stream_projection_emit(projection)
-            if emit is not None:
-                await self._queue.put(emit)
+            await self._queue.put(_stream_projection_emit(projection))
         for event in appended:
             await self._queue.put(durable(event))
 
@@ -1084,27 +1087,43 @@ class _AsyncEventEmitQueue:
         return self._queue.empty()
 
 
-def _stream_projection_emit(projection: StreamProjection) -> Emit | None:
-    """Convert UI stream projection to ephemeral emit."""
-    if projection.type == "content_delta":
-        return ephemeral(
-            ContentDelta(
-                delta=projection.delta or "",
-                content_index=projection.index or 0,
+def _stream_projection_emit(projection: StreamProjection) -> Emit:
+    """Convert one canonical stream projection to an ephemeral emit."""
+    match projection:
+        case ContentDeltaProjection(delta=delta, content_index=content_index):
+            return ephemeral(ContentDelta(delta=delta, content_index=content_index))
+        case FunctionCallDeltaProjection(
+            index=index,
+            call_id=call_id,
+            name=name,
+            delta=arguments_delta,
+        ):
+            return ephemeral(
+                FunctionCallDelta(
+                    index=index,
+                    id=call_id,
+                    name=name,
+                    arguments_delta=arguments_delta,
+                )
             )
-        )
-    if projection.type == "function_call_delta":
-        return ephemeral(
-            FunctionCallDelta(
-                index=projection.index or 0,
-                id=projection.call_id,
-                name=projection.name,
-                arguments_delta=projection.delta or "",
+        case ReasoningDeltaProjection(delta=delta):
+            return ephemeral(ReasoningDelta(delta=delta))
+        case ProviderToolActivityProjection(
+            call_id=call_id,
+            name=name,
+            status=status,
+            arguments=arguments,
+        ):
+            return ephemeral(
+                ProviderToolActivityChanged(
+                    call_id=call_id,
+                    name=name,
+                    status=status,
+                    arguments=arguments,
+                )
             )
-        )
-    if projection.type == "reasoning_delta":
-        return ephemeral(ReasoningDelta(delta=projection.delta or ""))
-    return None
+        case _:
+            assert_never(projection)
 
 
 async def _append_run_user_messages(

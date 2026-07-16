@@ -4,7 +4,7 @@ import asyncio
 import logging
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,6 +14,7 @@ from azents.broker.types import PublishedEvent
 from azents.core.enums import EventKind
 from azents.engine.events.engine_events import (
     ContentDelta,
+    ProviderToolActivityChanged,
     ReasoningDelta,
     RunComplete,
     RunStarted,
@@ -119,6 +120,22 @@ class LiveEventProjector:
                         session_id=session_id,
                         delta=delta,
                     )
+                case ProviderToolActivityChanged(
+                    call_id=call_id,
+                    name=name,
+                    status=status,
+                    arguments=arguments,
+                ):
+                    await self._partial_batcher.flush_session_and_transition(
+                        session_id,
+                        lambda: self._upsert_provider_tool_activity(
+                            session_id=session_id,
+                            call_id=call_id,
+                            name=name,
+                            status=status,
+                            arguments=arguments,
+                        ),
+                    )
                 case Event():
                     await self._partial_batcher.flush_session_and_transition(
                         session_id,
@@ -177,6 +194,25 @@ class LiveEventProjector:
                 extra={"session_id": session_id},
             )
 
+    async def _upsert_provider_tool_activity(
+        self,
+        *,
+        session_id: str,
+        call_id: str,
+        name: str,
+        status: Literal["running", "completed", "failed"],
+        arguments: str | None,
+    ) -> None:
+        """Persist and broadcast one provider-tool activity snapshot."""
+        live_event = await self._live_event_store.upsert_provider_tool_activity(
+            session_id,
+            call_id=call_id,
+            name=name,
+            status=status,
+            arguments=arguments,
+        )
+        await self._publish_event_upserted(live_event)
+
     async def _replace_live_counterpart(
         self,
         session_id: str,
@@ -214,7 +250,12 @@ class LiveEventProjector:
             event
             for event in events
             if event.adapter == "azents-live"
-            and event.kind in {EventKind.ASSISTANT_MESSAGE, EventKind.REASONING}
+            and event.kind
+            in {
+                EventKind.ASSISTANT_MESSAGE,
+                EventKind.REASONING,
+                EventKind.PROVIDER_TOOL_CALL,
+            }
         ]
         for event in model_partials:
             await self._live_event_store.remove(session_id, event.id)

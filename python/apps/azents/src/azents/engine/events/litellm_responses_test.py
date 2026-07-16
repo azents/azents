@@ -39,9 +39,12 @@ from azents.engine.events.litellm_responses import (
     guard_litellm_streaming_logging,
 )
 from azents.engine.events.protocols import (
+    ContentDeltaProjection,
+    FunctionCallDeltaProjection,
     NativeEvent,
     NativeModelRequest,
-    StreamProjection,
+    ProviderToolActivityProjection,
+    ReasoningDeltaProjection,
 )
 from azents.engine.events.responses_continuation import ResponsesContinuationPlanner
 from azents.engine.events.system_reminders import (
@@ -2381,13 +2384,53 @@ class TestLiteLLMResponsesOutputNormalizer:
         )
 
         assert text.events == []
-        assert text.projections == [
-            StreamProjection(type="content_delta", delta="hello")
-        ]
+        assert text.projections == [ContentDeltaProjection(delta="hello")]
         assert reasoning.events == []
-        assert reasoning.projections == [
-            StreamProjection(type="reasoning_delta", delta="thinking")
+        assert reasoning.projections == [ReasoningDeltaProjection(delta="thinking")]
+
+    def test_projects_provider_tool_lifecycle(self) -> None:
+        """Translate LiteLLM hosted-tool stages to canonical snapshots."""
+        output_stream = LiteLLMResponsesOutputNormalizer(
+            provider="openai",
+            model="gpt-5.1",
+        ).start("session-1")
+
+        running = output_stream.process_event(
+            NativeEvent(
+                type="ResponseWebSearchCallSearchingEvent",
+                item={"item_id": "search-1", "output_index": 0},
+            )
+        )
+        completed = output_stream.process_event(
+            NativeEvent(
+                type="ResponseWebSearchCallCompletedEvent",
+                item={"item_id": "search-1", "output_index": 0},
+            )
+        )
+        duplicate = output_stream.process_event(
+            NativeEvent(
+                type="ResponseWebSearchCallCompletedEvent",
+                item={"item_id": "search-1", "output_index": 0},
+            )
+        )
+
+        assert running.projections == [
+            ProviderToolActivityProjection(
+                call_id="search-1",
+                name="web_search",
+                status="running",
+                arguments=None,
+            )
         ]
+        assert completed.projections == [
+            ProviderToolActivityProjection(
+                call_id="search-1",
+                name="web_search",
+                status="completed",
+                arguments=None,
+            )
+        ]
+        assert duplicate.projections == []
 
     def test_interrupt_preserves_received_partial_assistant_text(self) -> None:
         """Create one incomplete assistant event from received text deltas."""
@@ -2996,7 +3039,9 @@ class TestLiteLLMResponsesOutputNormalizer:
         payload = output.events[0].payload
         assert isinstance(payload, AssistantMessagePayload)
         assert payload.content == "hello"
-        assert output.projections[0].delta == "hel"
+        projection = output.projections[0]
+        assert isinstance(projection, ContentDeltaProjection)
+        assert projection.delta == "hel"
 
     @pytest.mark.parametrize(
         "event_type",
@@ -3164,9 +3209,11 @@ class TestLiteLLMResponsesOutputNormalizer:
             ],
         )
 
-        assert output.projections[1].call_id == "call-1"
-        assert output.projections[1].name == "read_text"
-        assert output.projections[1].delta == '{"path"'
+        projection = output.projections[1]
+        assert isinstance(projection, FunctionCallDeltaProjection)
+        assert projection.call_id == "call-1"
+        assert projection.name == "read_text"
+        assert projection.delta == '{"path"'
 
     def test_response_prefixed_text_delta_projects_content(self) -> None:
         """Convert text delta containing OpenAI SDK class name to projection too."""
