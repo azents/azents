@@ -18,6 +18,7 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents/src/azents/worker/worker.py
   - python/apps/azents/src/azents/worker/scheduler.py
+  - python/apps/azents/src/azents/worker/live/**
   - python/apps/azents/src/azents/rdb/models/agent_session.py
   - python/apps/azents/src/azents/rdb/models/session_agent.py
   - python/apps/azents/src/azents/rdb/models/session_agent_context.py
@@ -92,7 +93,7 @@ api_routes:
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-07-16
-spec_version: 104
+spec_version: 105
 ---
 
 # Conversation & Events
@@ -433,6 +434,12 @@ compaction can insert model-visible system events without renumbering the whole 
 Compaction keeps append-only storage while presenting future model input from a single
 `compaction_summary` head event.
 
+`ProviderToolCallPayload.status` is the nullable provider-neutral lifecycle state `running`,
+`completed`, or `failed`. Live provider-tool calls carry the latest observed canonical state. Durable
+calls carry a terminal state when the adapter can normalize one, while historical or final-only
+provider events may omit the field. Provider-native stage strings remain confined to the adapter's
+native artifact. Provider result status remains a separate result-item status.
+
 `NativeArtifact.item` is adapter-native opaque payload. Event core does not interpret it.
 Same-native pass-through is allowed only when the compat key matches exactly:
 
@@ -456,9 +463,10 @@ event-list APIs:
   `has_newer` for newer pages. Each raw response page owns its `next_cursor` and `previous_cursor`;
   clients advance those cursors even when every event on a page is hidden by the render projection.
 - `GET /chat/v1/sessions/{session_id}/live` returns current non-durable live state such as
-  streaming assistant text, streaming reasoning, PostgreSQL-backed active tool calls, pending input buffers, run state,
-  session todo snapshot, and action execution projections. Redis stores only streaming assistant/reasoning
-  partials; active tool-call events are reconstructed from the running `AgentRun`.
+  streaming assistant text, streaming reasoning, provider-hosted tool activity, PostgreSQL-backed active
+  client tool calls, pending input buffers, run state, session todo snapshot, and action execution
+  projections. Redis stores streaming assistant/reasoning partials and attempt-local provider-tool
+  activity; active client-tool events are reconstructed from the running `AgentRun`.
 - `GET /chat/v1/agents/{agent_id}/sessions/{session_id}/subagents/tree` returns the durable
   Subagent Tree projection for the root tree containing the selected root or child session. The
   projection includes nested nodes, canonical paths, linked child `agent_session_id` values for
@@ -484,10 +492,14 @@ The frontend retains raw durable events and raw live partial events separately f
 `ChatMessage` view models. Projection identity is semantic rather than event-kind-global: assistant
 output uses native output identity or response/content indices, reasoning uses native identity or its
 projection root, and client/provider tool pairs use `call_id`. Selectors merge call and result events
-across raw page boundaries. Provider tool results preserve completion/failure status, output text, and
-attachments; live `agent_message` events use the same source-labeled internal-agent row as their
-durable form. When a live entity and durable event describe the same semantic output, the durable
-projection replaces the live projection without a duplicate or disappearance.
+across raw page boundaries. Provider-tool calls render provider-neutral `running`, `completed`, and
+`failed` states from their canonical status; a missing live status is treated as running, while a
+missing durable status uses the neutral historical fallback. Semantic hosted-tool names such as
+`web_search` select presentation labels without branching on provider identity. Provider tool results
+preserve completion/failure status, output text, and attachments; live `agent_message` events use the
+same source-labeled internal-agent row as their durable form. When a live entity and durable event
+describe the same semantic output, the durable projection replaces the live projection without a
+duplicate or disappearance.
 
 Both responses use the same event transport shape as the durable transcript. The removed
 `/chat/v1/sessions/{session_id}/messages` aggregate endpoint is not part of the public contract:
@@ -553,8 +565,12 @@ Durable/live handoff follows these invariants:
 
 Text and reasoning streaming projections are server-side batched before live store upsert and
 `live_event_upserted` broadcast. The worker flushes pending `ContentDelta` and `ReasoningDelta`
-batches before event durable boundaries and terminal runtime boundaries. Redis stores only the
-latest live projection, not every provider delta.
+batches before event durable boundaries and terminal runtime boundaries. Provider-tool activity is
+projected as a full canonical snapshot keyed by `call_id`; duplicate snapshots are suppressed and
+terminal state cannot regress to running. Redis stores only the latest live projection, not every
+provider delta. A failed non-Stop model attempt removes its assistant, reasoning, and provider-tool
+live projections before retry state is published. A matching durable provider-tool call or result is
+broadcast first and then removes the live projection by `call_id`.
 
 Legacy chat UI deltas and input-buffer notifications such as `content_delta`,
 `reasoning_delta`, `function_call_delta`, `run_started`, `run_phase_changed`, `input_buffered`, and
@@ -725,6 +741,8 @@ Current verification:
 
 ## 11. Changelog
 
+- **2026-07-16** — v105. Added provider-neutral live provider-tool lifecycle state, Redis resync,
+  attempt cleanup, semantic frontend presentation, and durable-before-live-removal handoff.
 - **2026-07-16** — v104. Added strict cross-adapter native artifact ownership and canonical fallback
   behavior for the official OpenAI SDK cutover and code-version rollback.
 - **2026-07-16** — v103. Scoped durable retry state to the active model turn and required successful output admission to clear it atomically before later turn progress.
