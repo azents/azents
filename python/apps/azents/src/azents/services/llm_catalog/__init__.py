@@ -1071,7 +1071,6 @@ def project_chatgpt_integration_entries(
                 projection_metadata={
                     "lowerer_target": LLMCatalogLowererTarget.LITELLM.value,
                     "freshness_rank": model_freshness_rank(candidate.model_identifier),
-                    "responses_lite": capabilities.compatibility.responses_lite,
                 },
                 hidden_reason=None,
             )

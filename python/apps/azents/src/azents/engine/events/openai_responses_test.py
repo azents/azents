@@ -24,10 +24,7 @@ from openai.types.responses.response_usage import (
 )
 
 from azents.core.enums import EventKind, LLMProvider
-from azents.core.llm_catalog import (
-    ModelCapabilities,
-    ModelCompatibilityCapabilities,
-)
+from azents.core.llm_catalog import ModelCapabilities
 from azents.engine.events.litellm_responses import LiteLLMResponsesLowerer
 from azents.engine.events.openai_responses import (
     OpenAIResponsesLowerer,
@@ -47,6 +44,7 @@ from azents.engine.events.types import (
 )
 from azents.engine.model_stream import ModelStreamCallContext
 from azents.engine.run.errors import ModelCallError
+from azents.engine.run.types import BuiltinToolSpec
 from azents.testing.model_stream import make_test_model_stream_watchdog
 
 
@@ -173,60 +171,54 @@ def test_openai_lowerer_omits_endpoint_credentials_and_store() -> None:
     assert request.options.get("prompt_cache_key") != "session-1"
 
 
-def test_chatgpt_lowerer_uses_full_context_store_false() -> None:
-    """Standard ChatGPT sampling is stateless and requests encrypted reasoning."""
+def test_chatgpt_lowerer_uses_standard_full_context_request() -> None:
+    """ChatGPT sampling uses standard tools and stateless encrypted replay."""
+    tool: dict[str, object] = {
+        "type": "function",
+        "name": "lookup",
+        "description": "Look up a value",
+        "parameters": {"type": "object"},
+    }
     lowerer = OpenAIResponsesLowerer(
         provider="chatgpt_oauth",
-        model="gpt-5.1-codex",
+        model="gpt-5.6-luna",
         provider_id=LLMProvider.CHATGPT_OAUTH,
         credential_kwargs={},
+        tools=[tool],
     )
 
-    request = lowerer.lower([_event()], model="gpt-5.1-codex")
+    request = lowerer.lower(
+        [_event()],
+        model="gpt-5.6-luna",
+        system_prompt="Be useful.",
+    )
 
     assert request.input == [{"role": "user", "content": "hello"}]
+    assert request.tools == [tool]
+    assert request.options.get("instructions") == "Be useful."
     assert request.options.get("store") is False
     assert request.options.get("include") == ["reasoning.encrypted_content"]
     assert request.continuation_store_enabled() is False
 
 
-def test_chatgpt_responses_lite_is_sampling_capability_driven() -> None:
-    """Responses Lite retains its extension prefix and required physical fields."""
+def test_chatgpt_lowerer_uses_standard_hosted_web_search_tool() -> None:
+    """ChatGPT hosted web search remains in the standard tools field."""
+    capabilities = ModelCapabilities()
+    capabilities.built_in_tools.supported = ["web_search"]
     lowerer = OpenAIResponsesLowerer(
         provider="chatgpt_oauth",
-        model="gpt-5.1-codex",
+        model="gpt-5.6-luna",
         provider_id=LLMProvider.CHATGPT_OAUTH,
         credential_kwargs={},
-        prompt_cache_scope="session-1",
-        tools=[
-            {
-                "type": "function",
-                "name": "lookup",
-                "description": "Look up a value",
-                "parameters": {"type": "object"},
-            }
-        ],
-        model_capabilities=ModelCapabilities(
-            compatibility=ModelCompatibilityCapabilities(responses_lite=True)
-        ),
+        hosted_tools=[BuiltinToolSpec(name="web_search", config={})],
+        model_capabilities=capabilities,
     )
 
-    request = lowerer.lower(
-        [_event()],
-        model="gpt-5.1-codex",
-        system_prompt="Be useful.",
-    )
+    request = lowerer.lower([_event()], model="gpt-5.6-luna")
 
-    assert request.responses_lite is True
-    assert request.tools == []
-    assert request.options.get("parallel_tool_calls") is False
-    assert request.options.get("prompt_cache_key") == "session-1"
-    assert request.input[0]["type"] == "additional_tools"
-    assert request.input[1] == {
-        "type": "message",
-        "role": "developer",
-        "content": [{"type": "input_text", "text": "Be useful."}],
-    }
+    assert request.tools == [{"type": "web_search"}]
+    assert request.options.get("instructions") == "You are a helpful assistant."
+    assert request.options.get("store") is False
 
 
 def test_client_config_keeps_endpoint_identity_outside_request(

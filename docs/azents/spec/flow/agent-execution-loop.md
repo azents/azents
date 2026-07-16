@@ -46,7 +46,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ChatView.tsx
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
 last_verified_at: 2026-07-16
-spec_version: 91
+spec_version: 92
 ---
 
 # Agent Execution Loop
@@ -118,8 +118,8 @@ native artifacts before they participate in prefix comparison.
 If OpenAI rejects an incremental request with the exact `previous_response_not_found` error code
 before a response stream opens, the adapter disables continuation for its remaining lifetime and
 retries that logical request once with full input. Other provider errors retain their normal failure
-classification. ChatGPT OAuth, Responses Lite, non-OpenAI providers, and explicit `store=false`
-requests always use full-context HTTP requests. Immediately before each physical OpenAI Responses
+classification. ChatGPT OAuth, non-OpenAI providers, and explicit `store=false` requests always use
+full-context HTTP requests. Immediately before each physical OpenAI Responses
 call, the adapter emits the structured boolean log field `previous_response_id_supplied` without
 logging the response ID itself. A missing-response fallback therefore emits `true` for the rejected
 incremental call followed by `false` for the full retry.
@@ -567,8 +567,8 @@ embedded into the summary payload with per-event truncation. OpenAI API-key and 
 generation uses the operation-scoped official OpenAI SDK helper from
 `engine/context/compaction.py`; other providers continue through the shared LiteLLM Responses helper.
 The OpenAI-compatible helper uses standard Responses input and instructions, omits
-`max_output_tokens`, and never uses sampling continuation or Responses Lite. ChatGPT OAuth additionally
-uses full input, `store=false`, and encrypted reasoning inclusion. If summary generation fails, the
+`max_output_tokens`, and never uses sampling continuation. ChatGPT OAuth additionally uses full input,
+`store=false`, and encrypted reasoning inclusion. If summary generation fails, the
 failure is propagated to the caller instead of being published as a successful compaction. The
 existing transcript remains append-only.
 
@@ -701,6 +701,7 @@ Primary checks:
 
 ## Changelog
 
+- **2026-07-16** — v92. Removed Responses Lite routing and standardized ChatGPT OAuth sampling on the standard Responses contract.
 - **2026-07-12** — v73. Added exact terminal Run correlation, durable-before-publication ordering, and exact per-turn inference provenance.
 - **2026-07-12** — v71. Promoted sequential single-head preparation, Session-owned per-turn inference snapshots, buffer-only action transport, buffer-keyed operation execution, handled preparation failures, and same-run profile changes.
 - **2026-07-11** — v70. Added bounded-fork subagent inference overrides, label-only schema guidance, atomic validation, and session-last-used continuation semantics.

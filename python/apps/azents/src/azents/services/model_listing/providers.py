@@ -329,7 +329,6 @@ def _candidate_from_chatgpt_model(
     )
     input_modalities = _chatgpt_modalities(model)
     context_window = _chatgpt_context_window(model)
-    responses_lite = model.get("use_responses_lite") is True
     parallel_tool_calls_value = model.get("supports_parallel_tool_calls")
     parallel_tool_calls = (
         parallel_tool_calls_value
@@ -361,7 +360,6 @@ def _candidate_from_chatgpt_model(
         compatibility=ModelCompatibilityCapabilities(
             provider_family="chatgpt",
             responses_api=True,
-            responses_lite=responses_lite,
         ),
     )
     return NormalizedModelCandidate(
@@ -377,7 +375,6 @@ def _candidate_from_chatgpt_model(
             "model_identifier": model_id,
             "model_display_name": display_name,
             "model_developer": LLMModelDeveloper.OPENAI.value,
-            "use_responses_lite": responses_lite,
         },
         source_metadata=_chatgpt_source_metadata(model),
         last_refreshed_at=fetched_at,
@@ -401,7 +398,6 @@ def _chatgpt_source_metadata(model: dict[str, object]) -> dict[str, object]:
         "supports_parallel_tool_calls",
         "supports_reasoning_summaries",
         "tool_mode",
-        "use_responses_lite",
         "visibility",
     )
     return {key: model[key] for key in keys if key in model}

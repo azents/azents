@@ -103,7 +103,6 @@ _OPENAI_REQUEST_OPTION_KEYS = {
     "tool_choice",
     "top_p",
 }
-_RESPONSES_LITE_HEADER = "x-openai-internal-codex-responses-lite"
 _SAFE_ERROR_CODE_MAX_CHARS = 96
 
 
@@ -156,14 +155,6 @@ class OpenAIResponsesRequest(BaseModel):
     def continuation_store_enabled(self) -> bool:
         """Return whether stored-response continuation is allowed."""
         return self.options.get("store") is not False
-
-    @property
-    def responses_lite(self) -> bool:
-        """Return whether this request uses the ChatGPT Responses Lite dialect."""
-        headers = self.options.get("extra_headers")
-        return isinstance(headers, dict) and headers.get(_RESPONSES_LITE_HEADER) == (
-            "true"
-        )
 
 
 class OpenAIResponsesLowerer:
@@ -499,9 +490,7 @@ class OpenAIResponsesModelAdapter:
             )
         options = request.options
         native_input: object = plan.input_items
-        native_tools: object = (
-            request.tools if request.tools or request.responses_lite else omit
-        )
+        native_tools: object = request.tools if request.tools else omit
         return await self.client.create_response(
             model=request.model,
             input=native_input,

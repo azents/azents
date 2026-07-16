@@ -68,7 +68,6 @@ class TestModelCapabilities(unittest.TestCase):
                 compatibility = azentspublicclient.models.model_compatibility_capabilities.ModelCompatibilityCapabilities(
                     provider_family = '', 
                     responses_api = True, 
-                    responses_lite = True, 
                     unsupported_media_policy = 'text_substitution', )
             )
         else:

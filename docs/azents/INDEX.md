@@ -19,7 +19,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-16 | 104 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-16 | 9 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-09 | 4 |
-| [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-07-16 | 10 |
+| [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-07-16 | 11 |
 | [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-07-10 | 54 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-07-13 | 7 |
 | [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-07-14 | 40 |
@@ -30,12 +30,12 @@ _8 documents_
 
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
-| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-07-16 | 91 |
+| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-07-16 | 92 |
 | [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-07-12 | 17 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-07-03 | 3 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-16 | 30 |
-| [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-07-16 | 9 |
-| [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-07-16 | 23 |
+| [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-07-16 | 10 |
+| [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-07-16 | 24 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-07-15 | 15 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
 | [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-06-27 | 2 |
@@ -216,8 +216,9 @@ _14 documents_
 - [ADR-0159: Cut Over OpenAI-Compatible HTTP Paths Atomically](adr/0159-cut-over-openai-compatible-http-paths-atomically.md)
 - [ADR-0160: Use Documented OpenAI Responses Terminal Discriminators](adr/0160-use-documented-openai-responses-terminal-discriminators.md)
 - [ADR-0161: Deliver the OpenAI HTTP Migration as One Revertible Change](adr/0161-deliver-openai-http-migration-as-one-revertible-change.md)
+- [ADR-0162: Use Standard Responses for ChatGPT OAuth](adr/0162-use-standard-responses-for-chatgpt-oauth.md)
 
-_167 documents_
+_168 documents_
 
 ## Issues (Bug Tracking)
 
@@ -251,4 +252,4 @@ _3 documents_
 
 ## Statistics
 
-- Total documents: 459
+- Total documents: 460

@@ -23,7 +23,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/llm-settings/**
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
 last_verified_at: 2026-07-16
-spec_version: 9
+spec_version: 10
 ---
 
 # ChatGPT OAuth Flow
@@ -146,11 +146,11 @@ The OAuth success transaction creates the integration and its empty account-scop
 GET https://chatgpt.com/backend-api/codex/models?client_version=0.144.0
 ```
 
-The request includes the connected account id and Azents client identity. Models are selectable only when backend metadata marks them API-supported and picker-visible. The backend model payload supplies the normalized `use_responses_lite` capability plus reasoning, modality, context-window, and tool metadata. A backend model remains selectable without a matching LiteLLM metadata key.
+The request includes the connected account id and Azents client identity. Models are selectable only when backend metadata marks them API-supported and picker-visible. The backend model payload supplies reasoning, modality, context-window, and tool metadata. Request-dialect hints are not projected into normalized capabilities. A backend model remains selectable without a matching LiteLLM metadata key.
 
 Picker reads use only the stored integration catalog and do not call ChatGPT. Before the first snapshot exists, the catalog returns an empty status-aware result; ChatGPT OAuth has no system-catalog fallback. Failed sync attempts preserve the last successful snapshot.
 
-Catalog refresh does not mutate Agent or Workspace model selection snapshots. Runtime transport selection uses the compatibility capability copied into the saved model selection when the user selects the model.
+Catalog refresh does not mutate Agent or Workspace model selection snapshots. ChatGPT OAuth execution uses the standard Responses contract independently of catalog metadata copied into a saved model selection.
 
 ## Runtime Refresh and Execution
 
@@ -199,13 +199,8 @@ Rules:
   input, and never use `previous_response_id`.
 - Immediately before a `store=false` runtime call, mask top-level Responses input item `id` values. Azents events and external ids remain preserved in the database, while provider response item ids are not replayed as stored references.
 - Runtime requests use `originator: azents`, an `azents/<version>` User-Agent, and the connected `ChatGPT-Account-Id` rather than impersonating Codex CLI identity.
-- A saved model capability with `responses_lite=false` uses the standard Responses contract regardless of model name.
-- A saved model capability with `responses_lite=true` moves tools and instructions into developer input items, strips image detail fields, disables parallel tool calls, sets reasoning context to `all_turns`, uses the Azents session id as prompt cache key and affinity id, and sends the fixed Responses Lite compatibility version and header.
-- Compaction and title generation use the standard Responses dialect regardless of the sampling-model
-  Responses Lite capability. They send ordinary user input plus top-level instructions, no sampling
-  tools or affinity fields, and omit `max_output_tokens` while retaining `store=false`, encrypted
-  reasoning inclusion, and common client identity headers.
-- Responses Lite failures follow the normal model-call error path. Runtime does not retry with the standard Responses contract.
+- Sampling always uses the standard Responses contract regardless of model name or backend request-dialect hints. Tools remain in the top-level `tools` field and instructions remain in the top-level `instructions` field.
+- Compaction and title generation use the same standard Responses dialect. They send ordinary user input plus top-level instructions, no sampling tools, and omit `max_output_tokens` while retaining `store=false`, encrypted reasoning inclusion, and common client identity headers.
 - Completed SDK usage maps directly into the existing turn marker. `cost_usd` is a LiteLLM public
   price-map estimate based only on content-free usage metadata and represents API pricing rather than
   ChatGPT subscription billing; missing or invalid pricing leaves the estimate unset.
@@ -245,6 +240,7 @@ Rules:
 
 | Date | Version | Change | Rationale |
 |---|---|---|---|
+| 2026-07-16 | 10 | Standardized all ChatGPT OAuth calls on the public Responses request contract and removed catalog-driven Lite dialect selection | [`adr/0162-use-standard-responses-for-chatgpt-oauth.md`](../../adr/0162-use-standard-responses-for-chatgpt-oauth.md) |
 | 2026-07-16 | 9 | Routed sampling, compaction, and title Responses HTTP through the official OpenAI SDK with full-context stateless ChatGPT requests | [`design/openai-compatible-responses-http-migration.md`](../../design/openai-compatible-responses-http-migration.md) |
 | 2026-07-14 | 8 | Removed the system-catalog fallback and made the account catalog transactional with OAuth integration creation | `python/apps/azents/src/azents/services/chatgpt_oauth/__init__.py` |
 | 2026-07-12 | 7 | Added account-scoped model discovery and saved-capability-driven Responses Lite lowering | [`design/chatgpt-responses-lite-catalog.md`](../../design/chatgpt-responses-lite-catalog.md) |
