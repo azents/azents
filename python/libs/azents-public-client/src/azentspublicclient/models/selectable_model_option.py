@@ -20,6 +20,7 @@ import json
 from pydantic import BaseModel, ConfigDict, Field, StrictStr
 from typing import Any, ClassVar, Dict, List
 from azentspublicclient.models.agent_model_selection import AgentModelSelection
+from azentspublicclient.models.selectable_model_settings import SelectableModelSettings
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -29,8 +30,9 @@ class SelectableModelOption(BaseModel):
     """ # noqa: E501
     label: StrictStr = Field(description="Selectable model label")
     model_selection: AgentModelSelection = Field(description="Selectable model selection snapshot")
+    settings: SelectableModelSettings = Field(description="Stored model-scoped settings")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["label", "model_selection"]
+    __properties: ClassVar[List[str]] = ["label", "model_selection", "settings"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -76,6 +78,9 @@ class SelectableModelOption(BaseModel):
         # override the default output from pydantic by calling `to_dict()` of model_selection
         if self.model_selection:
             _dict['model_selection'] = self.model_selection.to_dict()
+        # override the default output from pydantic by calling `to_dict()` of settings
+        if self.settings:
+            _dict['settings'] = self.settings.to_dict()
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
@@ -94,7 +99,8 @@ class SelectableModelOption(BaseModel):
 
         _obj = cls.model_validate({
             "label": obj.get("label"),
-            "model_selection": AgentModelSelection.from_dict(obj["model_selection"]) if obj.get("model_selection") is not None else None
+            "model_selection": AgentModelSelection.from_dict(obj["model_selection"]) if obj.get("model_selection") is not None else None,
+            "settings": SelectableModelSettings.from_dict(obj["settings"]) if obj.get("settings") is not None else None
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

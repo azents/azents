@@ -51,7 +51,10 @@ from azents.engine.events.types import (
 from azents.engine.run.errors import ModelCallError
 from azents.engine.run.types import USER_STOP_CANCEL_MESSAGE
 from azents.repos.agent_execution.data import EventCreate
-from azents.testing.model_selection import make_test_model_selection
+from azents.testing.model_selection import (
+    make_test_model_selection,
+    make_test_model_settings,
+)
 from azents.testing.model_stream import make_test_model_stream_watchdog
 
 
@@ -1197,6 +1200,7 @@ async def test_model_usage_is_appended_as_turn_marker(
     inference_state = SessionInferenceState(
         model_target_label="planning",
         model_selection=make_test_model_selection(model_identifier="gpt-5.1"),
+        model_settings=make_test_model_settings(),
         reasoning_effort=None,
         effective_context_window_tokens=128_000,
         effective_auto_compaction_threshold_tokens=102_400,

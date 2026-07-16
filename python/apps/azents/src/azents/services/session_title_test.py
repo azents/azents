@@ -46,6 +46,7 @@ from azents.services.session_title import (
     title_context_from_events,
     title_context_from_initial_prompt,
 )
+from azents.testing.model_selection import make_test_model_settings
 from azents.testing.model_stream import make_test_model_stream_watchdog
 
 
@@ -275,6 +276,7 @@ class _AgentRepository:
                 SelectableModelOption(
                     label=DEFAULT_MAIN_MODEL_OPTION_LABEL,
                     model_selection=selection,
+                    settings=make_test_model_settings(),
                 )
             ],
             main_model_label=DEFAULT_MAIN_MODEL_OPTION_LABEL,

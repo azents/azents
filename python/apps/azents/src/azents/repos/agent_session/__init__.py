@@ -12,7 +12,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.agent import AgentModelSelection
+from azents.core.agent import AgentModelSelection, SelectableModelSettings
 from azents.core.enums import (
     AgentSessionEndReason,
     AgentSessionKind,
@@ -877,6 +877,9 @@ class AgentSessionRepository:
                 current_model_selection=inference_state.model_selection.model_dump(
                     mode="json"
                 ),
+                current_model_settings=inference_state.model_settings.model_dump(
+                    mode="json"
+                ),
                 current_reasoning_effort=inference_state.reasoning_effort,
                 current_effective_context_window_tokens=(
                     inference_state.effective_context_window_tokens
@@ -1224,6 +1227,7 @@ class AgentSessionRepository:
         if rdb.current_model_target_label is not None:
             if (
                 rdb.current_model_selection is None
+                or rdb.current_model_settings is None
                 or rdb.current_effective_context_window_tokens is None
                 or rdb.current_effective_auto_compaction_threshold_tokens is None
                 or rdb.current_inference_resolved_at is None
@@ -1233,6 +1237,9 @@ class AgentSessionRepository:
                 model_target_label=rdb.current_model_target_label,
                 model_selection=AgentModelSelection.model_validate(
                     rdb.current_model_selection
+                ),
+                model_settings=SelectableModelSettings.model_validate(
+                    rdb.current_model_settings
                 ),
                 reasoning_effort=rdb.current_reasoning_effort,
                 effective_context_window_tokens=(

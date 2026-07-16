@@ -436,6 +436,8 @@ Class | Method | HTTP request | Description
  - [Secrets1](azentspublicclient/docs/Secrets1.md)
  - [SelectableModelOption](azentspublicclient/docs/SelectableModelOption.md)
  - [SelectableModelOptionInput](azentspublicclient/docs/SelectableModelOptionInput.md)
+ - [SelectableModelSettings](azentspublicclient/docs/SelectableModelSettings.md)
+ - [SelectableModelSettingsInput](azentspublicclient/docs/SelectableModelSettingsInput.md)
  - [SendCodeRequest](azentspublicclient/docs/SendCodeRequest.md)
  - [SendCodeResponse](azentspublicclient/docs/SendCodeResponse.md)
  - [SendElevationCodeResponse](azentspublicclient/docs/SendElevationCodeResponse.md)

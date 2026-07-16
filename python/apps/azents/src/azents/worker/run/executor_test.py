@@ -91,7 +91,10 @@ from azents.services.session_git_worktree import (
     SessionGitWorktreeService,
 )
 from azents.services.session_title import SessionTitleService
-from azents.testing.model_selection import make_test_model_selection
+from azents.testing.model_selection import (
+    make_test_model_selection,
+    make_test_model_settings,
+)
 from azents.transport.chat import chat_live_run_updated_dump
 from azents.worker.config import AgentWorkerConfig
 from azents.worker.live.event_projector import LiveEventProjector
@@ -845,6 +848,7 @@ def _executor(
                 model_target_label=recoverable.requested_model_target_label
                 or "default",
                 model_selection=recoverable.resolved_model_selection,
+                model_settings=make_test_model_settings(),
                 reasoning_effort=recoverable.resolved_reasoning_effort,
                 effective_context_window_tokens=(
                     recoverable.effective_context_window_tokens
@@ -952,6 +956,7 @@ def test_matching_session_inference_state_preserves_resolved_model() -> None:
     state = SessionInferenceState(
         model_target_label="Quality",
         model_selection=make_test_model_selection(model_identifier="gpt-5.5"),
+        model_settings=make_test_model_settings(),
         reasoning_effort=ModelReasoningEffort.HIGH,
         effective_context_window_tokens=64_000,
         effective_auto_compaction_threshold_tokens=51_200,
@@ -1117,6 +1122,7 @@ async def _resolve_success(*args: object, **kwargs: object) -> object:
                 inference_state=None,
             ),
             model_selection=make_test_model_selection(),
+            model_settings=make_test_model_settings(),
             reasoning_effort=None,
         )
     )
@@ -1570,6 +1576,7 @@ async def test_execute_claims_manual_retry_profile_before_flushing_input(
     retry_state = SessionInferenceState(
         model_target_label="Fast",
         model_selection=make_test_model_selection(),
+        model_settings=make_test_model_settings(),
         reasoning_effort=ModelReasoningEffort.LOW,
         effective_context_window_tokens=64_000,
         effective_auto_compaction_threshold_tokens=51_200,
@@ -1630,6 +1637,7 @@ async def test_execute_activates_pending_child_from_session_snapshot(
     inference_state = SessionInferenceState(
         model_target_label="Parent model",
         model_selection=selection,
+        model_settings=make_test_model_settings(),
         reasoning_effort=ModelReasoningEffort.HIGH,
         effective_context_window_tokens=64_000,
         effective_auto_compaction_threshold_tokens=51_200,
@@ -1717,6 +1725,7 @@ async def test_execute_rebuilds_turn_with_exact_updated_inference_state(
     initial_state = SessionInferenceState(
         model_target_label="fast",
         model_selection=make_test_model_selection(model_identifier="gpt-fast"),
+        model_settings=make_test_model_settings(),
         reasoning_effort=ModelReasoningEffort.LOW,
         effective_context_window_tokens=64_000,
         effective_auto_compaction_threshold_tokens=51_200,
@@ -1725,6 +1734,7 @@ async def test_execute_rebuilds_turn_with_exact_updated_inference_state(
     updated_state = SessionInferenceState(
         model_target_label="planning",
         model_selection=make_test_model_selection(model_identifier="gpt-planning"),
+        model_settings=make_test_model_settings(),
         reasoning_effort=ModelReasoningEffort.XHIGH,
         effective_context_window_tokens=128_000,
         effective_auto_compaction_threshold_tokens=102_400,

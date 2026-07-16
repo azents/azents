@@ -8,6 +8,7 @@ Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **label** | **str** | Selectable model label | 
 **model_selection** | [**AgentModelSelectionInput**](AgentModelSelectionInput.md) | Selectable model selection input | 
+**settings** | [**SelectableModelSettingsInput**](SelectableModelSettingsInput.md) |  | [optional] 
 
 ## Example
 

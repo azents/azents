@@ -46,7 +46,10 @@ from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
-from azents.testing.model_selection import make_test_model_selection_dict
+from azents.testing.model_selection import (
+    make_test_model_selection_dict,
+    make_test_model_settings,
+)
 
 
 async def _create_workspace(session: AsyncSession, handle: str) -> str:
@@ -708,6 +711,7 @@ class TestEventExecutionRepositories:
         inference_state = SessionInferenceState(
             model_target_label="Quality",
             model_selection=_model_selection(),
+            model_settings=make_test_model_settings(),
             reasoning_effort=ModelReasoningEffort.HIGH,
             effective_context_window_tokens=128_000,
             effective_auto_compaction_threshold_tokens=115_200,

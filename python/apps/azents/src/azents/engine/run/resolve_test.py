@@ -11,6 +11,7 @@ from azcommon.result import Failure, Success
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent import BuiltinToolConfig, SelectableModelSettings
 from azents.core.credentials import ApiKeySecrets
 from azents.core.enums import AgentType, LLMProvider
 from azents.core.inference_profile import RequestedInferenceProfile
@@ -25,7 +26,7 @@ from azents.core.tools import (
     TurnContext,
 )
 from azents.engine.run.contracts import ToolkitBinding
-from azents.engine.run.input import InputMessage, InvokeInput
+from azents.engine.run.input import InputMessage, InvalidModelParameters, InvokeInput
 from azents.engine.tools.builtin import BuiltinToolkitProvider
 from azents.engine.tools.builtin_agents import AgentsAppendixDedupeState
 from azents.engine.tools.claude_rules import (
@@ -331,6 +332,103 @@ class TestResolveInvokeInput:
         assert isinstance(result, Success)
         run_request = result.value
         assert run_request.model == "gpt-4o"
+
+    async def test_applies_selected_model_settings_and_lightweight_cap(self) -> None:
+        """Use option-owned output, tool, and context settings at runtime."""
+        agent = _make_agent()
+        main_option = agent.selectable_model_options[0]
+        main_context = (
+            main_option.model_selection.normalized_capabilities.context_window
+        )
+        main_context.max_input_tokens = 128_000
+        main_context.max_output_tokens = 8_000
+        main_option.model_selection.normalized_capabilities.built_in_tools.supported = [
+            "web_search"
+        ]
+        main_option.settings = SelectableModelSettings(
+            context_window_tokens=32_000,
+            max_output_tokens=20_000,
+            builtin_tools=[BuiltinToolConfig(name="web_search")],
+        )
+        lightweight_selection = make_test_model_selection(
+            integration_id="integ-1",
+            model_identifier="gpt-lightweight",
+        )
+        lightweight_context = (
+            lightweight_selection.normalized_capabilities.context_window
+        )
+        lightweight_context.max_input_tokens = 64_000
+        lightweight_option = make_test_selectable_model_options(
+            lightweight_selection,
+            label="lightweight",
+        )[0]
+        lightweight_option.settings = SelectableModelSettings(
+            context_window_tokens=16_000,
+            max_output_tokens=None,
+            builtin_tools=[],
+        )
+        agent.selectable_model_options.append(lightweight_option)
+        agent.lightweight_model_selection = lightweight_selection
+        agent.lightweight_model_label = "lightweight"
+
+        agent_repository = AsyncMock()
+        agent_repository.get_by_id.return_value = agent
+        integration_repository = AsyncMock()
+        integration_repository.get_by_id_with_secrets.return_value = _make_integration()
+
+        result = await resolve_invoke_input(
+            InvokeInput(
+                agent_id="agent-1",
+                session_id="session-1",
+                messages=[],
+            ),
+            agent_repository=agent_repository,
+            integration_repository=integration_repository,
+            session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
+            exchange_file_service=AsyncMock(),
+            model_file_service=AsyncMock(),
+        )
+
+        assert isinstance(result, Success)
+        request = result.value
+        assert request.context_window_tokens == 32_000
+        assert request.compaction_max_input_tokens == 16_000
+        assert request.effective_max_input_tokens == 16_000
+        assert request.max_output_tokens == 8_000
+        assert [tool.name for tool in request.builtin_tools] == ["web_search"]
+
+    async def test_rejects_stale_unsupported_model_settings(self) -> None:
+        """Defensive runtime validation blocks unsupported persisted tool intent."""
+        agent = _make_agent()
+        agent.selectable_model_options[0].settings = SelectableModelSettings(
+            context_window_tokens=None,
+            max_output_tokens=None,
+            builtin_tools=[BuiltinToolConfig(name="web_search")],
+        )
+        agent_repository = AsyncMock()
+        agent_repository.get_by_id.return_value = agent
+        integration_repository = AsyncMock()
+        integration_repository.get_by_id_with_secrets.return_value = _make_integration()
+
+        result = await resolve_invoke_input(
+            InvokeInput(
+                agent_id="agent-1",
+                session_id="session-1",
+                messages=[],
+            ),
+            agent_repository=agent_repository,
+            integration_repository=integration_repository,
+            session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
+            exchange_file_service=AsyncMock(),
+            model_file_service=AsyncMock(),
+        )
+
+        assert result == Failure(
+            InvalidModelParameters(
+                agent_id="agent-1",
+                errors=["Model 'gpt-4o' does not support Web Search."],
+            )
+        )
 
     async def test_closes_snapshot_session_before_provider_refresh(
         self,

@@ -18,7 +18,6 @@ from azents.services.agent.data import (
     AgentCreateInput,
     AgentUpdateInput,
     AvatarUploadRejected,
-    BuiltinToolValidationFailed,
     DuplicateAdmin,
     InvalidModelParameters,
     InvalidSelectableModelOptions,
@@ -104,14 +103,6 @@ async def create_agent(
             return AgentResponse.convert_from(value)
         case Failure(error):
             match error:
-                case BuiltinToolValidationFailed(errors=bt_errors):
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail={
-                            "message": "Built-in tool validation failed",
-                            "builtin_tool_errors": bt_errors,
-                        },
-                    )
                 case ModelRequired():
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
@@ -289,14 +280,6 @@ async def update_agent(
                     raise HTTPException(
                         status_code=status.HTTP_403_FORBIDDEN,
                         detail="Not allowed to manage this agent.",
-                    )
-                case BuiltinToolValidationFailed(errors=bt_errors):
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail={
-                            "message": "Built-in tool validation failed",
-                            "builtin_tool_errors": bt_errors,
-                        },
                     )
                 case ModelRequired():
                     raise HTTPException(

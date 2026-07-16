@@ -765,6 +765,7 @@ class RunExecutor:
             turn_inference_state = SessionInferenceState(
                 model_target_label=selected_profile.profile.model_target_label,
                 model_selection=resolved_profile.model_selection,
+                model_settings=resolved_profile.model_settings,
                 reasoning_effort=resolved_profile.reasoning_effort,
                 effective_context_window_tokens=run_request.effective_max_input_tokens,
                 effective_auto_compaction_threshold_tokens=(
@@ -785,6 +786,7 @@ class RunExecutor:
             recovered = await resolve_invoke_input_with_resolved_profile(
                 invoke_input,
                 resolved_model_selection=turn_inference_state.model_selection,
+                resolved_model_settings=turn_inference_state.model_settings,
                 resolved_reasoning_effort=turn_inference_state.reasoning_effort,
                 agent_repository=self.agent_repository,
                 integration_repository=self.integration_repository,
@@ -1356,6 +1358,9 @@ class RunExecutor:
                             invoke_input,
                             resolved_model_selection=(
                                 next_inference_state.model_selection
+                            ),
+                            resolved_model_settings=(
+                                next_inference_state.model_settings
                             ),
                             resolved_reasoning_effort=(
                                 next_inference_state.reasoning_effort
@@ -2202,6 +2207,7 @@ class RunExecutor:
                         prepared_inference_state = SessionInferenceState(
                             model_target_label=requested_profile.model_target_label,
                             model_selection=resolved_profile.model_selection,
+                            model_settings=resolved_profile.model_settings,
                             reasoning_effort=resolved_profile.reasoning_effort,
                             effective_context_window_tokens=effective_tokens,
                             effective_auto_compaction_threshold_tokens=(

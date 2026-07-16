@@ -76,7 +76,7 @@ def test_build_initial_model_capabilities_promotes_legacy_supported_fields() -> 
 
     assert capabilities.reasoning.supported is True
     assert capabilities.context_window.max_input_tokens == 128000
-    assert capabilities.built_in_tools.supported == ["web_search", "image_generation"]
+    assert capabilities.built_in_tools.supported == ["web_search"]
 
 
 @pytest.mark.parametrize(

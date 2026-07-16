@@ -10598,12 +10598,13 @@
             "description": "Per-tool options"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "name"
         ],
         "title": "BuiltinToolConfig",
-        "description": "Built-in tool setting to enable on an Agent."
+        "description": "Built-in tool setting enabled for one selectable model option."
       },
       "ChatEditMessageWriteRequest": {
         "properties": {
@@ -14026,32 +14027,6 @@
             "title": "Temperature",
             "description": "Generation temperature (0.0-2.0)"
           },
-          "context_window_tokens": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 1.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Context Window Tokens",
-            "description": "Agent-level context window cap for input budgeting"
-          },
-          "max_output_tokens": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 1.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Max Output Tokens",
-            "description": "Maximum output token count"
-          },
           "top_p": {
             "anyOf": [
               {
@@ -14105,14 +14080,6 @@
               }
             ],
             "description": "Reasoning effort, only for models with thinking support"
-          },
-          "builtin_tools": {
-            "items": {
-              "$ref": "#/components/schemas/BuiltinToolConfig"
-            },
-            "type": "array",
-            "title": "Builtin Tools",
-            "description": "Built-in tool list to enable"
           }
         },
         "additionalProperties": false,
@@ -15175,13 +15142,18 @@
           "model_selection": {
             "$ref": "#/components/schemas/AgentModelSelection",
             "description": "Selectable model selection snapshot"
+          },
+          "settings": {
+            "$ref": "#/components/schemas/SelectableModelSettings",
+            "description": "Stored model-scoped settings"
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
           "label",
-          "model_selection"
+          "model_selection",
+          "settings"
         ],
         "title": "SelectableModelOption",
         "description": "Stored selectable model option keyed by label."
@@ -15198,6 +15170,17 @@
           "model_selection": {
             "$ref": "#/components/schemas/AgentModelSelectionInput",
             "description": "Selectable model selection input"
+          },
+          "settings": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SelectableModelSettingsInput"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Model-scoped settings; omitted uses capability defaults"
           }
         },
         "additionalProperties": false,
@@ -15208,6 +15191,102 @@
         ],
         "title": "SelectableModelOptionInput",
         "description": "Selectable model option input keyed by label."
+      },
+      "SelectableModelSettings": {
+        "properties": {
+          "context_window_tokens": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Window Tokens",
+            "description": "Model-scoped context window cap for input budgeting"
+          },
+          "max_output_tokens": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Output Tokens",
+            "description": "Model-scoped maximum output token count"
+          },
+          "builtin_tools": {
+            "items": {
+              "$ref": "#/components/schemas/BuiltinToolConfig"
+            },
+            "type": "array",
+            "title": "Builtin Tools",
+            "description": "Enabled built-in tools"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "context_window_tokens",
+          "max_output_tokens",
+          "builtin_tools"
+        ],
+        "title": "SelectableModelSettings",
+        "description": "Stored user settings for one selectable model option."
+      },
+      "SelectableModelSettingsInput": {
+        "properties": {
+          "context_window_tokens": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Window Tokens",
+            "description": "Model-scoped context window cap for input budgeting"
+          },
+          "max_output_tokens": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Output Tokens",
+            "description": "Model-scoped maximum output token count"
+          },
+          "builtin_tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/BuiltinToolConfig"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Builtin Tools",
+            "description": "Enabled built-in tools; omitted enables every supported tool"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "SelectableModelSettingsInput",
+        "description": "Optional user settings submitted for one selectable model option."
       },
       "SendCodeRequest": {
         "properties": {
