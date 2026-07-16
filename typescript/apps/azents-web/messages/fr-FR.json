@@ -763,7 +763,18 @@
         "modelLabelColumn": "Model label",
         "selectedModelColumn": "Selected model",
         "actionsColumn": "Actions",
-        "dragHandleLabel": "Reorder model"
+        "dragHandleLabel": "Reorder model",
+        "settingsAction": "Paramètres du modèle",
+        "settingsTitle": "Paramètres de {label}",
+        "contextWindowTokensLabel": "Fenêtre de contexte maximale",
+        "maxOutputTokensLabel": "Nombre maximal de jetons en sortie",
+        "capabilityLimit": "Limite du catalogue : {tokens} jetons. Une valeur supérieure peut être enregistrée, mais elle sera limitée à l’exécution.",
+        "capabilityLimitUnknown": "Aucune limite n’est indiquée dans le catalogue. La limite du fournisseur reste prioritaire.",
+        "noTokenCap": "Aucune limite utilisateur",
+        "builtinToolsLabel": "Outils intégrés",
+        "builtinToolWebSearch": "Recherche web",
+        "noBuiltinTools": "Ce modèle ne prend en charge aucun outil intégré.",
+        "settingsDone": "Terminer"
       }
     },
     "toolkits": {

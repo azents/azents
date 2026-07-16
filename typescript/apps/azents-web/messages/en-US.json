@@ -763,7 +763,18 @@
         "modelLabelColumn": "Model label",
         "selectedModelColumn": "Selected model",
         "actionsColumn": "Actions",
-        "dragHandleLabel": "Reorder model"
+        "dragHandleLabel": "Reorder model",
+        "settingsAction": "Model settings",
+        "settingsTitle": "Settings for {label}",
+        "contextWindowTokensLabel": "Max context window",
+        "maxOutputTokensLabel": "Max output tokens",
+        "capabilityLimit": "Catalog capability: {tokens} tokens. Higher values are saved but clamped at runtime.",
+        "capabilityLimitUnknown": "No catalog limit is available. The provider remains authoritative.",
+        "noTokenCap": "No user cap",
+        "builtinToolsLabel": "Built-in tools",
+        "builtinToolWebSearch": "Web search",
+        "noBuiltinTools": "This model has no supported built-in tools.",
+        "settingsDone": "Done"
       }
     },
     "toolkits": {

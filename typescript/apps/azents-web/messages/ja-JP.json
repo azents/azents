@@ -763,7 +763,18 @@
         "modelLabelColumn": "Model label",
         "selectedModelColumn": "Selected model",
         "actionsColumn": "Actions",
-        "dragHandleLabel": "Reorder model"
+        "dragHandleLabel": "Reorder model",
+        "settingsAction": "モデル設定",
+        "settingsTitle": "{label}の設定",
+        "contextWindowTokensLabel": "最大コンテキストウィンドウ",
+        "maxOutputTokensLabel": "最大出力トークン数",
+        "capabilityLimit": "カタログ上の上限: {tokens}トークン。上限を超える値も保存できますが、実行時に調整されます。",
+        "capabilityLimitUnknown": "カタログに上限情報がありません。プロバイダーの上限が優先されます。",
+        "noTokenCap": "ユーザー上限なし",
+        "builtinToolsLabel": "組み込みツール",
+        "builtinToolWebSearch": "ウェブ検索",
+        "noBuiltinTools": "このモデルがサポートする組み込みツールはありません。",
+        "settingsDone": "完了"
       }
     },
     "toolkits": {
