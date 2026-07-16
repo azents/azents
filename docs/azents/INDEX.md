@@ -16,7 +16,7 @@ Design documents are accumulated records and are not listed individually in this
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
 | [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-07-16 | 47 |
-| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-16 | 103 |
+| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-16 | 104 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-16 | 9 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-09 | 4 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-07-16 | 10 |
@@ -30,17 +30,17 @@ _8 documents_
 
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
-| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-07-16 | 90 |
+| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-07-16 | 91 |
 | [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-07-12 | 17 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-07-03 | 3 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-16 | 30 |
-| [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-07-14 | 8 |
-| [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-07-16 | 22 |
+| [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-07-16 | 9 |
+| [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-07-16 | 23 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-07-15 | 15 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
 | [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-06-27 | 2 |
 | [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-07-16 | 20 |
-| [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-07-12 | 14 |
+| [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-07-16 | 15 |
 | [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-07-13 | 7 |
 | [xAI API Key Provider Flow](spec/flow/xai-api-key.md) | @Hardtack | 2026-07-10 | 1 |
 | [xAI OAuth Flow](spec/flow/xai-oauth.md) | @Hardtack | 2026-07-10 | 3 |
@@ -201,8 +201,23 @@ _14 documents_
 - [ADR-0145: Require Explicit Responses Stream Completion](adr/0145-require-explicit-responses-stream-completion.md)
 - [ADR-0145: Scope Failed-run Retry to One Model Turn](adr/0145-scope-failed-run-retry-to-model-turn.md)
 - [ADR-0146: Bound Model Streams by Parsed-Event Idle and Absolute Attempt Time](adr/0146-model-stream-parsed-event-idle-and-attempt-bounds.md)
+- [ADR-0147: Use an OpenAI-Native Responses Transport Family](adr/0147-openai-native-responses-transport-family.md)
+- [ADR-0148: Define the OpenAI HTTP Migration by Semantic Parity](adr/0148-define-openai-http-migration-by-semantic-parity.md)
+- [ADR-0149: Use LiteLLM Only as the OpenAI Cost Calculator](adr/0149-use-litellm-only-as-openai-cost-calculator.md)
+- [ADR-0150: Define the OpenAI Responses WebSocket Lifecycle](adr/0150-openai-responses-websocket-lifecycle.md)
+- [ADR-0151: Use Generic Native Adapter Request Types](adr/0151-use-generic-native-adapter-request-types.md)
+- [ADR-0152: Include ChatGPT OAuth in the OpenAI-Native HTTP Migration](adr/0152-include-chatgpt-oauth-in-openai-native-http-migration.md)
+- [ADR-0153: Use Official OpenAI SDK Native Stream Events](adr/0153-use-official-openai-sdk-native-stream-events.md)
+- [ADR-0154: Keep Native Artifact Compatibility Keys Strict](adr/0154-keep-native-artifact-compatibility-keys-strict.md)
+- [ADR-0155: Use Default OpenAI SDK HTTP Retries](adr/0155-use-default-openai-sdk-http-retries.md)
+- [ADR-0156: Scope OpenAI SDK Clients to Logical Model Operations](adr/0156-scope-openai-sdk-clients-to-logical-model-operations.md)
+- [ADR-0157: Keep OpenAI HTTP Failure Semantics at the Azents Boundary](adr/0157-keep-openai-http-failure-semantics-at-the-azents-boundary.md)
+- [ADR-0158: Calculate OpenAI-Compatible Costs from SDK Usage](adr/0158-calculate-openai-compatible-costs-from-sdk-usage.md)
+- [ADR-0159: Cut Over OpenAI-Compatible HTTP Paths Atomically](adr/0159-cut-over-openai-compatible-http-paths-atomically.md)
+- [ADR-0160: Use Documented OpenAI Responses Terminal Discriminators](adr/0160-use-documented-openai-responses-terminal-discriminators.md)
+- [ADR-0161: Deliver the OpenAI HTTP Migration as One Revertible Change](adr/0161-deliver-openai-http-migration-as-one-revertible-change.md)
 
-_152 documents_
+_167 documents_
 
 ## Issues (Bug Tracking)
 
@@ -236,4 +251,4 @@ _3 documents_
 
 ## Statistics
 
-- Total documents: 443
+- Total documents: 459

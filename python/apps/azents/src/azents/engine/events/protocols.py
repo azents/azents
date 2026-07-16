@@ -2,7 +2,7 @@
 
 import datetime
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
-from typing import Any, Protocol
+from typing import Any, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,8 +29,18 @@ from azents.repos.agent_execution.data import (
 )
 
 
+class NativeRequestInspection(Protocol):
+    """Narrow logical-request surface used by shared post-lower guards."""
+
+    model: str
+
+    def native_request_input_chars(self) -> int:
+        """Estimate the complete logical request size before dispatch planning."""
+        ...
+
+
 class NativeModelRequest(BaseModel):
-    """Adapter native model request."""
+    """LiteLLM adapter native model request."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -38,6 +48,22 @@ class NativeModelRequest(BaseModel):
     input: list[dict[str, object]] = Field(description="Native input items")
     tools: list[dict[str, object]] = Field(default_factory=list)
     kwargs: dict[str, object] = Field(default_factory=dict)
+
+    def native_request_input_chars(self) -> int:
+        """Estimate the complete logical request size."""
+        return len(str(self.input)) + len(str(self.tools)) + len(str(self.kwargs))
+
+    def continuation_input_items(self) -> list[dict[str, object]]:
+        """Return the complete input sequence used for continuation comparison."""
+        return self.input
+
+    def continuation_properties(self) -> object:
+        """Return every non-input property used for continuation comparison."""
+        return (self.model, self.tools, self.kwargs)
+
+    def continuation_store_enabled(self) -> bool:
+        """Return whether stored-response continuation is allowed."""
+        return self.kwargs.get("store") is not False
 
 
 class NativeEvent(BaseModel):
@@ -100,8 +126,8 @@ class PreLowerFilter(Protocol):
         ...
 
 
-class AdapterLowerer(Protocol):
-    """Lower Event transcript to adapter native request."""
+class AdapterLowerer[TNativeRequest](Protocol):
+    """Lower Event transcript to an adapter-specific native request."""
 
     compat_key: str
 
@@ -111,40 +137,49 @@ class AdapterLowerer(Protocol):
         *,
         model: str,
         system_prompt: str | None = None,
-    ) -> NativeModelRequest:
+    ) -> TNativeRequest:
         """Convert Event transcript to native request."""
         ...
 
 
-class PostLowerFilter(Protocol):
+class PostLowerFilter[TNativeRequest](Protocol):
     """Adapter native request post-processing filter."""
 
-    def apply(self, request: NativeModelRequest) -> NativeModelRequest:
+    def apply(self, request: TNativeRequest) -> TNativeRequest:
         """Validate or modify native request."""
         ...
 
 
-class ModelAdapter(Protocol):
+class ModelAdapter[TNativeRequest, TNativeStreamEvent](Protocol):
     """Adapter native model transport."""
 
     def stream(
         self,
-        request: NativeModelRequest,
+        request: TNativeRequest,
         *,
         watchdog: ModelStreamWatchdog,
         timeout_policy: ModelStreamTimeoutPolicy,
         call_context: ModelStreamCallContext,
-    ) -> AsyncIterator[NativeEvent]:
+    ) -> AsyncIterator[TNativeStreamEvent]:
         """Return native stream event."""
         ...
 
 
-class AdapterOutputStream(Protocol):
+@runtime_checkable
+class AsyncClosableAdapter(Protocol):
+    """Optional lifecycle for operation-scoped model adapters."""
+
+    async def close(self) -> None:
+        """Release adapter-owned transport resources."""
+        ...
+
+
+class AdapterOutputStream[TNativeStreamEvent](Protocol):
     """Incrementally normalize one adapter-native model stream."""
 
     def process_event(
         self,
-        native_event: NativeEvent,
+        native_event: TNativeStreamEvent,
     ) -> NormalizedAdapterOutput:
         """Convert one native event to immediate live projections."""
         ...
@@ -158,10 +193,10 @@ class AdapterOutputStream(Protocol):
         ...
 
 
-class AdapterOutputNormalizer(Protocol):
+class AdapterOutputNormalizer[TNativeStreamEvent](Protocol):
     """Create incremental normalizers for adapter-native model streams."""
 
-    def start(self, session_id: str) -> AdapterOutputStream:
+    def start(self, session_id: str) -> AdapterOutputStream[TNativeStreamEvent]:
         """Start normalization state for one native model stream."""
         ...
 

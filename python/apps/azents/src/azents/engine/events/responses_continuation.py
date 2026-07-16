@@ -3,8 +3,23 @@
 import copy
 import dataclasses
 from collections.abc import Mapping, Sequence
+from typing import Protocol
 
-from azents.engine.events.protocols import NativeModelRequest
+
+class ResponsesContinuationRequest(Protocol):
+    """Logical Responses request surface needed by continuation planning."""
+
+    def continuation_input_items(self) -> list[dict[str, object]]:
+        """Return the complete logical input sequence."""
+        ...
+
+    def continuation_properties(self) -> object:
+        """Return every non-input semantic request property."""
+        ...
+
+    def continuation_store_enabled(self) -> bool:
+        """Return whether stored-response continuation is allowed."""
+        ...
 
 
 @dataclasses.dataclass(frozen=True)
@@ -19,7 +34,8 @@ class ResponsesContinuationPlan:
 class _ResponsesContinuationState:
     """Last successfully completed request and response boundary."""
 
-    request: NativeModelRequest
+    input_items: list[dict[str, object]]
+    properties: object
     response_id: str
     output_items: list[dict[str, object]]
 
@@ -31,28 +47,29 @@ class ResponsesContinuationPlanner:
         self._state: _ResponsesContinuationState | None = None
         self._disabled = False
 
-    def plan(self, request: NativeModelRequest) -> ResponsesContinuationPlan:
+    def plan(self, request: ResponsesContinuationRequest) -> ResponsesContinuationPlan:
         """Return incremental input only when the prior boundary matches exactly."""
+        request_input = request.continuation_input_items()
         full_plan = ResponsesContinuationPlan(
-            input_items=request.input,
+            input_items=request_input,
             previous_response_id=None,
         )
-        if self._disabled or request.kwargs.get("store") is False:
+        if self._disabled or not request.continuation_store_enabled():
             return full_plan
 
         state = self._state
-        if state is None or not _request_properties_match(state.request, request):
+        if state is None or state.properties != request.continuation_properties():
             return full_plan
 
-        previous_input_count = len(state.request.input)
-        if request.input[:previous_input_count] != state.request.input:
+        previous_input_count = len(state.input_items)
+        if request_input[:previous_input_count] != state.input_items:
             return full_plan
 
         output_end = previous_input_count + len(state.output_items)
-        if request.input[previous_input_count:output_end] != state.output_items:
+        if request_input[previous_input_count:output_end] != state.output_items:
             return full_plan
 
-        delta = request.input[output_end:]
+        delta = request_input[output_end:]
         if not delta:
             return full_plan
         return ResponsesContinuationPlan(
@@ -62,17 +79,22 @@ class ResponsesContinuationPlanner:
 
     def record_completion(
         self,
-        request: NativeModelRequest,
+        request: ResponsesContinuationRequest,
         *,
         response_id: str,
         output_items: Sequence[Mapping[str, object]],
     ) -> None:
         """Commit a completed provider response as the next continuation boundary."""
-        if self._disabled or request.kwargs.get("store") is False or not response_id:
+        if (
+            self._disabled
+            or not request.continuation_store_enabled()
+            or not response_id
+        ):
             self._state = None
             return
         self._state = _ResponsesContinuationState(
-            request=request.model_copy(deep=True),
+            input_items=copy.deepcopy(request.continuation_input_items()),
+            properties=copy.deepcopy(request.continuation_properties()),
             response_id=response_id,
             output_items=copy.deepcopy(
                 [sanitize_responses_native_item(dict(item)) for item in output_items]
@@ -87,18 +109,6 @@ class ResponsesContinuationPlanner:
         """Disable continuation after the provider rejects stored response state."""
         self._disabled = True
         self._state = None
-
-
-def _request_properties_match(
-    previous: NativeModelRequest,
-    current: NativeModelRequest,
-) -> bool:
-    """Compare all request properties except the growing input sequence."""
-    return (
-        current.model == previous.model
-        and current.tools == previous.tools
-        and current.kwargs == previous.kwargs
-    )
 
 
 def sanitize_responses_native_item(

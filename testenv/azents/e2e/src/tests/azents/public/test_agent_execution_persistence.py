@@ -83,6 +83,12 @@ _RETRY_ACROSS_TURNS_CALL_ID = "call_failed_run_retry_turn_boundary"
 _RETRY_MANUAL = "Failed run retry exhaust then manual recover"
 _RETRY_MANUAL_RESPONSE = "Manual failed-run retry recovered successfully."
 _RETRY_STALE = "Failed run retry stale conflict"
+_SAFE_PROVIDER_RETRY_MESSAGES = frozenset(
+    {
+        "The model provider rate limit was exceeded.",
+        "The model response stream became inactive.",
+    }
+)
 _JSON_OBJECT = TypeAdapter(dict[str, object])
 _JSON_OBJECT_LIST = TypeAdapter(list[dict[str, object]])
 
@@ -1147,8 +1153,8 @@ class TestAgentExecutionPersistence:
         assert retry.get("failed_attempt_count") == 1
         assert retry.get("max_retries") == 3
         latest_error = attempts[-1].get("user_message")
-        assert isinstance(latest_error, str)
-        assert "Deterministic retry attempt 1 failed." in latest_error
+        assert latest_error in _SAFE_PROVIDER_RETRY_MESSAGES
+        assert "Deterministic retry attempt 1 failed." not in str(latest_error)
 
         during_retry = _list_history(
             server_url=azents_public_server_url,
@@ -1212,13 +1218,13 @@ class TestAgentExecutionPersistence:
         assert failure.get("failed_attempt_count") == 4
         assert failure.get("max_retries") == 3
         assert [attempt.get("attempt_number") for attempt in attempts] == [1, 2, 3, 4]
-        assert all(isinstance(message, str) for message in attempt_messages)
-        for attempt_number, message in enumerate(attempt_messages, start=1):
-            expected_message = (
-                f"Deterministic model turn 2 attempt {attempt_number} failed."
-            )
-            assert expected_message in str(message)
-            assert "Deterministic model turn 1" not in str(message)
+        assert all(
+            message in _SAFE_PROVIDER_RETRY_MESSAGES for message in attempt_messages
+        )
+        assert all(
+            "Deterministic model turn" not in str(message)
+            for message in attempt_messages
+        )
         assert _RETRY_ACROSS_TURNS_CALL_ID in _tool_result_call_ids(failed_payload)
 
     def test_failed_run_manual_retry_soft_reverts_terminal_error(

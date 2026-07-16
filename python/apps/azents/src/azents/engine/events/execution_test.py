@@ -423,6 +423,17 @@ class _ModelAdapter:
         yield NativeEvent(type="done", item={})
 
 
+class _ClosableModelAdapter(_ModelAdapter):
+    """Model adapter that records operation-scoped cleanup."""
+
+    def __init__(self) -> None:
+        self.closed = False
+
+    async def close(self) -> None:
+        """Record adapter cleanup."""
+        self.closed = True
+
+
 class _BlockingModelAdapter:
     """Pause the model stream after yielding its first delta."""
 
@@ -715,7 +726,7 @@ def _model_call_preparer(
     | None = None,
     system_prompt: SystemPromptAnalysisPayload | None = None,
     inference_state: SessionInferenceState | None = None,
-) -> ModelCallPreparer:
+) -> ModelCallPreparer[NativeModelRequest]:
     """Create a turn-local model call preparer for tests."""
     resolved_lowerer = lowerer or _Lowerer()
     resolved_tool_executor = tool_executor or _ToolExecutor()
@@ -724,7 +735,7 @@ def _model_call_preparer(
         *,
         transcript: Sequence[Event],
         model: str,
-    ) -> PreparedModelCall:
+    ) -> PreparedModelCall[NativeModelRequest]:
         return PreparedModelCall(
             native_request=resolved_lowerer.lower(transcript, model=model),
             inference_state=inference_state,
@@ -987,7 +998,7 @@ async def test_external_run_callbacks_observe_no_open_db_session() -> None:
 
     async def prepare_model_call(
         *, transcript: Sequence[Event], model: str
-    ) -> PreparedModelCall:
+    ) -> PreparedModelCall[NativeModelRequest]:
         del transcript
         assert open_sessions == 0
 
@@ -1630,7 +1641,7 @@ async def test_model_call_preparer_runs_for_each_model_turn() -> None:
         *,
         transcript: Sequence[Event],
         model: str,
-    ) -> PreparedModelCall:
+    ) -> PreparedModelCall[NativeModelRequest]:
         """Record each turn-local preparation."""
         prepared_transcripts.append(list(transcript))
 
@@ -1695,7 +1706,7 @@ async def test_model_call_preparer_turn_end_receives_error_reason() -> None:
         *,
         transcript: Sequence[Event],
         model: str,
-    ) -> PreparedModelCall:
+    ) -> PreparedModelCall[NativeModelRequest]:
         """Return a prepared failing model call."""
         del transcript
 
@@ -2693,3 +2704,37 @@ async def test_model_call_error_propagates_for_retry() -> None:
 
     assert run_repo.terminal is None
     assert transcript_repo.events == []
+
+
+async def test_execution_closes_operation_scoped_adapter() -> None:
+    """Execution closes adapter transport after successful completion."""
+    run_repo = _RunRepo()
+    transcript_repo = _TranscriptRepo()
+    model_adapter = _ClosableModelAdapter()
+    execution = AgentRunExecution(
+        session_manager=_session_context,
+        post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_inference_profile=None,
+        model_adapter=model_adapter,
+        output_normalizer=_Normalizer([_assistant_event()]),
+        model_call_preparer=_model_call_preparer(
+            lowerer=_Lowerer(), tool_executor=_ToolExecutor()
+        ),
+        run_repo=run_repo,
+        transcript_repo=transcript_repo,
+    )
+
+    status = await execution.run(
+        AgentRunExecutionRequest(
+            owner_generation=1,
+            tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            run_id="run-1",
+            session_id="session-1",
+            model="gpt-5.1",
+        ),
+    )
+
+    assert status == AgentRunStatus.COMPLETED
+    assert model_adapter.closed is True

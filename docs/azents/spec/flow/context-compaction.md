@@ -17,7 +17,7 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_run.py
   - python/apps/azents/src/azents/rdb/models/agent.py
 last_verified_at: 2026-07-16
-spec_version: 22
+spec_version: 23
 ---
 
 # Context Compaction
@@ -57,12 +57,19 @@ logical order, remains outside the fixed summary cutoff, and stays visible after
 
 ## Summary Model
 
-Summary generation uses LiteLLM Responses API from `engine/context/compaction.py`. The compaction model is
-resolved from the Agent lightweight option snapshot. Its model-scoped context cap participates in the effective input window, while its model-scoped `max_output_tokens` and built-in tools do not replace internal compaction request policy.
+Summary generation is routed by provider from `engine/context/compaction.py`. OpenAI API-key and
+ChatGPT OAuth use an operation-scoped official OpenAI SDK client; other providers use the shared
+LiteLLM Responses helper. The compaction model is resolved from the Agent lightweight option
+snapshot. Its model-scoped context cap participates in the effective input window, while its
+model-scoped `max_output_tokens` and built-in tools do not replace internal compaction request policy.
 
-Compaction summary generation is not user-facing streaming output. The runtime calls the summary
-model with `stream=False` and passes `max_output_tokens` from the dynamic summary budget. The summary
-budget is based on the model context window:
+Compaction summary generation is not user-facing streaming output, although the transport uses a
+stream so the common watchdog can enforce parsed-event idle and absolute attempt deadlines. The
+standard OpenAI-compatible helper sends ordinary user input plus top-level instructions and omits
+`max_output_tokens`; it does not use sampling continuation or Responses Lite. ChatGPT OAuth also
+uses complete input, `store=false`, encrypted reasoning inclusion, and no `previous_response_id`.
+Non-migrated providers receive `max_output_tokens` from the dynamic summary budget through the
+LiteLLM helper. The summary budget is based on the model context window:
 
 - target summary chars: 3% of context window tokens, converted with 1 token ≈ 4 chars;
 - limit summary chars: 5% of context window tokens, converted with 1 token ≈ 4 chars;
@@ -183,7 +190,9 @@ the immediate shape of the recent interaction.
 - Each continuity excerpt is independently truncated before it is embedded in the summary.
 - Auto, manual, and fallback compaction share the same summary prompt and budget policy.
 - Manual compaction uses the command run context when dispatching session compaction and summary enrichment hooks.
-- Summary model calls are non-streaming and carry API-level `max_output_tokens`.
+- Summary model calls use watched streaming transport without publishing user-facing deltas. OpenAI
+  API-key and ChatGPT OAuth omit API-level `max_output_tokens`; non-migrated providers receive the
+  dynamic summary budget through the LiteLLM helper.
 - Summary content is bounded by the runtime char guard after the model returns.
 - UI/audit history continues to include pre-compaction events. ModelFile GC may later delete unpinned ModelFile blobs whose single FilePart event is behind the head cursor, but it does not delete events or history metadata.
 - Legacy SDK compaction packages are not part of production compaction.

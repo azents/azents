@@ -12,6 +12,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentSessionTitleSource, EventKind, LLMProvider
 from azents.core.llm_mapping import build_credential_kwargs, to_runtime_model
+from azents.engine.events.openai_responses import (
+    OpenAIResponsesProviderError,
+    call_openai_responses_text,
+)
 from azents.engine.events.types import (
     AssistantMessagePayload,
     Event,
@@ -26,11 +30,12 @@ from azents.engine.model_stream import (
     get_model_stream_watchdog,
 )
 from azents.engine.responses import (
+    DEFAULT_RESPONSES_TEXT_CONFIG,
     ResponsesOutputError,
     call_responses_model,
     extract_response_text,
 )
-from azents.engine.run.errors import ModelStreamTimeoutError
+from azents.engine.run.errors import ModelCallError, ModelStreamTimeoutError
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
@@ -258,7 +263,12 @@ class SessionTitleService:
                 },
             )
             return None
-        except OpenAIError, ResponsesOutputError:
+        except (
+            OpenAIError,
+            OpenAIResponsesProviderError,
+            ModelCallError,
+            ResponsesOutputError,
+        ):
             logger.exception(
                 "Automatic session title generation failed",
                 extra={
@@ -295,24 +305,38 @@ async def generate_session_title_with_model(
         attempt_number=None,
         check_stop=None,
     )
-    response = await call_responses_model(
-        provider=provider,
-        model=model,
-        credential_kwargs=credential_kwargs,
-        input_items=[
-            {
-                "role": "user",
-                "content": "Generate a title for this initial user prompt:\n" + context,
-            }
-        ],
-        instructions=_TITLE_PROMPT,
-        stream=True,
-        max_output_tokens=_TITLE_RESPONSE_MAX_OUTPUT_TOKENS,
-        watchdog=watchdog,
-        timeout_policy=timeout_policy,
-        call_context=call_context,
-    )
-    text = await extract_response_text(response)
+    input_items: list[dict[str, object]] = [
+        {
+            "role": "user",
+            "content": "Generate a title for this initial user prompt:\n" + context,
+        }
+    ]
+    if provider in {LLMProvider.OPENAI, LLMProvider.CHATGPT_OAUTH}:
+        text = await call_openai_responses_text(
+            provider=provider,
+            model=model,
+            credential_kwargs=credential_kwargs,
+            input_items=input_items,
+            instructions=_TITLE_PROMPT,
+            text=DEFAULT_RESPONSES_TEXT_CONFIG,
+            watchdog=watchdog,
+            timeout_policy=timeout_policy,
+            call_context=call_context,
+        )
+    else:
+        response = await call_responses_model(
+            provider=provider,
+            model=model,
+            credential_kwargs=credential_kwargs,
+            input_items=input_items,
+            instructions=_TITLE_PROMPT,
+            stream=True,
+            max_output_tokens=_TITLE_RESPONSE_MAX_OUTPUT_TOKENS,
+            watchdog=watchdog,
+            timeout_policy=timeout_policy,
+            call_context=call_context,
+        )
+        text = await extract_response_text(response)
     if not text:
         return None
     return clean_generated_title(text)

@@ -19,7 +19,7 @@ from azents.engine.events.protocols import (
     EventAppendRepository,
     EventPayloadRepository,
     ManualCompactor,
-    NativeModelRequest,
+    NativeRequestInspection,
     PostLowerFilter,
     PreLowerFilter,
     SessionHeadMoveRepository,
@@ -292,42 +292,36 @@ class EventAutoCompactionFilter:
         return [summary]
 
 
-class NativeRequestSizeGuard:
+class NativeRequestSizeGuard[TNativeRequest: NativeRequestInspection]:
     """Post-lower native request size guard."""
 
     def __init__(self, *, max_input_chars: int) -> None:
         self._max_input_chars = max_input_chars
 
-    def apply(self, request: NativeModelRequest) -> NativeModelRequest:
-        """Fail when native request exceeds the specified character budget."""
-        input_chars = _native_request_input_chars(request)
-        if input_chars > self._max_input_chars:
+    def apply(self, request: TNativeRequest) -> TNativeRequest:
+        """Fail when the complete logical request exceeds the character budget."""
+        if request.native_request_input_chars() > self._max_input_chars:
             raise ValueError("Native model request input exceeds size guard")
         return request
 
 
-class PostLowerFilterPipeline:
+class PostLowerFilterPipeline[TNativeRequest]:
     """Adapter native post-lower filter pipeline."""
 
-    def __init__(self, filters: Sequence[PostLowerFilter]) -> None:
+    def __init__(self, filters: Sequence[PostLowerFilter[TNativeRequest]]) -> None:
         self._filters = list(filters)
 
     @property
-    def filters(self) -> tuple[PostLowerFilter, ...]:
+    def filters(self) -> tuple[PostLowerFilter[TNativeRequest], ...]:
         """Return configured filter list."""
         return tuple(self._filters)
 
-    def apply(self, request: NativeModelRequest) -> NativeModelRequest:
+    def apply(self, request: TNativeRequest) -> TNativeRequest:
         """Apply filters in order."""
         current = request
         for filter_ in self._filters:
             current = filter_.apply(current)
         return current
-
-
-def _native_request_input_chars(request: NativeModelRequest) -> int:
-    """Estimate character count of native input payload sent to provider."""
-    return len(str(request.input)) + len(str(request.tools)) + len(str(request.kwargs))
 
 
 @dataclasses.dataclass(frozen=True)

@@ -123,6 +123,56 @@ class TestSessionTitleHelpers:
         assert isinstance(calls[0]["instructions"], str)
         assert "session title generator" in calls[0]["instructions"]
 
+    @pytest.mark.parametrize(
+        "provider",
+        [LLMProvider.OPENAI, LLMProvider.CHATGPT_OAUTH],
+    )
+    async def test_generate_session_title_routes_openai_compatible_providers_to_sdk(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        provider: LLMProvider,
+    ) -> None:
+        """Both OpenAI-compatible title routes use the bounded SDK helper."""
+        calls: list[dict[str, object]] = []
+
+        async def fake_call_openai_responses_text(**kwargs: object) -> str:
+            calls.append(kwargs)
+            return "SDK generated title"
+
+        monkeypatch.setattr(
+            session_title_module,
+            "call_openai_responses_text",
+            fake_call_openai_responses_text,
+        )
+
+        watchdog = make_test_model_stream_watchdog()
+        title = await generate_session_title_with_model(
+            provider=provider,
+            model="gpt-test",
+            credential_kwargs={"api_key": "test-key"},
+            context="Describe the SDK migration",
+            session_id="session-1",
+            watchdog=watchdog,
+        )
+
+        assert title == "SDK generated title"
+        assert len(calls) == 1
+        call = calls[0]
+        assert call["provider"] == provider
+        assert call["model"] == "gpt-test"
+        assert call["input_items"] == [
+            {
+                "role": "user",
+                "content": "Generate a title for this initial user prompt:\n"
+                "Describe the SDK migration",
+            }
+        ]
+        assert call["text"] == {
+            "format": {"type": "text"},
+            "verbosity": "low",
+        }
+        assert "max_output_tokens" not in call
+
     async def test_generate_title_logs_model_failure(
         self,
         monkeypatch: pytest.MonkeyPatch,
