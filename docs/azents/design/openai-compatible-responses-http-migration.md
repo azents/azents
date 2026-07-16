@@ -2,6 +2,7 @@
 title: "OpenAI-Compatible Responses HTTP Migration"
 created: 2026-07-16
 updated: 2026-07-16
+implemented: 2026-07-16
 tags: [architecture, backend, engine, llm, openai, oauth, migration]
 ---
 
