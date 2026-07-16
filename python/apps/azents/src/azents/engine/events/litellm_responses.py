@@ -6,6 +6,7 @@ import dataclasses
 import datetime
 import hashlib
 import json
+import logging
 import os
 from collections.abc import AsyncIterable, AsyncIterator, Sequence
 from typing import Any, Protocol, runtime_checkable
@@ -107,6 +108,8 @@ _REASONING_ADAPTER: TypeAdapter[Reasoning] = TypeAdapter(Reasoning)
 _INCLUDE_ADAPTER: TypeAdapter[list[ResponseIncludable]] = TypeAdapter(
     list[ResponseIncludable]
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -874,16 +877,28 @@ class LiteLLMResponsesModelAdapter:
         if self.continuation_planner is not None:
             self.continuation_planner.reset()
 
+        async def call_response(active_plan: ResponsesContinuationPlan) -> object:
+            if self.continuation_planner is not None:
+                logger.info(
+                    "Dispatching OpenAI Responses request",
+                    extra={
+                        "previous_response_id_supplied": (
+                            active_plan.previous_response_id is not None
+                        )
+                    },
+                )
+            return await _call_litellm_responses(
+                request,
+                kwargs,
+                input_items=active_plan.input_items,
+                previous_response_id=active_plan.previous_response_id,
+                connect_timeout_seconds=timeout_policy.connect_timeout_seconds,
+            )
+
         async def open_response() -> object:
             nonlocal plan
             try:
-                response = await _call_litellm_responses(
-                    request,
-                    kwargs,
-                    input_items=plan.input_items,
-                    previous_response_id=plan.previous_response_id,
-                    connect_timeout_seconds=timeout_policy.connect_timeout_seconds,
-                )
+                response = await call_response(plan)
             except (LiteLLMOpenAIError, OpenAIBaseError) as exc:
                 if not (
                     plan.previous_response_id is not None
@@ -896,13 +911,7 @@ class LiteLLMResponsesModelAdapter:
                     input_items=request.input,
                     previous_response_id=None,
                 )
-                response = await _call_litellm_responses(
-                    request,
-                    kwargs,
-                    input_items=plan.input_items,
-                    previous_response_id=None,
-                    connect_timeout_seconds=timeout_policy.connect_timeout_seconds,
-                )
+                response = await call_response(plan)
             if isinstance(response, AsyncIterable):
                 guard_litellm_streaming_logging(response)
             return response

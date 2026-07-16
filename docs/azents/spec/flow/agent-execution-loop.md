@@ -46,7 +46,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ChatView.tsx
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
 last_verified_at: 2026-07-16
-spec_version: 88
+spec_version: 89
 ---
 
 # Agent Execution Loop
@@ -116,7 +116,10 @@ If OpenAI rejects an incremental request with the exact `previous_response_not_f
 before a response stream opens, the adapter disables continuation for its remaining lifetime and
 retries that logical request once with full input. Other provider errors retain their normal failure
 classification. ChatGPT OAuth, Responses Lite, non-OpenAI providers, and explicit `store=false`
-requests always use full-context HTTP requests.
+requests always use full-context HTTP requests. Immediately before each physical OpenAI Responses
+call, the adapter emits the structured boolean log field `previous_response_id_supplied` without
+logging the response ID itself. A missing-response fallback therefore emits `true` for the rejected
+incremental call followed by `false` for the full retry.
 
 ### Model Stream Attempt Watchdog
 

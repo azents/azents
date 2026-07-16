@@ -2,6 +2,7 @@
 
 import asyncio
 import datetime
+import logging
 import warnings
 import xml.etree.ElementTree as ElementTree
 from collections.abc import AsyncIterator
@@ -2017,8 +2018,13 @@ class TestLiteLLMResponsesModelAdapter:
     async def test_stream_continues_with_previous_response_and_delta_input(
         self,
         monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         """Send only new tool output after an exact completed response boundary."""
+        caplog.set_level(
+            logging.INFO,
+            logger="azents.engine.events.litellm_responses",
+        )
         calls: list[dict[str, object]] = []
         function_call = {
             "type": "function_call",
@@ -2071,6 +2077,11 @@ class TestLiteLLMResponsesModelAdapter:
         assert calls[0]["previous_response_id"] is None
         assert calls[1]["input"] == [tool_output]
         assert calls[1]["previous_response_id"] == "resp-1"
+        assert [
+            record.__dict__["previous_response_id_supplied"]
+            for record in caplog.records
+            if record.message == "Dispatching OpenAI Responses request"
+        ] == [False, True]
 
     async def test_stream_does_not_continue_without_successful_terminal_response(
         self,
@@ -2172,8 +2183,13 @@ class TestLiteLLMResponsesModelAdapter:
     async def test_missing_previous_response_retries_full_request_once(
         self,
         monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         """Recover a rejected stored response by disabling and retrying full input."""
+        caplog.set_level(
+            logging.INFO,
+            logger="azents.engine.events.litellm_responses",
+        )
         calls: list[dict[str, object]] = []
         function_call = {
             "type": "function_call",
@@ -2238,6 +2254,11 @@ class TestLiteLLMResponsesModelAdapter:
         assert calls[1]["previous_response_id"] == "resp-1"
         assert calls[2]["input"] == second.input
         assert calls[2]["previous_response_id"] is None
+        assert [
+            record.__dict__["previous_response_id_supplied"]
+            for record in caplog.records
+            if record.message == "Dispatching OpenAI Responses request"
+        ] == [False, True, False]
 
     async def test_litellm_bad_request_stays_internal(
         self,
