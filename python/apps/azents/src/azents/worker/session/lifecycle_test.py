@@ -40,6 +40,10 @@ class _SessionManager:
 class _Broker:
     """SessionBroker test double."""
 
+    def __init__(self) -> None:
+        self.renewed_session_ids: list[str] = []
+        self.owner_heartbeat_session_ids: list[str] = []
+
     async def release_session_lock(self, session_id: str) -> None:
         """This test does not release broker locks."""
         del session_id
@@ -58,9 +62,13 @@ class _Broker:
         """This test does not set broker activity."""
         del session_id, run_id, phase
 
+    async def renew_session_ttl(self, session_id: str) -> None:
+        """Record active owner lease renewal."""
+        self.renewed_session_ids.append(session_id)
+
     async def renew_session_owner_heartbeat(self, session_id: str) -> None:
-        """This test does not renew owner heartbeat."""
-        del session_id
+        """Record idle-only owner heartbeat renewal."""
+        self.owner_heartbeat_session_ids.append(session_id)
 
 
 class _AgentSessionRepository:
@@ -68,6 +76,16 @@ class _AgentSessionRepository:
 
     def __init__(self) -> None:
         self.idle_session_ids: list[str] = []
+        self.heartbeat_session_ids: list[str] = []
+
+    async def heartbeat_running(
+        self,
+        session: AsyncSession,
+        session_id: str,
+    ) -> None:
+        """Record durable RUNNING heartbeat renewal."""
+        del session
+        self.heartbeat_session_ids.append(session_id)
 
     async def lock_by_id(
         self,
@@ -220,6 +238,32 @@ def _service(
             _InputBufferRepository(pending_input),
         ),
     )
+
+
+@pytest.mark.asyncio
+async def test_heartbeat_session_refreshes_db_and_active_owner_lease() -> None:
+    """Active Run heartbeat renews DB state and the atomic Redis owner lease."""
+    broker = _Broker()
+    agent_session_repository = _AgentSessionRepository()
+    service = SessionLifecycleService(
+        broker=cast(SessionBroker, broker),
+        session_manager=cast(SessionManager[AsyncSession], _SessionManager()),
+        agent_session_repository=cast(
+            AgentSessionRepository,
+            agent_session_repository,
+        ),
+        agent_run_repository=cast(AgentRunRepository, _AgentRunRepository(None)),
+        input_buffer_repository=cast(
+            InputBufferRepository,
+            _InputBufferRepository(False),
+        ),
+    )
+
+    await service.heartbeat_session("session-001")
+
+    assert agent_session_repository.heartbeat_session_ids == ["session-001"]
+    assert broker.renewed_session_ids == ["session-001"]
+    assert broker.owner_heartbeat_session_ids == []
 
 
 @pytest.mark.asyncio

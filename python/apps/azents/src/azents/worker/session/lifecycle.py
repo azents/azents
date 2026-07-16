@@ -138,11 +138,11 @@ class SessionLifecycleService:
         return await self.run_short_db(get_active)
 
     async def heartbeat_session(self, session_id: str) -> None:
-        """Refresh DB heartbeat and Redis owner heartbeat of RUNNING session."""
+        """Refresh DB heartbeat and Redis owner lease of RUNNING session."""
         await self.run_short_db(
             lambda db: self.agent_session_repository.heartbeat_running(db, session_id)
         )
-        await self.broker.renew_session_owner_heartbeat(session_id)
+        await self.broker.renew_session_ttl(session_id)
 
     async def has_stop_request(self, session_id: str) -> bool:
         """Return whether Durable stop intent exists."""

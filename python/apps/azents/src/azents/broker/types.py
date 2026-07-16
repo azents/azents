@@ -73,7 +73,7 @@ class SessionBroker(Protocol):
         ...
 
     async def renew_session_ttl(self, session_id: str) -> None:
-        """Refresh session lock and activity TTL."""
+        """Refresh owner lock, owner heartbeat, and activity TTLs."""
         ...
 
     async def renew_session_owner_heartbeat(self, session_id: str) -> None:

@@ -333,7 +333,7 @@ class RedisBroker:
         await self.renew_session_ttl(session_id)
 
     async def renew_session_ttl(self, session_id: str) -> None:
-        """Refresh session lock and activity TTL.
+        """Refresh owner lock, owner heartbeat, and activity TTLs.
 
         :param session_id: Target session ID
         """
