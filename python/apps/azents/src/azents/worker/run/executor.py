@@ -549,6 +549,7 @@ class RunExecutor:
         recoverable_run = await self.session_lifecycle.claim_recoverable_agent_run(
             message.session_id
         )
+        actionable_transcript_pending = False
         created_run = recoverable_run is None
         async with self.session_manager() as db_session:
             session_state = await self.agent_session_repository.get_by_id(
@@ -598,7 +599,15 @@ class RunExecutor:
                         message.session_id
                     )
                 )
-                if not pending_input.exists and recoverable_run is None:
+                if not pending_input.exists or not pending_input.requires_inference:
+                    actionable_transcript_pending = (
+                        await self._has_actionable_model_input(message.session_id)
+                    )
+                if (
+                    not pending_input.exists
+                    and not actionable_transcript_pending
+                    and recoverable_run is None
+                ):
                     logger.info(
                         "Session wake-up ignored because no runtime input is pending",
                         extra={
@@ -648,8 +657,11 @@ class RunExecutor:
                 owner_generation=owner_generation,
                 tool_admission_barrier=tool_admission_barrier,
                 initial_turn_eligible=(
-                    recoverable_run is not None
-                    and recoverable_run.status == AgentRunStatus.RUNNING
+                    actionable_transcript_pending
+                    or (
+                        recoverable_run is not None
+                        and recoverable_run.status == AgentRunStatus.RUNNING
+                    )
                 ),
                 poll_fn=None,
                 process_actions=True,
