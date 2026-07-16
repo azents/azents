@@ -1,12 +1,26 @@
 """Tests for LLM provider integration catalog sync routing."""
 
-from fastapi import BackgroundTasks
+import datetime
+from unittest.mock import AsyncMock
 
-from azents.core.enums import LLMCatalogScope, LLMProvider
+import pytz
+from azcommon.result import Failure
+from fastapi import BackgroundTasks, HTTPException
+
+from azents.core.auth.deps import WorkspaceMember
+from azents.core.auth.permissions import Permissions
+from azents.core.enums import LLMCatalogScope, LLMProvider, WorkspaceUserRole
 from azents.core.llm_catalog_sync import IntegrationCatalogSyncTrigger
-from azents.services.llm_catalog import IntegrationCatalogProjectionService
+from azents.services.llm_catalog import (
+    IntegrationCatalogProjectionService,
+    IntegrationCatalogSyncThrottled,
+)
 
-from . import enqueue_initial_catalog_sync, enqueue_stale_catalog_sync
+from . import (
+    enqueue_initial_catalog_sync,
+    enqueue_stale_catalog_sync,
+    sync_integration_catalog,
+)
 
 
 def _service() -> IntegrationCatalogProjectionService:
@@ -122,3 +136,31 @@ def test_disabled_or_system_catalog_integration_does_not_queue_sync() -> None:
 
     assert disabled_tasks.tasks == []
     assert system_tasks.tasks == []
+
+
+async def test_explicit_sync_formats_pytz_retry_time_as_http_date() -> None:
+    retry_at = datetime.datetime(2026, 7, 16, 12, 0, 30, tzinfo=pytz.UTC)
+    member = WorkspaceMember(
+        user_id="user",
+        workspace_id="workspace",
+        workspace_user_id="workspace-user",
+        role=WorkspaceUserRole.OWNER,
+        permissions={Permissions.LLM_INTEGRATIONS_WRITE},
+        session_id="session",
+    )
+    service = AsyncMock(spec=IntegrationCatalogProjectionService)
+    service.sync_integration_catalog.return_value = Failure(
+        IntegrationCatalogSyncThrottled(retry_at=retry_at)
+    )
+
+    try:
+        await sync_integration_catalog(
+            member=member,
+            service=service,
+            integration_id="integration",
+        )
+    except HTTPException as exc:
+        assert exc.status_code == 429
+        assert exc.headers == {"Retry-After": "Thu, 16 Jul 2026 12:00:30 GMT"}
+    else:
+        raise AssertionError("Expected HTTPException")

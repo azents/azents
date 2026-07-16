@@ -3,6 +3,7 @@
 Workspace-scoped LLM provider integration CRUD endpoints.
 """
 
+import datetime
 import logging
 from email.utils import format_datetime
 from textwrap import dedent
@@ -327,7 +328,11 @@ async def sync_integration_catalog(
                             "Integration catalog sync is throttled until "
                             f"{retry_at.isoformat()}."
                         ),
-                        headers={"Retry-After": format_datetime(retry_at, usegmt=True)},
+                        headers={
+                            "Retry-After": format_datetime(
+                                retry_at.astimezone(datetime.UTC), usegmt=True
+                            )
+                        },
                     )
                 case (
                     IntegrationCatalogAutomaticRetryBlocked()

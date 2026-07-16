@@ -170,36 +170,13 @@ def authenticate_user(
     )
 
 
-def _sync_integration_catalog(
-    server_url: str,
-    token: str,
-    handle: str,
-    integration_id: str,
-) -> None:
-    """Public API t integration-scoped stored catalog t sync."""
-    last_response: http_requests.Response | None = None
-    for _ in range(3):
-        response = http_requests.post(
-            f"{server_url}/llm-provider-integration/v1/workspaces/{handle}"
-            f"/llm-provider-integrations/{integration_id}/catalog-sync",
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=10,
-        )
-        last_response = response
-        if response.status_code < 500:
-            break
-        time.sleep(0.2)
-    if last_response is None or last_response.status_code >= 400:
-        raise AssertionError(last_response.text if last_response is not None else "")
-
-
 def _list_integration_models(
     server_url: str,
     token: str,
     handle: str,
     integration_id: str,
 ) -> dict[str, object]:
-    """Public API t integration-scoped stored catalog t fetcht."""
+    """Return the stored catalog once its initial projection has entries."""
     response = http_requests.get(
         f"{server_url}/llm-provider-integration/v1/workspaces/{handle}"
         f"/llm-provider-integrations/{integration_id}/catalog-entries",
@@ -207,8 +184,14 @@ def _list_integration_models(
         params={"limit": 100, "offset": 0},
         timeout=10,
     )
+    if response.status_code == 404:
+        raise AssertionError("Stored catalog has not been created yet.")
     response.raise_for_status()
-    return response.json()
+    payload = response.json()
+    entries = payload.get("entries")
+    if not isinstance(entries, list) or not entries:
+        raise AssertionError("Stored catalog does not have selectable entries yet.")
+    return payload
 
 
 def model_selection_from_first_candidate(
@@ -217,8 +200,7 @@ def model_selection_from_first_candidate(
     handle: str,
     integration_id: str,
 ) -> AgentModelSelectionInput:
-    """Dynamic listing t t Agent model selection input t t."""
-    _sync_integration_catalog(server_url, token, handle, integration_id)
+    """Build an agent model selection from the initial stored projection."""
     listing = wait_until(
         lambda: _list_integration_models(server_url, token, handle, integration_id),
         timeout=10,
