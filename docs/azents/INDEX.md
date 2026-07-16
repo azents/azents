@@ -201,8 +201,23 @@ _14 documents_
 - [ADR-0145: Require Explicit Responses Stream Completion](adr/0145-require-explicit-responses-stream-completion.md)
 - [ADR-0145: Scope Failed-run Retry to One Model Turn](adr/0145-scope-failed-run-retry-to-model-turn.md)
 - [ADR-0146: Bound Model Streams by Parsed-Event Idle and Absolute Attempt Time](adr/0146-model-stream-parsed-event-idle-and-attempt-bounds.md)
+- [ADR-0147: Use an OpenAI-Native Responses Transport Family](adr/0147-openai-native-responses-transport-family.md)
+- [ADR-0148: Define the OpenAI HTTP Migration by Semantic Parity](adr/0148-define-openai-http-migration-by-semantic-parity.md)
+- [ADR-0149: Use LiteLLM Only as the OpenAI Cost Calculator](adr/0149-use-litellm-only-as-openai-cost-calculator.md)
+- [ADR-0150: Define the OpenAI Responses WebSocket Lifecycle](adr/0150-openai-responses-websocket-lifecycle.md)
+- [ADR-0151: Use Generic Native Adapter Request Types](adr/0151-use-generic-native-adapter-request-types.md)
+- [ADR-0152: Include ChatGPT OAuth in the OpenAI-Native HTTP Migration](adr/0152-include-chatgpt-oauth-in-openai-native-http-migration.md)
+- [ADR-0153: Use Official OpenAI SDK Native Stream Events](adr/0153-use-official-openai-sdk-native-stream-events.md)
+- [ADR-0154: Keep Native Artifact Compatibility Keys Strict](adr/0154-keep-native-artifact-compatibility-keys-strict.md)
+- [ADR-0155: Use Default OpenAI SDK HTTP Retries](adr/0155-use-default-openai-sdk-http-retries.md)
+- [ADR-0156: Scope OpenAI SDK Clients to Logical Model Operations](adr/0156-scope-openai-sdk-clients-to-logical-model-operations.md)
+- [ADR-0157: Keep OpenAI HTTP Failure Semantics at the Azents Boundary](adr/0157-keep-openai-http-failure-semantics-at-the-azents-boundary.md)
+- [ADR-0158: Calculate OpenAI-Compatible Costs from SDK Usage](adr/0158-calculate-openai-compatible-costs-from-sdk-usage.md)
+- [ADR-0159: Cut Over OpenAI-Compatible HTTP Paths Atomically](adr/0159-cut-over-openai-compatible-http-paths-atomically.md)
+- [ADR-0160: Use Documented OpenAI Responses Terminal Discriminators](adr/0160-use-documented-openai-responses-terminal-discriminators.md)
+- [ADR-0161: Deliver the OpenAI HTTP Migration as One Revertible Change](adr/0161-deliver-openai-http-migration-as-one-revertible-change.md)
 
-_152 documents_
+_167 documents_
 
 ## Issues (Bug Tracking)
 
@@ -236,4 +251,4 @@ _3 documents_
 
 ## Statistics
 
-- Total documents: 443
+- Total documents: 459
