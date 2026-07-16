@@ -462,6 +462,40 @@ def test_typed_normalizer_builds_openai_artifact_usage_and_cost(
     assert "resp_synthetic" not in str(minimal_response)
 
 
+def test_typed_normalizer_accepts_omitted_usage_details(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Usage totals survive compatible providers that omit detail objects."""
+    monkeypatch.setattr(
+        "azents.engine.events.openai_responses.completion_cost",
+        lambda **kwargs: 0.25,
+    )
+    usage = ResponseUsage.model_construct(
+        input_tokens=10,
+        input_tokens_details=None,
+        output_tokens=5,
+        output_tokens_details=None,
+        total_tokens=15,
+    )
+    response = _response().model_copy(update={"usage": usage})
+    output = OpenAIResponsesOutputNormalizer(
+        provider="openai",
+        model="gpt-5.1-codex",
+    ).start("session-1")
+    output.process_event(_completed_event(response))
+
+    completed = output.complete()
+
+    assert completed.usage is not None
+    assert completed.usage.prompt_tokens == 10
+    assert completed.usage.completion_tokens == 5
+    assert completed.usage.total_tokens == 15
+    assert completed.usage.cached_tokens is None
+    assert completed.usage.cache_creation_tokens is None
+    assert completed.usage.reasoning_tokens is None
+    assert completed.usage.cost_usd == 0.25
+
+
 def test_typed_terminal_error_fails_without_provider_body() -> None:
     """Typed error events expose a fixed safe failure message."""
     normalizer = OpenAIResponsesOutputNormalizer(

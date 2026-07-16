@@ -750,19 +750,33 @@ def _normalize_openai_usage(
     if usage is None:
         return None
     raw_usage = _sdk_model_dump(usage)
-    input_details = usage.input_tokens_details
-    output_details = usage.output_tokens_details
+    input_details: object = usage.input_tokens_details
+    output_details: object = usage.output_tokens_details
     return TokenUsagePayload(
         prompt_tokens=usage.input_tokens,
         completion_tokens=usage.output_tokens,
         total_tokens=usage.total_tokens,
         raw=raw_usage,
-        cached_tokens=input_details.cached_tokens,
-        cache_creation_tokens=getattr(input_details, "cache_write_tokens", None),
-        reasoning_tokens=output_details.reasoning_tokens,
+        cached_tokens=_optional_usage_detail(input_details, "cached_tokens"),
+        cache_creation_tokens=_optional_usage_detail(
+            input_details,
+            "cache_write_tokens",
+        ),
+        reasoning_tokens=_optional_usage_detail(
+            output_details,
+            "reasoning_tokens",
+        ),
         cost_usd=_estimate_openai_cost(response, model=model),
         raw_hidden_params=None,
     )
+
+
+def _optional_usage_detail(details: object, field: str) -> int | None:
+    """Read an optional integer from a provider-compatible usage detail object."""
+    value = getattr(details, field, None)
+    if not isinstance(value, int) or isinstance(value, bool):
+        return None
+    return value
 
 
 def _estimate_openai_cost(response: Response, *, model: str) -> float | None:
