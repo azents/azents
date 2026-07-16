@@ -6,6 +6,7 @@ import dataclasses
 import datetime
 import hashlib
 import json
+import logging
 import os
 from collections.abc import AsyncIterable, AsyncIterator, Sequence
 from typing import Any, Protocol, runtime_checkable
@@ -40,6 +41,11 @@ from azents.engine.events.protocols import (
     NativeModelRequest,
     NormalizedAdapterOutput,
     StreamProjection,
+)
+from azents.engine.events.responses_continuation import (
+    ResponsesContinuationPlan,
+    ResponsesContinuationPlanner,
+    sanitize_responses_native_item,
 )
 from azents.engine.events.system_reminders import (
     format_compaction_summary_reminder,
@@ -103,6 +109,8 @@ _INCLUDE_ADAPTER: TypeAdapter[list[ResponseIncludable]] = TypeAdapter(
     list[ResponseIncludable]
 )
 
+logger = logging.getLogger(__name__)
+
 
 @dataclasses.dataclass(frozen=True)
 class _PromptCacheInputs:
@@ -110,6 +118,14 @@ class _PromptCacheInputs:
 
     input_items: list[dict[str, object]]
     tools: list[dict[str, object]]
+
+
+@dataclasses.dataclass(frozen=True)
+class _ContinuationObservation:
+    """Continuation state observed from one native stream event."""
+
+    completed_response: dict[str, object] | None
+    terminal_failure: bool
 
 
 def _format_goal_updated_event_reminder(payload: UserMessagePayload) -> str:
@@ -835,6 +851,12 @@ class LiteLLMEvent(NativeEvent):
 class LiteLLMResponsesModelAdapter:
     """LiteLLM Responses streaming transport."""
 
+    def __init__(
+        self,
+        continuation_planner: ResponsesContinuationPlanner | None,
+    ) -> None:
+        self.continuation_planner = continuation_planner
+
     async def stream(
         self,
         request: NativeModelRequest,
@@ -851,18 +873,53 @@ class LiteLLMResponsesModelAdapter:
             **request.kwargs,
             "stream": True,
         }
+        plan = self._plan(request)
+        if self.continuation_planner is not None:
+            self.continuation_planner.reset()
 
-        async def open_response() -> object:
-            response = await _call_litellm_responses(
+        async def call_response(active_plan: ResponsesContinuationPlan) -> object:
+            if self.continuation_planner is not None:
+                logger.info(
+                    "Dispatching OpenAI Responses request",
+                    extra={
+                        "previous_response_id_supplied": (
+                            active_plan.previous_response_id is not None
+                        )
+                    },
+                )
+            return await _call_litellm_responses(
                 request,
                 kwargs,
+                input_items=active_plan.input_items,
+                previous_response_id=active_plan.previous_response_id,
                 connect_timeout_seconds=timeout_policy.connect_timeout_seconds,
             )
+
+        async def open_response() -> object:
+            nonlocal plan
+            try:
+                response = await call_response(plan)
+            except (LiteLLMOpenAIError, OpenAIBaseError) as exc:
+                if not (
+                    plan.previous_response_id is not None
+                    and _is_previous_response_not_found(exc)
+                    and self.continuation_planner is not None
+                ):
+                    raise
+                self.continuation_planner.disable()
+                plan = ResponsesContinuationPlan(
+                    input_items=request.input,
+                    previous_response_id=None,
+                )
+                response = await call_response(plan)
             if isinstance(response, AsyncIterable):
                 guard_litellm_streaming_logging(response)
             return response
 
         response: object | None = None
+        completed_response: dict[str, object] | None = None
+        completed_output_items: list[dict[str, object]] = []
+        terminal_failure = False
         try:
             response = await watchdog.open_response(
                 open_response,
@@ -875,13 +932,27 @@ class LiteLLMResponsesModelAdapter:
                 )
             async for event in response:
                 coerce_litellm_completed_response_for_logging(event)
+                event_type = event.__class__.__name__
                 if isinstance(event, _ModelDumpable):
-                    yield LiteLLMEvent(
-                        type=event.__class__.__name__,
-                        item=event.model_dump(),
+                    item = event.model_dump()
+                    observation = _observe_continuation_event(
+                        event_type,
+                        item,
+                        completed_response=completed_response,
+                        completed_output_items=completed_output_items,
+                        terminal_failure=terminal_failure,
                     )
+                    completed_response = observation.completed_response
+                    terminal_failure = observation.terminal_failure
+                    yield LiteLLMEvent(type=event_type, item=item)
                 else:
-                    yield LiteLLMEvent(type=event.__class__.__name__, item={})
+                    yield LiteLLMEvent(type=event_type, item={})
+            if completed_response is not None and not terminal_failure:
+                self._record_completion(
+                    request,
+                    completed_response=completed_response,
+                    completed_output_items=completed_output_items,
+                )
         except asyncio.CancelledError:
             raise
         except (LiteLLMOpenAIError, OpenAIBaseError) as exc:
@@ -893,11 +964,88 @@ class LiteLLMResponsesModelAdapter:
         finally:
             await close_stream_response(response)
 
+    def _plan(self, request: NativeModelRequest) -> ResponsesContinuationPlan:
+        """Plan the physical request while retaining the full logical request."""
+        if self.continuation_planner is None:
+            return ResponsesContinuationPlan(
+                input_items=request.input,
+                previous_response_id=None,
+            )
+        return self.continuation_planner.plan(request)
+
+    def _record_completion(
+        self,
+        request: NativeModelRequest,
+        *,
+        completed_response: dict[str, object],
+        completed_output_items: list[dict[str, object]],
+    ) -> None:
+        """Record a successful terminal response for the next request."""
+        if self.continuation_planner is None:
+            return
+        response_id = completed_response.get("id")
+        if not isinstance(response_id, str) or not response_id:
+            return
+        raw_output = completed_response.get("output")
+        output_items = (
+            [item for item in raw_output if isinstance(item, dict)]
+            if isinstance(raw_output, list) and raw_output
+            else completed_output_items
+        )
+        self.continuation_planner.record_completion(
+            request,
+            response_id=response_id,
+            output_items=output_items,
+        )
+
+
+def _observe_continuation_event(
+    event_type: str,
+    item: dict[str, object],
+    *,
+    completed_response: dict[str, object] | None,
+    completed_output_items: list[dict[str, object]],
+    terminal_failure: bool,
+) -> _ContinuationObservation:
+    """Observe completion data without changing normal stream delivery."""
+    if event_type in {"OutputItemDoneEvent", "ResponseOutputItemDoneEvent"}:
+        output_item = _dict(item.get("item"))
+        if _has_output_item_type(output_item):
+            completed_output_items.append(output_item)
+    elif event_type == "ResponseCompletedEvent":
+        completed_response = _dict(item.get("response"))
+    elif event_type in {
+        "ResponseErrorEvent",
+        "ResponseFailedEvent",
+        "ResponseIncompleteEvent",
+    }:
+        terminal_failure = True
+    return _ContinuationObservation(
+        completed_response=completed_response,
+        terminal_failure=terminal_failure,
+    )
+
+
+def _is_previous_response_not_found(exc: Exception) -> bool:
+    """Match only the provider's missing stored response error code."""
+    code = getattr(exc, "code", None)
+    if code == "previous_response_not_found":
+        return True
+    body = getattr(exc, "body", None)
+    if not isinstance(body, dict):
+        return False
+    error = body.get("error")
+    return isinstance(error, dict) and error.get("code") == (
+        "previous_response_not_found"
+    )
+
 
 async def _call_litellm_responses(
     request: NativeModelRequest,
     kwargs: dict[str, object],
     *,
+    input_items: list[dict[str, object]],
+    previous_response_id: str | None,
     connect_timeout_seconds: float,
 ) -> object:
     """Call LiteLLM Responses API."""
@@ -911,9 +1059,9 @@ async def _call_litellm_responses(
         else:
             tools = _TOOLS_ADAPTER.validate_python(request.tools)
     extra_kwargs = _extra_litellm_kwargs(kwargs)
-    input_items: Any = request.input
+    native_input: Any = input_items
     return await aresponses(
-        input=input_items,
+        input=native_input,
         model=request.model,
         tools=tools,
         stream=True,
@@ -929,6 +1077,7 @@ async def _call_litellm_responses(
         api_base=_optional_str(kwargs, "api_base"),
         stop=_optional_stop(kwargs, "stop"),
         include=_optional_include(kwargs, "include"),
+        previous_response_id=previous_response_id,
         timeout=connect_only_http_timeout(connect_timeout_seconds),
         **extra_kwargs,
     )
@@ -980,6 +1129,7 @@ def _extra_litellm_kwargs(kwargs: dict[str, object]) -> dict[str, Any]:
         "instructions",
         "max_output_tokens",
         "model",
+        "previous_response_id",
         "reasoning",
         "store",
         "stream",
@@ -1419,7 +1569,7 @@ class LiteLLMResponsesOutputNormalizer:
             provider=self.provider,
             model=self.model,
             schema_version=self.schema_version,
-            item=_sanitize_native_item(item),
+            item=sanitize_responses_native_item(item),
         )
 
 
@@ -1976,33 +2126,6 @@ def _image_digest(value: str) -> str:
         return base64.b64decode(value.encode(), validate=False).hex()[:32]
     except ValueError:
         return value[:32]
-
-
-def _sanitize_native_item(item: dict[str, object]) -> dict[str, object]:
-    """Remove durable raw blob fields from native artifact."""
-    item_type = item.get("type")
-    sanitized: dict[str, object] = {}
-    for key, value in item.items():
-        if item_type == "image_generation_call" and key == "result":
-            continue
-        if _raw_blob_key(key):
-            continue
-        sanitized[key] = _sanitize_native_value(value)
-    return sanitized
-
-
-def _sanitize_native_value(value: object) -> object:
-    """Remove raw blob fields from nested native artifact values."""
-    if isinstance(value, dict):
-        return _sanitize_native_item(value)
-    if isinstance(value, list):
-        return [_sanitize_native_value(item) for item in value]
-    return value
-
-
-def _raw_blob_key(key: str) -> bool:
-    """Return whether native artifact key should be treated as raw blob."""
-    return key in {"file_data", "base64", "data_base64", "provider_payload"}
 
 
 def _dict(value: object) -> dict[str, object]:
