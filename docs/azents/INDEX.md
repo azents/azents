@@ -197,6 +197,7 @@ _14 documents_
 - [ADR-0142: Persist Inference Provenance on Turn Usage Markers](adr/0142-persist-turn-usage-inference-provenance.md)
 - [ADR-0143: Make PostgreSQL Authoritative for Tool Call Ownership](adr/0143-make-postgresql-authoritative-for-tool-call-ownership.md)
 - [ADR-0144: OSS Admin Surface Authentication and Bootstrap](adr/0144-oss-admin-surface-auth-and-bootstrap.md)
+- [ADR-0145: Model-Scoped Selectable Model Settings](adr/0145-model-scoped-selectable-model-settings.md)
 - [ADR-0145: Require Explicit Responses Stream Completion](adr/0145-require-explicit-responses-stream-completion.md)
 - [ADR-0145: Scope Failed-run Retry to One Model Turn](adr/0145-scope-failed-run-retry-to-model-turn.md)
 - [ADR-0146: Bound Model Streams by Parsed-Event Idle and Absolute Attempt Time](adr/0146-model-stream-parsed-event-idle-and-attempt-bounds.md)
