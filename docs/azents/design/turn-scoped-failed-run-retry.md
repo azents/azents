@@ -161,10 +161,9 @@ Use the deterministic AIMock fixture and public chat APIs.
 
 | Scenario | Expected evidence |
 | --- | --- |
-| Current turn fails, retries, then succeeds with a tool call | `/live.run.retry` shows attempt 1 before recovery; durable history has no terminal failed-run error. |
-| Tool-call output is committed and the run continues | A fresh `/live` snapshot no longer contains the previous retry state. |
-| Following model turn fails | The new live retry state has `failed_attempt_count = 1` and contains only the new turn's attempt history. |
-| Following retry succeeds | Final assistant output is durable and the terminal history has no failed-run error. |
+| Current turn fails once, then succeeds with a tool call | The committed tool call and result prove the first turn recovered without terminal failed-run history. |
+| Following model turn exhausts its retry budget | Terminal failed-run metadata contains four attempts numbered 1–4, all from the second turn. |
+| Earlier retry state does not leak forward | The terminal metadata excludes the first turn's failed attempt and reports the full second-turn budget. |
 
 The fixture uses only deterministic local AIMock behavior and the built-in runtime exec tool; no external credential or prerequisite snapshot is required. CI runs it in the normal non-`live_external` E2E suite. Missing required fixture matches are failures, not skips.
 

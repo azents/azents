@@ -832,7 +832,7 @@
             "id": "call_failed_run_retry_turn_boundary",
             "name": "exec_command",
             "arguments": {
-              "command": "sleep 2 && printf '%s' 'TURN_RETRY_BOUNDARY'",
+              "command": "printf '%s' 'TURN_RETRY_BOUNDARY'",
               "yield_time_ms": 10000,
               "max_output_bytes": 1000
             }
@@ -862,7 +862,42 @@
         "sequenceIndex": 1
       },
       "response": {
-        "content": "Turn-scoped failed-run retry completed."
+        "error": {
+          "message": "Deterministic model turn 2 attempt 2 failed.",
+          "type": "rate_limit_error",
+          "code": "rate_limit"
+        },
+        "status": 429
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_failed_run_retry_turn_boundary",
+        "sequenceIndex": 2
+      },
+      "response": {
+        "error": {
+          "message": "Deterministic model turn 2 attempt 3 failed.",
+          "type": "rate_limit_error",
+          "code": "rate_limit"
+        },
+        "status": 429
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_failed_run_retry_turn_boundary",
+        "sequenceIndex": 3
+      },
+      "response": {
+        "error": {
+          "message": "Deterministic model turn 2 attempt 4 failed.",
+          "type": "rate_limit_error",
+          "code": "rate_limit"
+        },
+        "status": 429
       }
     },
     {

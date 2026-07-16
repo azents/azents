@@ -79,7 +79,6 @@ _TOOL_CALL_ID = "call_chat_input_buffer_delay"
 _RETRY_ONCE = "Failed run retry once then succeed"
 _RETRY_ONCE_RESPONSE = "Failed run retry recovered after one attempt."
 _RETRY_ACROSS_TURNS = "Failed run retry resets across model turns"
-_RETRY_ACROSS_TURNS_RESPONSE = "Turn-scoped failed-run retry completed."
 _RETRY_ACROSS_TURNS_CALL_ID = "call_failed_run_retry_turn_boundary"
 _RETRY_MANUAL = "Failed run retry exhaust then manual recover"
 _RETRY_MANUAL_RESPONSE = "Manual failed-run retry recovered successfully."
@@ -648,62 +647,6 @@ def _wait_for_live_retry(
     raise TimeoutError(f"live retry was not observed: {last_payload!r}")
 
 
-def _wait_for_live_retry_message(
-    *,
-    server_url: str,
-    token: str,
-    session_id: str,
-    expected_message: str,
-    timeout: float = 20,
-) -> dict[str, object]:
-    """Wait until /live exposes the expected failed model-turn attempt."""
-    deadline = time.monotonic() + timeout
-    last_payload: dict[str, object] | None = None
-    while time.monotonic() < deadline:
-        payload = _list_live(
-            server_url=server_url,
-            token=token,
-            session_id=session_id,
-        )
-        last_payload = payload
-        run_payload = payload.get("run")
-        if run_payload is not None:
-            run = _json_object_payload(run_payload, label="live run")
-            retry_payload = run.get("retry")
-            if retry_payload is not None:
-                retry = _json_object_payload(retry_payload, label="live run retry")
-                if retry.get("last_error_message") == expected_message:
-                    return payload
-        time.sleep(0.1)
-    raise TimeoutError(f"expected live retry was not observed: {last_payload!r}")
-
-
-def _wait_for_tool_turn_without_retry(
-    *,
-    server_url: str,
-    token: str,
-    session_id: str,
-    timeout: float = 20,
-) -> dict[str, object]:
-    """Wait for committed tool-call output after the prior retry cycle clears."""
-    deadline = time.monotonic() + timeout
-    last_payload: dict[str, object] | None = None
-    while time.monotonic() < deadline:
-        payload = _list_live(
-            server_url=server_url,
-            token=token,
-            session_id=session_id,
-        )
-        last_payload = payload
-        run_payload = payload.get("run")
-        if run_payload is not None:
-            run = _json_object_payload(run_payload, label="live run")
-            if run.get("phase") == "executing_tools" and run.get("retry") is None:
-                return payload
-        time.sleep(0.1)
-    raise TimeoutError(f"retry-free tool turn was not observed: {last_payload!r}")
-
-
 def _wait_for_failed_run_error(
     *,
     server_url: str,
@@ -1245,58 +1188,38 @@ class TestAgentExecutionPersistence:
             agent_id=agent_id,
             message=_RETRY_ACROSS_TURNS,
         )
-        first_retry_payload = _wait_for_live_retry_message(
+        failed_payload = _wait_for_failed_run_error(
             server_url=azents_public_server_url,
             token=workspace.token,
             session_id=result.session_id,
-            expected_message="Deterministic model turn 1 attempt 1 failed.",
+            expected_attempts=4,
         )
-        first_run = _json_object_payload(
-            first_retry_payload.get("run"),
-            label="first retry live run",
+        failed_event = _failed_run_error_events(failed_payload)[-1]
+        event_payload = _json_object_payload(
+            failed_event.get("payload"),
+            label="failed-run payload",
         )
-        first_retry = _json_object_payload(
-            first_run.get("retry"),
-            label="first retry state",
+        failure = _json_object_payload(
+            event_payload.get("failure"),
+            label="failed-run failure",
         )
-        assert first_retry.get("failed_attempt_count") == 1
-
-        _wait_for_tool_turn_without_retry(
-            server_url=azents_public_server_url,
-            token=workspace.token,
-            session_id=result.session_id,
+        attempts = _json_object_list_payload(
+            failure.get("attempts"),
+            label="failed-run attempts",
         )
 
-        second_retry_payload = _wait_for_live_retry_message(
-            server_url=azents_public_server_url,
-            token=workspace.token,
-            session_id=result.session_id,
-            expected_message="Deterministic model turn 2 attempt 1 failed.",
-        )
-        second_run = _json_object_payload(
-            second_retry_payload.get("run"),
-            label="second retry live run",
-        )
-        second_retry = _json_object_payload(
-            second_run.get("retry"),
-            label="second retry state",
-        )
-        second_attempts = _json_object_list_payload(
-            second_retry.get("attempts"),
-            label="second retry attempts",
-        )
-        assert second_retry.get("failed_attempt_count") == 1
-        assert len(second_attempts) == 1
-        assert second_attempts[0].get("attempt_number") == 1
-
-        final_payload = _wait_for_rest_contents(
-            server_url=azents_public_server_url,
-            token=workspace.token,
-            session_id=result.session_id,
-            expected=[_RETRY_ACROSS_TURNS, _RETRY_ACROSS_TURNS_RESPONSE],
-        )
-        assert _failed_run_error_events(final_payload) == []
-        assert _RETRY_ACROSS_TURNS_CALL_ID in _tool_result_call_ids(final_payload)
+        attempt_messages = [attempt.get("user_message") for attempt in attempts]
+        assert failure.get("failed_attempt_count") == 4
+        assert failure.get("max_retries") == 3
+        assert [attempt.get("attempt_number") for attempt in attempts] == [1, 2, 3, 4]
+        assert all(isinstance(message, str) for message in attempt_messages)
+        for attempt_number, message in enumerate(attempt_messages, start=1):
+            expected_message = (
+                f"Deterministic model turn 2 attempt {attempt_number} failed."
+            )
+            assert expected_message in str(message)
+            assert "Deterministic model turn 1" not in str(message)
+        assert _RETRY_ACROSS_TURNS_CALL_ID in _tool_result_call_ids(failed_payload)
 
     def test_failed_run_manual_retry_soft_reverts_terminal_error(
         self,
