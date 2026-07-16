@@ -4,6 +4,7 @@ import {
   Box,
   Code,
   Group,
+  Loader,
   Paper,
   Stack,
   Text,
@@ -16,6 +17,11 @@ import {
   IconTool,
 } from "@tabler/icons-react";
 import { FileAttachmentList } from "./FileAttachmentList";
+import {
+  providerToolActivityLabel,
+  providerToolDisplayName,
+  providerToolStatusLabel,
+} from "./providerToolCallPresentation";
 import type { ProviderToolCall } from "../types";
 
 interface ProviderToolCallCardProps {
@@ -39,6 +45,8 @@ export function ProviderToolCallCard({
   toolCall,
 }: ProviderToolCallCardProps): React.ReactElement {
   const [opened, { toggle }] = useDisclosure(false);
+  const displayName = providerToolDisplayName(toolCall.name);
+  const activityLabel = providerToolActivityLabel(toolCall);
   const hasArguments = toolCall.arguments.trim().length > 0;
   const hasOutput = (toolCall.output?.trim().length ?? 0) > 0;
   const hasAttachments = (toolCall.attachments?.length ?? 0) > 0;
@@ -54,20 +62,27 @@ export function ProviderToolCallCard({
             </ThemeIcon>
             <Box style={{ minWidth: 0 }}>
               <Text size="sm" fw={600} truncate>
-                {toolCall.name}
+                {displayName}
               </Text>
               <Text size="xs" c="dimmed">
-                Provider tool call
+                {activityLabel}
               </Text>
             </Box>
           </Group>
           <Group gap="xs" wrap="nowrap">
+            {toolCall.status === "running" ? (
+              <Loader
+                size="xs"
+                color="blue"
+                aria-label="Provider tool running"
+              />
+            ) : null}
             <Badge
               size="sm"
               color={statusColor(toolCall.status)}
               variant="light"
             >
-              {toolCall.status}
+              {providerToolStatusLabel(toolCall.status)}
             </Badge>
             {hasDetails ? (
               <ActionIcon
