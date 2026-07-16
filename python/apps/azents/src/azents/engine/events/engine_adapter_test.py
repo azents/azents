@@ -19,6 +19,10 @@ from azents.core.enums import (
     EventKind,
     LLMProvider,
 )
+from azents.core.llm_catalog import (
+    ModelCapabilities,
+    ModelCompatibilityCapabilities,
+)
 from azents.core.tools import Toolkit, ToolkitState, ToolkitStatus, TurnContext
 from azents.engine.context.compaction import (
     SummaryModelCall,
@@ -77,7 +81,11 @@ from azents.engine.hooks.types import (
 from azents.engine.run.contracts import RunContext, RunRequest, ToolkitBinding
 from azents.engine.run.emit import Emit
 from azents.engine.run.errors import CompactionFailedError, ModelCallError
-from azents.engine.run.types import USER_STOP_CANCEL_MESSAGE, CheckStop
+from azents.engine.run.types import (
+    USER_STOP_CANCEL_MESSAGE,
+    BuiltinToolSpec,
+    CheckStop,
+)
 from azents.repos.agent_execution.data import AgentRunCreate, EventCreate
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession
@@ -673,6 +681,91 @@ async def test_event_engine_adapter_runs_execution() -> None:
     )
     assert isinstance(prepared_request.options.get("prompt_cache_key"), str)
     assert isinstance(_events(emits)[0], RunComplete)
+
+
+async def test_adapter_replaces_lite_hosted_search_with_client_tool() -> None:
+    """Responses Lite exposes executable search instead of a hosted tool."""
+    execution = _Execution()
+    adapter = _agent_engine_adapter(
+        session_manager=_session_context,
+        artifact_service=_ArtifactService(),
+        exchange_file_service=_ExchangeFileService(),
+        model_file_service=_ModelFileService(),
+        run_repo=_RunRepo(),
+        agent_session_repo=_AgentSessionRepo(),
+        execution_factory=lambda **kwargs: (
+            setattr(
+                execution,
+                "model_call_preparer",
+                kwargs["model_call_preparer"],
+            )
+            or execution
+        ),
+    )
+    capabilities = ModelCapabilities(
+        compatibility=ModelCompatibilityCapabilities(responses_lite=True)
+    )
+    capabilities.built_in_tools.supported = ["web_search"]
+
+    _ = [
+        emit
+        async for emit in adapter.run(
+            RunRequest(
+                session_id="session-1",
+                user_messages=[],
+                agent_prompt="agent prompt",
+                toolkits=[],
+                provider=LLMProvider.CHATGPT_OAUTH,
+                model="gpt-5.4",
+                model_capabilities=capabilities,
+                credential_kwargs={
+                    "api_key": "synthetic-access-token",
+                    "base_url": CHATGPT_OAUTH_BACKEND_BASE_URL,
+                    "extra_headers": {
+                        "originator": "azents",
+                        "ChatGPT-Account-Id": "account-id",
+                    },
+                },
+                builtin_tools=[BuiltinToolSpec(name="web_search", config={})],
+                workspace_id="workspace-1",
+                agent_id="agent-1",
+                auto_compaction_threshold_tokens=None,
+                inference_state=None,
+            ),
+            RunContext(
+                owner_generation=1,
+                tool_admission_barrier=_OpenToolAdmissionBarrier(),
+                user_id="user-1",
+                run_id="0" * 32,
+                publish_event=_noop_publish,
+            ),
+        )
+    ]
+
+    assert execution.prepared_model_call is not None
+    native_request = execution.prepared_model_call.native_request
+    assert isinstance(native_request, OpenAIResponsesRequest)
+    assert native_request.tools == []
+    additional_tools = native_request.input[0]
+    assert additional_tools["type"] == "additional_tools"
+    tools = additional_tools["tools"]
+    assert isinstance(tools, list)
+    assert len(tools) == 1
+    assert isinstance(tools[0], dict)
+    assert tools[0]["type"] == "function"
+    assert tools[0]["name"] == "web_search"
+    tool_result = await execution.prepared_model_call.tool_executor.execute(
+        ClientToolCallPayload(
+            call_id="call-1",
+            name="web_search",
+            arguments='{"unsupported":"value"}',
+            native_artifact=_artifact({"type": "function_call"}),
+        )
+    )
+    assert tool_result.status == "failed"
+    assert tool_result.output == [
+        OutputTextPart(text="Web search arguments contain unsupported commands.")
+    ]
 
 
 async def test_adapter_yields_model_output_before_run_completion() -> None:

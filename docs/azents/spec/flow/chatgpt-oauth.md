@@ -23,7 +23,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/llm-settings/**
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
 last_verified_at: 2026-07-16
-spec_version: 9
+spec_version: 10
 ---
 
 # ChatGPT OAuth Flow
@@ -200,7 +200,8 @@ Rules:
 - Immediately before a `store=false` runtime call, mask top-level Responses input item `id` values. Azents events and external ids remain preserved in the database, while provider response item ids are not replayed as stored references.
 - Runtime requests use `originator: azents`, an `azents/<version>` User-Agent, and the connected `ChatGPT-Account-Id` rather than impersonating Codex CLI identity.
 - A saved model capability with `responses_lite=false` uses the standard Responses contract regardless of model name.
-- A saved model capability with `responses_lite=true` moves tools and instructions into developer input items, strips image detail fields, disables parallel tool calls, sets reasoning context to `all_turns`, uses the Azents session id as prompt cache key and affinity id, and sends the fixed Responses Lite compatibility version and header.
+- A saved model capability with `responses_lite=true` moves client tools and instructions into developer input items, strips image detail fields, disables parallel tool calls, sets reasoning context to `all_turns`, uses the Azents session id as prompt cache key and affinity id, and sends the fixed Responses Lite compatibility version and header.
+- Responses Lite does not execute provider-hosted Responses tools. When semantic `web_search` is enabled, Azents replaces the hosted declaration with an executable `web_search` client tool. The handler sends model commands to the authenticated ChatGPT Codex `alpha/search` endpoint, forwards only the plaintext search output into the normal client-tool result flow, and never retains or surfaces the endpoint's encrypted output or provider error body. Standard ChatGPT Responses and OpenAI API-key models retain provider-hosted web search.
 - Compaction and title generation use the standard Responses dialect regardless of the sampling-model
   Responses Lite capability. They send ordinary user input plus top-level instructions, no sampling
   tools or affinity fields, and omit `max_output_tokens` while retaining `store=false`, encrypted

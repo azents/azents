@@ -27,6 +27,11 @@ from azents.engine.context.compaction import (
     enforce_summary_char_budget,
     summarize_text_with_model,
 )
+from azents.engine.events.chatgpt_web_search import (
+    create_chatgpt_web_search_tool,
+    responses_lite_web_search_enabled,
+    without_hosted_web_search,
+)
 from azents.engine.events.engine_events import (
     CompactionComplete,
     CompactionStarted,
@@ -376,6 +381,32 @@ class AgentEngineAdapter:
                     check_stop=check_stop,
                 ),
             )
+            hosted_tools = list(request.builtin_tools)
+            if responses_lite_web_search_enabled(
+                provider=request.provider,
+                responses_lite=(
+                    request.model_capabilities.compatibility.responses_lite
+                ),
+                builtin_tools=hosted_tools,
+            ):
+                builtin_config = next(
+                    tool.config for tool in hosted_tools if tool.name == "web_search"
+                )
+                web_search_tool = create_chatgpt_web_search_tool(
+                    credential_kwargs=request.credential_kwargs,
+                    session_id=request.session_id,
+                    model=model,
+                    builtin_config=builtin_config,
+                    transport=None,
+                )
+                catalog = dataclasses.replace(
+                    catalog,
+                    tools={
+                        **catalog.tools,
+                        web_search_tool.spec.name: web_search_tool,
+                    },
+                )
+                hosted_tools = without_hosted_web_search(hosted_tools)
             hook_providers = _runtime_hook_provider_refs(
                 catalog.active_toolkit_bindings
             )
@@ -418,7 +449,7 @@ class AgentEngineAdapter:
                 top_p=request.top_p,
                 stop=request.stop,
                 reasoning_effort=request.reasoning_effort,
-                hosted_tools=request.builtin_tools,
+                hosted_tools=hosted_tools,
                 prompt_cache_scope=request.session_id,
                 model_developer=request.model_developer,
                 model_capabilities=request.model_capabilities,
