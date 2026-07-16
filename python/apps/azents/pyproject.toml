@@ -42,7 +42,7 @@ dependencies = [
     "lightkube==0.19.1",
     # Local dependencies
     "az-common",
-    "litellm==1.87.0",
+    "litellm==1.91.3",
     "Pillow==12.2.0",
     "redis==7.4.0",
     "mcp==1.27.0",
