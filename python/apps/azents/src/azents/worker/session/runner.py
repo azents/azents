@@ -67,6 +67,13 @@ class _PendingIdleBoundary:
     run_status: AgentRunStatus | None
 
 
+@dataclasses.dataclass(frozen=True)
+class _RunnerLoopState:
+    """State carried between session runner ticks."""
+
+    idle_started_at: float
+
+
 class SessionRunner:
     """Per-session message processing loop.
 
@@ -372,12 +379,18 @@ class SessionRunner:
                 extra={"session_id": session_id},
             )
 
+    def _monotonic_time(self) -> float:
+        """Return the current event-loop monotonic time."""
+        return asyncio.get_running_loop().time()
+
     async def _loop(self) -> None:
         """Session message processing loop."""
-        idle_started_at = asyncio.get_running_loop().time()
+        state: _RunnerLoopState | None = _RunnerLoopState(
+            idle_started_at=self._monotonic_time()
+        )
         try:
-            while await self._tick(idle_started_at):
-                pass
+            while state is not None:
+                state = await self._tick(state)
         finally:
             toolkit_cleanup_error: Exception | None = None
             try:
@@ -395,12 +408,15 @@ class SessionRunner:
             if toolkit_cleanup_error is not None:
                 raise toolkit_cleanup_error
 
-    async def _tick(self, idle_started_at: float) -> bool:
+    async def _tick(
+        self,
+        state: _RunnerLoopState,
+    ) -> _RunnerLoopState | None:
         wait_result = await self.waiter.wait_next(
             inbox=self.inbox,
             runner_shutdown=self.runner_shutdown,
             running_session_id=self.running_session_id,
-            idle_started_at=idle_started_at,
+            idle_started_at=state.idle_started_at,
         )
         match wait_result:
             case HeartbeatResult():
@@ -408,15 +424,15 @@ class SessionRunner:
                 await self.session_lifecycle.renew_session_owner_heartbeat(
                     self.running_session_id
                 )
-                return True
+                return state
             case IdleTimeoutResult():
                 logger.info(
                     "Session runner idle timeout",
                     extra={"session_id": self.running_session_id},
                 )
-                return False
+                return None
             case ShutdownResult():
-                return False
+                return None
             case MessageResult(message):
                 if self.running_session_id is None:
                     self.owner_generation = (
@@ -427,8 +443,7 @@ class SessionRunner:
                 self.running_session_id = message.session_id
                 self.stop_controller.clear_for_next_run()
                 self.handover_wake_up = None
-                loop = asyncio.get_running_loop()
-                message_started_at = loop.time()
+                message_started_at = self._monotonic_time()
                 L = bind_extra(
                     logger,
                     {
@@ -440,7 +455,7 @@ class SessionRunner:
                     "Session runner wake-up dequeued",
                     extra={
                         "idle_wait_seconds": round(
-                            message_started_at - idle_started_at,
+                            message_started_at - state.idle_started_at,
                             3,
                         ),
                         "inbox_size": self.inbox.qsize(),
@@ -450,7 +465,7 @@ class SessionRunner:
                 result = await self._process_message(message)
 
                 if self.shutdown_event.is_set():
-                    return False
+                    return None
 
                 marked_idle = False
                 if result.terminal_event_observed:
@@ -493,7 +508,7 @@ class SessionRunner:
                     "Session runner wake-up processed",
                     extra={
                         "duration_seconds": round(
-                            loop.time() - message_started_at,
+                            self._monotonic_time() - message_started_at,
                             3,
                         ),
                         "inbox_size": self.inbox.qsize(),
@@ -504,9 +519,8 @@ class SessionRunner:
                 )
 
                 if self.runner_shutdown.is_set() and self.inbox.empty():
-                    return False
-                idle_started_at = asyncio.get_running_loop().time()
-                return True
+                    return None
+                return _RunnerLoopState(idle_started_at=self._monotonic_time())
             case _:
                 assert_never(wait_result)
 

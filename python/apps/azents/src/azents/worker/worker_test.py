@@ -67,11 +67,17 @@ from azents.worker.run.results import RunExecutionResult
 from azents.worker.session.contracts import PrepareToolkits
 from azents.worker.session.idle_continuation import IdleContinuationService
 from azents.worker.session.lifecycle import SessionLifecycleService
-from azents.worker.session.runner import (
-    SessionRunner,
-)
+from azents.worker.session.runner import SessionRunner
 from azents.worker.session.supervisor import RunStopController, ToolAdmissionBarrier
 from azents.worker.session.user_stop_finalizer import UserStopFinalizer
+from azents.worker.session.waiter import (
+    HeartbeatResult,
+    IdleTimeoutResult,
+    MessageResult,
+    RunnerWaitResult,
+    SessionRunnerWaiter,
+    ShutdownResult,
+)
 
 
 class _Broadcast:
@@ -445,6 +451,7 @@ class _Host:
         self.idle_continuation_result = False
         self.lifecycle_events: list[str] = []
         self.released_session_ids: list[str] = []
+        self.heartbeat_session_ids: list[str] = []
         self.owner_heartbeat_session_ids: list[str] = []
         self.pending_input_session_ids: set[str] = set()
         self.stop_request_session_ids: set[str] = set()
@@ -584,8 +591,8 @@ class _Host:
         return self.running_agent_run_exists
 
     async def heartbeat_session(self, session_id: str) -> None:
-        """This test does not refresh heartbeat."""
-        _ = session_id
+        """Store session for active owner lease refresh calls."""
+        self.heartbeat_session_ids.append(session_id)
 
     async def renew_session_owner_heartbeat(self, session_id: str) -> None:
         """Store session for owner heartbeat refresh call."""
@@ -600,6 +607,29 @@ async def _wait_for_owner_heartbeat(host: _Host) -> None:
     """Wait until owner heartbeat call is recorded in test host."""
     while not host.owner_heartbeat_session_ids:
         await asyncio.sleep(0)
+
+
+class _ScriptedSessionRunnerWaiter:
+    """Return deterministic wait results and record idle baselines."""
+
+    def __init__(self, results: Sequence[RunnerWaitResult]) -> None:
+        self.results = list(results)
+        self.idle_started_at: list[float] = []
+
+    async def wait_next(
+        self,
+        *,
+        inbox: object,
+        runner_shutdown: asyncio.Event,
+        running_session_id: str | None,
+        idle_started_at: float,
+    ) -> RunnerWaitResult:
+        """Return the next scripted transition without real time."""
+        del inbox, runner_shutdown, running_session_id
+        self.idle_started_at.append(idle_started_at)
+        if not self.results:
+            raise AssertionError("No scripted SessionRunner wait result remains")
+        return self.results.pop(0)
 
 
 def _make_session_runner(host: _Host) -> SessionRunner:
@@ -926,6 +956,87 @@ async def test_noop_wake_up_after_terminal_run_finishes_delayed_idle() -> None:
 
 
 @pytest.mark.asyncio
+async def test_session_runner_carries_idle_baseline_across_explicit_transitions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Completed messages reset idle time while heartbeats preserve the baseline."""
+    host = _Host()
+    runner = _make_session_runner(host)
+    first = _wake_up(user_id="user-001")
+    follow_up = _wake_up(user_id="user-002")
+    waiter = _ScriptedSessionRunnerWaiter(
+        [
+            MessageResult(first),
+            HeartbeatResult(),
+            MessageResult(follow_up),
+            ShutdownResult(),
+        ]
+    )
+    runner.waiter = cast(SessionRunnerWaiter, waiter)
+    now = 0.0
+    completion_times = iter([1801.0, 5402.0])
+
+    async def process_message(
+        message: SessionWakeUp,
+        *,
+        poll_fn: PollMessages | None,
+        check_stop: CheckStop | None,
+        prepare_toolkits: PrepareToolkits | None,
+    ) -> RunExecutionResult:
+        del poll_fn, check_stop, prepare_toolkits
+        nonlocal now
+        host.processed_messages.append(message)
+        now = next(completion_times)
+        return RunExecutionResult(
+            toolkits=[],
+            terminal_event_observed=False,
+            no_actionable_work=False,
+        )
+
+    monkeypatch.setattr(host, "process_message", process_message)
+    monkeypatch.setattr(
+        runner,
+        "_monotonic_time",
+        lambda: now,
+    )
+
+    await runner.run()
+
+    assert host.processed_messages == [first, follow_up]
+    assert waiter.idle_started_at == [0.0, 1801.0, 1801.0, 5402.0]
+    assert host.owner_heartbeat_session_ids == ["session-001"]
+    assert host.released_session_ids == ["session-001"]
+
+
+@pytest.mark.asyncio
+async def test_session_runner_idle_timeout_releases_lock_once() -> None:
+    """Idle timeout exits the runner and releases its owner lock once."""
+    host = _Host()
+    runner = _make_session_runner(host)
+    waiter = _ScriptedSessionRunnerWaiter(
+        [MessageResult(_wake_up()), IdleTimeoutResult()]
+    )
+    runner.waiter = cast(SessionRunnerWaiter, waiter)
+
+    await runner.run()
+
+    assert host.released_session_ids == ["session-001"]
+
+
+@pytest.mark.asyncio
+async def test_session_runner_graceful_shutdown_releases_lock_once() -> None:
+    """Explicit graceful shutdown releases the current owner lock once."""
+    host = _Host()
+    runner = _start_session_runner(host)
+    runner.enqueue(_wake_up())
+    await host.idle_mark_attempted.wait()
+
+    await runner.shutdown()
+
+    assert host.released_session_ids == ["session-001"]
+
+
+@pytest.mark.asyncio
 async def test_session_runner_renews_owner_heartbeat_while_idle(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -944,6 +1055,7 @@ async def test_session_runner_renews_owner_heartbeat_while_idle(
         runner.enqueue(message)
         await asyncio.wait_for(_wait_for_owner_heartbeat(host), timeout=1)
         assert host.owner_heartbeat_session_ids == ["session-001"]
+        assert host.heartbeat_session_ids == []
         assert host.released_session_ids == []
     finally:
         await runner.shutdown()

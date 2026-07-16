@@ -39,7 +39,7 @@ _8 documents_
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-07-15 | 15 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
 | [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-06-27 | 2 |
-| [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-07-14 | 19 |
+| [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-07-16 | 19 |
 | [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-07-12 | 14 |
 | [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-07-13 | 7 |
 | [xAI API Key Provider Flow](spec/flow/xai-api-key.md) | @Hardtack | 2026-07-10 | 1 |
