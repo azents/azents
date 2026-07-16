@@ -1350,6 +1350,35 @@
       "response": {
         "content": "WATCHDOG_TITLE_RUN_COMPLETED"
       }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Provider tool live activity handoff",
+        "hasToolResult": false
+      },
+      "response": {
+        "content": "PROVIDER_TOOL_LIVE_ACTIVITY_COMPLETED",
+        "webSearches": [
+          "provider-neutral live activity"
+        ]
+      },
+      "recordedTimings": {
+        "ttftMs": 0,
+        "interChunkDelaysMs": [
+          0,
+          0,
+          300,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "totalDurationMs": 300
+      }
     }
   ]
 }

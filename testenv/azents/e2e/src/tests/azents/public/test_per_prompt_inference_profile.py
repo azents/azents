@@ -534,6 +534,10 @@ def _tree_names(tree: dict[str, object]) -> set[str]:
     return names
 
 
+# Shared public-path helper used by provider-tool lifecycle E2E coverage.
+setup_profile_agent = _setup_profile_agent
+
+
 class TestPerPromptInferenceProfile:
     """Per-prompt routing and provenance E2E coverage."""
 
