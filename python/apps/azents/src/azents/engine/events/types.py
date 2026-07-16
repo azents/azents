@@ -273,6 +273,7 @@ class ProviderToolCallPayload(BaseModel):
     call_id: str = Field(min_length=1)
     name: str = Field(min_length=1)
     arguments: str | None = Field(default=None)
+    status: Literal["running", "completed", "failed"] | None = Field(default=None)
     native_artifact: NativeArtifact = Field(description="Native artifact")
 
 

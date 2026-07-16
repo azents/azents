@@ -14,6 +14,7 @@ from azents.engine.events.types import (
     ActiveToolCall,
     AssistantMessagePayload,
     ClientToolCallPayload,
+    ProviderToolCallPayload,
     ReasoningPayload,
     UserMessagePayload,
 )
@@ -119,9 +120,30 @@ async def _assert_live_store_contract(store: LiveEventStore) -> None:
     )
     await store.append_reasoning_delta(session_id, delta="think", now=now)
     await store.append_reasoning_delta(session_id, delta="ing", now=now)
+    provider_running = await store.upsert_provider_tool_activity(
+        session_id,
+        call_id="search-1",
+        name="web_search",
+        status="running",
+        arguments=None,
+        now=now,
+    )
+    provider_completed = await store.upsert_provider_tool_activity(
+        session_id,
+        call_id="search-1",
+        name="web_search",
+        status="completed",
+        arguments='{"query":"azents"}',
+        now=now + datetime.timedelta(seconds=1),
+    )
+    assert provider_completed.id == provider_running.id
+    assert provider_completed.created_at == now
+    assert isinstance(provider_completed.payload, ProviderToolCallPayload)
+    assert provider_completed.payload.status == "completed"
     events = await store.list_by_session_id(session_id)
     assert {event.kind for event in events} == {
         EventKind.ASSISTANT_MESSAGE,
+        EventKind.PROVIDER_TOOL_CALL,
         EventKind.REASONING,
     }
 
@@ -144,6 +166,15 @@ async def _assert_live_store_contract(store: LiveEventStore) -> None:
     await store.remove_live_counterpart(assistant)
     assert all(
         event.kind != EventKind.ASSISTANT_MESSAGE
+        for event in await store.list_by_session_id(session_id)
+    )
+
+    durable_provider_call = provider_completed.model_copy(
+        update={"id": "d" * 32, "adapter": "openai"}
+    )
+    await store.remove_live_counterpart(durable_provider_call)
+    assert all(
+        event.kind != EventKind.PROVIDER_TOOL_CALL
         for event in await store.list_by_session_id(session_id)
     )
 

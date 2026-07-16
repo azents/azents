@@ -2,7 +2,7 @@
 
 import datetime
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
-from typing import Any, Protocol, runtime_checkable
+from typing import Annotated, Any, Literal, Protocol, TypeAlias, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -75,16 +75,56 @@ class NativeEvent(BaseModel):
     item: dict[str, object] = Field(description="Native event payload")
 
 
-class StreamProjection(BaseModel):
-    """UI streaming projection event."""
+class ContentDeltaProjection(BaseModel):
+    """Assistant content streaming projection."""
 
     model_config = ConfigDict(frozen=True)
 
-    type: str = Field(description="Projection type")
-    delta: str | None = Field(default=None)
-    index: int | None = Field(default=None)
-    call_id: str | None = Field(default=None)
-    name: str | None = Field(default=None)
+    type: Literal["content_delta"] = "content_delta"
+    delta: str
+    content_index: int = 0
+
+
+class FunctionCallDeltaProjection(BaseModel):
+    """Client function-call argument streaming projection."""
+
+    model_config = ConfigDict(frozen=True)
+
+    type: Literal["function_call_delta"] = "function_call_delta"
+    index: int
+    call_id: str | None
+    name: str | None
+    delta: str
+
+
+class ReasoningDeltaProjection(BaseModel):
+    """Reasoning summary streaming projection."""
+
+    model_config = ConfigDict(frozen=True)
+
+    type: Literal["reasoning_delta"] = "reasoning_delta"
+    delta: str
+
+
+class ProviderToolActivityProjection(BaseModel):
+    """Provider-neutral hosted-tool activity snapshot."""
+
+    model_config = ConfigDict(frozen=True)
+
+    type: Literal["provider_tool_activity"] = "provider_tool_activity"
+    call_id: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+    status: Literal["running", "completed", "failed"]
+    arguments: str | None
+
+
+StreamProjection: TypeAlias = Annotated[
+    ContentDeltaProjection
+    | FunctionCallDeltaProjection
+    | ReasoningDeltaProjection
+    | ProviderToolActivityProjection,
+    Field(discriminator="type"),
+]
 
 
 class NormalizedAdapterOutput(BaseModel):

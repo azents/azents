@@ -7,7 +7,7 @@ import math
 import os
 from collections.abc import AsyncIterable, AsyncIterator, Mapping, Sequence
 from types import SimpleNamespace
-from typing import Any, Protocol, TypedDict, runtime_checkable
+from typing import Any, Literal, Protocol, TypedDict, runtime_checkable
 
 from litellm import completion_cost
 from litellm.types.llms.openai import ResponsesAPIResponse
@@ -20,16 +20,31 @@ from openai import (
 )
 from openai.types.responses import (
     Response,
+    ResponseCodeInterpreterCallCompletedEvent,
+    ResponseCodeInterpreterCallInProgressEvent,
+    ResponseCodeInterpreterCallInterpretingEvent,
     ResponseCompletedEvent,
     ResponseErrorEvent,
     ResponseFailedEvent,
+    ResponseFileSearchCallCompletedEvent,
+    ResponseFileSearchCallInProgressEvent,
+    ResponseFileSearchCallSearchingEvent,
     ResponseFunctionCallArgumentsDeltaEvent,
+    ResponseImageGenCallCompletedEvent,
+    ResponseImageGenCallGeneratingEvent,
+    ResponseImageGenCallInProgressEvent,
     ResponseIncompleteEvent,
+    ResponseMcpCallCompletedEvent,
+    ResponseMcpCallFailedEvent,
+    ResponseMcpCallInProgressEvent,
     ResponseOutputItemAddedEvent,
     ResponseOutputItemDoneEvent,
     ResponseReasoningSummaryTextDeltaEvent,
     ResponseStreamEvent,
     ResponseTextDeltaEvent,
+    ResponseWebSearchCallCompletedEvent,
+    ResponseWebSearchCallInProgressEvent,
+    ResponseWebSearchCallSearchingEvent,
 )
 from openai.types.responses.response_includable import ResponseIncludable
 from openai.types.responses.response_input_param import ResponseInputParam
@@ -45,7 +60,17 @@ from azents.engine.events.litellm_responses import (
     LiteLLMResponsesLowerer,
     LiteLLMResponsesOutputNormalizer,
 )
-from azents.engine.events.protocols import NormalizedAdapterOutput, StreamProjection
+from azents.engine.events.protocols import (
+    ContentDeltaProjection,
+    FunctionCallDeltaProjection,
+    NormalizedAdapterOutput,
+    ReasoningDeltaProjection,
+    StreamProjection,
+)
+from azents.engine.events.provider_tool_activity import (
+    ProviderToolActivityAccumulator,
+    ProviderToolObservation,
+)
 from azents.engine.events.responses_continuation import (
     ResponsesContinuationPlan,
     ResponsesContinuationPlanner,
@@ -596,6 +621,7 @@ class _OpenAIResponsesOutputStream:
         self._completed_response_seen = False
         self._terminal_error: ModelCallError | None = None
         self._partial_text: list[str] = []
+        self._provider_tool_activity = ProviderToolActivityAccumulator()
 
     def process_event(
         self,
@@ -603,14 +629,17 @@ class _OpenAIResponsesOutputStream:
     ) -> NormalizedAdapterOutput:
         """Consume one class-and-wire matched SDK event."""
         projections: list[StreamProjection] = []
+        observation = _openai_provider_tool_observation(native_event)
+        if observation is not None:
+            activity = self._provider_tool_activity.observe(observation)
+            if activity is not None:
+                projections.append(activity)
         if (
             isinstance(native_event, ResponseTextDeltaEvent)
             and native_event.type == "response.output_text.delta"
         ):
             self._partial_text.append(native_event.delta)
-            projections.append(
-                StreamProjection(type="content_delta", delta=native_event.delta)
-            )
+            projections.append(ContentDeltaProjection(delta=native_event.delta))
         elif (
             isinstance(native_event, ResponseOutputItemAddedEvent)
             and native_event.type == "response.output_item.added"
@@ -621,8 +650,7 @@ class _OpenAIResponsesOutputStream:
                 name = _string_value(raw_item.get("name"))
                 self._tool_refs[native_event.output_index] = (call_id, name)
                 projections.append(
-                    StreamProjection(
-                        type="function_call_delta",
+                    FunctionCallDeltaProjection(
                         index=native_event.output_index,
                         call_id=call_id,
                         name=name,
@@ -642,8 +670,7 @@ class _OpenAIResponsesOutputStream:
         ):
             call_id, name = self._tool_refs.get(native_event.output_index, (None, None))
             projections.append(
-                StreamProjection(
-                    type="function_call_delta",
+                FunctionCallDeltaProjection(
                     index=native_event.output_index,
                     call_id=call_id,
                     name=name,
@@ -654,9 +681,7 @@ class _OpenAIResponsesOutputStream:
             isinstance(native_event, ResponseReasoningSummaryTextDeltaEvent)
             and native_event.type == "response.reasoning_summary_text.delta"
         ):
-            projections.append(
-                StreamProjection(type="reasoning_delta", delta=native_event.delta)
-            )
+            projections.append(ReasoningDeltaProjection(delta=native_event.delta))
         elif (
             isinstance(native_event, ResponseIncompleteEvent)
             and native_event.type == "response.incomplete"
@@ -727,6 +752,204 @@ class _OpenAIResponsesOutputStream:
             events=events,
             usage=usage,
         )
+
+
+def _openai_provider_tool_observation(
+    native_event: ResponseStreamEvent,
+) -> ProviderToolObservation | None:
+    """Extract one provider-neutral hosted-tool observation from an SDK event."""
+    if (
+        isinstance(native_event, ResponseOutputItemAddedEvent)
+        and native_event.type == "response.output_item.added"
+    ):
+        return _provider_tool_output_item_observation(
+            _sdk_model_dump(native_event.item),
+            default_status="running",
+        )
+    if isinstance(
+        native_event,
+        (
+            ResponseWebSearchCallInProgressEvent,
+            ResponseWebSearchCallSearchingEvent,
+        ),
+    ) and native_event.type in {
+        "response.web_search_call.in_progress",
+        "response.web_search_call.searching",
+    }:
+        return ProviderToolObservation(
+            call_id=native_event.item_id,
+            name="web_search",
+            status="running",
+        )
+    if (
+        isinstance(native_event, ResponseWebSearchCallCompletedEvent)
+        and native_event.type == "response.web_search_call.completed"
+    ):
+        return ProviderToolObservation(
+            call_id=native_event.item_id,
+            name="web_search",
+            status="completed",
+        )
+    if isinstance(
+        native_event,
+        (
+            ResponseFileSearchCallInProgressEvent,
+            ResponseFileSearchCallSearchingEvent,
+        ),
+    ) and native_event.type in {
+        "response.file_search_call.in_progress",
+        "response.file_search_call.searching",
+    }:
+        return ProviderToolObservation(
+            call_id=native_event.item_id,
+            name="file_search",
+            status="running",
+        )
+    if (
+        isinstance(native_event, ResponseFileSearchCallCompletedEvent)
+        and native_event.type == "response.file_search_call.completed"
+    ):
+        return ProviderToolObservation(
+            call_id=native_event.item_id,
+            name="file_search",
+            status="completed",
+        )
+    if isinstance(
+        native_event,
+        (
+            ResponseCodeInterpreterCallInProgressEvent,
+            ResponseCodeInterpreterCallInterpretingEvent,
+        ),
+    ) and native_event.type in {
+        "response.code_interpreter_call.in_progress",
+        "response.code_interpreter_call.interpreting",
+    }:
+        return ProviderToolObservation(
+            call_id=native_event.item_id,
+            name="code_interpreter",
+            status="running",
+        )
+    if (
+        isinstance(native_event, ResponseCodeInterpreterCallCompletedEvent)
+        and native_event.type == "response.code_interpreter_call.completed"
+    ):
+        return ProviderToolObservation(
+            call_id=native_event.item_id,
+            name="code_interpreter",
+            status="completed",
+        )
+    if isinstance(
+        native_event,
+        (
+            ResponseImageGenCallInProgressEvent,
+            ResponseImageGenCallGeneratingEvent,
+        ),
+    ) and native_event.type in {
+        "response.image_generation_call.in_progress",
+        "response.image_generation_call.generating",
+    }:
+        return ProviderToolObservation(
+            call_id=native_event.item_id,
+            name="image_generation",
+            status="running",
+        )
+    if (
+        isinstance(native_event, ResponseImageGenCallCompletedEvent)
+        and native_event.type == "response.image_generation_call.completed"
+    ):
+        return ProviderToolObservation(
+            call_id=native_event.item_id,
+            name="image_generation",
+            status="completed",
+        )
+    if (
+        isinstance(native_event, ResponseMcpCallInProgressEvent)
+        and native_event.type == "response.mcp_call.in_progress"
+    ):
+        return ProviderToolObservation(
+            call_id=native_event.item_id,
+            name="mcp",
+            status="running",
+        )
+    if (
+        isinstance(native_event, ResponseMcpCallCompletedEvent)
+        and native_event.type == "response.mcp_call.completed"
+    ):
+        return ProviderToolObservation(
+            call_id=native_event.item_id,
+            name="mcp",
+            status="completed",
+        )
+    if (
+        isinstance(native_event, ResponseMcpCallFailedEvent)
+        and native_event.type == "response.mcp_call.failed"
+    ):
+        return ProviderToolObservation(
+            call_id=native_event.item_id,
+            name="mcp",
+            status="failed",
+        )
+    return None
+
+
+def _provider_tool_output_item_observation(
+    item: dict[str, object],
+    *,
+    default_status: Literal["running", "completed", "failed"],
+) -> ProviderToolObservation | None:
+    """Extract provider-tool activity from one native output item."""
+    item_type = item.get("type")
+    if not isinstance(item_type, str):
+        return None
+    name_by_type = {
+        "web_search_call": "web_search",
+        "web_search": "web_search",
+        "file_search_call": "file_search",
+        "code_interpreter_call": "code_interpreter",
+        "image_generation_call": "image_generation",
+        "mcp_call": "mcp",
+    }
+    name = name_by_type.get(item_type)
+    if name is None:
+        return None
+    call_id = _string_value(item.get("call_id") or item.get("id"))
+    if not call_id:
+        return None
+    native_status = item.get("status")
+    status = (
+        _canonical_provider_tool_status(native_status)
+        if isinstance(native_status, str)
+        else default_status
+    )
+    if status is None:
+        status = default_status
+    return ProviderToolObservation(
+        call_id=call_id,
+        name=name,
+        status=status,
+    )
+
+
+def _canonical_provider_tool_status(
+    native_status: str,
+) -> Literal["running", "completed", "failed"] | None:
+    """Map one native provider-tool state to the canonical lifecycle."""
+    normalized = native_status.lower().replace("-", "_")
+    if normalized in {
+        "added",
+        "queued",
+        "pending",
+        "in_progress",
+        "searching",
+        "generating",
+        "interpreting",
+    }:
+        return "running"
+    if normalized in {"completed", "done", "succeeded"}:
+        return "completed"
+    if normalized in {"failed", "error"}:
+        return "failed"
+    return None
 
 
 def _normalize_openai_usage(

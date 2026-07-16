@@ -39,6 +39,18 @@ class ReasoningDelta(BaseModel):
     delta: str
 
 
+class ProviderToolActivityChanged(BaseModel):
+    """Provider-neutral hosted-tool activity snapshot."""
+
+    model_config = ConfigDict(frozen=True)
+
+    type: Literal["provider_tool_activity_changed"] = "provider_tool_activity_changed"
+    call_id: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+    status: Literal["running", "completed", "failed"]
+    arguments: str | None
+
+
 class RunStarted(BaseModel):
     """Run started event."""
 
@@ -179,6 +191,7 @@ EngineEvent: TypeAlias = Annotated[
     ContentDelta
     | ReasoningDelta
     | FunctionCallDelta
+    | ProviderToolActivityChanged
     | RunStarted
     | RunPhaseChanged
     | RunComplete

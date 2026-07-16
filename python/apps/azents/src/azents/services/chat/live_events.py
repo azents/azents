@@ -3,7 +3,7 @@
 import datetime
 import hashlib
 from collections.abc import AsyncIterator, Sequence
-from typing import Annotated, Any, Protocol, cast
+from typing import Annotated, Any, Literal, Protocol, cast
 
 from fastapi import Depends
 from pydantic import TypeAdapter
@@ -26,6 +26,8 @@ from azents.engine.events.types import (
     InputTextPart,
     NativeArtifact,
     OutputTextPart,
+    ProviderToolCallPayload,
+    ProviderToolResultPayload,
     ReasoningPayload,
     UserContentPart,
     UserMessagePayload,
@@ -163,6 +165,48 @@ def _tool_call_live_event(
             native_artifact=_live_native_artifact(
                 projection="client_tool_call",
                 source=source,
+                item={},
+            ),
+        ),
+        model_order=0,
+        external_id=call_id,
+        adapter="azents-live",
+        provider="azents",
+        model="live",
+        native_format="live_projection",
+        schema_version="1",
+        created_at=created_at,
+    )
+
+
+def provider_tool_activity_live_event_id(session_id: str, call_id: str) -> str:
+    """Return the deterministic live projection ID for provider-tool activity."""
+    return _stable_live_id(session_id, "provider-tool", call_id)
+
+
+def _provider_tool_activity_live_event(
+    *,
+    session_id: str,
+    event_id: str,
+    call_id: str,
+    name: str,
+    status: Literal["running", "completed", "failed"],
+    arguments: str | None,
+    created_at: datetime.datetime,
+) -> Event:
+    """Build one provider-neutral hosted-tool live Event projection."""
+    return Event(
+        id=event_id,
+        session_id=session_id,
+        kind=EventKind.PROVIDER_TOOL_CALL,
+        payload=ProviderToolCallPayload(
+            call_id=call_id,
+            name=name,
+            arguments=arguments,
+            status=status,
+            native_artifact=_live_native_artifact(
+                projection="provider_tool_call",
+                source="provider_tool_activity",
                 item={},
             ),
         ),
@@ -332,6 +376,19 @@ class LiveEventStore(Protocol):
         """Merge streaming reasoning delta into live reasoning projection."""
         ...
 
+    async def upsert_provider_tool_activity(
+        self,
+        session_id: str,
+        *,
+        call_id: str,
+        name: str,
+        status: Literal["running", "completed", "failed"],
+        arguments: str | None,
+        now: datetime.datetime | None = None,
+    ) -> Event:
+        """Upsert one provider-tool activity snapshot."""
+        ...
+
     async def remove_live_counterpart(self, event: Event) -> None:
         """Remove corresponding live projection after durable event append."""
         ...
@@ -414,6 +471,33 @@ class BaseLiveEventStore:
         await self.upsert(event)
         return event
 
+    async def upsert_provider_tool_activity(
+        self,
+        session_id: str,
+        *,
+        call_id: str,
+        name: str,
+        status: Literal["running", "completed", "failed"],
+        arguments: str | None,
+        now: datetime.datetime | None = None,
+    ) -> Event:
+        """Upsert one provider-tool activity snapshot."""
+        event_id = provider_tool_activity_live_event_id(session_id, call_id)
+        current = await self._get(session_id, event_id)
+        event = _provider_tool_activity_live_event(
+            session_id=session_id,
+            event_id=event_id,
+            call_id=call_id,
+            name=name,
+            status=status,
+            arguments=arguments,
+            created_at=current.created_at
+            if current is not None
+            else (now or datetime.datetime.now(datetime.UTC)),
+        )
+        await self.upsert(event)
+        return event
+
     async def remove_live_counterpart(self, event: Event) -> None:
         """Remove corresponding live projection after durable event append."""
         if event.kind == EventKind.ASSISTANT_MESSAGE:
@@ -428,6 +512,17 @@ class BaseLiveEventStore:
             await self.remove(
                 event.session_id,
                 _stable_live_id(event.session_id, "reasoning"),
+            )
+        elif isinstance(
+            event.payload,
+            ProviderToolCallPayload | ProviderToolResultPayload,
+        ):
+            await self.remove(
+                event.session_id,
+                provider_tool_activity_live_event_id(
+                    event.session_id,
+                    event.payload.call_id,
+                ),
             )
 
 

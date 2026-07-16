@@ -21,10 +21,10 @@ from azents.engine.events.execution import (
     TurnEndReason,
 )
 from azents.engine.events.protocols import (
+    ContentDeltaProjection,
     NativeEvent,
     NativeModelRequest,
     NormalizedAdapterOutput,
-    StreamProjection,
 )
 from azents.engine.events.types import (
     ActiveToolCall,
@@ -530,8 +530,7 @@ class _ProjectingOutputStream(_StaticOutputStream):
         return NormalizedAdapterOutput(
             needs_follow_up=False,
             projections=[
-                StreamProjection(
-                    type="content_delta",
+                ContentDeltaProjection(
                     delta=str(native_event.item.get("delta", "")),
                 )
             ],
@@ -1102,9 +1101,7 @@ async def test_model_delta_reaches_output_sink_before_stream_completion() -> Non
 
     assert not run_task.done()
     assert len(sink_outputs) == 1
-    assert sink_outputs[0].projections == [
-        StreamProjection(type="content_delta", delta="hel")
-    ]
+    assert sink_outputs[0].projections == [ContentDeltaProjection(delta="hel")]
     assert transcript_repo.events == []
 
     model_adapter.release.set()

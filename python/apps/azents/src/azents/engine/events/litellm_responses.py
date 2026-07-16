@@ -9,7 +9,7 @@ import json
 import logging
 import os
 from collections.abc import AsyncIterable, AsyncIterator, Sequence
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Literal, Protocol, runtime_checkable
 
 from azcommon.uuid import uuid7
 from litellm.exceptions import OpenAIError as LiteLLMOpenAIError
@@ -33,10 +33,17 @@ from azents.engine.events.output_parts import (
     lower_output_to_text,
 )
 from azents.engine.events.protocols import (
+    ContentDeltaProjection,
+    FunctionCallDeltaProjection,
     NativeEvent,
     NativeModelRequest,
     NormalizedAdapterOutput,
+    ReasoningDeltaProjection,
     StreamProjection,
+)
+from azents.engine.events.provider_tool_activity import (
+    ProviderToolActivityAccumulator,
+    ProviderToolObservation,
 )
 from azents.engine.events.responses_continuation import (
     ResponsesContinuationPlan,
@@ -1380,6 +1387,7 @@ class LiteLLMResponsesOutputNormalizer:
                 call_id=call_id,
                 name="web_search",
                 arguments=None,
+                status=_canonical_provider_tool_status(output_item.get("status")),
                 native_artifact=artifact,
             )
             return _event(session_id, EventKind.PROVIDER_TOOL_CALL, payload)
@@ -1469,6 +1477,7 @@ class _LiteLLMResponsesOutputStream:
         self._terminal_error: ModelCallError | None = None
         self._usage: TokenUsagePayload | None = None
         self._partial_text: list[str] = []
+        self._provider_tool_activity = ProviderToolActivityAccumulator()
 
     def process_event(
         self,
@@ -1478,16 +1487,16 @@ class _LiteLLMResponsesOutputStream:
         event_type = native_event.type
         item = native_event.item
         projections: list[StreamProjection] = []
+        observation = _litellm_provider_tool_observation(event_type, item)
+        if observation is not None:
+            activity = self._provider_tool_activity.observe(observation)
+            if activity is not None:
+                projections.append(activity)
 
         if event_type in {"OutputTextDeltaEvent", "ResponseTextDeltaEvent"}:
             delta = str(item.get("delta", ""))
             self._partial_text.append(delta)
-            projections.append(
-                StreamProjection(
-                    type="content_delta",
-                    delta=delta,
-                )
-            )
+            projections.append(ContentDeltaProjection(delta=delta))
         elif event_type in {"OutputItemAddedEvent", "ResponseOutputItemAddedEvent"}:
             output_index = _int_or_none(item.get("output_index"))
             raw_item = _dict(item.get("item"))
@@ -1496,8 +1505,7 @@ class _LiteLLMResponsesOutputStream:
                 name = str(raw_item.get("name") or "")
                 self._tool_refs[output_index] = (call_id, name)
                 projections.append(
-                    StreamProjection(
-                        type="function_call_delta",
+                    FunctionCallDeltaProjection(
                         index=output_index,
                         call_id=call_id,
                         name=name,
@@ -1516,9 +1524,8 @@ class _LiteLLMResponsesOutputStream:
             ref_index = output_index if output_index is not None else -1
             call_id, name = self._tool_refs.get(ref_index, (None, None))
             projections.append(
-                StreamProjection(
-                    type="function_call_delta",
-                    index=output_index,
+                FunctionCallDeltaProjection(
+                    index=ref_index,
                     call_id=call_id,
                     name=name,
                     delta=str(item.get("delta", "")),
@@ -1529,10 +1536,7 @@ class _LiteLLMResponsesOutputStream:
             "ResponseReasoningSummaryTextDeltaEvent",
         }:
             projections.append(
-                StreamProjection(
-                    type="reasoning_delta",
-                    delta=str(item.get("delta", "")),
-                )
+                ReasoningDeltaProjection(delta=str(item.get("delta", "")))
             )
         elif event_type == "ResponseIncompleteEvent":
             self._terminal_error = _incomplete_response_model_error(
@@ -1592,6 +1596,150 @@ class _LiteLLMResponsesOutputStream:
         return completed.model_copy(
             update={"events": [*completed.events, partial_event]}
         )
+
+
+def _litellm_provider_tool_observation(
+    event_type: str,
+    item: dict[str, object],
+) -> ProviderToolObservation | None:
+    """Extract one provider-neutral hosted-tool observation from LiteLLM."""
+    if event_type in {
+        "OutputItemAddedEvent",
+        "ResponseOutputItemAddedEvent",
+        "response.output_item.added",
+    }:
+        return _provider_tool_output_item_observation(
+            _dict(item.get("item")),
+            default_status="running",
+        )
+    lifecycle: dict[
+        str,
+        tuple[str, Literal["running", "completed", "failed"]],
+    ] = {
+        "ResponseWebSearchCallInProgressEvent": ("web_search", "running"),
+        "ResponseWebSearchCallSearchingEvent": ("web_search", "running"),
+        "ResponseWebSearchCallCompletedEvent": ("web_search", "completed"),
+        "response.web_search_call.in_progress": ("web_search", "running"),
+        "response.web_search_call.searching": ("web_search", "running"),
+        "response.web_search_call.completed": ("web_search", "completed"),
+        "ResponseFileSearchCallInProgressEvent": ("file_search", "running"),
+        "ResponseFileSearchCallSearchingEvent": ("file_search", "running"),
+        "ResponseFileSearchCallCompletedEvent": ("file_search", "completed"),
+        "response.file_search_call.in_progress": ("file_search", "running"),
+        "response.file_search_call.searching": ("file_search", "running"),
+        "response.file_search_call.completed": ("file_search", "completed"),
+        "ResponseCodeInterpreterCallInProgressEvent": (
+            "code_interpreter",
+            "running",
+        ),
+        "ResponseCodeInterpreterCallInterpretingEvent": (
+            "code_interpreter",
+            "running",
+        ),
+        "ResponseCodeInterpreterCallCompletedEvent": (
+            "code_interpreter",
+            "completed",
+        ),
+        "response.code_interpreter_call.in_progress": (
+            "code_interpreter",
+            "running",
+        ),
+        "response.code_interpreter_call.interpreting": (
+            "code_interpreter",
+            "running",
+        ),
+        "response.code_interpreter_call.completed": (
+            "code_interpreter",
+            "completed",
+        ),
+        "ResponseImageGenCallInProgressEvent": ("image_generation", "running"),
+        "ResponseImageGenCallGeneratingEvent": ("image_generation", "running"),
+        "ResponseImageGenCallCompletedEvent": ("image_generation", "completed"),
+        "response.image_generation_call.in_progress": (
+            "image_generation",
+            "running",
+        ),
+        "response.image_generation_call.generating": (
+            "image_generation",
+            "running",
+        ),
+        "response.image_generation_call.completed": (
+            "image_generation",
+            "completed",
+        ),
+        "ResponseMcpCallInProgressEvent": ("mcp", "running"),
+        "ResponseMcpCallCompletedEvent": ("mcp", "completed"),
+        "ResponseMcpCallFailedEvent": ("mcp", "failed"),
+        "response.mcp_call.in_progress": ("mcp", "running"),
+        "response.mcp_call.completed": ("mcp", "completed"),
+        "response.mcp_call.failed": ("mcp", "failed"),
+    }
+    activity = lifecycle.get(event_type)
+    if activity is None:
+        return None
+    call_id = item.get("item_id") or item.get("call_id") or item.get("id")
+    if not isinstance(call_id, str) or not call_id:
+        return None
+    name, status = activity
+    return ProviderToolObservation(
+        call_id=call_id,
+        name=name,
+        status=status,
+    )
+
+
+def _provider_tool_output_item_observation(
+    item: dict[str, object],
+    *,
+    default_status: Literal["running", "completed", "failed"],
+) -> ProviderToolObservation | None:
+    """Extract provider-tool activity from one native output item."""
+    item_type = item.get("type")
+    if not isinstance(item_type, str):
+        return None
+    name_by_type = {
+        "web_search_call": "web_search",
+        "web_search": "web_search",
+        "file_search_call": "file_search",
+        "code_interpreter_call": "code_interpreter",
+        "image_generation_call": "image_generation",
+        "mcp_call": "mcp",
+    }
+    name = name_by_type.get(item_type)
+    if name is None:
+        return None
+    call_id = item.get("call_id") or item.get("id")
+    if not isinstance(call_id, str) or not call_id:
+        return None
+    return ProviderToolObservation(
+        call_id=call_id,
+        name=name,
+        status=_canonical_provider_tool_status(item.get("status")) or default_status,
+    )
+
+
+def _canonical_provider_tool_status(
+    native_status: object,
+) -> Literal["running", "completed", "failed"] | None:
+    """Map one native provider-tool state to the canonical lifecycle."""
+    if not isinstance(native_status, str):
+        return None
+    normalized = native_status.lower().replace("-", "_")
+    if normalized in {
+        "added",
+        "queued",
+        "pending",
+        "in_progress",
+        "searching",
+        "generating",
+        "interpreting",
+    }:
+        return "running"
+    if normalized in {"completed", "done", "succeeded"}:
+        return "completed"
+    if normalized in {"failed", "error"}:
+        return "failed"
+    return None
 
 
 def _incomplete_response_model_error(
