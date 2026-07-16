@@ -146,6 +146,7 @@ class _RunRepo:
         self.model_call_started_at: datetime.datetime | None = None
         self.terminal_result_event_id: str | None = None
         self.terminal_result_message: str | None = None
+        self.retry_states: list[object | None] = []
 
     async def get_by_id(
         self,
@@ -220,8 +221,9 @@ class _RunRepo:
         run_id: str,
         retry_state: object | None,
     ) -> object:
-        """No-op retry-state update for execution tests."""
-        del session, run_id, retry_state
+        """Record retry-state updates from model-output admission."""
+        del session, run_id
+        self.retry_states.append(retry_state)
         return object()
 
 
@@ -570,6 +572,24 @@ class _Normalizer:
                 needs_follow_up=False,
                 events=self._events,
                 usage=self._usage,
+            )
+        )
+
+
+class _NoUsageNormalizer:
+    """Return successful durable output without provider usage."""
+
+    def __init__(self, events: list[Event]) -> None:
+        self._events = events
+
+    def start(self, session_id: str) -> _StaticOutputStream:
+        """Return output that cannot produce a turn marker."""
+        del session_id
+        return _StaticOutputStream(
+            NormalizedAdapterOutput(
+                events=self._events,
+                usage=None,
+                needs_follow_up=False,
             )
         )
 
@@ -1125,6 +1145,52 @@ async def test_text_run_commits_durable_events_before_output_sink() -> None:
 
     assert status == AgentRunStatus.COMPLETED
     assert committed_event_counts_at_sink == [3]
+
+
+async def test_output_without_usage_clears_retry_state_before_publish() -> None:
+    """Output admission ends the retry cycle even without a turn marker."""
+    run_repo = _RunRepo()
+    transcript_repo = _TranscriptRepo()
+    retry_updates_at_sink: list[list[object | None]] = []
+
+    async def output_sink(
+        normalized: NormalizedAdapterOutput,
+        appended: Sequence[Event],
+    ) -> None:
+        """Record committed retry lifecycle before publishing output."""
+        del normalized, appended
+        retry_updates_at_sink.append(list(run_repo.retry_states))
+
+    execution = AgentRunExecution(
+        session_manager=_session_context,
+        post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_inference_profile=None,
+        model_adapter=_ModelAdapter(),
+        output_normalizer=_NoUsageNormalizer([_assistant_event()]),
+        model_call_preparer=_model_call_preparer(),
+        output_sink=output_sink,
+        run_repo=run_repo,
+        transcript_repo=transcript_repo,
+    )
+
+    status = await execution.run(
+        AgentRunExecutionRequest(
+            owner_generation=1,
+            tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            run_id="run-1",
+            session_id="session-1",
+            model="gpt-5.1",
+        ),
+    )
+
+    assert status == AgentRunStatus.COMPLETED
+    assert retry_updates_at_sink == [[None]]
+    assert [event.kind for event in transcript_repo.events] == [
+        EventKind.ASSISTANT_MESSAGE,
+        EventKind.RUN_MARKER,
+    ]
 
 
 async def test_text_run_output_sink_receives_run_marker() -> None:

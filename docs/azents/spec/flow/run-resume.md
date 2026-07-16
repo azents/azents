@@ -22,7 +22,7 @@ code_paths:
   - python/apps/azents/src/azents/engine/run/errors.py
   - python/apps/azents/src/azents/worker/session/**
 last_verified_at: 2026-07-16
-spec_version: 19
+spec_version: 20
 ---
 
 # Run Resume
@@ -196,15 +196,22 @@ pending input.
 ## Failed-run Retry Recovery
 
 When a running `agent_runs` row has non-null `retry_state`, that state is the durable retry resume
-source. Recovery and handover must preserve the failed attempt count and `next_retry_at`; a worker
-restart must not reset the retry budget or bypass exponential backoff. If a terminal transition closes
-the run, terminal helpers clear `retry_state` so stale retry state cannot be resumed.
+source for the active model turn. Recovery and handover preserve that turn's failed-attempt count,
+history, and `next_retry_at`; a worker restart must not reset its budget or bypass exponential
+backoff. Retry state remains present during both backoff and the in-flight retry attempt.
+
+Successful normalized model output and the retry-state clear commit in one transaction. Recovery
+therefore observes either unfinished output with the active turn's retry state, or committed output
+with null retry state and a fresh budget for the next turn. A terminal transition also clears
+`retry_state` defensively.
 
 A worker that acquires a session during retry must treat the run as still active. It may re-enter the
 same run boundary with the existing `run_id`; the adapter must reuse the existing `agent_runs` row
-instead of creating a replacement row. Retry wait may be resumed from `next_retry_at`, and stop while
+instead of creating a replacement row. Retry wait may be resumed from `next_retry_at`, and an expired
+timestamp starts the next attempt immediately without implying that the state is stale. Stop while
 waiting finalizes the failed run with `finalization_reason = retry_stopped_by_user`. Shutdown while
-waiting leaves the run `running` for the next worker instead of writing durable failed history.
+waiting or during an attempt leaves the run `running` for the next worker instead of writing durable
+failed history.
 
 ## Inference Profile Recovery
 
@@ -253,6 +260,7 @@ run to observe `check_stop()` as true.
 
 ## Changelog
 
+- **2026-07-16** (spec_version 20) — Scoped takeover retry recovery to the active model turn and made committed model output plus retry-state removal one durable boundary.
 - **2026-07-14** (spec_version 19) — Replaced operation resume with owner-generation-fenced live execution, atomic terminal snapshot/delete handover, 30-second graceful shutdown, and cancelled no-reexecution takeover recovery.
 - **2026-07-12** (spec_version 18) — Made ownership generation and durable call/result state authoritative for no-reexecution tool recovery.
 - **2026-07-12** (spec_version 17) — Promoted Session-owned per-turn inference recovery, handled preparation failure, buffer-only action transport, buffer-keyed action recovery, and same-run context rebuild.

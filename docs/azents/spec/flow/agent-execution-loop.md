@@ -46,7 +46,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ChatView.tsx
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
 last_verified_at: 2026-07-16
-spec_version: 89
+spec_version: 90
 ---
 
 # Agent Execution Loop
@@ -217,23 +217,23 @@ selection or queries a later Session value while appending an earlier turn.
 
 `terminal_result_event_id` and `terminal_result_message` store the user-safe terminal output projection for a completed, failed, stopped, interrupted, or cancelled run. Subagent parent observation and Subagent Tree unread/result previews read this projection instead of scanning child transcript history.
 
-`retry_state` is nullable durable JSON on `agent_runs`. When present, it records failed-run retry
-progress for a still-running run and includes the latest user-safe error message, failed attempt
+`retry_state` is nullable durable JSON on `agent_runs`. When present, it records the active model
+turn's failed-run retry progress and includes the latest user-safe error message, failed attempt
 count, max retries, backoff seconds, `next_retry_at`, error type/source, retryability, failure code,
 and a bounded `attempts` list. Each attempt summary contains attempt number, user-safe message,
 error type/source, failed timestamp, retryability, failure code, truncation flag, backoff seconds,
-and the next retry timestamp. Terminal run transitions clear `retry_state`. `/live` exposes this as
-the optional `run.retry` projection so retry UI can restore the live retry card and attempt history
-without durable transcript retry-attempt events.
+and the next retry timestamp. `/live` exposes this as the optional `run.retry` projection so retry
+UI can restore the current turn's live retry card and attempt history without durable transcript
+retry-attempt events.
 
 Failed-run retry is owned by the worker run boundary, not by the event execution core. User-visible
 model/runtime errors that stop a run attempt propagate out of `AgentRunExecution` without appending a
 durable `system_error`, without appending a failed `run_marker`, and without marking the run
 terminal. `RunExecutor` converts the propagated failure into `FailedRunAttempt`, persists
 `agent_runs.retry_state`, waits until `next_retry_at` while observing stop/shutdown, and retries the
-same `run_id`. This keeps the run `running` and prevents durable failed history until retry is
-finalized. `max_retries` counts retries after the initial attempt, so a budget of three permits four
-total attempts and terminal attempt numbers remain one-based.
+same model turn and `run_id`. This keeps the run `running` and prevents durable failed history until
+retry is finalized. `max_retries` counts retries after the initial attempt, so a budget of three
+permits four total attempts and terminal attempt numbers remain one-based within each model turn.
 
 Before a non-Stop model failure is recorded or its retry state is published, `RunExecutor` asks the
 live projector to discard that attempt's assistant and reasoning projections. The partial batcher
@@ -245,10 +245,15 @@ publication. A retry therefore starts from canonical durable history rather than
 failed prefix with the next attempt. User Stop bypasses this discard because its interruption path
 may durably retain valid assistant text.
 
-When retry wait expires and the next attempt starts, `RunExecutor` clears `agent_runs.retry_state`
-and publishes a `live_run_updated` snapshot with `run.retry = null` so stale retry UI disappears
-while normal model/tool progress continues. The in-memory executor still carries the previous
-attempt summaries for the next failure in the same run. Known non-retryable failures, such as
+The retry state remains durable during backoff and the in-flight retry so worker takeover preserves
+the current turn's count and does not bypass backoff. The transaction that admits successful model
+output also clears `agent_runs.retry_state`, independent of whether provider usage produced a
+`turn_marker`. The first durable model-output emit resets the executor-local count and attempt
+history; for client-tool output, the committed `executing_tools` phase may perform the same reset
+first. A later model turn, including tool-less `end_turn = false` continuation, starts at failed
+attempt 1 with a fresh retry budget. WebSocket and REST live projections keep `run.retry` while the
+retry is active and remove it after successful output admission or terminal transition.
+Known non-retryable failures, such as
 deterministic fixture strict-mode `no_fixture_match`, are classified with `retryability =
 non_retryable`, receive `backoff_seconds = 0`, and are finalized on the first failed attempt instead
 of waiting for the retry budget. When retry is
@@ -770,6 +775,9 @@ updated by the user.
 
 ## Changelog
 
+- **2026-07-16** (spec_version 90) — Scoped failed-run retry count, history, and backoff to one model
+  turn; preserved active retry state through in-flight recovery and cleared it atomically with
+  successful model output admission.
 - **2026-07-15** (spec_version 87) — Continued the Agent Run with another successful model step when
   a completed Responses payload explicitly sets the optional `end_turn` extension to `false`.
 - **2026-07-15** (spec_version 86) — Required explicit native `response.completed` before successful
