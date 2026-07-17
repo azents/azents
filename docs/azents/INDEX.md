@@ -219,8 +219,9 @@ _14 documents_
 - [ADR-0162: Use Standard Responses for ChatGPT OAuth](adr/0162-use-standard-responses-for-chatgpt-oauth.md)
 - [ADR-0163: Normalize Provider Tool Live Activity Across Model Adapters](adr/0163-normalize-provider-tool-live-activity.md)
 - [ADR-0164: Materialize Provider-Generated Images as File Resources](adr/0164-materialize-provider-generated-images-as-file-resources.md)
+- [ADR-0165: Model-Scoped Subagent Override Policy](adr/0165-subagent-model-override-policy.md)
 
-_170 documents_
+_171 documents_
 
 ## Issues (Bug Tracking)
 
@@ -254,4 +255,4 @@ _3 documents_
 
 ## Statistics
 
-- Total documents: 468
+- Total documents: 470
