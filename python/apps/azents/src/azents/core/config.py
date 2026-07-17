@@ -81,7 +81,8 @@ class Settings(BaseSettings):
 
     runtime_default_provider_id: str | None = None
 
-    # Streaming model watchdog
+    # Streaming model transport and watchdog
+    openai_responses_websocket_enabled: bool = True
     model_stream_connect_timeout_seconds: float = 15.0
     model_stream_idle_timeout_seconds: float = 300.0
     model_stream_absolute_timeout_seconds: float = 1_800.0
@@ -368,6 +369,7 @@ class Config(BaseModel):
     redis: RedisConfig
     runtime: RuntimeConfig
     model_stream_timeout: ModelStreamTimeoutConfig
+    openai_responses_websocket_enabled: bool
     github: GitHubConfig | None = None
     web_url: str = ""
     api_url: str = ""
@@ -446,6 +448,9 @@ class Config(BaseModel):
                     settings.model_stream_absolute_timeout_seconds
                 ),
                 close_grace_seconds=settings.model_stream_close_grace_seconds,
+            ),
+            openai_responses_websocket_enabled=(
+                settings.openai_responses_websocket_enabled
             ),
             github=GitHubConfig(
                 platform_app_id=settings.github_platform_app_id,

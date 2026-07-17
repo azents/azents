@@ -292,7 +292,7 @@ class _ModelStreamCallState:
 class _DeadlineReached(Exception):
     """Internal deadline signal before typed model timeout conversion."""
 
-    kind: Literal["parsed_event_idle", "absolute_attempt"]
+    kind: Literal["connect", "parsed_event_idle", "absolute_attempt"]
 
 
 class ModelStreamWatchdog:
@@ -339,7 +339,11 @@ class ModelStreamWatchdog:
         state = self._start_state(policy=policy, context=context)
         operation = asyncio.create_task(_await_factory(factory))
         try:
-            response = await self._wait_for_operation(operation, state=state)
+            response = await self._wait_for_operation(
+                operation,
+                state=state,
+                phase="connect",
+            )
         except asyncio.CancelledError:
             await self._cleanup_after_caller_cancel(
                 operation,
@@ -393,7 +397,11 @@ class ModelStreamWatchdog:
             while True:
                 operation = asyncio.create_task(_next_item(iterator))
                 try:
-                    event = await self._wait_for_operation(operation, state=call_state)
+                    event = await self._wait_for_operation(
+                        operation,
+                        state=call_state,
+                        phase="parsed_event_idle",
+                    )
                 except StopAsyncIteration:
                     completed = True
                     self._log_terminal(
@@ -522,28 +530,34 @@ class ModelStreamWatchdog:
         operation: asyncio.Task[T],
         *,
         state: _ModelStreamCallState,
+        phase: Literal["connect", "parsed_event_idle"],
     ) -> T:
         now = self.clock.time()
-        idle_remaining = state.idle_deadline - now
+        phase_deadline = (
+            state.started_at + state.policy.connect_timeout_seconds
+            if phase == "connect"
+            else state.idle_deadline
+        )
+        phase_remaining = phase_deadline - now
         absolute_remaining = state.absolute_deadline - now
-        if idle_remaining <= 0 or absolute_remaining <= 0:
+        if phase_remaining <= 0 or absolute_remaining <= 0:
             await self._prefer_user_stop(state.context)
-            if absolute_remaining <= idle_remaining:
+            if absolute_remaining <= phase_remaining:
                 raise _DeadlineReached("absolute_attempt")
-            raise _DeadlineReached("parsed_event_idle")
+            raise _DeadlineReached(phase)
 
-        idle_task = asyncio.create_task(self.clock.sleep(idle_remaining))
+        phase_task = asyncio.create_task(self.clock.sleep(phase_remaining))
         absolute_task = asyncio.create_task(self.clock.sleep(absolute_remaining))
         try:
             done, _ = await asyncio.wait(
-                {operation, idle_task, absolute_task},
+                {operation, phase_task, absolute_task},
                 return_when=asyncio.FIRST_COMPLETED,
             )
         finally:
-            for timer in (idle_task, absolute_task):
+            for timer in (phase_task, absolute_task):
                 if not timer.done():
                     timer.cancel()
-            await asyncio.gather(idle_task, absolute_task, return_exceptions=True)
+            await asyncio.gather(phase_task, absolute_task, return_exceptions=True)
 
         if operation in done:
             return operation.result()
@@ -551,7 +565,7 @@ class ModelStreamWatchdog:
         await self._prefer_user_stop(state.context)
         if absolute_task in done:
             raise _DeadlineReached("absolute_attempt")
-        raise _DeadlineReached("parsed_event_idle")
+        raise _DeadlineReached(phase)
 
     async def _prefer_user_stop(self, context: ModelStreamCallContext) -> None:
         if context.check_stop is not None and await context.check_stop():
@@ -660,15 +674,16 @@ class ModelStreamWatchdog:
 
     def _deadline_error(
         self,
-        kind: Literal["parsed_event_idle", "absolute_attempt"],
+        kind: Literal["connect", "parsed_event_idle", "absolute_attempt"],
         *,
         state: _ModelStreamCallState,
     ) -> ModelStreamTimeoutError:
-        deadline = (
-            state.policy.parsed_event_idle_timeout_seconds
-            if kind == "parsed_event_idle"
-            else state.policy.absolute_attempt_timeout_seconds
-        )
+        if kind == "connect":
+            deadline = state.policy.connect_timeout_seconds
+        elif kind == "parsed_event_idle":
+            deadline = state.policy.parsed_event_idle_timeout_seconds
+        else:
+            deadline = state.policy.absolute_attempt_timeout_seconds
         return ModelStreamTimeoutError(
             timeout_kind=kind,
             deadline_seconds=deadline,

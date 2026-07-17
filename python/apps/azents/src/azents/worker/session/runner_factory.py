@@ -9,10 +9,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.engine.events.engine_adapter import AgentEngineAdapter
 from azents.engine.run.contracts import AgentEngineProtocol
+from azents.engine.run.model_transport import InMemoryModelTransportState
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent_session import AgentSessionRepository
 from azents.services.input_buffer import InputBufferService
+from azents.worker.config import AgentWorkerConfig
+from azents.worker.deps import get_worker_config
 from azents.worker.events.publisher import WorkerEventPublisher
 from azents.worker.run.executor import RunExecutor
 from azents.worker.session.idle_continuation import IdleContinuationService
@@ -25,6 +28,7 @@ from azents.worker.session.user_stop_finalizer import UserStopFinalizer
 class SessionRunnerFactory:
     """Store worker-side collaborators required to create SessionRunner."""
 
+    worker_config: Annotated[AgentWorkerConfig, Depends(get_worker_config)]
     event_publisher: Annotated[WorkerEventPublisher, Depends(WorkerEventPublisher)]
     session_lifecycle: Annotated[
         SessionLifecycleService, Depends(SessionLifecycleService)
@@ -56,4 +60,9 @@ class SessionRunnerFactory:
             user_stop_finalizer=self.user_stop_finalizer,
             run_executor=self.run_executor,
             engine=self.engine,
+            model_transport_state=InMemoryModelTransportState(
+                websocket_enabled=(
+                    self.worker_config.openai_responses_websocket_enabled
+                ),
+            ),
         )

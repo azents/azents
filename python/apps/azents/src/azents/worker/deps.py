@@ -254,6 +254,7 @@ def get_worker_config(
         web_url=config.web_url,
         oauth_secret_key=config.credential_encryption.key,
         mcp_proxy_url=config.mcp_proxy_url,
+        openai_responses_websocket_enabled=(config.openai_responses_websocket_enabled),
         failed_run_max_retries=_int_from_env(
             "AZ_FAILED_RUN_MAX_RETRIES",
             _DEFAULT_FAILED_RUN_MAX_RETRIES,

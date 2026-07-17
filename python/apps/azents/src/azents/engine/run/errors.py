@@ -24,7 +24,13 @@ class ModelCallError(UserVisibleRuntimeError):
     """LLM provider/model call failure."""
 
 
-class ModelStreamTimeoutError(ModelCallError):
+class TransientModelCallError(ModelCallError):
+    """Retryable model call failure with a stable operational code."""
+
+    failure_code: str
+
+
+class ModelStreamTimeoutError(TransientModelCallError):
     """Azents-owned timeout for one streaming model provider attempt."""
 
     _FAILURE_CODES: dict[ModelStreamTimeoutKind, ModelStreamTimeoutFailureCode] = {

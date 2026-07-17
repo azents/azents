@@ -294,6 +294,36 @@ async def test_open_response_classifies_provider_connect_timeout() -> None:
     assert captured.value.model == "test-model"
 
 
+async def test_open_response_enforces_application_connect_deadline() -> None:
+    """Response acquisition uses the configured application connect deadline."""
+    clock = ControlledClock()
+    policy = _policy(connect=5, idle=30, absolute=60)
+    watchdog = _watchdog(clock, policy=policy)
+    release = asyncio.Event()
+
+    async def block_connect() -> object:
+        await release.wait()
+        return object()
+
+    task = asyncio.create_task(
+        watchdog.open_response(
+            block_connect,
+            policy=policy,
+            context=_context(),
+        )
+    )
+    await _wait_until(lambda: clock.sleeper_count == 2)
+    clock.advance(5)
+
+    with pytest.raises(ModelStreamTimeoutError) as captured:
+        await task
+
+    assert captured.value.timeout_kind == "connect"
+    assert captured.value.failure_code == "model_connect_timeout"
+    assert captured.value.deadline_seconds == 5
+    assert watchdog.cleanup_registry.active_count == 0
+
+
 async def test_parsed_event_idle_timeout_closes_cooperative_iterator() -> None:
     clock = ControlledClock()
     policy = _policy(idle=5, absolute=30)
@@ -413,7 +443,7 @@ async def test_user_stop_preempts_simultaneous_idle_timeout() -> None:
 
 async def test_timeout_adopts_non_cooperative_cleanup_and_closes_late_handle() -> None:
     clock = ControlledClock()
-    policy = _policy(idle=5, absolute=30)
+    policy = _policy(connect=5, idle=30, absolute=60)
     watchdog = _watchdog(clock, policy=policy, close_grace=2)
     release = asyncio.Event()
     response = CloseableResponse()

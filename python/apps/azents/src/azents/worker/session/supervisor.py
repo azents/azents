@@ -6,6 +6,7 @@ import logging
 from collections.abc import Awaitable, Callable
 
 from azents.broker.types import SessionWakeUp
+from azents.engine.run.model_transport import ModelTransportState
 from azents.engine.run.types import (
     SHUTDOWN_CANCEL_MESSAGE,
     USER_STOP_CANCEL_MESSAGE,
@@ -134,6 +135,7 @@ class RunTaskSupervisor:
         prepare_toolkits: PrepareToolkits,
         drain_stop_signals: Callable[[], None],
         owner_generation: int,
+        model_transport_state: ModelTransportState,
         command: PendingSessionCommand | None = None,
     ) -> RunExecutionResult:
         """Create engine execution task and apply stop/shutdown policy."""
@@ -147,6 +149,7 @@ class RunTaskSupervisor:
                 dispatch_event=self.event_publisher.dispatch_event,
                 owner_generation=owner_generation,
                 tool_admission_barrier=self.stop_controller.tool_admission_barrier,
+                model_transport_state=model_transport_state,
                 command=command,
             )
         )

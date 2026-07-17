@@ -18,6 +18,7 @@ from azents.engine.context.window import compute_effective_context_window_tokens
 from azents.engine.events.types import Event
 from azents.engine.io.user_input import RunUserMessage
 from azents.engine.run.emit import Emit
+from azents.engine.run.model_transport import ModelTransportState
 from azents.engine.run.types import (
     BuiltinToolSpec,
     CheckStop,
@@ -181,6 +182,7 @@ class RunContext:
     run_id: str
     owner_generation: int
     tool_admission_barrier: ToolAdmissionBarrier
+    model_transport_state: ModelTransportState
     publish_event: PublishEventFn
 
 
