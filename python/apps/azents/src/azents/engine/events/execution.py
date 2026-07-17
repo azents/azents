@@ -989,6 +989,7 @@ class AgentRunExecution[
             transcript,
             source_run_id=run.retry_source_run_id,
             source_input_event_ids=source_input_event_ids,
+            head_event_id=head_event_id,
         )
 
     async def _model_input_head_event_id(
@@ -1326,15 +1327,29 @@ def _without_retry_source_run_output(
     *,
     source_run_id: str,
     source_input_event_ids: Sequence[str],
+    head_event_id: str | None,
 ) -> list[Event]:
     """Exclude one retry source Run's output from model input only."""
     source_input_ids = set(source_input_event_ids)
     source_input_indexes = [
         index for index, event in enumerate(transcript) if event.id in source_input_ids
     ]
-    if not source_input_indexes:
+    if source_input_indexes:
+        last_source_input_index = max(source_input_indexes)
+    elif head_event_id is not None:
+        head_index = next(
+            (
+                index
+                for index, event in enumerate(transcript)
+                if event.id == head_event_id
+            ),
+            None,
+        )
+        if head_index is None:
+            return list(transcript)
+        last_source_input_index = head_index
+    else:
         return list(transcript)
-    last_source_input_index = max(source_input_indexes)
     source_marker_index = next(
         (
             index

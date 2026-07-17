@@ -1112,6 +1112,77 @@ async def test_explicit_retry_excludes_source_run_output_from_model_input() -> N
     ]
 
 
+async def test_explicit_retry_after_compaction_uses_summary_as_input_boundary() -> None:
+    """Exclude stopped output when compaction moved past source inputs."""
+    source_run_id = "2" * 32
+    retry_run_id = "3" * 32
+    summary = _event(
+        "compaction-summary",
+        EventKind.COMPACTION_SUMMARY,
+        CompactionSummaryPayload(
+            compaction_id="compaction-1",
+            content="summary containing the source input",
+        ),
+    )
+    transcript_repo = _TranscriptRepo()
+    transcript_repo.events = [
+        summary,
+        _event(
+            "source-partial",
+            EventKind.ASSISTANT_MESSAGE,
+            AssistantMessagePayload(
+                content="stopped partial after compaction",
+                native_artifact=_artifact(),
+            ),
+        ),
+        _event(
+            "source-interrupted",
+            EventKind.INTERRUPTED,
+            InterruptedPayload(run_id=source_run_id, reason="user_requested"),
+        ),
+        _event(
+            "source-marker",
+            EventKind.RUN_MARKER,
+            RunMarkerPayload(run_id=source_run_id, status="interrupted"),
+        ),
+    ]
+    run_repo = _RunRepo()
+    run_repo.retry_source_run_id = source_run_id
+    run_repo.input_event_ids_by_run[source_run_id] = [
+        "input-before-head".rjust(32, "0")
+    ]
+    lowerer = _RecordingLowerer()
+    execution = AgentRunExecution(
+        session_manager=_session_context,
+        post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_provider_integration_id=None,
+        model_stream_inference_profile=None,
+        model_adapter=_ModelAdapter(),
+        output_normalizer=_Normalizer([_assistant_event()]),
+        model_call_preparer=_model_call_preparer(lowerer=lowerer),
+        run_repo=run_repo,
+        transcript_repo=transcript_repo,
+        session_repo=_SessionRepo(summary.id),
+    )
+
+    status = await execution.run(
+        AgentRunExecutionRequest(
+            owner_generation=1,
+            tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            run_id=retry_run_id,
+            session_id="session-1",
+            model="gpt-5.1",
+        ),
+    )
+
+    assert status == AgentRunStatus.COMPLETED
+    assert [[event.id for event in events] for events in lowerer.transcripts] == [
+        [summary.id]
+    ]
+
+
 async def test_model_follow_up_continues_without_tool_call() -> None:
     """Run another model step when completed output requests follow-up."""
     run_repo = _RunRepo()
