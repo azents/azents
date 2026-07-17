@@ -128,9 +128,12 @@ A classified WebSocket transport failure invalidates the connection, marks the m
 `SessionRunner` key HTTP-only, and fails the current attempt through the existing failed-Run boundary.
 The next retry reconstructs the complete logical request from durable history and uses SDK HTTP. The
 transport failure consumes the shared failed-Run retry count and backoff; there is no inline
-WebSocket-to-HTTP replay, automatic reconnect loop, or separate WebSocket retry budget. User Stop,
-application watchdog expiry, provider terminal failure, authentication, authorization, rate-limit,
-and provider-unavailable errors do not mark the key HTTP-only.
+WebSocket-to-HTTP replay, automatic reconnect loop, or separate WebSocket retry budget. All
+operation-scoped official SDK clients disable automatic HTTP retries, so ordinary sampling retries
+remain owned by the failed-Run boundary rather than being hidden inside one model attempt. The exact
+incremental-continuation recovery described below is a deliberate single inline redispatch, not an SDK
+retry. User Stop, application watchdog expiry, provider terminal failure, authentication,
+authorization, rate-limit, and provider-unavailable errors do not mark the key HTTP-only.
 
 OpenAI Platform Responses calls may reuse the immediately preceding stored response within one
 `AgentRunExecution` tool loop over either selected physical transport. The lowerer and post-lower size
