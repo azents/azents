@@ -2,6 +2,7 @@
 title: "OpenAI Responses WebSocket Transport Design"
 created: 2026-07-17
 updated: 2026-07-17
+implemented: 2026-07-17
 tags: [backend, engine, llm, openai, oauth, websocket]
 ---
 

@@ -8,6 +8,7 @@ touches_domains: [agent, conversation, toolkit]
 code_paths:
   - python/apps/azents/src/azents/engine/run/contracts.py
   - python/apps/azents/src/azents/engine/run/errors.py
+  - python/apps/azents/src/azents/engine/run/model_transport.py
   - python/apps/azents/src/azents/engine/io/user_input.py
   - python/apps/azents/src/azents/engine/events/**
   - python/apps/azents/src/azents/engine/tools/**
@@ -40,13 +41,15 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/model_file.py
   - python/apps/azents/src/azents/rdb/models/workspace_model_settings.py
   - python/apps/azents/src/azents/worker/worker.py
+  - python/apps/azents/src/azents/worker/config.py
+  - python/apps/azents/src/azents/worker/deps.py
   - python/apps/azents/src/azents/worker/live/**
   - python/apps/azents/src/azents/worker/run/**
   - python/apps/azents/src/azents/worker/session/**
   - typescript/apps/azents-web/src/features/chat/components/ChatView.tsx
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
-last_verified_at: 2026-07-16
-spec_version: 93
+last_verified_at: 2026-07-17
+spec_version: 94
 ---
 
 # Agent Execution Loop
@@ -72,7 +75,8 @@ Main steps:
    model options into a complete adapter-owned logical request. OpenAI API-key and ChatGPT OAuth use
    `OpenAIResponsesLowerer`; other providers use `LiteLLMResponsesLowerer`.
 7. `PostLowerFilterPipeline` applies adapter-native request guards to that complete logical request.
-8. OpenAI API-key and ChatGPT OAuth dispatch streaming HTTP through the official OpenAI SDK;
+8. OpenAI API-key and ChatGPT OAuth primary sampling selects a persistent Responses WebSocket or
+   streaming HTTP through the official OpenAI SDK after the complete request is validated;
    non-migrated providers continue through `LiteLLMResponsesModelAdapter`.
 9. The matching `AdapterOutputNormalizer` incrementally processes native output into typed,
    provider-neutral UI stream projections while retaining only the state needed to build durable
@@ -101,32 +105,61 @@ request follow-up. Foreground client tool calls continue to require follow-up re
 `end_turn`. Incomplete tool calls are never admitted. A user stop remains a separate interruption path
 and may durably preserve assistant text received before completion without requesting follow-up.
 
-### OpenAI HTTP incremental input continuation
+### OpenAI Responses physical transport and incremental continuation
+
+Physical transport selection happens only after the lowerer and post-lower guards have produced and
+validated the complete logical request. `AZ_OPENAI_RESPONSES_WEBSOCKET_ENABLED` is a process-scoped,
+default-enabled deployment switch. When enabled, primary sampling may use WebSocket only for the
+official OpenAI default endpoint or the exact ChatGPT OAuth backend endpoint. Custom OpenAI-compatible
+base URLs, explicit `stop`, request-scoped `extra_headers`, context compaction, and automatic Session
+title generation use streaming HTTP. A `SessionRunner` owns in-memory HTTP-only fallback state keyed
+by transport family, provider, and resolved integration ID. The state survives failed-Run attempts in
+that runner and is discarded on runner teardown or worker handover.
+
+One `OpenAIResponsesModelAdapter` and official SDK client belong to one `AgentRunExecution`. For
+eligible sampling, the adapter lazily opens at most one Responses WebSocket, allows only one active
+logical response, serially reuses a healthy connection across model/tool turns, and closes the socket
+before the SDK client when the execution ends. SDK automatic reconnect is disabled. User Stop,
+watchdog expiry, execution cancellation, pre-terminal stream abandonment, decode failure, or
+WebSocket I/O failure closes and invalidates the connection so unread events cannot enter a later
+response.
+
+A classified WebSocket transport failure invalidates the connection, marks the matching
+`SessionRunner` key HTTP-only, and fails the current attempt through the existing failed-Run boundary.
+The next retry reconstructs the complete logical request from durable history and uses SDK HTTP. The
+transport failure consumes the shared failed-Run retry count and backoff; there is no inline
+WebSocket-to-HTTP replay, automatic reconnect loop, or separate WebSocket retry budget. All
+operation-scoped official SDK clients disable automatic HTTP retries, so ordinary sampling retries
+remain owned by the failed-Run boundary rather than being hidden inside one model attempt. The exact
+incremental-continuation recovery described below is a deliberate single inline redispatch, not an SDK
+retry. User Stop, application watchdog expiry, provider terminal failure, authentication,
+authorization, rate-limit, and provider-unavailable errors do not mark the key HTTP-only.
 
 OpenAI Platform Responses calls may reuse the immediately preceding stored response within one
-`AgentRunExecution` tool loop. The lowerer and post-lower size guard still operate on the complete
-logical request. Only the model adapter's physical HTTP request is reduced: when the current input
-exactly equals the preceding full request input, followed by that response's ordered native output
-items, followed by non-empty new input, the adapter sends only the new input and supplies the
-preceding response ID as `previous_response_id`.
+`AgentRunExecution` tool loop over either selected physical transport. The lowerer and post-lower size
+guard still operate on the complete logical request. Only the model adapter's physical request is
+reduced: when the current input exactly equals the preceding full request input, followed by that
+response's ordered native output items, followed by non-empty new input, the adapter sends only the
+new input and supplies the preceding response ID as `previous_response_id`.
 
 Continuation is enabled only for `LLMProvider.OPENAI` sampling requests whose `store` setting is not
 `false`. The request model, tools, and all presence-preserving logical options must match exactly. Any
 changed property, edited or compacted prefix, output mismatch, missing completion data, empty delta,
-cancellation, or failed/incomplete stream causes the next call to use the complete logical request. Continuation state is in memory for
-one adapter lifetime and is committed only after a successful `response.completed` event with a
-non-empty response ID. Durable event history remains the recovery source across worker retries,
-restarts, and adapter recreation. Stored output items use the same raw-blob sanitization as durable
-native artifacts before they participate in prefix comparison.
+cancellation, failed/incomplete stream, or physical transport change causes the next call to use the
+complete logical request. Continuation state is in memory for one adapter lifetime and is committed
+only after a successful `response.completed` event with a non-empty response ID. Durable event
+history remains the recovery source across worker retries, restarts, and adapter recreation. Stored
+output items use the same raw-blob sanitization as durable native artifacts before they participate in
+prefix comparison.
 
-If OpenAI rejects an incremental request with the exact `previous_response_not_found` error code
+If OpenAI rejects an incremental HTTP request with the exact `previous_response_not_found` error code
 before a response stream opens, the adapter disables continuation for its remaining lifetime and
 retries that logical request once with full input. Other provider errors retain their normal failure
 classification. ChatGPT OAuth, non-OpenAI providers, and explicit `store=false` requests always use
-full-context HTTP requests. Immediately before each physical OpenAI Responses
-call, the adapter emits the structured boolean log field `previous_response_id_supplied` without
-logging the response ID itself. A missing-response fallback therefore emits `true` for the rejected
-incremental call followed by `false` for the full retry.
+full-context physical requests. Immediately before each physical OpenAI Responses call, the adapter
+emits the structured boolean log field `previous_response_id_supplied` without logging the response
+ID itself. An HTTP missing-response fallback therefore emits `true` for the rejected incremental call
+followed by `false` for the full retry.
 
 ### Model Stream Attempt Watchdog
 
@@ -144,9 +177,11 @@ overrides. The production defaults are:
 
 The active LiteLLM or official OpenAI SDK HTTP client receives a connect-only `httpx.Timeout`; its
 read, write, and pool bounds remain disabled so transport idle behavior does not become a second
-stream-liveness policy. Response handle acquisition and async iteration share the same parsed-event
-idle and absolute deadlines. The watchdog does not classify semantic progress: metadata, reasoning,
-text, tool-call, terminal, and other parsed events all refresh idle equally.
+stream-liveness policy. The official SDK WebSocket open timeout is likewise disabled so the Azents
+connection-establishment deadline exclusively bounds lazy connection and response acquisition.
+Response handle acquisition and async iteration share the same parsed-event idle and absolute
+deadlines. The watchdog does not classify semantic progress: metadata, reasoning, text, tool-call,
+terminal, and other parsed events all refresh idle equally.
 
 A watchdog expiry cancels the active response acquisition or iteration and raises a typed failure
 before normalized output can become durable. The stable failure codes are
@@ -715,6 +750,9 @@ Primary checks:
 
 ## Changelog
 
+- **2026-07-17** — v94. Added execution-owned persistent OpenAI Responses WebSocket sampling,
+  SessionRunner-scoped HTTP fallback, shared failed-Run retry handling, and transport-aware
+  continuation and watchdog behavior.
 - **2026-07-16** — v93. Added adapter-local provider-tool lifecycle extraction, shared canonical
   accumulation, attempt-local live cleanup, and durable provider-tool handoff.
 - **2026-07-16** — v92. Removed Responses Lite routing and standardized ChatGPT OAuth sampling on the standard Responses contract.
@@ -825,6 +863,9 @@ updated by the user.
 
 ## Changelog
 
+- **2026-07-17** (spec_version 94) — Added execution-owned persistent OpenAI Responses WebSocket
+  sampling, SessionRunner-scoped HTTP fallback, shared failed-Run retry handling, and transport-aware
+  continuation and watchdog behavior.
 - **2026-07-16** (spec_version 93) — Added provider-neutral hosted-tool live activity with
   adapter-local extraction, shared monotonic accumulation, retry cleanup, Redis resync, and
   durable-before-live-removal handoff.
