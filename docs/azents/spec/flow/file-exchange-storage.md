@@ -21,6 +21,7 @@ code_paths:
   - python/apps/azents/src/azents/engine/events/fork_context.py
   - python/apps/azents/src/azents/engine/events/model_file_parts.py
   - python/apps/azents/src/azents/engine/events/model_file_materializer.py
+  - python/apps/azents/src/azents/engine/events/provider_output.py
   - python/apps/azents/src/azents/api/public/chat/v1/**
   - python/apps/azents/src/azents/engine/tools/import_file.py
   - python/apps/azents/src/azents/engine/tools/import_resolver.py
@@ -30,8 +31,9 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/AttachmentPreviewBar.tsx
   - typescript/apps/azents-web/src/features/chat/components/FileAttachmentList.tsx
   - typescript/apps/azents-web/src/features/chat/components/AttachmentPreviewViewer.tsx
-last_verified_at: 2026-07-15
-spec_version: 15
+  - typescript/apps/azents-web/src/features/chat/components/ProviderToolCallCard.tsx
+last_verified_at: 2026-07-17
+spec_version: 16
 ---
 
 # File Exchange Storage
@@ -74,6 +76,19 @@ Active transcript FilePart referencing deleted or missing ModelFile is rewritten
 
 When `spawn_agent` forks parent model-visible context into a child session, FileParts are degraded to bounded text placeholders before appending the selected events to the child transcript. Forking does not copy blobs, does not create child ModelFiles, and does not share ModelFile rows through subagent tree context. If the child needs bytes, the parent must hand off a runtime path, exchange/artifact URI workflow, or another explicit transfer outside automatic context fork.
 
+### Provider-hosted generated image
+
+A completed provider-hosted `image_generation` result creates two resources from one transient validated image payload:
+
+1. the original provider bytes become an Exchange file and optional Exchange preview for user preview and download;
+2. the shared ModelFile normalization policy creates an independent ModelFile and `FileOutputPart` for later model input.
+
+The provider result event references both resources. It does not contain Base64, a data URL, raw bytes, or the provider-native result field. Exchange and ModelFile media type, size, hash, storage key, authorization, and lifecycle remain independent; neither identity is inferred from the other URI or metadata.
+
+The Engine validates Session, Agent, Workspace, and authenticated actor ownership before object upload, closes that session, uploads the original, optional preview, and normalized ModelFile object, then revalidates ownership while admitting all metadata and the updated provider result in the model-output transaction. Partial materialization is failure. Failed admission compensation deletes only unowned prepared keys. Deterministic run/call/output identities make retry admission idempotent, reject identity collisions, and preserve objects already referenced by committed metadata.
+
+Compatible Responses replay resolves the ModelFile and reconstructs provider-native Base64 only inside the outbound request. Cross-adapter replay lowers the FilePart through normal rich-image input or the explicit unavailable-image placeholder. Request-local bytes are never copied back into durable history.
+
 ### Agent presents sandbox file
 
 `present_file` tool publishes only files under Provider-reported Agent Workspace as public Exchange attachment to user. Files outside allowed path are rejected. Published attachment appears in chat UI attachment list and can be retrieved through download endpoint.
@@ -97,6 +112,7 @@ When `spawn_agent` forks parent model-visible context into a child session, File
 - Composer attachments and user-originated sent attachments, including images, render as fixed-width compact tiles in a non-wrapping horizontal strip. Input-buffer projections use the same compact presentation.
 - Attachment strips expose horizontal overflow with a dynamic 40px transparency mask: right edge at the start, both edges in the middle, left edge at the end, and no mask without overflow. Dragging a strip does not activate a tile.
 - Agent-originated image-only output renders as an adaptive gallery whenever the original images are available; generated thumbnail metadata is optional. A single image preserves its aspect ratio with a 480px maximum height. Multiple images use square two-column cells, and sets larger than four expose a `+N` count on the fourth visible cell.
+- An available `image_generation` attachment renders directly inside the provider-tool card below its header. It uses the same Exchange preview and download behavior and does not expose Base64 or require diagnostic details to be expanded.
 - Agent-originated non-image files use the compact strip. Mixed Agent output groups the image gallery and compact file strip inside one bordered attachment group.
 - Every available sent attachment opens `AttachmentPreviewViewer` from its tile body or gallery cell. The trailing tile download action downloads the original without opening the viewer.
 - Exchange-file creation stores a bounded UTF-8 `preview_summary` for `text/*`, JSON, XML, and JavaScript payloads. User uploads and Agent-presented text files therefore use the same text preview path while retaining the complete original for download.
@@ -113,6 +129,7 @@ When `spawn_agent` forks parent model-visible context into a child session, File
 
 ## Changelog
 
+- **2026-07-17** — v16. Added provider-hosted generated-image dual materialization, retry-safe admission, request-local replay, and direct provider-tool attachment presentation.
 - **2026-07-15** — v15. Required preallocated object keys, S3 upload outside DB sessions,
   ownership revalidation, and compensation cleanup before metadata becomes visible.
 - **2026-07-15** — v14. Clarified that input-buffer promotion resolves only Exchange attachment

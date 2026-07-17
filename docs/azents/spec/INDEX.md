@@ -12,11 +12,11 @@ Details of all living specs. Synchronized from frontmatter.
 
 | Domain | Title | Owner | Last Verified | Version |
 |---|---|---|---|---|
-| agent | [Agent Domain Spec](domain/agent.md) | @Hardtack | 2026-07-16 | 47 |
-| conversation | [Conversation & Events](domain/conversation.md) | @Hardtack | 2026-07-16 | 105 |
+| agent | [Agent Domain Spec](domain/agent.md) | @Hardtack | 2026-07-17 | 48 |
+| conversation | [Conversation & Events](domain/conversation.md) | @Hardtack | 2026-07-17 | 106 |
 | goal | [Goal Domain Spec](domain/goal.md) | - | 2026-07-16 | 9 |
 | memory | [Memory](domain/memory.md) | @Hardtack | 2026-07-09 | 4 |
-| model-catalog | [Model Catalog Domain Spec](domain/model-catalog.md) | - | 2026-07-16 | 11 |
+| model-catalog | [Model Catalog Domain Spec](domain/model-catalog.md) | - | 2026-07-17 | 12 |
 | toolkit | [Toolkit](domain/toolkit.md) | @Hardtack | 2026-07-10 | 54 |
 | user-auth | [User & Authentication](domain/user-auth.md) | @Hardtack | 2026-07-13 | 7 |
 | workspace | [Workspace & Membership](domain/workspace.md) | @Hardtack | 2026-07-14 | 40 |
@@ -25,13 +25,13 @@ Details of all living specs. Synchronized from frontmatter.
 
 | Title | Owner | Last Verified | Version |
 |---|---|---|---|
-| [Agent Execution Loop](flow/agent-execution-loop.md) | @Hardtack | 2026-07-17 | 94 |
+| [Agent Execution Loop](flow/agent-execution-loop.md) | @Hardtack | 2026-07-17 | 95 |
 | [Agent Runtime Control](flow/agent-runtime-control.md) | @Hardtack | 2026-07-12 | 17 |
 | [Agent Runtime Persistence](flow/agent-runtime-persistence.md) | @Hardtack | 2026-07-03 | 3 |
 | [Chat Session Resync](flow/chat-session-resync.md) | @Hardtack | 2026-07-16 | 31 |
 | [ChatGPT OAuth Flow](flow/chatgpt-oauth.md) | @Hardtack | 2026-07-17 | 11 |
 | [Context Compaction](flow/context-compaction.md) | @Hardtack | 2026-07-16 | 24 |
-| [File Exchange Storage](flow/file-exchange-storage.md) | @Hardtack | 2026-07-15 | 15 |
+| [File Exchange Storage](flow/file-exchange-storage.md) | @Hardtack | 2026-07-17 | 16 |
 | [MCP OAuth Flow](flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
 | [Periodic Execution Flow Spec](flow/periodic-execution.md) | - | 2026-06-27 | 2 |
 | [Run Resume](flow/run-resume.md) | @Hardtack | 2026-07-16 | 20 |
