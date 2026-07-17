@@ -51,11 +51,11 @@ export const CompletedWithOutputAndAttachment = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
+    await expect(canvas.getByText(imageAttachment.name ?? "")).toBeVisible();
     await userEvent.click(
       canvas.getByRole("button", { name: "Show tool details" }),
     );
     await expect(canvas.getByText("Generated one image.")).toBeVisible();
-    await expect(canvas.getByText(imageAttachment.name ?? "")).toBeVisible();
   },
 } satisfies Story;
 

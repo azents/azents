@@ -182,6 +182,35 @@ def test_recorded_state_is_deep_copied_and_sanitized() -> None:
     assert plan.input_items == [delta]
 
 
+def test_request_local_rehydration_does_not_break_continuation() -> None:
+    """Compare sanitized items while preserving physical request-local Base64."""
+    planner = ResponsesContinuationPlanner()
+    previous = _request([{"role": "user", "content": "generate"}])
+    output = {
+        "type": "image_generation_call",
+        "id": "image-1",
+        "result": "provider-base64",
+    }
+    planner.record_completion(
+        previous,
+        response_id="resp-image",
+        output_items=[output],
+    )
+    rehydrated_output = {
+        "type": "image_generation_call",
+        "id": "image-1",
+        "result": "request-local-base64",
+    }
+    delta = {"role": "user", "content": "continue"}
+    current = _request([*previous.input, rehydrated_output, delta])
+
+    plan = planner.plan(current)
+
+    assert plan.previous_response_id == "resp-image"
+    assert plan.input_items == [delta]
+    assert rehydrated_output["result"] == "request-local-base64"
+
+
 def test_sanitizer_removes_nested_blob_fields() -> None:
     """Use the same recursive blob policy for artifacts and continuation state."""
     assert sanitize_responses_native_item(

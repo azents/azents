@@ -50,6 +50,7 @@ class ResponsesContinuationPlanner:
     def plan(self, request: ResponsesContinuationRequest) -> ResponsesContinuationPlan:
         """Return incremental input only when the prior boundary matches exactly."""
         request_input = request.continuation_input_items()
+        comparison_input = _sanitize_responses_input_items(request_input)
         full_plan = ResponsesContinuationPlan(
             input_items=request_input,
             previous_response_id=None,
@@ -62,11 +63,11 @@ class ResponsesContinuationPlanner:
             return full_plan
 
         previous_input_count = len(state.input_items)
-        if request_input[:previous_input_count] != state.input_items:
+        if comparison_input[:previous_input_count] != state.input_items:
             return full_plan
 
         output_end = previous_input_count + len(state.output_items)
-        if request_input[previous_input_count:output_end] != state.output_items:
+        if comparison_input[previous_input_count:output_end] != state.output_items:
             return full_plan
 
         delta = request_input[output_end:]
@@ -93,7 +94,9 @@ class ResponsesContinuationPlanner:
             self._state = None
             return
         self._state = _ResponsesContinuationState(
-            input_items=copy.deepcopy(request.continuation_input_items()),
+            input_items=copy.deepcopy(
+                _sanitize_responses_input_items(request.continuation_input_items())
+            ),
             properties=copy.deepcopy(request.continuation_properties()),
             response_id=response_id,
             output_items=copy.deepcopy(
@@ -109,6 +112,13 @@ class ResponsesContinuationPlanner:
         """Disable continuation after the provider rejects stored response state."""
         self._disabled = True
         self._state = None
+
+
+def _sanitize_responses_input_items(
+    items: Sequence[Mapping[str, object]],
+) -> list[dict[str, object]]:
+    """Sanitize request-local blob fields only for continuation comparison."""
+    return [sanitize_responses_native_item(dict(item)) for item in items]
 
 
 def sanitize_responses_native_item(
