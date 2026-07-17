@@ -66,10 +66,6 @@ from azents.core.chatgpt_oauth import CHATGPT_OAUTH_BACKEND_BASE_URL
 from azents.core.enums import LLMModelDeveloper, LLMProvider
 from azents.core.llm_catalog import ModelCapabilities
 from azents.engine.events.file_parts import ModelFileResolver
-from azents.engine.events.litellm_responses import (
-    LiteLLMResponsesLowerer,
-    LiteLLMResponsesOutputNormalizer,
-)
 from azents.engine.events.protocols import (
     CompletedAdapterOutput,
     ContentDeltaProjection,
@@ -86,12 +82,13 @@ from azents.engine.events.responses_continuation import (
     ResponsesContinuationPlan,
     ResponsesContinuationPlanner,
 )
+from azents.engine.events.responses_lowering import ResponsesRequestLowerer
+from azents.engine.events.responses_output import ResponsesOutputNormalizer
 from azents.engine.events.types import (
     AssistantMessagePayload,
     Event,
     OutputTextPart,
     TokenUsagePayload,
-    build_native_compat_key,
 )
 from azents.engine.model_stream import (
     ModelStreamCallContext,
@@ -200,6 +197,12 @@ class OpenAIResponsesRequest(BaseModel):
         return self.options.get("store") is not False
 
 
+class _OpenAIResponsesRequestLowerer(ResponsesRequestLowerer):
+    """Lower canonical events to OpenAI-compatible Responses input."""
+
+    adapter = "openai"
+
+
 class OpenAIResponsesLowerer:
     """Lower canonical events to an OpenAI SDK-owned logical request."""
 
@@ -227,11 +230,11 @@ class OpenAIResponsesLowerer:
         model_capabilities: ModelCapabilities | None = None,
         model_file_resolver: ModelFileResolver | None = None,
     ) -> None:
-        """Reuse canonical event lowering without inheriting its request type."""
+        """Configure shared event lowering and SDK-owned request validation."""
         self.request_extra_headers = _optional_credential_headers(
             (kwargs or {}).get("extra_headers")
         )
-        self._lowerer = LiteLLMResponsesLowerer(
+        self._lowerer = _OpenAIResponsesRequestLowerer(
             provider=provider,
             model=model,
             tools=tools,
@@ -248,13 +251,6 @@ class OpenAIResponsesLowerer:
             model_developer=model_developer,
             model_capabilities=model_capabilities,
             model_file_resolver=model_file_resolver,
-        )
-        self._lowerer.compat_key = build_native_compat_key(
-            adapter=self.adapter,
-            native_format=self.native_format,
-            provider=self._lowerer.provider,
-            model=self._lowerer.model,
-            schema_version=self.schema_version,
         )
         self.compat_key = self._lowerer.compat_key
 
@@ -995,6 +991,12 @@ def _map_websocket_handshake_status(status_code: int | None) -> ModelCallError |
     return None
 
 
+class _OpenAIResponsesCanonicalNormalizer(ResponsesOutputNormalizer):
+    """Normalize Responses output with OpenAI artifact ownership."""
+
+    adapter = "openai"
+
+
 class OpenAIResponsesOutputNormalizer:
     """Normalize official SDK typed Responses events to canonical events."""
 
@@ -1006,17 +1008,9 @@ class OpenAIResponsesOutputNormalizer:
         """Configure OpenAI-native artifact ownership."""
         self.provider = provider
         self.model = model
-        self._canonical = LiteLLMResponsesOutputNormalizer(
+        self._canonical = _OpenAIResponsesCanonicalNormalizer(
             provider=provider,
             model=model,
-        )
-        self._canonical.adapter = self.adapter
-        self._canonical.compat_key = build_native_compat_key(
-            adapter=self.adapter,
-            native_format=self.native_format,
-            provider=provider,
-            model=model,
-            schema_version=self.schema_version,
         )
 
     def start(self, session_id: str) -> "_OpenAIResponsesOutputStream":

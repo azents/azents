@@ -27,12 +27,13 @@ from openai.types.responses import (
     ResponseWebSearchCallInProgressEvent,
 )
 from openai.types.responses.response_function_web_search import ActionSearch
+from openai.types.responses.response_input_param import ResponseInputParam
 from openai.types.responses.response_output_item import ImageGenerationCall
 from openai.types.responses.response_usage import (
     InputTokensDetails,
     OutputTokensDetails,
 )
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 from websockets.datastructures import Headers
 from websockets.exceptions import InvalidStatus
 from websockets.http11 import Response as WebSocketHTTPResponse
@@ -471,11 +472,13 @@ def test_chatgpt_oauth_rehydrates_image_generation_with_store_false() -> None:
     assert request.input == [
         {
             "type": "image_generation_call",
-            "id": None,
+            "id": "image-call-1",
             "status": "completed",
             "result": "cmVoeWRyYXRlZA==",
         }
     ]
+    validated_input = TypeAdapter(ResponseInputParam).validate_python(request.input)
+    assert validated_input == request.input
 
 
 def test_openai_sdk_rehydrates_image_generation_result() -> None:

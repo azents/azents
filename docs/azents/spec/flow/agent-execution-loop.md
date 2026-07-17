@@ -49,7 +49,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ChatView.tsx
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
 last_verified_at: 2026-07-17
-spec_version: 95
+spec_version: 96
 ---
 
 # Agent Execution Loop
@@ -432,7 +432,8 @@ metadata and identity reuse with different bytes fails explicitly.
 
 On a later request, an exactly compatible native Responses artifact reconstructs the sanitized
 `image_generation_call.result` from ModelFile bytes in request-local memory only. ChatGPT OAuth sends
-that reconstructed result in its full `store=false` request. Cross-adapter or incompatible replay
+that reconstructed result and its required provider item ID in the full `store=false` request.
+Cross-adapter or incompatible replay
 emits a bounded provider-result marker plus the FilePart lowered as rich image input when supported, or
 the normal explicit unavailable-image placeholder otherwise.
 
@@ -888,6 +889,8 @@ updated by the user.
 
 ## Changelog
 
+- **2026-07-17** (spec_version 96) — Preserved the required provider item ID when replaying a
+  generated image in ChatGPT OAuth `store=false` requests.
 - **2026-07-17** (spec_version 95) — Restored exhaustive `image_generation` lowering, dual file
   admission, request-local replay, and continuation-safe sanitization across OpenAI SDK, ChatGPT
   OAuth, and LiteLLM.
