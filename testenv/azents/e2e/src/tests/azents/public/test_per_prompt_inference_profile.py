@@ -143,7 +143,10 @@ def _setup_profile_agent(
                 "settings": {
                     "context_window_tokens": 96_000,
                     "max_output_tokens": 12_000,
-                    "builtin_tools": [{"name": "web_search"}],
+                    "builtin_tools": [
+                        {"name": "web_search"},
+                        {"name": "image_generation"},
+                    ],
                 },
             },
             {

@@ -85,7 +85,6 @@ from azents.engine.events.provider_tool_activity import (
 from azents.engine.events.responses_continuation import (
     ResponsesContinuationPlan,
     ResponsesContinuationPlanner,
-    sanitize_responses_native_item,
 )
 from azents.engine.events.types import (
     AssistantMessagePayload,
@@ -1637,18 +1636,16 @@ class _SDKModel(Protocol):
 
 
 def _sdk_model_dump(value: object) -> dict[str, object]:
-    """Serialize SDK models while preserving nulls, extras, and presence."""
+    """Serialize SDK models while preserving transient provider output fields."""
     if value is None:
         return {}
     if isinstance(value, dict):
-        return sanitize_responses_native_item(dict(value))
+        return dict(value)
     if isinstance(value, _SDKModel):
-        return sanitize_responses_native_item(
-            value.model_dump(
-                mode="json",
-                exclude_unset=True,
-                warnings=False,
-            )
+        return value.model_dump(
+            mode="json",
+            exclude_unset=True,
+            warnings=False,
         )
     return {}
 

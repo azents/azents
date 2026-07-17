@@ -6,6 +6,7 @@ import dataclasses
 import datetime
 import hashlib
 import uuid
+import warnings
 from io import BytesIO
 from typing import Literal
 
@@ -27,9 +28,9 @@ from azents.engine.events.types import (
 )
 from azents.engine.run.errors import ModelCallError
 from azents.repos.exchange_file import exchange_file_object_key
-from azents.repos.exchange_file.data import ExchangeFileCreate
+from azents.repos.exchange_file.data import ExchangeFile, ExchangeFileCreate
 from azents.repos.model_file import model_file_storage_key
-from azents.repos.model_file.data import ModelFileCreate
+from azents.repos.model_file.data import ModelFile, ModelFileCreate
 from azents.services.exchange_file import (
     ExchangeFileService,
     make_exchange_preview_thumbnail,
@@ -43,6 +44,8 @@ from azents.services.model_file import (
 
 _MAX_DECODED_IMAGE_BYTES = 20 * 1024 * 1024
 _MAX_ENCODED_IMAGE_CHARS = ((_MAX_DECODED_IMAGE_BYTES + 2) // 3) * 4
+_MAX_IMAGE_DIMENSION = 8192
+_MAX_IMAGE_PIXELS = 4096 * 4096
 _IMAGE_MEDIA_TYPES: dict[str, tuple[str, str]] = {
     "JPEG": ("image/jpeg", "jpg"),
     "PNG": ("image/png", "png"),
@@ -80,22 +83,31 @@ class _PreparedGeneratedImage:
 
 @dataclasses.dataclass
 class PreparedProviderOutput:
-    """Uploaded provider output awaiting transactional metadata admission."""
+    """Prepared provider output awaiting transactional upload and admission."""
 
     normalized: NormalizedAdapterOutput
     materializer: "ProviderOutputMaterializer"
     generated_images: tuple[_PreparedGeneratedImage, ...]
+    uploaded_keys: set[str] = dataclasses.field(default_factory=set)
     admitted: bool = False
 
     async def persist(self, session: AsyncSession) -> None:
         """Persist file metadata in the caller's model-output transaction."""
-        await self.materializer.persist(session, self.generated_images)
+        await self.materializer.persist(
+            session,
+            self.generated_images,
+            uploaded_keys=self.uploaded_keys,
+        )
 
     async def cleanup(self) -> None:
         """Compensate uploaded objects unless metadata admission succeeded."""
-        if self.admitted:
+        if self.admitted or not self.uploaded_keys:
             return
-        await self.materializer.cleanup(self.generated_images)
+        await self.materializer.cleanup(
+            self.generated_images,
+            uploaded_keys=self.uploaded_keys,
+        )
+        self.uploaded_keys.clear()
 
 
 @dataclasses.dataclass
@@ -115,7 +127,7 @@ class ProviderOutputMaterializer:
         self,
         normalized: NormalizedAdapterOutput,
     ) -> PreparedProviderOutput:
-        """Validate scope, prepare metadata, upload objects, and update events."""
+        """Validate scope, prepare metadata and bytes, and update events."""
         pending = normalized.pending_provider_files
         if not pending:
             return PreparedProviderOutput(
@@ -128,40 +140,64 @@ class ProviderOutputMaterializer:
             self._prepare_generated_image(file) for file in pending
         )
         self._validate_unique_outputs(generated_images)
-        prepared = PreparedProviderOutput(
+        return PreparedProviderOutput(
             normalized=self._attach_resources(normalized, generated_images),
             materializer=self,
             generated_images=generated_images,
         )
-        uploaded = False
-        try:
-            await self._upload(generated_images)
-            uploaded = True
-            return prepared
-        finally:
-            if not uploaded:
-                await self.cleanup(generated_images)
 
     async def persist(
         self,
         session: AsyncSession,
         generated_images: tuple[_PreparedGeneratedImage, ...],
+        *,
+        uploaded_keys: set[str],
     ) -> None:
-        """Revalidate ownership and persist all prepared metadata."""
+        """Serialize admission, upload new objects, and persist file metadata."""
         if not generated_images:
             return
+        run = await self.model_file_service.agent_run_repository.lock_by_id(
+            session,
+            self.run_id,
+        )
+        if run is None or run.session_id != self.session_id:
+            raise ModelCallError("Generated image output scope is unavailable.")
         await self._validate_scope_in_session(session)
+        existing_keys = await self._validated_persisted_object_keys_in_session(
+            session,
+            generated_images,
+        )
+        await self._upload(
+            generated_images,
+            skip_keys=existing_keys,
+            uploaded_keys=uploaded_keys,
+        )
+        exchange_repository = self.exchange_file_service.exchange_file_repository
+        model_repository = self.model_file_service.model_file_repository
         for image in generated_images:
-            await self.exchange_file_service.exchange_file_repository.create(
+            source = await exchange_repository.get_by_id(
                 session,
-                image.exchange_source,
+                image.exchange_source.id,
             )
+            if source is None:
+                source = await exchange_repository.create(
+                    session,
+                    image.exchange_source,
+                )
+            self._validate_existing_exchange_file(source, image.exchange_source)
+
             preview = image.exchange_preview
             if preview is not None:
-                await self.exchange_file_service.exchange_file_repository.create(
+                existing_preview = await exchange_repository.get_by_id(
                     session,
-                    preview,
+                    preview.id,
                 )
+                if existing_preview is None:
+                    existing_preview = await exchange_repository.create(
+                        session,
+                        preview,
+                    )
+                self._validate_existing_exchange_file(existing_preview, preview)
                 if (
                     image.preview_width is None
                     or image.preview_height is None
@@ -170,36 +206,141 @@ class ProviderOutputMaterializer:
                     raise ModelCallError(
                         "Generated image preview metadata is incomplete."
                     )
-                repository = self.exchange_file_service.exchange_file_repository
-                await repository.set_preview_thumbnail_file_id(
-                    session,
-                    file_id=image.exchange_source.id,
-                    preview_thumbnail_file_id=preview.id,
-                    preview_thumbnail_media_type=preview.media_type,
-                    preview_thumbnail_width=image.preview_width,
-                    preview_thumbnail_height=image.preview_height,
-                    preview_generated_at=image.preview_generated_at,
-                )
-            await self.model_file_service.model_file_repository.create(
+                if source.preview_thumbnail_file_id not in {None, preview.id}:
+                    raise ModelCallError("Generated image output identity collided.")
+                if source.preview_thumbnail_file_id is None:
+                    await exchange_repository.set_preview_thumbnail_file_id(
+                        session,
+                        file_id=image.exchange_source.id,
+                        preview_thumbnail_file_id=preview.id,
+                        preview_thumbnail_media_type=preview.media_type,
+                        preview_thumbnail_width=image.preview_width,
+                        preview_thumbnail_height=image.preview_height,
+                        preview_generated_at=image.preview_generated_at,
+                    )
+
+            model_file = await model_repository.get_by_id(
                 session,
-                image.model_file,
+                image.model_file.id,
             )
+            if model_file is None:
+                model_file = await model_repository.create(
+                    session,
+                    image.model_file,
+                )
+            self._validate_existing_model_file(model_file, image.model_file)
 
     async def cleanup(
         self,
         generated_images: tuple[_PreparedGeneratedImage, ...],
+        *,
+        uploaded_keys: set[str],
     ) -> None:
-        """Delete every prepared object key after failed admission."""
-        keys = {
-            upload.key
-            for generated_image in generated_images
-            for upload in generated_image.uploads
-        }
-        for key in sorted(keys):
-            await self.model_file_service.s3_service.delete(
-                bucket=self.model_file_service.config.workspace_s3.bucket,
-                key=key,
+        """Serialize compensation and preserve any newly committed retry output."""
+        async with self.model_file_service.session_manager() as session:
+            run = await self.model_file_service.agent_run_repository.lock_by_id(
+                session,
+                self.run_id,
             )
+            protected_keys = (
+                await self._validated_persisted_object_keys_in_session(
+                    session,
+                    generated_images,
+                )
+                if run is not None and run.session_id == self.session_id
+                else set()
+            )
+            for key in sorted(uploaded_keys - protected_keys):
+                await self.model_file_service.s3_service.delete(
+                    bucket=self.model_file_service.config.workspace_s3.bucket,
+                    key=key,
+                )
+
+    async def _validated_persisted_object_keys_in_session(
+        self,
+        session: AsyncSession,
+        generated_images: tuple[_PreparedGeneratedImage, ...],
+    ) -> set[str]:
+        """Validate identities visible inside the current admission transaction."""
+        protected: set[str] = set()
+        exchange_repository = self.exchange_file_service.exchange_file_repository
+        model_repository = self.model_file_service.model_file_repository
+        for image in generated_images:
+            source = await exchange_repository.get_by_id(
+                session,
+                image.exchange_source.id,
+            )
+            if source is not None:
+                self._validate_existing_exchange_file(
+                    source,
+                    image.exchange_source,
+                )
+                protected.add(source.object_key)
+            preview = image.exchange_preview
+            if preview is not None:
+                if source is not None and source.preview_thumbnail_file_id not in {
+                    None,
+                    preview.id,
+                }:
+                    raise ModelCallError("Generated image output identity collided.")
+                existing_preview = await exchange_repository.get_by_id(
+                    session,
+                    preview.id,
+                )
+                if existing_preview is not None:
+                    self._validate_existing_exchange_file(
+                        existing_preview,
+                        preview,
+                    )
+                    protected.add(existing_preview.object_key)
+            model_file = await model_repository.get_by_id(
+                session,
+                image.model_file.id,
+            )
+            if model_file is not None:
+                self._validate_existing_model_file(
+                    model_file,
+                    image.model_file,
+                )
+                protected.add(model_file.storage_key)
+        return protected
+
+    @staticmethod
+    def _validate_existing_exchange_file(
+        existing: ExchangeFile,
+        expected: ExchangeFileCreate,
+    ) -> None:
+        """Reject deterministic Exchange identities bound to different bytes."""
+        if (
+            existing.id != expected.id
+            or existing.workspace_id != expected.workspace_id
+            or existing.agent_id != expected.agent_id
+            or existing.filename != expected.filename
+            or existing.media_type != expected.media_type
+            or existing.size_bytes != expected.size_bytes
+            or existing.sha256 != expected.sha256
+            or existing.created_by_user_id != expected.created_by_user_id
+        ):
+            raise ModelCallError("Generated image output identity collided.")
+
+    @staticmethod
+    def _validate_existing_model_file(
+        existing: ModelFile,
+        expected: ModelFileCreate,
+    ) -> None:
+        """Reject deterministic ModelFile identities bound to different bytes."""
+        if (
+            existing.id != expected.id
+            or existing.workspace_id != expected.workspace_id
+            or existing.session_id != expected.session_id
+            or existing.agent_id != expected.agent_id
+            or existing.name != expected.name
+            or existing.media_type != expected.media_type
+            or existing.kind != expected.kind
+            or existing.size_bytes != expected.size_bytes
+            or existing.sha256 != expected.sha256
+        ):
+            raise ModelCallError("Generated image output identity collided.")
 
     async def _validate_scope(self) -> None:
         """Validate provider output ownership before object upload."""
@@ -434,16 +575,22 @@ class ProviderOutputMaterializer:
     async def _upload(
         self,
         generated_images: tuple[_PreparedGeneratedImage, ...],
+        *,
+        skip_keys: set[str],
+        uploaded_keys: set[str],
     ) -> None:
-        """Upload prepared Exchange, preview, and ModelFile objects."""
+        """Upload objects that are not already bound to committed metadata."""
         for image in generated_images:
             for upload in image.uploads:
+                if upload.key in skip_keys:
+                    continue
                 await self.model_file_service.s3_service.upload(
                     bucket=self.model_file_service.config.workspace_s3.bucket,
                     key=upload.key,
                     body=upload.body,
                     content_type=upload.media_type,
                 )
+                uploaded_keys.add(upload.key)
 
     @staticmethod
     def _validate_unique_outputs(
@@ -504,10 +651,27 @@ def _split_image_data_url(value: str) -> tuple[str, str | None]:
 
 def _detect_image_media_type(body: bytes) -> tuple[str, str]:
     try:
-        with Image.open(BytesIO(body)) as image:
-            image.verify()
-            image_format = image.format
-    except (OSError, UnidentifiedImageError, ValueError) as exc:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            with Image.open(BytesIO(body)) as image:
+                width, height = image.size
+                if (
+                    width > _MAX_IMAGE_DIMENSION
+                    or height > _MAX_IMAGE_DIMENSION
+                    or width * height > _MAX_IMAGE_PIXELS
+                ):
+                    raise ModelCallError("Generated image dimensions exceed the limit.")
+                image.verify()
+                image_format = image.format
+    except ModelCallError:
+        raise
+    except (
+        Image.DecompressionBombError,
+        Image.DecompressionBombWarning,
+        OSError,
+        UnidentifiedImageError,
+        ValueError,
+    ) as exc:
         raise ModelCallError(
             "Generated image result is corrupt or unsupported."
         ) from exc

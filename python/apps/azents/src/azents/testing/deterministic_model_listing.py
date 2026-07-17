@@ -184,7 +184,7 @@ def _candidate(
             ),
             built_in_tools=ModelBuiltInToolCapabilities(
                 supported=(
-                    ["web_search"]
+                    ["web_search", "image_generation"]
                     if source == "testenv_fixture:deterministic-model-settings"
                     and not lightweight
                     else []

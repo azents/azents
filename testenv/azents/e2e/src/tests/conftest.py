@@ -36,6 +36,12 @@ from support.consts import REPOSITORY_ROOT
 from support.system_bootstrap import SystemBootstrapEvidence
 
 _AIMOCK_FIXTURE_DIR = REPOSITORY_ROOT / "testenv/azents/e2e/src/support/aimock_fixtures"
+_IMAGE_GENERATION_PROXY = (
+    REPOSITORY_ROOT / "testenv/azents/e2e/src/support/image_generation_openai_proxy.py"
+)
+_IMAGE_GENERATION_FIXTURE_DIR = (
+    REPOSITORY_ROOT / "testenv/azents/e2e/src/support/fixtures"
+)
 _DOCKER_CLIENT_TIMEOUT_SECONDS = 300
 _RUNTIME_PROVIDER_ID = "system-docker"
 _RUNTIME_CONTAINER_NAME_RE = re.compile(r"^azents-runtime-[0-9a-f]{32}$")
@@ -206,6 +212,45 @@ def mock_openai_container(
             time.sleep(1)
         else:
             pytest.fail("mock OpenAI server did not start in time")
+        yield container
+
+
+@pytest.fixture(scope="session")
+def openai_proxy_container(
+    container_network: Network,
+    mock_openai_container: DockerContainer,
+) -> Generator[DockerContainer, None, None]:
+    """Proxy AIMock and add deterministic Responses image generation."""
+    del mock_openai_container
+    python_image = get_docker_hub_image("python:3.14-alpine")
+    with (
+        DockerContainer(
+            python_image,
+            docker_client_kw={"timeout": _DOCKER_CLIENT_TIMEOUT_SECONDS},
+        )
+        .with_volume_mapping(str(_IMAGE_GENERATION_PROXY), "/app/proxy.py", "ro")
+        .with_volume_mapping(
+            str(_IMAGE_GENERATION_FIXTURE_DIR),
+            "/fixtures",
+            "ro",
+        )
+        .with_command(["python", "/app/proxy.py"])
+        .with_exposed_ports(8081)
+        .with_network(container_network)
+        .with_network_aliases("openai-proxy") as container
+    ):
+        host = container.get_container_host_ip()
+        port = container.get_exposed_port(8081)
+        for _ in range(30):
+            try:
+                response = requests.get(f"http://{host}:{port}/health", timeout=2)
+                if response.status_code == 200:
+                    break
+            except requests.exceptions.RequestException:
+                pass
+            time.sleep(1)
+        else:
+            pytest.fail("OpenAI image-generation proxy did not start in time")
         yield container
 
 
@@ -409,7 +454,6 @@ def _configure_azents_server_container(
     auth_jwt_secret_key: str,
     credential_encryption_key: str,
     system_bootstrap_setup_token: str,
-    mock_openai_container: DockerContainer,
 ) -> DockerContainer:
     """azents server container t settings."""
     return (
@@ -434,7 +478,7 @@ def _configure_azents_server_container(
         .with_env("AZ_LLM_CATALOG_SYNC_ENABLED", "true")
         .with_env("AZ_LLM_CATALOG_STARTUP_SYNC_ENABLED", "true")
         .with_env("AZ_LLM_CATALOG_SOURCE_MODE", "fixture")
-        .with_env("AZ_OPENAI_BASE_URL", "http://mock-openai:8080/v1")
+        .with_env("AZ_OPENAI_BASE_URL", "http://openai-proxy:8081/v1")
         .with_env("AZ_TESTENV_RUNTIME_HOOK_QA_ENABLED", "true")
         .with_env("AZ_TOOL_INTERNAL_ERROR_DETAILS", "true")
         .with_env("AZ_AGENT_HOME_IDLE_TIMEOUT_SECS", "60")
@@ -582,9 +626,10 @@ def azents_public_server_container(
     auth_jwt_secret_key: str,
     credential_encryption_key: str,
     system_bootstrap_setup_token: str,
-    mock_openai_container: DockerContainer,
+    openai_proxy_container: DockerContainer,
 ) -> Generator[DockerContainer, None, None]:
     """azents Public API server container (port 8010)."""
+    del openai_proxy_container
     base_container = (
         DockerContainer(
             image=azents_server_image,
@@ -605,7 +650,6 @@ def azents_public_server_container(
         auth_jwt_secret_key,
         credential_encryption_key,
         system_bootstrap_setup_token,
-        mock_openai_container,
     )
 
     with container:
@@ -628,9 +672,10 @@ def azents_admin_server_container(
     auth_jwt_secret_key: str,
     credential_encryption_key: str,
     system_bootstrap_setup_token: str,
-    mock_openai_container: DockerContainer,
+    openai_proxy_container: DockerContainer,
 ) -> Generator[DockerContainer, None, None]:
     """azents Admin API server container (port 8011)."""
+    del openai_proxy_container
     base_container = (
         DockerContainer(
             image=azents_server_image,
@@ -652,7 +697,6 @@ def azents_admin_server_container(
         auth_jwt_secret_key,
         credential_encryption_key,
         system_bootstrap_setup_token,
-        mock_openai_container,
     )
 
     with container:
@@ -675,10 +719,10 @@ def azents_engine_worker_container(
     auth_jwt_secret_key: str,
     credential_encryption_key: str,
     system_bootstrap_setup_token: str,
-    mock_openai_container: DockerContainer,
+    openai_proxy_container: DockerContainer,
 ) -> Generator[DockerContainer, None, None]:
     """WebSocket session runt processt azents engine worker container."""
-    del azents_admin_server_container
+    del azents_admin_server_container, openai_proxy_container
 
     base_container = (
         DockerContainer(
@@ -701,7 +745,6 @@ def azents_engine_worker_container(
         auth_jwt_secret_key,
         credential_encryption_key,
         system_bootstrap_setup_token,
-        mock_openai_container,
     )
     container = container.with_env("AZ_WORKER_HEALTH_PORT", "8012").with_env(
         "AZ_AGENT_HOME_DOCKER_NETWORK", container_network.name
@@ -752,11 +795,11 @@ def azents_runtime_control_container(
     auth_jwt_secret_key: str,
     credential_encryption_key: str,
     system_bootstrap_setup_token: str,
-    mock_openai_container: DockerContainer,
+    openai_proxy_container: DockerContainer,
     azents_runtime_runner_image: str,
 ) -> Generator[DockerContainer, None, None]:
     """Runtime Control gRPC server container."""
-    del azents_admin_server_container
+    del azents_admin_server_container, openai_proxy_container
 
     base_container = (
         DockerContainer(
@@ -778,7 +821,6 @@ def azents_runtime_control_container(
         auth_jwt_secret_key,
         credential_encryption_key,
         system_bootstrap_setup_token,
-        mock_openai_container,
     )
     container = (
         container.with_env("AZ_RUNTIME_CONTROL_PORT", "8030")
@@ -864,6 +906,14 @@ def mock_openai_url(mock_openai_container: DockerContainer) -> str:
     """test runner t t t mock OpenAI URL."""
     host = mock_openai_container.get_container_host_ip()
     port = mock_openai_container.get_exposed_port(8080)
+    return f"http://{host}:{port}"
+
+
+@pytest.fixture(scope="session")
+def openai_proxy_url(openai_proxy_container: DockerContainer) -> str:
+    """Return the host-visible deterministic OpenAI proxy URL."""
+    host = openai_proxy_container.get_container_host_ip()
+    port = openai_proxy_container.get_exposed_port(8081)
     return f"http://{host}:{port}"
 
 

@@ -1354,6 +1354,16 @@
     {
       "match": {
         "endpoint": "chat",
+        "userMessage": "Provider image generation follow-up",
+        "hasToolResult": false
+      },
+      "response": {
+        "content": "PROVIDER_IMAGE_GENERATION_FOLLOW_UP_COMPLETED"
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
         "userMessage": "Provider tool live activity handoff",
         "hasToolResult": false
       },

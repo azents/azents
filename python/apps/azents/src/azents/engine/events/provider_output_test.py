@@ -3,10 +3,12 @@
 import base64
 import datetime
 from contextlib import AbstractAsyncContextManager
+from io import BytesIO
 from typing import IO, cast
 
 import pytest
 from azcommon.infra.s3.service import S3Service
+from PIL import Image
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import azents.engine.events.provider_output as provider_output
@@ -18,6 +20,7 @@ from azents.engine.events.provider_output import (
     pending_image_generation_output,
 )
 from azents.engine.events.types import (
+    AgentRunState,
     Event,
     FileOutputPart,
     NativeArtifact,
@@ -43,6 +46,13 @@ _PNG_BASE64 = (
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ"
     "/pLvAAAAAElFTkSuQmCC"
 )
+
+
+def _png_base64(*, width: int, height: int) -> str:
+    """Create a compact valid PNG fixture with controlled dimensions."""
+    body = BytesIO()
+    Image.new("1", (width, height)).save(body, format="PNG")
+    return base64.b64encode(body.getvalue()).decode()
 
 
 class _Session(AsyncSession):
@@ -104,6 +114,25 @@ class _WorkspaceUserRepository(WorkspaceUserRepository):
         )
 
 
+class _AgentRunRepository(AgentRunRepository):
+    """Serialize provider-output admission on the synthetic run."""
+
+    def __init__(self) -> None:
+        self.lock_calls = 0
+
+    async def lock_by_id(
+        self,
+        session: AsyncSession,
+        run_id: str,
+    ) -> AgentRunState | None:
+        del session
+        self.lock_calls += 1
+        return AgentRunState.model_construct(
+            id=run_id,
+            session_id="session-1",
+        )
+
+
 class _ExchangeFileRepository(ExchangeFileRepository):
     """Record Exchange metadata admission."""
 
@@ -118,10 +147,33 @@ class _ExchangeFileRepository(ExchangeFileRepository):
     ) -> ExchangeFile:
         del session
         self.created.append(create)
+        return self._build_created(create)
+
+    async def get_by_id(
+        self,
+        session: AsyncSession,
+        file_id: str,
+    ) -> ExchangeFile | None:
+        del session
+        for create in self.created:
+            if create.id == file_id:
+                return self._build_created(create)
+        return None
+
+    def _build_created(self, create: ExchangeFileCreate) -> ExchangeFile:
+        preview_id = next(
+            (
+                preview_id
+                for source_id, preview_id in self.preview_links
+                if source_id == create.id
+            ),
+            None,
+        )
         return ExchangeFile.model_construct(
             **create.model_dump(),
             status="available",
             object_key=f"exchange/workspace-1/files/{create.id}/original",
+            preview_thumbnail_file_id=preview_id,
             created_at=datetime.datetime.now(datetime.UTC),
         )
 
@@ -160,6 +212,21 @@ class _ModelFileRepository(ModelFileRepository):
     ) -> ModelFile:
         del session
         self.created.append(create)
+        return self._build_created(create)
+
+    async def get_by_id(
+        self,
+        session: AsyncSession,
+        model_file_id: str,
+    ) -> ModelFile | None:
+        del session
+        for create in self.created:
+            if create.id == model_file_id:
+                return self._build_created(create)
+        return None
+
+    @staticmethod
+    def _build_created(create: ModelFileCreate) -> ModelFile:
         return ModelFile.model_construct(
             **create.model_dump(),
             status="available",
@@ -175,6 +242,7 @@ class _S3Service(S3Service):
 
     def __init__(self) -> None:
         self.uploaded: dict[str, bytes] = {}
+        self.upload_calls: list[str] = []
         self.deleted: list[str] = []
 
     async def upload(
@@ -187,6 +255,7 @@ class _S3Service(S3Service):
     ) -> None:
         del bucket, content_type
         assert isinstance(body, bytes)
+        self.upload_calls.append(key)
         self.uploaded[key] = body
 
     async def delete(self, bucket: str, key: str) -> None:
@@ -233,12 +302,14 @@ def _artifact() -> NativeArtifact:
     )
 
 
-def _normalized_output() -> NormalizedAdapterOutput:
+def _normalized_output(
+    result: str = _PNG_BASE64,
+) -> NormalizedAdapterOutput:
     pending = pending_image_generation_output(
         {
             "type": "image_generation_call",
             "id": "image-call-1",
-            "result": _PNG_BASE64,
+            "result": result,
         },
         output_index=0,
     )
@@ -296,7 +367,7 @@ def _materializer(
     model_service = ModelFileService(
         model_file_repository=model_repository,
         agent_session_repository=session_repository,
-        agent_run_repository=AgentRunRepository(),
+        agent_run_repository=_AgentRunRepository(),
         workspace_user_repository=workspace_user_repository,
         session_manager=session_manager,
         s3_service=s3_service,
@@ -376,13 +447,44 @@ def test_rejects_provider_image_above_encoded_bound(
         )
 
 
+def test_rejects_provider_image_above_pixel_bound(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reject oversized dimensions before normalization decodes pixels."""
+    monkeypatch.setattr(provider_output, "_MAX_IMAGE_PIXELS", 0)
+
+    with pytest.raises(ModelCallError, match="dimensions exceed the limit"):
+        pending_image_generation_output(
+            {"id": "image-call-1", "result": _PNG_BASE64},
+            output_index=0,
+        )
+
+
+def test_maps_pillow_decompression_bomb_to_model_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Expose Pillow decompression-bomb rejection as a bounded model error."""
+
+    def reject_image(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        raise Image.DecompressionBombError("synthetic oversized image")
+
+    monkeypatch.setattr(provider_output.Image, "open", reject_image)
+
+    with pytest.raises(ModelCallError, match="corrupt or unsupported"):
+        pending_image_generation_output(
+            {"id": "image-call-1", "result": _PNG_BASE64},
+            output_index=0,
+        )
+
+
 async def test_materializes_exchange_and_model_file_in_one_admission() -> None:
     """Prepare uploads and persist both metadata resources with event references."""
     materializer, exchange_repository, model_repository, s3_service = _materializer()
 
     prepared = await materializer.prepare(_normalized_output())
 
-    assert len(s3_service.uploaded) == 3
+    assert s3_service.uploaded == {}
     assert prepared.normalized.pending_provider_files == []
     payload = prepared.normalized.events[0].payload
     assert isinstance(payload, ProviderToolResultPayload)
@@ -399,19 +501,71 @@ async def test_materializes_exchange_and_model_file_in_one_admission() -> None:
     prepared.admitted = True
     await prepared.cleanup()
 
+    assert len(s3_service.uploaded) == 3
     assert len(exchange_repository.created) == 2
     assert len(exchange_repository.preview_links) == 1
     assert len(model_repository.created) == 1
     assert s3_service.deleted == []
 
 
-async def test_failed_admission_compensates_every_uploaded_object() -> None:
-    """Delete Exchange, preview, and ModelFile objects after admission failure."""
+async def test_retry_reuses_metadata_and_preserves_admitted_objects() -> None:
+    """Keep deterministic resources safe across repeated output admission."""
+    materializer, exchange_repository, model_repository, s3_service = _materializer()
+    first = await materializer.prepare(_normalized_output())
+    await first.persist(_Session())
+    first.admitted = True
+    original_upload_calls = list(s3_service.upload_calls)
+
+    rolled_back_retry = await materializer.prepare(_normalized_output())
+    await rolled_back_retry.cleanup()
+    assert s3_service.deleted == []
+
+    admitted_retry = await materializer.prepare(_normalized_output())
+    await admitted_retry.persist(_Session())
+    admitted_retry.admitted = True
+
+    assert s3_service.upload_calls == original_upload_calls
+    assert len(exchange_repository.created) == 2
+    assert len(exchange_repository.preview_links) == 1
+    assert len(model_repository.created) == 1
+    assert s3_service.deleted == []
+
+
+async def test_retry_rejects_changed_bytes_before_overwriting_objects() -> None:
+    """Keep admitted deterministic object keys bound to their original bytes."""
     materializer, _, _, s3_service = _materializer()
+    first = await materializer.prepare(_normalized_output())
+    await first.persist(_Session())
+    first.admitted = True
+    original_objects = dict(s3_service.uploaded)
+    original_upload_calls = list(s3_service.upload_calls)
+
+    retry = await materializer.prepare(
+        _normalized_output(_png_base64(width=2, height=1))
+    )
+    with pytest.raises(ModelCallError, match="identity collided"):
+        await retry.persist(_Session())
+
+    assert s3_service.uploaded == original_objects
+    assert s3_service.upload_calls == original_upload_calls
+
+
+async def test_failed_admission_compensates_every_uploaded_object() -> None:
+    """Delete uploaded objects after the metadata transaction rolls back."""
+    materializer, exchange_repository, model_repository, s3_service = _materializer()
+    run_repository = cast(
+        _AgentRunRepository,
+        materializer.model_file_service.agent_run_repository,
+    )
     prepared = await materializer.prepare(_normalized_output())
+    await prepared.persist(_Session())
+    exchange_repository.created.clear()
+    exchange_repository.preview_links.clear()
+    model_repository.created.clear()
 
     await prepared.cleanup()
 
+    assert run_repository.lock_calls == 2
     assert sorted(s3_service.deleted) == sorted(s3_service.uploaded)
 
 
@@ -420,12 +574,13 @@ async def test_failed_upload_compensates_prepared_object_keys() -> None:
     s3_service = _FailingS3Service()
     materializer, _, _, _ = _materializer(s3_service)
 
+    prepared = await materializer.prepare(_normalized_output())
     with pytest.raises(OSError, match="object storage unavailable"):
-        await materializer.prepare(_normalized_output())
+        await prepared.persist(_Session())
+    await prepared.cleanup()
 
     assert len(s3_service.uploaded) == 1
-    assert len(s3_service.deleted) == 3
-    assert set(s3_service.uploaded) <= set(s3_service.deleted)
+    assert s3_service.deleted == list(s3_service.uploaded)
 
 
 async def test_requires_authenticated_actor_before_upload() -> None:
