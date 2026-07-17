@@ -243,9 +243,9 @@ def _failed_attempts(payload: dict[str, object]) -> list[dict[str, object]]:
     )
 
 
-def _run_marker_ids(payload: dict[str, object], *, status: str) -> set[str]:
-    """Return Run IDs from durable markers with the requested status."""
-    run_ids: set[str] = set()
+def _run_marker_statuses(payload: dict[str, object]) -> dict[str, str]:
+    """Return durable Run marker statuses keyed by Run ID."""
+    statuses: dict[str, str] = {}
     for event in history_events(payload):
         if event.get("kind") != "run_marker":
             continue
@@ -254,9 +254,10 @@ def _run_marker_ids(payload: dict[str, object], *, status: str) -> set[str]:
             label="run marker payload",
         )
         run_id = marker.get("run_id")
-        if marker.get("status") == status and isinstance(run_id, str):
-            run_ids.add(run_id)
-    return run_ids
+        status = marker.get("status")
+        if isinstance(run_id, str) and isinstance(status, str):
+            statuses[run_id] = status
+    return statuses
 
 
 def _wait_for_completed_retry(
@@ -271,7 +272,7 @@ def _wait_for_completed_retry(
     """Wait until a different Run durably completes the stopped retry."""
     deadline = time.monotonic() + timeout
     expected_content_present = False
-    completed_run_ids: set[str] = set()
+    marker_statuses: dict[str, str] = {}
     while time.monotonic() < deadline:
         observed = list_history(
             server_url=public_url,
@@ -279,9 +280,10 @@ def _wait_for_completed_retry(
             session_id=session_id,
         )
         expected_content_present = expected_content in message_contents(observed)
-        completed_run_ids = _run_marker_ids(observed, status="completed")
+        marker_statuses = _run_marker_statuses(observed)
         if expected_content_present and any(
-            run_id != stopped_run_id for run_id in completed_run_ids
+            run_id != stopped_run_id and status == "completed"
+            for run_id, status in marker_statuses.items()
         ):
             return observed
         time.sleep(0.05)
@@ -294,7 +296,8 @@ def _wait_for_completed_retry(
     raise TimeoutError(
         "fresh retry Run did not complete: "
         f"expected_content_present={expected_content_present!r}, "
-        f"completed_run_ids={sorted(completed_run_ids)!r}, "
+        f"marker_statuses={marker_statuses!r}, "
+        f"session_run_state={live.get('session_run_state')!r}, "
         f"live_run={live.get('run')!r}"
     )
 
