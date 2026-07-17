@@ -116,11 +116,11 @@ logger = logging.getLogger(__name__)
 _MEMORY_READ_RULES_PROMPT = dedent("""\
     ### Memory Rules
 
-    Use `list_memories` or `search_memories` to discover relevant memories. Use `get_memory` to retrieve full content when a memory looks relevant.
+    Use the loaded memory summaries as the primary index. Call `get_memory` directly when a likely candidate is visible; use `list_memories` or `search_memories` only for discovery.
 
     #### Memory lookup
 
-    `search_memories` splits the query on whitespace and performs case-insensitive AND matching across memory name, description, and content. Include the distinctive terms that every search result should contain.
+    `search_memories` returns exact all-term matches when possible and otherwise returns ranked partial matches.
 
     #### Types of memory
 
@@ -162,7 +162,7 @@ _MEMORY_WRITE_RULES_PROMPT = dedent("""\
 
     #### Duplicate prevention
 
-    Do not save duplicate memories. Use `list_memories` or `search_memories` with short keywords to check if a similar memory already exists. Use the same `name` to update an existing memory (upsert).""")  # noqa: E501
+    Before saving, compare against the loaded summaries and search candidates. Reuse the same `name` when existing memory represents the same information. An empty search result alone does not prove that no memory exists.""")  # noqa: E501
 
 _MAX_MEMORY_SUMMARIES = 100
 

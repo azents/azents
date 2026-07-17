@@ -55,3 +55,10 @@ class MemorySummary(BaseModel):
     name: str = Field(description="Memory identifier")
     type: str = Field(description="Type")
     description: str = Field(description="One-line summary")
+
+
+class MemorySearchMatch(MemorySummary):
+    """Memory summary with lexical search match details."""
+
+    matched_terms: int = Field(description="Number of query terms that matched")
+    total_terms: int = Field(description="Number of distinct query terms")

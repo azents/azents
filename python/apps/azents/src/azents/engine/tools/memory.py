@@ -17,6 +17,7 @@ from azents.repos.memory import MemoryRepository
 from azents.repos.memory.data import (
     MemoryCreate,
     MemoryScope,
+    MemorySearchMatch,
     MemorySummary,
 )
 
@@ -66,8 +67,8 @@ class SearchMemoriesInput(BaseModel):
 
     query: str = Field(
         description=(
-            "Whitespace-separated search terms. Search is case-insensitive, "
-            "and all terms must appear in name, description, or content."
+            "Whitespace-separated search terms. Search returns exact all-term "
+            "matches when possible, otherwise ranked partial matches."
         )
     )
     scope: MemoryScope | None = Field(
@@ -314,62 +315,68 @@ def make_search_memories_tool(
     """
 
     async def search_memories(args: SearchMemoriesInput) -> str:
-        """Search memories by whitespace-separated AND terms."""
+        """Search memories, falling back to ranked partial matches."""
         if args.scope == MemoryScope.USER and not user_id:
             raise FunctionToolError(
                 "Cannot search user-scope memories: no user context"
             )
-        results: list[MemorySummary] = []
 
+        if args.scope == MemoryScope.AGENT:
+            search_user_id = None
+            include_agent_scope = False
+        elif args.scope == MemoryScope.USER:
+            search_user_id = user_id
+            include_agent_scope = False
+        else:
+            search_user_id = user_id
+            include_agent_scope = user_id is not None
+
+        results: list[MemorySummary]
+        partial_results: list[MemorySearchMatch] = []
         async with session_manager() as session:
-            if args.scope is None:
-                # repo.search searches both agent + user scopes when user_id is provided
-                results = await repo.search(
+            results = await repo.search(
+                session,
+                agent_id=agent_id,
+                user_id=search_user_id,
+                include_agent_scope=include_agent_scope,
+                query=args.query,
+            )
+            if not results:
+                partial_results = await repo.search_partial(
                     session,
                     agent_id=agent_id,
-                    user_id=user_id,
+                    user_id=search_user_id,
+                    include_agent_scope=include_agent_scope,
                     query=args.query,
                 )
-            elif args.scope == MemoryScope.AGENT:
-                results = await repo.search(
-                    session,
-                    agent_id=agent_id,
-                    user_id=None,
-                    query=args.query,
-                )
-            elif args.scope == MemoryScope.USER:
-                if not user_id:
-                    raise FunctionToolError(
-                        "Cannot search user-scope memories: no user context"
-                    )
-                # Search only user scope. Passing user_id searches both agent+user, so
-                # filter only user scope from results
-                all_results = await repo.search(
-                    session,
-                    agent_id=agent_id,
-                    user_id=user_id,
-                    query=args.query,
-                )
-                # repo.search omits scope info in MemorySummary, so searching with
-                # user_id=user_id also includes agent scope results. To separately
-                # search only user scope, search with user_id only.
-                results = all_results
 
-        if not results:
-            return f'No memories found matching "{args.query}".'
+        if results:
+            return "\n".join(
+                f"{i}. **{memory.name}** ({memory.type}) — {memory.description}"
+                for i, memory in enumerate(results, 1)
+            )
 
-        lines: list[str] = []
-        for i, m in enumerate(results, 1):
-            lines.append(f"{i}. **{m.name}** ({m.type}) — {m.description}")
-        return "\n".join(lines)
+        if partial_results:
+            lines = ["No exact all-term match was found.", "", "Partial matches:"]
+            lines.extend(
+                f"{i}. **{memory.name}** ({memory.type}) — {memory.description} "
+                f"(matched {memory.matched_terms}/{memory.total_terms} terms)"
+                for i, memory in enumerate(partial_results, 1)
+            )
+            return "\n".join(lines)
+
+        return (
+            f'No lexical candidates found for "{args.query}". '
+            "Check the loaded memory summaries before creating a new memory."
+        )
 
     return make_tool(
         search_memories,
         name="search_memories",
         description=(
             "Search memories by whitespace-separated terms. "
-            "Search is case-insensitive and requires every term to match "
-            "name, description, or content."
+            "Returns exact all-term matches when possible, otherwise ranked "
+            "partial matches."
         ),
     )
 

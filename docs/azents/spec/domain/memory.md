@@ -21,8 +21,8 @@ code_paths:
 api_routes:
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/memories
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/memories/{memory_id}
-last_verified_at: 2026-07-09
-spec_version: 4
+last_verified_at: 2026-07-17
+spec_version: 5
 ---
 
 # Memory
@@ -82,7 +82,7 @@ During AgentRuntime resolve, Agent with `memory_enabled` enabled receives Memory
 
 - `list_memories(scope=None, type=None)` returns agent scope summary and user scope summary grouped by type as markdown list. It queries sorted up to 100 rows per scope.
 - `get_memory(scope, name)` returns full `content` of a single Memory. Missing row is handled as tool error.
-- `search_memories(query, scope=None)` splits `query` on whitespace and performs case-insensitive `ILIKE` matching over `name`, `description`, and `content`; every term must match at least one searchable field. If `scope=None` and user context exists, it searches both agent scope and user scope and returns up to 50 summaries.
+- `search_memories(query, scope=None)` first splits `query` into distinct whitespace terms and performs case-insensitive `ILIKE` matching over `name`, `description`, and `content`; every term must match at least one searchable field. If the exact all-term search returns no rows, the runtime tool performs an any-term fallback, ranks up to 10 candidates by the number of distinct matched terms, and labels them as partial matches. If neither search finds candidates, the tool directs the model back to the loaded Memory summary index before creating a new Memory. `scope=None` searches agent scope plus the current user's scope when user context exists; an explicit scope searches only that scope.
 - `delete_memory(scope, name)` deletes by scope/name and returns existence result as JSON.
 
 ### Public API and settings UI
@@ -105,13 +105,14 @@ The Agent Memory settings page exposes the Agent `memory_enabled` toggle and man
 - Memory is isolated per Agent. user scope is also limited by `(agent_id, user_id)`.
 - user scope cannot be written or directly read in execution without user context.
 - Output of Memory tools is normal tool output, so it may remain as conversation event. Whether to save credentials, secrets, or personally identifiable information depends on Agent tool-use policy and user instruction.
-- Search is lexical `ILIKE`. Current implementation has no embedding similarity, automatic relevance ranking, or automatic compaction-to-memory promotion.
+- Search is lexical `ILIKE`. Runtime partial fallback ranks only by distinct matched query-term count; current implementation has no embedding similarity, semantic relevance ranking, or automatic compaction-to-memory promotion.
 - Runtime tool `save_memory` is upsert-by-name, while human-facing API create/update uses strict duplicate conflict semantics.
 
 ## Change History
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-07-17 | 5 | Added runtime exact-to-partial lexical search fallback and index-first duplicate prevention guidance |
 | 2026-07-09 | 3 | Clarified model-facing Memory search guidance to use short keyword queries instead of full sentences |
 | 2026-07-02 | 2 | Added public Agent Memory settings API/UI behavior and permission semantics |
 | 2026-05-10 | 1 | Initial Memory domain spec |

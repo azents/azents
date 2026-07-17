@@ -9,26 +9,59 @@ from .data import (
     Memory,
     MemoryCreate,
     MemoryScope,
+    MemorySearchMatch,
     MemorySummary,
     MemoryUpdate,
 )
 
+_PARTIAL_SEARCH_LIMIT = 10
+
+
+def _split_search_terms(query: str) -> list[str]:
+    """Split search text into distinct case-insensitive terms."""
+    terms: list[str] = []
+    seen: set[str] = set()
+    for term in query.split():
+        normalized = term.casefold()
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        terms.append(term)
+    return terms
+
+
+def _make_term_filter(term: str) -> sa.ColumnElement[bool]:
+    """Build a case-insensitive filter for one search term."""
+    pattern = f"%{term}%"
+    return sa.or_(
+        RDBAgentMemory.name.ilike(pattern),
+        RDBAgentMemory.description.ilike(pattern),
+        RDBAgentMemory.content.ilike(pattern),
+    )
+
 
 def _make_search_filter(query: str) -> sa.ColumnElement[bool]:
     """Build case-insensitive AND search filters from whitespace terms."""
-    term_filters: list[sa.ColumnElement[bool]] = []
-    for term in query.split():
-        pattern = f"%{term}%"
-        term_filters.append(
-            sa.or_(
-                RDBAgentMemory.name.ilike(pattern),
-                RDBAgentMemory.description.ilike(pattern),
-                RDBAgentMemory.content.ilike(pattern),
-            )
-        )
+    term_filters = [_make_term_filter(term) for term in _split_search_terms(query)]
     if not term_filters:
         return sa.false()
     return sa.and_(*term_filters)
+
+
+def _make_search_scope_filter(
+    *,
+    user_id: str | None,
+    include_agent_scope: bool,
+) -> sa.ColumnElement[bool]:
+    """Build a scope filter for runtime memory search."""
+    if user_id is None:
+        return RDBAgentMemory.user_id.is_(None)
+    if include_agent_scope:
+        return sa.or_(
+            RDBAgentMemory.user_id.is_(None),
+            RDBAgentMemory.user_id == user_id,
+        )
+    return RDBAgentMemory.user_id == user_id
 
 
 class MemoryRepository:
@@ -319,32 +352,23 @@ class MemoryRepository:
         *,
         agent_id: str,
         user_id: str | None,
+        include_agent_scope: bool,
         query: str,
     ) -> list[MemorySummary]:
-        """Search memory.
-
-        Search name, description, and content with case-insensitive ILIKE.
-        The query is split on whitespace, and every term must match at least one
-        searchable field.
-        Search both agent scope and user scope when user_id is provided.
+        """Search memory using case-insensitive all-term matching.
 
         :param session: Database session
         :param agent_id: Agent ID
         :param user_id: User ID (None=agent scope only)
+        :param include_agent_scope: Include agent scope with the user's scope
         :param query: Whitespace-separated search terms; all terms must match
         :return: MemorySummary list
         """
         search_filter = _make_search_filter(query)
-
-        scope_filter: sa.ColumnElement[bool]
-        if user_id is None:
-            scope_filter = RDBAgentMemory.user_id.is_(None)
-        else:
-            # Search both agent scope and user scope
-            scope_filter = sa.or_(
-                RDBAgentMemory.user_id.is_(None),
-                RDBAgentMemory.user_id == user_id,
-            )
+        scope_filter = _make_search_scope_filter(
+            user_id=user_id,
+            include_agent_scope=include_agent_scope,
+        )
 
         stmt = (
             sa.select(RDBAgentMemory)
@@ -360,6 +384,67 @@ class MemoryRepository:
         result = await session.execute(stmt)
         rows = result.scalars().all()
         return [self._build_summary(r) for r in rows]
+
+    async def search_partial(
+        self,
+        session: AsyncSession,
+        *,
+        agent_id: str,
+        user_id: str | None,
+        include_agent_scope: bool,
+        query: str,
+    ) -> list[MemorySearchMatch]:
+        """Search memories matching any query term, ranked by matched term count.
+
+        :param session: Database session
+        :param agent_id: Agent ID
+        :param user_id: User ID (None=agent scope only)
+        :param include_agent_scope: Include agent scope with the user's scope
+        :param query: Whitespace-separated search terms
+        :return: Ranked partial search matches
+        """
+        terms = _split_search_terms(query)
+        if not terms:
+            return []
+
+        term_filters = [_make_term_filter(term) for term in terms]
+        matched_terms: sa.ColumnElement[int] = sa.literal(0)
+        for term_filter in term_filters:
+            matched_terms = matched_terms + sa.case((term_filter, 1), else_=0)
+        matched_terms_label = matched_terms.label("matched_terms")
+
+        scope_filter = _make_search_scope_filter(
+            user_id=user_id,
+            include_agent_scope=include_agent_scope,
+        )
+
+        stmt = (
+            sa.select(RDBAgentMemory, matched_terms_label)
+            .where(
+                RDBAgentMemory.agent_id == agent_id,
+                scope_filter,
+                sa.or_(*term_filters),
+            )
+            .order_by(
+                matched_terms_label.desc(),
+                RDBAgentMemory.type,
+                RDBAgentMemory.name,
+            )
+            .limit(_PARTIAL_SEARCH_LIMIT)
+        )
+
+        result = await session.execute(stmt)
+        rows = result.all()
+        return [
+            MemorySearchMatch(
+                name=rdb.name,
+                type=rdb.type,
+                description=rdb.description,
+                matched_terms=match_count,
+                total_terms=len(terms),
+            )
+            for rdb, match_count in rows
+        ]
 
     async def delete_by_name(
         self,
