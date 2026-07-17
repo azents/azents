@@ -31,12 +31,15 @@ class FunctionCallDelta(BaseModel):
 
 
 class ReasoningDelta(BaseModel):
-    """Reasoning summary Text chunk streaming event."""
+    """Reasoning summary text chunk streaming event."""
 
     model_config = ConfigDict(frozen=True)
 
     type: Literal["reasoning_delta"] = "reasoning_delta"
     delta: str
+    item_id: str | None
+    output_index: int | None
+    summary_index: int | None
 
 
 class ProviderToolActivityChanged(BaseModel):

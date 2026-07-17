@@ -118,8 +118,38 @@ async def _assert_live_store_contract(store: LiveEventStore) -> None:
         content_index=1,
         now=now + datetime.timedelta(seconds=1),
     )
-    await store.append_reasoning_delta(session_id, delta="think", now=now)
-    await store.append_reasoning_delta(session_id, delta="ing", now=now)
+    first_reasoning = await store.append_reasoning_delta(
+        session_id,
+        delta="first",
+        item_id="rs_1",
+        output_index=2,
+        summary_index=0,
+        now=now,
+    )
+    await store.append_reasoning_delta(
+        session_id,
+        delta=" summary",
+        item_id="rs_1",
+        output_index=2,
+        summary_index=0,
+        now=now,
+    )
+    await store.append_reasoning_delta(
+        session_id,
+        delta="second",
+        item_id="rs_1",
+        output_index=2,
+        summary_index=1,
+        now=now,
+    )
+    await store.append_reasoning_delta(
+        session_id,
+        delta="third",
+        item_id="rs_2",
+        output_index=3,
+        summary_index=0,
+        now=now + datetime.timedelta(seconds=1),
+    )
     provider_running = await store.upsert_provider_tool_activity(
         session_id,
         call_id="search-1",
@@ -157,11 +187,26 @@ async def _assert_live_store_contract(store: LiveEventStore) -> None:
     assert "hello world" in assistant_contents
     assert "secondary" in assistant_contents
 
-    reasoning_payload = next(
-        event.payload for event in events if event.kind == EventKind.REASONING
+    reasoning_events = [event for event in events if event.kind == EventKind.REASONING]
+    assert len(reasoning_events) == 2
+    assert {
+        event.payload.text
+        for event in reasoning_events
+        if isinstance(event.payload, ReasoningPayload)
+    } == {"first summary\nsecond", "third"}
+
+    durable_first_reasoning = first_reasoning.model_copy(
+        update={"id": "e" * 32, "adapter": "openai"}
     )
-    assert isinstance(reasoning_payload, ReasoningPayload)
-    assert reasoning_payload.text == "thinking"
+    await store.remove_live_counterpart(durable_first_reasoning)
+    remaining_reasoning = [
+        event
+        for event in await store.list_by_session_id(session_id)
+        if event.kind == EventKind.REASONING
+    ]
+    assert len(remaining_reasoning) == 1
+    assert isinstance(remaining_reasoning[0].payload, ReasoningPayload)
+    assert remaining_reasoning[0].payload.text == "third"
 
     await store.remove_live_counterpart(assistant)
     assert all(
@@ -177,6 +222,126 @@ async def _assert_live_store_contract(store: LiveEventStore) -> None:
         event.kind != EventKind.PROVIDER_TOOL_CALL
         for event in await store.list_by_session_id(session_id)
     )
+
+
+@pytest.mark.asyncio
+async def test_reasoning_identity_promotes_from_output_index_to_item_id() -> None:
+    """Move an existing output-position projection to its stable item identity."""
+    store = InMemoryLiveEventStore()
+    now = datetime.datetime(2026, 7, 17, tzinfo=datetime.UTC)
+
+    output_only = await store.append_reasoning_delta(
+        "session-1",
+        delta="first",
+        item_id=None,
+        output_index=2,
+        summary_index=0,
+        now=now,
+    )
+    promoted = await store.append_reasoning_delta(
+        "session-1",
+        delta=" continued",
+        item_id="rs_1",
+        output_index=2,
+        summary_index=0,
+        now=now + datetime.timedelta(seconds=1),
+    )
+
+    events = await store.list_by_session_id("session-1")
+    assert len(events) == 1
+    assert events[0].id == promoted.id
+    assert events[0].id != output_only.id
+    assert events[0].created_at == now
+    assert isinstance(events[0].payload, ReasoningPayload)
+    assert events[0].payload.text == "first continued"
+
+
+@pytest.mark.asyncio
+async def test_durable_reasoning_hands_off_output_index_only_live_items() -> None:
+    """Use durable output-position metadata for order-independent handoff."""
+    store = InMemoryLiveEventStore()
+    now = datetime.datetime(2026, 7, 17, tzinfo=datetime.UTC)
+    first = await store.append_reasoning_delta(
+        "session-1",
+        delta="first",
+        item_id=None,
+        output_index=2,
+        summary_index=0,
+        now=now,
+    )
+    second = await store.append_reasoning_delta(
+        "session-1",
+        delta="second",
+        item_id=None,
+        output_index=3,
+        summary_index=0,
+        now=now + datetime.timedelta(seconds=1),
+    )
+    assert isinstance(first.payload, ReasoningPayload)
+    assert isinstance(second.payload, ReasoningPayload)
+    second_artifact = second.payload.native_artifact.model_copy(
+        update={
+            "item": {
+                "type": "reasoning",
+                "id": "rs_2",
+                "output_index": 3,
+            }
+        }
+    )
+    durable_second = second.model_copy(
+        update={
+            "id": "a" * 32,
+            "adapter": "openai",
+            "payload": second.payload.model_copy(
+                update={"native_artifact": second_artifact}
+            ),
+        }
+    )
+
+    await store.remove_live_counterpart(durable_second)
+
+    remaining = await store.list_by_session_id("session-1")
+    assert [event.id for event in remaining] == [first.id]
+
+
+@pytest.mark.asyncio
+async def test_legacy_durable_reasoning_removes_all_live_reasoning_items() -> None:
+    """Keep legacy identity-free durable cleanup behavior."""
+    store = InMemoryLiveEventStore()
+    now = datetime.datetime(2026, 7, 17, tzinfo=datetime.UTC)
+    live = await store.append_reasoning_delta(
+        "session-1",
+        delta="first",
+        item_id="rs_1",
+        output_index=2,
+        summary_index=0,
+        now=now,
+    )
+    await store.append_reasoning_delta(
+        "session-1",
+        delta="second",
+        item_id="rs_2",
+        output_index=3,
+        summary_index=0,
+        now=now + datetime.timedelta(seconds=1),
+    )
+    assert isinstance(live.payload, ReasoningPayload)
+    legacy_artifact = live.payload.native_artifact.model_copy(
+        update={"item": {"type": "reasoning"}}
+    )
+    legacy = live.model_copy(
+        update={
+            "id": "b" * 32,
+            "adapter": "openai",
+            "payload": live.payload.model_copy(
+                update={"native_artifact": legacy_artifact}
+            ),
+        }
+    )
+
+    await store.remove_live_counterpart(legacy)
+
+    assert await store.list_by_session_id("session-1") == []
 
 
 @pytest.mark.asyncio

@@ -224,7 +224,9 @@ class _LiveEventStore:
         self._listed = 0
         self.removed_counterparts: list[str] = []
         self.assistant_deltas: list[tuple[str, str, int]] = []
-        self.reasoning_deltas: list[tuple[str, str]] = []
+        self.reasoning_deltas: list[
+            tuple[str, str, str | None, int | None, int | None]
+        ] = []
         self.cleared_session_ids: list[str] = []
         self.removed_events: list[tuple[str, str]] = []
 
@@ -280,9 +282,14 @@ class _LiveEventStore:
         session_id: str,
         *,
         delta: str,
+        item_id: str | None,
+        output_index: int | None,
+        summary_index: int | None,
     ) -> Event:
         """Record Reasoning delta append and return live event."""
-        self.reasoning_deltas.append((session_id, delta))
+        self.reasoning_deltas.append(
+            (session_id, delta, item_id, output_index, summary_index)
+        )
         return Event(
             id="3123456789abcdef0123456789abcded",
             session_id=session_id,
@@ -1468,15 +1475,25 @@ async def test_dispatch_flushes_reasoning_batch_during_event_update() -> None:
 
     await event_publisher.dispatch_event(
         "session-1",
-        ReasoningDelta(delta="think"),
+        ReasoningDelta(
+            delta="think",
+            item_id="rs_1",
+            output_index=0,
+            summary_index=0,
+        ),
     )
     await event_publisher.dispatch_event(
         "session-1",
-        ReasoningDelta(delta="ing"),
+        ReasoningDelta(
+            delta="ing",
+            item_id="rs_1",
+            output_index=0,
+            summary_index=0,
+        ),
     )
     await event_publisher.dispatch_event("session-1", durable_reasoning)
 
-    assert live_store.reasoning_deltas == [("session-1", "thinking")]
+    assert live_store.reasoning_deltas == [("session-1", "thinking", "rs_1", 0, 0)]
     event_types = [
         event.get("kind") or event.get("type") for _, event in broadcast.events
     ]

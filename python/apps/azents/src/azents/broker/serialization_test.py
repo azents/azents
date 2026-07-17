@@ -46,9 +46,22 @@ class TestSerializeEngineEvent:
         }
 
     def test_reasoning_delta(self) -> None:
-        """Serialize ReasoningDelta."""
-        result = serialize_event(ReasoningDelta(delta="thinking..."))
-        assert result == {"type": "reasoning_delta", "delta": "thinking..."}
+        """Serialize ReasoningDelta with its live item identity."""
+        result = serialize_event(
+            ReasoningDelta(
+                delta="thinking...",
+                item_id="rs_1",
+                output_index=2,
+                summary_index=1,
+            )
+        )
+        assert result == {
+            "type": "reasoning_delta",
+            "delta": "thinking...",
+            "item_id": "rs_1",
+            "output_index": 2,
+            "summary_index": 1,
+        }
 
     def test_function_call_delta(self) -> None:
         """Serialize FunctionCallDelta."""

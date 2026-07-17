@@ -18,6 +18,7 @@ from azents.engine.events.file_parts import (
 )
 from azents.engine.events.output_parts import iter_output_parts, lower_output_to_text
 from azents.engine.events.protocols import NativeModelRequest
+from azents.engine.events.responses_continuation import sanitize_responses_native_item
 from azents.engine.events.system_reminders import (
     format_compaction_summary_reminder,
     format_goal_continuation_reminder,
@@ -319,9 +320,11 @@ class ResponsesRequestLowerer:
                 if result is None:
                     return None
                 return {**artifact.item, "result": result}
+            case ReasoningPayload(native_artifact=artifact):
+                if artifact.compatible_with(self.compat_key):
+                    return sanitize_responses_native_item(dict(artifact.item))
             case (
                 AssistantMessagePayload(native_artifact=artifact)
-                | ReasoningPayload(native_artifact=artifact)
                 | ClientToolCallPayload(native_artifact=artifact)
                 | ProviderToolCallPayload(native_artifact=artifact)
                 | ProviderToolResultPayload(native_artifact=artifact)

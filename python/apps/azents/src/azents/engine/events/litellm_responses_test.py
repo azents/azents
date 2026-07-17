@@ -2635,14 +2635,26 @@ class TestLiteLLMResponsesOutputNormalizer:
         reasoning = output_stream.process_event(
             NativeEvent(
                 type="ReasoningSummaryTextDeltaEvent",
-                item={"delta": "thinking"},
+                item={
+                    "delta": "thinking",
+                    "item_id": "rs_1",
+                    "output_index": 2,
+                    "summary_index": 1,
+                },
             )
         )
 
         assert text.events == []
         assert text.projections == [ContentDeltaProjection(delta="hello")]
         assert reasoning.events == []
-        assert reasoning.projections == [ReasoningDeltaProjection(delta="thinking")]
+        assert reasoning.projections == [
+            ReasoningDeltaProjection(
+                delta="thinking",
+                item_id="rs_1",
+                output_index=2,
+                summary_index=1,
+            )
+        ]
 
     def test_projects_provider_tool_lifecycle(self) -> None:
         """Translate LiteLLM hosted-tool stages to canonical snapshots."""
@@ -3473,6 +3485,7 @@ class TestLiteLLMResponsesOutputNormalizer:
                             "output": [
                                 {
                                     "type": "reasoning",
+                                    "id": "rs_1",
                                     "content": [{"text": "private chain"}],
                                     "summary": [{"text": "audit summary"}],
                                 }
@@ -3487,6 +3500,20 @@ class TestLiteLLMResponsesOutputNormalizer:
         assert isinstance(reasoning, ReasoningPayload)
         assert reasoning.text == "private chain"
         assert reasoning.summary == "audit summary"
+        assert reasoning.native_artifact.item["output_index"] == 0
+
+        request = LiteLLMResponsesLowerer(
+            provider="openai",
+            model="gpt-5.1",
+        ).lower(output.events, model="gpt-5.1")
+        assert request.input == [
+            {
+                "type": "reasoning",
+                "id": "rs_1",
+                "content": [{"text": "private chain"}],
+                "summary": [{"text": "audit summary"}],
+            }
+        ]
 
     @pytest.mark.parametrize(
         ("item_added_type", "delta_type"),

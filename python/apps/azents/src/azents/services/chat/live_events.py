@@ -50,6 +50,20 @@ def _stable_live_id(session_id: str, *parts: object) -> str:
     return hashlib.md5(raw.encode("utf-8"), usedforsecurity=False).hexdigest()
 
 
+def reasoning_live_event_id(
+    session_id: str,
+    *,
+    item_id: str | None,
+    output_index: int | None,
+) -> str:
+    """Return the deterministic live projection ID for one reasoning item."""
+    if item_id is not None:
+        return _stable_live_id(session_id, "reasoning", "item", item_id)
+    if output_index is not None:
+        return _stable_live_id(session_id, "reasoning", "output", output_index)
+    return _stable_live_id(session_id, "reasoning")
+
+
 def _live_native_artifact(
     *,
     projection: str,
@@ -118,8 +132,18 @@ def _reasoning_live_event(
     session_id: str,
     event_id: str,
     text: str,
+    item_id: str | None,
+    output_index: int | None,
+    summary_index: int | None,
     created_at: datetime.datetime,
 ) -> Event:
+    native_item: dict[str, object] = {}
+    if item_id is not None:
+        native_item["id"] = item_id
+    if output_index is not None:
+        native_item["output_index"] = output_index
+    if summary_index is not None:
+        native_item["summary_index"] = summary_index
     return Event(
         id=event_id,
         session_id=session_id,
@@ -130,7 +154,7 @@ def _reasoning_live_event(
             native_artifact=_live_native_artifact(
                 projection="reasoning",
                 source="reasoning_delta",
-                item={},
+                item=native_item,
             ),
         ),
         model_order=0,
@@ -371,6 +395,9 @@ class LiveEventStore(Protocol):
         session_id: str,
         *,
         delta: str,
+        item_id: str | None,
+        output_index: int | None,
+        summary_index: int | None,
         now: datetime.datetime | None = None,
     ) -> Event:
         """Merge streaming reasoning delta into live reasoning projection."""
@@ -450,20 +477,53 @@ class BaseLiveEventStore:
         session_id: str,
         *,
         delta: str,
+        item_id: str | None,
+        output_index: int | None,
+        summary_index: int | None,
         now: datetime.datetime | None = None,
     ) -> Event:
-        """Merge streaming reasoning delta into live reasoning projection."""
-        event_id = _stable_live_id(session_id, "reasoning")
+        """Merge streaming reasoning delta into its live reasoning item."""
+        event_id = reasoning_live_event_id(
+            session_id,
+            item_id=item_id,
+            output_index=output_index,
+        )
         current = await self._get(session_id, event_id)
-        current_text = (
-            current.payload.text
+        if current is None and item_id is not None and output_index is not None:
+            output_event_id = reasoning_live_event_id(
+                session_id,
+                item_id=None,
+                output_index=output_index,
+            )
+            current = await self._get(session_id, output_event_id)
+            if current is not None:
+                await self.remove(session_id, output_event_id)
+        current_payload = (
+            current.payload
             if current is not None and isinstance(current.payload, ReasoningPayload)
+            else None
+        )
+        current_text = current_payload.text if current_payload is not None else ""
+        current_summary_index: int | None = None
+        if current_payload is not None:
+            value = current_payload.native_artifact.item.get("summary_index")
+            if isinstance(value, int) and not isinstance(value, bool):
+                current_summary_index = value
+        separator = (
+            "\n"
+            if current_text
+            and current_summary_index is not None
+            and summary_index is not None
+            and current_summary_index != summary_index
             else ""
         )
         event = _reasoning_live_event(
             session_id=session_id,
             event_id=event_id,
-            text=f"{current_text or ''}{delta}",
+            text=f"{current_text or ''}{separator}{delta}",
+            item_id=item_id,
+            output_index=output_index,
+            summary_index=summary_index,
             created_at=current.created_at
             if current is not None
             else (now or datetime.datetime.now(datetime.UTC)),
@@ -508,11 +568,46 @@ class BaseLiveEventStore:
                     and live_event.adapter == "azents-live"
                 ):
                     await self.remove(event.session_id, live_event.id)
-        elif event.kind == EventKind.REASONING:
-            await self.remove(
-                event.session_id,
-                _stable_live_id(event.session_id, "reasoning"),
+        elif isinstance(event.payload, ReasoningPayload):
+            native_item = event.payload.native_artifact.item
+            raw_item_id = native_item.get("id")
+            item_id = raw_item_id if isinstance(raw_item_id, str) else None
+            raw_output_index = native_item.get("output_index")
+            output_index = (
+                raw_output_index
+                if isinstance(raw_output_index, int)
+                and not isinstance(raw_output_index, bool)
+                else None
             )
+            live_events = [
+                live_event
+                for live_event in await self.list_by_session_id(event.session_id)
+                if live_event.kind == EventKind.REASONING
+                and live_event.adapter == "azents-live"
+            ]
+            if item_id is not None or output_index is not None:
+                counterpart_ids = {
+                    reasoning_live_event_id(
+                        event.session_id,
+                        item_id=item_id,
+                        output_index=None,
+                    )
+                    if item_id is not None
+                    else None,
+                    reasoning_live_event_id(
+                        event.session_id,
+                        item_id=None,
+                        output_index=output_index,
+                    )
+                    if output_index is not None
+                    else None,
+                }
+                for live_event in live_events:
+                    if live_event.id in counterpart_ids:
+                        await self.remove(event.session_id, live_event.id)
+            else:
+                for live_event in live_events:
+                    await self.remove(event.session_id, live_event.id)
         elif isinstance(
             event.payload,
             ProviderToolCallPayload | ProviderToolResultPayload,
