@@ -1,10 +1,10 @@
 ---
-title: "ADR-0165: Model-Scoped Subagent Override Policy"
+title: "ADR-0166: Model-Scoped Subagent Override Policy"
 created: 2026-07-17
 tags: [architecture, agent, backend, frontend, engine, subagent, models]
 ---
 
-# ADR-0165: Model-Scoped Subagent Override Policy
+# ADR-0166: Model-Scoped Subagent Override Policy
 
 ## Context
 
