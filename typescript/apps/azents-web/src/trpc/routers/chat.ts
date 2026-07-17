@@ -39,6 +39,7 @@ import {
   chatV1ReadAgentWorkspacePath,
   chatV1RegisterAgentProject,
   chatV1RetryFailedRun,
+  chatV1RetryStoppedRun,
   chatV1StatAgentWorkspacePath,
   chatV1StopSessionRun,
   chatV1UpdateAgentSessionTitle,
@@ -697,6 +698,39 @@ export const chatRouter = router({
           body: {
             agent_id: input.agentId,
             failed_event_id: input.failedEventId,
+            client_request_id: input.clientRequestId,
+          },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          400: "BAD_REQUEST",
+          401: "UNAUTHORIZED",
+          403: "FORBIDDEN",
+          404: "NOT_FOUND",
+          409: "CONFLICT",
+        });
+      }
+    }),
+
+  retryStoppedRun: publicProcedure
+    .input(
+      z.object({
+        sessionId: z.string().min(1),
+        agentId: z.string().min(1),
+        stoppedRunId: z.string().min(1),
+        clientRequestId: z.string().min(1).max(64),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { data } = await chatV1RetryStoppedRun({
+          client: ctx.apiClient,
+          path: { session_id: input.sessionId },
+          body: {
+            agent_id: input.agentId,
+            stopped_run_id: input.stoppedRunId,
             client_request_id: input.clientRequestId,
           },
           throwOnError: true,

@@ -16,8 +16,8 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_session.py
   - python/apps/azents/src/azents/rdb/models/agent_run.py
   - python/apps/azents/src/azents/rdb/models/agent.py
-last_verified_at: 2026-07-16
-spec_version: 24
+last_verified_at: 2026-07-17
+spec_version: 25
 ---
 
 # Context Compaction
@@ -40,20 +40,20 @@ back to estimating the full selected transcript.
 When compaction is required:
 
 1. Select the full model-input transcript slice and fixed cutoff that will be summarized.
-2. In a short database session, append `compaction_marker` with a new `compaction_id` and a durable reason (`auto_threshold_exceeded` for automatic compaction, `manual_command` for explicit `/compact`). Commit the marker and reserve the immediately adjacent logical order for the summary.
-3. Close the marker persistence session before dispatching the compaction-start lifecycle hook or generating and enriching the summary. The external model and hook calls run outside compactor-owned database sessions and hold no active transaction or session-row lock used for event ordering.
+2. Publish the Run-scoped live operation `preparing_context` and dispatch the compaction-start lifecycle hook. The external model and hook calls run outside compactor-owned database sessions and hold no active transaction or session-row lock used for event ordering.
+3. Generate the summary through the provider-specific adapter. Provider failures propagate through the common bounded `ModelProviderFailure` contract to the owning Run controller.
 4. Render bounded continuity history from the selected transcript, but keep it separate from the generated summary.
 5. Dispatch the compaction summary enrichment hook pipeline with the generated summary and rendered continuity history.
 6. Append the continuity history after the enriched summary.
-7. In another short database session, append `compaction_summary` at the reserved logical order with the same `compaction_id` and reason. The payload content contains the enriched checkpoint followed by bounded `Recent User Messages` and `Recent Transcript` sections.
+7. In one short database session, append `compaction_summary` at the selected transcript's next model order with the `compaction_id` and reason. The payload content contains the enriched checkpoint followed by bounded `Recent User Messages` and `Recent Transcript` sections.
 8. Move `agent_sessions.model_input_head_event_id` and `agent_sessions.model_input_head_model_order` to the summary event and commit that transaction.
-9. If summary generation or enrichment fails or is cancelled, append and commit a terminal failed/cancelled marker in a separate short database session without moving the model-input head.
+9. Remove the live operation after success, Stop, cancellation, or terminal failure. A failed or cancelled attempt appends no compaction marker or summary and does not move the model-input head.
 
 Old events remain queryable. The head pointer and event model order only change which
-event range and ordering are used for future model input. Sequential appends leave gaps in
-`model_order` so compaction can reserve the summary immediately after its marker without renumbering
-the whole session transcript. Input appended while summary generation is running receives a later
-logical order, remains outside the fixed summary cutoff, and stays visible after the summary head.
+event range and ordering are used for future model input. Input appended while summary generation is
+running remains outside the fixed summary cutoff and stays visible after the successful summary head.
+The runtime no longer writes `compaction_marker` lifecycle events for new automatic or manual
+compactions; historical markers remain readable.
 
 ## Summary Model
 
@@ -69,7 +69,13 @@ standard OpenAI-compatible helper sends ordinary user input plus top-level instr
 `max_output_tokens`; it does not use sampling continuation. ChatGPT OAuth also uses complete input,
 `store=false`, encrypted reasoning inclusion, and no `previous_response_id`.
 Non-migrated providers receive `max_output_tokens` from the dynamic summary budget through the
-LiteLLM helper. The summary budget is based on the model context window:
+LiteLLM helper. Both adapter families preserve only a bounded redacted provider message and typed safe
+diagnostics. An automatic compaction provider failure consumes the active model turn's standard full
+retry budget regardless of category; the next attempt rebuilds from current durable history. Manual
+compaction uses its command Run's same failed-run controller and fresh budget. Provider retry hints are
+diagnostic and do not replace the standard backoff schedule.
+
+The summary budget is based on the model context window:
 
 - target summary chars: 3% of context window tokens, converted with 1 token ≈ 4 chars;
 - limit summary chars: 5% of context window tokens, converted with 1 token ≈ 4 chars;
@@ -102,9 +108,10 @@ details unless needed to continue, and to prefer the latest transcript evidence 
 
 Manual compaction uses the same prompt, budget policy, continuity event policy, and summary
 enrichment pipeline as automatic compaction. Manual compaction runs inside a `RunContext`, dispatches
-`on_session_compact` with that run id, and passes the same run id to `on_compaction_summary`. If
-summary generation fails, the runtime records the failure path and keeps recent context under the
-fallback budget rather than deleting prior events.
+`on_session_compact` with that run id, and passes the same run id to `on_compaction_summary`. It
+publishes the same `preparing_context` live operation. A failed attempt leaves prior events and the
+model-input head unchanged, then flows through the command Run's retry/finalization boundary without
+writing a per-attempt compaction marker.
 
 ## Token Estimation and Filters
 
@@ -168,12 +175,12 @@ the immediate shape of the recent interaction.
 
 ## Invariants
 
-- Compaction is append-only.
-- External summary generation and enrichment run after the started-marker session closes and before the summary transaction opens; they do not hold the session-row event-ordering lock.
-- Events appended during external summary work retain a later logical order than the reserved summary order and remain visible after the model-input head moves.
-- Summary failure or cancellation records a committed terminal marker without moving the model-input head.
-- Successful compaction writes the trigger reason to both `compaction_marker.payload.reason` and `compaction_summary.payload.reason` so context/debug views can explain why the checkpoint was created.
-- `model_input_head_event_id` points at the event summary event after successful compaction, and `model_input_head_model_order` stores the same head event model order for scheduler GC cursor comparisons.
+- Compaction is append-only: success appends one `compaction_summary`; failure or cancellation appends no compaction lifecycle event.
+- External summary generation and enrichment run before the summary transaction opens and do not hold the session-row event-ordering lock.
+- Events appended during external summary work remain outside the fixed selected cutoff and visible after the model-input head moves.
+- Summary failure or cancellation leaves the model-input head unchanged.
+- Successful compaction writes the trigger reason to `compaction_summary.payload.reason` so context/debug views can explain why the checkpoint was created.
+- `model_input_head_event_id` points at the summary event after successful compaction, and `model_input_head_model_order` stores the same head event model order for scheduler GC cursor comparisons.
 - Future model input is selected and sorted by event model order, not by physical append id.
 - Auto and manual compaction present future model input as one `compaction_summary` head event.
 - The summary model receives the full selected model-input transcript, not a transcript with a
@@ -190,9 +197,17 @@ the immediate shape of the recent interaction.
 - Each continuity excerpt is independently truncated before it is embedded in the summary.
 - Auto, manual, and fallback compaction share the same summary prompt and budget policy.
 - Manual compaction uses the command run context when dispatching session compaction and summary enrichment hooks.
+- Automatic and manual compaction expose one Run-scoped `preparing_context` live operation whose identity remains stable across retry and is removed at every terminal boundary.
+- Every provider-attributed compaction failure uses the common bounded failure contract and the owning Run's full retry budget; no provider category finalizes early.
 - Summary model calls use watched streaming transport without publishing user-facing deltas. OpenAI
   API-key and ChatGPT OAuth omit API-level `max_output_tokens`; non-migrated providers receive the
   dynamic summary budget through the LiteLLM helper.
 - Summary content is bounded by the runtime char guard after the model returns.
 - UI/audit history continues to include pre-compaction events. ModelFile GC may later delete unpinned ModelFile blobs whose single FilePart event is behind the head cursor, but it does not delete events or history metadata.
 - Legacy SDK compaction packages are not part of production compaction.
+
+## Changelog
+
+- **2026-07-17** (spec_version 25) — Removed durable compaction lifecycle markers, projected one
+  stable context-preparation operation, and routed every provider-attributed automatic or manual
+  compaction failure through the owning Run's full retry budget.

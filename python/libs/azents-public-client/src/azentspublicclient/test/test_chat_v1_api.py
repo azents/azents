@@ -285,6 +285,13 @@ class TestChatV1Api(unittest.TestCase):
         """
         pass
 
+    def test_chat_v1_retry_stopped_run(self) -> None:
+        """Test case for chat_v1_retry_stopped_run
+
+        Retry Stopped Run
+        """
+        pass
+
     def test_chat_v1_stat_agent_workspace_path(self) -> None:
         """Test case for chat_v1_stat_agent_workspace_path
 

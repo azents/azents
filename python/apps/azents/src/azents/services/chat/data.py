@@ -7,6 +7,7 @@ from typing import Literal
 from azents.core.enums import AgentRunPhase, AgentRunStatus, AgentSessionRunState
 from azents.core.inference_profile import AppliedInferenceProfile
 from azents.engine.events.types import Event
+from azents.engine.run.errors import ModelStreamCallKind
 from azents.engine.run.failure import FailedRunAttemptSource, FailedRunRetryability
 from azents.engine.tools.goal import GoalStateSnapshot, GoalStatus
 from azents.engine.tools.todo import TodoStateSnapshot
@@ -24,6 +25,26 @@ class PaginatedEvents:
     items: list[Event]
     has_more: bool
     has_newer: bool = False
+
+
+@dataclasses.dataclass(frozen=True)
+class ChatLiveRunOperation:
+    """Current live operation projected within one Run."""
+
+    kind: Literal["preparing_context"]
+    operation_id: str
+    status: Literal["running"]
+
+
+@dataclasses.dataclass(frozen=True)
+class ChatLiveRunRecoveryState:
+    """User-safe recovery state retained for one stopped Run."""
+
+    kind: Literal["provider_failure", "stopped"]
+    user_message: str
+    operation: ModelStreamCallKind
+    source_run_id: str
+    stopped_at: str
 
 
 @dataclasses.dataclass(frozen=True)
@@ -64,6 +85,8 @@ class ChatLiveRunState:
     status: AgentRunStatus
     inference_profile: AppliedInferenceProfile
     model_call_started_at: datetime.datetime | None
+    operation: ChatLiveRunOperation | None = None
+    recovery: ChatLiveRunRecoveryState | None = None
     retry: ChatLiveRunRetryState | None = None
 
 

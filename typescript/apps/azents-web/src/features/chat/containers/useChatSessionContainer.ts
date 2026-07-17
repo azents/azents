@@ -51,6 +51,7 @@ import type {
   FileAttachment,
   GoalStateSnapshot,
   InputActionDefinition,
+  ModelOperation,
   PendingInputBuffer,
   TodoStateSnapshot,
   TokenUsageSummary,
@@ -159,6 +160,8 @@ export interface ChatSessionContainerOutput {
   ) => Promise<boolean>;
   /** retry the latest terminal failed run */
   onRetryFailedRun: (failedEventId: string) => Promise<boolean>;
+  /** retry the latest recoverable stopped run */
+  onRetryStoppedRun: (stoppedRunId: string) => Promise<boolean>;
   /** Context compaction whether in progress */
   isCompacting: boolean;
   /** whether commands are blocked during Run */
@@ -529,6 +532,65 @@ function liveRunRetryFromRecord(
   };
 }
 
+function liveRunOperationFromValue(
+  value: unknown,
+): ChatLiveRunState["operation"] {
+  if (!isRecord(value) || value.kind !== "preparing_context") {
+    return null;
+  }
+  const operationId = stringField(value, "operation_id");
+  if (operationId === null || value.status !== "running") {
+    return null;
+  }
+  return {
+    kind: "preparing_context",
+    operationId,
+    status: "running",
+  };
+}
+
+function modelOperationFromValue(value: unknown): ModelOperation | null {
+  switch (value) {
+    case "sampling":
+    case "compaction":
+    case "session_title":
+      return value;
+    default:
+      return null;
+  }
+}
+
+function liveRunRecoveryFromValue(
+  value: unknown,
+): ChatLiveRunState["recovery"] {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const kind = value.kind;
+  if (kind !== "provider_failure" && kind !== "stopped") {
+    return null;
+  }
+  const userMessage = stringField(value, "user_message");
+  const operation = modelOperationFromValue(value.operation);
+  const sourceRunId = stringField(value, "source_run_id");
+  const stoppedAt = stringField(value, "stopped_at");
+  if (
+    userMessage === null ||
+    operation === null ||
+    sourceRunId === null ||
+    stoppedAt === null
+  ) {
+    return null;
+  }
+  return {
+    kind,
+    userMessage,
+    operation,
+    sourceRunId,
+    stoppedAt,
+  };
+}
+
 function chatLiveRunStateFromValue(value: unknown): ChatLiveRunState | null {
   if (!isRecord(value)) {
     return null;
@@ -557,6 +619,8 @@ function chatLiveRunStateFromValue(value: unknown): ChatLiveRunState | null {
     inferenceProfile,
     modelCallStartedAt: stringField(value, "model_call_started_at"),
     retry,
+    operation: liveRunOperationFromValue(value.operation),
+    recovery: liveRunRecoveryFromValue(value.recovery),
   };
 }
 
@@ -2808,6 +2872,7 @@ export function useChatSessionContainer(
   const sendInputMutation = trpc.chat.sendInput.useMutation();
   const editMessageMutation = trpc.chat.editMessage.useMutation();
   const retryFailedRunMutation = trpc.chat.retryFailedRun.useMutation();
+  const retryStoppedRunMutation = trpc.chat.retryStoppedRun.useMutation();
   const stopSessionRunMutation = trpc.chat.stopSessionRun.useMutation();
   const deleteInputBufferMutation = trpc.chat.deleteInputBuffer.useMutation();
   const updateSessionGoalMutation = trpc.chat.updateSessionGoal.useMutation();
@@ -3026,6 +3091,32 @@ export function useChatSessionContainer(
     ],
   );
 
+  const onRetryStoppedRun = useCallback(
+    (stoppedRunId: string): Promise<boolean> => {
+      const writeKey = JSON.stringify({
+        type: "stopped_run_retry",
+        sessionId,
+        stoppedRunId,
+      });
+      const clientRequestId = clientRequestIdForWrite(writeKey);
+      return runWriteMutation(writeKey, clientRequestId, () =>
+        retryStoppedRunMutation.mutateAsync({
+          sessionId,
+          agentId: agent.id,
+          stoppedRunId,
+          clientRequestId,
+        }),
+      );
+    },
+    [
+      agent.id,
+      clientRequestIdForWrite,
+      retryStoppedRunMutation,
+      runWriteMutation,
+      sessionId,
+    ],
+  );
+
   const onStopRequest = useCallback(() => {
     const run = managedLiveState.liveRun;
     if (stopSessionRunMutation.isPending || run === null) {
@@ -3221,6 +3312,7 @@ export function useChatSessionContainer(
     onResetToLatest,
     onSubmitMessageEdit,
     onRetryFailedRun,
+    onRetryStoppedRun,
     isCompacting,
     wasCommandBlocked: wasRestCommandBlocked,
     isStopAvailable,

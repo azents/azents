@@ -2437,6 +2437,64 @@
         }
       }
     },
+    "/chat/v1/sessions/{session_id}/retry-stopped-run": {
+      "post": {
+        "tags": [
+          "Chat v1"
+        ],
+        "summary": "Retry Stopped Run",
+        "description": "Accept a recoverable stopped-Run retry at the REST boundary.",
+        "operationId": "chat_v1_retry_stopped_run",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatStoppedRunRetryRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatWriteResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/chat/v1/sessions/{session_id}/edit-message": {
       "post": {
         "tags": [
@@ -11199,6 +11257,83 @@
         "title": "ChatInputWriteRequest",
         "description": "REST composer input write request."
       },
+      "ChatLiveRunOperationResponse": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "preparing_context",
+            "title": "Kind",
+            "description": "Operation kind"
+          },
+          "operation_id": {
+            "type": "string",
+            "title": "Operation Id",
+            "description": "Stable operation identity"
+          },
+          "status": {
+            "type": "string",
+            "const": "running",
+            "title": "Status",
+            "description": "Current operation status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "operation_id",
+          "status"
+        ],
+        "title": "ChatLiveRunOperationResponse",
+        "description": "Current live Run operation response."
+      },
+      "ChatLiveRunRecoveryStateResponse": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "provider_failure",
+              "stopped"
+            ],
+            "title": "Kind",
+            "description": "Recovery kind"
+          },
+          "user_message": {
+            "type": "string",
+            "title": "User Message",
+            "description": "User-safe stopped Run message"
+          },
+          "operation": {
+            "type": "string",
+            "enum": [
+              "sampling",
+              "compaction",
+              "session_title"
+            ],
+            "title": "Operation",
+            "description": "Model operation that was stopped"
+          },
+          "source_run_id": {
+            "type": "string",
+            "title": "Source Run Id",
+            "description": "Recoverable stopped AgentRun ID"
+          },
+          "stopped_at": {
+            "type": "string",
+            "title": "Stopped At",
+            "description": "Stopped timestamp"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "user_message",
+          "operation",
+          "source_run_id",
+          "stopped_at"
+        ],
+        "title": "ChatLiveRunRecoveryStateResponse",
+        "description": "User-safe recoverable stopped Run response."
+      },
       "ChatLiveRunRetryAttemptResponse": {
         "properties": {
           "attempt_number": {
@@ -11360,6 +11495,28 @@
             "title": "Model Call Started At",
             "description": "Current model call start time, or null outside a model call"
           },
+          "operation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ChatLiveRunOperationResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Current live Run operation"
+          },
+          "recovery": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ChatLiveRunRecoveryStateResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Recoverable state retained for a stopped Run"
+          },
           "retry": {
             "anyOf": [
               {
@@ -11459,6 +11616,35 @@
         "title": "ChatStopResponse",
         "description": "REST stop response."
       },
+      "ChatStoppedRunRetryRequest": {
+        "properties": {
+          "agent_id": {
+            "type": "string",
+            "title": "Agent Id",
+            "description": "Agent ID"
+          },
+          "stopped_run_id": {
+            "type": "string",
+            "title": "Stopped Run Id",
+            "description": "Recoverable stopped AgentRun ID"
+          },
+          "client_request_id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Client Request Id",
+            "description": "Client-generated idempotency key"
+          }
+        },
+        "type": "object",
+        "required": [
+          "agent_id",
+          "stopped_run_id",
+          "client_request_id"
+        ],
+        "title": "ChatStoppedRunRetryRequest",
+        "description": "REST stopped-run retry request."
+      },
       "ChatWriteAcceptedResponse": {
         "properties": {
           "type": {
@@ -11467,7 +11653,8 @@
               "input_buffer",
               "edit_message",
               "command",
-              "failed_run_retry"
+              "failed_run_retry",
+              "stopped_run_retry"
             ],
             "title": "Type",
             "description": "Accepted target type"
@@ -11550,7 +11737,7 @@
                 "type": "null"
               }
             ],
-            "description": "Currently running run status"
+            "description": "Current active or recoverable stopped Run projection"
           },
           "session_run_state": {
             "$ref": "#/components/schemas/AgentSessionRunState",
@@ -13167,7 +13354,7 @@
                 "type": "null"
               }
             ],
-            "description": "Currently running run status"
+            "description": "Current active or recoverable stopped Run projection"
           },
           "session_run_state": {
             "$ref": "#/components/schemas/AgentSessionRunState",

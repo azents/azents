@@ -12,10 +12,7 @@ from azcommon.logging import bind_extra
 from litellm.exceptions import ContextWindowExceededError, OpenAIError
 
 from azents.core.enums import LLMProvider
-from azents.engine.events.openai_responses import (
-    OpenAIResponsesProviderError,
-    call_openai_responses_text,
-)
+from azents.engine.events.openai_responses import call_openai_responses_text
 from azents.engine.model_stream import (
     ModelStreamCallContext,
     ModelStreamWatchdog,
@@ -28,11 +25,15 @@ from azents.engine.responses import (
     responses_max_output_tokens,
 )
 from azents.engine.run.errors import (
-    CompactionContextWindowExceededError,
     CompactionFailedError,
     CompactionModelStreamTimeoutError,
     ModelCallError,
     ModelStreamTimeoutError,
+)
+from azents.engine.run.provider_failure import (
+    ModelProviderFailure,
+    ModelProviderFailureCategory,
+    model_provider_failure,
 )
 
 logger = logging.getLogger(__name__)
@@ -47,15 +48,6 @@ _MIN_SUMMARY_LIMIT_CHARS = 16_000
 _MAX_SUMMARY_LIMIT_CHARS = 32_000
 _SUMMARY_ROUNDING_CHARS = 1_000
 _SUMMARY_TRUNCATION_NOTE = "\n\n[Truncated by Azents compaction guard.]"
-_SUMMARY_CONTEXT_RETRY_KEEP_RATIOS = (0.70, 0.45, 0.25, 0.12)
-_SUMMARY_CONTEXT_OMISSION_MARKER = (
-    "[Older compaction input omitted because it exceeded the summary model "
-    "context window.]"
-)
-_SUMMARY_CONTEXT_LINE_TRUNCATION_MARKER = (
-    "\n\n[Compaction input line middle omitted because one rendered event exceeded "
-    "the retry budget.]\n\n"
-)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -75,6 +67,7 @@ class SummaryModelCall(Protocol):
         self,
         *,
         provider: LLMProvider,
+        provider_integration_id: str | None,
         model: str,
         credential_kwargs: dict[str, object],
         system_prompt: str,
@@ -237,6 +230,7 @@ async def summarize_text_with_model(
     *,
     watchdog: ModelStreamWatchdog,
     provider: LLMProvider,
+    provider_integration_id: str | None,
     model: str,
     credential_kwargs: dict[str, object],
     system_prompt: str,
@@ -245,7 +239,7 @@ async def summarize_text_with_model(
     max_output_tokens: int,
     session_id: str | None = None,
 ) -> str:
-    """Create compaction summary with LiteLLM Responses API."""
+    """Create one compaction summary model attempt."""
     endpoint_max_output_tokens = responses_max_output_tokens(
         provider,
         max_output_tokens,
@@ -255,6 +249,7 @@ async def summarize_text_with_model(
         logger,
         {
             "provider": provider.value,
+            "provider_integration_id": provider_integration_id,
             "model": model,
             "session_id": session_id,
             "conversation_chars": len(conversation_text),
@@ -263,72 +258,43 @@ async def summarize_text_with_model(
             "endpoint_max_output_tokens": endpoint_max_output_tokens,
         },
     )
-    current_conversation_text = conversation_text
-    retry_index = 0
-    attempt = 1
-    while True:
-        try:
-            L.info(
-                "Compaction summary LiteLLM Responses call starting",
-                extra={
-                    "attempt": attempt,
-                    "input_chars": len(current_conversation_text),
-                    "input_estimated_tokens": _estimated_tokens(
-                        current_conversation_text
-                    ),
-                },
-            )
-            summary = await _summarize_text_attempt(
-                watchdog=watchdog,
-                provider=provider,
-                model=model,
-                credential_kwargs=credential_kwargs,
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                conversation_text=current_conversation_text,
-                endpoint_max_output_tokens=endpoint_max_output_tokens,
-                session_id=session_id,
-            )
-        except CompactionContextWindowExceededError:
-            if retry_index >= len(_SUMMARY_CONTEXT_RETRY_KEEP_RATIOS):
-                raise
-            keep_ratio = _SUMMARY_CONTEXT_RETRY_KEEP_RATIOS[retry_index]
-            retry_index += 1
-            current_conversation_text = _truncate_context_retry_text(
-                conversation_text,
-                keep_chars=int(len(conversation_text) * keep_ratio),
-            )
-            L.warning(
-                "Compaction summary input exceeded model context window; retrying "
-                "with older input omitted",
-                extra={
-                    "failed_attempt": attempt,
-                    "next_attempt": attempt + 1,
-                    "keep_ratio": keep_ratio,
-                    "retry_input_chars": len(current_conversation_text),
-                    "retry_input_estimated_tokens": _estimated_tokens(
-                        current_conversation_text
-                    ),
-                },
-            )
-            attempt += 1
-            continue
-        L.info(
-            "Compaction summary LiteLLM Responses call completed",
-            extra={
-                "attempt": attempt,
-                "input_chars": len(current_conversation_text),
-                "summary_chars": len(summary),
-                "summary_estimated_tokens": _estimated_tokens(summary),
-            },
-        )
-        return summary
+    L.info(
+        "Compaction summary model call starting",
+        extra={
+            "attempt": 1,
+            "input_chars": len(conversation_text),
+            "input_estimated_tokens": _estimated_tokens(conversation_text),
+        },
+    )
+    summary = await _summarize_text_attempt(
+        watchdog=watchdog,
+        provider=provider,
+        provider_integration_id=provider_integration_id,
+        model=model,
+        credential_kwargs=credential_kwargs,
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        conversation_text=conversation_text,
+        endpoint_max_output_tokens=endpoint_max_output_tokens,
+        session_id=session_id,
+    )
+    L.info(
+        "Compaction summary model call completed",
+        extra={
+            "attempt": 1,
+            "input_chars": len(conversation_text),
+            "summary_chars": len(summary),
+            "summary_estimated_tokens": _estimated_tokens(summary),
+        },
+    )
+    return summary
 
 
 async def _summarize_text_attempt(
     *,
     watchdog: ModelStreamWatchdog,
     provider: LLMProvider,
+    provider_integration_id: str | None,
     model: str,
     credential_kwargs: dict[str, object],
     system_prompt: str,
@@ -346,6 +312,7 @@ async def _summarize_text_attempt(
     call_context = ModelStreamCallContext(
         call_kind="compaction",
         provider=provider.value,
+        provider_integration_id=provider_integration_id,
         model=model,
         session_id=session_id,
         run_id=None,
@@ -381,117 +348,64 @@ async def _summarize_text_attempt(
             call_context=call_context,
         )
         return await extract_response_text(response)
+    except ModelProviderFailure:
+        raise
     except ModelStreamTimeoutError as exc:
         raise CompactionModelStreamTimeoutError(exc) from exc
     except ResponsesOutputError as exc:
-        raise _compaction_error_from_responses_output(exc) from exc
-    except OpenAIResponsesProviderError as exc:
-        if exc.code == "context_length_exceeded":
-            raise CompactionContextWindowExceededError(str(exc)) from exc
-        raise CompactionFailedError(str(exc)) from exc
+        raise model_provider_failure(
+            operation="compaction",
+            provider=provider.value,
+            model=model,
+            integration=provider_integration_id,
+            provider_message=exc.message,
+            status_code=None,
+            provider_code=exc.code,
+            provider_error_type=exc.event_type,
+        ) from None
     except ModelCallError as exc:
         raise CompactionFailedError(exc.user_message) from exc
     except ContextWindowExceededError as exc:
-        raise _compaction_error_from_litellm_exception(exc) from exc
+        raise _litellm_provider_failure(
+            exc,
+            provider=provider,
+            provider_integration_id=provider_integration_id,
+            model=model,
+            category=ModelProviderFailureCategory.CONTEXT_LIMIT,
+        ) from None
     except OpenAIError as exc:
-        raise _compaction_error_from_litellm_exception(exc) from exc
+        raise _litellm_provider_failure(
+            exc,
+            provider=provider,
+            provider_integration_id=provider_integration_id,
+            model=model,
+            category=None,
+        ) from None
 
 
-def _compaction_error_from_responses_output(
-    exc: ResponsesOutputError,
-) -> CompactionFailedError:
-    """Convert shared Responses output error to compaction exception hierarchy."""
-    message = exc.message
-    if message:
-        if _is_context_window_exceeded(code=exc.code, message=message):
-            return CompactionContextWindowExceededError(
-                _format_summary_model_error(code=exc.code, message=message)
-            )
-        if isinstance(exc.code, str) and exc.code:
-            return CompactionFailedError(
-                f"Compaction summary model failed: {exc.code}: {message}"
-            )
-        return CompactionFailedError(f"Compaction summary model failed: {message}")
-    return CompactionFailedError(f"Compaction summary model failed: {exc.event_type}")
-
-
-def _compaction_error_from_litellm_exception(
-    exc: Exception,
-) -> CompactionFailedError:
-    """Convert LiteLLM exception to compaction exception hierarchy."""
-    message = str(exc)
-    code = getattr(exc, "code", None)
-    if isinstance(exc, ContextWindowExceededError) or _is_context_window_exceeded(
-        code=code,
-        message=message,
-    ):
-        return CompactionContextWindowExceededError(
-            _format_summary_model_error(code=code, message=message)
-        )
-    return CompactionFailedError(
-        _format_summary_model_error(code=code, message=message)
-    )
-
-
-def _format_summary_model_error(*, code: object, message: str) -> str:
-    """Format summary model error message as an internal, non-user-facing error."""
-    if isinstance(code, str) and code:
-        return f"Compaction summary model failed: {code}: {message}"
-    return f"Compaction summary model failed: {message}"
-
-
-def _is_context_window_exceeded(*, code: object, message: object) -> bool:
-    """Determine whether provider error is context window exceeded."""
-    if code == "context_length_exceeded":
-        return True
-    if not isinstance(message, str):
-        return False
-    normalized = message.lower()
-    return "context window" in normalized and (
-        "exceed" in normalized or "too long" in normalized
-    )
-
-
-def _truncate_context_retry_text(text: str, *, keep_chars: int) -> str:
-    """Omit oldest rendered event lines from summary input."""
-    if keep_chars <= 0:
-        return _SUMMARY_CONTEXT_OMISSION_MARKER[:keep_chars]
-    if len(text) <= keep_chars:
-        return text
-
-    marker_cost = len(_SUMMARY_CONTEXT_OMISSION_MARKER) + 1
-    remaining = max(0, keep_chars - marker_cost)
-    selected: list[str] = []
-    for line in reversed(text.splitlines()):
-        line_cost = len(line) + 1
-        if line_cost <= remaining:
-            selected.append(line)
-            remaining -= line_cost
-            continue
-        if not selected and remaining > 0:
-            selected.append(_truncate_context_retry_line(line, keep_chars=remaining))
-        break
-
-    if not selected:
-        return _SUMMARY_CONTEXT_OMISSION_MARKER[:keep_chars]
-    selected.reverse()
-    return "\n".join([_SUMMARY_CONTEXT_OMISSION_MARKER, *selected])
-
-
-def _truncate_context_retry_line(line: str, *, keep_chars: int) -> str:
-    """Preserve head/tail of one rendered event line and omit the middle."""
-    if keep_chars <= 0:
-        return ""
-    marker_len = len(_SUMMARY_CONTEXT_LINE_TRUNCATION_MARKER)
-    if len(line) <= keep_chars or keep_chars <= marker_len:
-        return line[-keep_chars:]
-    payload_chars = keep_chars - marker_len
-    prefix_chars = payload_chars // 2
-    suffix_chars = payload_chars - prefix_chars
-    return (
-        line[:prefix_chars].rstrip()
-        + _SUMMARY_CONTEXT_LINE_TRUNCATION_MARKER
-        + line[-suffix_chars:].lstrip()
+def _litellm_provider_failure(
+    exc: ContextWindowExceededError | OpenAIError,
+    *,
+    provider: LLMProvider,
+    provider_integration_id: str | None,
+    model: str,
+    category: ModelProviderFailureCategory | None,
+) -> ModelProviderFailure:
+    """Convert one typed LiteLLM failure without retaining its SDK object."""
+    body = getattr(exc, "body", None)
+    error = body.get("error") if isinstance(body, dict) else None
+    error_body = error if isinstance(error, dict) else {}
+    status_code = getattr(exc, "status_code", None)
+    return model_provider_failure(
+        operation="compaction",
+        provider=provider.value,
+        model=model,
+        integration=provider_integration_id,
+        provider_message=(error_body.get("message") or getattr(exc, "message", None)),
+        status_code=status_code if isinstance(status_code, int) else None,
+        provider_code=error_body.get("code") or getattr(exc, "code", None),
+        provider_error_type=(error_body.get("type") or exc.__class__.__name__),
+        category=category,
     )
 
 

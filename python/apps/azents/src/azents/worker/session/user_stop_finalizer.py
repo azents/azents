@@ -2,6 +2,7 @@
 
 import dataclasses
 import datetime
+import logging
 from collections.abc import Awaitable, Callable, Sequence
 from contextlib import AbstractAsyncContextManager
 from typing import Annotated
@@ -10,7 +11,7 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.types import SessionBroker
-from azents.core.enums import AgentRunStatus, EventKind
+from azents.core.enums import AgentRunPhase, AgentRunStatus, EventKind
 from azents.engine.events.engine_events import RunStopped
 from azents.engine.events.tool_calls import finalize_tool_result
 from azents.engine.events.types import (
@@ -25,16 +26,20 @@ from azents.engine.events.types import (
     ReasoningPayload,
     RunMarkerPayload,
 )
+from azents.engine.run.failure import RunRecoveryState
 from azents.rdb.deps import get_session_manager
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_session import AgentSessionRepository
+from azents.services.chat.data import ChatLiveRunRecoveryState, ChatLiveRunState
 from azents.services.chat.live_events import RedisLiveEventStore
 from azents.worker.deps import get_live_event_store, get_worker_broker
 from azents.worker.events.publisher import WorkerEventPublisher
 from azents.worker.live.event_projector import LiveEventProjector
 
 SessionManagerFactory = Callable[[], AbstractAsyncContextManager[AsyncSession]]
+
+logger = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -89,15 +94,16 @@ class UserStopFinalizer:
                 status=AgentRunStatus.STOPPED,
             )
         else:
-            await self._mark_agent_run_terminal_if_running(
+            stopped_run = await self._mark_agent_run_stopped_with_recovery(
                 session_id,
                 run_id=effective_run_id,
-                status=AgentRunStatus.STOPPED,
+                recovery_state=_stopped_recovery_state(running_run),
             )
             await self.event_publisher.dispatch_event(
                 session_id,
                 RunStopped(run_id=effective_run_id),
             )
+            await self._publish_stopped_recovery(session_id, stopped_run)
         await self._clear_stop_request(session_id)
         await self.broker.clear_session_activity(session_id)
 
@@ -108,16 +114,18 @@ class UserStopFinalizer:
         run_id: str,
     ) -> None:
         """Record run marker stopped by User stop and RunStopped event."""
+        running_run = await self._get_running_agent_run(session_id)
         await self._append_user_stop_events(session_id, run_id)
-        await self._mark_agent_run_terminal_if_running(
+        stopped_run = await self._mark_agent_run_stopped_with_recovery(
             session_id,
             run_id=run_id,
-            status=AgentRunStatus.STOPPED,
+            recovery_state=_stopped_recovery_state(running_run),
         )
         await self.event_publisher.dispatch_event(
             session_id,
             RunStopped(run_id=run_id),
         )
+        await self._publish_stopped_recovery(session_id, stopped_run)
         await self._clear_stop_request(session_id)
 
     async def _get_running_agent_run(
@@ -328,27 +336,70 @@ class UserStopFinalizer:
             )
         )
 
-    async def _mark_agent_run_terminal_if_running(
+    async def _mark_agent_run_stopped_with_recovery(
         self,
         session_id: str,
         *,
         run_id: str,
-        status: AgentRunStatus,
-    ) -> None:
-        """Close AgentRun row as terminal state if still running."""
+        recovery_state: RunRecoveryState | None,
+    ) -> AgentRunState | None:
+        """Stop one Run while retaining its latest provider failure."""
+        stopped_run: AgentRunState | None = None
 
-        async def mark_terminal(db_session: AsyncSession) -> None:
+        async def mark_stopped(db_session: AsyncSession) -> None:
+            nonlocal stopped_run
             run = await self.agent_run_repository.get_by_id(db_session, run_id)
             if run is not None and run.session_id != session_id:
                 raise ValueError("AgentRun session mismatch")
-            await self.agent_run_repository.mark_terminal_if_running(
-                db_session,
-                run_id,
-                status,
-                ended_at=datetime.datetime.now(datetime.UTC),
+            stopped_run = (
+                await self.agent_run_repository.mark_stopped_with_recovery_if_running(
+                    db_session,
+                    run_id,
+                    recovery_state=recovery_state,
+                    ended_at=datetime.datetime.now(datetime.UTC),
+                )
             )
 
-        await self._run_short_db(mark_terminal)
+        await self._run_short_db(mark_stopped)
+        return stopped_run
+
+    async def _publish_stopped_recovery(
+        self,
+        session_id: str,
+        run: AgentRunState | None,
+    ) -> None:
+        """Publish the persisted recoverable stopped Run to live clients."""
+        if run is None or run.recovery_state is None:
+            return
+        async with self.session_manager() as db_session:
+            session_state = await self.agent_session_repository.get_by_id(
+                db_session,
+                session_id,
+            )
+        if session_state is None or session_state.inference_state is None:
+            logger.warning(
+                "Stopped AgentRun recovery has no Session inference state",
+                extra={"session_id": session_id, "run_id": run.id},
+            )
+            return
+        recovery = run.recovery_state
+        await self.live_event_projector.publish_live_run_updated(
+            session_id,
+            ChatLiveRunState(
+                run_id=run.id,
+                phase=run.phase,
+                status=run.status,
+                inference_profile=session_state.inference_state.applied_profile,
+                model_call_started_at=run.model_call_started_at,
+                recovery=ChatLiveRunRecoveryState(
+                    kind=recovery.kind,
+                    user_message=recovery.user_message,
+                    operation=recovery.operation,
+                    source_run_id=recovery.source_run_id,
+                    stopped_at=recovery.stopped_at.isoformat(),
+                ),
+            ),
+        )
 
     async def _run_short_db(
         self,
@@ -357,3 +408,27 @@ class UserStopFinalizer:
         """Run ``action`` in a short-lived DB transaction."""
         async with self.session_manager() as db_session:
             await action(db_session)
+
+
+def _stopped_recovery_state(run: AgentRunState | None) -> RunRecoveryState | None:
+    """Build a recoverable state for every active Run stopped by the user."""
+    if run is None:
+        return None
+    stopped_at = datetime.datetime.now(datetime.UTC)
+    if run.retry_state is not None:
+        provider_recovery = RunRecoveryState.from_retry_state(
+            run.retry_state,
+            source_run_id=run.id,
+            stopped_at=stopped_at,
+        )
+        if provider_recovery is not None:
+            return provider_recovery
+    return RunRecoveryState(
+        kind="stopped",
+        user_message="Execution stopped.",
+        operation=(
+            "compaction" if run.phase is AgentRunPhase.COMPACTING else "sampling"
+        ),
+        source_run_id=run.id,
+        stopped_at=stopped_at,
+    )

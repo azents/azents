@@ -652,6 +652,7 @@ async def test_event_engine_adapter_runs_execution() -> None:
                 agent_id="agent-1",
                 auto_compaction_threshold_tokens=None,
                 inference_state=None,
+                compaction_provider_integration_id=None,
             ),
             RunContext(
                 owner_generation=1,
@@ -705,6 +706,7 @@ async def test_adapter_yields_model_output_before_run_completion() -> None:
             agent_id="agent-1",
             auto_compaction_threshold_tokens=None,
             inference_state=None,
+            compaction_provider_integration_id=None,
         ),
         RunContext(
             owner_generation=1,
@@ -753,6 +755,7 @@ async def test_adapter_forwards_user_stop_cancellation_to_execution() -> None:
                 agent_id="agent-1",
                 auto_compaction_threshold_tokens=None,
                 inference_state=None,
+                compaction_provider_integration_id=None,
             ),
             RunContext(
                 owner_generation=1,
@@ -803,6 +806,7 @@ async def test_adapter_drains_run_task_on_stream_close() -> None:
             agent_id="agent-1",
             auto_compaction_threshold_tokens=None,
             inference_state=None,
+            compaction_provider_integration_id=None,
         ),
         RunContext(
             owner_generation=1,
@@ -855,6 +859,7 @@ async def test_event_engine_adapter_includes_turn_start_injected_prompts() -> No
                 agent_id="agent-1",
                 auto_compaction_threshold_tokens=None,
                 inference_state=None,
+                compaction_provider_integration_id=None,
             ),
             RunContext(
                 owner_generation=1,
@@ -907,6 +912,7 @@ async def test_adapter_propagates_user_visible_model_call_error() -> None:
                 agent_id="agent-1",
                 auto_compaction_threshold_tokens=None,
                 inference_state=None,
+                compaction_provider_integration_id=None,
             ),
             RunContext(
                 owner_generation=1,
@@ -971,6 +977,7 @@ async def test_model_kwargs_routes_chatgpt_oauth_to_backend_api() -> None:
                 agent_id="agent-1",
                 auto_compaction_threshold_tokens=None,
                 inference_state=None,
+                compaction_provider_integration_id=None,
             ),
             RunContext(
                 owner_generation=1,
@@ -1030,6 +1037,7 @@ async def test_adapter_wires_event_filters_and_session_head_repo() -> None:
                 agent_id="agent-1",
                 auto_compaction_threshold_tokens=None,
                 inference_state=None,
+                compaction_provider_integration_id=None,
                 max_output_tokens=123,
                 max_input_tokens=64_000,
                 compaction_max_input_tokens=32_000,
@@ -1085,6 +1093,7 @@ async def test_manual_compact_runs_append_only_event_compactor() -> None:
     async def summarize(
         *,
         provider: LLMProvider,
+        provider_integration_id: str | None,
         model: str,
         credential_kwargs: dict[str, object],
         system_prompt: str,
@@ -1094,7 +1103,14 @@ async def test_manual_compact_runs_append_only_event_compactor() -> None:
         session_id: str | None = None,
     ) -> str:
         """Replace summary model call."""
-        del provider, model, credential_kwargs, max_output_tokens, session_id
+        del (
+            provider,
+            provider_integration_id,
+            model,
+            credential_kwargs,
+            max_output_tokens,
+            session_id,
+        )
         captured_prompts["system_prompt"] = system_prompt
         captured_prompts["user_prompt"] = user_prompt
         return f"summary::{conversation_text}"
@@ -1126,6 +1142,7 @@ async def test_manual_compact_runs_append_only_event_compactor() -> None:
                 agent_id="agent-1",
                 auto_compaction_threshold_tokens=None,
                 inference_state=None,
+                compaction_provider_integration_id=None,
             ),
             _run_context(),
         )
@@ -1160,6 +1177,7 @@ async def test_manual_compact_runs_compaction_summary_hook() -> None:
     async def summarize(
         *,
         provider: LLMProvider,
+        provider_integration_id: str | None,
         model: str,
         credential_kwargs: dict[str, object],
         system_prompt: str,
@@ -1169,7 +1187,14 @@ async def test_manual_compact_runs_compaction_summary_hook() -> None:
         session_id: str | None = None,
     ) -> str:
         """Return compact summary."""
-        del provider, model, credential_kwargs, system_prompt, user_prompt
+        del (
+            provider,
+            provider_integration_id,
+            model,
+            credential_kwargs,
+            system_prompt,
+            user_prompt,
+        )
         del conversation_text, max_output_tokens, session_id
         return "summary"
 
@@ -1200,6 +1225,7 @@ async def test_manual_compact_runs_compaction_summary_hook() -> None:
                 agent_id="agent-1",
                 auto_compaction_threshold_tokens=None,
                 inference_state=None,
+                compaction_provider_integration_id=None,
             ),
             _run_context(),
         )
@@ -1269,6 +1295,7 @@ async def test_manual_compact_trims_summary_input_to_checkpoint_and_tail() -> No
     async def summarize(
         *,
         provider: LLMProvider,
+        provider_integration_id: str | None,
         model: str,
         credential_kwargs: dict[str, object],
         system_prompt: str,
@@ -1278,7 +1305,14 @@ async def test_manual_compact_trims_summary_input_to_checkpoint_and_tail() -> No
         session_id: str | None = None,
     ) -> str:
         """Capture summary input."""
-        del provider, model, credential_kwargs, system_prompt, user_prompt
+        del (
+            provider,
+            provider_integration_id,
+            model,
+            credential_kwargs,
+            system_prompt,
+            user_prompt,
+        )
         del max_output_tokens, session_id
         captured["conversation_text"] = conversation_text
         return "summary"
@@ -1310,6 +1344,7 @@ async def test_manual_compact_trims_summary_input_to_checkpoint_and_tail() -> No
                 agent_id="agent-1",
                 auto_compaction_threshold_tokens=None,
                 inference_state=None,
+                compaction_provider_integration_id=None,
                 max_input_tokens=12_000,
                 compaction_max_input_tokens=12_000,
             ),
@@ -1364,6 +1399,7 @@ async def test_manual_compact_propagates_compaction_failure() -> None:
             agent_id="agent-1",
             auto_compaction_threshold_tokens=None,
             inference_state=None,
+            compaction_provider_integration_id=None,
         ),
         _run_context(),
     )

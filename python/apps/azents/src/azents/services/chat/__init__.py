@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     AgentProjectDefaultItemType,
+    AgentRunPhase,
     AgentRunStatus,
     AgentSessionKind,
     AgentSessionPrimaryKind,
@@ -68,6 +69,8 @@ from .data import (
     AgentNotFound,
     ArchiveSessionError,
     ArchiveSessionResult,
+    ChatLiveRunOperation,
+    ChatLiveRunRecoveryState,
     ChatLiveRunRetryAttempt,
     ChatLiveRunRetryState,
     ChatLiveRunState,
@@ -1016,10 +1019,16 @@ class ChatSessionService:
                 input_buffer_to_live_event(input_buffer)
                 for input_buffer in input_buffers
             ]
-            run = await self.agent_run_repository.get_running_by_session_id(
+            run = await self.agent_run_repository.get_live_by_session_id(
                 session,
                 session_id=session_id,
             )
+            if (
+                run is not None
+                and run.status == AgentRunStatus.STOPPED
+                and input_buffers
+            ):
+                run = None
             goal_store = GoalStateStore(session_manager=self.session_manager)
             goal = GoalStateSnapshot.from_state(
                 await goal_store.load_in_session(
@@ -1068,23 +1077,47 @@ class ChatSessionService:
         live_run = None
         if run is not None:
             assert inference_profile is not None
-            if session_run_state != AgentSessionRunState.RUNNING:
-                logger.warning(
-                    "Active AgentRun contradicts persisted Session run state",
-                    extra={
-                        "session_id": session_id,
-                        "run_id": run.id,
-                        "run_status": run.status,
-                        "session_run_state": session_run_state,
-                    },
-                )
-            session_run_state = AgentSessionRunState.RUNNING
+            active_run = run.status in {
+                AgentRunStatus.PENDING,
+                AgentRunStatus.RUNNING,
+            }
+            if active_run:
+                if session_run_state != AgentSessionRunState.RUNNING:
+                    logger.warning(
+                        "Active AgentRun contradicts persisted Session run state",
+                        extra={
+                            "session_id": session_id,
+                            "run_id": run.id,
+                            "run_status": run.status,
+                            "session_run_state": session_run_state,
+                        },
+                    )
+                session_run_state = AgentSessionRunState.RUNNING
+            recovery = run.recovery_state
             live_run = ChatLiveRunState(
                 run_id=run.id,
                 phase=run.phase,
                 status=run.status,
                 inference_profile=inference_profile,
                 model_call_started_at=run.model_call_started_at,
+                operation=(
+                    ChatLiveRunOperation(
+                        kind="preparing_context",
+                        operation_id=run.id,
+                        status="running",
+                    )
+                    if active_run and run.phase == AgentRunPhase.COMPACTING
+                    else None
+                ),
+                recovery=None
+                if recovery is None
+                else ChatLiveRunRecoveryState(
+                    kind=recovery.kind,
+                    user_message=recovery.user_message,
+                    operation=recovery.operation,
+                    source_run_id=recovery.source_run_id,
+                    stopped_at=recovery.stopped_at.isoformat(),
+                ),
                 retry=None
                 if run.retry_state is None
                 else ChatLiveRunRetryState(

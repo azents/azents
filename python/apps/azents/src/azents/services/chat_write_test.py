@@ -10,6 +10,7 @@ from azcommon.result import Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
+    AgentRunPhase,
     AgentRunStatus,
     AgentSessionKind,
     AgentSessionRunState,
@@ -30,6 +31,7 @@ from azents.engine.run.failure import (
     FailedRunAttempt,
     FailedRunFailureMetadata,
     FailedRunRetryState,
+    RunRecoveryState,
 )
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.chat_write_request import ChatWriteRequestType
@@ -601,6 +603,117 @@ class TestChatWriteService:
                 event_id=user_event.id,
             )
             assert len(associated_runs) == 2
+
+    async def test_stopped_manual_compaction_retry_requeues_command(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Retrying a stopped command Run creates a fresh compact command Run."""
+        async with rdb_session_manager() as session:
+            workspace_id = await _create_workspace(
+                session,
+                "chat-write-stopped-command-retry",
+            )
+            user_id = await _create_user(
+                session,
+                "chat-write-stopped-command-retry@example.com",
+            )
+            agent_id = await _create_agent(
+                session,
+                workspace_id,
+                "stopped-command-retry",
+            )
+            agent_session = (
+                await AgentSessionRepository().ensure_team_primary_for_agent(
+                    session,
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                )
+            )
+            run_repo = AgentRunRepository()
+            source = await run_repo.create(
+                session,
+                AgentRunCreate(
+                    session_id=agent_session.id,
+                    parent_agent_run_id=None,
+                    phase=AgentRunPhase.COMPACTING,
+                ),
+            )
+            now = datetime.datetime.now(datetime.UTC)
+            await run_repo.mark_stopped_with_recovery(
+                session,
+                source.id,
+                recovery_state=RunRecoveryState(
+                    kind="stopped",
+                    user_message="Execution stopped.",
+                    operation="compaction",
+                    source_run_id=source.id,
+                    stopped_at=now,
+                ),
+                ended_at=now,
+            )
+
+        payload: dict[str, object] = {"stopped_run_id": source.id}
+        service = _service(rdb_session_manager)
+        accepted = await service.create_idempotent_stopped_run_retry(
+            agent_id=agent_id,
+            session_id=agent_session.id,
+            user_id=user_id,
+            client_request_id="retry-stopped-command",
+            stopped_run_id=source.id,
+            payload=payload,
+        )
+
+        assert accepted.request.created is True
+        assert accepted.stopped_run_id == source.id
+        assert accepted.retry_run_id is not None
+        async with rdb_session_manager() as session:
+            retry = await AgentRunRepository().get_retry_by_source_run_id(
+                session,
+                source_run_id=source.id,
+            )
+            assert retry is not None
+            assert retry.id == accepted.retry_run_id
+            assert retry.status == AgentRunStatus.PENDING
+            assert retry.retry_source_run_id == source.id
+            assert (
+                await AgentRunRepository().list_input_event_ids(
+                    session,
+                    run_id=retry.id,
+                )
+                == []
+            )
+            pending_command = (
+                await AgentSessionRepository().get_pending_command_by_session_id(
+                    session,
+                    agent_session.id,
+                )
+            )
+            assert pending_command is not None
+            assert pending_command.name == "compact"
+            assert pending_command.user_id == user_id
+            assert pending_command.payload == {
+                "command": "compact",
+                "retry_source_run_id": source.id,
+            }
+            session_after = await AgentSessionRepository().get_by_id(
+                session,
+                agent_session.id,
+            )
+            assert session_after is not None
+            assert session_after.run_state == AgentSessionRunState.RUNNING
+
+        repeated = await service.create_idempotent_stopped_run_retry(
+            agent_id=agent_id,
+            session_id=agent_session.id,
+            user_id=user_id,
+            client_request_id="retry-stopped-command",
+            stopped_run_id=source.id,
+            payload=payload,
+        )
+
+        assert repeated.request.created is False
+        assert repeated.retry_run_id == accepted.retry_run_id
 
     async def test_failed_run_retry_rejects_stale_failed_error(
         self,

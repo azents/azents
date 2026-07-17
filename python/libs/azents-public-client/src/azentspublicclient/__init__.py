@@ -127,11 +127,14 @@ __all__ = [
     "ChatGPTOAuthSessionStatus",
     "ChatInputWriteRequest",
     "ChatInputWriteRequestAction",
+    "ChatLiveRunOperationResponse",
+    "ChatLiveRunRecoveryStateResponse",
     "ChatLiveRunRetryAttemptResponse",
     "ChatLiveRunRetryStateResponse",
     "ChatLiveRunStateResponse",
     "ChatSessionCreateMessageWriteRequest",
     "ChatStopResponse",
+    "ChatStoppedRunRetryRequest",
     "ChatWriteAcceptedResponse",
     "ChatWriteResponse",
     "ChatWriteSnapshotResponse",
@@ -429,11 +432,14 @@ from azentspublicclient.models.chat_gpto_auth_secrets import ChatGPTOAuthSecrets
 from azentspublicclient.models.chat_gpto_auth_session_status import ChatGPTOAuthSessionStatus as ChatGPTOAuthSessionStatus
 from azentspublicclient.models.chat_input_write_request import ChatInputWriteRequest as ChatInputWriteRequest
 from azentspublicclient.models.chat_input_write_request_action import ChatInputWriteRequestAction as ChatInputWriteRequestAction
+from azentspublicclient.models.chat_live_run_operation_response import ChatLiveRunOperationResponse as ChatLiveRunOperationResponse
+from azentspublicclient.models.chat_live_run_recovery_state_response import ChatLiveRunRecoveryStateResponse as ChatLiveRunRecoveryStateResponse
 from azentspublicclient.models.chat_live_run_retry_attempt_response import ChatLiveRunRetryAttemptResponse as ChatLiveRunRetryAttemptResponse
 from azentspublicclient.models.chat_live_run_retry_state_response import ChatLiveRunRetryStateResponse as ChatLiveRunRetryStateResponse
 from azentspublicclient.models.chat_live_run_state_response import ChatLiveRunStateResponse as ChatLiveRunStateResponse
 from azentspublicclient.models.chat_session_create_message_write_request import ChatSessionCreateMessageWriteRequest as ChatSessionCreateMessageWriteRequest
 from azentspublicclient.models.chat_stop_response import ChatStopResponse as ChatStopResponse
+from azentspublicclient.models.chat_stopped_run_retry_request import ChatStoppedRunRetryRequest as ChatStoppedRunRetryRequest
 from azentspublicclient.models.chat_write_accepted_response import ChatWriteAcceptedResponse as ChatWriteAcceptedResponse
 from azentspublicclient.models.chat_write_response import ChatWriteResponse as ChatWriteResponse
 from azentspublicclient.models.chat_write_snapshot_response import ChatWriteSnapshotResponse as ChatWriteSnapshotResponse

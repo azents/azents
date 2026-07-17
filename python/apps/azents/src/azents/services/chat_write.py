@@ -8,6 +8,7 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
+    AgentRunStatus,
     AgentSessionKind,
     AgentSessionRunState,
     EventKind,
@@ -63,6 +64,15 @@ class AcceptedFailedRunRetry:
 
     request: AcceptedChatWriteRequest
     failed_event_id: str
+
+
+@dataclasses.dataclass(frozen=True)
+class AcceptedStoppedRunRetry:
+    """REST recoverable stopped-Run retry acceptance result."""
+
+    request: AcceptedChatWriteRequest
+    stopped_run_id: str
+    retry_run_id: str | None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -317,15 +327,6 @@ class ChatWriteService:
             )
             if original_run is None:
                 raise ValueError("Failed AgentRun not found")
-            original_input_event_ids = (
-                await self.agent_run_repository.list_input_event_ids(
-                    session,
-                    run_id=original_run.id,
-                )
-            )
-            if not original_input_event_ids:
-                raise ValueError("Failed AgentRun has no input events")
-
             record, created = await self._create_idempotent_record(
                 session,
                 session_id=session_id,
@@ -347,15 +348,11 @@ class ChatWriteService:
                     session,
                     session_id,
                 )
-                retry_run = await self.agent_run_repository.create_pending(
+                await self.agent_run_repository.create_retry_pending_from_source(
                     session,
                     session_id=session_id,
-                    parent_agent_run_id=None,
-                )
-                await self.agent_run_repository.associate_input_events(
-                    session,
-                    run_id=retry_run.id,
-                    event_ids=original_input_event_ids,
+                    source_run_id=original_run.id,
+                    allow_empty_inputs=False,
                 )
                 await self.agent_session_repository.mark_running(session, session_id)
 
@@ -366,6 +363,131 @@ class ChatWriteService:
                 created=created,
             ),
             failed_event_id=record.accepted_id,
+        )
+
+    async def create_idempotent_stopped_run_retry(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        user_id: str,
+        client_request_id: str,
+        stopped_run_id: str,
+        payload: dict[str, object],
+    ) -> AcceptedStoppedRunRetry:
+        """Create a fresh linked Run from the latest recoverable stopped Run."""
+        async with self.session_manager() as session:
+            existing = (
+                await self.chat_write_request_repository.get_by_client_request_id(
+                    session,
+                    session_id=session_id,
+                    user_id=user_id,
+                    client_request_id=client_request_id,
+                )
+            )
+            if existing is not None:
+                self._validate_existing_record(
+                    existing,
+                    write_type=ChatWriteRequestType.STOPPED_RUN_RETRY,
+                    payload=payload,
+                )
+                retry_run = await self.agent_run_repository.get_retry_by_source_run_id(
+                    session,
+                    source_run_id=existing.accepted_id,
+                )
+                return AcceptedStoppedRunRetry(
+                    request=AcceptedChatWriteRequest(
+                        session_id=existing.session_id,
+                        record=existing,
+                        created=False,
+                    ),
+                    stopped_run_id=existing.accepted_id,
+                    retry_run_id=retry_run.id if retry_run is not None else None,
+                )
+
+            await self._lock_session_for_idle_control(
+                session,
+                agent_id=agent_id,
+                session_id=session_id,
+            )
+            pending_inputs = await self.input_buffer_service.list_by_session_id(
+                session,
+                session_id,
+            )
+            if pending_inputs:
+                raise ValueError("Session has pending input")
+
+            source = await self.agent_run_repository.get_live_by_session_id(
+                session,
+                session_id=session_id,
+            )
+            if source is None or source.id != stopped_run_id:
+                raise ValueError("Stopped AgentRun is no longer recoverable")
+            if source.status != AgentRunStatus.STOPPED:
+                raise ValueError("AgentRun is not stopped")
+            if source.recovery_state is None:
+                raise ValueError("Stopped AgentRun has no recovery state")
+            source_input_event_ids = (
+                await self.agent_run_repository.list_input_event_ids(
+                    session,
+                    run_id=source.id,
+                )
+            )
+            retry_command: str | None = None
+            if not source_input_event_ids:
+                if source.recovery_state.operation != "compaction":
+                    raise ValueError("Retry source AgentRun has no input events")
+                retry_command = "compact"
+
+            record, created = await self._create_idempotent_record(
+                session,
+                session_id=session_id,
+                user_id=user_id,
+                client_request_id=client_request_id,
+                write_type=ChatWriteRequestType.STOPPED_RUN_RETRY,
+                accepted_type=ChatWriteRequestType.STOPPED_RUN_RETRY,
+                accepted_id=stopped_run_id,
+                history_reload_required=False,
+                payload=payload,
+            )
+            retry_run = (
+                await self.agent_run_repository.create_retry_pending_from_source(
+                    session,
+                    session_id=session_id,
+                    source_run_id=source.id,
+                    allow_empty_inputs=retry_command is not None,
+                )
+                if created
+                else await self.agent_run_repository.get_retry_by_source_run_id(
+                    session,
+                    source_run_id=source.id,
+                )
+            )
+            if created and retry_command is not None:
+                queued = await self.agent_session_repository.enqueue_pending_command(
+                    session,
+                    session_id=session_id,
+                    command_id=uuid7().hex,
+                    command_name=retry_command,
+                    payload={
+                        "command": retry_command,
+                        "retry_source_run_id": source.id,
+                    },
+                    user_id=user_id,
+                )
+                if queued is None:
+                    raise ValueError("Session cannot accept retried command")
+            elif created:
+                await self.agent_session_repository.mark_running(session, session_id)
+
+        return AcceptedStoppedRunRetry(
+            request=AcceptedChatWriteRequest(
+                session_id=record.session_id,
+                record=record,
+                created=created,
+            ),
+            stopped_run_id=record.accepted_id,
+            retry_run_id=retry_run.id if retry_run is not None else None,
         )
 
     async def request_session_stop(

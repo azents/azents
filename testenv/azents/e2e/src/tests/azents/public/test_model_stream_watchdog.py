@@ -52,6 +52,11 @@ _EVENTS_RESET_RESPONSE = (
 _RETRY_EXHAUSTION_PROMPT = "Watchdog retry exhaustion"
 _USER_STOP_PROMPT = "Watchdog user stop preserves partial"
 _USER_STOP_PARTIAL = "WATCHDOG_STOP_PARTIAL"
+_USER_STOP_RETRY_RESPONSE = "WATCHDOG_STOP_RETRY_RECOVERED"
+_STOP_DISMISS_PROMPT = "Watchdog stop recovery dismissed by new message"
+_STOP_DISMISS_PARTIAL = "WATCHDOG_DISMISS_STOP_PARTIAL"
+_STOP_DISMISS_NEXT_PROMPT = "Watchdog new message after stop"
+_STOP_DISMISS_NEXT_RESPONSE = "WATCHDOG_NEW_MESSAGE_AFTER_STOP_COMPLETED"
 _COMPACTION_SEED = "Watchdog compaction timeout seed"
 _COMPACTION_SEED_RESPONSE = "Watchdog compaction timeout seed response."
 _TITLE_PROMPT = "Watchdog session title timeout"
@@ -249,6 +254,56 @@ def _post_stop(*, public_url: str, token: str, session_id: str) -> None:
     response.raise_for_status()
 
 
+def _post_stopped_run_retry(
+    *,
+    public_url: str,
+    token: str,
+    agent_id: str,
+    session_id: str,
+    stopped_run_id: str,
+) -> dict[str, object]:
+    """Retry one recoverable stopped Run through the public REST boundary."""
+    response = requests.post(
+        f"{public_url}/chat/v1/sessions/{session_id}/retry-stopped-run",
+        headers={**auth_headers(token), "Content-Type": "application/json"},
+        json={
+            "agent_id": agent_id,
+            "stopped_run_id": stopped_run_id,
+            "client_request_id": f"watchdog-stopped-retry-{unique()}",
+        },
+        timeout=10,
+    )
+    response.raise_for_status()
+    return json_object(response)
+
+
+def _post_message_with_snapshot(
+    *,
+    public_url: str,
+    token: str,
+    agent_id: str,
+    session_id: str,
+    message: str,
+) -> dict[str, object]:
+    """Post a user message and return its authoritative write snapshot."""
+    response = requests.post(
+        f"{public_url}/chat/v1/sessions/{session_id}/inputs",
+        headers={**auth_headers(token), "Content-Type": "application/json"},
+        json={
+            "agent_id": agent_id,
+            "client_request_id": f"watchdog-message-{unique()}",
+            "message": message,
+            "inference_profile": {
+                "model_target_label": "default",
+                "reasoning_effort": None,
+            },
+        },
+        timeout=10,
+    )
+    response.raise_for_status()
+    return json_object(response)
+
+
 def _post_compact(
     *,
     public_url: str,
@@ -277,6 +332,7 @@ def _wait_for_interrupted_partial(
     public_url: str,
     token: str,
     session_id: str,
+    content_marker: str,
     timeout: float = 15,
 ) -> dict[str, object]:
     """Wait until User Stop durably retains the valid partial and interruption."""
@@ -289,9 +345,7 @@ def _wait_for_interrupted_partial(
             token=token,
             session_id=session_id,
         )
-        if not any(
-            _USER_STOP_PARTIAL in content for content in message_contents(observed)
-        ):
+        if not any(content_marker in content for content in message_contents(observed)):
             return False
         for event in history_events(observed):
             if event.get("kind") != "run_marker":
@@ -308,6 +362,73 @@ def _wait_for_interrupted_partial(
         interrupted,
         timeout=timeout,
         message=f"interrupted partial did not become durable: {observed!r}",
+    )
+    assert observed is not None
+    return observed
+
+
+def _wait_for_stopped_recovery(
+    *,
+    public_url: str,
+    token: str,
+    session_id: str,
+    timeout: float = 15,
+) -> dict[str, object]:
+    """Wait until the live projection exposes one recoverable stopped Run."""
+    observed: dict[str, object] | None = None
+
+    def recovery_visible() -> bool:
+        nonlocal observed
+        observed = list_live(
+            server_url=public_url,
+            token=token,
+            session_id=session_id,
+        )
+        run_payload = observed.get("run")
+        if run_payload is None:
+            return False
+        run = json_object_payload(run_payload, label="recoverable stopped run")
+        recovery_payload = run.get("recovery")
+        if recovery_payload is None:
+            return False
+        recovery = json_object_payload(
+            recovery_payload,
+            label="stopped run recovery",
+        )
+        return recovery.get("source_run_id") == run.get("run_id")
+
+    _wait_until(
+        recovery_visible,
+        timeout=timeout,
+        message=f"stopped recovery did not appear: {observed!r}",
+    )
+    assert observed is not None
+    return observed
+
+
+def _wait_for_no_live_run(
+    *,
+    public_url: str,
+    token: str,
+    session_id: str,
+    timeout: float = 15,
+) -> dict[str, object]:
+    """Wait until no active or recoverable Run remains in the live projection."""
+    observed: dict[str, object] | None = None
+
+    def run_cleared() -> bool:
+        nonlocal observed
+        observed = list_live(
+            server_url=public_url,
+            token=token,
+            session_id=session_id,
+        )
+        return observed.get("run") is None
+
+    _wait_until(
+        run_cleared,
+        timeout=timeout,
+        message=f"live run did not clear: {observed!r}",
     )
     assert observed is not None
     return observed
@@ -603,14 +724,14 @@ class TestModelStreamWatchdog:
         }
         assert all(attempt.get("retryability") == "transient" for attempt in attempts)
 
-    def test_user_stop_preserves_valid_partial_without_timeout_retry(
+    def test_user_stop_exposes_recovery_and_retry_starts_fresh_run(
         self,
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
         azents_engine_worker_container: object,
     ) -> None:
-        """Stop remains preemptive and retains only the valid assistant prefix."""
+        """Stop retains valid output and Retry starts a fresh recoverable Run."""
         del azents_engine_worker_container
         workspace = setup_workspace(
             public_api_client,
@@ -636,14 +757,163 @@ class TestModelStreamWatchdog:
             token=workspace.token,
             session_id=result.session_id,
         )
-        payload = _wait_for_interrupted_partial(
+        history = _wait_for_interrupted_partial(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=result.session_id,
+            content_marker=_USER_STOP_PARTIAL,
+        )
+        live = _wait_for_stopped_recovery(
             public_url=azents_public_server_url,
             token=workspace.token,
             session_id=result.session_id,
         )
+        stopped_run = json_object_payload(
+            live.get("run"),
+            label="recoverable stopped run",
+        )
+        stopped_run_id = stopped_run.get("run_id")
+        assert isinstance(stopped_run_id, str)
+        recovery = json_object_payload(
+            stopped_run.get("recovery"),
+            label="stopped run recovery",
+        )
+        assert recovery.get("kind") == "stopped"
+        assert recovery.get("user_message") == "Execution stopped."
+        assert recovery.get("operation") == "sampling"
+        assert recovery.get("source_run_id") == stopped_run_id
 
-        assert not system_error_events(payload)
-        assert "run_complete" in message_roles(payload)
+        retry = _post_stopped_run_retry(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            session_id=result.session_id,
+            stopped_run_id=stopped_run_id,
+        )
+        accepted = json_object_payload(
+            retry.get("accepted"),
+            label="stopped retry accepted target",
+        )
+        assert accepted == {"type": "stopped_run_retry", "id": stopped_run_id}
+        snapshot = json_object_payload(
+            retry.get("snapshot"),
+            label="stopped retry snapshot",
+        )
+        retry_run = json_object_payload(
+            snapshot.get("run"),
+            label="fresh retry run",
+        )
+        assert retry_run.get("run_id") != stopped_run_id
+        assert retry_run.get("retry") is None
+        assert retry_run.get("recovery") is None
+
+        final_history = wait_for_rest_contents(
+            server_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=result.session_id,
+            expected=[_USER_STOP_RETRY_RESPONSE],
+        )
+        assert not system_error_events(history)
+        assert not system_error_events(final_history)
+        assert "run_complete" in message_roles(history)
+        assert any(
+            _USER_STOP_PARTIAL in content for content in message_contents(final_history)
+        )
+
+    def test_new_message_dismisses_stopped_recovery_and_runs_normally(
+        self,
+        public_api_client: azentspublicclient.ApiClient,
+        admin_api_client: azentsadminclient.ApiClient,
+        azents_public_server_url: str,
+        azents_engine_worker_container: object,
+    ) -> None:
+        """A new user message replaces an old stopped recovery projection."""
+        del azents_engine_worker_container
+        workspace = setup_workspace(
+            public_api_client,
+            admin_api_client,
+            azents_public_server_url,
+        )
+        agent_id = create_agent(public_api_client, workspace)
+        result = run_message(
+            public_api_client=public_api_client,
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            message=_STOP_DISMISS_PROMPT,
+        )
+        _wait_for_live_content(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=result.session_id,
+            content=_STOP_DISMISS_PARTIAL,
+        )
+        _post_stop(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=result.session_id,
+        )
+        _wait_for_interrupted_partial(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=result.session_id,
+            content_marker=_STOP_DISMISS_PARTIAL,
+        )
+        live = _wait_for_stopped_recovery(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=result.session_id,
+        )
+        stopped_run = json_object_payload(
+            live.get("run"),
+            label="dismissed stopped run",
+        )
+        stopped_run_id = stopped_run.get("run_id")
+        assert isinstance(stopped_run_id, str)
+
+        write = _post_message_with_snapshot(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            session_id=result.session_id,
+            message=_STOP_DISMISS_NEXT_PROMPT,
+        )
+        accepted = json_object_payload(
+            write.get("accepted"),
+            label="new message accepted target",
+        )
+        assert accepted.get("type") == "input_buffer"
+        snapshot = json_object_payload(
+            write.get("snapshot"),
+            label="new message snapshot",
+        )
+        new_run_payload = snapshot.get("run")
+        if new_run_payload is None:
+            pending_inputs = json_object_list_payload(
+                snapshot.get("input_buffer_events"),
+                label="new message input buffer",
+            )
+            assert pending_inputs
+        else:
+            new_run = json_object_payload(
+                new_run_payload,
+                label="new message run",
+            )
+            assert new_run.get("run_id") != stopped_run_id
+            assert new_run.get("recovery") is None
+
+        final_history = wait_for_rest_contents(
+            server_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=result.session_id,
+            expected=[_STOP_DISMISS_NEXT_PROMPT, _STOP_DISMISS_NEXT_RESPONSE],
+        )
+        assert not system_error_events(final_history)
+        _wait_for_no_live_run(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=result.session_id,
+        )
 
     def test_compaction_timeout_uses_run_retry_and_commits_no_summary(
         self,
@@ -686,7 +956,10 @@ class TestModelStreamWatchdog:
             expected_attempts=4,
         )
 
-        assert "compaction_summary" not in message_roles(payload)
+        roles = message_roles(payload)
+        assert "compaction_marker" not in roles
+        assert "compaction_summary" not in roles
+        assert len(failed_run_error_events(payload)) == 1
         assert {
             attempt.get("failure_code") for attempt in _failed_attempts(payload)
         } == {"model_stream_idle_timeout"}

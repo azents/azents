@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 from azents.core.enums import AgentRunPhase, AgentRunStatus, EventKind
 from azents.engine.events.types import ActiveToolCall
-from azents.engine.run.failure import FailedRunRetryState
+from azents.engine.run.failure import FailedRunRetryState, RunRecoveryState
 from azents.rdb.models.event import JSONValue
 
 
@@ -54,6 +54,7 @@ class AgentRunPatch(BaseModel):
     phase: AgentRunPhase | None = Field(default=None, description="Run phase")
     status: AgentRunStatus | None = Field(default=None, description="Run status")
     parent_agent_run_id: str | None = Field(default=None)
+    retry_source_run_id: str | None = Field(default=None)
     started_at: datetime.datetime | None = Field(default=None)
     model_call_started_at: datetime.datetime | None = Field(
         default=None,
@@ -66,6 +67,10 @@ class AgentRunPatch(BaseModel):
     retry_state: FailedRunRetryState | None = Field(
         default=None,
         description="Durable failed-run retry state",
+    )
+    recovery_state: RunRecoveryState | None = Field(
+        default=None,
+        description="Recoverable state retained on a stopped Run",
     )
     last_completed_event_id: str | None = Field(
         default=None,

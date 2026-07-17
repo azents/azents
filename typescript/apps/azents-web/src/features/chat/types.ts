@@ -614,6 +614,36 @@ export interface ChatLiveRunRetryState {
   attempts: FailedRunAttemptSummary[];
 }
 
+export interface PreparingContextRunOperation {
+  kind: "preparing_context";
+  operationId: string;
+  status: "running";
+}
+
+export type ChatLiveRunOperation = PreparingContextRunOperation;
+
+export type ModelOperation = "sampling" | "compaction" | "session_title";
+
+export interface ProviderFailureRunRecovery {
+  kind: "provider_failure";
+  userMessage: string;
+  operation: ModelOperation;
+  sourceRunId: string;
+  stoppedAt: string;
+}
+
+export interface StoppedRunRecovery {
+  kind: "stopped";
+  userMessage: string;
+  operation: ModelOperation;
+  sourceRunId: string;
+  stoppedAt: string;
+}
+
+export type ChatLiveRunRecovery =
+  | ProviderFailureRunRecovery
+  | StoppedRunRecovery;
+
 export interface ChatLiveRunState {
   run_id: string;
   phase: AgentRunPhase;
@@ -621,6 +651,8 @@ export interface ChatLiveRunState {
   inferenceProfile: AppliedInferenceProfile;
   modelCallStartedAt: string | null;
   retry?: ChatLiveRunRetryState | null;
+  operation?: ChatLiveRunOperation | null;
+  recovery?: ChatLiveRunRecovery | null;
 }
 
 export type ChatEvent =

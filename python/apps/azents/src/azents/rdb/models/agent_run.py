@@ -57,6 +57,10 @@ class RDBAgentRun(RDBModel):
         "ix_agent_runs_parent_agent_run_id",
         "parent_agent_run_id",
     )
+    IX_RETRY_SOURCE_RUN_ID = sa.Index(
+        "ix_agent_runs_retry_source_run_id",
+        "retry_source_run_id",
+    )
     UQ_SESSION_PENDING = sa.Index(
         "uq_agent_runs_session_pending",
         "session_id",
@@ -81,6 +85,12 @@ class RDBAgentRun(RDBModel):
         sa.ForeignKey("agent_runs.id", ondelete="SET NULL"),
         nullable=True,
     )
+    retry_source_run_id: Mapped[str | None] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("agent_runs.id", ondelete="SET NULL"),
+        nullable=True,
+        default=None,
+    )
     phase: Mapped[AgentRunPhase] = mapped_column(
         agent_run_phase_enum,
         nullable=False,
@@ -100,6 +110,11 @@ class RDBAgentRun(RDBModel):
         server_default=sa.text("'[]'::jsonb"),
     )
     retry_state: Mapped[dict[str, JSONValue] | None] = mapped_column(
+        JSONB,
+        nullable=True,
+        default=None,
+    )
+    recovery_state: Mapped[dict[str, JSONValue] | None] = mapped_column(
         JSONB,
         nullable=True,
         default=None,
@@ -163,5 +178,6 @@ class RDBAgentRun(RDBModel):
         IX_PHASE,
         IX_STATUS,
         IX_PARENT_AGENT_RUN_ID,
+        IX_RETRY_SOURCE_RUN_ID,
         UQ_SESSION_PENDING,
     )

@@ -34,8 +34,8 @@ class ChatWriteAcceptedResponse(BaseModel):
     @field_validator('type')
     def type_validate_enum(cls, value):
         """Validates the enum"""
-        if value not in set(['input_buffer', 'edit_message', 'command', 'failed_run_retry']):
-            raise ValueError("must be one of enum values ('input_buffer', 'edit_message', 'command', 'failed_run_retry')")
+        if value not in set(['input_buffer', 'edit_message', 'command', 'failed_run_retry', 'stopped_run_retry']):
+            raise ValueError("must be one of enum values ('input_buffer', 'edit_message', 'command', 'failed_run_retry', 'stopped_run_retry')")
         return value
 
     model_config = ConfigDict(

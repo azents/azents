@@ -159,7 +159,12 @@ class AutoCompactionFilter(Protocol):
 
     was_compacted: bool
 
-    async def compact(self, transcript: Sequence[Event]) -> list[Event]:
+    async def compact(
+        self,
+        transcript: Sequence[Event],
+        *,
+        on_started: Callable[[], Awaitable[None]] | None = None,
+    ) -> list[Event]:
         """Compact model input outside a caller-owned DB session."""
         ...
 
@@ -230,6 +235,7 @@ class AgentRunExecution[
         model_adapter: ModelAdapter[TNativeRequest, TNativeStreamEvent],
         model_stream_watchdog: ModelStreamWatchdog,
         model_stream_provider: str,
+        model_stream_provider_integration_id: str | None,
         model_stream_inference_profile: str | None,
         output_normalizer: AdapterOutputNormalizer[TNativeStreamEvent],
         model_call_preparer: ModelCallPreparer[TNativeRequest],
@@ -250,6 +256,7 @@ class AgentRunExecution[
         self.model_adapter = model_adapter
         self.model_stream_watchdog = model_stream_watchdog
         self.model_stream_provider = model_stream_provider
+        self.model_stream_provider_integration_id = model_stream_provider_integration_id
         self.model_stream_inference_profile = model_stream_inference_profile
         self.output_normalizer = output_normalizer
         self.pre_lower_filter = pre_lower_filter
@@ -348,8 +355,30 @@ class AgentRunExecution[
                     else False
                 )
                 if self.auto_compaction_filter is not None:
-                    transcript = await self.auto_compaction_filter.compact(transcript)
-                    compacted = compacted or self.auto_compaction_filter.was_compacted
+                    compaction_started = False
+
+                    async def on_compaction_started() -> None:
+                        nonlocal compaction_started
+                        compaction_started = True
+                        await self._update_phase(
+                            request.run_id,
+                            AgentRunPhase.COMPACTING,
+                        )
+
+                    try:
+                        transcript = await self.auto_compaction_filter.compact(
+                            transcript,
+                            on_started=on_compaction_started,
+                        )
+                        compacted = (
+                            compacted or self.auto_compaction_filter.was_compacted
+                        )
+                    finally:
+                        if compaction_started:
+                            await self._update_phase(
+                                request.run_id,
+                                AgentRunPhase.PREPARING_INPUT,
+                            )
                 if self.model_file_pin_repo is not None:
                     async with self.session_manager() as session:
                         await self.model_file_pin_repo.pin_many(
@@ -662,6 +691,7 @@ class AgentRunExecution[
         call_context = ModelStreamCallContext(
             call_kind="sampling",
             provider=self.model_stream_provider,
+            provider_integration_id=self.model_stream_provider_integration_id,
             model=native_request.model,
             session_id=session_id,
             run_id=run_id,
