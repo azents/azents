@@ -22,8 +22,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/agents/components/ModelCatalogPicker.tsx
   - typescript/apps/azents-web/src/features/llm-settings/**
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
-last_verified_at: 2026-07-16
-spec_version: 10
+last_verified_at: 2026-07-17
+spec_version: 11
 ---
 
 # ChatGPT OAuth Flow
@@ -180,7 +180,7 @@ sequenceDiagram
         Resolve-->>Worker: run blocked
     end
     Resolve->>SDK: api_key=access_token, base_url=Codex backend
-    SDK->>ChatGPT: Responses request
+    SDK->>ChatGPT: Standard Responses request over selected transport
 ```
 
 Rules:
@@ -188,15 +188,27 @@ Rules:
 - Refresh applies only to integrations whose provider is `chatgpt_oauth`.
 - Transient provider failure is treated as retryable provider unavailable, and permanent rejection is stored as `refresh_required`.
 - Concurrent refresh race rereads latest integration and does not overwrite with failure if token is already refreshed.
-- Sampling, context compaction, and automatic Session title Responses HTTP calls use the official
-  OpenAI Python SDK. LiteLLM is not a ChatGPT OAuth transport fallback.
-- `access_token` used in runtime request is passed only as OpenAI SDK `api_key`. The SDK client is
-  scoped to one sampling execution, compaction operation, or title operation and closes with its
-  active stream on every exit. Credentials, requests, responses, and provider request/response
-  identifiers are not exposed in logs or API responses.
+- Sampling, context compaction, and automatic Session title calls use the official OpenAI Python SDK.
+  LiteLLM is not a ChatGPT OAuth transport fallback.
+- Primary sampling prefers the persistent Responses WebSocket when
+  `AZ_OPENAI_RESPONSES_WEBSOCKET_ENABLED` is enabled and the resolved base URL exactly matches the
+  ChatGPT OAuth backend. One sampling execution opens the socket lazily, serially reuses it across its
+  model/tool turns, and closes it on every execution exit. Context compaction and automatic Session
+  title generation remain streaming HTTP operations.
+- A classified WebSocket transport failure activates HTTP-only state for the resolved ChatGPT OAuth
+  integration in the owning `SessionRunner` and fails through the shared failed-Run retry boundary.
+  The next attempt sends the complete logical request over HTTP. There is no inline transport replay,
+  separate WebSocket retry budget, or SDK automatic reconnect.
+- `access_token` used in runtime requests is passed only as the OpenAI SDK `api_key`. The SDK client
+  is scoped to one sampling execution, compaction operation, or title operation and closes with its
+  active stream on every exit. Credentials, requests, responses, account headers, and provider
+  request/response identifiers are not exposed in logs or API responses.
+- The WebSocket handshake explicitly carries the connected `ChatGPT-Account-Id` and Azents client
+  identity headers because the SDK HTTP client's default headers are not inherited by the Responses
+  WebSocket connection.
 - ChatGPT Codex backend does not allow Responses API server-side persistence, so runtime calls set
   `store=false`, request encrypted reasoning content for stateless replay, send complete logical
-  input, and never use `previous_response_id`.
+  input over either physical transport, and never use `previous_response_id`.
 - Immediately before a `store=false` runtime call, mask top-level Responses input item `id` values. Azents events and external ids remain preserved in the database, while provider response item ids are not replayed as stored references.
 - Runtime requests use `originator: azents`, an `azents/<version>` User-Agent, and the connected `ChatGPT-Account-Id` rather than impersonating Codex CLI identity.
 - Sampling always uses the standard Responses contract regardless of model name or backend request-dialect hints. Tools remain in the top-level `tools` field and instructions remain in the top-level `instructions` field.
@@ -240,6 +252,7 @@ Rules:
 
 | Date | Version | Change | Rationale |
 |---|---|---|---|
+| 2026-07-17 | 11 | Added execution-owned persistent WebSocket sampling with SessionRunner-scoped HTTP fallback while retaining HTTP compaction and title operations | [`adr/0150-openai-responses-websocket-lifecycle.md`](../../adr/0150-openai-responses-websocket-lifecycle.md) |
 | 2026-07-16 | 10 | Standardized all ChatGPT OAuth calls on the public Responses request contract and removed catalog-driven Lite dialect selection | [`adr/0162-use-standard-responses-for-chatgpt-oauth.md`](../../adr/0162-use-standard-responses-for-chatgpt-oauth.md) |
 | 2026-07-16 | 9 | Routed sampling, compaction, and title Responses HTTP through the official OpenAI SDK with full-context stateless ChatGPT requests | [`design/openai-compatible-responses-http-migration.md`](../../design/openai-compatible-responses-http-migration.md) |
 | 2026-07-14 | 8 | Removed the system-catalog fallback and made the account catalog transactional with OAuth integration creation | `python/apps/azents/src/azents/services/chatgpt_oauth/__init__.py` |
