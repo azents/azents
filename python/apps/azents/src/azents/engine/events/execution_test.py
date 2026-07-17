@@ -149,6 +149,8 @@ class _RunRepo:
         self.terminal_result_event_id: str | None = None
         self.terminal_result_message: str | None = None
         self.retry_states: list[object | None] = []
+        self.retry_source_run_id: str | None = None
+        self.input_event_ids_by_run: dict[str, list[str]] = {}
 
     async def get_by_id(
         self,
@@ -164,12 +166,23 @@ class _RunRepo:
             phase=self.phases[-1] if self.phases else AgentRunPhase.IDLE,
             status=self.terminal or AgentRunStatus.RUNNING,
             parent_agent_run_id=None,
+            retry_source_run_id=self.retry_source_run_id,
             active_tool_calls=list(self.active_tool_calls),
             created_at=datetime.datetime.now(datetime.UTC),
             started_at=datetime.datetime.now(datetime.UTC),
             model_call_started_at=self.model_call_started_at,
             updated_at=datetime.datetime.now(datetime.UTC),
         )
+
+    async def list_input_event_ids(
+        self,
+        session: AsyncSession,
+        *,
+        run_id: str,
+    ) -> list[str]:
+        """Return configured input associations for one run."""
+        del session
+        return list(self.input_event_ids_by_run.get(run_id, []))
 
     async def lock_by_id(
         self,
@@ -1007,6 +1020,96 @@ async def test_text_run_completes() -> None:
     )
     assert waiting_started_at is not None
     assert streaming_started_at == waiting_started_at
+
+
+async def test_explicit_retry_excludes_source_run_output_from_model_input() -> None:
+    """Retry the source input without replaying its stopped output."""
+    source_run_id = "2" * 32
+    retry_run_id = "3" * 32
+    source_input = _event(
+        "source-input",
+        EventKind.USER_MESSAGE,
+        UserMessagePayload(content="retry this input"),
+    )
+    current_retry_output = _event(
+        "current-output",
+        EventKind.ASSISTANT_MESSAGE,
+        AssistantMessagePayload(
+            content="current retry output",
+            native_artifact=_artifact(),
+        ),
+    )
+    current_retry_turn = _event(
+        "current-turn",
+        EventKind.TURN_MARKER,
+        TurnMarkerPayload(run_id=retry_run_id, usage=_usage()),
+    )
+    transcript_repo = _TranscriptRepo()
+    transcript_repo.events = [
+        _event(
+            "history-input",
+            EventKind.USER_MESSAGE,
+            UserMessagePayload(content="earlier history"),
+        ),
+        source_input,
+        _event(
+            "source-partial",
+            EventKind.ASSISTANT_MESSAGE,
+            AssistantMessagePayload(
+                content="stopped partial",
+                native_artifact=_artifact(),
+            ),
+        ),
+        _event(
+            "source-interrupted",
+            EventKind.INTERRUPTED,
+            InterruptedPayload(run_id=source_run_id, reason="user_requested"),
+        ),
+        _event(
+            "source-marker",
+            EventKind.RUN_MARKER,
+            RunMarkerPayload(run_id=source_run_id, status="interrupted"),
+        ),
+        current_retry_output,
+        current_retry_turn,
+    ]
+    run_repo = _RunRepo()
+    run_repo.retry_source_run_id = source_run_id
+    run_repo.input_event_ids_by_run[source_run_id] = [source_input.id]
+    lowerer = _RecordingLowerer()
+    execution = AgentRunExecution(
+        session_manager=_session_context,
+        post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_provider_integration_id=None,
+        model_stream_inference_profile=None,
+        model_adapter=_ModelAdapter(),
+        output_normalizer=_Normalizer([_assistant_event()]),
+        model_call_preparer=_model_call_preparer(lowerer=lowerer),
+        run_repo=run_repo,
+        transcript_repo=transcript_repo,
+    )
+
+    status = await execution.run(
+        AgentRunExecutionRequest(
+            owner_generation=1,
+            tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            run_id=retry_run_id,
+            session_id="session-1",
+            model="gpt-5.1",
+        ),
+    )
+
+    assert status == AgentRunStatus.COMPLETED
+    assert [[event.id for event in events] for events in lowerer.transcripts] == [
+        [
+            "history-input".rjust(32, "0"),
+            source_input.id,
+            current_retry_output.id,
+            current_retry_turn.id,
+        ]
+    ]
 
 
 async def test_model_follow_up_continues_without_tool_call() -> None:

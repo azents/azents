@@ -338,6 +338,15 @@ class RunStateRepository(Protocol):
         """Fetch run state."""
         ...
 
+    async def list_input_event_ids(
+        self,
+        session: AsyncSession,
+        *,
+        run_id: str,
+    ) -> list[str]:
+        """List a run's associated input events in stable order."""
+        ...
+
     async def update_phase(
         self,
         session: AsyncSession,

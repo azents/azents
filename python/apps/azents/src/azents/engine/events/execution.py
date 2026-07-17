@@ -306,9 +306,9 @@ class AgentRunExecution[
                         session,
                         request.session_id,
                     )
-                    transcript = await self.transcript_repo.list_for_model_input(
+                    transcript = await self._list_model_input_transcript(
                         session,
-                        request.session_id,
+                        request,
                         head_event_id=head_event_id,
                     )
                     repaired_events = await self._append_missing_tool_results(
@@ -317,9 +317,9 @@ class AgentRunExecution[
                         transcript,
                     )
                     if repaired_events:
-                        transcript = await self.transcript_repo.list_for_model_input(
+                        transcript = await self._list_model_input_transcript(
                             session,
-                            request.session_id,
+                            request,
                             head_event_id=head_event_id,
                         )
                     model_call_started_at = await self._update_phase_in_session(
@@ -965,6 +965,32 @@ class AgentRunExecution[
             )
         return appended
 
+    async def _list_model_input_transcript(
+        self,
+        session: AsyncSession,
+        request: AgentRunExecutionRequest,
+        *,
+        head_event_id: str | None,
+    ) -> list[Event]:
+        """Build model input while preserving retry source history."""
+        transcript = await self.transcript_repo.list_for_model_input(
+            session,
+            request.session_id,
+            head_event_id=head_event_id,
+        )
+        run = await self.run_repo.get_by_id(session, request.run_id)
+        if run is None or run.retry_source_run_id is None:
+            return transcript
+        source_input_event_ids = await self.run_repo.list_input_event_ids(
+            session,
+            run_id=run.retry_source_run_id,
+        )
+        return _without_retry_source_run_output(
+            transcript,
+            source_run_id=run.retry_source_run_id,
+            source_input_event_ids=source_input_event_ids,
+        )
+
     async def _model_input_head_event_id(
         self,
         session: AsyncSession,
@@ -1293,6 +1319,40 @@ async def _stopped(check_stop: CheckStop | None) -> bool:
     if check_stop is None:
         return False
     return await check_stop()
+
+
+def _without_retry_source_run_output(
+    transcript: Sequence[Event],
+    *,
+    source_run_id: str,
+    source_input_event_ids: Sequence[str],
+) -> list[Event]:
+    """Exclude one retry source Run's output from model input only."""
+    source_input_ids = set(source_input_event_ids)
+    source_input_indexes = [
+        index for index, event in enumerate(transcript) if event.id in source_input_ids
+    ]
+    if not source_input_indexes:
+        return list(transcript)
+    last_source_input_index = max(source_input_indexes)
+    source_marker_index = next(
+        (
+            index
+            for index, event in enumerate(
+                transcript[last_source_input_index + 1 :],
+                start=last_source_input_index + 1,
+            )
+            if isinstance(event.payload, RunMarkerPayload)
+            and event.payload.run_id == source_run_id
+        ),
+        None,
+    )
+    if source_marker_index is None:
+        return list(transcript)
+    return [
+        *transcript[: last_source_input_index + 1],
+        *transcript[source_marker_index + 1 :],
+    ]
 
 
 def _without_existing_terminal_run_markers(
