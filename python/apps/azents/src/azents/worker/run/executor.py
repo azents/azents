@@ -1618,13 +1618,7 @@ class RunExecutor:
                     attempt_number += 1
         except asyncio.CancelledError as exc:
             run_end_reason = "cancelled"
-            if user_stop_cancelled(exc):
-                terminal_run_status = AgentRunStatus.STOPPED
-                await self.user_stop_finalizer.record_interrupted_run(
-                    message.session_id,
-                    run_id=run_id,
-                )
-            else:
+            if not user_stop_cancelled(exc):
                 terminal_run_status = AgentRunStatus.CANCELLED
             raise
         finally:

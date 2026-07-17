@@ -785,6 +785,27 @@ class _AlwaysFailingEngine(_Engine):
         return iterator()
 
 
+class _UserStopCancellingEngine(_Engine):
+    """Engine that propagates a user-stop cancellation."""
+
+    def run(
+        self,
+        request: RunRequest,
+        context: object,
+        *,
+        poll_messages: object = None,
+        check_stop: object = None,
+    ) -> AsyncIterator[Emit]:
+        """Cancel the active run as a user-stop observation."""
+        del request, context, poll_messages, check_stop
+
+        async def iterator() -> AsyncIterator[Emit]:
+            raise asyncio.CancelledError(USER_STOP_CANCEL_MESSAGE)
+            yield  # pragma: no cover
+
+        return iterator()
+
+
 class _CommandHandler:
     """Command handler test double."""
 
@@ -3308,6 +3329,66 @@ async def test_record_unknown_provider_failure_alerts_on_every_attempt(
         record.__dict__["provider_failure_fingerprint"] == failure.fingerprint
         for record in alerts
     )
+
+
+@pytest.mark.asyncio
+async def test_execute_user_stop_cancellation_leaves_terminalization_to_supervisor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """User-stop cancellation keeps the Run live for full Stop finalization."""
+    lifecycle = _SessionLifecycle()
+    user_stop_finalizer = _UserStopFinalizer()
+    live_event_projector = _LiveEventProjector()
+    executor = _executor(
+        lifecycle,
+        engine=cast(AgentEngineProtocol, _UserStopCancellingEngine()),
+        user_stop_finalizer=user_stop_finalizer,
+        live_event_projector=live_event_projector,
+    )
+
+    async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
+        del args, kwargs
+        return RunInputPollResult(
+            context_invalidated=False,
+            complete_run=False,
+            requested_inference_profile=None,
+            promoted_event_ids=[],
+            user_messages=[],
+            has_actionable_work=True,
+        )
+
+    monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
+    _patch_successful_resolution(monkeypatch)
+
+    async def dispatch_event(session_id: str, event: PublishedEvent) -> None:
+        del session_id, event
+
+    with pytest.raises(asyncio.CancelledError) as raised:
+        await executor.execute(
+            SessionWakeUp(
+                agent_id="agent-001",
+                session_id="session-001",
+                user_id=None,
+                additional_system_prompt=None,
+                interface=None,
+                workspace_id="workspace-001",
+                workspace_handle=None,
+            ),
+            poll_fn=None,
+            check_stop=None,
+            prepare_toolkits=None,
+            shutdown_event=asyncio.Event(),
+            dispatch_event=dispatch_event,
+            owner_generation=1,
+            tool_admission_barrier=ToolAdmissionBarrier(),
+            model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
+        )
+
+    assert raised.value.args == (USER_STOP_CANCEL_MESSAGE,)
+    assert user_stop_finalizer.interrupted_runs == []
+    assert lifecycle.terminal_runs == []
+    assert lifecycle.cleared_session_ids == []
+    assert live_event_projector.flushed_session_ids == ["session-001"]
 
 
 @pytest.mark.asyncio
