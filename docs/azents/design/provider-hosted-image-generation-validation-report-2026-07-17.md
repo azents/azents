@@ -8,7 +8,7 @@ tags: [backend, engine, frontend, llm, storage, testenv]
 
 ## Scope
 
-This report validates the implementation described by [`provider-hosted-image-generation.md`](./provider-hosted-image-generation.md) and its [implementation plan](./provider-hosted-image-generation-implementation-plan.md).
+This report validates the implementation described by [`provider-hosted-image-generation.md`](./provider-hosted-image-generation.md).
 
 The validation covers:
 
