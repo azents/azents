@@ -1377,9 +1377,8 @@
     {
       "match": {
         "endpoint": "chat",
-        "userMessage": "Watchdog user stop preserves partial",
-        "hasToolResult": false,
-        "turnIndex": 1
+        "userMessage": "The previous assistant run was interrupted by the user.",
+        "hasToolResult": false
       },
       "response": {
         "content": "WATCHDOG_STOP_RETRY_RECOVERED"
