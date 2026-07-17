@@ -214,7 +214,7 @@ class TestProviderImageGeneration:
         )
 
         observed_statuses: set[str] = set()
-        durable_result: dict[str, object] | None = None
+        run_cleared = False
         with connect_chat(
             public_api_client=public_api_client,
             server_url=azents_public_server_url,
@@ -259,26 +259,21 @@ class TestProviderImageGeneration:
                             status = payload.get("status")
                             if isinstance(status, str):
                                 observed_statuses.add(status)
-                elif action_type == "history_event_appended":
-                    event = json_object_payload(
-                        action.get("event"),
-                        label="history appended event",
-                    )
-                    if _provider_result([event]) is not None:
-                        durable_result = event
-                if durable_result is not None and observed_statuses >= {
+                elif action_type == "live_run_cleared":
+                    run_cleared = True
+                if run_cleared and observed_statuses >= {
                     "running",
                     "completed",
                 }:
                     break
-            if durable_result is None or not observed_statuses >= {
+            if not run_cleared or not observed_statuses >= {
                 "running",
                 "completed",
             }:
                 raise TimeoutError(
                     "image-generation live handoff did not complete: "
                     f"statuses={observed_statuses!r}, "
-                    f"durable_result={durable_result!r}, "
+                    f"run_cleared={run_cleared!r}, "
                     f"actions={observed_action_types!r}"
                 )
 
@@ -301,7 +296,7 @@ class TestProviderImageGeneration:
             for event in history_events(history)
             if _provider_result([event]) is not None
         ]
-        assert len(results) == 1
+        assert len(results) == 1, serialized_history
         result_payload = json_object_payload(
             results[0].get("payload"),
             label="durable provider result payload",
