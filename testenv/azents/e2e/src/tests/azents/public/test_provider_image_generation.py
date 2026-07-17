@@ -312,6 +312,7 @@ class TestProviderImageGeneration:
         assert len(output) == 1
         assert isinstance(output[0].get("model_file_id"), str)
         assert output[0].get("kind") == "image"
+        assert output[0].get("media_type") == "image/jpeg"
         assert len(attachments) == 1
         attachment = attachments[0]
         assert attachment.get("availability") == "available"
@@ -374,7 +375,12 @@ class TestProviderImageGeneration:
             item for item in input_items if item.get("type") == "image_generation_call"
         ]
         assert len(image_items) == 1
-        assert image_items[0].get("result") == _IMAGE_BASE64
+        replayed_result = image_items[0].get("result")
+        assert isinstance(replayed_result, str)
+        replayed_image = base64.b64decode(replayed_result, validate=True)
+        assert replayed_result != _IMAGE_BASE64
+        assert replayed_image.startswith(b"\xff\xd8\xff")
+        assert replayed_image.endswith(b"\xff\xd9")
 
         final_history = list_history(
             server_url=azents_public_server_url,
