@@ -5,6 +5,7 @@ import dataclasses
 from azents.core.agent import BuiltinToolConfig
 from azents.core.builtin_tools import (
     BuiltinToolValidationContext,
+    ImageGenerationRule,
     WebSearchRule,
     validate_builtin_tools,
 )
@@ -68,20 +69,53 @@ class TestValidateBuiltinTools:
 
         assert errors == {}
 
+    def test_valid_image_generation(self) -> None:
+        """Return no errors for supported image generation."""
+        errors = validate_builtin_tools(
+            [BuiltinToolConfig(name="image_generation")],
+            _make_context(supported_builtin_tools=["image_generation"]),
+        )
+
+        assert errors == {}
+
     def test_unknown_tool(self) -> None:
         """Reject unimplemented built-in tools."""
         errors = validate_builtin_tools(
-            [BuiltinToolConfig(name="image_generation")],
+            [BuiltinToolConfig(name="web_fetch")],
             _make_context(),
         )
 
-        assert errors == {
-            "image_generation": ["Unknown built-in tool: 'image_generation'"]
-        }
+        assert errors == {"web_fetch": ["Unknown built-in tool: 'web_fetch'"]}
 
     def test_empty_tools(self) -> None:
         """Return no errors for an explicit all-off configuration."""
         assert validate_builtin_tools([], _make_context()) == {}
+
+
+class TestImageGenerationRule:
+    """ImageGenerationRule validation tests."""
+
+    def test_supported_provider_models(self) -> None:
+        """Accept image generation whenever the capability advertises it."""
+        for provider in (
+            LLMProvider.OPENAI,
+            LLMProvider.CHATGPT_OAUTH,
+        ):
+            errors = ImageGenerationRule().validate(
+                _make_context(
+                    supported_builtin_tools=["image_generation"],
+                    provider=provider,
+                )
+            )
+            assert errors == []
+
+    def test_unsupported_model(self) -> None:
+        """Reject a model without the image generation capability."""
+        errors = ImageGenerationRule().validate(
+            _make_context(supported_builtin_tools=[]),
+        )
+
+        assert errors == ["Model 'gpt-5' does not support Image Generation."]
 
 
 class TestWebSearchRule:

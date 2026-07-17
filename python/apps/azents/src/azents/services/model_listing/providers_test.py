@@ -211,7 +211,8 @@ async def test_list_chatgpt_models_uses_backend_capability_metadata(
     assert result.summary.returned_count == 4
     assert result.summary.skipped_count == 2
     assert all(
-        candidate.normalized_capabilities.built_in_tools.supported == ["web_search"]
+        candidate.normalized_capabilities.built_in_tools.supported
+        == ["web_search", "image_generation"]
         for candidate in result.models
     )
     candidate, standard_candidate, legacy_candidate, empty_modalities_candidate = (

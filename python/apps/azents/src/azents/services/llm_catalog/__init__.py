@@ -70,6 +70,7 @@ from azents.services.model_listing.providers import (
     list_chatgpt_models_for_integration,
     list_vertex_models_for_integration,
 )
+from azents.services.provider_hosted_tools import supported_provider_hosted_tools
 from azents.testing.deterministic_model_listing import (
     build_deterministic_listing,
     parse_deterministic_fixture_variant,
@@ -1101,7 +1102,11 @@ def project_integration_entries(
             else LLMCatalogEntryVisibility.SELECTABLE
         )
         capabilities = (
-            _capabilities_from_litellm_metadata(metadata)
+            _capabilities_from_litellm_metadata(
+                metadata,
+                provider=provider,
+                model_identifier=candidate.model_identifier,
+            )
             if hidden_reason is None
             else candidate.normalized_capabilities
         )
@@ -1171,7 +1176,9 @@ def project_system_entries(
                 runtime_model_identifier=model_key,
                 display_name=_display_name(model_key),
                 normalized_capabilities=_capabilities_from_litellm_metadata(
-                    metadata
+                    metadata,
+                    provider=provider,
+                    model_identifier=_provider_model_identifier(provider, model_key),
                 ).model_dump(mode="json"),
                 lifecycle_status=LLMModelLifecycleStatus.ACTIVE,
                 visibility_status=visibility,
@@ -1276,6 +1283,9 @@ def _projection_diagnostics(
 
 def _capabilities_from_litellm_metadata(
     metadata: dict[str, Any],
+    *,
+    provider: LLMProvider,
+    model_identifier: str,
 ) -> ModelCapabilities:
     provider_info = _PROVIDER_MODEL_INFO_ADAPTER.validate_python(metadata)
     return ModelCapabilities(
@@ -1297,7 +1307,11 @@ def _capabilities_from_litellm_metadata(
             effort_levels=_reasoning_effort_levels(provider_info),
         ),
         built_in_tools=ModelBuiltInToolCapabilities(
-            supported=_supported_builtin_tools(metadata)
+            supported=supported_provider_hosted_tools(
+                provider=provider,
+                model_identifier=model_identifier,
+                metadata=metadata,
+            )
         ),
         compatibility=ModelCompatibilityCapabilities(
             provider_family=_str_or_none(metadata.get("litellm_provider")),
@@ -1328,12 +1342,6 @@ def _reasoning_effort_levels(
     if model_info.get("supports_max_reasoning_effort") is True:
         efforts.append(ModelReasoningEffort.MAX)
     return efforts
-
-
-def _supported_builtin_tools(metadata: dict[str, Any]) -> list[str]:
-    if metadata.get("supports_web_search") is True:
-        return ["web_search"]
-    return []
 
 
 def _modalities_from_metadata(metadata: dict[str, Any]) -> list[ModelModality]:
