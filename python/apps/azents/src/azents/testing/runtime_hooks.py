@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -49,6 +50,7 @@ class TestenvRuntimeHookQAConfig(BaseModel):
     replacement_output: str = "Runtime hook QA replaced the tool output."
     sensitive_marker: str = "RUNTIME_HOOK_QA_SECRET_SHOULD_NOT_APPEAR"
     delay_seconds: float = 0.0
+    release_file_path: str | None = None
 
 
 class RuntimeHookQAProbeInput(BaseModel):
@@ -99,6 +101,14 @@ class TestenvRuntimeHookQAToolkit(Toolkit[TestenvRuntimeHookQAConfig]):
                 "Runtime hook QA probe executed",
                 extra={"qa_marker": input.marker},
             )
+            if self._config.release_file_path is not None:
+                release_file = Path(self._config.release_file_path)
+                logger.info(
+                    "Runtime hook QA probe waiting for release file",
+                    extra={"release_file_path": str(release_file)},
+                )
+                while not release_file.exists():
+                    await asyncio.sleep(0.1)
             if self._config.delay_seconds > 0:
                 await asyncio.sleep(self._config.delay_seconds)
             return f"runtime hook qa raw output: {input.marker}"

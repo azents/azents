@@ -32,6 +32,7 @@ from azentspublicclient.models.toolkit_config_create_request import (
     ToolkitConfigCreateRequest,
 )
 from pydantic import TypeAdapter, ValidationError
+from testcontainers.core.container import DockerContainer
 
 from support.utils import (
     authenticate_user,
@@ -119,9 +120,10 @@ def _create_agent(
     public_api_client: azentspublicclient.ApiClient,
     workspace: _Workspace,
     *,
-    delay_seconds: float = 3.0,
+    delay_seconds: float,
+    release_file_path: str | None,
 ) -> str:
-    """long-running deterministic tool t t agent t t API t t."""
+    """Create an agent with a controllable deterministic QA tool."""
     toolkit_api = ToolkitV1Api(public_api_client)
     toolkit = toolkit_api.toolkit_v1_create_toolkit_config(
         handle=workspace.handle,
@@ -129,7 +131,11 @@ def _create_agent(
             toolkit_type="runtime_hook_qa",
             slug="bufferqa",
             name="Chat Input Buffer QA Toolkit",
-            config={"mode": "observe", "delay_seconds": delay_seconds},
+            config={
+                "mode": "observe",
+                "delay_seconds": delay_seconds,
+                "release_file_path": release_file_path,
+            },
             enabled=True,
         ),
         _headers=_headers(workspace.token),
@@ -420,10 +426,10 @@ def _assert_split_rest_contract(
     assert legacy_fields.isdisjoint(live_payload)
 
 
-def _input_buffer_contents(payload: dict[str, object]) -> list[str]:
-    """Live response t input buffer projection content listt returnt."""
+def _pending_buffers(payload: dict[str, object]) -> list[_PendingBuffer]:
+    """Return pending user-message buffers from the live projection."""
     raw_buffers = payload.get("input_buffers")
-    contents: list[str] = []
+    buffers: list[_PendingBuffer] = []
     for raw_buffer in _object_items(raw_buffers, label="live input_buffers"):
         if raw_buffer.get("kind") != "user_message":
             continue
@@ -431,13 +437,17 @@ def _input_buffer_contents(payload: dict[str, object]) -> list[str]:
         metadata = _object_item(event_payload.get("metadata"), label="live metadata")
         if metadata.get("live_projection") != "input_buffer":
             continue
+        buffer_id = raw_buffer.get("id")
         content = event_payload.get("content")
-        if not isinstance(content, str):
-            raise AssertionError(
-                f"input buffer content is not a string: {raw_buffer!r}"
-            )
-        contents.append(content)
-    return contents
+        if not isinstance(buffer_id, str) or not isinstance(content, str):
+            raise AssertionError(f"invalid input buffer projection: {raw_buffer!r}")
+        buffers.append(_PendingBuffer(id=buffer_id, content=content))
+    return buffers
+
+
+def _input_buffer_contents(payload: dict[str, object]) -> list[str]:
+    """Return pending input-buffer contents from the live projection."""
+    return [buffer.content for buffer in _pending_buffers(payload)]
 
 
 def _run_marker_statuses(payload: dict[str, object]) -> list[str]:
@@ -652,6 +662,76 @@ def _wait_for_rest_state(
     raise TimeoutError(f"REST state was not observed: {last_payload!r}")
 
 
+def _wait_for_pending_buffer(
+    *,
+    server_url: str,
+    token: str,
+    session_id: str,
+    expected: _PendingBuffer,
+    timeout: float = 30,
+) -> None:
+    """Wait until a specific buffer remains pending in the live projection."""
+    deadline = time.monotonic() + timeout
+    last_buffers: list[_PendingBuffer] = []
+    while time.monotonic() < deadline:
+        live_payload = _list_live(
+            server_url=server_url,
+            token=token,
+            session_id=session_id,
+        )
+        last_buffers = _pending_buffers(live_payload)
+        if expected in last_buffers:
+            return
+        time.sleep(0.25)
+    raise TimeoutError(
+        f"pending buffer was not observed: {expected!r}, {last_buffers!r}"
+    )
+
+
+def _container_logs(container: DockerContainer) -> str:
+    """Return combined container stdout and stderr."""
+    stdout, stderr = container.get_logs()
+    return stdout.decode(errors="replace") + stderr.decode(errors="replace")
+
+
+def _wait_for_tool_release_barrier(
+    container: DockerContainer,
+    release_file_path: str,
+    *,
+    timeout: float = 60,
+) -> None:
+    """Wait until the QA tool reports that it is blocked on its release file."""
+    deadline = time.monotonic() + timeout
+    last_logs = ""
+    while time.monotonic() < deadline:
+        last_logs = _container_logs(container)
+        if release_file_path in last_logs:
+            return
+        time.sleep(0.25)
+    raise TimeoutError(
+        f"tool release barrier was not observed: {release_file_path}\n"
+        f"{last_logs[-4000:]}"
+    )
+
+
+def _set_release_file(
+    container: DockerContainer,
+    release_file_path: str,
+    *,
+    present: bool,
+) -> None:
+    """Create or remove the QA tool release file inside the worker container."""
+    command = (
+        ["touch", release_file_path] if present else ["rm", "-f", release_file_path]
+    )
+    result = container.get_wrapped_container().exec_run(command)
+    if result.exit_code != 0:
+        output = result.output.decode(errors="replace")
+        raise AssertionError(
+            f"failed to update tool release file {release_file_path}: {output}"
+        )
+
+
 def _delete_input_buffer(
     *,
     server_url: str,
@@ -717,7 +797,12 @@ class TestChatInputBuffer:
             admin_api_client,
             azents_public_server_url,
         )
-        agent_id = _create_agent(public_api_client, workspace, delay_seconds=5.0)
+        agent_id = _create_agent(
+            public_api_client,
+            workspace,
+            delay_seconds=5.0,
+            release_file_path=None,
+        )
 
         initial_response = _write_new_session_message(
             server_url=azents_public_server_url,
@@ -824,74 +909,96 @@ class TestChatInputBuffer:
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
-        azents_engine_worker_container: object,
+        azents_engine_worker_container: DockerContainer,
         mock_openai_url: str,
     ) -> None:
-        """deletet pending buffer t REST t t model requestt t t."""
-        del azents_engine_worker_container
+        """Delete a pending buffer before the blocked tool can finish."""
         _reset_mock_openai(mock_openai_url)
         workspace = _setup_workspace(
             public_api_client,
             admin_api_client,
             azents_public_server_url,
         )
-        agent_id = _create_agent(public_api_client, workspace)
+        release_file_path = f"/tmp/azents-runtime-hook-qa-{unique()}"
+        _set_release_file(
+            azents_engine_worker_container,
+            release_file_path,
+            present=False,
+        )
+        agent_id = _create_agent(
+            public_api_client,
+            workspace,
+            delay_seconds=0.0,
+            release_file_path=release_file_path,
+        )
 
-        initial_response = _write_new_session_message(
-            server_url=azents_public_server_url,
-            token=workspace.token,
-            agent_id=agent_id,
-            message=_INITIAL_MESSAGE,
-            client_request_id=f"initial-delete-{unique()}",
-        )
-        session_id = _session_id_from_write(initial_response)
-        _assert_legacy_messages_get_removed(
-            server_url=azents_public_server_url,
-            token=workspace.token,
-            session_id=session_id,
-        )
-        _wait_for_running_rest_state(
+        session_id: str | None = None
+        try:
+            initial_response = _write_new_session_message(
+                server_url=azents_public_server_url,
+                token=workspace.token,
+                agent_id=agent_id,
+                message=_INITIAL_MESSAGE,
+                client_request_id=f"initial-delete-{unique()}",
+            )
+            session_id = _session_id_from_write(initial_response)
+            _assert_legacy_messages_get_removed(
+                server_url=azents_public_server_url,
+                token=workspace.token,
+                session_id=session_id,
+            )
+            _wait_for_tool_release_barrier(
+                azents_engine_worker_container,
+                release_file_path,
+            )
+            deleted_response = _write_session_message(
+                server_url=azents_public_server_url,
+                token=workspace.token,
+                session_id=session_id,
+                agent_id=agent_id,
+                message=_DELETED_MESSAGE,
+                client_request_id=f"deleted-{unique()}",
+            )
+            deleted_buffer = _PendingBuffer(
+                id=str(_accepted_write(deleted_response)["id"]),
+                content=_DELETED_MESSAGE,
+            )
+            _wait_for_pending_buffer(
+                server_url=azents_public_server_url,
+                token=workspace.token,
+                session_id=session_id,
+                expected=deleted_buffer,
+            )
+            _delete_input_buffer(
+                server_url=azents_public_server_url,
+                token=workspace.token,
+                session_id=session_id,
+                buffer_id=deleted_buffer.id,
+            )
+            pending_payload = _list_live(
+                server_url=azents_public_server_url,
+                token=workspace.token,
+                session_id=session_id,
+            )
+            assert _pending_buffers(pending_payload) == []
+        finally:
+            _set_release_file(
+                azents_engine_worker_container,
+                release_file_path,
+                present=True,
+            )
+
+        assert session_id is not None
+        _wait_for_idle_rest_state(
             server_url=azents_public_server_url,
             token=workspace.token,
             session_id=session_id,
             expected_message=_INITIAL_MESSAGE,
-            timeout=60,
         )
-
-        deleted_response = _write_session_message(
+        final_history = _list_history(
             server_url=azents_public_server_url,
             token=workspace.token,
             session_id=session_id,
-            agent_id=agent_id,
-            message=_DELETED_MESSAGE,
-            client_request_id=f"deleted-{unique()}",
-        )
-        deleted_buffer = _PendingBuffer(
-            id=str(_accepted_write(deleted_response)["id"]),
-            content=_DELETED_MESSAGE,
-        )
-        _delete_input_buffer(
-            server_url=azents_public_server_url,
-            token=workspace.token,
-            session_id=session_id,
-            buffer_id=deleted_buffer.id,
-        )
-        pending_payload = _list_live(
-            server_url=azents_public_server_url,
-            token=workspace.token,
-            session_id=session_id,
-        )
-        assert _input_buffer_contents(pending_payload) == []
-        final_payload = _wait_for_rest_state(
-            server_url=azents_public_server_url,
-            token=workspace.token,
-            session_id=session_id,
-            expected_pending=[],
-        )
-
-        final_history = _object_item(
-            final_payload.get("history"),
-            label="final history",
         )
         assert _DELETED_MESSAGE not in _message_contents(final_history)
         assert _DELETED_MESSAGE not in _mock_openai_journal_text(mock_openai_url)
@@ -910,7 +1017,12 @@ class TestChatInputBuffer:
             admin_api_client,
             azents_public_server_url,
         )
-        agent_id = _create_agent(public_api_client, workspace, delay_seconds=30.0)
+        agent_id = _create_agent(
+            public_api_client,
+            workspace,
+            delay_seconds=30.0,
+            release_file_path=None,
+        )
         initial_response = _write_new_session_message(
             server_url=azents_public_server_url,
             token=workspace.token,
@@ -955,7 +1067,12 @@ class TestChatInputBuffer:
             admin_api_client,
             azents_public_server_url,
         )
-        agent_id = _create_agent(public_api_client, workspace)
+        agent_id = _create_agent(
+            public_api_client,
+            workspace,
+            delay_seconds=3.0,
+            release_file_path=None,
+        )
         initial_response = _write_new_session_message(
             server_url=azents_public_server_url,
             token=workspace.token,
