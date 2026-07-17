@@ -9,6 +9,8 @@ Name | Type | Description | Notes
 **context_window_tokens** | **int** |  | 
 **max_output_tokens** | **int** |  | 
 **builtin_tools** | [**List[BuiltinToolConfig]**](BuiltinToolConfig.md) | Enabled built-in tools | 
+**subagent_enabled** | **bool** | Available as an explicit subagent model target | 
+**subagent_guidance** | **str** |  | 
 
 ## Example
 

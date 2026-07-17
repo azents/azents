@@ -98,6 +98,8 @@ class TestNormalizeSelectableModelOptions:
         assert settings.context_window_tokens is None
         assert settings.max_output_tokens is None
         assert [tool.name for tool in settings.builtin_tools] == ["web_search"]
+        assert settings.subagent_enabled is True
+        assert settings.subagent_guidance is None
 
     async def test_explicit_empty_tools_preserve_all_off_intent(self) -> None:
         """An explicit empty tool list remains distinct from omitted defaults."""
@@ -120,6 +122,46 @@ class TestNormalizeSelectableModelOptions:
         assert settings.context_window_tokens == 32_000
         assert settings.max_output_tokens == 4_000
         assert settings.builtin_tools == []
+
+    async def test_normalizes_subagent_policy(self) -> None:
+        """Subagent policy preserves availability and trims optional guidance."""
+        option = _option("research", "plain-model")
+        option.settings = SelectableModelSettingsInput(
+            context_window_tokens=None,
+            max_output_tokens=None,
+            builtin_tools=[],
+            subagent_enabled=False,
+            subagent_guidance="  Prefer only for bounded research.  ",
+        )
+
+        result = await normalize_selectable_model_options(
+            option_inputs=[option],
+            main_model_label=None,
+            lightweight_model_label=None,
+            resolve_model_selection=_resolve_option,
+        )
+
+        assert isinstance(result, Success)
+        settings = result.value.selectable_model_options[0].settings
+        assert settings.subagent_enabled is False
+        assert settings.subagent_guidance == "Prefer only for bounded research."
+
+    async def test_normalizes_blank_subagent_guidance_to_null(self) -> None:
+        """Whitespace-only subagent guidance is stored as null."""
+        option = _option("research", "plain-model")
+        option.settings = SelectableModelSettingsInput(subagent_guidance="  \n  ")
+
+        result = await normalize_selectable_model_options(
+            option_inputs=[option],
+            main_model_label=None,
+            lightweight_model_label=None,
+            resolve_model_selection=_resolve_option,
+        )
+
+        assert isinstance(result, Success)
+        assert (
+            result.value.selectable_model_options[0].settings.subagent_guidance is None
+        )
 
     async def test_omitted_tool_list_uses_capability_defaults(self) -> None:
         """Explicit token settings may still request default built-in tools."""

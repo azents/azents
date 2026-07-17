@@ -719,6 +719,113 @@
     {
       "match": {
         "endpoint": "chat",
+        "userMessage": "Subagent reject disabled target override"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_subagent_reject_disabled_target",
+            "name": "spawn_agent",
+            "arguments": {
+              "name": "invalid_disabled_target",
+              "task": "Must not create a child",
+              "agent_type": "default",
+              "fork_turns": "none",
+              "model_target_label": "Quality"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_subagent_reject_disabled_target"
+      },
+      "response": {
+        "content": "Disabled target override rejection observed."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Subagent inherit disabled parent target"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_subagent_inherit_disabled_target",
+            "name": "spawn_agent",
+            "arguments": {
+              "name": "inherited_disabled",
+              "task": "Inherited disabled parent target task",
+              "agent_type": "default",
+              "fork_turns": "none"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Inherited disabled parent target task"
+      },
+      "response": {
+        "content": "Inherited disabled target task completed."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_subagent_inherit_disabled_target"
+      },
+      "response": {
+        "content": "Disabled target inheritance observed."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Subagent effort-only disabled parent target"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_subagent_effort_only_disabled_target",
+            "name": "spawn_agent",
+            "arguments": {
+              "name": "effort_only_disabled",
+              "task": "Effort-only disabled parent target task",
+              "agent_type": "default",
+              "fork_turns": "none",
+              "reasoning_effort": "medium"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Effort-only disabled parent target task"
+      },
+      "response": {
+        "content": "Effort-only disabled target task completed."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_subagent_effort_only_disabled_target"
+      },
+      "response": {
+        "content": "Disabled target effort override observed."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
         "userMessage": "Subagent reject full-history override"
       },
       "response": {

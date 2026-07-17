@@ -777,6 +777,13 @@
         "builtinToolsLabel": "Built-in tools",
         "builtinToolWebSearch": "Web search",
         "noBuiltinTools": "This model has no supported built-in tools.",
+        "subagentsSectionLabel": "Subagents",
+        "subagentEnabledLabel": "Available for explicit subagent selection",
+        "subagentEnabledDescription": "Show this label to the parent model as an explicit spawn_agent target.",
+        "subagentInheritanceDescription": "Disabling explicit selection does not prevent a child from inheriting this model from its active parent.",
+        "subagentGuidanceLabel": "Subagent selection guidance",
+        "subagentGuidanceDescription": "Optional guidance for appropriate task types or cost and quality constraints. Maximum {max} characters.",
+        "subagentGuidancePlaceholder": "For example: Prefer for repository exploration and bounded investigation.",
         "settingsDone": "Done"
       }
     },

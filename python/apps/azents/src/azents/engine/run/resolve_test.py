@@ -349,6 +349,8 @@ class TestResolveInvokeInput:
             context_window_tokens=32_000,
             max_output_tokens=20_000,
             builtin_tools=[BuiltinToolConfig(name="web_search")],
+            subagent_enabled=True,
+            subagent_guidance=None,
         )
         lightweight_selection = make_test_model_selection(
             integration_id="integ-1",
@@ -366,6 +368,8 @@ class TestResolveInvokeInput:
             context_window_tokens=16_000,
             max_output_tokens=None,
             builtin_tools=[],
+            subagent_enabled=True,
+            subagent_guidance=None,
         )
         agent.selectable_model_options.append(lightweight_option)
         agent.lightweight_model_selection = lightweight_selection
@@ -404,6 +408,8 @@ class TestResolveInvokeInput:
             context_window_tokens=None,
             max_output_tokens=None,
             builtin_tools=[BuiltinToolConfig(name="web_search")],
+            subagent_enabled=True,
+            subagent_guidance=None,
         )
         agent_repository = AsyncMock()
         agent_repository.get_by_id.return_value = agent

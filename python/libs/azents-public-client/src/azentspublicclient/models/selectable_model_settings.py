@@ -17,7 +17,7 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 from typing import Any, ClassVar, Dict, List, Optional
 from typing_extensions import Annotated
 from azentspublicclient.models.builtin_tool_config import BuiltinToolConfig
@@ -31,8 +31,10 @@ class SelectableModelSettings(BaseModel):
     context_window_tokens: Optional[Annotated[int, Field(strict=True, ge=1)]]
     max_output_tokens: Optional[Annotated[int, Field(strict=True, ge=1)]]
     builtin_tools: List[BuiltinToolConfig] = Field(description="Enabled built-in tools")
+    subagent_enabled: StrictBool = Field(description="Available as an explicit subagent model target")
+    subagent_guidance: Optional[Annotated[str, Field(strict=True, max_length=500)]]
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["context_window_tokens", "max_output_tokens", "builtin_tools"]
+    __properties: ClassVar[List[str]] = ["context_window_tokens", "max_output_tokens", "builtin_tools", "subagent_enabled", "subagent_guidance"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -97,6 +99,11 @@ class SelectableModelSettings(BaseModel):
         if self.max_output_tokens is None and "max_output_tokens" in self.model_fields_set:
             _dict['max_output_tokens'] = None
 
+        # set to None if subagent_guidance (nullable) is None
+        # and model_fields_set contains the field
+        if self.subagent_guidance is None and "subagent_guidance" in self.model_fields_set:
+            _dict['subagent_guidance'] = None
+
         return _dict
 
     @classmethod
@@ -111,7 +118,9 @@ class SelectableModelSettings(BaseModel):
         _obj = cls.model_validate({
             "context_window_tokens": obj.get("context_window_tokens"),
             "max_output_tokens": obj.get("max_output_tokens"),
-            "builtin_tools": [BuiltinToolConfig.from_dict(_item) for _item in obj["builtin_tools"]] if obj.get("builtin_tools") is not None else None
+            "builtin_tools": [BuiltinToolConfig.from_dict(_item) for _item in obj["builtin_tools"]] if obj.get("builtin_tools") is not None else None,
+            "subagent_enabled": obj.get("subagent_enabled"),
+            "subagent_guidance": obj.get("subagent_guidance")
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

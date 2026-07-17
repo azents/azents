@@ -47,7 +47,7 @@ api_routes:
   - /llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/{session_id}
   - /chat/v1
 last_verified_at: 2026-07-17
-spec_version: 48
+spec_version: 49
 ---
 
 # Agent Domain Spec
@@ -89,8 +89,10 @@ Agent is central execution unit of azents. Within Workspace, it bundles an order
 - labels are trimmed, non-empty, case-sensitive, and unique within the list;
 - labels are at most 80 characters;
 - selected labels are normalized against the final list, and an absent selected label falls back to the first ordered option;
-- every option stores `settings.context_window_tokens`, `settings.max_output_tokens`, and `settings.builtin_tools` independently;
-- nullable token caps mean no user cap, while an explicit empty built-in tool list disables all provider-hosted tools for that option.
+- every option stores `settings.context_window_tokens`, `settings.max_output_tokens`, `settings.builtin_tools`, `settings.subagent_enabled`, and `settings.subagent_guidance` independently;
+- nullable token caps mean no user cap, while an explicit empty built-in tool list disables all provider-hosted tools for that option;
+- `subagent_enabled` defaults to true and controls only whether the label is available as an explicit `spawn_agent` model target;
+- `subagent_guidance` is nullable parent-model routing guidance, is trimmed with blank input normalized to null, and is limited to 500 characters.
 
 `model_selection` and `lightweight_model_selection` are `AgentModelSelection` JSONB snapshots and are not FK targets. They are effective runtime snapshots owned by Agent service consistency logic:
 
@@ -164,7 +166,9 @@ Create/update requests accept selectable model options as the current model cont
       "settings": {
         "context_window_tokens": 128000,
         "max_output_tokens": 8192,
-        "builtin_tools": [{"name": "web_search"}]
+        "builtin_tools": [{"name": "web_search"}],
+        "subagent_enabled": false,
+        "subagent_guidance": "Reserve for complex synthesis tasks."
       }
     },
     {
@@ -176,7 +180,9 @@ Create/update requests accept selectable model options as the current model cont
       "settings": {
         "context_window_tokens": null,
         "max_output_tokens": 4096,
-        "builtin_tools": []
+        "builtin_tools": [],
+        "subagent_enabled": true,
+        "subagent_guidance": "Prefer for bounded investigation."
       }
     }
   ],
@@ -195,7 +201,8 @@ Create/update requests accept selectable model options as the current model cont
 
 - `selectable_model_options` omitted on create: copy Workspace default selectable model options into Agent.
 - `selectable_model_options` supplied: whole-list replacement. Every entry is resolved through stored catalog projection at submit time, and its settings are normalized against that resolved option capability.
-- Omitted option settings default to null token caps and every supported implemented built-in tool enabled. Explicit null token caps preserve no user cap, and an explicit empty built-in tool list preserves all-off intent.
+- Omitted option settings default to null token caps, every supported implemented built-in tool enabled, explicit subagent targeting enabled, and null subagent guidance. Explicit null token caps preserve no user cap, and an explicit empty built-in tool list preserves all-off intent.
+- Subagent guidance is trimmed and blank input becomes null. Guidance longer than 500 characters is rejected.
 - Positive token caps are stored even when they exceed catalog capability limits; runtime clamps them against the resolved model snapshot. Duplicate or unsupported built-in tool names are rejected per option.
 - Empty lists, more than 10 entries, empty labels, duplicate labels, and unresolved model selections are rejected.
 - `main_model_label` / `lightweight_model_label` omitted, null, or absent from the final list: fallback to the first ordered option label.
@@ -226,7 +233,9 @@ PUT accepts Workspace default selectable model options and labels:
       "settings": {
         "context_window_tokens": null,
         "max_output_tokens": null,
-        "builtin_tools": [{"name": "web_search"}]
+        "builtin_tools": [{"name": "web_search"}],
+        "subagent_enabled": true,
+        "subagent_guidance": null
       }
     }
   ],
@@ -282,7 +291,7 @@ Before an inference-bearing FIFO head is atomically prepared, runtime resolution
 
 Successful preparation atomically stores the full selected `AgentModelSelection`, selected `SelectableModelSettings`, resolved effort, effective limits, and resolution timestamp on `AgentSession` with the canonical input effects and buffer deletion. The Session snapshot is authoritative for the next model turn, automatic retry, recovery, and worker takeover; later Agent edits cannot change an already prepared turn. A later prepared profile may update that snapshot within the same active `AgentRun` and forces model/tool context to rebuild before the next model call. Resolution failures consume the failed FIFO head, preserve the previously committed Session snapshot, append a terminal typed user-safe error, and are never retried.
 
-`spawn_agent` exposes the current Agent's selectable labels and their explicit effort levels, but not integration ids, providers, physical model identifiers, display names, families, catalog metadata, context limits, pricing, or resolved snapshots. Omitted override fields preserve the exact concrete parent Session profile. An explicit target label or effort is allowed only with `fork_turns = none` or a positive bounded count; full-history forks reject overrides. A target-only override normalizes from the parent resolved effort using canonical effort order: preserve when supported, otherwise choose the greatest supported lower effort, otherwise the smallest supported effort, or null when no explicit levels exist. Explicit effort is validated exactly and never normalized. Static validation completes before child creation.
+`spawn_agent` exposes only current Agent options whose `settings.subagent_enabled` is true. Each advertised entry contains the Agent-owned label, explicit effort levels, and optional bounded `subagent_guidance`, but not integration ids, providers, physical model identifiers, display names, families, catalog metadata, context limits, pricing, or resolved snapshots. Explicit target validation uses the same enabled-option set; missing and disabled labels fail with the same unavailable-override tool error before child creation. Omitted `model_target_label` preserves the exact concrete parent Session target even when that option is disabled, and an effort-only override retains that inherited target. If no option is enabled, inherited spawning remains available while no explicit target is advertised. An explicit target label or effort is allowed only with `fork_turns = none` or a positive bounded count; full-history forks reject overrides. A target-only override normalizes from the parent resolved effort using canonical effort order: preserve when supported, otherwise choose the greatest supported lower effort, otherwise the smallest supported effort, or null when no explicit levels exist. Explicit effort is validated exactly and never normalized. Static validation completes before child creation.
 
 Runtime does not query Workspace defaults or model listing. Workspace defaults act only as copy sources at Agent create/update submit time, and model catalog changes do not mutate an already prepared Session snapshot.
 
@@ -324,6 +333,7 @@ Following contracts do not exist in current system.
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-07-17 | 49 | Added per-option explicit subagent target availability and bounded parent-model selection guidance |
 | 2026-07-17 | 48 | Restored model-scoped `image_generation` selection and exhaustive OpenAI/ChatGPT/LiteLLM hosted-tool lowering |
 | 2026-07-16 | 47 | Moved context, output, and built-in tool intent to selectable model options and persisted selected settings on AgentSession |
 | 2026-07-12 | 46 | Moved prepared turn inference authority and effective limits from AgentRun to AgentSession |

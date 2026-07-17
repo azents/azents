@@ -51,6 +51,14 @@ def _normalize_requested_label(label: str | None) -> str | None:
     return label.strip()
 
 
+def _normalize_subagent_guidance(guidance: str | None) -> str | None:
+    """Trim optional subagent guidance and collapse blank input to null."""
+    if guidance is None:
+        return None
+    normalized = guidance.strip()
+    return normalized or None
+
+
 def _select_label(
     labels: set[str], options: Sequence[SelectableModelOption], label: str | None
 ) -> str:
@@ -98,6 +106,10 @@ def _normalize_selectable_model_settings(
             context_window_tokens=settings_input.context_window_tokens,
             max_output_tokens=settings_input.max_output_tokens,
             builtin_tools=list(builtin_tools),
+            subagent_enabled=settings_input.subagent_enabled,
+            subagent_guidance=_normalize_subagent_guidance(
+                settings_input.subagent_guidance
+            ),
         )
     )
 

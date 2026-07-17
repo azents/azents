@@ -84,6 +84,8 @@ function settingsForModel(model: AgentModelSelection): SelectableModelSettings {
     builtin_tools: (
       model.normalized_capabilities.built_in_tools?.supported ?? []
     ).map((name) => ({ name })),
+    subagent_enabled: true,
+    subagent_guidance: null,
   };
 }
 

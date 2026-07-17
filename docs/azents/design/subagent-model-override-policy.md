@@ -2,6 +2,7 @@
 title: "Subagent Model Override Policy"
 created: 2026-07-17
 updated: 2026-07-17
+implemented: 2026-07-17
 tags: [agent, backend, frontend, engine, subagent, models]
 ---
 

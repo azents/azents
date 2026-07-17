@@ -49,6 +49,8 @@ const defaultOption: SelectableModelOptionFormValue = {
   context_window_tokens: 128_000,
   max_output_tokens: 8_000,
   builtin_tools: ["web_search"],
+  subagent_enabled: true,
+  subagent_guidance: "Use for complex synthesis tasks.",
 };
 
 const lightweightOption: SelectableModelOptionFormValue = {
@@ -66,6 +68,8 @@ const lightweightOption: SelectableModelOptionFormValue = {
   context_window_tokens: null,
   max_output_tokens: null,
   builtin_tools: [],
+  subagent_enabled: false,
+  subagent_guidance: "Prefer for repository exploration.",
 };
 
 const options: SelectableModelOptionFormValue[] = [
@@ -163,6 +167,52 @@ export const SettingsModal = {
   },
 } satisfies Story;
 
+export const SubagentPolicyInteraction = {
+  render: () => <SelectableModelOptionsEditorHarness />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(
+      canvas.getByRole("button", { name: "Model settings" }),
+    );
+    const body = within(document.body);
+    const enabledSwitch = body.getByRole("checkbox", {
+      name: "Available for explicit subagent selection",
+    });
+    const guidance = body.getByRole("textbox", {
+      name: "Subagent selection guidance",
+    });
+    await expect(enabledSwitch).toBeChecked();
+    await expect(guidance).toHaveValue("Use for complex synthesis tasks.");
+    await userEvent.click(enabledSwitch);
+    await expect(enabledSwitch).not.toBeChecked();
+    await expect(guidance).toBeDisabled();
+    await expect(guidance).toHaveValue("Use for complex synthesis tasks.");
+  },
+} satisfies Story;
+
+export const ExplicitSubagentSelectionDisabled = {
+  args: {
+    options: [lightweightOption],
+    mainModelLabel: "lightweight",
+    lightweightModelLabel: "lightweight",
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(
+      canvas.getByRole("button", { name: "Model settings" }),
+    );
+    const body = within(document.body);
+    await expect(
+      body.getByRole("checkbox", {
+        name: "Available for explicit subagent selection",
+      }),
+    ).not.toBeChecked();
+    await expect(
+      body.getByRole("textbox", { name: "Subagent selection guidance" }),
+    ).toBeDisabled();
+  },
+} satisfies Story;
+
 export const DuplicateLabel = {
   args: {
     showValidationErrors: true,
@@ -192,6 +242,8 @@ export const PendingNewModel = {
         context_window_tokens: null,
         max_output_tokens: null,
         builtin_tools: [],
+        subagent_enabled: true,
+        subagent_guidance: null,
       },
     ],
   },

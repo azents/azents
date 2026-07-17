@@ -15,12 +15,26 @@ const agentModelSelectionInputSchema = z
   })
   .nullable();
 
+const builtinToolConfigSchema = z.object({
+  name: z.string().min(1),
+  config: z.record(z.string(), z.unknown()).optional().default({}),
+});
+
+const selectableModelSettingsInputSchema = z.object({
+  context_window_tokens: z.number().int().positive().nullable().optional(),
+  max_output_tokens: z.number().int().positive().nullable().optional(),
+  builtin_tools: z.array(builtinToolConfigSchema).nullable().optional(),
+  subagent_enabled: z.boolean().optional(),
+  subagent_guidance: z.string().max(500).nullable().optional(),
+});
+
 const selectableModelOptionInputSchema = z.object({
   label: z.string().min(1),
   model_selection: z.object({
     llm_provider_integration_id: z.string().min(1),
     model_identifier: z.string().min(1),
   }),
+  settings: selectableModelSettingsInputSchema.nullable().optional(),
 });
 
 export const workspaceModelSettingsRouter = router({
