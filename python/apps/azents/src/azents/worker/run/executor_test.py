@@ -55,6 +55,7 @@ from azents.engine.run.contracts import AgentEngineProtocol, RunContext, RunRequ
 from azents.engine.run.emit import Emit, durable, ephemeral
 from azents.engine.run.errors import (
     ModelCallError,
+    NonRetryableModelCallError,
     TransientModelCallError,
     UserVisibleRuntimeError,
 )
@@ -744,6 +745,12 @@ class _SyntheticTransientModelCallError(TransientModelCallError):
     """Safe transient model failure used to verify retry persistence."""
 
     failure_code = "synthetic_transport_failure"
+
+
+class _SyntheticNonRetryableModelCallError(NonRetryableModelCallError):
+    """Safe deterministic model failure used to verify immediate finalization."""
+
+    failure_code = "synthetic_invalid_request"
 
 
 class _AlwaysFailingEngine(_Engine):
@@ -2819,6 +2826,21 @@ async def test_run_session_heartbeat_loop_refreshes_lifecycle(
             await task
 
     assert lifecycle.heartbeat_session_ids[:2] == ["session-001", "session-001"]
+
+
+def test_failed_run_attempt_classifies_typed_non_retryable_model_error() -> None:
+    """Typed deterministic model failures enter the immediate-finalization path."""
+    executor = _executor()
+
+    attempt = executor._failed_run_attempt_from_user_visible_error(  # pyright: ignore[reportPrivateUsage]
+        _SyntheticNonRetryableModelCallError("request rejected"),
+        attempt_number=1,
+        source="model",
+    )
+
+    assert attempt.retryability == "non_retryable"
+    assert attempt.failure_code == "synthetic_invalid_request"
+    assert attempt.user_message == "request rejected"
 
 
 @pytest.mark.asyncio

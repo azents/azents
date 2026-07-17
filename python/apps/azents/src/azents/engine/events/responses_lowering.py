@@ -232,9 +232,9 @@ class ResponsesRequestLowerer:
         if kwargs.get("store") is False:
             # With store=False, provider response items are not persisted; replaying
             # ids like rs_... can resolve missing items. Keep call_id for tool
-            # continuity, but mask every item id consistently so prompt cache keys
+            # continuity, but omit every item id consistently so prompt cache keys
             # remain stable across turns.
-            input_items = _mask_response_item_ids_for_unstored_request(input_items)
+            input_items = _omit_response_item_ids_for_unstored_request(input_items)
         input_items = _drop_orphan_tool_outputs(input_items)
         hosted = _lower_hosted_tools(
             self._hosted_tools,
@@ -705,18 +705,18 @@ def _drop_orphan_tool_outputs(
     return filtered
 
 
-def _mask_response_item_ids_for_unstored_request(
+def _omit_response_item_ids_for_unstored_request(
     input_items: Sequence[dict[str, object]],
 ) -> list[dict[str, object]]:
-    """Mask unstored response ids except required generated-image call ids."""
+    """Omit provider item ids from unstored Responses replay."""
     normalized: list[dict[str, object]] = []
     for item in input_items:
-        if "id" not in item or item.get("type") == "image_generation_call":
+        if "id" not in item:
             normalized.append(item)
             continue
-        masked = dict(item)
-        masked["id"] = None
-        normalized.append(masked)
+        without_id = dict(item)
+        without_id.pop("id")
+        normalized.append(without_id)
     return normalized
 
 

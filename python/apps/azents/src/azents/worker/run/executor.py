@@ -73,6 +73,7 @@ from azents.engine.run.contracts import (
 from azents.engine.run.emit import Emit, handle_engine_event
 from azents.engine.run.errors import (
     CompactionModelStreamTimeoutError,
+    NonRetryableModelCallError,
     TransientModelCallError,
     UserVisibleRuntimeError,
 )
@@ -1711,6 +1712,9 @@ class RunExecutor:
         failure_code: str | None = None
         if isinstance(exc, TransientModelCallError):
             retryability = "transient"
+            failure_code = exc.failure_code
+        elif isinstance(exc, NonRetryableModelCallError):
+            retryability = "non_retryable"
             failure_code = exc.failure_code
         elif _FAILED_RUN_NO_FIXTURE_MATCH_CODE in message:
             retryability = "non_retryable"
