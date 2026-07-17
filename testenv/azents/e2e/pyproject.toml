@@ -57,4 +57,5 @@ python_functions = ["test_*"]
 markers = [
     "live_external: requires external credentials or live third-party services",
     "runtime_provider: requires an agent runtime provider connection",
+    "web_surface: exercises deployed web applications through a real browser and gateway",
 ]

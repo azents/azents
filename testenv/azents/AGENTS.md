@@ -32,7 +32,7 @@ uv run pytest ./src/tests/azents/public/test_health.py
 
 E2E is the primary location for product behavior verification. `testenv` is the fixture/prerequisite support layer that makes E2E execution possible.
 
-Deterministic CI runs `uv run pytest -vv -m "not live_external" ./src` from `testenv/azents/e2e` and does not depend on AWS/ECR credentials. Live/external verification runs only with the `azents-live-e2e` PR label, a maintainer comment on same-repository PRs, a manual workflow, or a nightly workflow. Live workflows run E2E tests marked `live_external`. Requested live verification fails when credentials are missing; nightly optional verification records prerequisite-not-ready as a skip summary.
+Required CI runs two credential-free E2E lanes from `testenv/azents/e2e`. Deterministic E2E uses `uv run pytest -vv -m "not live_external and not runtime_provider and not web_surface" ./src`. Web Surface E2E runs separately with `uv run pytest -vv -m "web_surface and not live_external and not runtime_provider" ./src` and exercises worktree-built web applications through a real browser and gateway. Live/external verification runs only with the `azents-live-e2e` PR label, a maintainer comment on same-repository PRs, a manual workflow, or a nightly workflow. Live workflows run E2E tests marked `live_external`. Requested live verification fails when credentials are missing; nightly optional verification records prerequisite-not-ready as a skip summary.
 
 ## Fixture Setup Substrate
 
