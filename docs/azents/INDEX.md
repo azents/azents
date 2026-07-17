@@ -218,8 +218,9 @@ _14 documents_
 - [ADR-0161: Deliver the OpenAI HTTP Migration as One Revertible Change](adr/0161-deliver-openai-http-migration-as-one-revertible-change.md)
 - [ADR-0162: Use Standard Responses for ChatGPT OAuth](adr/0162-use-standard-responses-for-chatgpt-oauth.md)
 - [ADR-0163: Normalize Provider Tool Live Activity Across Model Adapters](adr/0163-normalize-provider-tool-live-activity.md)
+- [ADR-0164: Materialize Provider-Generated Images as File Resources](adr/0164-materialize-provider-generated-images-as-file-resources.md)
 
-_169 documents_
+_170 documents_
 
 ## Issues (Bug Tracking)
 
