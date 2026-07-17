@@ -118,10 +118,33 @@ class _ExchangeFileRepository(ExchangeFileRepository):
     ) -> ExchangeFile:
         del session
         self.created.append(create)
+        return self._build_created(create)
+
+    async def get_by_id(
+        self,
+        session: AsyncSession,
+        file_id: str,
+    ) -> ExchangeFile | None:
+        del session
+        for create in self.created:
+            if create.id == file_id:
+                return self._build_created(create)
+        return None
+
+    def _build_created(self, create: ExchangeFileCreate) -> ExchangeFile:
+        preview_id = next(
+            (
+                preview_id
+                for source_id, preview_id in self.preview_links
+                if source_id == create.id
+            ),
+            None,
+        )
         return ExchangeFile.model_construct(
             **create.model_dump(),
             status="available",
             object_key=f"exchange/workspace-1/files/{create.id}/original",
+            preview_thumbnail_file_id=preview_id,
             created_at=datetime.datetime.now(datetime.UTC),
         )
 
@@ -160,6 +183,21 @@ class _ModelFileRepository(ModelFileRepository):
     ) -> ModelFile:
         del session
         self.created.append(create)
+        return self._build_created(create)
+
+    async def get_by_id(
+        self,
+        session: AsyncSession,
+        model_file_id: str,
+    ) -> ModelFile | None:
+        del session
+        for create in self.created:
+            if create.id == model_file_id:
+                return self._build_created(create)
+        return None
+
+    @staticmethod
+    def _build_created(create: ModelFileCreate) -> ModelFile:
         return ModelFile.model_construct(
             **create.model_dump(),
             status="available",
@@ -398,6 +436,27 @@ async def test_materializes_exchange_and_model_file_in_one_admission() -> None:
     await prepared.persist(_Session())
     prepared.admitted = True
     await prepared.cleanup()
+
+    assert len(exchange_repository.created) == 2
+    assert len(exchange_repository.preview_links) == 1
+    assert len(model_repository.created) == 1
+    assert s3_service.deleted == []
+
+
+async def test_retry_reuses_metadata_and_preserves_admitted_objects() -> None:
+    """Keep deterministic resources safe across repeated output admission."""
+    materializer, exchange_repository, model_repository, s3_service = _materializer()
+    first = await materializer.prepare(_normalized_output())
+    await first.persist(_Session())
+    first.admitted = True
+
+    rolled_back_retry = await materializer.prepare(_normalized_output())
+    await rolled_back_retry.cleanup()
+    assert s3_service.deleted == []
+
+    admitted_retry = await materializer.prepare(_normalized_output())
+    await admitted_retry.persist(_Session())
+    admitted_retry.admitted = True
 
     assert len(exchange_repository.created) == 2
     assert len(exchange_repository.preview_links) == 1
