@@ -11,8 +11,6 @@ Name | Type | Description | Notes
 **status** | [**AgentRunStatus**](AgentRunStatus.md) | Current run status | 
 **inference_profile** | [**AppliedInferenceProfile**](AppliedInferenceProfile.md) | Inference settings applied to the active turn | 
 **model_call_started_at** | **datetime** |  | 
-**operation** | [**ChatLiveRunOperationResponse**](ChatLiveRunOperationResponse.md) |  | [optional] 
-**recovery** | [**ChatLiveRunRecoveryStateResponse**](ChatLiveRunRecoveryStateResponse.md) |  | [optional] 
 **retry** | [**ChatLiveRunRetryStateResponse**](ChatLiveRunRetryStateResponse.md) |  | [optional] 
 
 ## Example

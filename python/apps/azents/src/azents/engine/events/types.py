@@ -22,7 +22,6 @@ from azents.engine.events.action_messages import ActionMessagePayload
 from azents.engine.run.failure import (
     FailedRunFailureMetadata,
     FailedRunRetryState,
-    RunRecoveryState,
 )
 
 RawDict: TypeAlias = Annotated[dict[str, object], SkipValidation]
@@ -610,10 +609,8 @@ class AgentRunState(BaseModel):
     phase: AgentRunPhase
     status: AgentRunStatus
     parent_agent_run_id: str | None
-    retry_source_run_id: str | None = Field(default=None)
     active_tool_calls: list[ActiveToolCall] = Field(default_factory=list)
     retry_state: FailedRunRetryState | None = Field(default=None)
-    recovery_state: RunRecoveryState | None = Field(default=None)
     last_completed_event_id: str | None = Field(default=None)
     terminal_result_event_id: str | None = Field(default=None)
     terminal_result_message: str | None = Field(default=None)

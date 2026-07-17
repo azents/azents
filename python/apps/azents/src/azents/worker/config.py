@@ -2,8 +2,6 @@
 
 import dataclasses
 
-from azents.engine.run.retry_policy import FailedRunRetryPolicy
-
 
 @dataclasses.dataclass(frozen=True)
 class AgentWorkerConfig:
@@ -13,4 +11,7 @@ class AgentWorkerConfig:
     oauth_secret_key: str
     mcp_proxy_url: str | None
     openai_responses_websocket_enabled: bool
-    failed_run_retry_policy: FailedRunRetryPolicy
+    failed_run_max_retries: int
+    failed_run_base_backoff_seconds: int
+    failed_run_backoff_multiplier: int
+    failed_run_max_backoff_seconds: int

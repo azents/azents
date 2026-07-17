@@ -517,10 +517,18 @@ async def test_filepart_placeholder_filter_keeps_available_filepart() -> None:
 
 
 async def test_compactor_appends_summary_and_moves_head() -> None:
-    """Compaction appends only the summary and moves the model-input head."""
+    """Compaction moves head to summary id without deleting old events."""
     events = [
-        _event("1", EventKind.USER_MESSAGE, UserMessagePayload(content="old")),
-        _event("2", EventKind.USER_MESSAGE, UserMessagePayload(content="recent")),
+        _event(
+            "1",
+            EventKind.USER_MESSAGE,
+            UserMessagePayload(content="old"),
+        ),
+        _event(
+            "2",
+            EventKind.USER_MESSAGE,
+            UserMessagePayload(content="recent"),
+        ),
     ]
     transcript_repo = _TranscriptRepo(events)
     session_repo = _SessionRepo()
@@ -547,11 +555,12 @@ async def test_compactor_appends_summary_and_moves_head() -> None:
 
     assert summary is not None
     assert session_repo.head_event_id == summary.id
-    assert len(transcript_repo.events) == 3
+    assert len(transcript_repo.events) == 4
     assert [event.model_order for event in transcript_repo.events] == [
         1000,
         2000,
-        2001,
+        3000,
+        3001,
     ]
     model_input_events = sorted(
         (
@@ -562,6 +571,9 @@ async def test_compactor_appends_summary_and_moves_head() -> None:
         key=lambda event: event.model_order,
     )
     assert [event.payload for event in model_input_events] == [summary.payload]
+    started_payload = transcript_repo.events[2].payload
+    assert isinstance(started_payload, CompactionMarkerPayload)
+    assert started_payload.reason == "manual_command"
     payload = summary.payload
     assert isinstance(payload, CompactionSummaryPayload)
     assert payload.covered_until_event_id == f"{2:032d}"
@@ -574,9 +586,15 @@ async def test_compactor_appends_summary_and_moves_head() -> None:
     assert '"model_order"' not in payload.content
 
 
-async def test_compactor_opens_no_transaction_during_external_summary_call() -> None:
-    """Compaction opens no database transaction during model latency."""
-    events = [_event("1", EventKind.USER_MESSAGE, UserMessagePayload(content="old"))]
+async def test_compactor_commits_before_external_summary_call() -> None:
+    """Compaction does not hold its start transaction during model latency."""
+    events = [
+        _event(
+            "1",
+            EventKind.USER_MESSAGE,
+            UserMessagePayload(content="old"),
+        )
+    ]
     session_manager = _SessionManager()
     transcript_repo = _TranscriptRepo(events)
 
@@ -584,10 +602,11 @@ async def test_compactor_opens_no_transaction_during_external_summary_call() -> 
         old_events: Sequence[Event],
         summary_budget: object,
     ) -> str:
-        """Verify no compaction transaction is active."""
+        """Verify the started-marker session is already closed."""
         del old_events, summary_budget
         assert session_manager.active_scopes == 0
-        assert session_manager.sessions == []
+        assert len(session_manager.sessions) == 1
+        assert session_manager.sessions[0].commit_count == 1
         return "summary"
 
     await _compactor(
@@ -601,13 +620,19 @@ async def test_compactor_opens_no_transaction_during_external_summary_call() -> 
         summarize=summarize,
     )
 
-    assert len(session_manager.sessions) == 1
-    assert session_manager.sessions[0].commit_count == 1
+    assert len(session_manager.sessions) == 2
+    assert [session.commit_count for session in session_manager.sessions] == [1, 1]
 
 
 async def test_compactor_preserves_input_appended_during_summary() -> None:
     """Input appended during summary remains after the new model-input head."""
-    events = [_event("1", EventKind.USER_MESSAGE, UserMessagePayload(content="old"))]
+    events = [
+        _event(
+            "1",
+            EventKind.USER_MESSAGE,
+            UserMessagePayload(content="old"),
+        )
+    ]
     session_manager = _SessionManager()
     concurrent_session = _Session()
     transcript_repo = _TranscriptRepo(events)
@@ -616,10 +641,10 @@ async def test_compactor_preserves_input_appended_during_summary() -> None:
         old_events: Sequence[Event],
         summary_budget: object,
     ) -> str:
-        """Append input while no compaction transaction is open."""
+        """Append input after the started-marker transaction is released."""
         del old_events, summary_budget
         assert session_manager.active_scopes == 0
-        assert session_manager.sessions == []
+        assert session_manager.sessions[0].commit_count == 1
         await transcript_repo.append(
             concurrent_session,
             EventCreate(
@@ -645,8 +670,9 @@ async def test_compactor_preserves_input_appended_during_summary() -> None:
     )
 
     assert summary is not None
-    concurrent_input = transcript_repo.events[1]
-    assert summary.model_order == events[0].model_order + 1
+    started_marker = transcript_repo.events[1]
+    concurrent_input = transcript_repo.events[2]
+    assert summary.model_order == started_marker.model_order + 1
     assert concurrent_input.model_order > summary.model_order
     model_input_events = sorted(
         (
@@ -973,11 +999,19 @@ async def test_compactor_truncates_large_continuity_events() -> None:
     assert "x" * 9_000 not in payload.content
 
 
-async def test_compactor_propagates_summary_failure_without_durable_marker() -> None:
-    """Summary failure leaves transcript and model-input head unchanged."""
+async def test_compactor_propagates_summary_failure() -> None:
+    """Summary failure propagates instead of being hidden as success."""
     events = [
-        _event("1", EventKind.USER_MESSAGE, UserMessagePayload(content="old")),
-        _event("2", EventKind.USER_MESSAGE, UserMessagePayload(content="recent")),
+        _event(
+            "1",
+            EventKind.USER_MESSAGE,
+            UserMessagePayload(content="old"),
+        ),
+        _event(
+            "2",
+            EventKind.USER_MESSAGE,
+            UserMessagePayload(content="recent"),
+        ),
     ]
     transcript_repo = _TranscriptRepo(events)
     session_repo = _SessionRepo()
@@ -1002,12 +1036,30 @@ async def test_compactor_propagates_summary_failure_without_durable_marker() -> 
         )
 
     assert session_repo.head_event_id is None
-    assert transcript_repo.events == events
+    assert len(transcript_repo.events) == 4
+    started_marker = transcript_repo.events[-2]
+    assert started_marker.kind == EventKind.COMPACTION_MARKER
+    started_payload = started_marker.payload
+    assert isinstance(started_payload, CompactionMarkerPayload)
+    assert started_payload.status == "started"
+    failed_marker = transcript_repo.events[-1]
+    assert failed_marker.kind == EventKind.COMPACTION_MARKER
+    failed_payload = failed_marker.payload
+    assert isinstance(failed_payload, CompactionMarkerPayload)
+    assert failed_payload.status == "failed"
+    assert failed_payload.reason == "summary_failed"
+    assert failed_payload.error == "provider unavailable"
 
 
-async def test_compactor_propagates_summary_enrichment_error_without_marker() -> None:
-    """Summary enrichment failure leaves no durable compaction lifecycle event."""
-    events = [_event("1", EventKind.USER_MESSAGE, UserMessagePayload(content="old"))]
+async def test_compactor_commits_failure_after_summary_enrichment_error() -> None:
+    """Summary enrichment failure records a terminal marker after start commit."""
+    events = [
+        _event(
+            "1",
+            EventKind.USER_MESSAGE,
+            UserMessagePayload(content="old"),
+        )
+    ]
     session_manager = _SessionManager()
     transcript_repo = _TranscriptRepo(events)
 
@@ -1028,7 +1080,13 @@ async def test_compactor_propagates_summary_enrichment_error_without_marker() ->
         covered_until_event_id: str,
     ) -> str:
         """Simulate an external enrichment failure."""
-        del summary, continuity_history, compaction_id, reason, covered_until_event_id
+        del (
+            summary,
+            continuity_history,
+            compaction_id,
+            reason,
+            covered_until_event_id,
+        )
         raise RuntimeError("enrichment unavailable")
 
     with pytest.raises(RuntimeError, match="enrichment unavailable"):
@@ -1044,13 +1102,23 @@ async def test_compactor_propagates_summary_enrichment_error_without_marker() ->
             summary_enricher=enrich,
         )
 
-    assert session_manager.sessions == []
-    assert transcript_repo.events == events
+    assert [session.commit_count for session in session_manager.sessions] == [1, 1]
+    failed = transcript_repo.events[-1].payload
+    assert isinstance(failed, CompactionMarkerPayload)
+    assert failed.status == "failed"
+    assert failed.reason == "summary_enrichment_failed"
+    assert failed.error == "enrichment unavailable"
 
 
-async def test_compactor_propagates_cancelled_start_callback_without_marker() -> None:
-    """Cancellation in the start callback leaves transcript unchanged."""
-    events = [_event("1", EventKind.USER_MESSAGE, UserMessagePayload(content="old"))]
+async def test_compactor_records_cancelled_start_callback() -> None:
+    """Cancellation in the start callback follows the durable started marker."""
+    events = [
+        _event(
+            "1",
+            EventKind.USER_MESSAGE,
+            UserMessagePayload(content="old"),
+        )
+    ]
     session_manager = _SessionManager()
     transcript_repo = _TranscriptRepo(events)
 
@@ -1079,13 +1147,25 @@ async def test_compactor_propagates_cancelled_start_callback_without_marker() ->
             on_started=on_started,
         )
 
-    assert session_manager.sessions == []
-    assert transcript_repo.events == events
+    assert [session.commit_count for session in session_manager.sessions] == [1, 1]
+    started = transcript_repo.events[-2].payload
+    assert isinstance(started, CompactionMarkerPayload)
+    assert started.status == "started"
+    cancelled = transcript_repo.events[-1].payload
+    assert isinstance(cancelled, CompactionMarkerPayload)
+    assert cancelled.status == "failed"
+    assert cancelled.reason == "cancelled"
 
 
-async def test_compactor_propagates_summary_cancellation_without_marker() -> None:
-    """Cancellation during summary leaves transcript unchanged."""
-    events = [_event("1", EventKind.USER_MESSAGE, UserMessagePayload(content="old"))]
+async def test_compactor_commits_cancelled_marker_after_summary_cancellation() -> None:
+    """Cancellation records a durable outcome in a separate transaction."""
+    events = [
+        _event(
+            "1",
+            EventKind.USER_MESSAGE,
+            UserMessagePayload(content="old"),
+        )
+    ]
     session_manager = _SessionManager()
     transcript_repo = _TranscriptRepo(events)
 
@@ -1109,15 +1189,26 @@ async def test_compactor_propagates_summary_cancellation_without_marker() -> Non
             summarize=summarize,
         )
 
-    assert session_manager.sessions == []
-    assert transcript_repo.events == events
+    assert [session.commit_count for session in session_manager.sessions] == [1, 1]
+    cancelled = transcript_repo.events[-1].payload
+    assert isinstance(cancelled, CompactionMarkerPayload)
+    assert cancelled.status == "failed"
+    assert cancelled.reason == "cancelled"
 
 
 async def test_compactor_raises_when_summary_is_empty() -> None:
-    """Empty summary propagates failure without durable lifecycle markers."""
+    """Empty summary leaves failed marker and propagates failure to caller."""
     events = [
-        _event("1", EventKind.USER_MESSAGE, UserMessagePayload(content="old")),
-        _event("2", EventKind.USER_MESSAGE, UserMessagePayload(content="recent")),
+        _event(
+            "1",
+            EventKind.USER_MESSAGE,
+            UserMessagePayload(content="old"),
+        ),
+        _event(
+            "2",
+            EventKind.USER_MESSAGE,
+            UserMessagePayload(content="recent"),
+        ),
     ]
     transcript_repo = _TranscriptRepo(events)
     session_repo = _SessionRepo()
@@ -1142,14 +1233,28 @@ async def test_compactor_raises_when_summary_is_empty() -> None:
         )
 
     assert session_repo.head_event_id is None
-    assert transcript_repo.events == events
+    assert len(transcript_repo.events) == 4
+    failed_marker = transcript_repo.events[-1]
+    assert failed_marker.kind == EventKind.COMPACTION_MARKER
+    payload = failed_marker.payload
+    assert isinstance(payload, CompactionMarkerPayload)
+    assert payload.status == "failed"
+    assert payload.reason == "empty_summary"
 
 
 async def test_auto_compaction_runs_when_threshold_is_exceeded() -> None:
-    """Auto compaction persists only the successful summary."""
+    """Auto compaction returns a full summary with continuity events."""
     events = [
-        _event("1", EventKind.USER_MESSAGE, UserMessagePayload(content="old" * 100)),
-        _event("2", EventKind.USER_MESSAGE, UserMessagePayload(content="recent")),
+        _event(
+            "1",
+            EventKind.USER_MESSAGE,
+            UserMessagePayload(content="old" * 100),
+        ),
+        _event(
+            "2",
+            EventKind.USER_MESSAGE,
+            UserMessagePayload(content="recent"),
+        ),
     ]
     transcript_repo = _TranscriptRepo(events)
     session_repo = _SessionRepo()
@@ -1178,11 +1283,9 @@ async def test_auto_compaction_runs_when_threshold_is_exceeded() -> None:
     assert session_repo.head_event_id is not None
     assert len(result) == 1
     assert result[0].kind == EventKind.COMPACTION_SUMMARY
-    assert [event.kind for event in transcript_repo.events] == [
-        EventKind.USER_MESSAGE,
-        EventKind.USER_MESSAGE,
-        EventKind.COMPACTION_SUMMARY,
-    ]
+    marker_payload = transcript_repo.events[2].payload
+    assert isinstance(marker_payload, CompactionMarkerPayload)
+    assert marker_payload.reason == "auto_threshold_exceeded"
     summary_payload = result[0].payload
     assert isinstance(summary_payload, CompactionSummaryPayload)
     assert summary_payload.reason == "auto_threshold_exceeded"
@@ -1191,26 +1294,32 @@ async def test_auto_compaction_runs_when_threshold_is_exceeded() -> None:
     assert "2. recent" in summary_payload.content
 
 
-async def test_auto_compaction_calls_started_before_summary_without_marker() -> None:
-    """Auto compaction reports live start before the external summary call."""
+async def test_auto_compaction_emits_started_before_summary_call() -> None:
+    """Auto compaction calls start callback before long summary call."""
     events = [
-        _event("1", EventKind.USER_MESSAGE, UserMessagePayload(content="old" * 100)),
-        _event("2", EventKind.USER_MESSAGE, UserMessagePayload(content="recent")),
+        _event(
+            "1",
+            EventKind.USER_MESSAGE,
+            UserMessagePayload(content="old" * 100),
+        ),
+        _event(
+            "2",
+            EventKind.USER_MESSAGE,
+            UserMessagePayload(content="recent"),
+        ),
     ]
     transcript_repo = _TranscriptRepo(events)
     session_repo = _SessionRepo()
     session_manager = _SessionManager()
     calls: list[str] = []
 
-    async def on_phase_started() -> None:
-        assert session_manager.active_scopes == 0
-        assert session_manager.sessions == []
-        assert transcript_repo.events == events
-        calls.append("phase")
-
     async def on_compaction_started() -> None:
-        assert calls == ["phase"]
-        calls.append("hook")
+        assert session_manager.active_scopes == 0
+        assert session_manager.sessions[0].commit_count == 1
+        marker = transcript_repo.events[-1].payload
+        assert isinstance(marker, CompactionMarkerPayload)
+        assert marker.status == "started"
+        calls.append("started")
 
     async def summarize(
         old_events: Sequence[Event],
@@ -1233,9 +1342,9 @@ async def test_auto_compaction_calls_started_before_summary_without_marker() -> 
         auto_compaction_threshold_tokens=None,
         compaction_id_factory=lambda: "compact-1",
         on_compaction_started=on_compaction_started,
-    ).compact(events, on_started=on_phase_started)
+    ).compact(events)
 
-    assert calls == ["phase", "hook", "summarize"]
+    assert calls == ["started", "summarize"]
 
 
 async def test_auto_compaction_marks_compacted_only_when_summary_is_created() -> None:

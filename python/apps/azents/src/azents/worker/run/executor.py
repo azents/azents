@@ -82,17 +82,11 @@ from azents.engine.run.failure import (
     FailedRunAttemptSource,
     FailedRunAttemptVisibility,
     FailedRunFinalizationReason,
-    FailedRunProviderFailure,
     FailedRunRetryability,
     FailedRunRetryState,
 )
 from azents.engine.run.input import InvokeInput
 from azents.engine.run.model_transport import ModelTransportState
-from azents.engine.run.provider_failure import (
-    ModelProviderFailure,
-    ModelProviderFailureCategory,
-    ModelProviderFailureRetryability,
-)
 from azents.engine.run.resolve import (
     ModelTargetNotFound,
     ReasoningEffortUnsupported,
@@ -136,7 +130,6 @@ from azents.repos.llm_provider_integration.deps import (
 from azents.repos.toolkit import AgentToolkitRepository, ToolkitRepository
 from azents.runtime.types import RuntimeDomainConfig
 from azents.services.chat.data import (
-    ChatLiveRunOperation,
     ChatLiveRunRetryAttempt,
     ChatLiveRunRetryState,
     ChatLiveRunState,
@@ -1175,15 +1168,6 @@ class RunExecutor:
                     status=AgentRunStatus.RUNNING,
                     inference_profile=inference_profile,
                     model_call_started_at=active_model_call_started_at,
-                    operation=(
-                        ChatLiveRunOperation(
-                            kind="preparing_context",
-                            operation_id=run_id,
-                            status="running",
-                        )
-                        if active_phase is AgentRunPhase.COMPACTING
-                        else None
-                    ),
                     retry=_chat_live_retry_state(live_retry_state),
                 ),
             )
@@ -1349,13 +1333,18 @@ class RunExecutor:
                         shutdown_event=shutdown_event,
                     )
                     if retry_stopped:
-                        run_end_reason = "cancelled"
-                        terminal_run_status = AgentRunStatus.STOPPED
-                        await self.user_stop_finalizer.record_interrupted_run(
-                            message.session_id,
-                            run_id=run_id,
+                        run_end_reason = "error"
+                        terminal_run_status = AgentRunStatus.FAILED
+                        await self.failed_run_finalizer.finalize(
+                            FailedRunFinalizationInput(
+                                session_id=message.session_id,
+                                run_id=run_id,
+                                user_message=current_retry_state.last_user_message,
+                                retry_state=current_retry_state,
+                                reason="retry_stopped_by_user",
+                            ),
+                            dispatch_event=dispatch_event,
                         )
-                        terminal_state_persisted = True
                         run_completed = True
             while not run_completed:
                 try:
@@ -1512,13 +1501,18 @@ class RunExecutor:
                         shutdown_event=shutdown_event,
                     )
                     if retry_stopped:
-                        run_end_reason = "cancelled"
-                        terminal_run_status = AgentRunStatus.STOPPED
-                        await self.user_stop_finalizer.record_interrupted_run(
-                            message.session_id,
-                            run_id=run_id,
+                        run_end_reason = "error"
+                        terminal_run_status = AgentRunStatus.FAILED
+                        await self.failed_run_finalizer.finalize(
+                            FailedRunFinalizationInput(
+                                session_id=message.session_id,
+                                run_id=run_id,
+                                user_message=retry_state.last_user_message,
+                                retry_state=retry_state,
+                                reason="retry_stopped_by_user",
+                            ),
+                            dispatch_event=dispatch_event,
                         )
-                        terminal_state_persisted = True
                         run_completed = True
                         break
                     attempt_number += 1
@@ -1606,13 +1600,18 @@ class RunExecutor:
                         shutdown_event=shutdown_event,
                     )
                     if retry_stopped:
-                        run_end_reason = "cancelled"
-                        terminal_run_status = AgentRunStatus.STOPPED
-                        await self.user_stop_finalizer.record_interrupted_run(
-                            message.session_id,
-                            run_id=run_id,
+                        run_end_reason = "error"
+                        terminal_run_status = AgentRunStatus.FAILED
+                        await self.failed_run_finalizer.finalize(
+                            FailedRunFinalizationInput(
+                                session_id=message.session_id,
+                                run_id=run_id,
+                                user_message=retry_state.last_user_message,
+                                retry_state=retry_state,
+                                reason="retry_stopped_by_user",
+                            ),
+                            dispatch_event=dispatch_event,
                         )
-                        terminal_state_persisted = True
                         run_completed = True
                         break
                     attempt_number += 1
@@ -1662,11 +1661,10 @@ class RunExecutor:
                 )
             else:
                 await self.session_lifecycle.clear_session_activity(message.session_id)
-                if terminal_run_status is not AgentRunStatus.STOPPED:
-                    await self.live_event_projector.publish_live_run_cleared(
-                        message.session_id,
-                        run_id=run_id,
-                    )
+                await self.live_event_projector.publish_live_run_cleared(
+                    message.session_id,
+                    run_id=run_id,
+                )
                 await publish_session_tree_changed()
             if command is not None:
                 await self._clear_pending_command(
@@ -1706,12 +1704,7 @@ class RunExecutor:
         message = str(exc)
         retryability: FailedRunRetryability = "unknown"
         failure_code: str | None = None
-        provider_failure: FailedRunProviderFailure | None = None
-        if isinstance(exc, ModelProviderFailure):
-            retryability = _failed_run_retryability(exc.retryability)
-            failure_code = exc.failure_code
-            provider_failure = FailedRunProviderFailure.from_failure(exc)
-        elif isinstance(exc, TransientModelCallError):
+        if isinstance(exc, TransientModelCallError):
             retryability = "transient"
             failure_code = exc.failure_code
         elif isinstance(exc, NonRetryableModelCallError):
@@ -1730,7 +1723,6 @@ class RunExecutor:
             occurred_at=datetime.datetime.now(datetime.UTC),
             retryability=retryability,
             failure_code=failure_code,
-            provider_failure=provider_failure,
         )
 
     async def _record_failed_run_attempt(
@@ -1742,19 +1734,22 @@ class RunExecutor:
         previous_retry_state: FailedRunRetryState | None,
     ) -> FailedRunRetryState:
         """Persist retry state for a failed run attempt."""
-        retry_policy = self.worker_config.failed_run_retry_policy
         backoff_seconds = (
             0
             if attempt.retryability == "non_retryable"
-            and attempt.provider_failure is None
-            else retry_policy.backoff_seconds(attempt.attempt_number)
+            else _failed_run_backoff_seconds(
+                attempt.attempt_number,
+                base_seconds=self.worker_config.failed_run_base_backoff_seconds,
+                multiplier=self.worker_config.failed_run_backoff_multiplier,
+                max_seconds=self.worker_config.failed_run_max_backoff_seconds,
+            )
         )
         next_retry_at = attempt.occurred_at + datetime.timedelta(
             seconds=backoff_seconds
         )
         retry_state = FailedRunRetryState.from_attempt(
             attempt,
-            max_retries=retry_policy.max_retries,
+            max_retries=self.worker_config.failed_run_max_retries,
             backoff_seconds=backoff_seconds,
             next_retry_at=next_retry_at,
             previous=previous_retry_state,
@@ -1769,31 +1764,6 @@ class RunExecutor:
             run_id=run_id,
             phase=None,
         )
-        provider_failure = attempt.provider_failure
-        if provider_failure is not None:
-            log_extra = {
-                "session_id": session_id,
-                "run_id": run_id,
-                "attempt_number": attempt.attempt_number,
-                "provider_failure_operation": provider_failure.operation,
-                "provider_failure_provider": provider_failure.provider,
-                "provider_failure_integration": provider_failure.integration,
-                "provider_failure_model": provider_failure.model,
-                "provider_failure_category": provider_failure.category.value,
-                "provider_failure_retryability": provider_failure.retryability.value,
-                "provider_failure_status_code": provider_failure.status_code,
-                "provider_failure_code": provider_failure.provider_code,
-                "provider_failure_error_type": provider_failure.provider_error_type,
-                "provider_failure_fingerprint": provider_failure.fingerprint,
-                "provider_failure_retry_outcome": (
-                    "scheduled"
-                    if retry_policy.retry_available(attempt.attempt_number)
-                    else "exhausted"
-                ),
-            }
-            logger.warning("Model provider attempt failed", extra=log_extra)
-            if provider_failure.category is ModelProviderFailureCategory.UNKNOWN:
-                logger.error("Unknown model provider failure", extra=log_extra)
         return retry_state
 
     async def _wait_for_failed_run_retry(
@@ -2414,26 +2384,20 @@ def _failed_run_finalization_reason(
     retry_state: FailedRunRetryState,
 ) -> FailedRunFinalizationReason | None:
     """Return terminal retry finalization reason, if retry should stop."""
-    if (
-        retry_state.retryability == "non_retryable"
-        and retry_state.provider_failure is None
-    ):
+    if retry_state.retryability == "non_retryable":
         return "non_retryable"
     if retry_state.failed_attempt_count > retry_state.max_retries:
         return "retry_exhausted"
     return None
 
 
-def _failed_run_retryability(
-    retryability: ModelProviderFailureRetryability,
-) -> FailedRunRetryability:
-    """Convert provider diagnostic retryability to failed-run state."""
-    match retryability:
-        case ModelProviderFailureRetryability.TRANSIENT:
-            return "transient"
-        case ModelProviderFailureRetryability.USER_ACTION_REQUIRED:
-            return "user_action_required"
-        case ModelProviderFailureRetryability.NON_RETRYABLE:
-            return "non_retryable"
-        case ModelProviderFailureRetryability.UNKNOWN:
-            return "unknown"
+def _failed_run_backoff_seconds(
+    attempt_number: int,
+    *,
+    base_seconds: int,
+    multiplier: int,
+    max_seconds: int,
+) -> int:
+    """Return bounded exponential failed-run retry backoff."""
+    raw = base_seconds * (multiplier ** (attempt_number - 1))
+    return min(max_seconds, raw)

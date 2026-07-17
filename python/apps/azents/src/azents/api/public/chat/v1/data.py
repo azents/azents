@@ -48,8 +48,6 @@ from azents.services.chat.context import (
     SessionContextSystemPromptFragment,
 )
 from azents.services.chat.data import (
-    ChatLiveRunOperation,
-    ChatLiveRunRecoveryState,
     ChatLiveRunRetryAttempt,
     ChatLiveRunRetryState,
     ChatLiveRunState,
@@ -353,18 +351,6 @@ class ChatFailedRunRetryRequest(BaseModel):
     )
 
 
-class ChatStoppedRunRetryRequest(BaseModel):
-    """REST stopped-run retry request."""
-
-    agent_id: str = Field(description="Agent ID")
-    stopped_run_id: str = Field(description="Recoverable stopped AgentRun ID")
-    client_request_id: str = Field(
-        min_length=1,
-        max_length=64,
-        description="Client-generated idempotency key",
-    )
-
-
 class ChatWriteAcceptedResponse(BaseModel):
     """REST write accepted target."""
 
@@ -373,7 +359,6 @@ class ChatWriteAcceptedResponse(BaseModel):
         "edit_message",
         "command",
         "failed_run_retry",
-        "stopped_run_retry",
     ] = Field(description="Accepted target type")
     id: str = Field(description="Accepted target ID")
 
@@ -570,7 +555,7 @@ class ChatWriteSnapshotResponse(BaseModel):
     )
     run: ChatLiveRunStateResponse | None = Field(
         default=None,
-        description="Current active or recoverable stopped Run projection",
+        description="Currently running run status",
     )
     session_run_state: AgentSessionRunState = Field(
         description="Authoritative run_state for the current session",
@@ -1834,46 +1819,6 @@ class ChatLiveRunRetryStateResponse(BaseModel):
         )
 
 
-class ChatLiveRunOperationResponse(BaseModel):
-    """Current live Run operation response."""
-
-    kind: Literal["preparing_context"] = Field(description="Operation kind")
-    operation_id: str = Field(description="Stable operation identity")
-    status: Literal["running"] = Field(description="Current operation status")
-
-    @classmethod
-    def from_domain(cls, operation: ChatLiveRunOperation) -> Self:
-        """Convert from live Run operation domain model."""
-        return cls(
-            kind=operation.kind,
-            operation_id=operation.operation_id,
-            status=operation.status,
-        )
-
-
-class ChatLiveRunRecoveryStateResponse(BaseModel):
-    """User-safe recoverable stopped Run response."""
-
-    kind: Literal["provider_failure", "stopped"] = Field(description="Recovery kind")
-    user_message: str = Field(description="User-safe stopped Run message")
-    operation: Literal["sampling", "compaction", "session_title"] = Field(
-        description="Model operation that was stopped",
-    )
-    source_run_id: str = Field(description="Recoverable stopped AgentRun ID")
-    stopped_at: str = Field(description="Stopped timestamp")
-
-    @classmethod
-    def from_domain(cls, recovery: ChatLiveRunRecoveryState) -> Self:
-        """Convert from recoverable stopped Run domain model."""
-        return cls(
-            kind=recovery.kind,
-            user_message=recovery.user_message,
-            operation=recovery.operation,
-            source_run_id=recovery.source_run_id,
-            stopped_at=recovery.stopped_at,
-        )
-
-
 class ChatLiveRunStateResponse(BaseModel):
     """Current live run state response."""
 
@@ -1885,16 +1830,6 @@ class ChatLiveRunStateResponse(BaseModel):
     )
     model_call_started_at: datetime.datetime | None = Field(
         description="Current model call start time, or null outside a model call",
-    )
-    operation: ChatLiveRunOperationResponse | None = Field(
-        default=None,
-        description="Current live Run operation",
-        exclude_if=lambda value: value is None,
-    )
-    recovery: ChatLiveRunRecoveryStateResponse | None = Field(
-        default=None,
-        description="Recoverable state retained for a stopped Run",
-        exclude_if=lambda value: value is None,
     )
     retry: ChatLiveRunRetryStateResponse | None = Field(
         default=None,
@@ -1911,12 +1846,6 @@ class ChatLiveRunStateResponse(BaseModel):
             status=run.status,
             inference_profile=run.inference_profile,
             model_call_started_at=run.model_call_started_at,
-            operation=None
-            if run.operation is None
-            else ChatLiveRunOperationResponse.from_domain(run.operation),
-            recovery=None
-            if run.recovery is None
-            else ChatLiveRunRecoveryStateResponse.from_domain(run.recovery),
             retry=None
             if run.retry is None
             else ChatLiveRunRetryStateResponse.from_domain(run.retry),
@@ -1934,7 +1863,7 @@ class LiveEventListResponse(BaseModel):
     )
     run: ChatLiveRunStateResponse | None = Field(
         default=None,
-        description="Current active or recoverable stopped Run projection",
+        description="Currently running run status",
     )
     session_run_state: AgentSessionRunState = Field(
         description="Authoritative run_state for the current session",

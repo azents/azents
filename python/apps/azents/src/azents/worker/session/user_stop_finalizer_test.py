@@ -2,15 +2,13 @@
 
 from collections.abc import Sequence
 from contextlib import AbstractAsyncContextManager
-from datetime import UTC, datetime, timedelta
-from types import SimpleNamespace
+from datetime import UTC, datetime
 from typing import Any, cast
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentRunPhase, AgentRunStatus, EventKind
-from azents.core.inference_profile import AppliedInferenceProfile
 from azents.engine.events.engine_events import RunStopped
 from azents.engine.events.types import (
     ActiveToolCall,
@@ -23,15 +21,7 @@ from azents.engine.events.types import (
     RunMarkerPayload,
 )
 from azents.engine.run.emit import PublishedEvent
-from azents.engine.run.failure import (
-    FailedRunAttempt,
-    FailedRunProviderFailure,
-    FailedRunRetryState,
-    RunRecoveryState,
-)
-from azents.engine.run.provider_failure import model_provider_failure
 from azents.repos.agent_execution.data import EventCreate
-from azents.services.chat.data import ChatLiveRunState
 from azents.worker.events.publisher import WorkerEventPublisher
 from azents.worker.session.user_stop_finalizer import UserStopFinalizer
 
@@ -80,7 +70,6 @@ class _AgentRunRepository:
         self.running_run = running_run
         self.terminal_sessions: list[tuple[str, AgentRunStatus]] = []
         self.terminal_runs: list[tuple[str, AgentRunStatus]] = []
-        self.recovery_states: list[RunRecoveryState | None] = []
         self.fail_terminal = False
 
     async def lock_by_id(
@@ -157,35 +146,6 @@ class _AgentRunRepository:
         self.terminal_runs.append((run_id, status))
         return object()
 
-    async def mark_stopped_with_recovery_if_running(
-        self,
-        session: AsyncSession,
-        run_id: str,
-        *,
-        recovery_state: RunRecoveryState | None,
-        ended_at: datetime,
-    ) -> AgentRunState | None:
-        """Record stopped terminal state and its recoverable projection."""
-        del session
-        if self.fail_terminal:
-            raise RuntimeError("terminal persistence unavailable")
-        self.terminal_runs.append((run_id, AgentRunStatus.STOPPED))
-        self.recovery_states.append(recovery_state)
-        if self.running_run is None or self.running_run.id != run_id:
-            return None
-        self.running_run = self.running_run.model_copy(
-            update={
-                "status": AgentRunStatus.STOPPED,
-                "phase": AgentRunPhase.IDLE,
-                "active_tool_calls": [],
-                "retry_state": None,
-                "recovery_state": recovery_state,
-                "model_call_started_at": None,
-                "ended_at": ended_at,
-            }
-        )
-        return self.running_run
-
 
 class _EventTranscriptRepository:
     """EventTranscriptRepository test double."""
@@ -219,23 +179,6 @@ class _AgentSessionRepository:
     def __init__(self) -> None:
         self.cleared_stop_request_session_ids: list[str] = []
 
-    async def get_by_id(
-        self,
-        session: AsyncSession,
-        session_id: str,
-    ) -> object:
-        """Return one prepared Session inference projection."""
-        del session, session_id
-        return SimpleNamespace(
-            inference_state=SimpleNamespace(
-                applied_profile=AppliedInferenceProfile(
-                    model_target_label="default",
-                    model_display_name="Test Model",
-                    reasoning_effort=None,
-                )
-            )
-        )
-
     async def clear_stop_request(
         self,
         session: AsyncSession,
@@ -267,7 +210,6 @@ class _LiveEventProjector:
         self.flushed_session_ids: list[str] = []
         self.removed_events: list[tuple[str, str]] = []
         self.removed_active_call_ids: list[set[str]] = []
-        self.live_run_updates: list[tuple[str, ChatLiveRunState]] = []
 
     async def flush_session(self, session_id: str) -> None:
         """Record flush request."""
@@ -288,14 +230,6 @@ class _LiveEventProjector:
         del session_id
         assert active_tool_calls == []
         self.removed_active_call_ids.append(removed_call_ids)
-
-    async def publish_live_run_updated(
-        self,
-        session_id: str,
-        run: ChatLiveRunState,
-    ) -> None:
-        """Record the recoverable stopped Run projection."""
-        self.live_run_updates.append((session_id, run))
 
 
 class _Broker:
@@ -379,38 +313,6 @@ def _running_run(session_id: str) -> AgentRunState:
         model_call_started_at=now,
         ended_at=None,
         updated_at=now,
-    )
-
-
-def _provider_retry_state() -> FailedRunRetryState:
-    """Create one provider-attributed retry state for stopped recovery tests."""
-    now = datetime.now(UTC)
-    failure = model_provider_failure(
-        operation="sampling",
-        provider="openai",
-        model="gpt-4o",
-        integration=None,
-        provider_message="The model provider rejected the credentials.",
-        status_code=401,
-        provider_code="invalid_api_key",
-        provider_error_type="authentication_error",
-    )
-    return FailedRunRetryState.from_attempt(
-        FailedRunAttempt(
-            user_message=failure.user_message,
-            internal_message=None,
-            error_type=failure.__class__.__name__,
-            source="model",
-            visibility="user_visible",
-            attempt_number=1,
-            occurred_at=now,
-            retryability="user_action_required",
-            failure_code=failure.failure_code,
-            provider_failure=FailedRunProviderFailure.from_failure(failure),
-        ),
-        max_retries=10,
-        backoff_seconds=1,
-        next_retry_at=now + timedelta(seconds=1),
     )
 
 
@@ -504,23 +406,6 @@ async def test_finalize_persists_live_events_and_marks_run_terminal() -> None:
         ("11111111111111111111111111111111", AgentRunStatus.STOPPED)
     ]
     assert run_repository.terminal_sessions == []
-    assert len(run_repository.recovery_states) == 1
-    recovery_state = run_repository.recovery_states[0]
-    assert recovery_state is not None
-    assert recovery_state.kind == "stopped"
-    assert recovery_state.user_message == "Execution stopped."
-    assert recovery_state.operation == "sampling"
-    assert recovery_state.source_run_id == "11111111111111111111111111111111"
-    assert len(projector.live_run_updates) == 1
-    live_session_id, live_run = projector.live_run_updates[0]
-    assert live_session_id == session_id
-    assert live_run.status is AgentRunStatus.STOPPED
-    assert live_run.phase is AgentRunPhase.IDLE
-    assert live_run.operation is None
-    assert live_run.retry is None
-    assert live_run.recovery is not None
-    assert live_run.recovery.kind == "stopped"
-    assert live_run.recovery.source_run_id == live_run.run_id
     assert run_repository.running_run is not None
     assert run_repository.running_run.active_tool_calls == []
     assert session_repository.cleared_stop_request_session_ids == [session_id]
@@ -530,66 +415,6 @@ async def test_finalize_persists_live_events_and_marks_run_terminal() -> None:
     stopped_event = event_publisher.dispatched[0][1]
     assert isinstance(stopped_event, RunStopped)
     assert stopped_event.run_id == "11111111111111111111111111111111"
-
-
-@pytest.mark.asyncio
-async def test_finalize_preserves_latest_provider_failure_in_recovery() -> None:
-    """Stop retains the safe provider error when retry state is available."""
-    session_id = "session-001"
-    retry_state = _provider_retry_state()
-    running_run = _running_run(session_id).model_copy(
-        update={"retry_state": retry_state}
-    )
-    finalizer, run_repository, _, _, projector, _, _ = _finalizer(
-        running_run=running_run,
-        live_events=[],
-    )
-
-    await finalizer.finalize(
-        session_id,
-        run_id=running_run.id,
-        active_tool_calls=[],
-    )
-
-    assert len(run_repository.recovery_states) == 1
-    recovery_state = run_repository.recovery_states[0]
-    assert recovery_state is not None
-    assert recovery_state.kind == "provider_failure"
-    assert recovery_state.user_message == retry_state.last_user_message
-    assert recovery_state.operation == "sampling"
-    assert recovery_state.source_run_id == running_run.id
-    assert len(projector.live_run_updates) == 1
-    live_run = projector.live_run_updates[0][1]
-    assert live_run.recovery is not None
-    assert live_run.recovery.kind == "provider_failure"
-    assert live_run.recovery.user_message == retry_state.last_user_message
-
-
-@pytest.mark.asyncio
-async def test_finalize_marks_direct_compaction_stop_as_recoverable() -> None:
-    """Stopping before a provider failure still retains a fresh-budget Retry."""
-    session_id = "session-001"
-    compacting_run = _running_run(session_id).model_copy(
-        update={"phase": AgentRunPhase.COMPACTING}
-    )
-    finalizer, run_repository, _, _, _, _, _ = _finalizer(
-        running_run=compacting_run,
-        live_events=[],
-    )
-
-    await finalizer.finalize(
-        session_id,
-        run_id=compacting_run.id,
-        active_tool_calls=[],
-    )
-
-    assert len(run_repository.recovery_states) == 1
-    recovery_state = run_repository.recovery_states[0]
-    assert recovery_state is not None
-    assert recovery_state.kind == "stopped"
-    assert recovery_state.user_message == "Execution stopped."
-    assert recovery_state.operation == "compaction"
-    assert recovery_state.source_run_id == compacting_run.id
 
 
 @pytest.mark.asyncio

@@ -2,7 +2,7 @@ import datetime
 import enum
 import logging
 import sys
-from typing import TYPE_CHECKING, Any, MutableMapping, TypeVar, assert_never
+from typing import Any, MutableMapping, TypeVar, assert_never
 
 import click
 import sentry_sdk
@@ -10,9 +10,6 @@ from pythonjsonlogger.core import RESERVED_ATTRS
 from pythonjsonlogger.json import JsonFormatter
 from typing_extensions import override
 from uvicorn.logging import DefaultFormatter
-
-if TYPE_CHECKING:
-    from sentry_sdk._types import Event, Hint
 
 STANDARD_LOG_RECORD_KEYS = frozenset(
     [
@@ -237,26 +234,6 @@ def configure_logging(
         assert_never(format)
 
 
-def apply_structured_sentry_fingerprint(
-    event: "Event",
-    hint: "Hint",
-) -> "Event":
-    """Map approved structured log fingerprints into Sentry grouping."""
-    del hint
-    extra = event.get("extra")
-    if not isinstance(extra, MutableMapping):
-        return event
-    provider_fingerprint = extra.get("provider_failure_fingerprint")
-    if not isinstance(provider_fingerprint, str) or not provider_fingerprint:
-        return event
-    fingerprint = ["model-provider-failure", provider_fingerprint]
-    release = event.get("release")
-    if isinstance(release, str) and release:
-        fingerprint.append(release)
-    event["fingerprint"] = fingerprint
-    return event
-
-
 def configure_logging_for_runtime(
     *,
     runtime_env: RuntimeEnvironment,
@@ -277,10 +254,7 @@ def configure_logging_for_runtime(
     """
     # Initialize Sentry only in deployed environment
     if runtime_env == RuntimeEnvironment.DEPLOYED and sentry_dsn:
-        sentry_sdk.init(
-            dsn=sentry_dsn,
-            before_send=apply_structured_sentry_fingerprint,
-        )
+        sentry_sdk.init(dsn=sentry_dsn)
 
     if runtime_env == RuntimeEnvironment.LOCAL:
         configure_logging(

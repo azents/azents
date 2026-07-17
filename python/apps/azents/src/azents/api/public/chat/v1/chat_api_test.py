@@ -19,7 +19,6 @@ from azents.api.public.chat.v1 import (
     _write_input_via_rest,  # pyright: ignore[reportPrivateUsage]  # Pin the REST write boundary helper directly.
     _write_message_via_rest,  # pyright: ignore[reportPrivateUsage]  # Pin the REST write boundary helper directly.
     _write_new_session_message_via_rest,  # pyright: ignore[reportPrivateUsage]  # Pin the REST write boundary helper directly.
-    _write_stopped_run_retry_via_rest,  # pyright: ignore[reportPrivateUsage]  # Pin the stopped recovery boundary directly.
     archive_agent_session,
     cleanup_session_git_worktree,
     create_team_agent_session,
@@ -43,7 +42,6 @@ from azents.api.public.chat.v1.data import (
     ChatInputWriteRequest,
     ChatMessageWriteRequest,
     ChatSessionCreateMessageWriteRequest,
-    ChatStoppedRunRetryRequest,
     CleanupSessionGitWorktreeRequest,
     GoalStatusUpdateRequest,
 )
@@ -110,7 +108,6 @@ from azents.services.chat_write import (
     AcceptedChatWriteRequest,
     AcceptedEditInput,
     AcceptedPendingCommand,
-    AcceptedStoppedRunRetry,
     AcceptedStopRequest,
 )
 from azents.services.session_git_worktree import GitWorktreeCleanupRequest
@@ -701,28 +698,6 @@ class _RestWriteIdempotencyService:
                 created=self.created,
             ),
             command_id="command-request-1" if self.created else None,
-        )
-
-    async def create_idempotent_stopped_run_retry(
-        self,
-        **kwargs: object,
-    ) -> AcceptedStoppedRunRetry:
-        """Return idempotent stopped-Run retry acceptance result."""
-        self.calls.append(kwargs)
-        stopped_run_id = str(kwargs["stopped_run_id"])
-        record = self._record(
-            kwargs,
-            write_type=ChatWriteRequestType.STOPPED_RUN_RETRY,
-            accepted_id=stopped_run_id,
-        )
-        return AcceptedStoppedRunRetry(
-            request=AcceptedChatWriteRequest(
-                session_id=str(kwargs["session_id"]),
-                record=record,
-                created=self.created,
-            ),
-            stopped_run_id=stopped_run_id,
-            retry_run_id=("3123456789abcdef0123456789abcdef" if self.created else None),
         )
 
     def _record(
@@ -2021,36 +1996,6 @@ class TestRestEditCommandWriteContract:
 
         assert response.client_request_id == "command-1"
         assert broker.messages == []
-
-    async def test_stopped_run_retry_creates_fresh_run_and_wakes_once(self) -> None:
-        """Stopped recovery retry targets the source Run and wakes the worker."""
-        broker = _MemoryBroker()
-        chat_service = _RestWriteChatService()
-        idempotency = _RestWriteIdempotencyService(created=True)
-        stopped_run_id = "2123456789abcdef0123456789abcdef"
-
-        response = await _write_stopped_run_retry_via_rest(
-            chat_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-            idempotency,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-            broker,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-            InMemoryLiveEventStore(),
-            ChatStoppedRunRetryRequest(
-                agent_id="agent-1",
-                stopped_run_id=stopped_run_id,
-                client_request_id="stopped-retry-1",
-            ),
-            session_id="0123456789abcdef0123456789abcdef",
-            user_id="user-1",
-        )
-
-        assert response.accepted.type == "stopped_run_retry"
-        assert response.accepted.id == stopped_run_id
-        assert response.history_reload_required is False
-        assert idempotency.calls[0]["stopped_run_id"] == stopped_run_id
-        assert len(broker.messages) == 1
-        message = broker.messages[0]
-        assert isinstance(message, SessionWakeUp)
-        assert message.session_id == "0123456789abcdef0123456789abcdef"
 
 
 class TestChatInferenceProfileRequestContract:

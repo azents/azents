@@ -5,13 +5,6 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from azents.engine.run.errors import ModelStreamCallKind
-from azents.engine.run.provider_failure import (
-    ModelProviderFailure,
-    ModelProviderFailureCategory,
-    ModelProviderFailureRetryability,
-)
-
 _FAILED_RUN_ATTEMPT_MESSAGE_MAX_LENGTH = 2000
 
 FailedRunAttemptSource = Literal[
@@ -37,79 +30,6 @@ FailedRunFinalizationReason = Literal[
 ]
 
 
-class FailedRunProviderFailure(BaseModel):
-    """Safe provider diagnostics retained across retry handover."""
-
-    model_config = ConfigDict(frozen=True)
-
-    operation: ModelStreamCallKind
-    category: ModelProviderFailureCategory
-    retryability: ModelProviderFailureRetryability
-    provider_message: str | None = Field(default=None)
-    status_code: int | None = Field(default=None, ge=100, le=599)
-    provider_code: str | None = Field(default=None)
-    provider_error_type: str | None = Field(default=None)
-    retry_hint_seconds: float | None = Field(default=None, ge=0, le=86_400)
-    provider: str = Field(min_length=1)
-    integration: str | None = Field(default=None)
-    model: str = Field(min_length=1)
-    fingerprint: str = Field(min_length=1)
-
-    @classmethod
-    def from_failure(
-        cls,
-        failure: ModelProviderFailure,
-    ) -> "FailedRunProviderFailure":
-        """Copy only the provider-neutral bounded failure contract."""
-        return cls(
-            operation=failure.operation,
-            category=failure.category,
-            retryability=failure.retryability,
-            provider_message=failure.provider_message,
-            status_code=failure.status_code,
-            provider_code=failure.provider_code,
-            provider_error_type=failure.provider_error_type,
-            retry_hint_seconds=failure.retry_hint_seconds,
-            provider=failure.provider,
-            integration=failure.integration,
-            model=failure.model,
-            fingerprint=failure.fingerprint,
-        )
-
-
-class RunRecoveryState(BaseModel):
-    """Recoverable projection retained on a terminal stopped Run."""
-
-    model_config = ConfigDict(frozen=True)
-
-    schema_version: int = Field(default=1, ge=1)
-    kind: Literal["provider_failure", "stopped"]
-    user_message: str = Field(min_length=1)
-    operation: ModelStreamCallKind
-    source_run_id: str = Field(min_length=32, max_length=32)
-    stopped_at: datetime.datetime
-
-    @classmethod
-    def from_retry_state(
-        cls,
-        retry_state: "FailedRunRetryState",
-        *,
-        source_run_id: str,
-        stopped_at: datetime.datetime,
-    ) -> "RunRecoveryState | None":
-        """Build stopped recovery only when a provider failure was observed."""
-        provider_failure = retry_state.provider_failure
-        if provider_failure is None:
-            return None
-        return cls(
-            kind="provider_failure",
-            user_message=retry_state.last_user_message,
-            operation=provider_failure.operation,
-            source_run_id=source_run_id,
-            stopped_at=stopped_at,
-        )
-
-
 class FailedRunAttempt(BaseModel):
     """One run-stopping failed attempt before terminal finalization."""
 
@@ -127,7 +47,6 @@ class FailedRunAttempt(BaseModel):
     occurred_at: datetime.datetime = Field(description="UTC occurrence timestamp")
     retryability: FailedRunRetryability = Field(default="unknown")
     failure_code: str | None = Field(default=None)
-    provider_failure: FailedRunProviderFailure | None = Field(default=None)
 
 
 class FailedRunAttemptSummary(BaseModel):
@@ -181,7 +100,7 @@ class FailedRunRetryState(BaseModel):
     schema_version: int = Field(default=1, ge=1)
     status: FailedRunRetryStatus = Field(default="waiting")
     failed_attempt_count: int = Field(ge=1)
-    max_retries: int = Field(ge=0)
+    max_retries: int = Field(ge=1)
     last_user_message: str = Field(min_length=1)
     last_error_type: str = Field(min_length=1)
     last_source: FailedRunAttemptSource
@@ -190,7 +109,6 @@ class FailedRunRetryState(BaseModel):
     next_retry_at: datetime.datetime
     retryability: FailedRunRetryability = Field(default="unknown")
     failure_code: str | None = Field(default=None)
-    provider_failure: FailedRunProviderFailure | None = Field(default=None)
     attempts: list[FailedRunAttemptSummary] = Field(default_factory=list)
 
     @classmethod
@@ -222,7 +140,6 @@ class FailedRunRetryState(BaseModel):
             next_retry_at=next_retry_at,
             retryability=attempt.retryability,
             failure_code=attempt.failure_code,
-            provider_failure=attempt.provider_failure,
             attempts=attempts,
         )
 
@@ -235,7 +152,7 @@ class FailedRunFailureMetadata(BaseModel):
     kind: Literal["failed_run"] = "failed_run"
     finalization_reason: FailedRunFinalizationReason
     failed_attempt_count: int = Field(ge=1)
-    max_retries: int = Field(ge=0)
+    max_retries: int = Field(ge=1)
     last_error_type: str | None = Field(default=None)
     retryability: FailedRunRetryability = Field(default="unknown")
     failure_code: str | None = Field(default=None)

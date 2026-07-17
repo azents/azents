@@ -736,9 +736,6 @@ async def resolve_invoke_input_with_model_source(
                 agent_id=invoke_input.agent_id,
                 auto_compaction_threshold_tokens=None,
                 inference_state=None,
-                compaction_provider_integration_id=(
-                    lightweight_selection.llm_provider_integration_id
-                ),
                 temperature=params.temperature if params else None,
                 max_output_tokens=_effective_max_output_tokens(
                     main_selection,

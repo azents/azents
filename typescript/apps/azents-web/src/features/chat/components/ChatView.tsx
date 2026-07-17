@@ -167,24 +167,6 @@ function hasLiveRetry(
   return liveRun?.retry !== null && typeof liveRun?.retry !== "undefined";
 }
 
-function hasLiveOperation(
-  liveRun: ChatLiveRunState | null,
-): liveRun is ChatLiveRunState & {
-  operation: NonNullable<ChatLiveRunState["operation"]>;
-} {
-  return (
-    liveRun?.operation !== null && typeof liveRun?.operation !== "undefined"
-  );
-}
-
-function hasLiveRecovery(
-  liveRun: ChatLiveRunState | null,
-): liveRun is ChatLiveRunState & {
-  recovery: NonNullable<ChatLiveRunState["recovery"]>;
-} {
-  return liveRun?.recovery !== null && typeof liveRun?.recovery !== "undefined";
-}
-
 /** latest compaction summary position returns.. */
 function getLatestCompactionIndex(messages: ChatMessage[]): number {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
@@ -290,12 +272,6 @@ function getTimelineItemIds(
   if (hasLiveRetry(liveRun)) {
     ids.push(`live-run-retry:${liveRun.run_id}`);
   }
-  if (hasLiveOperation(liveRun)) {
-    ids.push(`live-run-operation:${liveRun.operation.operationId}`);
-  }
-  if (hasLiveRecovery(liveRun)) {
-    ids.push(`live-run-recovery:${liveRun.run_id}`);
-  }
   for (const actionExecution of placement.liveTail) {
     ids.push(actionExecutionTimelineItemId(actionExecution));
   }
@@ -383,8 +359,8 @@ interface ChatViewProps {
   ) => Promise<boolean>;
   /** retry the latest terminal failed run */
   onRetryFailedRun: (failedEventId: string) => Promise<boolean>;
-  /** retry the latest recoverable stopped run */
-  onRetryStoppedRun: (stoppedRunId: string) => Promise<boolean>;
+  /** Context compaction whether in progress */
+  isCompacting: boolean;
   /** whether commands are blocked during Run */
   wasCommandBlocked: boolean;
   /** Session run_state based on stop button exposed whether */
@@ -437,7 +413,7 @@ export function ChatView({
   onResetToLatest,
   onSubmitMessageEdit,
   onRetryFailedRun,
-  onRetryStoppedRun,
+  isCompacting,
   wasCommandBlocked,
   isStopAvailable,
   isStopPending,
@@ -512,19 +488,7 @@ export function ChatView({
     chatTimelineState.type === "LATEST_FOLLOWING" && hasLiveRetry(liveRun)
       ? liveRun
       : null;
-  const liveOperationRun =
-    chatTimelineState.type === "LATEST_FOLLOWING" && hasLiveOperation(liveRun)
-      ? liveRun
-      : null;
-  const liveRecoveryRun =
-    chatTimelineState.type === "LATEST_FOLLOWING" &&
-    liveRun?.status === "stopped" &&
-    hasLiveRecovery(liveRun)
-      ? liveRun
-      : null;
   const liveRetryVisible = liveRetryRun !== null;
-  const liveOperationVisible = liveOperationRun !== null;
-  const liveRecoveryVisible = liveRecoveryRun !== null;
   const visibleActionExecutions = useMemo(
     () =>
       chatTimelineState.type === "LATEST_FOLLOWING"
@@ -542,8 +506,6 @@ export function ChatView({
     messages.length > 0 ||
     pendingInputBuffers.length > 0 ||
     liveRetryVisible ||
-    liveOperationVisible ||
-    liveRecoveryVisible ||
     visibleActionExecutions.length > 0;
   const editingMessageIndex = useMemo(() => {
     if (!editingMessage) {
@@ -1346,40 +1308,28 @@ export function ChatView({
                   />
                 ))}
                 {liveRetryRun !== null && (
-                  <RunRetryCard
-                    variant="live"
-                    retry={liveRetryRun.retry}
-                    phase={liveRetryRun.phase}
-                  />
-                )}
-                {liveOperationRun !== null && <CompactionIndicator />}
-                {liveRecoveryRun !== null && (
-                  <RunRetryCard
-                    variant="stopped"
-                    recoveryKind={liveRecoveryRun.recovery.kind}
-                    message={liveRecoveryRun.recovery.userMessage}
-                    canRetry={
-                      !isResponsePending &&
-                      !isWritePending &&
-                      pendingInputBuffers.length === 0
-                    }
-                    isRetryPending={isWritePending}
-                    onRetry={() => {
-                      void onRetryStoppedRun(
-                        liveRecoveryRun.recovery.sourceRunId,
-                      );
-                    }}
-                  />
+                  <>
+                    <RunRetryCard
+                      variant="live"
+                      retry={liveRetryRun.retry}
+                      phase={liveRetryRun.phase}
+                    />
+                    {isModelResponsePending && (
+                      <AgentRunIndicator
+                        modelCallStartedAt={liveRetryRun.modelCallStartedAt}
+                      />
+                    )}
+                  </>
                 )}
                 {chatTimelineState.type === "LATEST_FOLLOWING" &&
                   !liveRetryVisible &&
-                  !liveOperationVisible &&
-                  !liveRecoveryVisible &&
                   isModelResponsePending && (
                     <AgentRunIndicator
                       modelCallStartedAt={liveRun?.modelCallStartedAt ?? null}
                     />
                   )}
+                {chatTimelineState.type === "LATEST_FOLLOWING" &&
+                  isCompacting && <CompactionIndicator />}
                 {actionExecutionPlacement.liveTail.map((actionExecution) => (
                   <ActionExecutionTimelineCard
                     key={actionExecution.execution.id}

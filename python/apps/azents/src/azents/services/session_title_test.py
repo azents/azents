@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from typing import Any, cast
 
 import pytest
+from openai import OpenAIError
 
 import azents.services.session_title as session_title_module
 from azents.core.agent import (
@@ -31,12 +32,6 @@ from azents.engine.events.types import (
     NativeArtifact,
     UserMessagePayload,
 )
-from azents.engine.model_stream import ModelStreamCallContext
-from azents.engine.run.provider_failure import (
-    ModelProviderFailureCategory,
-    model_provider_failure,
-)
-from azents.engine.run.retry_policy import FailedRunRetryPolicy
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_session import AgentSessionRepository
@@ -97,12 +92,10 @@ class TestSessionTitleHelpers:
         watchdog = make_test_model_stream_watchdog()
         title = await generate_session_title_with_model(
             provider=LLMProvider.ANTHROPIC,
-            provider_integration_id=None,
             model="anthropic/test",
             credential_kwargs={},
             context="Compare two insurance options",
             session_id=None,
-            attempt_number=None,
             watchdog=watchdog,
         )
 
@@ -155,12 +148,10 @@ class TestSessionTitleHelpers:
         watchdog = make_test_model_stream_watchdog()
         title = await generate_session_title_with_model(
             provider=provider,
-            provider_integration_id="integration-title",
             model="gpt-test",
             credential_kwargs={"api_key": "test-key"},
             context="Describe the SDK migration",
             session_id="session-1",
-            attempt_number=3,
             watchdog=watchdog,
         )
 
@@ -180,10 +171,6 @@ class TestSessionTitleHelpers:
             "format": {"type": "text"},
             "verbosity": "low",
         }
-        call_context = call["call_context"]
-        assert isinstance(call_context, ModelStreamCallContext)
-        assert call_context.provider_integration_id == "integration-title"
-        assert call_context.attempt_number == 3
         assert "max_output_tokens" not in call
 
     async def test_generate_title_logs_model_failure(
@@ -203,28 +190,11 @@ class TestSessionTitleHelpers:
             ),
             session_manager=cast(Any, _session_manager),
             model_stream_watchdog=make_test_model_stream_watchdog(),
-            retry_policy=FailedRunRetryPolicy(
-                max_retries=0,
-                base_backoff_seconds=0,
-                backoff_multiplier=1,
-                max_backoff_seconds=0,
-            ),
-        )
-
-        failure = model_provider_failure(
-            operation="session_title",
-            provider="openai",
-            model="gpt-5.1",
-            integration=None,
-            provider_message="Stream must be set to true",
-            status_code=400,
-            provider_code="invalid_request",
-            provider_error_type="bad_request",
         )
 
         async def raise_bad_request(**kwargs: object) -> str | None:
             del kwargs
-            raise failure
+            raise OpenAIError("Stream must be set to true")
 
         monkeypatch.setattr(
             session_title_module,
@@ -246,10 +216,10 @@ class TestSessionTitleHelpers:
 
         log_calls: list[tuple[str, dict[str, object]]] = []
 
-        def record_warning(message: str, **kwargs: object) -> None:
+        def record_exception(message: str, **kwargs: object) -> None:
             log_calls.append((message, kwargs))
 
-        monkeypatch.setattr(session_title_module.logger, "warning", record_warning)
+        monkeypatch.setattr(session_title_module.logger, "exception", record_exception)
 
         result = await service.generate_from_initial_prompt(
             session_id="session-001",
@@ -259,114 +229,16 @@ class TestSessionTitleHelpers:
         assert result is None
         assert log_calls == [
             (
-                "Automatic session title provider attempt failed",
+                "Automatic session title generation failed",
                 {
                     "extra": {
                         "session_id": "session-001",
                         "agent_id": "agent-001",
-                        "attempt_number": 1,
-                        "provider_failure_operation": "session_title",
-                        "provider_failure_provider": "openai",
-                        "provider_failure_integration": None,
-                        "provider_failure_model": "gpt-5.1",
-                        "provider_failure_category": "invalid_request",
-                        "provider_failure_retryability": "non_retryable",
-                        "provider_failure_status_code": 400,
-                        "provider_failure_code": "invalid_request",
-                        "provider_failure_error_type": "bad_request",
-                        "provider_failure_fingerprint": failure.fingerprint,
-                        "provider_failure_retry_outcome": "exhausted",
+                        "provider": "openai",
+                        "model": "gpt-test",
                     }
                 },
             )
-        ]
-
-    async def test_generate_title_retries_unknown_provider_failure(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        """Standalone title generation uses the shared full retry budget."""
-        service = SessionTitleService(
-            agent_repository=cast(AgentRepository, _AgentRepository()),
-            agent_session_repository=cast(
-                AgentSessionRepository,
-                _AgentSessionRepository(),
-            ),
-            integration_repository=cast(
-                LLMProviderIntegrationRepository,
-                _IntegrationRepository(),
-            ),
-            session_manager=cast(Any, _session_manager),
-            model_stream_watchdog=make_test_model_stream_watchdog(),
-            retry_policy=FailedRunRetryPolicy(
-                max_retries=2,
-                base_backoff_seconds=0,
-                backoff_multiplier=1,
-                max_backoff_seconds=0,
-            ),
-        )
-        failure = model_provider_failure(
-            operation="session_title",
-            provider="openai",
-            model="gpt-5.1",
-            integration="integration-001",
-            provider_message="A new provider outcome occurred.",
-            status_code=None,
-            provider_code="future_failure",
-            provider_error_type="future_error",
-            category=ModelProviderFailureCategory.UNKNOWN,
-        )
-        attempts: list[int] = []
-
-        async def fail_twice(**kwargs: object) -> str | None:
-            attempt_number = kwargs["attempt_number"]
-            assert isinstance(attempt_number, int)
-            attempts.append(attempt_number)
-            if len(attempts) <= 2:
-                raise failure
-            return "Recovered title"
-
-        monkeypatch.setattr(
-            session_title_module,
-            "generate_session_title_with_model",
-            fail_twice,
-        )
-        warning_calls: list[tuple[str, dict[str, object]]] = []
-        error_calls: list[tuple[str, dict[str, object]]] = []
-        monkeypatch.setattr(
-            session_title_module.logger,
-            "warning",
-            lambda message, **kwargs: warning_calls.append((message, kwargs)),
-        )
-        monkeypatch.setattr(
-            session_title_module.logger,
-            "error",
-            lambda message, **kwargs: error_calls.append((message, kwargs)),
-        )
-
-        result = await service._generate_title(  # pyright: ignore[reportPrivateUsage]  # Exercise the standalone retry boundary directly.
-            agent_id="agent-001",
-            session_id="session-001",
-            context="Compare two insurance options",
-        )
-
-        assert result == "Recovered title"
-        assert attempts == [1, 2, 3]
-        retry_outcomes: list[str] = []
-        for _, kwargs in warning_calls:
-            extra = kwargs["extra"]
-            assert isinstance(extra, dict)
-            outcome = extra["provider_failure_retry_outcome"]
-            assert isinstance(outcome, str)
-            retry_outcomes.append(outcome)
-        assert retry_outcomes == ["scheduled", "scheduled"]
-        assert [message for message, _ in error_calls] == [
-            "Unknown model provider failure",
-            "Unknown model provider failure",
-        ]
-        assert [kwargs["extra"] for _, kwargs in error_calls] == [
-            warning_calls[0][1]["extra"],
-            warning_calls[1][1]["extra"],
         ]
 
     def test_initial_prompt_context_uses_only_user_text(self) -> None:

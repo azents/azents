@@ -166,7 +166,6 @@ def _context(
     return ModelStreamCallContext(
         call_kind="sampling",
         provider="test-provider",
-        provider_integration_id=None,
         model="test-model",
         session_id="session-1",
         run_id="run-1",

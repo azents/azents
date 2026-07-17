@@ -227,7 +227,7 @@ const baseArgs = {
   onResetToLatest: noop,
   onSubmitMessageEdit: sendMessage,
   onRetryFailedRun: sendMessage,
-  onRetryStoppedRun: sendMessage,
+  isCompacting: false,
   wasCommandBlocked: false,
   isStopAvailable: false,
   isStopPending: false,
@@ -303,76 +303,6 @@ export const WithLiveRunRetry = {
       },
     },
     isModelResponsePending: true,
-  },
-} satisfies Story;
-
-export const WithPreparingContext = {
-  args: {
-    ...baseArgs,
-    isResponsePending: true,
-    liveRun: {
-      run_id: "run-preparing-context-story",
-      phase: "compacting",
-      status: "running",
-      inferenceProfile: {
-        model_target_label: "default",
-        model_display_name: "GPT 5.5",
-        reasoning_effort: null,
-      },
-      modelCallStartedAt: null,
-      retry: null,
-      operation: {
-        kind: "preparing_context",
-        operationId: "operation-preparing-context-story",
-        status: "running",
-      },
-      recovery: null,
-    },
-  },
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
-    await expect(
-      canvas.getByText("Preparing conversation context…"),
-    ).toBeVisible();
-  },
-} satisfies Story;
-
-export const WithStoppedRecovery = {
-  args: {
-    ...baseArgs,
-    onRetryStoppedRun: fn(),
-    liveRun: {
-      run_id: "run-stopped-story",
-      phase: "idle",
-      status: "stopped",
-      inferenceProfile: {
-        model_target_label: "default",
-        model_display_name: "GPT 5.5",
-        reasoning_effort: null,
-      },
-      modelCallStartedAt: null,
-      retry: null,
-      operation: null,
-      recovery: {
-        kind: "provider_failure",
-        userMessage:
-          "Model provider error: The provider connection was interrupted.",
-        operation: "sampling",
-        sourceRunId: "run-stopped-story",
-        stoppedAt: "2026-07-17T10:00:00.000Z",
-      },
-    },
-  },
-  play: async ({ args, canvasElement }) => {
-    const canvas = within(canvasElement);
-    await expect(canvas.getByText("Model provider error")).toBeVisible();
-    await expect(
-      canvas.getByText("The provider connection was interrupted."),
-    ).toBeVisible();
-    await userEvent.click(canvas.getByRole("button", { name: "Retry run" }));
-    await expect(args.onRetryStoppedRun).toHaveBeenCalledWith(
-      "run-stopped-story",
-    );
   },
 } satisfies Story;
 

@@ -1518,9 +1518,7 @@
     "noLocalBranches": "이 Project에서 사용할 수 있는 로컬 브랜치가 없습니다.",
     "chooseWorktreeSourceFolder": "원본 폴더 선택…",
     "failedRunRecovery": {
-      "errorTitle": "오류",
-      "providerErrorTitle": "모델 제공업체 오류",
-      "stoppedTitle": "실행이 중지되었습니다",
+      "errorTitle": "에러",
       "liveTitle": "실패한 실행 재시도 중",
       "terminalTitle": "재시도 후 실행 실패",
       "nonRetryableTitle": "재시도하지 않고 실행 실패",

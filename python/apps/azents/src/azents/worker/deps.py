@@ -19,10 +19,6 @@ from azents.core.deps import get_appctx, get_config, get_credential_cipher
 from azents.core.redis import create_redis_client
 from azents.core.s3.deps import get_s3_service
 from azents.engine.run.commands import COMMAND_REGISTRY, CommandHandler
-from azents.engine.run.retry_policy import (
-    FailedRunRetryPolicy,
-    get_failed_run_retry_policy,
-)
 from azents.engine.tools.builtin import BuiltinToolkitProvider
 from azents.engine.tools.builtin_agents import ToolkitAgentsAppendixDedupeStateStore
 from azents.engine.tools.claude_rules import (
@@ -64,6 +60,18 @@ from .config import AgentWorkerConfig
 from .health import HealthServer
 
 _DEFAULT_HEALTH_PORT = 8012
+_DEFAULT_FAILED_RUN_MAX_RETRIES = 10
+_DEFAULT_FAILED_RUN_BASE_BACKOFF_SECONDS = 1
+_DEFAULT_FAILED_RUN_BACKOFF_MULTIPLIER = 2
+_DEFAULT_FAILED_RUN_MAX_BACKOFF_SECONDS = 60
+
+
+def _int_from_env(name: str, default: int) -> int:
+    """Read an integer environment variable."""
+    raw_value = os.environ.get(name)
+    if raw_value is None:
+        return default
+    return int(raw_value)
 
 
 def get_worker_id() -> str:
@@ -240,10 +248,6 @@ def get_toolkit_repository(
 
 def get_worker_config(
     config: Annotated[Config, Depends(get_config)],
-    failed_run_retry_policy: Annotated[
-        FailedRunRetryPolicy,
-        Depends(get_failed_run_retry_policy),
-    ],
 ) -> AgentWorkerConfig:
     """Worker run settings dependency."""
     return AgentWorkerConfig(
@@ -251,7 +255,22 @@ def get_worker_config(
         oauth_secret_key=config.credential_encryption.key,
         mcp_proxy_url=config.mcp_proxy_url,
         openai_responses_websocket_enabled=(config.openai_responses_websocket_enabled),
-        failed_run_retry_policy=failed_run_retry_policy,
+        failed_run_max_retries=_int_from_env(
+            "AZ_FAILED_RUN_MAX_RETRIES",
+            _DEFAULT_FAILED_RUN_MAX_RETRIES,
+        ),
+        failed_run_base_backoff_seconds=_int_from_env(
+            "AZ_FAILED_RUN_BASE_BACKOFF_SECONDS",
+            _DEFAULT_FAILED_RUN_BASE_BACKOFF_SECONDS,
+        ),
+        failed_run_backoff_multiplier=_int_from_env(
+            "AZ_FAILED_RUN_BACKOFF_MULTIPLIER",
+            _DEFAULT_FAILED_RUN_BACKOFF_MULTIPLIER,
+        ),
+        failed_run_max_backoff_seconds=_int_from_env(
+            "AZ_FAILED_RUN_MAX_BACKOFF_SECONDS",
+            _DEFAULT_FAILED_RUN_MAX_BACKOFF_SECONDS,
+        ),
     )
 
 
