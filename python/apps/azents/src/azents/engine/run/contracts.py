@@ -75,8 +75,6 @@ class RunRequest:
     """Exact auto-compaction threshold, or None to derive it from input limits."""
     inference_state: SessionInferenceState | None
     """Exact Session inference snapshot applied to this model-call turn."""
-    compaction_provider_integration_id: str | None
-    """Provider integration used by the compaction model, when configured."""
     model_capabilities: ModelCapabilities = dataclasses.field(
         default_factory=ModelCapabilities,
     )

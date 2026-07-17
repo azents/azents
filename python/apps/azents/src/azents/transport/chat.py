@@ -146,22 +146,6 @@ def chat_live_run_updated_dump(
                 for attempt in run.retry.attempts
             ],
         }
-    operation = None
-    if run.operation is not None:
-        operation = {
-            "kind": run.operation.kind,
-            "operation_id": run.operation.operation_id,
-            "status": run.operation.status,
-        }
-    recovery = None
-    if run.recovery is not None:
-        recovery = {
-            "kind": run.recovery.kind,
-            "user_message": run.recovery.user_message,
-            "operation": run.recovery.operation,
-            "source_run_id": run.recovery.source_run_id,
-            "stopped_at": run.recovery.stopped_at,
-        }
     return {
         "type": "live_run_updated",
         "session_id": session_id,
@@ -173,8 +157,6 @@ def chat_live_run_updated_dump(
             "model_call_started_at": run.model_call_started_at.isoformat()
             if run.model_call_started_at is not None
             else None,
-            "operation": operation,
-            "recovery": recovery,
             "retry": retry,
         },
     }

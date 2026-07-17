@@ -773,6 +773,7 @@ function ErrorTextMessage({
       <RunRetryCard
         variant="terminal"
         message={message.content ?? ""}
+        failure={message.failedRunFailure}
         canRetry={failedRunRetryAction?.canRetry ?? false}
         isRetryPending={failedRunRetryAction?.isPending ?? false}
         onRetry={failedRunRetryAction?.onRetry ?? (() => {})}

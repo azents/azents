@@ -36,12 +36,9 @@ from azents.engine.events.types import (
     UnknownAdapterOutputPayload,
     build_native_compat_key,
 )
-from azents.engine.run.errors import ModelStreamCallKind
-from azents.engine.run.provider_failure import (
-    ModelProviderFailure,
-    ModelProviderFailureCategory,
-    model_provider_failure,
-)
+from azents.engine.run.errors import ModelCallError
+
+_MODEL_CALL_ERROR_DETAIL_MAX_CHARS = 512
 
 
 class ResponsesOutputNormalizer:
@@ -51,19 +48,10 @@ class ResponsesOutputNormalizer:
     native_format = "responses"
     schema_version = "1"
 
-    def __init__(
-        self,
-        *,
-        provider: str,
-        model: str,
-        operation: ModelStreamCallKind,
-        integration: str | None,
-    ) -> None:
-        """Set normalizer origin and provider-failure context."""
-        self.provider: str = provider
-        self.model: str = model
-        self.operation: ModelStreamCallKind = operation
-        self.integration: str | None = integration
+    def __init__(self, *, provider: str, model: str) -> None:
+        """Set normalizer origin provider/model."""
+        self.provider = provider
+        self.model = model
         self.compat_key = build_native_compat_key(
             adapter=self.adapter,
             native_format=self.native_format,
@@ -283,7 +271,7 @@ class _ResponsesOutputStream:
         self._completed_output_items: list[dict[str, object]] = []
         self._completed_response: dict[str, object] | None = None
         self._completed_response_seen = False
-        self._terminal_error: ModelProviderFailure | None = None
+        self._terminal_error: ModelCallError | None = None
         self._usage: TokenUsagePayload | None = None
         self._partial_text: list[str] = []
         self._provider_tool_activity = ProviderToolActivityAccumulator()
@@ -366,28 +354,14 @@ class _ResponsesOutputStream:
             )
         elif event_type == "ResponseIncompleteEvent":
             self._terminal_error = _incomplete_response_model_error(
-                response_item_dict(item.get("response")),
-                operation=self.normalizer.operation,
-                provider=self.normalizer.provider,
-                model=self.normalizer.model,
-                integration=self.normalizer.integration,
+                response_item_dict(item.get("response"))
             )
         elif event_type == "ResponseFailedEvent":
             self._terminal_error = _failed_response_model_error(
-                response_item_dict(item.get("response")),
-                operation=self.normalizer.operation,
-                provider=self.normalizer.provider,
-                model=self.normalizer.model,
-                integration=self.normalizer.integration,
+                response_item_dict(item.get("response"))
             )
         elif event_type == "ResponseErrorEvent":
-            self._terminal_error = _response_error_event_model_error(
-                item,
-                operation=self.normalizer.operation,
-                provider=self.normalizer.provider,
-                model=self.normalizer.model,
-                integration=self.normalizer.integration,
-            )
+            self._terminal_error = _response_error_event_model_error(item)
         elif event_type == "ResponseCompletedEvent":
             self._completed_response_seen = True
             self._completed_response = response_item_dict(item.get("response"))
@@ -405,17 +379,7 @@ class _ResponsesOutputStream:
         if self._terminal_error is not None:
             raise self._terminal_error
         if not self._completed_response_seen:
-            raise model_provider_failure(
-                operation=self.normalizer.operation,
-                provider=self.normalizer.provider,
-                model=self.normalizer.model,
-                integration=self.normalizer.integration,
-                provider_message="The model response stream ended before completion.",
-                status_code=None,
-                provider_code="stream_ended_before_completion",
-                provider_error_type="response_stream_transport",
-                category=ModelProviderFailureCategory.TRANSPORT,
-            )
+            raise ModelCallError("Model response stream ended before completion.")
         return self._build_output()
 
     def _build_output(self) -> NormalizedAdapterOutput:
@@ -630,103 +594,64 @@ def _canonical_provider_tool_status(
 
 def _incomplete_response_model_error(
     response: dict[str, object],
-    *,
-    operation: ModelStreamCallKind,
-    provider: str,
-    model: str,
-    integration: str | None,
-) -> ModelProviderFailure:
-    """Create a typed provider failure for an incomplete response."""
+) -> ModelCallError:
+    """Create a safe error for a provider-incomplete response."""
     details = response_item_dict(response.get("incomplete_details"))
-    provider_code = details.get("reason")
-    return model_provider_failure(
-        operation=operation,
-        provider=provider,
-        model=model,
-        integration=integration,
-        provider_message=(
-            details.get("message")
-            or _terminal_failure_fallback_message("incomplete", provider_code)
-        ),
-        status_code=None,
-        provider_code=provider_code,
-        provider_error_type="response_incomplete",
+    return _terminal_model_call_error(
+        "Model response was incomplete",
+        message=_bounded_terminal_detail(details.get("reason")),
     )
 
 
-def _failed_response_model_error(
-    response: dict[str, object],
-    *,
-    operation: ModelStreamCallKind,
-    provider: str,
-    model: str,
-    integration: str | None,
-) -> ModelProviderFailure:
-    """Create a typed provider failure for a failed response."""
+def _failed_response_model_error(response: dict[str, object]) -> ModelCallError:
+    """Create a safe error for a provider-failed response."""
     error = response_item_dict(response.get("error"))
-    provider_code = error.get("code")
-    return model_provider_failure(
-        operation=operation,
-        provider=provider,
-        model=model,
-        integration=integration,
-        provider_message=(
-            error.get("message")
-            or _terminal_failure_fallback_message("failed", provider_code)
-        ),
-        status_code=None,
-        provider_code=provider_code,
-        provider_error_type=error.get("type") or "response_failed",
+    return _terminal_model_call_error(
+        "Model response failed",
+        message=_bounded_terminal_detail(error.get("message")),
+        code=_bounded_terminal_detail(error.get("code")),
     )
 
 
 def _response_error_event_model_error(
     item: dict[str, object],
-    *,
-    operation: ModelStreamCallKind,
-    provider: str,
-    model: str,
-    integration: str | None,
-) -> ModelProviderFailure:
-    """Create a typed provider failure for a native Responses error event."""
-    provider_code = item.get("code")
-    return model_provider_failure(
-        operation=operation,
-        provider=provider,
-        model=model,
-        integration=integration,
-        provider_message=(
-            item.get("message")
-            or _terminal_failure_fallback_message("error", provider_code)
-        ),
-        status_code=None,
-        provider_code=provider_code,
-        provider_error_type=item.get("type") or "response_error",
+) -> ModelCallError:
+    """Create a safe error for a native Responses error event."""
+    return _terminal_model_call_error(
+        "Model call failed",
+        message=_bounded_terminal_detail(item.get("message")),
+        code=_bounded_terminal_detail(item.get("code")),
     )
 
 
-def _terminal_failure_fallback_message(
-    outcome: Literal["error", "failed", "incomplete"],
-    provider_code: object,
-) -> str:
-    """Return a concise classified fallback when no provider message exists."""
-    if provider_code == "max_output_tokens":
-        return "The model response reached its output token limit."
-    if provider_code in {"content_filter", "bio_policy", "cyber_policy"}:
-        return "The model provider rejected the request due to policy."
-    if provider_code == "context_length_exceeded":
-        return "The model context window was exceeded."
-    if provider_code == "insufficient_quota":
-        return "The model provider quota was exceeded."
-    if provider_code == "rate_limit_exceeded":
-        return "The model provider rate limit was exceeded."
-    if provider_code == "server_error":
-        return "The model provider is temporarily unavailable."
-    if outcome == "incomplete":
-        return "The model response was incomplete."
-    if outcome == "failed":
-        return "The model response failed."
-    return "The model provider could not process the request."
+def _terminal_model_call_error(
+    summary: str,
+    *,
+    message: str | None,
+    code: str | None = None,
+) -> ModelCallError:
+    """Format bounded terminal details as a user-visible model error."""
+    details: list[str] = []
+    if message is not None:
+        details.append(message)
+    if code is not None and code != message:
+        details.append(f"code: {code}")
+    if not details:
+        return ModelCallError(f"{summary}.")
+    return ModelCallError(f"{summary}: {'; '.join(details)}")
+
+
+def _bounded_terminal_detail(value: object) -> str | None:
+    """Return a bounded scalar provider terminal detail."""
+    if isinstance(value, str):
+        detail = value.strip()
+    elif isinstance(value, (int, float)) and not isinstance(value, bool):
+        detail = str(value)
+    else:
+        return None
+    if not detail:
+        return None
+    return detail[:_MODEL_CALL_ERROR_DETAIL_MAX_CHARS]
 
 
 def _has_assistant_text(events: Sequence[Event]) -> bool:

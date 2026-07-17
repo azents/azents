@@ -892,7 +892,7 @@
       },
       "response": {
         "error": {
-          "message": "Deterministic provider failure. api_key=dummy-provider-secret-value Bearer dummy-provider-token-value\u0001 request rejected.",
+          "message": "Deterministic retry attempt 1 failed.",
           "type": "rate_limit_error",
           "code": "rate_limit"
         },
@@ -1371,52 +1371,6 @@
       "streamingProfile": {
         "ttft": 0,
         "tps": 20,
-        "jitter": 0
-      }
-    },
-    {
-      "match": {
-        "endpoint": "chat",
-        "userMessage": "The previous assistant run was interrupted by the user.",
-        "hasToolResult": false
-      },
-      "response": {
-        "content": "WATCHDOG_STOP_RETRY_RECOVERED"
-      },
-      "streamingProfile": {
-        "ttft": 200,
-        "tps": 100,
-        "jitter": 0
-      }
-    },
-    {
-      "match": {
-        "endpoint": "chat",
-        "userMessage": "Watchdog stop recovery dismissed by new message",
-        "hasToolResult": false
-      },
-      "response": {
-        "content": "WATCHDOG_DISMISS_STOP_PARTIAL abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz"
-      },
-      "chunkSize": 4,
-      "streamingProfile": {
-        "ttft": 0,
-        "tps": 20,
-        "jitter": 0
-      }
-    },
-    {
-      "match": {
-        "endpoint": "chat",
-        "userMessage": "Watchdog new message after stop",
-        "hasToolResult": false
-      },
-      "response": {
-        "content": "WATCHDOG_NEW_MESSAGE_AFTER_STOP_COMPLETED"
-      },
-      "streamingProfile": {
-        "ttft": 200,
-        "tps": 100,
         "jitter": 0
       }
     },

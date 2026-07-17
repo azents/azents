@@ -36,10 +36,7 @@ from azents.engine.model_stream import (
     close_stream_response,
     connect_only_http_timeout,
 )
-from azents.engine.run.provider_failure import (
-    ModelProviderFailure,
-    model_provider_failure,
-)
+from azents.engine.run.errors import ModelCallError
 
 _TOOLS_ADAPTER: TypeAdapter[list[ToolParam]] = TypeAdapter(list[ToolParam])
 _REASONING_ADAPTER: TypeAdapter[Reasoning] = TypeAdapter(Reasoning)
@@ -65,6 +62,13 @@ class _ModelDumpable(Protocol):
     def model_dump(self) -> dict[str, object]:
         """Convert object to dict."""
         ...
+
+
+@runtime_checkable
+class _StatusCodeError(Protocol):
+    """Provider error with HTTP status_code."""
+
+    status_code: int | None
 
 
 @runtime_checkable
@@ -212,9 +216,11 @@ class LiteLLMResponsesModelAdapter:
         except asyncio.CancelledError:
             raise
         except (LiteLLMOpenAIError, OpenAIBaseError) as exc:
-            # LiteLLM retry finishes inside aresponses, then only the final
-            # provider-attributed failure crosses the Engine boundary.
-            raise _map_litellm_provider_error(exc, call_context=call_context) from None
+            # LiteLLM retry finishes inside aresponses, then
+            # only final provider errors arrive here.
+            if not _is_user_visible_provider_error(exc):
+                raise
+            raise ModelCallError(_format_model_call_error(exc)) from exc
         finally:
             await close_stream_response(response)
 
@@ -479,66 +485,23 @@ def _optional_include(
     raise TypeError(f"LiteLLM kwarg {key} must be list[str]")
 
 
-def _map_litellm_provider_error(
-    exc: LiteLLMOpenAIError | OpenAIBaseError,
-    *,
-    call_context: ModelStreamCallContext,
-) -> ModelProviderFailure:
-    """Convert one final LiteLLM/OpenAI exception into the common contract."""
-    error_body = _provider_error_body(getattr(exc, "body", None))
-    status_code = getattr(exc, "status_code", None)
-    return model_provider_failure(
-        operation=call_context.call_kind,
-        provider=call_context.provider,
-        model=call_context.model,
-        integration=call_context.provider_integration_id,
-        provider_message=(error_body.get("message") or _litellm_provider_message(exc)),
-        status_code=status_code if isinstance(status_code, int) else None,
-        provider_code=error_body.get("code") or getattr(exc, "code", None),
-        provider_error_type=(error_body.get("type") or exc.__class__.__name__),
-        retry_hint_seconds=_retry_after_seconds(exc),
+def _format_model_call_error(exc: Exception) -> str:
+    """Convert LiteLLM/OpenAI provider error to user-visible message."""
+    status_code = exc.status_code if isinstance(exc, _StatusCodeError) else None
+    message = str(exc)
+    if status_code is None:
+        return f"Model call failed: {message}"
+    return f"Model call failed ({status_code}): {message}"
+
+
+def _is_user_visible_provider_error(exc: Exception) -> bool:
+    """Check whether final provider error is user-visible."""
+    if not isinstance(exc, _StatusCodeError):
+        return False
+    status_code = exc.status_code
+    return status_code in {401, 403, 429} or (
+        status_code is not None and 500 <= status_code <= 599
     )
-
-
-def _provider_error_body(value: object) -> dict[str, object]:
-    """Return the typed provider error object from a LiteLLM body."""
-    if not isinstance(value, dict):
-        return {}
-    nested = value.get("error")
-    if isinstance(nested, dict):
-        return nested
-    return value
-
-
-def _litellm_provider_message(exc: Exception) -> str | None:
-    """Return scalar SDK message text without its exception-class prefix."""
-    message = getattr(exc, "message", None)
-    if not isinstance(message, str):
-        return None
-    prefixes = (
-        f"litellm.{exc.__class__.__name__}: ",
-        f"{exc.__class__.__name__}: ",
-    )
-    for prefix in prefixes:
-        if message.startswith(prefix):
-            return message[len(prefix) :]
-    return message
-
-
-def _retry_after_seconds(exc: Exception) -> float | None:
-    """Extract one numeric Retry-After hint without retaining headers."""
-    response = getattr(exc, "response", None)
-    headers = getattr(response, "headers", None)
-    if headers is None:
-        return None
-    value = headers.get("retry-after")
-    if not isinstance(value, str):
-        return None
-    try:
-        seconds = float(value)
-    except ValueError:
-        return None
-    return seconds if 0 <= seconds <= 86_400 else None
 
 
 def guard_litellm_streaming_logging(response: AsyncIterable[object]) -> None:

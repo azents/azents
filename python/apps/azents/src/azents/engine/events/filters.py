@@ -1,5 +1,6 @@
 """Event runtime filters and append-only compaction."""
 
+import asyncio
 import dataclasses
 import json
 import logging
@@ -39,6 +40,7 @@ from azents.engine.events.types import (
     AttachmentOutputPart,
     ClientToolCallPayload,
     ClientToolResultPayload,
+    CompactionMarkerPayload,
     CompactionSummaryPayload,
     Event,
     EventPayload,
@@ -267,30 +269,19 @@ class EventAutoCompactionFilter:
         self.summary_enricher = summary_enricher
         self.was_compacted = False
 
-    async def compact(
-        self,
-        transcript: Sequence[Event],
-        *,
-        on_started: Callable[[], Awaitable[None]] | None = None,
-    ) -> list[Event]:
+    async def compact(self, transcript: Sequence[Event]) -> list[Event]:
         """Compact model input without keeping a caller-owned DB session open."""
         self.was_compacted = False
         events = list(transcript)
         if _compaction_input_tokens(events) <= self._threshold_tokens:
             return events
 
-        async def notify_started() -> None:
-            if on_started is not None:
-                await on_started()
-            if self.on_compaction_started is not None:
-                await self.on_compaction_started()
-
         summary = await self.compactor.compact(
             session_id=self._session_id,
             transcript=events,
             compaction_id=self.compaction_id_factory(),
             summarize=self.summarize,
-            on_started=notify_started,
+            on_started=self.on_compaction_started,
             summary_context_window_tokens=self._max_input_tokens,
             reason="auto_threshold_exceeded",
             summary_enricher=self.summary_enricher,
@@ -359,34 +350,122 @@ class EventCompactor:
         reason: str | None = None,
         summary_enricher: SummaryEnricher | None = None,
     ) -> Event | None:
-        """Append one successful summary and move the model-input head."""
+        """Append summary event and move session model input head to summary."""
         old_events = list(transcript)
         if not old_events:
             return None
 
-        summary_order = max(event.model_order for event in old_events) + 1
+        async with self.session_manager() as session:
+            marker_event = await self.transcript_repo.append(
+                session,
+                EventCreate(
+                    session_id=session_id,
+                    kind=EventKind.COMPACTION_MARKER,
+                    payload=CompactionMarkerPayload(
+                        compaction_id=compaction_id,
+                        status="started",
+                        reason=reason,
+                    ).model_dump(mode="json", exclude_none=True),
+                ),
+            )
+        summary_order = marker_event.model_order + 1
+        # The marker session closes before lifecycle hooks and the external
+        # summary model call. Reserving the adjacent summary order keeps
+        # concurrent input after the summary when the model-input head advances.
         if on_started is not None:
-            await on_started()
+            try:
+                await on_started()
+            except asyncio.CancelledError:
+                await self._append_compaction_failure(
+                    session_id=session_id,
+                    compaction_id=compaction_id,
+                    model_order=summary_order,
+                    reason="cancelled",
+                    error=None,
+                )
+                raise
+            except Exception as exc:
+                await self._append_compaction_failure(
+                    session_id=session_id,
+                    compaction_id=compaction_id,
+                    model_order=summary_order,
+                    reason="start_callback_failed",
+                    error=str(exc),
+                )
+                raise
 
         summary_budget = compute_summary_budget(
             summary_context_window_tokens or self.summary_context_window_tokens
         )
-        summary = await summarize(old_events, summary_budget)
+        try:
+            summary = await summarize(old_events, summary_budget)
+        except asyncio.CancelledError:
+            await self._append_compaction_failure(
+                session_id=session_id,
+                compaction_id=compaction_id,
+                model_order=summary_order,
+                reason="cancelled",
+                error=None,
+            )
+            raise
+        except Exception as exc:
+            await self._append_compaction_failure(
+                session_id=session_id,
+                compaction_id=compaction_id,
+                model_order=summary_order,
+                reason="summary_failed",
+                error=str(exc),
+            )
+            raise
+
         if not summary.strip():
+            await self._append_compaction_failure(
+                session_id=session_id,
+                compaction_id=compaction_id,
+                model_order=summary_order,
+                reason="empty_summary",
+                error=None,
+            )
             raise CompactionFailedError(
                 "Compaction failed: summary model returned no text."
             )
 
         continuity_history = _render_continuity_history(old_events)
         if summary_enricher is not None:
-            summary = await summary_enricher(
-                summary=summary,
-                continuity_history=continuity_history,
-                compaction_id=compaction_id,
-                reason=reason,
-                covered_until_event_id=old_events[-1].id,
-            )
+            try:
+                summary = await summary_enricher(
+                    summary=summary,
+                    continuity_history=continuity_history,
+                    compaction_id=compaction_id,
+                    reason=reason,
+                    covered_until_event_id=old_events[-1].id,
+                )
+            except asyncio.CancelledError:
+                await self._append_compaction_failure(
+                    session_id=session_id,
+                    compaction_id=compaction_id,
+                    model_order=summary_order,
+                    reason="cancelled",
+                    error=None,
+                )
+                raise
+            except Exception as exc:
+                await self._append_compaction_failure(
+                    session_id=session_id,
+                    compaction_id=compaction_id,
+                    model_order=summary_order,
+                    reason="summary_enrichment_failed",
+                    error=str(exc),
+                )
+                raise
         if not summary.strip():
+            await self._append_compaction_failure(
+                session_id=session_id,
+                compaction_id=compaction_id,
+                model_order=summary_order,
+                reason="empty_summary",
+                error=None,
+            )
             raise CompactionFailedError(
                 "Compaction failed: summary enrichment returned no text."
             )
@@ -416,6 +495,32 @@ class EventCompactor:
                 summary_event.id,
             )
         return summary_event
+
+    async def _append_compaction_failure(
+        self,
+        *,
+        session_id: str,
+        compaction_id: str,
+        model_order: int,
+        reason: str,
+        error: str | None,
+    ) -> None:
+        """Append a failed compaction marker in a short transaction."""
+        async with self.session_manager() as session:
+            await self.transcript_repo.append(
+                session,
+                EventCreate(
+                    session_id=session_id,
+                    kind=EventKind.COMPACTION_MARKER,
+                    payload=CompactionMarkerPayload(
+                        compaction_id=compaction_id,
+                        status="failed",
+                        reason=reason,
+                        error=error,
+                    ).model_dump(mode="json", exclude_none=True),
+                    model_order=model_order,
+                ),
+            )
 
 
 def _compaction_input_tokens(events: Sequence[Event]) -> int:

@@ -1,6 +1,8 @@
 import {
+  Badge,
   Box,
   Button,
+  Collapse,
   Group,
   Paper,
   rem,
@@ -8,14 +10,21 @@ import {
   Stack,
   Text,
 } from "@mantine/core";
-import { IconAlertTriangle, IconClock, IconRefresh } from "@tabler/icons-react";
-import { useTranslations } from "next-intl";
-import { useEffect, useState } from "react";
+import { useDisclosure } from "@mantine/hooks";
+import {
+  IconAlertTriangle,
+  IconChevronRight,
+  IconClock,
+  IconRefresh,
+} from "@tabler/icons-react";
+import { useLocale, useTranslations } from "next-intl";
+import { useEffect, useMemo, useState } from "react";
 import inlineControlClasses from "./ChatInlineControl.module.css";
 import type {
   AgentRunPhase,
-  ChatLiveRunRecovery,
   ChatLiveRunRetryState,
+  FailedRunAttemptSummary,
+  FailedRunFailureMetadata,
 } from "../types";
 
 type RunRetryCardProps =
@@ -25,16 +34,9 @@ type RunRetryCardProps =
       phase: AgentRunPhase;
     }
   | {
-      variant: "stopped";
-      recoveryKind: ChatLiveRunRecovery["kind"];
-      message: string;
-      canRetry: boolean;
-      isRetryPending: boolean;
-      onRetry: () => void;
-    }
-  | {
       variant: "terminal";
       message: string;
+      failure: FailedRunFailureMetadata;
       canRetry: boolean;
       isRetryPending: boolean;
       onRetry: () => void;
@@ -73,35 +75,119 @@ function useRetryCountdown(nextRetryAt: string | null): number | null {
   return Math.max(0, Math.ceil((target - now) / 1000));
 }
 
-const MODEL_PROVIDER_ERROR_PREFIX = "Model provider error:";
-
-function isProviderMessage(message: string): boolean {
-  return message.startsWith(MODEL_PROVIDER_ERROR_PREFIX);
+function formatFullDateTime(iso: string, locale: string): string {
+  const date = new Date(iso);
+  if (!Number.isFinite(date.getTime())) {
+    return iso;
+  }
+  return new Intl.DateTimeFormat(locale, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
 }
 
-function providerMessageBody(message: string): string {
-  return isProviderMessage(message)
-    ? message.slice(MODEL_PROVIDER_ERROR_PREFIX.length).trim()
-    : message;
+function AttemptHistory({
+  attempts,
+}: {
+  attempts: FailedRunAttemptSummary[];
+}): React.ReactElement | null {
+  const t = useTranslations("chat");
+  const locale = useLocale();
+  const [opened, { toggle }] = useDisclosure(false);
+  const sortedAttempts = useMemo(
+    () => [...attempts].sort((a, b) => b.attemptNumber - a.attemptNumber),
+    [attempts],
+  );
+
+  if (sortedAttempts.length === 0) {
+    return null;
+  }
+
+  return (
+    <Stack gap={rem(6)}>
+      <Group
+        gap={rem(6)}
+        wrap="nowrap"
+        role="button"
+        tabIndex={0}
+        className={inlineControlClasses.root}
+        style={{ cursor: "pointer", userSelect: "none" }}
+        onClick={toggle}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            toggle();
+          }
+        }}
+      >
+        <IconChevronRight
+          aria-hidden="true"
+          size={rem(14)}
+          stroke={1.8}
+          color="var(--mantine-color-dimmed)"
+          style={{
+            transform: opened ? "rotate(90deg)" : "none",
+            transition: "transform 160ms",
+          }}
+        />
+        <Text
+          size="xs"
+          fw={600}
+          c="dimmed"
+          className={inlineControlClasses.label}
+        >
+          {t("failedRunRecovery.history", { count: sortedAttempts.length })}
+        </Text>
+      </Group>
+      <Collapse expanded={opened}>
+        <ScrollArea.Autosize mah={rem(280)} scrollbars="y">
+          <Stack gap="xs">
+            {sortedAttempts.map((attempt) => (
+              <Paper
+                key={`${attempt.attemptNumber}:${attempt.failedAt}`}
+                withBorder
+                radius="md"
+                p="xs"
+                bg="var(--mantine-color-body)"
+              >
+                <Stack gap={rem(4)}>
+                  <Group gap="xs" justify="space-between" wrap="nowrap">
+                    <Text size="xs" fw={600}>
+                      {t("failedRunRecovery.attemptTitle", {
+                        attemptNumber: attempt.attemptNumber,
+                      })}
+                    </Text>
+                    <Text size="xs" c="dimmed">
+                      {formatFullDateTime(attempt.failedAt, locale)}
+                    </Text>
+                  </Group>
+                  <Text size="xs" style={{ overflowWrap: "anywhere" }}>
+                    {attempt.userMessage}
+                  </Text>
+                  <Group gap="xs" wrap="wrap">
+                    <Badge size="xs" variant="light" color="gray">
+                      {attempt.errorType}
+                    </Badge>
+                  </Group>
+                </Stack>
+              </Paper>
+            ))}
+          </Stack>
+        </ScrollArea.Autosize>
+      </Collapse>
+    </Stack>
+  );
 }
 
 export function RunRetryCard(props: RunRetryCardProps): React.ReactElement {
   const t = useTranslations("chat");
   const isLive = props.variant === "live";
-  const rawMessage = isLive ? props.retry.lastErrorMessage : props.message;
+  const attempts = isLive
+    ? props.retry.attempts
+    : (props.failure.attempts ?? []);
+  const retry = isLive ? props.retry : null;
   const countdown = useRetryCountdown(isLive ? props.retry.nextRetryAt : null);
-  const genericStopped =
-    props.variant === "stopped" && props.recoveryKind === "stopped";
-  const providerFailure =
-    props.variant === "stopped"
-      ? props.recoveryKind === "provider_failure"
-      : isProviderMessage(rawMessage);
-  const title = genericStopped
-    ? t("failedRunRecovery.stoppedTitle")
-    : providerFailure
-      ? t("failedRunRecovery.providerErrorTitle")
-      : t("failedRunRecovery.errorTitle");
-  const message = providerMessageBody(rawMessage);
+  const message = isLive ? retry?.lastErrorMessage : props.message;
 
   return (
     <Box mb="md" w="100%" style={{ minWidth: 0 }}>
@@ -116,17 +202,17 @@ export function RunRetryCard(props: RunRetryCardProps): React.ReactElement {
           <Group gap="xs" align="flex-start" wrap="nowrap">
             <IconAlertTriangle
               aria-hidden="true"
-              size={rem(20)}
+              size={20}
               stroke={1.8}
               color="var(--mantine-color-orange-6)"
               style={{ flexShrink: 0 }}
             />
             <Text size="sm" fw={700}>
-              {title}
+              {t("failedRunRecovery.errorTitle")}
             </Text>
           </Group>
 
-          {message !== "" && !genericStopped && (
+          {message && (
             <Paper
               withBorder
               radius="md"
@@ -163,13 +249,15 @@ export function RunRetryCard(props: RunRetryCardProps): React.ReactElement {
             </Group>
           )}
 
+          <AttemptHistory attempts={attempts} />
+
           {!isLive && props.canRetry && (
             <Group gap="xs" justify="flex-end" wrap="wrap">
               <Button
                 size="xs"
                 variant="light"
                 color="orange"
-                leftSection={<IconRefresh size={rem(14)} />}
+                leftSection={<IconRefresh size={14} />}
                 loading={props.isRetryPending}
                 onClick={props.onRetry}
               >

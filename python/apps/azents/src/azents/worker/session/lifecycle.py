@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.broker.types import SessionBroker, SessionWakeUp
 from azents.core.enums import AgentRunPhase, AgentRunStatus
 from azents.engine.events.types import AgentRunState
-from azents.engine.run.failure import FailedRunRetryState, RunRecoveryState
+from azents.engine.run.failure import FailedRunRetryState
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import AgentRunRepository
@@ -306,28 +306,6 @@ class SessionLifecycleService:
             )
 
         await self.run_short_db(mark_terminal)
-
-    async def mark_agent_run_stopped_with_recovery(
-        self,
-        session_id: str,
-        *,
-        run_id: str,
-        recovery_state: RunRecoveryState | None,
-    ) -> None:
-        """Stop one running AgentRun with an optional recovery projection."""
-
-        async def mark_stopped(db_session: AsyncSession) -> None:
-            run = await self.agent_run_repository.get_by_id(db_session, run_id)
-            if run is not None and run.session_id != session_id:
-                raise ValueError("AgentRun session mismatch")
-            await self.agent_run_repository.mark_stopped_with_recovery_if_running(
-                db_session,
-                run_id,
-                recovery_state=recovery_state,
-                ended_at=datetime.datetime.now(datetime.UTC),
-            )
-
-        await self.run_short_db(mark_stopped)
 
     async def update_agent_run_retry_state(
         self,

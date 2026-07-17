@@ -93,7 +93,7 @@ api_routes:
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-07-17
-spec_version: 107
+spec_version: 106
 ---
 
 # Conversation & Events
@@ -347,8 +347,6 @@ before destructive cleanup can remove a path or branch.
 | `status` | enum | `pending`, `running`, `completed`, `stopped`, `failed`, `interrupted`, or `cancelled` |
 | `active_tool_calls` | JSONB array | `call_id`, `name`, redacted/summarized `arguments`, `started_at`, and `owner_generation` |
 | `retry_state` | JSONB \| null | Durable current-model-turn retry state; cleared on successful model output admission or terminal transition |
-| `recovery_state` | JSONB \| null | Terminal stopped-Run recovery projection with safe message, operation, source Run, and stopped timestamp |
-| `retry_source_run_id` | FK `agent_runs` \| null | Source stopped/failed Run for an explicit fresh pending retry; `ON DELETE SET NULL` and explicitly indexed |
 | `parent_agent_run_id` | FK `agent_runs` \| null | Parent run lineage for a subagent's first run |
 | `last_completed_event_id` | `str(32)` \| null | Terminal run boundary event id when available |
 | `terminal_result_event_id` | `str(32)` \| null | Terminal assistant/error event used by parent subagent observation |
@@ -364,17 +362,7 @@ and the in-flight retry attempt. Successful model output admission clears `retry
 transaction that appends the output, so a later model turn starts with a fresh retry budget and REST
 resync cannot recover an earlier turn's error. Terminal run updates also clear `retry_state`
 defensively so retry progress cannot leak into completed, stopped, failed, interrupted, or cancelled
-runs. Provider-attributed retry state may retain the closed category, diagnostic retryability, bounded
-redacted provider message, safe code/type/status/retry hint, internal provider/model/integration
-identifiers, and stable safe fingerprint. Every provider category uses the full failed-run budget;
-diagnostic `non_retryable` never short-circuits provider retry.
-
-`recovery_state` is distinct terminal state and is never auto-resumed. Every user-stopped active Run
-stores either `kind = provider_failure` with the latest safe provider message or `kind = stopped` with
-`Execution stopped.`. Stop clears `retry_state`, writes no provider `system_error`, and leaves the
-stopped Run available through live projection only until a newer pending/running Run exists. Explicit
-stopped retry creates a different pending Run linked by `retry_source_run_id`, copies the ordered
-input associations and requested profile intent, and starts with a fresh retry budget.
+runs.
 
 A run is precreated as `pending` and associated with its ordered durable input events through
 `agent_run_input_events`. Normal buffered input resolves its requested profile before activation, then
@@ -384,7 +372,7 @@ buffer, appends a deterministic `system_error`, preserves the previous Session i
 and completes the active run without retry. Only one pending run may exist for a session. Pending and
 running runs are active recovery state.
 
-The requested label is intent, while the Session-owned current inference snapshot is the execution authority at each turn boundary. `AgentRun` stores lifecycle, parentage, activity, retry, and terminal-result state; it does not own or restore model selection. A profile change arriving during an active run is prepared for the next boundary, and the same run rebuilds its physical request and effective limits from the new Session snapshot instead of creating a replacement run. Manual terminal failed-run retry and recoverable stopped-run retry each create a new pending run, preserve the original ordered input-event associations, link the source through `retry_source_run_id`, and re-resolve the Session's requested profile against current Agent routing before execution. A subagent's first run is precreated with `parent_agent_run_id`; child creation first stores either the exact parent Session snapshot or a statically validated spawn override on the child Session. Recovery activates the child from that Session snapshot without deriving model state from the parent run row.
+The requested label is intent, while the Session-owned current inference snapshot is the execution authority at each turn boundary. `AgentRun` stores lifecycle, parentage, activity, retry, and terminal-result state; it does not own or restore model selection. A profile change arriving during an active run is prepared for the next boundary, and the same run rebuilds its physical request and effective limits from the new Session snapshot instead of creating a replacement run. Manual retry creates a new pending run, preserves the original ordered input-event associations, and re-resolves the Session's requested profile against current Agent routing before execution. A subagent's first run is precreated with `parent_agent_run_id`; child creation first stores either the exact parent Session snapshot or a statically validated spawn override on the child Session. Recovery activates the child from that Session snapshot without deriving model state from the parent run row.
 
 ## 4. Event Transcript Events
 
@@ -433,10 +421,8 @@ does not create a duplicate action-message bubble.
 
 `system_error` payloads may include optional user-safe failed-run metadata under `failure`. The
 metadata identifies terminal failed-run output, finalization reason, retry counts, last error type,
-diagnostic retryability/failure code, and bounded attempt summaries. A provider-authored scalar
-message may be stored only after the common deterministic bounding and secret-redaction boundary.
-Stack traces, credentials, headers, cookies, request/model output, arbitrary raw provider bodies, raw
-stream frames, and SDK serialization are not stored in durable transcript payloads.
+and future retry classification fields. Stack traces, raw provider response bodies, and credential
+details are not stored in durable transcript payloads.
 
 Attachments are payload-specific, not event-common. Tool result output is always a part array using
 `output_text`, `output_image`, `output_file`, `output_audio`, or `output_video`.
@@ -557,7 +543,7 @@ WebSocket chat clients receive subscription and event actions:
   integration controls;
 - `compaction_started` and `compaction_complete` for transient compaction UI state;
 - `todo_state_changed` when the session-scoped TodoToolkit State changes;
-- `live_run_updated` when the authoritative current Run projection changes, including active retry, context-preparation operation, or terminal stopped recovery state;
+- `live_run_updated` when the authoritative running run projection changes, including failed-run retry state;
 - `live_run_cleared` with the exact terminal `run_id` when cleanup removes that current run projection;
 - `action_execution_updated` when an active operation TurnAction execution projection changes;
 - `action_execution_removed` after an operation's durable terminal snapshot replaces its live state;
@@ -577,9 +563,8 @@ Durable/live handoff follows these invariants:
   because the event arrived through the history action.
 - `live_event_removed` removes only the live projection. It must not remove a durable view model that
   has already been promoted from `history_event_appended`.
-- `live_run_updated` replaces the current `run` live-state snapshot atomically, including profile,
-  retry, context-preparation operation, and stopped recovery fields; `live_run_cleared` clears only
-  when its required `run_id` exactly matches the current live run, and it does not remove
+- `live_run_updated` replaces the current `run` live-state snapshot atomically; `live_run_cleared`
+  clears only when its required `run_id` exactly matches the current live run, and it does not remove
   durable transcript events. A delayed terminal or clear for Run A cannot clear a newer Run B.
 - When a durable event has a matching live counterpart, the worker publishes the history
   append action before publishing the live removal action.
@@ -659,18 +644,16 @@ history/live routes, but they are read-only for human chat writes.
 session and rejects `session_kind = subagent` before creating a chat write request, input buffer, live
 projection, or broker wake-up.
 `POST /chat/v1/sessions/{session_id}/edit-message`,
-`POST /chat/v1/sessions/{session_id}/commands`,
-`POST /chat/v1/sessions/{session_id}/retry-failed-run`, and
-`POST /chat/v1/sessions/{session_id}/retry-stopped-run` are idle-only control boundaries. Message,
-edit, command, failed-run retry, and stopped-run retry write paths reject `session_kind = subagent`
-before write side effects; new subagent instructions must enter through parent-agent collaboration
-tools as
+`POST /chat/v1/sessions/{session_id}/commands`, and
+`POST /chat/v1/sessions/{session_id}/retry-failed-run` are idle-only control boundaries. Message,
+edit, command, and failed-run retry write paths reject `session_kind = subagent` before write side
+effects; new subagent instructions must enter through parent-agent collaboration tools as
 `agent_message` input. All REST write
 requests require `client_request_id`; accepted writes are recorded in `chat_write_requests` so
 retries with the same key return the same accepted target instead of creating duplicate side effects.
 REST write idempotency is scoped to `(session_id, user_id, client_request_id)`. The same
 `client_request_id` may be reused independently for different explicit session routes because the URL
-session is the write boundary. New-session messages, normal messages, and edits require `inference_profile = { model_target_label, reasoning_effort }`; the label is client-visible Agent intent. Effort is concrete in normal user input whenever the selected target advertises explicit levels, while models with an empty explicit-level list use nullable provider/model default internally and show no effort control. Commands require `inference_profile = null`; failed-run and stopped-run retry accept no profile override. Message writes commit a `user_message` input buffer
+session is the write boundary. New-session messages, normal messages, and edits require `inference_profile = { model_target_label, reasoning_effort }`; the label is client-visible Agent intent. Effort is concrete in normal user input whenever the selected target advertises explicit levels, while models with an empty explicit-level list use nullable provider/model default internally and show no effort control. Commands require `inference_profile = null`, and failed-run retry accepts no profile override. Message writes commit a `user_message` input buffer
 to the explicit path session before returning success, mark the same session running in the producer
 transaction, then send a worker wake-up signal for that session. The message path must not
 resolve runtime current/active session state to replace the requested `session_id`. Edit writes
@@ -682,11 +665,7 @@ for that session. Failed-run retry writes target the latest visible failed-run `
 are rejected with `409 Conflict` if any newer visible durable event exists, if the session is running,
 or if pending input/command state exists. Accepted retry writes soft-revert the failed event and later
 visible events, mark the session running, send a normal wake-up, return accepted type
-`failed_run_retry`, and set `history_reload_required = true`. Stopped-run retry targets the latest
-`STOPPED` Run with non-null `recovery_state`; it is rejected if that Run is no longer the live
-recoverable source or the session has pending work. Acceptance creates or reuses one linked pending
-Run, returns accepted type `stopped_run_retry`, and keeps `history_reload_required = false` because no
-durable provider error is reverted. Signal delivery is not the persistence source of truth. REST write
+`failed_run_retry`, and set `history_reload_required = true`. Signal delivery is not the persistence source of truth. REST write
 responses include `session_id`, `client_request_id`, an accepted target, an authoritative live
 snapshot, and `history_reload_required` for writes such as edit/command that require durable history
 reload.
@@ -723,16 +702,12 @@ not duplicate metadata or delete objects already referenced by an earlier commit
 
 ## 8. Compaction
 
-Compaction is append-only. A successful automatic or manual compaction appends one
-`compaction_summary`, keeps old events for UI/audit, and moves
-`agent_sessions.model_input_head_event_id` to the summary id so future model input starts from the
-compacted head. Failed and cancelled attempts append no compaction lifecycle event and do not move the
-head. Historical `compaction_marker` events remain readable, but new compactions do not write them.
+Compaction is append-only. It appends `compaction_marker` and `compaction_summary`, keeps old events
+for UI/audit, and moves `agent_sessions.model_input_head_event_id` to the summary id so future model
+input starts from the compacted head.
 
 Future model input is selected and sorted by event `model_order`. Auto and manual compaction both
-summarize the full selected model-input transcript into one `compaction_summary` event. While the
-provider operation is active, the Run exposes one stable `preparing_context` live operation; retries
-update the same identity and every terminal boundary removes it. Runtime
+summarize the full selected model-input transcript into one `compaction_summary` event. Runtime
 compaction summary hooks may enrich the generated summary before continuity is appended. The summary
 content also includes bounded `Recent User Messages` and `Recent Transcript` sections. The
 user-message section keeps the last five user messages visible even when a long tool-heavy run leaves
@@ -747,8 +722,6 @@ storage JSON dump.
 - Event transcript is the durable model/tool source of truth.
 - Native artifacts are opaque replay optimizations, never event state.
 - `agent_runs.phase` and `active_tool_calls` are the durable UI activity source.
-- `retry_state` is active auto-resumable state; terminal `recovery_state` is explicit user recovery only and never resumes during worker takeover.
-- Every user-stopped active Run retains a safe recoverable state, while a newer pending/running Run suppresses that old recovery from current live projection.
 - Public chat UI state is restored from `/history`, `/live`, the dedicated Subagent Tree API, and event WebSocket actions, including session todo, action execution state, and subagent tree invalidations.
 - Existing transcript/session data migration is not required for the private service cutover.
 - Web chat message/edit/command writes have a single REST commit boundary; WebSocket is not a fallback write path.
@@ -759,7 +732,7 @@ storage JSON dump.
 - Requested profile intent and ordered run-input associations are durable; the Session's complete prepared inference snapshot is authoritative for the next turn and may change at a later boundary within the same active run.
 - `SessionAgent` is the subagent tree source of truth; `AgentSession` remains the transcript/run/input boundary.
 - Child sessions are hidden from ordinary Agent session lists by `session_kind = subagent`, not by access-control bypass.
-- Child subagent sessions are human read-only: REST message/edit/command/failed-run retry/stopped-run retry writes reject them before side effects, while parent-agent collaboration tools may enqueue `agent_message` input.
+- Child subagent sessions are human read-only: REST message/edit/command/failed-run retry writes reject them before side effects, while parent-agent collaboration tools may enqueue `agent_message` input.
 - `wait_agent` observes terminal child run projections once by advancing `parent_observed_run_index`; it must not infer results by scanning child transcript history.
 - Any service path that enqueues input buffers must mark `agent_sessions.run_state` as `running` in
   the same transaction.
@@ -782,9 +755,6 @@ Current verification:
 
 ## 11. Changelog
 
-- **2026-07-17** — v107. Added bounded provider-failure retry metadata, full-budget provider policy,
-  terminal stopped recovery, linked fresh-budget retry, stable context preparation, and marker-free
-  compaction attempts.
 - **2026-07-17** — v106. Added Base64-free dual materialization, request-local replay, retry-safe admission, and direct attachment presentation for provider-hosted generated images.
 - **2026-07-16** — v105. Added provider-neutral live provider-tool lifecycle state, Redis resync,
   attempt cleanup, semantic frontend presentation, and durable-before-live-removal handoff.

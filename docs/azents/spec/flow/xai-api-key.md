@@ -88,8 +88,6 @@ Both xAI provider identities share these transport rules:
 
 A model-call HTTP 403 surfaces as a user-visible provider failure and does not trigger token-expiry refresh handling. In the separate OAuth refresh path, HTTP 403 persists `entitlement_denied` rather than treating the token as merely expired.
 
-LiteLLM HTTP, transport, and typed terminal failures are normalized into the common `ModelProviderFailure` contract. The default presentation preserves only the bounded, redacted provider-authored reason under `Model provider error`; credentials, headers, request/output data, raw bodies, and SDK serialization remain excluded. Every provider-attributed failure receives the complete current Run retry budget regardless of category or diagnostic retryability.
-
 ## Frontend Behavior
 
 - `xai` appears in the Add integration modal only when returned by the provider capability API.

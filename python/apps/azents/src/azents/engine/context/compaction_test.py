@@ -15,10 +15,7 @@ from azents.engine.context.compaction import (
     enforce_summary_char_budget,
     summarize_text_with_model,
 )
-from azents.engine.run.provider_failure import (
-    ModelProviderFailure,
-    ModelProviderFailureCategory,
-)
+from azents.engine.run.errors import CompactionFailedError
 from azents.testing.model_stream import make_test_model_stream_watchdog
 
 
@@ -154,7 +151,6 @@ class TestSummarizeTextWithModel:
         result = await summarize_text_with_model(
             watchdog=make_test_model_stream_watchdog(),
             provider=LLMProvider.CHATGPT_OAUTH,
-            provider_integration_id=None,
             model="gpt-5.5",
             credential_kwargs={
                 "api_key": "test-key",
@@ -197,7 +193,6 @@ class TestSummarizeTextWithModel:
         await summarize_text_with_model(
             watchdog=make_test_model_stream_watchdog(),
             provider=LLMProvider.OPENAI,
-            provider_integration_id=None,
             model="gpt-5.5",
             credential_kwargs={"api_key": "test-key"},
             system_prompt="summarize system",
@@ -240,7 +235,6 @@ class TestSummarizeTextWithModel:
         result = await summarize_text_with_model(
             watchdog=make_test_model_stream_watchdog(),
             provider=LLMProvider.ANTHROPIC,
-            provider_integration_id=None,
             model="claude-sonnet-4-5",
             credential_kwargs={"api_key": "test-key"},
             system_prompt="summarize system",
@@ -284,7 +278,6 @@ class TestSummarizeTextWithModel:
         result = await summarize_text_with_model(
             watchdog=make_test_model_stream_watchdog(),
             provider=LLMProvider.ANTHROPIC,
-            provider_integration_id=None,
             model="gpt-5.5",
             credential_kwargs={"api_key": "test-key"},
             system_prompt="summarize system",
@@ -334,7 +327,6 @@ class TestSummarizeTextWithModel:
         result = await summarize_text_with_model(
             watchdog=make_test_model_stream_watchdog(),
             provider=LLMProvider.ANTHROPIC,
-            provider_integration_id=None,
             model="gpt-5.5",
             credential_kwargs={"api_key": "test-key"},
             system_prompt="summarize system",
@@ -375,7 +367,6 @@ class TestSummarizeTextWithModel:
         result = await summarize_text_with_model(
             watchdog=make_test_model_stream_watchdog(),
             provider=LLMProvider.ANTHROPIC,
-            provider_integration_id=None,
             model="gpt-5.5",
             credential_kwargs={"api_key": "test-key"},
             system_prompt="summarize system",
@@ -419,7 +410,6 @@ class TestSummarizeTextWithModel:
         result = await summarize_text_with_model(
             watchdog=make_test_model_stream_watchdog(),
             provider=LLMProvider.ANTHROPIC,
-            provider_integration_id=None,
             model="gpt-5.5",
             credential_kwargs={"api_key": "test-key"},
             system_prompt="summarize system",
@@ -451,7 +441,6 @@ class TestSummarizeTextWithModel:
         result = await summarize_text_with_model(
             watchdog=make_test_model_stream_watchdog(),
             provider=LLMProvider.ANTHROPIC,
-            provider_integration_id=None,
             model="gpt-5.5",
             credential_kwargs={"api_key": "test-key"},
             system_prompt="summarize system",
@@ -464,11 +453,11 @@ class TestSummarizeTextWithModel:
         assert result == "summary"
         assert calls[0]["stream"] is True
 
-    async def test_propagates_context_window_error_without_internal_retry(
+    async def test_retries_context_window_error_with_older_input_omitted(
         self,
         monkeypatch: MonkeyPatch,
     ) -> None:
-        """Context failures cross the compaction boundary for Run retry."""
+        """Context-window-exceeded stream error retries after omitting older input."""
 
         async def fake_aresponses(**kwargs: object) -> object:
             calls.append(dict(kwargs))
@@ -487,36 +476,58 @@ class TestSummarizeTextWithModel:
                     }
                 )
 
-            return failed_stream()
+            async def completed_stream() -> AsyncIterator[_ResponsesStreamEvent]:
+                yield _ResponsesStreamEvent(
+                    {"type": "response.output_text.done", "text": "summary"}
+                )
+
+            if len(calls) == 1:
+                return failed_stream()
+            return completed_stream()
 
         calls: list[dict[str, object]] = []
-        monkeypatch.setattr("azents.engine.responses.aresponses", fake_aresponses)
+        monkeypatch.setattr(
+            "azents.engine.responses.aresponses",
+            fake_aresponses,
+        )
+        conversation_text = "\n".join(
+            [
+                "[User]: OLDEST_SHOULD_BE_OMITTED " + ("old " * 500),
+                "[Assistant]: " + ("middle " * 20),
+                "[User]: recent tail",
+            ]
+        )
 
-        with pytest.raises(ModelProviderFailure) as raised:
-            await summarize_text_with_model(
-                watchdog=make_test_model_stream_watchdog(),
-                provider=LLMProvider.ANTHROPIC,
-                provider_integration_id=None,
-                model="gpt-5.4-mini",
-                credential_kwargs={"api_key": "test-key"},
-                system_prompt="summarize system",
-                user_prompt="summarize user\n",
-                conversation_text="[User]: hello",
-                max_output_tokens=4000,
-                session_id="session-1",
-            )
+        result = await summarize_text_with_model(
+            watchdog=make_test_model_stream_watchdog(),
+            provider=LLMProvider.ANTHROPIC,
+            model="gpt-5.4-mini",
+            credential_kwargs={"api_key": "test-key"},
+            system_prompt="summarize system",
+            user_prompt="summarize user\n",
+            conversation_text=conversation_text,
+            max_output_tokens=4000,
+            session_id="session-1",
+        )
 
-        assert len(calls) == 1
-        assert raised.value.operation == "compaction"
-        assert raised.value.category is ModelProviderFailureCategory.CONTEXT_LIMIT
-        assert raised.value.provider_code == "context_length_exceeded"
-        assert "exceeds the context window" in raised.value.user_message
+        assert result == "summary"
+        assert len(calls) == 2
+        retry_input = calls[1]["input"]
+        assert isinstance(retry_input, list)
+        retry_message = retry_input[0]
+        assert isinstance(retry_message, dict)
+        retry_content = retry_message["content"]
+        assert isinstance(retry_content, str)
+        assert "Older compaction input omitted" in retry_content
+        assert "OLDEST_SHOULD_BE_OMITTED" not in retry_content
+        assert "[Assistant]: middle" in retry_content
+        assert retry_content.endswith("[User]: recent tail")
 
-    async def test_propagates_non_context_stream_provider_failure(
+    async def test_non_context_stream_error_fails_without_retry(
         self,
         monkeypatch: MonkeyPatch,
     ) -> None:
-        """Non-context provider failures retain typed compaction metadata."""
+        """Non-context-window stream error fails without retry."""
 
         async def fake_aresponses(**kwargs: object) -> object:
             calls.append(dict(kwargs))
@@ -537,13 +548,15 @@ class TestSummarizeTextWithModel:
             return stream()
 
         calls: list[dict[str, object]] = []
-        monkeypatch.setattr("azents.engine.responses.aresponses", fake_aresponses)
+        monkeypatch.setattr(
+            "azents.engine.responses.aresponses",
+            fake_aresponses,
+        )
 
-        with pytest.raises(ModelProviderFailure) as raised:
+        with pytest.raises(CompactionFailedError, match="bad_request"):
             await summarize_text_with_model(
                 watchdog=make_test_model_stream_watchdog(),
                 provider=LLMProvider.ANTHROPIC,
-                provider_integration_id="integration-compact",
                 model="gpt-5.4-mini",
                 credential_kwargs={"api_key": "test-key"},
                 system_prompt="summarize system",
@@ -554,44 +567,62 @@ class TestSummarizeTextWithModel:
             )
 
         assert len(calls) == 1
-        assert raised.value.operation == "compaction"
-        assert raised.value.category is ModelProviderFailureCategory.INVALID_REQUEST
-        assert raised.value.provider_code == "bad_request"
-        assert raised.value.provider_message == "The request is invalid."
-        assert raised.value.integration == "integration-compact"
 
-    async def test_propagates_litellm_context_window_exception(
+    async def test_retries_litellm_context_window_exception(
         self,
         monkeypatch: MonkeyPatch,
     ) -> None:
-        """LiteLLM context failures also use the common provider contract."""
+        """LiteLLM context window exception follows the same retry path."""
 
         async def fake_aresponses(**kwargs: object) -> object:
             calls.append(dict(kwargs))
-            raise ContextWindowExceededError(
-                "input exceeds context window",
-                model="gpt-5.4-mini",
-                llm_provider="openai",
-            )
+            if len(calls) == 1:
+                raise ContextWindowExceededError(
+                    "input exceeds context window",
+                    model="gpt-5.4-mini",
+                    llm_provider="openai",
+                )
+
+            async def completed_stream() -> AsyncIterator[_ResponsesStreamEvent]:
+                yield _ResponsesStreamEvent(
+                    {"type": "response.output_text.done", "text": "summary"}
+                )
+
+            return completed_stream()
 
         calls: list[dict[str, object]] = []
-        monkeypatch.setattr("azents.engine.responses.aresponses", fake_aresponses)
+        monkeypatch.setattr(
+            "azents.engine.responses.aresponses",
+            fake_aresponses,
+        )
+        conversation_text = "\n".join(
+            [
+                "[User]: OLDEST_SHOULD_BE_OMITTED " + ("old " * 500),
+                "[Assistant]: " + ("middle " * 20),
+                "[User]: recent tail",
+            ]
+        )
 
-        with pytest.raises(ModelProviderFailure) as raised:
-            await summarize_text_with_model(
-                watchdog=make_test_model_stream_watchdog(),
-                provider=LLMProvider.ANTHROPIC,
-                provider_integration_id=None,
-                model="gpt-5.4-mini",
-                credential_kwargs={"api_key": "test-key"},
-                system_prompt="summarize system",
-                user_prompt="summarize user\n",
-                conversation_text="[User]: hello",
-                max_output_tokens=4000,
-                session_id="session-1",
-            )
+        result = await summarize_text_with_model(
+            watchdog=make_test_model_stream_watchdog(),
+            provider=LLMProvider.ANTHROPIC,
+            model="gpt-5.4-mini",
+            credential_kwargs={"api_key": "test-key"},
+            system_prompt="summarize system",
+            user_prompt="summarize user\n",
+            conversation_text=conversation_text,
+            max_output_tokens=4000,
+            session_id="session-1",
+        )
 
-        assert len(calls) == 1
-        assert raised.value.operation == "compaction"
-        assert raised.value.category is ModelProviderFailureCategory.CONTEXT_LIMIT
-        assert raised.value.provider_error_type == "ContextWindowExceededError"
+        assert result == "summary"
+        assert len(calls) == 2
+        retry_input = calls[1]["input"]
+        assert isinstance(retry_input, list)
+        retry_message = retry_input[0]
+        assert isinstance(retry_message, dict)
+        retry_content = retry_message["content"]
+        assert isinstance(retry_content, str)
+        assert "Older compaction input omitted" in retry_content
+        assert "OLDEST_SHOULD_BE_OMITTED" not in retry_content
+        assert retry_content.endswith("[User]: recent tail")

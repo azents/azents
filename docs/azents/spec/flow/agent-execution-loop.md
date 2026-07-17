@@ -46,7 +46,6 @@ code_paths:
   - python/apps/azents/src/azents/worker/live/**
   - python/apps/azents/src/azents/worker/run/**
   - python/apps/azents/src/azents/worker/session/**
-  - python/libs/az-common/src/azcommon/logging.py
   - typescript/apps/azents-web/src/features/chat/components/ChatView.tsx
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
 last_verified_at: 2026-07-17
@@ -95,16 +94,12 @@ optional canonical JSON arguments. A normally exhausted Responses stream must co
 `response.completed` terminal event before its normalized output can be appended. The OpenAI SDK
 normalizer requires both the documented SDK event class and exact wire discriminator;
 `response.incomplete`, `response.failed`, and `error` outcomes, plus EOF without a recognized
-terminal event, raise the common `ModelProviderFailure` before durable model events are appended and
-flow through the failed-run retry/finalization boundary. OpenAI-native and LiteLLM-backed adapters map
-typed SDK exceptions, terminal events, and provider-attributed transport failures into the same closed
-provider-neutral category and retryability taxonomy. The contract retains only bounded identifiers,
-valid status/retry-hint scalars, and a redacted provider-authored message; credentials, headers,
-cookies, request/model output, arbitrary response bodies, raw stream frames, and SDK serialization do
-not cross the adapter boundary. Category and retryability are diagnostic metadata. Every
-provider-attributed failure, including authentication, permission, quota, policy, invalid request,
-context-limit, transient, and unknown categories, consumes the normal complete failed-run retry budget.
-Completed output items may reconstruct a successfully completed response but do not independently prove response completion. When the
+terminal event, raise `ModelCallError` before durable model events or markers are appended and flow
+through the failed-run retry/finalization boundary. Typed terminal provider codes are retained only as
+bounded operational metadata: rate-limit, server, and timeout failures are transient; deterministic
+request, policy, quota, context-window, image-input, output-limit, and content-filter failures are
+non-retryable. Raw provider message bodies are neither logged nor surfaced to users. Completed output items may reconstruct a
+successfully completed response but do not independently prove response completion. When the
 completed response includes the optional provider extension `end_turn` with the exact boolean value
 `false`, normalization marks the successful model step as needing follow-up. The execution loop
 appends that step's durable output and turn marker, then starts the next model step without treating it
@@ -272,12 +267,12 @@ The foreground `RunRequest` uses the selected Session settings: `max_output_toke
 
 `retry_state` is nullable durable JSON on `agent_runs`. When present, it records the active model
 turn's failed-run retry progress and includes the latest user-safe error message, failed attempt
-count, max retries, backoff seconds, `next_retry_at`, error type/source, diagnostic retryability,
-failure code, bounded attempt summaries, and bounded provider-failure metadata when applicable.
-`/live` exposes the user-safe active state as optional `run.retry`; the default UI shows the concise
-provider-error message and retry status without rendering technical attempt history, error classes,
-provider codes, statuses, taxonomy, or concrete integration identity. Retry attempts do not create
-durable transcript events.
+count, max retries, backoff seconds, `next_retry_at`, error type/source, retryability, failure code,
+and a bounded `attempts` list. Each attempt summary contains attempt number, user-safe message,
+error type/source, failed timestamp, retryability, failure code, truncation flag, backoff seconds,
+and the next retry timestamp. `/live` exposes this as the optional `run.retry` projection so retry
+UI can restore the current turn's live retry card and attempt history without durable transcript
+retry-attempt events.
 
 Failed-run retry is owned by the worker run boundary, not by the event execution core. User-visible
 model/runtime errors that stop a run attempt propagate out of `AgentRunExecution` without appending a
@@ -306,20 +301,15 @@ history; for client-tool output, the committed `executing_tools` phase may perfo
 first. A later model turn, including tool-less `end_turn = false` continuation, starts at failed
 attempt 1 with a fresh retry budget. WebSocket and REST live projections keep `run.retry` while the
 retry is active and remove it after successful output admission or terminal transition.
-Provider retryability never short-circuits retry. A provider failure classified diagnostically as
-`non_retryable` still receives the standard exponential backoff and full configured retry budget.
-Only non-provider deterministic runtime failures, including fixture strict-mode `no_fixture_match`,
-may retain immediate `non_retryable` finalization. Each provider attempt emits one structured warning
-with safe operation/provider/model/category/status/code/type/fingerprint and retry-outcome fields. An
-`unknown` category additionally emits an immediate error-level structured record. The shared logging
-integration maps the safe provider fingerprint plus deployed release to the Sentry event fingerprint,
-so repeated attempts group into one incident while distinct failures remain separate. Runtime product
-code does not call a monitoring SDK directly.
-
-When retry is exhausted, or when a non-provider non-retryable failure is observed,
+Known non-retryable failures, including deterministic fixture strict-mode `no_fixture_match` and
+typed provider request, authentication, authorization, policy, quota, context-window, image-input,
+output-limit, and content-filter failures, are classified with `retryability = non_retryable`, receive
+`backoff_seconds = 0`, and are finalized on the first failed attempt instead of waiting for the retry
+budget. When retry is
+exhausted, when a non-retryable failure is observed, or when stop is requested while retry is waiting,
 `FailedRunErrorFinalizer` promotes the latest attempt to durable failed-run output by delegating
 durable append and terminal run updates to the engine failed-run event store. That event-store
-boundary appends one terminal `system_error` with failed-run metadata, appends the failed run marker,
+boundary appends the terminal `system_error` with failed-run metadata, appends the failed run marker,
 and marks the run `failed` while clearing retry state. The worker finalizer then emits `RunComplete`
 and clears live activity.
 
@@ -331,27 +321,13 @@ message-processing errors also remain outside the failed-run scope unless they a
 concrete `RunExecutor` boundary.
 
 Failed-run terminal `system_error` events carry a user-safe `failure` payload with `kind =
-failed_run`. The payload retains finalization reason, failed attempt count, retry budget, latest
-diagnostic retryability/failure code, optional `action_hint`, and bounded attempt summaries for
-recovery and support. The default terminal card shows only the safe error message and a manual Retry
-action when the failed-run event is the latest visible durable event and the session is idle. It does
-not render attempt history, internal messages, error classes, stack traces, raw provider responses, or
-observability-only diagnostics.
-
-`recovery_state` is nullable durable JSON on a terminal stopped `agent_runs` row. Every user-stopped
-active Run stores a recoverable projection: `kind = provider_failure` preserves the last bounded
-provider message and operation when provider retry state exists; otherwise `kind = stopped` uses the
-safe message `Execution stopped.` and the stopped sampling or context-preparation operation. Stop
-clears active retry/operation state, marks the Run `STOPPED`, keeps the normal durable interruption
-and run-marker events, and does not append a provider `system_error`. Worker recovery never resumes a
-stopped Run automatically.
-
-`POST /chat/v1/sessions/{session_id}/retry-stopped-run` is an idle-only idempotent control. It accepts
-the latest recoverable stopped Run, creates a distinct pending Run linked by `retry_source_run_id`,
-copies the source Run's ordered input associations and requested inference intent, and starts with no
-retry state so the new Run receives a fresh full budget. A normal new user input creates the newer
-pending Run and naturally suppresses the stopped recovery projection without rewriting durable
-history.
+failed_run`. The payload includes finalization reason, failed attempt count, retry budget, latest
+retryability/failure code, optional `action_hint`, and the same bounded user-safe attempt history
+shape used by `run.retry.attempts`. Frontend history/live mapping must preserve this metadata on the
+rendered error message. The terminal failed-run error card shows the safe error message inside the
+card, exposes the attempt history as expandable detail, and shows a manual retry action only when the
+failed-run error event is the latest visible durable event and the session is idle. It must not render
+internal messages, stack traces, raw provider responses, or any observability-only diagnostics.
 
 ## 3. Event Transcript
 
@@ -655,10 +631,8 @@ completed model turns of the same compacted transcript. The next model step ther
 `compaction_summary` head event that contains the durable checkpoint, any hook enrichment, and recent
 continuity context.
 
-Successful automatic compaction writes one `compaction_summary` with reason
-`auto_threshold_exceeded` and moves the model-input head. It does not write a started marker or a
-per-attempt failed/cancelled marker. Explicit `/compact` writes one successful summary with reason
-`manual_command`.
+Successful automatic compaction writes `auto_threshold_exceeded` to both the marker and summary
+payload reason. Explicit `/compact` writes `manual_command` to both payloads.
 
 Manual compaction uses the same summary-plus-continuity structure as automatic compaction. The
 runtime no longer keeps a separate raw tail by moving the compaction boundary; recent continuity is
@@ -669,11 +643,7 @@ The OpenAI-compatible helper uses standard Responses input and instructions, omi
 `max_output_tokens`, and never uses sampling continuation. ChatGPT OAuth additionally uses full input,
 `store=false`, and encrypted reasoning inclusion. If summary generation fails, the
 failure is propagated to the caller instead of being published as a successful compaction. The
-existing transcript remains append-only. Automatic and manual compaction publish one live Run
-operation with `kind = preparing_context`, `operation_id = run_id`, and `status = running`; the same
-identity remains through retry and is removed on success, Stop, cancellation, or terminal failure.
-The default frontend copy is `Preparing conversation context…` and does not expose technical retry
-history or the term compaction.
+existing transcript remains append-only.
 
 Automatic Session title generation follows the same provider routing and standard helper dialect.
 OpenAI-compatible title calls omit `max_output_tokens`; a timeout, premature EOF, terminal failure, or
@@ -703,11 +673,8 @@ Command writes are idle-only control actions: the REST transaction stores one pe
 latest visible durable event. The accepted write type is `failed_run_retry`; it soft-reverts visible
 events from the failed event model-order boundary, clears pending buffers defensively, marks the
 session running, sends a normal wake-up, and requires history reload. It does not append a synthetic
-user message. Recoverable stopped Runs use the separate
-`POST /chat/v1/sessions/{session_id}/retry-stopped-run` control described above; that path does not
-soft-revert history and returns `history_reload_required = false` because Stop did not persist a
-provider error. `SessionRunner` reads the pending command from the session and passes it into
-`RunExecutor`, which prepares the same `RunRequest` and
+user message. `SessionRunner` reads the pending
+command from the session and passes it into `RunExecutor`, which prepares the same `RunRequest` and
 `RunContext` used by normal runs before invoking the registered command handler. Running sessions,
 existing pending commands, or pending input buffers reject command/edit writes with `409 Conflict`.
 Operation TurnActions are processed after input-buffer preparation and before model dispatch at both
@@ -810,9 +777,6 @@ Primary checks:
 
 ## Changelog
 
-- **2026-07-17** — v99. Unified bounded provider-failure mapping, full-budget provider retry,
-  live context preparation, recoverable stopped Runs, fresh-budget stopped retry, and immediate
-  unknown-fingerprint structured logging.
 - **2026-07-17** — v95. Restored exhaustive `image_generation` lowering, dual file admission,
   request-local replay, and continuation-safe sanitization across OpenAI SDK, ChatGPT OAuth, and
   LiteLLM.
@@ -930,10 +894,6 @@ updated by the user.
 ## Changelog
 
 - **2026-07-17** (spec_version 100) — Applied per-option explicit subagent target eligibility and bounded guidance while preserving disabled-target inheritance and atomic rejection.
-- **2026-07-17** (spec_version 99) — Replaced provider-specific terminal classes with one bounded
-  provider-failure contract, gave every provider category the full retry budget, projected context
-  preparation as one live operation, retained every user-stopped active Run as recoverable state, and
-  added fresh-budget stopped retry plus immediate unknown-fingerprint structured logging.
 - **2026-07-17** (spec_version 98) — Classified safe typed provider terminal failures so deterministic
   errors finalize immediately while transient provider failures retain retry behavior and stable
   operational codes.

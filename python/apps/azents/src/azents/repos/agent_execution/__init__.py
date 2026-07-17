@@ -20,7 +20,7 @@ from azents.engine.events.types import (
     UserMessagePayload,
     validate_event_payload,
 )
-from azents.engine.run.failure import FailedRunRetryState, RunRecoveryState
+from azents.engine.run.failure import FailedRunRetryState
 from azents.rdb.models.agent_run import RDBAgentRun
 from azents.rdb.models.agent_run_input_event import RDBAgentRunInputEvent
 from azents.rdb.models.agent_session import RDBAgentSession
@@ -451,60 +451,6 @@ class AgentRunRepository:
         parent_agent_run_id: str | None,
     ) -> AgentRunState:
         """Create a model-independent pending run without cancelling an active run."""
-        return await self._create_pending(
-            session,
-            session_id=session_id,
-            parent_agent_run_id=parent_agent_run_id,
-            retry_source_run_id=None,
-        )
-
-    async def create_retry_pending_from_source(
-        self,
-        session: AsyncSession,
-        *,
-        session_id: str,
-        source_run_id: str,
-        allow_empty_inputs: bool,
-    ) -> AgentRunState:
-        """Create a linked pending retry with copied ordered input associations."""
-        source = await session.scalar(
-            sa.select(RDBAgentRun)
-            .where(
-                RDBAgentRun.id == source_run_id,
-                RDBAgentRun.session_id == session_id,
-            )
-            .with_for_update()
-        )
-        if source is None:
-            raise ValueError("Retry source AgentRun not found")
-        input_event_ids = await self.list_input_event_ids(
-            session,
-            run_id=source_run_id,
-        )
-        if not input_event_ids and not allow_empty_inputs:
-            raise ValueError("Retry source AgentRun has no input events")
-        retry = await self._create_pending(
-            session,
-            session_id=session_id,
-            parent_agent_run_id=source.parent_agent_run_id,
-            retry_source_run_id=source.id,
-        )
-        await self.associate_input_events(
-            session,
-            run_id=retry.id,
-            event_ids=input_event_ids,
-        )
-        return retry
-
-    async def _create_pending(
-        self,
-        session: AsyncSession,
-        *,
-        session_id: str,
-        parent_agent_run_id: str | None,
-        retry_source_run_id: str | None,
-    ) -> AgentRunState:
-        """Create one pending run after serializing session-scoped run indexes."""
         locked_session_id = await session.scalar(
             sa.select(RDBAgentSession.id)
             .where(RDBAgentSession.id == session_id)
@@ -517,7 +463,6 @@ class AgentRunRepository:
             session_id=session_id,
             run_index=run_index,
             parent_agent_run_id=parent_agent_run_id,
-            retry_source_run_id=retry_source_run_id,
             phase=AgentRunPhase.IDLE,
             status=AgentRunStatus.PENDING,
         )
@@ -800,42 +745,6 @@ class AgentRunRepository:
             return None
         return self._build(rdb)
 
-    async def get_live_by_session_id(
-        self,
-        session: AsyncSession,
-        *,
-        session_id: str,
-    ) -> AgentRunState | None:
-        """Return the latest running or recoverable stopped Run projection."""
-        rdb = await session.scalar(
-            sa.select(RDBAgentRun)
-            .where(RDBAgentRun.session_id == session_id)
-            .order_by(RDBAgentRun.run_index.desc())
-            .limit(1)
-        )
-        if rdb is None:
-            return None
-        if rdb.status == AgentRunStatus.RUNNING:
-            return self._build(rdb)
-        if rdb.status == AgentRunStatus.STOPPED and rdb.recovery_state is not None:
-            return self._build(rdb)
-        return None
-
-    async def get_retry_by_source_run_id(
-        self,
-        session: AsyncSession,
-        *,
-        source_run_id: str,
-    ) -> AgentRunState | None:
-        """Fetch the newest explicit retry created from one source Run."""
-        rdb = await session.scalar(
-            sa.select(RDBAgentRun)
-            .where(RDBAgentRun.retry_source_run_id == source_run_id)
-            .order_by(RDBAgentRun.run_index.desc())
-            .limit(1)
-        )
-        return self._build(rdb) if rdb is not None else None
-
     async def lock_by_id(
         self,
         session: AsyncSession,
@@ -888,12 +797,6 @@ class AgentRunRepository:
             values["retry_state"] = (
                 patch.retry_state.model_dump(mode="json", exclude_none=True)
                 if patch.retry_state is not None
-                else None
-            )
-        if "recovery_state" in values:
-            values["recovery_state"] = (
-                patch.recovery_state.model_dump(mode="json", exclude_none=True)
-                if patch.recovery_state is not None
                 else None
             )
         if values:
@@ -949,50 +852,6 @@ class AgentRunRepository:
                 retry_state=retry_state,
                 model_call_started_at=None,
             ),
-        )
-
-    async def mark_stopped_with_recovery(
-        self,
-        session: AsyncSession,
-        run_id: str,
-        *,
-        recovery_state: RunRecoveryState | None,
-        ended_at: datetime.datetime,
-    ) -> AgentRunState:
-        """Stop a Run while retaining a non-resumable recovery projection."""
-        return await self.update(
-            session,
-            run_id,
-            AgentRunPatch(
-                status=AgentRunStatus.STOPPED,
-                phase=AgentRunPhase.IDLE,
-                active_tool_calls=[],
-                model_call_started_at=None,
-                retry_state=None,
-                recovery_state=recovery_state,
-                ended_at=ended_at,
-            ),
-        )
-
-    async def mark_stopped_with_recovery_if_running(
-        self,
-        session: AsyncSession,
-        run_id: str,
-        *,
-        recovery_state: RunRecoveryState | None,
-        ended_at: datetime.datetime,
-    ) -> AgentRunState | None:
-        """Stop a Run with recovery only while it remains running."""
-        rdb = await session.get(RDBAgentRun, run_id)
-        if rdb is None:
-            return None
-        if rdb.status != AgentRunStatus.RUNNING:
-            return self._build(rdb)
-        return await self.mark_stopped_with_recovery(
-            session,
-            run_id,
-            recovery_state=recovery_state,
-            ended_at=ended_at,
         )
 
     async def mark_terminal(
@@ -1065,13 +924,9 @@ class AgentRunRepository:
             phase=rdb.phase,
             status=rdb.status,
             parent_agent_run_id=rdb.parent_agent_run_id,
-            retry_source_run_id=rdb.retry_source_run_id,
             active_tool_calls=active_tool_calls,
             retry_state=FailedRunRetryState.model_validate(rdb.retry_state)
             if rdb.retry_state is not None
-            else None,
-            recovery_state=RunRecoveryState.model_validate(rdb.recovery_state)
-            if rdb.recovery_state is not None
             else None,
             last_completed_event_id=rdb.last_completed_event_id,
             terminal_result_event_id=rdb.terminal_result_event_id,
