@@ -285,12 +285,27 @@ class OpenAIResponsesLowerer:
         if self.request_extra_headers is None:
             request_options.pop("extra_headers", None)
         options = _OPTIONS_ADAPTER.validate_python(request_options)
+        _validate_openai_hosted_tools(native.tools)
         return OpenAIResponsesRequest(
             model=native.model,
             input=native.input,
             tools=native.tools,
             options=options,
         )
+
+
+def _validate_openai_hosted_tools(tools: Sequence[dict[str, object]]) -> None:
+    """Validate SDK-owned hosted tool shapes without changing function tools."""
+    for tool in tools:
+        if tool.get("type") != "image_generation":
+            continue
+        validated = _TOOLS_ADAPTER.validate_python([tool])
+        normalized = dict(validated[0])
+        if normalized.keys() != tool.keys():
+            unsupported = ", ".join(sorted(set(tool) - set(normalized)))
+            raise ValueError(
+                f"Unsupported OpenAI image generation options: {unsupported}"
+            )
 
 
 @dataclasses.dataclass(frozen=True)

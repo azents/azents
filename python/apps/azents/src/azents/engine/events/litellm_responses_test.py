@@ -1488,6 +1488,70 @@ class TestLiteLLMResponsesLowerer:
 
         assert request.tools == [{"type": "web_search"}]
 
+    @pytest.mark.parametrize(
+        "provider_id",
+        [LLMProvider.OPENAI, LLMProvider.CHATGPT_OAUTH],
+    )
+    def test_lowers_openai_compatible_image_generation_hosted_tool(
+        self,
+        provider_id: LLMProvider,
+    ) -> None:
+        """Lower hosted image generation into the Responses tools field."""
+        capabilities = ModelCapabilities()
+        capabilities.built_in_tools.supported = ["image_generation"]
+        lowerer = LiteLLMResponsesLowerer(
+            provider=provider_id.value,
+            model="gpt-5.6-luna",
+            provider_id=provider_id,
+            hosted_tools=[
+                BuiltinToolSpec(
+                    name="image_generation",
+                    config={"quality": "high", "size": "1024x1024"},
+                )
+            ],
+            model_capabilities=capabilities,
+        )
+
+        request = lowerer.lower([], model="gpt-5.6-luna")
+
+        assert request.tools == [
+            {
+                "type": "image_generation",
+                "quality": "high",
+                "size": "1024x1024",
+            }
+        ]
+
+    def test_lowers_explicit_litellm_image_generation_capability(self) -> None:
+        """Pass the semantic Responses tool to a known LiteLLM target."""
+        capabilities = ModelCapabilities()
+        capabilities.built_in_tools.supported = ["image_generation"]
+        lowerer = LiteLLMResponsesLowerer(
+            provider="anthropic",
+            model="future-image-model",
+            provider_id=LLMProvider.ANTHROPIC,
+            hosted_tools=[BuiltinToolSpec(name="image_generation", config={})],
+            model_capabilities=capabilities,
+        )
+
+        request = lowerer.lower([], model="future-image-model")
+
+        assert request.tools == [{"type": "image_generation"}]
+
+    def test_image_generation_on_unknown_litellm_target_fails(self) -> None:
+        """Fail instead of silently omitting an unsupported target."""
+        capabilities = ModelCapabilities()
+        capabilities.built_in_tools.supported = ["image_generation"]
+        lowerer = LiteLLMResponsesLowerer(
+            provider="unknown",
+            model="future-image-model",
+            hosted_tools=[BuiltinToolSpec(name="image_generation", config={})],
+            model_capabilities=capabilities,
+        )
+
+        with pytest.raises(UnsupportedRequiredBuiltinToolError):
+            lowerer.lower([], model="future-image-model")
+
     def test_lowers_hosted_tools_in_deterministic_order(self) -> None:
         """Sort hosted tools by semantic name/config before provider request."""
         capabilities = ModelCapabilities()

@@ -93,7 +93,8 @@ def test_project_system_entries_filters_non_chat_models() -> None:
     ]
     assert selectable[0].provider_model_identifier == "gpt-4o"
     assert selectable[0].normalized_capabilities["built_in_tools"]["supported"] == [
-        "web_search"
+        "web_search",
+        "image_generation",
     ]
     assert hidden[0].provider_model_identifier == "dall-e-3"
     assert hidden[0].hidden_reason == "unsupported_mode:image_generation"

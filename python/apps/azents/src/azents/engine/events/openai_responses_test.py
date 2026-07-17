@@ -31,6 +31,7 @@ from openai.types.responses.response_usage import (
     InputTokensDetails,
     OutputTokensDetails,
 )
+from pydantic import ValidationError
 from websockets.datastructures import Headers
 from websockets.exceptions import InvalidStatus
 from websockets.http11 import Response as WebSocketHTTPResponse
@@ -350,6 +351,70 @@ def test_chatgpt_lowerer_uses_standard_hosted_web_search_tool() -> None:
     assert request.tools == [{"type": "web_search"}]
     assert request.options.get("instructions") == "You are a helpful assistant."
     assert request.options.get("store") is False
+
+
+@pytest.mark.parametrize(
+    ("provider", "provider_id"),
+    [
+        ("openai", LLMProvider.OPENAI),
+        ("chatgpt_oauth", LLMProvider.CHATGPT_OAUTH),
+    ],
+)
+def test_openai_sdk_lowerer_uses_standard_image_generation_tool(
+    provider: str,
+    provider_id: LLMProvider,
+) -> None:
+    """Validate image generation through the official SDK tool contract."""
+    capabilities = ModelCapabilities()
+    capabilities.built_in_tools.supported = ["image_generation"]
+    lowerer = OpenAIResponsesLowerer(
+        provider=provider,
+        model="gpt-5.6-luna",
+        provider_id=provider_id,
+        credential_kwargs={},
+        hosted_tools=[
+            BuiltinToolSpec(
+                name="image_generation",
+                config={"quality": "high", "size": "1024x1024"},
+            )
+        ],
+        model_capabilities=capabilities,
+    )
+
+    request = lowerer.lower([_event()], model="gpt-5.6-luna")
+
+    assert request.tools == [
+        {
+            "type": "image_generation",
+            "quality": "high",
+            "size": "1024x1024",
+        }
+    ]
+    assert request.options.get("store") is (
+        False if provider_id == LLMProvider.CHATGPT_OAUTH else None
+    )
+
+
+def test_openai_sdk_lowerer_rejects_invalid_image_generation_config() -> None:
+    """Reject invalid provider configuration before dispatch."""
+    capabilities = ModelCapabilities()
+    capabilities.built_in_tools.supported = ["image_generation"]
+    lowerer = OpenAIResponsesLowerer(
+        provider="openai",
+        model="gpt-5.6-luna",
+        provider_id=LLMProvider.OPENAI,
+        credential_kwargs={},
+        hosted_tools=[
+            BuiltinToolSpec(
+                name="image_generation",
+                config={"quality": "ultra"},
+            )
+        ],
+        model_capabilities=capabilities,
+    )
+
+    with pytest.raises(ValidationError):
+        lowerer.lower([_event()], model="gpt-5.6-luna")
 
 
 def test_client_config_keeps_endpoint_identity_outside_request(

@@ -84,21 +84,34 @@ class WebSearchRule(BuiltinToolRule):
 
     def validate(self, ctx: BuiltinToolValidationContext) -> list[str]:
         """Validate Web Search compatibility."""
-        errors: list[str] = []
-
-        # Provider compatibility
         supported = ctx.provider_model.capabilities.built_in_tools.supported
-        if self.name not in supported:
-            errors.append(
-                f"Model '{ctx.provider_model.model_identifier}'"
-                " does not support Web Search."
-            )
+        if self.name in supported:
+            return []
+        return [
+            f"Model '{ctx.provider_model.model_identifier}'"
+            " does not support Web Search."
+        ]
 
-        return errors
+
+class ImageGenerationRule(BuiltinToolRule):
+    """Image Generation: provider-hosted image creation capability."""
+
+    name = "image_generation"
+
+    def validate(self, ctx: BuiltinToolValidationContext) -> list[str]:
+        """Validate Image Generation compatibility."""
+        supported = ctx.provider_model.capabilities.built_in_tools.supported
+        if self.name in supported:
+            return []
+        return [
+            f"Model '{ctx.provider_model.model_identifier}'"
+            " does not support Image Generation."
+        ]
 
 
 BUILTIN_TOOL_RULES: dict[str, BuiltinToolRule] = {
     "web_search": WebSearchRule(),
+    "image_generation": ImageGenerationRule(),
 }
 """Registered built-in tool validation rule registry."""
 

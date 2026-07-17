@@ -57,6 +57,7 @@ from azents.core.llm_catalog import (
 from azents.repos.llm_provider_integration.data import (
     LLMProviderIntegrationWithSecrets,
 )
+from azents.services.provider_hosted_tools import supported_provider_hosted_tools
 
 from .data import (
     ModelListingOutput,
@@ -356,7 +357,13 @@ def _candidate_from_chatgpt_model(
             effort_levels=reasoning_efforts,
             summaries=reasoning_summaries,
         ),
-        built_in_tools=ModelBuiltInToolCapabilities(supported=["web_search"]),
+        built_in_tools=ModelBuiltInToolCapabilities(
+            supported=supported_provider_hosted_tools(
+                provider=LLMProvider.CHATGPT_OAUTH,
+                model_identifier=model_id,
+                metadata=model,
+            )
+        ),
         compatibility=ModelCompatibilityCapabilities(
             provider_family="chatgpt",
             responses_api=True,

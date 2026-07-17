@@ -679,26 +679,38 @@ def _lower_hosted_tools(
             json.dumps(item.config, sort_keys=True, separators=(",", ":")),
         ),
     ):
-        if tool.name != "web_search":
-            continue
         if tool.name not in supported:
             msg = f"Required builtin tool is not supported: {tool.name}"
             raise UnsupportedRequiredBuiltinToolError(msg)
         config = dict(tool.config)
-        match target:
-            case "openai" | "xai":
-                native_tools.append({"type": "web_search", **config})
-            case "google":
-                native_tools.append({"google_search": config})
-            case "anthropic":
-                native_tools.append(
-                    {"type": "web_search_20250305", "name": "web_search", **config}
-                )
-            case "fallback":
-                msg = f"Required builtin tool is not supported: {tool.name}"
-                raise UnsupportedRequiredBuiltinToolError(msg)
+        match tool.name:
+            case "web_search":
+                match target:
+                    case "openai" | "xai":
+                        native_tools.append({"type": "web_search", **config})
+                    case "google":
+                        native_tools.append({"google_search": config})
+                    case "anthropic":
+                        native_tools.append(
+                            {
+                                "type": "web_search_20250305",
+                                "name": "web_search",
+                                **config,
+                            }
+                        )
+                    case "fallback":
+                        msg = f"Required builtin tool is not supported: {tool.name}"
+                        raise UnsupportedRequiredBuiltinToolError(msg)
+                    case _:
+                        msg = f"Required builtin tool is not supported: {tool.name}"
+                        raise UnsupportedRequiredBuiltinToolError(msg)
+            case "image_generation":
+                if target == "fallback":
+                    msg = f"Required builtin tool is not supported: {tool.name}"
+                    raise UnsupportedRequiredBuiltinToolError(msg)
+                native_tools.append({"type": "image_generation", **config})
             case _:
-                msg = f"Required builtin tool is not supported: {tool.name}"
+                msg = f"Required builtin tool is not implemented: {tool.name}"
                 raise UnsupportedRequiredBuiltinToolError(msg)
 
     return _HostedToolLowering(tools=native_tools, kwargs=kwargs)
