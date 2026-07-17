@@ -30,7 +30,16 @@ def upgrade() -> None:
             IMMUTABLE
             AS $$
                 SELECT CASE
-                    WHEN capabilities IS NULL THEN NULL
+                    WHEN capabilities IS NULL
+                        OR jsonb_typeof(capabilities) = 'null'
+                    THEN jsonb_build_object(
+                        'built_in_tools',
+                        jsonb_build_object(
+                            'supported',
+                            jsonb_build_array('image_generation')
+                        )
+                    )
+                    WHEN jsonb_typeof(capabilities) != 'object' THEN capabilities
                     WHEN EXISTS (
                         SELECT 1
                         FROM jsonb_array_elements_text(
@@ -48,7 +57,13 @@ def upgrade() -> None:
                         capabilities,
                         '{built_in_tools}',
                         jsonb_set(
-                            COALESCE(capabilities->'built_in_tools', '{}'::jsonb),
+                            CASE
+                                WHEN jsonb_typeof(
+                                    capabilities->'built_in_tools'
+                                ) = 'object'
+                                THEN capabilities->'built_in_tools'
+                                ELSE '{}'::jsonb
+                            END,
                             '{supported}',
                             CASE
                                 WHEN jsonb_typeof(
@@ -88,6 +103,7 @@ def upgrade() -> None:
             AS $$
                 SELECT CASE
                     WHEN selection IS NULL THEN NULL
+                    WHEN jsonb_typeof(selection) != 'object' THEN selection
                     WHEN pg_temp.supports_image_generation(
                         selection->>'provider',
                         selection->>'model_identifier'
@@ -109,14 +125,45 @@ def upgrade() -> None:
             LANGUAGE sql
             IMMUTABLE
             AS $$
-                SELECT jsonb_set(
-                    option_value,
-                    '{model_selection}',
-                    pg_temp.selection_with_image_generation(
-                        option_value->'model_selection'
-                    ),
-                    true
-                )
+                SELECT CASE
+                    WHEN jsonb_typeof(option_value) = 'object'
+                        AND option_value ? 'model_selection'
+                    THEN jsonb_set(
+                        option_value,
+                        '{model_selection}',
+                        pg_temp.selection_with_image_generation(
+                            option_value->'model_selection'
+                        ),
+                        true
+                    )
+                    ELSE option_value
+                END
+            $$;
+
+            CREATE OR REPLACE FUNCTION pg_temp.options_with_image_generation(
+                option_values jsonb
+            ) RETURNS jsonb
+            LANGUAGE sql
+            IMMUTABLE
+            AS $$
+                SELECT CASE
+                    WHEN option_values IS NULL THEN NULL
+                    WHEN jsonb_typeof(option_values) != 'array' THEN option_values
+                    ELSE COALESCE(
+                        (
+                            SELECT jsonb_agg(
+                                pg_temp.option_with_image_generation(option_value)
+                                ORDER BY ordinality
+                            )
+                            FROM jsonb_array_elements(option_values)
+                                WITH ORDINALITY AS options(
+                                    option_value,
+                                    ordinality
+                                )
+                        ),
+                        '[]'::jsonb
+                    )
+                END
             $$;
             """
         )
@@ -145,14 +192,8 @@ def upgrade() -> None:
                     pg_temp.selection_with_image_generation(
                         lightweight_model_selection
                     ),
-                selectable_model_options = (
-                    SELECT jsonb_agg(
-                        pg_temp.option_with_image_generation(option_value)
-                        ORDER BY ordinality
-                    )
-                    FROM jsonb_array_elements(selectable_model_options)
-                        WITH ORDINALITY AS options(option_value, ordinality)
-                );
+                selectable_model_options =
+                    pg_temp.options_with_image_generation(selectable_model_options);
 
             UPDATE workspace_model_settings
             SET default_model_selection =
@@ -163,17 +204,10 @@ def upgrade() -> None:
                     pg_temp.selection_with_image_generation(
                         default_lightweight_model_selection
                     ),
-                default_selectable_model_options = CASE
-                    WHEN default_selectable_model_options IS NULL THEN NULL
-                    ELSE (
-                        SELECT jsonb_agg(
-                            pg_temp.option_with_image_generation(option_value)
-                            ORDER BY ordinality
-                        )
-                        FROM jsonb_array_elements(default_selectable_model_options)
-                            WITH ORDINALITY AS options(option_value, ordinality)
-                    )
-                END;
+                default_selectable_model_options =
+                    pg_temp.options_with_image_generation(
+                        default_selectable_model_options
+                    );
             """
         )
     )

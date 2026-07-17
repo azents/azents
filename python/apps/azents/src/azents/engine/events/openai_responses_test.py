@@ -27,6 +27,7 @@ from openai.types.responses import (
     ResponseWebSearchCallInProgressEvent,
 )
 from openai.types.responses.response_function_web_search import ActionSearch
+from openai.types.responses.response_output_item import ImageGenerationCall
 from openai.types.responses.response_usage import (
     InputTokensDetails,
     OutputTokensDetails,
@@ -1503,6 +1504,45 @@ def test_typed_normalizer_extracts_transient_generated_image() -> None:
     assert pending.call_id == "image-call-1"
     assert pending.body.startswith(b"\x89PNG")
     assert "body" not in completed.model_dump(mode="json")
+
+
+def test_typed_stream_extracts_transient_generated_image() -> None:
+    """Preserve typed SDK image bytes until transient file extraction."""
+    image = ImageGenerationCall(
+        id="image-call-1",
+        result=_PNG_BASE64,
+        status="completed",
+        type="image_generation_call",
+    )
+    response = _response().model_copy(update={"output": [image]})
+    output = OpenAIResponsesOutputNormalizer(
+        provider="openai",
+        model="gpt-5.1-codex",
+    ).start("session-1")
+
+    output.process_event(
+        ResponseOutputItemDoneEvent(
+            item=image,
+            output_index=0,
+            sequence_number=1,
+            type="response.output_item.done",
+        )
+    )
+    output.process_event(_completed_event(response))
+
+    completed = output.complete()
+
+    assert len(completed.events) == 1
+    payload = completed.events[0].payload
+    assert isinstance(payload, ProviderToolResultPayload)
+    assert "result" not in payload.native_artifact.item
+    assert len(completed.pending_provider_files) == 1
+    pending = completed.pending_provider_files[0]
+    assert pending.call_id == "image-call-1"
+    assert pending.body.startswith(b"\x89PNG")
+    serialized = completed.model_dump(mode="json")
+    assert "body" not in serialized
+    assert _PNG_BASE64 not in str(serialized)
 
 
 def test_typed_normalizer_projects_generic_provider_tool_output_items() -> None:
