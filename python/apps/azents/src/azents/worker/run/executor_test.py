@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import dataclasses
 import datetime
+import logging
 from collections.abc import AsyncIterator
 from contextlib import AbstractAsyncContextManager
 from types import SimpleNamespace
@@ -62,7 +63,12 @@ from azents.engine.run.errors import (
 from azents.engine.run.failure import FailedRunRetryState
 from azents.engine.run.input import AgentNotFound
 from azents.engine.run.model_transport import InMemoryModelTransportState
+from azents.engine.run.provider_failure import (
+    ModelProviderFailureCategory,
+    model_provider_failure,
+)
 from azents.engine.run.resolve import ResolvedInvokeInputProfile
+from azents.engine.run.retry_policy import FailedRunRetryPolicy
 from azents.engine.run.types import (
     SHUTDOWN_CANCEL_MESSAGE,
     USER_STOP_CANCEL_MESSAGE,
@@ -893,11 +899,28 @@ class _FailedRunFinalizer:
         return object()
 
 
+class _UserStopFinalizer:
+    """User-stop finalizer test double."""
+
+    def __init__(self) -> None:
+        self.interrupted_runs: list[tuple[str, str]] = []
+
+    async def record_interrupted_run(
+        self,
+        session_id: str,
+        *,
+        run_id: str,
+    ) -> None:
+        """Record one recoverable stopped Run."""
+        self.interrupted_runs.append((session_id, run_id))
+
+
 def _executor(
     session_lifecycle: _SessionLifecycle | None = None,
     *,
     engine: AgentEngineProtocol | None = None,
     failed_run_finalizer: object | None = None,
+    user_stop_finalizer: _UserStopFinalizer | None = None,
     command_registry: dict[str, CommandHandler] | None = None,
     agent_session_repository: _AgentSessionRepository | None = None,
     live_event_projector: _LiveEventProjector | None = None,
@@ -911,6 +934,8 @@ def _executor(
         engine = cast(AgentEngineProtocol, _Engine())
     if failed_run_finalizer is None:
         failed_run_finalizer = _FailedRunFinalizer()
+    if user_stop_finalizer is None:
+        user_stop_finalizer = _UserStopFinalizer()
     if command_registry is None:
         command_registry = {}
     if agent_session_repository is None:
@@ -966,10 +991,12 @@ def _executor(
             oauth_secret_key="test-secret",
             mcp_proxy_url=None,
             openai_responses_websocket_enabled=False,
-            failed_run_max_retries=failed_run_max_retries,
-            failed_run_base_backoff_seconds=1,
-            failed_run_backoff_multiplier=2,
-            failed_run_max_backoff_seconds=60,
+            failed_run_retry_policy=FailedRunRetryPolicy(
+                max_retries=failed_run_max_retries,
+                base_backoff_seconds=1,
+                backoff_multiplier=2,
+                max_backoff_seconds=60,
+            ),
         ),
         exchange_file_service=cast(ExchangeFileService, object()),
         model_file_service=cast(ModelFileService, object()),
@@ -980,7 +1007,7 @@ def _executor(
         ),
         session_title_service=cast(SessionTitleService, _SessionTitleService()),
         live_event_projector=cast(LiveEventProjector, live_event_projector),
-        user_stop_finalizer=cast(UserStopFinalizer, object()),
+        user_stop_finalizer=cast(UserStopFinalizer, user_stop_finalizer),
         failed_run_finalizer=cast(Any, failed_run_finalizer),
         builtin_toolkit_provider=cast(BuiltinToolkitProvider, object()),
         claude_rules_toolkit_provider=cast(ClaudeRulesToolkitProvider, object()),
@@ -1199,6 +1226,7 @@ async def _resolve_success(*args: object, **kwargs: object) -> object:
                 workspace_id="workspace-001",
                 agent_id="agent-001",
                 auto_compaction_threshold_tokens=None,
+                compaction_provider_integration_id=None,
                 inference_state=None,
             ),
             model_selection=make_test_model_selection(),
@@ -1222,6 +1250,7 @@ async def _resolve_existing_success(*args: object, **kwargs: object) -> object:
             workspace_id="workspace-001",
             agent_id="agent-001",
             auto_compaction_threshold_tokens=None,
+            compaction_provider_integration_id=None,
             inference_state=None,
         )
     )
@@ -1372,6 +1401,7 @@ async def test_execute_recovers_activated_run_before_flushing_input(
                 workspace_id="workspace-001",
                 agent_id="agent-001",
                 auto_compaction_threshold_tokens=None,
+                compaction_provider_integration_id=None,
                 inference_state=None,
             )
         )
@@ -1515,6 +1545,7 @@ async def test_execute_recovers_activated_command_run(
                 workspace_id="workspace-001",
                 agent_id="agent-001",
                 auto_compaction_threshold_tokens=None,
+                compaction_provider_integration_id=None,
                 inference_state=None,
             )
         )
@@ -1615,6 +1646,7 @@ async def test_execute_recovers_durable_retry_budget(
                 workspace_id="workspace-001",
                 agent_id="agent-001",
                 auto_compaction_threshold_tokens=None,
+                compaction_provider_integration_id=None,
                 inference_state=None,
             )
         )
@@ -2532,6 +2564,12 @@ async def test_execute_runs_pending_command_inside_run_boundary(
         ("session-001", run_id, AgentRunPhase.COMPACTING),
         ("session-001", run_id, AgentRunPhase.NORMALIZING_OUTPUT),
     ]
+    initial_live_run = live_event_projector.live_run_updates[0][1]
+    assert initial_live_run.operation is not None
+    assert initial_live_run.operation.kind == "preparing_context"
+    assert initial_live_run.operation.operation_id == run_id
+    assert initial_live_run.operation.status == "running"
+    assert live_event_projector.live_run_updates[-1][1].operation is None
     assert [type(event).__name__ for _, event in dispatched] == [
         "RunStarted",
         "RunPhaseChanged",
@@ -2829,7 +2867,7 @@ async def test_run_session_heartbeat_loop_refreshes_lifecycle(
 
 
 def test_failed_run_attempt_classifies_typed_non_retryable_model_error() -> None:
-    """Typed deterministic model failures enter the immediate-finalization path."""
+    """Typed deterministic non-provider failures still finalize immediately."""
     executor = _executor()
 
     attempt = executor._failed_run_attempt_from_user_visible_error(  # pyright: ignore[reportPrivateUsage]
@@ -2841,6 +2879,46 @@ def test_failed_run_attempt_classifies_typed_non_retryable_model_error() -> None
     assert attempt.retryability == "non_retryable"
     assert attempt.failure_code == "synthetic_invalid_request"
     assert attempt.user_message == "request rejected"
+
+
+@pytest.mark.asyncio
+async def test_provider_failure_uses_full_budget_despite_retryability() -> None:
+    """Provider diagnostics never reduce the configured retry budget."""
+    executor = _executor(failed_run_max_retries=2)
+    failure = model_provider_failure(
+        operation="sampling",
+        provider="openai",
+        model="gpt-4o",
+        integration="integration-001",
+        provider_message="The request is invalid.",
+        status_code=400,
+        provider_code="invalid_request",
+        provider_error_type="bad_request",
+    )
+    retry_state: FailedRunRetryState | None = None
+    finalization_reasons: list[str | None] = []
+
+    for attempt_number in range(1, 4):
+        attempt = executor._failed_run_attempt_from_user_visible_error(  # pyright: ignore[reportPrivateUsage]  # Exercise provider policy at the retry boundary.
+            failure,
+            attempt_number=attempt_number,
+            source="model",
+        )
+        retry_state = await executor._record_failed_run_attempt(  # pyright: ignore[reportPrivateUsage]  # Exercise durable retry policy directly.
+            session_id="session-001",
+            run_id="run-001",
+            attempt=attempt,
+            previous_retry_state=retry_state,
+        )
+        finalization_reasons.append(
+            run_executor_module._failed_run_finalization_reason(retry_state)  # pyright: ignore[reportPrivateUsage]  # Verify the full-budget terminal boundary.
+        )
+
+    assert retry_state is not None
+    assert retry_state.retryability == "non_retryable"
+    assert retry_state.provider_failure is not None
+    assert [attempt.backoff_seconds for attempt in retry_state.attempts] == [1, 2, 4]
+    assert finalization_reasons == [None, None, "retry_exhausted"]
 
 
 @pytest.mark.asyncio
@@ -3110,18 +3188,145 @@ async def test_execute_publishes_retry_state_after_internal_attempt_failure(
 
 
 @pytest.mark.asyncio
-async def test_execute_finalizes_when_failed_run_retry_is_stopped(
+async def test_record_provider_failure_logs_safe_structured_attempt(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Every provider failure attempt emits one safe structured warning."""
+    lifecycle = _SessionLifecycle()
+    executor = _executor(lifecycle)
+    failure = model_provider_failure(
+        operation="sampling",
+        provider="openai",
+        model="gpt-4o",
+        integration="integration-001",
+        provider_message="The provider is temporarily unavailable.",
+        status_code=503,
+        provider_code="server_error",
+        provider_error_type="api_error",
+    )
+    attempt = executor._failed_run_attempt_from_user_visible_error(  # pyright: ignore[reportPrivateUsage]  # Exercise provider-attempt logging directly.
+        failure,
+        attempt_number=1,
+        source="model",
+    )
+
+    with caplog.at_level(logging.WARNING, logger=run_executor_module.__name__):
+        await executor._record_failed_run_attempt(  # pyright: ignore[reportPrivateUsage]  # Exercise provider-attempt logging directly.
+            session_id="session-001",
+            run_id="run-001",
+            attempt=attempt,
+            previous_retry_state=None,
+        )
+
+    records = [
+        record
+        for record in caplog.records
+        if record.getMessage() == "Model provider attempt failed"
+    ]
+    assert len(records) == 1
+    record = records[0]
+    log_fields = record.__dict__
+    assert record.levelno == logging.WARNING
+    assert log_fields["session_id"] == "session-001"
+    assert log_fields["run_id"] == "run-001"
+    assert log_fields["attempt_number"] == 1
+    assert log_fields["provider_failure_operation"] == "sampling"
+    assert log_fields["provider_failure_provider"] == "openai"
+    assert log_fields["provider_failure_integration"] == "integration-001"
+    assert log_fields["provider_failure_model"] == "gpt-4o"
+    assert log_fields["provider_failure_category"] == "provider_unavailable"
+    assert log_fields["provider_failure_retryability"] == "transient"
+    assert log_fields["provider_failure_status_code"] == 503
+    assert log_fields["provider_failure_code"] == "server_error"
+    assert log_fields["provider_failure_error_type"] == "api_error"
+    assert log_fields["provider_failure_fingerprint"] == failure.fingerprint
+    assert log_fields["provider_failure_retry_outcome"] == "scheduled"
+    assert record.getMessage() == "Model provider attempt failed"
+
+
+@pytest.mark.asyncio
+async def test_record_unknown_provider_failure_alerts_on_every_attempt(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Every unknown attempt alerts immediately with a stable fingerprint."""
+    lifecycle = _SessionLifecycle()
+    executor = _executor(lifecycle)
+    failure = model_provider_failure(
+        operation="sampling",
+        provider="openai",
+        model="gpt-4o",
+        integration=None,
+        provider_message="Unrecognized provider outcome 8127.",
+        status_code=None,
+        provider_code="future_failure",
+        provider_error_type="future_error",
+        category=ModelProviderFailureCategory.UNKNOWN,
+    )
+    first_attempt = executor._failed_run_attempt_from_user_visible_error(  # pyright: ignore[reportPrivateUsage]  # Exercise provider-attempt logging directly.
+        failure,
+        attempt_number=1,
+        source="model",
+    )
+    second_attempt = executor._failed_run_attempt_from_user_visible_error(  # pyright: ignore[reportPrivateUsage]  # Exercise provider-attempt logging directly.
+        failure,
+        attempt_number=2,
+        source="model",
+    )
+
+    with caplog.at_level(logging.WARNING, logger=run_executor_module.__name__):
+        first_state = await executor._record_failed_run_attempt(  # pyright: ignore[reportPrivateUsage]  # Exercise provider-attempt logging directly.
+            session_id="session-001",
+            run_id="run-001",
+            attempt=first_attempt,
+            previous_retry_state=None,
+        )
+        await executor._record_failed_run_attempt(  # pyright: ignore[reportPrivateUsage]  # Exercise provider-attempt logging directly.
+            session_id="session-001",
+            run_id="run-001",
+            attempt=second_attempt,
+            previous_retry_state=first_state,
+        )
+
+    warnings = [
+        record
+        for record in caplog.records
+        if record.getMessage() == "Model provider attempt failed"
+    ]
+    alerts = [
+        record
+        for record in caplog.records
+        if record.getMessage() == "Unknown model provider failure"
+    ]
+    assert [record.__dict__["attempt_number"] for record in warnings] == [1, 2]
+    assert all(record.levelno == logging.WARNING for record in warnings)
+    assert [record.__dict__["attempt_number"] for record in alerts] == [1, 2]
+    assert all(record.levelno == logging.ERROR for record in alerts)
+    assert all(
+        record.__dict__["provider_failure_category"] == "unknown" for record in alerts
+    )
+    assert all(
+        record.__dict__["provider_failure_fingerprint"] == failure.fingerprint
+        for record in alerts
+    )
+
+
+@pytest.mark.asyncio
+async def test_execute_stops_failed_run_retry_without_durable_finalization(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Stop during retry promotes the latest attempt through the finalizer."""
+    """Stop during retry retains recoverable state without a failed Run event."""
     monkeypatch.setattr(run_executor_module, "_FAILED_RUN_RETRY_WAIT_POLL_SECONDS", 0)
     lifecycle = _SessionLifecycle()
     engine = _AlwaysFailingEngine()
     finalizer = _FailedRunFinalizer()
+    user_stop_finalizer = _UserStopFinalizer()
+    live_event_projector = _LiveEventProjector()
     executor = _executor(
         lifecycle,
         engine=cast(AgentEngineProtocol, engine),
         failed_run_finalizer=finalizer,
+        user_stop_finalizer=user_stop_finalizer,
+        live_event_projector=live_event_projector,
     )
 
     async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
@@ -3178,17 +3383,24 @@ async def test_execute_finalizes_when_failed_run_retry_is_stopped(
     )
 
     assert engine.calls == 1
-    assert result.terminal_run_status == AgentRunStatus.FAILED
+    assert result.terminal_run_status == AgentRunStatus.STOPPED
     assert len(lifecycle.retry_states) == 1
-    assert len(finalizer.inputs) == 1
-    assert finalizer.inputs[0].reason == "retry_stopped_by_user"
+    assert finalizer.inputs == []
+    assert user_stop_finalizer.interrupted_runs == [("session-001", "run-001")]
+    assert live_event_projector.live_run_clears == []
 
 
+@pytest.mark.parametrize(
+    ("max_retries", "expected_calls"),
+    [(0, 1), (1, 2)],
+)
 @pytest.mark.asyncio
 async def test_execute_finalizes_when_failed_run_retry_is_exhausted(
     monkeypatch: pytest.MonkeyPatch,
+    max_retries: int,
+    expected_calls: int,
 ) -> None:
-    """Retry exhaustion promotes the latest attempt through the finalizer."""
+    """Retry exhaustion supports both disabled and positive retry budgets."""
     lifecycle = _SessionLifecycle()
     engine = _AlwaysFailingEngine()
     finalizer = _FailedRunFinalizer()
@@ -3196,7 +3408,7 @@ async def test_execute_finalizes_when_failed_run_retry_is_exhausted(
         lifecycle,
         engine=cast(AgentEngineProtocol, engine),
         failed_run_finalizer=finalizer,
-        failed_run_max_retries=1,
+        failed_run_max_retries=max_retries,
     )
 
     async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
@@ -3249,11 +3461,13 @@ async def test_execute_finalizes_when_failed_run_retry_is_exhausted(
         model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
     )
 
-    assert engine.calls == 2
+    assert engine.calls == expected_calls
     assert result.terminal_run_status == AgentRunStatus.FAILED
-    assert len(lifecycle.retry_states) == 2
+    assert len(lifecycle.retry_states) == expected_calls
     assert len(finalizer.inputs) == 1
-    assert finalizer.inputs[0].retry_state.failed_attempt_count == 2
+    retry_state = finalizer.inputs[0].retry_state
+    assert retry_state.failed_attempt_count == expected_calls
+    assert retry_state.max_retries == max_retries
     assert finalizer.inputs[0].reason == "retry_exhausted"
 
 

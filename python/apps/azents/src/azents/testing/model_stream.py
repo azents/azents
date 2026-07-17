@@ -45,6 +45,7 @@ def make_test_model_stream_context(
     return ModelStreamCallContext(
         call_kind=call_kind,
         provider="test",
+        provider_integration_id=None,
         model="test-model",
         session_id="session-test",
         run_id="run-test",

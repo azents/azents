@@ -34,7 +34,11 @@ from azents.engine.events.types import (
     UserMessagePayload,
     validate_event_payload,
 )
-from azents.engine.run.failure import FailedRunAttempt, FailedRunRetryState
+from azents.engine.run.failure import (
+    FailedRunAttempt,
+    FailedRunRetryState,
+    RunRecoveryState,
+)
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.agent_session import RDBAgentSession
@@ -881,6 +885,111 @@ class TestEventExecutionRepositories:
         assert completed.terminal_result_message == "Completed subtask summary"
         assert (
             await repo.get_running_by_session_id(
+                rdb_session,
+                session_id=event_session.id,
+            )
+            is None
+        )
+
+    async def test_stopped_run_recovery_creates_fresh_budget_linked_retry(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """A recoverable stopped Run remains live until a fresh retry replaces it."""
+        workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
+            rdb_session,
+            "event-runtime-stopped-retry",
+        )
+        event_session = await _agent_session_repository().create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        input_event = await EventTranscriptRepository().append(
+            rdb_session,
+            EventCreate(
+                session_id=event_session.id,
+                kind=EventKind.USER_MESSAGE,
+                payload=UserMessagePayload(content="retry this input").model_dump(
+                    mode="json"
+                ),
+            ),
+        )
+        repo = AgentRunRepository()
+        source = await repo.create(
+            rdb_session,
+            AgentRunCreate(
+                session_id=event_session.id,
+                parent_agent_run_id=None,
+            ),
+        )
+        await repo.associate_input_events(
+            rdb_session,
+            run_id=source.id,
+            event_ids=[input_event.id],
+        )
+        now = datetime.datetime.now(datetime.UTC)
+        retry_state = FailedRunRetryState.from_attempt(
+            FailedRunAttempt(
+                user_message="Model provider error: Temporary failure.",
+                internal_message=None,
+                error_type="ModelProviderFailure",
+                source="model",
+                visibility="user_visible",
+                attempt_number=1,
+                occurred_at=now,
+            ),
+            max_retries=10,
+            backoff_seconds=1,
+            next_retry_at=now + datetime.timedelta(seconds=1),
+        )
+        await repo.update_retry_state(rdb_session, source.id, retry_state)
+        recovery = RunRecoveryState(
+            kind="stopped",
+            user_message="Execution stopped.",
+            operation="sampling",
+            source_run_id=source.id,
+            stopped_at=now,
+        )
+
+        stopped = await repo.mark_stopped_with_recovery(
+            rdb_session,
+            source.id,
+            recovery_state=recovery,
+            ended_at=now,
+        )
+
+        assert stopped.status == AgentRunStatus.STOPPED
+        assert stopped.retry_state is None
+        assert stopped.recovery_state == recovery
+        assert (
+            await repo.get_live_by_session_id(
+                rdb_session,
+                session_id=event_session.id,
+            )
+            == stopped
+        )
+
+        retry = await repo.create_retry_pending_from_source(
+            rdb_session,
+            session_id=event_session.id,
+            source_run_id=source.id,
+            allow_empty_inputs=False,
+        )
+
+        assert retry.status == AgentRunStatus.PENDING
+        assert retry.retry_source_run_id == source.id
+        assert retry.retry_state is None
+        assert retry.recovery_state is None
+        assert await repo.list_input_event_ids(
+            rdb_session,
+            run_id=retry.id,
+        ) == [input_event.id]
+        assert (
+            await repo.get_live_by_session_id(
                 rdb_session,
                 session_id=event_session.id,
             )

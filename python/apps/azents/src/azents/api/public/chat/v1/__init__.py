@@ -204,6 +204,7 @@ from .data import (
     ChatLiveRunStateResponse,
     ChatMessageWriteRequest,
     ChatSessionCreateMessageWriteRequest,
+    ChatStoppedRunRetryRequest,
     ChatStopResponse,
     ChatWriteAcceptedResponse,
     ChatWriteResponse,
@@ -1221,6 +1222,65 @@ async def _write_failed_run_retry_via_rest(
     )
 
 
+async def _write_stopped_run_retry_via_rest(
+    chat_service: ChatSessionService,
+    chat_write_service: ChatWriteService,
+    broker: SessionBroker,
+    live_event_store: LiveEventStore,
+    request: ChatStoppedRunRetryRequest,
+    *,
+    session_id: str,
+    user_id: str,
+) -> ChatWriteResponse:
+    """Handle recoverable stopped-Run retry as an idle control action."""
+    resolved_session_id = await _validate_rest_session(
+        chat_service,
+        session_id=session_id,
+        agent_id=request.agent_id,
+        user_id=user_id,
+    )
+    payload = request.model_dump(mode="json")
+    try:
+        accepted = await chat_write_service.create_idempotent_stopped_run_retry(
+            agent_id=request.agent_id,
+            session_id=resolved_session_id,
+            user_id=user_id,
+            client_request_id=request.client_request_id,
+            stopped_run_id=request.stopped_run_id,
+            payload=payload,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if accepted.request.created:
+        await broker.send_message(
+            SessionWakeUp(
+                agent_id=request.agent_id,
+                session_id=resolved_session_id,
+                user_id=user_id,
+                additional_system_prompt=None,
+                interface=None,
+                workspace_id=None,
+                workspace_handle=None,
+            )
+        )
+    snapshot = await _build_chat_write_snapshot(
+        chat_service,
+        live_event_store,
+        session_id=resolved_session_id,
+        user_id=user_id,
+    )
+    return ChatWriteResponse(
+        session_id=resolved_session_id,
+        client_request_id=request.client_request_id,
+        accepted=ChatWriteAcceptedResponse(
+            type="stopped_run_retry",
+            id=accepted.stopped_run_id,
+        ),
+        snapshot=snapshot,
+        history_reload_required=False,
+    )
+
+
 async def _write_command_via_rest(
     chat_service: ChatSessionService,
     chat_write_service: ChatWriteService,
@@ -1443,6 +1503,29 @@ async def retry_failed_run(
     """Accept a manual failed-run retry at the REST boundary."""
     _validate_session_id(session_id)
     return await _write_failed_run_retry_via_rest(
+        chat_service,
+        chat_write_service,
+        broker,
+        live_event_store,
+        request,
+        session_id=session_id,
+        user_id=current_user.user_id,
+    )
+
+
+@router.post("/sessions/{session_id}/retry-stopped-run")
+async def retry_stopped_run(
+    session_id: str,
+    request: ChatStoppedRunRetryRequest,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    chat_service: Annotated[ChatSessionService, Depends()],
+    chat_write_service: Annotated[ChatWriteService, Depends()],
+    broker: Annotated[SessionBroker, Depends(get_broker)],
+    live_event_store: Annotated[LiveEventStore, Depends(get_live_event_store)],
+) -> ChatWriteResponse:
+    """Accept a recoverable stopped-Run retry at the REST boundary."""
+    _validate_session_id(session_id)
+    return await _write_stopped_run_retry_via_rest(
         chat_service,
         chat_write_service,
         broker,

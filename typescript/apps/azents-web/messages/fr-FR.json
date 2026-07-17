@@ -1512,6 +1512,8 @@
     "chooseWorktreeSourceFolder": "Choose source folder…",
     "failedRunRecovery": {
       "errorTitle": "Erreur",
+      "providerErrorTitle": "Erreur du fournisseur de modèle",
+      "stoppedTitle": "Exécution arrêtée",
       "liveTitle": "Nouvelle tentative après un échec d’exécution",
       "terminalTitle": "Exécution échouée après les nouvelles tentatives",
       "nonRetryableTitle": "Exécution échouée sans nouvelle tentative",

@@ -1512,6 +1512,8 @@
     "chooseWorktreeSourceFolder": "Choose source folder…",
     "failedRunRecovery": {
       "errorTitle": "エラー",
+      "providerErrorTitle": "モデルプロバイダーエラー",
+      "stoppedTitle": "実行を停止しました",
       "liveTitle": "失敗した実行を再試行中",
       "terminalTitle": "再試行後に実行が失敗しました",
       "nonRetryableTitle": "再試行せずに実行が失敗しました",

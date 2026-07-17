@@ -83,11 +83,9 @@ _RETRY_ACROSS_TURNS_CALL_ID = "call_failed_run_retry_turn_boundary"
 _RETRY_MANUAL = "Failed run retry exhaust then manual recover"
 _RETRY_MANUAL_RESPONSE = "Manual failed-run retry recovered successfully."
 _RETRY_STALE = "Failed run retry stale conflict"
-_SAFE_PROVIDER_RETRY_MESSAGES = frozenset(
-    {
-        "The model provider rate limit was exceeded.",
-        "The model response stream became inactive.",
-    }
+_SANITIZED_PROVIDER_RETRY_MESSAGE = (
+    "Model provider error: Deterministic provider failure. "
+    "api_key=[REDACTED] Bearer [REDACTED] request rejected."
 )
 _JSON_OBJECT = TypeAdapter(dict[str, object])
 _JSON_OBJECT_LIST = TypeAdapter(list[dict[str, object]])
@@ -469,7 +467,7 @@ def _run_command(
             token=token,
             session_id=session_id,
         )
-        if {"compaction_marker", "compaction_summary"} <= set(_message_roles(payload)):
+        if "compaction_summary" in set(_message_roles(payload)):
             return
         time.sleep(0.5)
     raise TimeoutError(f"command did not complete: {command}")
@@ -1191,8 +1189,9 @@ class TestAgentExecutionPersistence:
         assert retry.get("failed_attempt_count") == 1
         assert retry.get("max_retries") == 3
         latest_error = attempts[-1].get("user_message")
-        assert latest_error in _SAFE_PROVIDER_RETRY_MESSAGES
-        assert "Deterministic retry attempt 1 failed." not in str(latest_error)
+        assert latest_error == _SANITIZED_PROVIDER_RETRY_MESSAGE
+        assert "dummy-provider-secret-value" not in str(latest_error)
+        assert "dummy-provider-token-value" not in str(latest_error)
 
         during_retry = _list_history(
             server_url=azents_public_server_url,
@@ -1256,13 +1255,10 @@ class TestAgentExecutionPersistence:
         assert failure.get("failed_attempt_count") == 4
         assert failure.get("max_retries") == 3
         assert [attempt.get("attempt_number") for attempt in attempts] == [1, 2, 3, 4]
-        assert all(
-            message in _SAFE_PROVIDER_RETRY_MESSAGES for message in attempt_messages
-        )
-        assert all(
-            "Deterministic model turn" not in str(message)
-            for message in attempt_messages
-        )
+        assert attempt_messages == [
+            f"Model provider error: Deterministic model turn 2 attempt {number} failed."
+            for number in range(1, 5)
+        ]
         assert _RETRY_ACROSS_TURNS_CALL_ID in _tool_result_call_ids(failed_payload)
 
     def test_failed_run_manual_retry_soft_reverts_terminal_error(
@@ -1459,9 +1455,8 @@ class TestAgentExecutionPersistence:
             token=workspace.token,
             session_id=first.session_id,
         )
-        assert {"compaction_marker", "compaction_summary"} <= set(
-            _message_roles(after_compact)
-        )
+        assert "compaction_summary" in set(_message_roles(after_compact))
+        assert "compaction_marker" not in set(_message_roles(after_compact))
         assert _COMPACT_SEED in _message_contents(after_compact)
         assert _COMPACT_SEED_RESPONSE in _message_contents(after_compact)
 

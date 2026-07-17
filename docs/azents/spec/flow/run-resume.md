@@ -21,8 +21,8 @@ code_paths:
   - python/apps/azents/src/azents/engine/run/types.py
   - python/apps/azents/src/azents/engine/run/errors.py
   - python/apps/azents/src/azents/worker/session/**
-last_verified_at: 2026-07-16
-spec_version: 20
+last_verified_at: 2026-07-17
+spec_version: 21
 ---
 
 # Run Resume
@@ -197,8 +197,10 @@ pending input.
 
 When a running `agent_runs` row has non-null `retry_state`, that state is the durable retry resume
 source for the active model turn. Recovery and handover preserve that turn's failed-attempt count,
-history, and `next_retry_at`; a worker restart must not reset its budget or bypass exponential
-backoff. Retry state remains present during both backoff and the in-flight retry attempt.
+bounded history, `next_retry_at`, and bounded provider-failure metadata when applicable; a worker
+restart must not reset its budget or bypass exponential backoff. Retry state remains present during
+both backoff and the in-flight retry attempt. Every provider-attributed category uses the same complete
+budget, even when its diagnostic retryability is `non_retryable` or `user_action_required`.
 
 Successful normalized model output and the retry-state clear commit in one transaction. Recovery
 therefore observes either unfinished output with the active turn's retry state, or committed output
@@ -209,15 +211,15 @@ A worker that acquires a session during retry must treat the run as still active
 same run boundary with the existing `run_id`; the adapter must reuse the existing `agent_runs` row
 instead of creating a replacement row. Retry wait may be resumed from `next_retry_at`, and an expired
 timestamp starts the next attempt immediately without implying that the state is stale. Stop while
-waiting finalizes the failed run with `finalization_reason = retry_stopped_by_user`. Shutdown while
-waiting or during an attempt leaves the run `running` for the next worker instead of writing durable
-failed history.
+waiting or during an attempt marks the Run `STOPPED`, clears active retry state, retains a terminal
+recoverable projection, and writes no provider `system_error`. Shutdown while waiting or during an
+attempt leaves the run `running` for the next worker instead of writing durable failed history.
 
 ## Inference Profile Recovery
 
 Pending and running `AgentRun` rows are active recovery sources. Recovery claims the existing run and its ordered input-event associations rather than creating a new run boundary. The Session current inference snapshot is the turn execution authority: it contains requested label, resolved physical selection, effort, effective limits, and resolution time. Recovery must not overwrite it from older run-owned provenance. A pending normal input resolves during preparation; successful preparation atomically updates the Session snapshot with canonical events and buffer deletion. A handled resolution failure preserves the previous snapshot, appends a deterministic user-safe error, consumes the failed head, and completes the active run without retry. A later profile change within a running run updates the Session snapshot for the next turn and rebuilds that same run's request.
 
-Manual failed-run retry is a distinct new pending run. It copies the original requested profile and ordered input associations, marks source `retry_original`, and leaves resolved provenance empty so current Agent routing is resolved once at activation. The first child subagent run is different: it is precreated with a parent run id and a complete resolved snapshot, effort, and limits. It uses source `parent_run` for exact inheritance or `spawn_override` for a statically resolved non-full-history override. Recovery activates either pre-resolved source without re-routing the requested label, so first-run execution does not depend on whether the original target label still exists. Later child runs resolve the stored session-last-used label normally.
+Manual failed-run retry and recoverable stopped-run retry are distinct new pending Runs. Each copies the source Run's requested profile intent and ordered input associations, records `retry_source_run_id`, and leaves resolved provenance empty so current Agent routing is resolved once at activation. The new Run has null retry/recovery state and therefore receives a fresh complete budget. The first child subagent run is different: it is precreated with a parent run id and a complete resolved snapshot, effort, and limits. It uses source `parent_run` for exact inheritance or `spawn_override` for a statically resolved non-full-history override. Recovery activates either pre-resolved source without re-routing the requested label, so first-run execution does not depend on whether the original target label still exists. Later child runs resolve the stored session-last-used label normally.
 
 ## Tool Recovery
 
@@ -235,6 +237,13 @@ event order for a stopped run is:
 3. `interrupted` with `reason=user_requested`.
 4. `run_marker(status=interrupted)`.
 
+The Run row becomes `STOPPED` with terminal `recovery_state`. If its last active retry state contains a
+provider failure, recovery uses `kind = provider_failure` and the bounded provider message; otherwise
+it uses `kind = stopped` and `Execution stopped.`. This state is eligible for explicit
+`retry-stopped-run` but is never a takeover resume source. A newer pending/running Run created by
+Retry or normal user input replaces it in current live projection while the stopped row remains
+durable history.
+
 If an operation TurnAction is active, the same preemptive task cancellation first converts it into a
 cancelled durable snapshot and removes its live row; the handler is not left for replay. If an input
 buffer is already pending when stop handling finishes, the warm session runner must enqueue or
@@ -245,7 +254,9 @@ run to observe `check_stop()` as true.
 
 - Durable transcript, ordered run-input associations, and pending/running `agent_runs` are the resume source of truth.
 - The Session inference snapshot is complete and atomic per turn; recovery never restores it from an older AgentRun snapshot.
-- `agent_runs.retry_state` is the resume source for failed-run retry progress while a run remains running.
+- `agent_runs.retry_state` is the resume source for failed-run retry progress while a Run remains running.
+- `agent_runs.recovery_state` belongs only to a terminal stopped Run and is never auto-resumed by takeover.
+- Every provider-attributed retry state uses the complete configured budget regardless of diagnostic category or retryability.
 - A live sticky owner must receive follow-up broker wake-ups directly.
 - A non-owner worker must not process a session while the owner heartbeat is live.
 - A stale owner heartbeat revokes the sticky owner even if the 30-minute lease key has not expired.

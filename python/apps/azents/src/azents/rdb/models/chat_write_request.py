@@ -23,6 +23,7 @@ class ChatWriteRequestType(enum.StrEnum):
     EDIT_MESSAGE = "edit_message"
     COMMAND = "command"
     FAILED_RUN_RETRY = "failed_run_retry"
+    STOPPED_RUN_RETRY = "stopped_run_retry"
 
 
 chat_write_request_type_enum = ENUM(

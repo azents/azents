@@ -159,7 +159,12 @@ class AutoCompactionFilter(Protocol):
 
     was_compacted: bool
 
-    async def compact(self, transcript: Sequence[Event]) -> list[Event]:
+    async def compact(
+        self,
+        transcript: Sequence[Event],
+        *,
+        on_started: Callable[[], Awaitable[None]] | None = None,
+    ) -> list[Event]:
         """Compact model input outside a caller-owned DB session."""
         ...
 
@@ -199,10 +204,6 @@ class AgentRunExecutionRequest:
 class _ModelStreamUserInterrupted(Exception):
     """Indicates model stream was interrupted by user stop."""
 
-    def __init__(self, normalized: NormalizedAdapterOutput) -> None:
-        super().__init__(USER_STOP_CANCEL_MESSAGE)
-        self.normalized = normalized
-
 
 class _ToolExecutionUserInterrupted(Exception):
     """Indicates tool execution was interrupted by user stop."""
@@ -230,6 +231,7 @@ class AgentRunExecution[
         model_adapter: ModelAdapter[TNativeRequest, TNativeStreamEvent],
         model_stream_watchdog: ModelStreamWatchdog,
         model_stream_provider: str,
+        model_stream_provider_integration_id: str | None,
         model_stream_inference_profile: str | None,
         output_normalizer: AdapterOutputNormalizer[TNativeStreamEvent],
         model_call_preparer: ModelCallPreparer[TNativeRequest],
@@ -250,6 +252,7 @@ class AgentRunExecution[
         self.model_adapter = model_adapter
         self.model_stream_watchdog = model_stream_watchdog
         self.model_stream_provider = model_stream_provider
+        self.model_stream_provider_integration_id = model_stream_provider_integration_id
         self.model_stream_inference_profile = model_stream_inference_profile
         self.output_normalizer = output_normalizer
         self.pre_lower_filter = pre_lower_filter
@@ -348,8 +351,30 @@ class AgentRunExecution[
                     else False
                 )
                 if self.auto_compaction_filter is not None:
-                    transcript = await self.auto_compaction_filter.compact(transcript)
-                    compacted = compacted or self.auto_compaction_filter.was_compacted
+                    compaction_started = False
+
+                    async def on_compaction_started() -> None:
+                        nonlocal compaction_started
+                        compaction_started = True
+                        await self._update_phase(
+                            request.run_id,
+                            AgentRunPhase.COMPACTING,
+                        )
+
+                    try:
+                        transcript = await self.auto_compaction_filter.compact(
+                            transcript,
+                            on_started=on_compaction_started,
+                        )
+                        compacted = (
+                            compacted or self.auto_compaction_filter.was_compacted
+                        )
+                    finally:
+                        if compaction_started:
+                            await self._update_phase(
+                                request.run_id,
+                                AgentRunPhase.PREPARING_INPUT,
+                            )
                 if self.model_file_pin_repo is not None:
                     async with self.session_manager() as session:
                         await self.model_file_pin_repo.pin_many(
@@ -399,12 +424,9 @@ class AgentRunExecution[
                             native_request,
                             check_stop=check_stop,
                         )
-                    except _ModelStreamUserInterrupted as exc:
+                    except _ModelStreamUserInterrupted:
                         await finish_turn("cancelled")
-                        return await self._complete_user_interrupted_model_stream(
-                            request,
-                            exc.normalized,
-                        )
+                        raise asyncio.CancelledError(USER_STOP_CANCEL_MESSAGE) from None
 
                     await self._update_phase(
                         request.run_id,
@@ -573,37 +595,8 @@ class AgentRunExecution[
                             tool_executor=prepared.tool_executor,
                         )
                     except _ToolExecutionUserInterrupted:
-                        run_marker: Event | None = None
-                        async with self.session_manager() as session:
-                            current_run = await self.run_repo.get_by_id(
-                                session,
-                                request.run_id,
-                            )
-                            if (
-                                current_run is not None
-                                and current_run.status == AgentRunStatus.RUNNING
-                            ):
-                                run_marker = await self._append_run_marker(
-                                    session,
-                                    request.session_id,
-                                    request.run_id,
-                                    "interrupted",
-                                )
-                                await self._mark_terminal(
-                                    session,
-                                    request.run_id,
-                                    AgentRunStatus.INTERRUPTED,
-                                )
-                        if run_marker is not None and self.output_sink is not None:
-                            await self.output_sink(
-                                NormalizedAdapterOutput(
-                                    needs_follow_up=False,
-                                    events=[],
-                                ),
-                                [run_marker],
-                            )
                         await finish_turn("cancelled")
-                        return AgentRunStatus.INTERRUPTED
+                        raise asyncio.CancelledError(USER_STOP_CANCEL_MESSAGE) from None
                     await finish_turn("completed")
                 except asyncio.CancelledError:
                     raise
@@ -662,6 +655,7 @@ class AgentRunExecution[
         call_context = ModelStreamCallContext(
             call_kind="sampling",
             provider=self.model_stream_provider,
+            provider_integration_id=self.model_stream_provider_integration_id,
             model=native_request.model,
             session_id=session_id,
             run_id=run_id,
@@ -680,52 +674,9 @@ class AgentRunExecution[
                     await self.output_sink(incremental, [])
         except asyncio.CancelledError as exc:
             if _is_user_stop_cancellation(exc):
-                raise _ModelStreamUserInterrupted(output_stream.interrupt()) from exc
+                raise _ModelStreamUserInterrupted from exc
             raise
         return output_stream
-
-    async def _complete_user_interrupted_model_stream(
-        self,
-        request: AgentRunExecutionRequest,
-        normalized: NormalizedAdapterOutput,
-    ) -> AgentRunStatus:
-        """Durabilize partial text from model stream interrupted by user stop."""
-        await self._update_phase(
-            request.run_id,
-            AgentRunPhase.APPENDING_EVENTS,
-        )
-        assistant_events = [
-            event
-            for event in normalized.events
-            if event.kind == EventKind.ASSISTANT_MESSAGE
-            and isinstance(event.payload, AssistantMessagePayload)
-            and _assistant_content_is_non_empty(event.payload.content)
-        ]
-        async with self.session_manager() as session:
-            appended = await self._append_events(session, assistant_events)
-            run_marker = await self._append_run_marker(
-                session,
-                request.session_id,
-                request.run_id,
-                "interrupted",
-            )
-            terminal_result = _terminal_result_from_events(appended)
-            await self._mark_terminal(
-                session,
-                request.run_id,
-                AgentRunStatus.INTERRUPTED,
-                terminal_result_event_id=terminal_result.event_id,
-                terminal_result_message=terminal_result.message,
-            )
-        if self.output_sink is not None:
-            await self.output_sink(
-                NormalizedAdapterOutput(
-                    needs_follow_up=False,
-                    events=assistant_events,
-                ),
-                [*appended, run_marker],
-            )
-        return AgentRunStatus.INTERRUPTED
 
     async def _append_events(
         self,

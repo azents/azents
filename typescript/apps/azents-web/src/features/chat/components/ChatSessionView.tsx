@@ -291,7 +291,7 @@ export function ChatSessionView({
           onResetToLatest={output.onResetToLatest}
           onSubmitMessageEdit={output.onSubmitMessageEdit}
           onRetryFailedRun={output.onRetryFailedRun}
-          isCompacting={output.isCompacting}
+          onRetryStoppedRun={output.onRetryStoppedRun}
           wasCommandBlocked={output.wasCommandBlocked}
           isStopAvailable={output.isStopAvailable}
           isStopPending={output.isStopPending}

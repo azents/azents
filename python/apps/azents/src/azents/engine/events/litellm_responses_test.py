@@ -87,7 +87,10 @@ from azents.engine.model_stream import (
     ModelStreamTimeoutPolicy,
     ModelStreamWatchdog,
 )
-from azents.engine.run.errors import ModelCallError
+from azents.engine.run.provider_failure import (
+    ModelProviderFailure,
+    ModelProviderFailureCategory,
+)
 from azents.engine.run.types import BuiltinToolSpec
 from azents.testing.model_stream import (
     make_test_model_stream_context,
@@ -2326,11 +2329,11 @@ class TestLiteLLMResponsesModelAdapter:
             if record.message == "Dispatching OpenAI Responses request"
         ] == [False, True, False]
 
-    async def test_litellm_bad_request_stays_internal(
+    async def test_litellm_body_shaped_message_uses_safe_fallback(
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Treat provider 400 as malformed request and propagate as internal error."""
+        """Reject serialized provider bodies while retaining classification."""
 
         async def fail_call(**kwargs: object) -> object:
             del kwargs
@@ -2346,13 +2349,31 @@ class TestLiteLLMResponsesModelAdapter:
         )
         adapter = _TestLiteLLMResponsesModelAdapter()
 
-        with pytest.raises(BadRequestError, match="Instructions are required"):
+        with pytest.raises(
+            ModelProviderFailure,
+            match="The model provider could not process the request",
+        ) as raised:
             _ = [
                 event
                 async for event in adapter.stream(
                     NativeModelRequest(model="gpt-5.1-codex", input=[]),
+                    call_context=ModelStreamCallContext(
+                        call_kind="sampling",
+                        provider="openai",
+                        provider_integration_id="integration-001",
+                        model="gpt-5.1-codex",
+                        session_id="session-1",
+                        run_id="run-1",
+                        attempt_number=1,
+                        check_stop=None,
+                    ),
                 )
             ]
+
+        assert raised.value.category is ModelProviderFailureCategory.INVALID_REQUEST
+        assert raised.value.status_code == 400
+        assert raised.value.integration == "integration-001"
+        assert raised.value.provider_message is None
 
     async def test_auth_error_is_user_visible(
         self,
@@ -2374,13 +2395,19 @@ class TestLiteLLMResponsesModelAdapter:
         )
         adapter = _TestLiteLLMResponsesModelAdapter()
 
-        with pytest.raises(ModelCallError, match="Model call failed \\(401\\)"):
+        with pytest.raises(
+            ModelProviderFailure,
+            match="Model provider error: Missing scopes",
+        ) as raised:
             _ = [
                 event
                 async for event in adapter.stream(
                     NativeModelRequest(model="gpt-5.1-codex", input=[]),
                 )
             ]
+
+        assert raised.value.category is ModelProviderFailureCategory.AUTHENTICATION
+        assert raised.value.status_code == 401
 
     async def test_provider_server_error_is_user_visible_after_retries(
         self,
@@ -2402,13 +2429,21 @@ class TestLiteLLMResponsesModelAdapter:
         )
         adapter = _TestLiteLLMResponsesModelAdapter()
 
-        with pytest.raises(ModelCallError, match="Model call failed \\(503\\)"):
+        with pytest.raises(
+            ModelProviderFailure,
+            match="Model provider error: provider unavailable",
+        ) as raised:
             _ = [
                 event
                 async for event in adapter.stream(
                     NativeModelRequest(model="gpt-5.1-codex", input=[]),
                 )
             ]
+
+        assert (
+            raised.value.category is ModelProviderFailureCategory.PROVIDER_UNAVAILABLE
+        )
+        assert raised.value.status_code == 503
 
     async def test_request_validation_error_stays_internal(self) -> None:
         """Propagate adapter request validation failure as internal error."""
@@ -2626,6 +2661,8 @@ class TestLiteLLMResponsesOutputNormalizer:
         normalizer = LiteLLMResponsesOutputNormalizer(
             provider="openai",
             model="gpt-5.1",
+            operation="sampling",
+            integration=None,
         )
         output_stream = normalizer.start("session-1")
 
@@ -2661,6 +2698,8 @@ class TestLiteLLMResponsesOutputNormalizer:
         output_stream = LiteLLMResponsesOutputNormalizer(
             provider="openai",
             model="gpt-5.1",
+            operation="sampling",
+            integration=None,
         ).start("session-1")
 
         running = output_stream.process_event(
@@ -2705,6 +2744,8 @@ class TestLiteLLMResponsesOutputNormalizer:
         output_stream = LiteLLMResponsesOutputNormalizer(
             provider="openai",
             model="gpt-5.1",
+            operation="sampling",
+            integration=None,
         ).start("session-1")
 
         running = output_stream.process_event(
@@ -2774,6 +2815,8 @@ class TestLiteLLMResponsesOutputNormalizer:
         normalizer = LiteLLMResponsesOutputNormalizer(
             provider="openai",
             model="gpt-5.1",
+            operation="sampling",
+            integration=None,
         )
         output_stream = normalizer.start("session-1")
         output_stream.process_event(
@@ -2807,6 +2850,8 @@ class TestLiteLLMResponsesOutputNormalizer:
         normalizer = LiteLLMResponsesOutputNormalizer(
             provider="openai",
             model="gpt-5.1",
+            operation="sampling",
+            integration=None,
         )
         output_stream = normalizer.start("session-1")
 
@@ -2841,6 +2886,8 @@ class TestLiteLLMResponsesOutputNormalizer:
         normalizer = LiteLLMResponsesOutputNormalizer(
             provider="openai",
             model="gpt-5.1",
+            operation="sampling",
+            integration=None,
         )
         output_stream = normalizer.start("session-1")
         output_stream.process_event(
@@ -2856,32 +2903,45 @@ class TestLiteLLMResponsesOutputNormalizer:
         )
 
         with pytest.raises(
-            ModelCallError,
+            ModelProviderFailure,
             match="stream ended before completion",
-        ):
+        ) as raised:
             output_stream.complete()
+
+        assert raised.value.category is ModelProviderFailureCategory.TRANSPORT
+        assert raised.value.provider_code == "stream_ended_before_completion"
 
     def test_rejects_empty_stream_without_terminal_event(self) -> None:
         """Reject EOF when no native response terminal event was observed."""
         normalizer = LiteLLMResponsesOutputNormalizer(
             provider="openai",
             model="gpt-5.1",
+            operation="sampling",
+            integration=None,
         )
         output_stream = normalizer.start("session-1")
 
         with pytest.raises(
-            ModelCallError,
+            ModelProviderFailure,
             match="stream ended before completion",
-        ):
+        ) as raised:
             output_stream.complete()
 
+        assert raised.value.category is ModelProviderFailureCategory.TRANSPORT
+        assert raised.value.provider_code == "stream_ended_before_completion"
+
     @pytest.mark.parametrize(
-        ("event_type", "item", "message"),
+        ("event_type", "item", "message", "category", "provider_code"),
         [
             (
                 "ResponseIncompleteEvent",
                 {"response": {"incomplete_details": {"reason": "max_output_tokens"}}},
-                "Model response was incomplete: max_output_tokens",
+                (
+                    "Model provider error: The model response reached its output "
+                    "token limit."
+                ),
+                ModelProviderFailureCategory.INVALID_REQUEST,
+                "max_output_tokens",
             ),
             (
                 "ResponseFailedEvent",
@@ -2893,10 +2953,9 @@ class TestLiteLLMResponsesOutputNormalizer:
                         }
                     }
                 },
-                (
-                    "Model response failed: Provider rejected the response; "
-                    "code: provider_failed"
-                ),
+                "Model provider error: Provider rejected the response",
+                ModelProviderFailureCategory.UNKNOWN,
+                "provider_failed",
             ),
             (
                 "ResponseErrorEvent",
@@ -2904,7 +2963,9 @@ class TestLiteLLMResponsesOutputNormalizer:
                     "message": "Provider stream failed",
                     "code": "stream_failed",
                 },
-                "Model call failed: Provider stream failed; code: stream_failed",
+                "Model provider error: Provider stream failed",
+                ModelProviderFailureCategory.UNKNOWN,
+                "stream_failed",
             ),
         ],
     )
@@ -2913,11 +2974,15 @@ class TestLiteLLMResponsesOutputNormalizer:
         event_type: str,
         item: dict[str, object],
         message: str,
+        category: ModelProviderFailureCategory,
+        provider_code: str,
     ) -> None:
         """Convert native unsuccessful terminal outcomes to model errors."""
         normalizer = LiteLLMResponsesOutputNormalizer(
             provider="openai",
             model="gpt-5.1",
+            operation="sampling",
+            integration=None,
         )
         output_stream = normalizer.start("session-1")
         output_stream.process_event(
@@ -2933,14 +2998,19 @@ class TestLiteLLMResponsesOutputNormalizer:
         )
         output_stream.process_event(NativeEvent(type=event_type, item=item))
 
-        with pytest.raises(ModelCallError, match=message):
+        with pytest.raises(ModelProviderFailure, match=message) as raised:
             output_stream.complete()
+
+        assert raised.value.category is category
+        assert raised.value.provider_code == provider_code
 
     def test_interrupt_does_not_mask_unsuccessful_terminal_event(self) -> None:
         """Keep provider failure authoritative over later cancellation."""
         normalizer = LiteLLMResponsesOutputNormalizer(
             provider="openai",
             model="gpt-5.1",
+            operation="sampling",
+            integration=None,
         )
         output_stream = normalizer.start("session-1")
         output_stream.process_event(
@@ -2952,36 +3022,47 @@ class TestLiteLLMResponsesOutputNormalizer:
             )
         )
 
-        with pytest.raises(ModelCallError, match="max_output_tokens"):
+        with pytest.raises(
+            ModelProviderFailure,
+            match="The model response reached its output token limit",
+        ) as raised:
             output_stream.interrupt()
+
+        assert raised.value.category is ModelProviderFailureCategory.INVALID_REQUEST
+        assert raised.value.provider_code == "max_output_tokens"
 
     def test_bounds_unsuccessful_terminal_details(self) -> None:
         """Keep provider terminal details bounded and scalar-only."""
         normalizer = LiteLLMResponsesOutputNormalizer(
             provider="openai",
             model="gpt-5.1",
+            operation="sampling",
+            integration=None,
         )
         output_stream = normalizer.start("session-1")
         output_stream.process_event(
             NativeEvent(
                 type="ResponseErrorEvent",
                 item={
-                    "message": "x" * 600,
+                    "message": "x" * 1200,
                     "code": {"raw": "not user safe"},
                 },
             )
         )
 
-        with pytest.raises(ModelCallError) as raised:
+        with pytest.raises(ModelProviderFailure) as raised:
             output_stream.complete()
 
-        assert str(raised.value) == f"Model call failed: {'x' * 512}"
+        assert str(raised.value) == f"Model provider error: {'x' * 1000}"
+        assert raised.value.provider_message == "x" * 1000
 
     def test_accepts_explicitly_completed_reasoning_only_response(self) -> None:
         """Keep explicit completed reasoning-only output in current scope."""
         normalizer = LiteLLMResponsesOutputNormalizer(
             provider="openai",
             model="gpt-5.1",
+            operation="sampling",
+            integration=None,
         )
 
         output = normalizer.normalize(
@@ -3024,6 +3105,8 @@ class TestLiteLLMResponsesOutputNormalizer:
         normalizer = LiteLLMResponsesOutputNormalizer(
             provider="openai",
             model="gpt-5.1",
+            operation="sampling",
+            integration=None,
         )
 
         output = normalizer.normalize(
@@ -3055,6 +3138,8 @@ class TestLiteLLMResponsesOutputNormalizer:
         normalizer = LiteLLMResponsesOutputNormalizer(
             provider="openai",
             model="gpt-5.1",
+            operation="sampling",
+            integration=None,
         )
 
         output = normalizer.normalize(
@@ -3085,6 +3170,8 @@ class TestLiteLLMResponsesOutputNormalizer:
         normalizer = LiteLLMResponsesOutputNormalizer(
             provider="openai",
             model="gpt-5.1",
+            operation="sampling",
+            integration=None,
         )
         native_events = [
             NativeEvent(
@@ -3175,6 +3262,8 @@ class TestLiteLLMResponsesOutputNormalizer:
         normalizer = LiteLLMResponsesOutputNormalizer(
             provider="openai",
             model="gpt-5.1",
+            operation="sampling",
+            integration=None,
         )
 
         output = normalizer.normalize(
@@ -3220,6 +3309,8 @@ class TestLiteLLMResponsesOutputNormalizer:
         normalizer = LiteLLMResponsesOutputNormalizer(
             provider="anthropic",
             model="claude-sonnet-4.5",
+            operation="sampling",
+            integration=None,
         )
 
         output = normalizer.normalize(
@@ -3261,6 +3352,8 @@ class TestLiteLLMResponsesOutputNormalizer:
         normalizer = LiteLLMResponsesOutputNormalizer(
             provider="openai",
             model="gpt-5.1",
+            operation="sampling",
+            integration=None,
         )
 
         output = normalizer.normalize(
@@ -3300,6 +3393,8 @@ class TestLiteLLMResponsesOutputNormalizer:
         normalizer = LiteLLMResponsesOutputNormalizer(
             provider="openai",
             model="gpt-5.1",
+            operation="sampling",
+            integration=None,
         )
 
         output = normalizer.normalize(
@@ -3341,6 +3436,8 @@ class TestLiteLLMResponsesOutputNormalizer:
         normalizer = LiteLLMResponsesOutputNormalizer(
             provider="openai",
             model="gpt-5.1",
+            operation="sampling",
+            integration=None,
         )
 
         output = normalizer.normalize(
@@ -3388,6 +3485,8 @@ class TestLiteLLMResponsesOutputNormalizer:
         normalizer = LiteLLMResponsesOutputNormalizer(
             provider="openai",
             model="gpt-5.1",
+            operation="sampling",
+            integration=None,
         )
 
         output = normalizer.normalize(
@@ -3423,6 +3522,8 @@ class TestLiteLLMResponsesOutputNormalizer:
         normalizer = LiteLLMResponsesOutputNormalizer(
             provider="openai",
             model="gpt-5.1",
+            operation="sampling",
+            integration=None,
         )
 
         output = normalizer.normalize(
@@ -3473,6 +3574,8 @@ class TestLiteLLMResponsesOutputNormalizer:
         normalizer = LiteLLMResponsesOutputNormalizer(
             provider="openai",
             model="gpt-5.1",
+            operation="sampling",
+            integration=None,
         )
 
         output = normalizer.normalize(
@@ -3534,6 +3637,8 @@ class TestLiteLLMResponsesOutputNormalizer:
         normalizer = LiteLLMResponsesOutputNormalizer(
             provider="openai",
             model="gpt-5.1",
+            operation="sampling",
+            integration=None,
         )
         output = normalizer.normalize(
             "session-1",
@@ -3571,6 +3676,8 @@ class TestLiteLLMResponsesOutputNormalizer:
         normalizer = LiteLLMResponsesOutputNormalizer(
             provider="openai",
             model="gpt-5.1",
+            operation="sampling",
+            integration=None,
         )
 
         output = normalizer.normalize(

@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.broker.types import SessionBroker
 from azents.core.enums import AgentRunPhase, AgentRunStatus
 from azents.engine.events.types import AgentRunState
+from azents.engine.run.failure import RunRecoveryState
 from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
@@ -135,6 +136,7 @@ class _AgentRunRepository:
         self.active_lookup_error = active_lookup_error
         self.terminal_session_ids: list[str] = []
         self.terminal_run_ids: list[str] = []
+        self.stopped_recoveries: list[tuple[str, RunRecoveryState | None]] = []
         self.activation_run_ids: list[str] = []
 
     async def get_active_by_session_id(
@@ -171,6 +173,19 @@ class _AgentRunRepository:
         """Record a run-level terminal transition."""
         del session, status, ended_at
         self.terminal_run_ids.append(run_id)
+        return self.running_run
+
+    async def mark_stopped_with_recovery_if_running(
+        self,
+        session: AsyncSession,
+        run_id: str,
+        *,
+        recovery_state: RunRecoveryState | None,
+        ended_at: datetime,
+    ) -> AgentRunState | None:
+        """Record a stopped Run recovery transition."""
+        del session, ended_at
+        self.stopped_recoveries.append((run_id, recovery_state))
         return self.running_run
 
     async def activate_pending(
@@ -354,6 +369,33 @@ async def test_terminal_update_rejects_cross_session_run() -> None:
         )
 
     assert agent_run_repository.terminal_run_ids == []
+
+
+@pytest.mark.asyncio
+async def test_stopped_update_persists_recovery_projection() -> None:
+    """Lifecycle forwards direct Stop recovery without active retry state."""
+    run = _running_run()
+    agent_run_repository = _AgentRunRepository(run)
+    service = _service(
+        agent_run_repository=agent_run_repository,
+        agent_session_repository=_AgentSessionRepository(),
+        pending_input=False,
+    )
+    recovery = RunRecoveryState(
+        kind="stopped",
+        user_message="Execution stopped.",
+        operation="sampling",
+        source_run_id=run.id,
+        stopped_at=datetime.now(UTC),
+    )
+
+    await service.mark_agent_run_stopped_with_recovery(
+        "session-001",
+        run_id=run.id,
+        recovery_state=recovery,
+    )
+
+    assert agent_run_repository.stopped_recoveries == [(run.id, recovery)]
 
 
 @pytest.mark.asyncio

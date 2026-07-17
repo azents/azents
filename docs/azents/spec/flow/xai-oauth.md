@@ -175,6 +175,7 @@ Rules:
 
 - Refresh applies only to integrations whose provider is `xai_oauth`.
 - Runtime calls pass `api_key=<access token>`, `base_url=https://api.x.ai/v1`, `api_base=https://api.x.ai/v1`, and `custom_llm_provider=xai`.
+- After runtime credentials resolve, LiteLLM HTTP, transport, and typed terminal failures use the common `ModelProviderFailure` contract. The UI retains only the bounded, redacted provider-authored reason under `Model provider error`, and every provider-attributed failure receives the complete current Run retry budget regardless of category or diagnostic retryability.
 - OAuth and API-key identities share xAI transport lowering: the first `system` input item carries system instructions, top-level `instructions` is omitted, hosted `web_search` uses the xAI Responses tool target, and Anthropic cache-control hints are not applied.
 - Transient network/provider failures mark the integration `temporarily_unavailable` and can be retried by a later run.
 - Token refresh 400/401 marks the integration `refresh_required`.
