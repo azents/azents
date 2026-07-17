@@ -195,16 +195,21 @@ class SessionRunner:
         self,
         message: SessionWakeUp,
     ) -> None:
-        """Wake next turn only when pending buffer remains after Stop."""
+        """Wake persisted follow-up work after the stopped boundary completes."""
         if not self.stop_controller.user_stop_requested:
             return
-        has_pending = self.input_buffer_service.has_pending_session_input_buffers
-        if not await has_pending(message.session_id):
+        has_pending_input = self.input_buffer_service.has_pending_session_input_buffers
+        follow_up_persisted = (
+            await self.session_lifecycle.has_active_agent_run(message.session_id)
+            or await self._has_pending_command(message.session_id)
+            or await has_pending_input(message.session_id)
+        )
+        if not follow_up_persisted:
             discarded = self.inbox.discard_wake_ups(message.session_id)
             if discarded:
                 logger.info(
                     "Session runner discarded wake-ups after user stop "
-                    "with no pending input",
+                    "with no persisted follow-up work",
                     extra={
                         "session_id": message.session_id,
                         "discarded_wake_up_count": discarded,

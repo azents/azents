@@ -1669,6 +1669,30 @@ async def test_stop_does_not_duplicate_existing_resume_wake_up() -> None:
 
 
 @pytest.mark.asyncio
+async def test_stop_preserves_existing_retry_wake_up_for_pending_run() -> None:
+    """A stopped-run retry wake-up survives the prior stopped boundary."""
+    host = _Host()
+    host.stop_first_message = True
+    host.running_agent_run_exists = True
+    runner = _start_session_runner(host)
+    message = _wake_up()
+
+    try:
+        runner.enqueue(message)
+        await asyncio.wait_for(host.message_started.wait(), timeout=1)
+        runner.enqueue(message)
+        runner.enqueue(SessionStopSignal(session_id="session-001", user_id="user-001"))
+        await asyncio.wait_for(
+            _wait_until(lambda: len(host.processed_messages) == 2),
+            timeout=2,
+        )
+    finally:
+        await runner.shutdown()
+
+    assert host.processed_messages == [message, message]
+
+
+@pytest.mark.asyncio
 async def test_stop_discards_existing_wake_up_when_no_pending_buffer() -> None:
     """If no pending buffer remains after Stop, queued wake-up is not resumed."""
     host = _Host()
