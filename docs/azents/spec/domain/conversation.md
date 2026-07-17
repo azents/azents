@@ -92,8 +92,8 @@ api_routes:
   - /chat/v1/exchange-files/{file_id}/download
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
-last_verified_at: 2026-07-16
-spec_version: 105
+last_verified_at: 2026-07-17
+spec_version: 106
 ---
 
 # Conversation & Events
@@ -452,6 +452,14 @@ use `litellm`. A mismatch always reconstructs provider input from canonical even
 forward cutover from old LiteLLM artifacts and a code-version rollback that reads newer OpenAI-native
 artifacts; cross-adapter objects are never replayed as though they shared schema ownership.
 
+Completed `image_generation` results use a provider-neutral durable shape. The result `output`
+contains a ModelFile-backed `FileOutputPart`, and `attachments` contains the independently stored
+Exchange original. Provider Base64, decoded bytes, and native `result` fields are transient only and
+are excluded from event payloads, native artifacts, REST/WebSocket projections, and frontend state.
+The same-native lowerer may reconstruct the native image result from the ModelFile in request-local
+memory. An incompatible adapter or model lowers the FilePart through the normal rich-image path or an
+explicit bounded unavailable-image placeholder.
+
 ## 5. History And Live Event APIs
 
 The final `events` table is the durable transcript table. Public chat readers use two separate
@@ -495,11 +503,13 @@ projection root, and client/provider tool pairs use `call_id`. Selectors merge c
 across raw page boundaries. Provider-tool calls render provider-neutral `running`, `completed`, and
 `failed` states from their canonical status; a missing live status is treated as running, while a
 missing durable status uses the neutral historical fallback. Semantic hosted-tool names such as
-`web_search` select presentation labels without branching on provider identity. Provider tool results
-preserve completion/failure status, output text, and attachments; live `agent_message` events use the
-same source-labeled internal-agent row as their durable form. When a live entity and durable event
-describe the same semantic output, the durable projection replaces the live projection without a
-duplicate or disappearance.
+`web_search` and `image_generation` select presentation labels without branching on provider identity.
+Provider tool results preserve completion/failure status, output text, and attachments. An available
+`image_generation` attachment renders directly in the provider-tool card without requiring the user
+to expand diagnostic details; preview and download continue through the Exchange attachment surface.
+Live `agent_message` events use the same source-labeled internal-agent row as their durable form. When
+a live entity and durable event describe the same semantic output, the durable projection replaces
+the live projection without a duplicate or disappearance.
 
 Both responses use the same event transport shape as the durable transcript. The removed
 `/chat/v1/sessions/{session_id}/messages` aggregate endpoint is not part of the public contract:
@@ -683,8 +693,12 @@ but that model-visible rendering is not stored by mutating the event content tex
 
 ## 7. Exchange Files And Attachments
 
-Exchange files remain the durable user-visible file/artifact surface. Generated model image/file output
-is represented in event transcript as provider tool call/result events with attachments.
+Exchange files remain the durable user-visible file/artifact surface. Provider-hosted generated images
+are represented by provider tool call/result events whose terminal result references both an Exchange
+attachment for the original user-visible bytes and a ModelFile/FilePart for later model input. The two
+resources keep independent storage keys, media type, size, hash, authorization, and lifecycle metadata.
+A result is not admitted when only one resource succeeds, and retry-safe deterministic admission must
+not duplicate metadata or delete objects already referenced by an earlier committed attempt.
 
 ## 8. Compaction
 
@@ -741,6 +755,7 @@ Current verification:
 
 ## 11. Changelog
 
+- **2026-07-17** — v106. Added Base64-free dual materialization, request-local replay, retry-safe admission, and direct attachment presentation for provider-hosted generated images.
 - **2026-07-16** — v105. Added provider-neutral live provider-tool lifecycle state, Redis resync,
   attempt cleanup, semantic frontend presentation, and durable-before-live-removal handoff.
 - **2026-07-16** — v104. Added strict cross-adapter native artifact ownership and canonical fallback

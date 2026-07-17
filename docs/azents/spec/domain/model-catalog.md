@@ -18,13 +18,14 @@ code_paths:
   - python/apps/azents/src/azents/services/agent/__init__.py
   - python/apps/azents/src/azents/services/workspace_model_settings/__init__.py
   - python/apps/azents/src/azents/services/model_listing/providers.py
+  - python/apps/azents/src/azents/services/provider_hosted_tools.py
   - typescript/apps/azents-web/src/features/agents/components/ModelCatalogPicker.tsx
   - typescript/apps/azents-web/src/features/agents/containers/useAgentFormContainer.ts
   - typescript/apps/azents-web/src/features/llm-settings/containers/useLlmSettingsContainer.ts
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
   - typescript/apps/azents-admin-web/src/features/model-catalog/containers/useModelCatalogPageContainer.ts
-last_verified_at: 2026-07-16
-spec_version: 11
+last_verified_at: 2026-07-17
+spec_version: 12
 ---
 
 # Model Catalog Domain Spec
@@ -66,11 +67,11 @@ Only entries with selectable visibility are returned by the public picker list A
 
 LiteLLM is the current lowerer target projection source. The source sync service records LiteLLM source snapshots before projection. System and integration projections use the stored LiteLLM source snapshot rather than fetching external model metadata from the picker read path.
 
-ChatGPT OAuth integration catalogs additionally fetch the authenticated account-visible model list from the ChatGPT Codex backend during sync. Backend metadata is authoritative for visibility, reasoning efforts, modalities, and context window. Request-dialect hints are excluded from normalized capabilities and stored projection metadata. Following Codex's provider-level capability policy, every API-supported and picker-visible ChatGPT OAuth model is projected with the semantic `web_search` built-in tool capability. ChatGPT entries do not require a matching LiteLLM model metadata key; the LiteLLM source snapshot remains attached to the catalog snapshot because the existing lowerer-target catalog lifecycle requires one.
+ChatGPT OAuth integration catalogs additionally fetch the authenticated account-visible model list from the ChatGPT Codex backend during sync. Backend metadata is authoritative for visibility, reasoning efforts, modalities, and context window. Request-dialect hints are excluded from normalized capabilities and stored projection metadata. Following Codex's provider-level capability policy, every API-supported and picker-visible ChatGPT OAuth model is projected with the semantic `web_search` built-in tool capability. `image_generation` is projected only from an explicit trusted source flag or the maintained OpenAI-family model support policy shared with OpenAI system catalog projection. ChatGPT entries do not require a matching LiteLLM model metadata key; the LiteLLM source snapshot remains attached to the catalog snapshot because the existing lowerer-target catalog lifecycle requires one.
 
 Reasoning capabilities are projected from LiteLLM's canonical provider model metadata schema. Explicit effort levels are reconstructed in the deterministic order `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. The optional `none`, `minimal`, `xhigh`, and `max` levels follow their corresponding LiteLLM support flags. Every model marked as reasoning-capable receives the baseline `low`, `medium`, and `high` levels, except that an explicit `supports_low_reasoning_effort: false` removes `low`. A model with no projected effort levels allows no explicit effort override; an empty list is not interpreted as unrestricted support.
 
-Built-in tool capability projection is filtered through the implemented configurable registry. The current registry contains only `web_search`; `web_fetch` and `image_generation` are not advertised because they do not have a complete supported runtime contract. A future built-in tool becomes selectable only after capability projection, validation, runtime lowering/handling, UI presentation, and deterministic coverage exist together.
+Built-in tool capability projection is filtered through the implemented configurable registry. The current registry contains `web_search` and `image_generation`; unimplemented identifiers such as `web_fetch` are not advertised. `image_generation` support requires an explicit trusted source flag or an Azents-owned provider/model support policy. Generic image output modality alone is not evidence of provider-hosted image-tool support. A future built-in tool becomes selectable only after capability projection, validation, runtime lowering/handling, UI presentation, and deterministic coverage exist together.
 
 Each catalog sync records an attempt with status, counts, failure metadata, action hint, and diagnostics. Failed syncs keep the last successful snapshot available when one exists.
 
@@ -144,6 +145,7 @@ For user-scoped integration catalogs, the picker can trigger integration sync. F
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-07-17 | 12 | Restored trusted `image_generation` capability projection for supported OpenAI-family catalog entries |
 | 2026-07-16 | 11 | Removed the Responses Lite capability and request-dialect metadata from ChatGPT OAuth catalog projections |
 | 2026-07-16 | 10 | Completed create, configuration-update, explicit, and stale-refresh synchronization policy with atomic throttling, backoff, and picker status behavior |
 | 2026-07-16 | 9 | Scoped selectable settings to catalog-resolved options and limited advertised built-in tools to implemented contracts |

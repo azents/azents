@@ -24,6 +24,7 @@ code_paths:
   - python/apps/azents/src/azents/services/agent_runtime/**
   - python/apps/azents/src/azents/services/llm_provider_integration/**
   - python/apps/azents/src/azents/services/model_listing/**
+  - python/apps/azents/src/azents/services/provider_hosted_tools.py
   - python/apps/azents/src/azents/services/workspace_model_settings/**
   - python/apps/azents/src/azents/api/public/agent/**
   - python/apps/azents/src/azents/api/public/llm_provider_integration/**
@@ -45,8 +46,8 @@ api_routes:
   - /llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/start
   - /llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/{session_id}
   - /chat/v1
-last_verified_at: 2026-07-16
-spec_version: 47
+last_verified_at: 2026-07-17
+spec_version: 48
 ---
 
 # Agent Domain Spec
@@ -289,9 +290,9 @@ Runtime does not query Workspace defaults or model listing. Workspace defaults a
 
 Each selectable model option owns its provider-hosted built-in tool opt-in list. Model snapshot `normalized_capabilities.built_in_tools.supported` means only selectable capability; a supported tool omitted from that option's settings is not exposed when the option is selected.
 
-The configurable implemented registry currently contains only `web_search`. Capability projection filters out unimplemented identifiers such as `web_fetch` and `image_generation`. Agent and Workspace submit normalization rejects unknown, duplicate, or capability-unsupported names per option.
+The configurable implemented registry contains `web_search` and `image_generation`. Capability projection filters out unimplemented identifiers such as `web_fetch`. Agent and Workspace submit normalization rejects unknown, duplicate, or capability-unsupported names per option. `image_generation` uses the same model-scoped validation contract as other builtins and does not restore historical provider-specific Agent validation conditions.
 
-Runtime passes the selected Session settings as `BuiltinToolSpec(name, config)`. LiteLLM Responses lowerer sees `RunRequest.model_developer`, provider, model capability and lowers semantic hosted tools into native `tools`/`kwargs`; to protect stale snapshots or direct `RunRequest` construction, it performs capability validation once more.
+Runtime passes the selected Session settings as `BuiltinToolSpec(name, config)`. OpenAI API-key and ChatGPT OAuth runs lower the semantic builtins through the official Responses SDK path; other providers use the LiteLLM Responses lowerer. Every lowerer performs capability validation again to protect stale snapshots or direct `RunRequest` construction. Configured hosted tools are dispatched exhaustively: a selected semantic builtin is lowered to its provider-native shape or fails before provider dispatch, never silently omitted.
 
 ## 5. Context Window / Compaction
 
@@ -323,6 +324,7 @@ Following contracts do not exist in current system.
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-07-17 | 48 | Restored model-scoped `image_generation` selection and exhaustive OpenAI/ChatGPT/LiteLLM hosted-tool lowering |
 | 2026-07-16 | 47 | Moved context, output, and built-in tool intent to selectable model options and persisted selected settings on AgentSession |
 | 2026-07-12 | 46 | Moved prepared turn inference authority and effective limits from AgentRun to AgentSession |
 | 2026-07-11 | 45 | Added label-only subagent spawn overrides, bounded-fork restrictions, and effort transition semantics |

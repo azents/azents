@@ -49,7 +49,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ChatView.tsx
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
 last_verified_at: 2026-07-17
-spec_version: 94
+spec_version: 95
 ---
 
 # Agent Execution Loop
@@ -150,7 +150,9 @@ complete logical request. Continuation state is in memory for one adapter lifeti
 only after a successful `response.completed` event with a non-empty response ID. Durable event
 history remains the recovery source across worker retries, restarts, and adapter recreation. Stored
 output items use the same raw-blob sanitization as durable native artifacts before they participate in
-prefix comparison.
+prefix comparison. Request-local reconstruction of an `image_generation_call.result` is sanitized for
+comparison as well, so ModelFile rehydration does not disable an otherwise valid
+`previous_response_id` continuation or resend an image the provider already retains.
 
 If OpenAI rejects an incremental HTTP request with the exact `previous_response_not_found` error code
 before a response stream opens, the adapter disables continuation for its remaining lifetime and
@@ -397,9 +399,12 @@ stream handles, timeouts, or continuation state. Credentials and endpoint identi
 operation-scoped `AsyncOpenAI` client outside the request. Sampling reuses that client across turns in
 one execution; compaction and title generation each own one bounded-operation client. Streams and
 clients close on success, failure, timeout, cancellation, and User Stop. Agent
-`model_parameters.builtin_tools` stores semantic ids such as `web_search`; the lowerer maps them to
-provider/model-developer native shapes and fails before provider call if the selected model capability
-does not support the requested hosted tool.
+model-scoped builtin settings store semantic ids such as `web_search` and `image_generation`; the
+lowerer maps them to provider/model-developer native shapes and fails before provider call if the
+selected model capability does not support the requested hosted tool. Hosted-tool dispatch is
+exhaustive: OpenAI API-key and ChatGPT OAuth use the official Responses tool shape, LiteLLM receives
+the Responses semantic tool for provider-dialect translation, and no configured builtin is silently
+omitted.
 
 OpenAI SDK completion usage maps directly into the existing turn-marker token fields. Its raw usage is
 the SDK usage object serialized to plain JSON and does not synthesize LiteLLM hidden parameters.
@@ -410,9 +415,26 @@ OAuth cost is an API price-map estimate, not subscription billing.
 
 Both `xai` and `xai_oauth` use the xAI transport target in this lowerer. For either identity, system instructions become the first `system` input item instead of top-level `instructions`, hosted `web_search` uses the xAI Responses tool target, and Anthropic cache-control hints are omitted. Credential refresh is resolved before the adapter pipeline and remains exclusive to `xai_oauth`; the lowerer does not own OAuth lifecycle state.
 
-Generated image/file output and provider-hosted tool output from the model are normalized as
-provider tool call/result events with attachments or text payloads. These provider tool events do not
-enter the client tool execution loop and do not by themselves continue the model turn.
+Provider-hosted tool output is normalized as provider tool call/result events and does not enter the
+client tool execution loop or by itself continue the model turn. A completed `image_generation` item
+first becomes an excluded transient pending-file output. The shared materializer strictly decodes and
+verifies the image, enforces encoded and 20 MiB decoded bounds, stores the original as an Exchange
+attachment, stores a normalized copy as a ModelFile, and replaces the result skeleton with both
+references before durable output admission. Base64 and raw bytes never enter event JSON or native
+artifacts.
+
+Object uploads occur outside a database transaction. Session, Agent, Workspace, and authenticated
+actor ownership are checked before upload and revalidated while file metadata, provider result events,
+the turn marker, and retry-state clear are committed together. Partial storage or metadata admission
+fails the model output and compensation-deletes unowned prepared keys. Deterministic run/call/output
+identities make repeated admission idempotent; cleanup protects keys already referenced by committed
+metadata and identity reuse with different bytes fails explicitly.
+
+On a later request, an exactly compatible native Responses artifact reconstructs the sanitized
+`image_generation_call.result` from ModelFile bytes in request-local memory only. ChatGPT OAuth sends
+that reconstructed result in its full `store=false` request. Cross-adapter or incompatible replay
+emits a bounded provider-result marker plus the FilePart lowered as rich image input when supported, or
+the normal explicit unavailable-image placeholder otherwise.
 
 Each output stream owns one shared provider-tool activity accumulator. OpenAI SDK and LiteLLM
 normalizers extract adapter-native observations locally, normalize stable call identity and semantic
@@ -750,6 +772,9 @@ Primary checks:
 
 ## Changelog
 
+- **2026-07-17** — v95. Restored exhaustive `image_generation` lowering, dual file admission,
+  request-local replay, and continuation-safe sanitization across OpenAI SDK, ChatGPT OAuth, and
+  LiteLLM.
 - **2026-07-17** — v94. Added execution-owned persistent OpenAI Responses WebSocket sampling,
   SessionRunner-scoped HTTP fallback, shared failed-Run retry handling, and transport-aware
   continuation and watchdog behavior.
@@ -863,6 +888,9 @@ updated by the user.
 
 ## Changelog
 
+- **2026-07-17** (spec_version 95) — Restored exhaustive `image_generation` lowering, dual file
+  admission, request-local replay, and continuation-safe sanitization across OpenAI SDK, ChatGPT
+  OAuth, and LiteLLM.
 - **2026-07-17** (spec_version 94) — Added execution-owned persistent OpenAI Responses WebSocket
   sampling, SessionRunner-scoped HTTP fallback, shared failed-Run retry handling, and transport-aware
   continuation and watchdog behavior.
