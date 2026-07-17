@@ -14,6 +14,7 @@ from openai.types.responses import (
     Response,
     ResponseCompletedEvent,
     ResponseErrorEvent,
+    ResponseFailedEvent,
     ResponseFileSearchToolCall,
     ResponseFunctionWebSearch,
     ResponseOutputItemAddedEvent,
@@ -26,14 +27,14 @@ from openai.types.responses import (
     ResponseWebSearchCallCompletedEvent,
     ResponseWebSearchCallInProgressEvent,
 )
+from openai.types.responses.response_error import ResponseError
 from openai.types.responses.response_function_web_search import ActionSearch
-from openai.types.responses.response_input_param import ResponseInputParam
 from openai.types.responses.response_output_item import ImageGenerationCall
 from openai.types.responses.response_usage import (
     InputTokensDetails,
     OutputTokensDetails,
 )
-from pydantic import TypeAdapter, ValidationError
+from pydantic import ValidationError
 from websockets.datastructures import Headers
 from websockets.exceptions import InvalidStatus
 from websockets.http11 import Response as WebSocketHTTPResponse
@@ -72,7 +73,12 @@ from azents.engine.model_stream import (
     ModelStreamTimeoutPolicy,
     close_stream_response,
 )
-from azents.engine.run.errors import ModelCallError, ModelStreamTimeoutError
+from azents.engine.run.errors import (
+    ModelCallError,
+    ModelStreamTimeoutError,
+    NonRetryableModelCallError,
+    TransientModelCallError,
+)
 from azents.engine.run.model_transport import (
     InMemoryModelTransportState,
     ModelTransportKey,
@@ -150,6 +156,23 @@ def _completed_event(response: Response | None = None) -> ResponseCompletedEvent
         response=response or _response(),
         sequence_number=2,
         type="response.completed",
+    )
+
+
+def _failed_event(*, code: str, message: str) -> ResponseFailedEvent:
+    error = ResponseError.model_construct(code=code, message=message)
+    response = _response().model_copy(
+        update={
+            "error": error,
+            "output": [],
+            "status": "failed",
+            "usage": None,
+        }
+    )
+    return ResponseFailedEvent(
+        response=response,
+        sequence_number=2,
+        type="response.failed",
     )
 
 
@@ -472,13 +495,10 @@ def test_chatgpt_oauth_rehydrates_image_generation_with_store_false() -> None:
     assert request.input == [
         {
             "type": "image_generation_call",
-            "id": "image-call-1",
             "status": "completed",
             "result": "cmVoeWRyYXRlZA==",
         }
     ]
-    validated_input = TypeAdapter(ResponseInputParam).validate_python(request.input)
-    assert validated_input == request.input
 
 
 def test_openai_sdk_rehydrates_image_generation_result() -> None:
@@ -1257,7 +1277,10 @@ async def test_authentication_handshake_failure_does_not_activate_http_fallback(
         inference_profile=None,
     )
 
-    with pytest.raises(ModelCallError, match="^Model authentication failed\\.$"):
+    with pytest.raises(
+        NonRetryableModelCallError,
+        match="^Model authentication failed\\.$",
+    ) as raised:
         _ = [
             event
             async for event in adapter.stream(
@@ -1268,6 +1291,9 @@ async def test_authentication_handshake_failure_does_not_activate_http_fallback(
             )
         ]
 
+    assert raised.value.failure_code == (
+        "openai_websocket_handshake_authentication_failed"
+    )
     assert state.websocket_allowed(key) is True
     await adapter.close()
 
@@ -1340,6 +1366,119 @@ async def test_official_sdk_wire_request_preserves_presence_and_stop() -> None:
     assert "store" not in captured_body
     assert "tools" not in captured_body
     assert "previous_response_id" not in captured_body
+
+
+async def test_official_sdk_wire_request_omits_unstored_generated_image_id() -> None:
+    """Match the ChatGPT stateless replay body rather than SDK input typing."""
+    captured_body: dict[str, object] = {}
+
+    async def respond(request: httpx.Request) -> httpx.Response:
+        body = json.loads((await request.aread()).decode())
+        assert isinstance(body, dict)
+        captured_body.update(body)
+        event = _completed_event().model_dump_json(exclude_unset=True)
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            content=f"data: {event}\n\ndata: [DONE]\n\n",
+            request=request,
+        )
+
+    lowerer = OpenAIResponsesLowerer(
+        provider="chatgpt_oauth",
+        model="gpt-5.1",
+        provider_id=LLMProvider.CHATGPT_OAUTH,
+        credential_kwargs={},
+        model_file_resolver=_StaticModelFileResolver(),
+    )
+    artifact = NativeArtifact(
+        compat_key=build_native_compat_key(
+            adapter="openai",
+            native_format="responses",
+            provider="chatgpt_oauth",
+            model="gpt-5.1",
+            schema_version="1",
+        ),
+        adapter="openai",
+        native_format="responses",
+        provider="chatgpt_oauth",
+        model="gpt-5.1",
+        schema_version="1",
+        item={
+            "type": "image_generation_call",
+            "id": "image-call-1",
+            "status": "completed",
+        },
+    )
+    event = Event(
+        id="4" * 32,
+        session_id="session-1",
+        kind=EventKind.PROVIDER_TOOL_RESULT,
+        payload=ProviderToolResultPayload(
+            call_id="image-call-1",
+            name="image_generation",
+            status="completed",
+            output=[
+                FileOutputPart(
+                    model_file_id="model-file-1",
+                    media_type="image/jpeg",
+                    name="generated.jpg",
+                    size=123,
+                    kind="image",
+                )
+            ],
+            native_artifact=artifact,
+        ),
+        created_at=datetime.datetime.now(datetime.UTC),
+    )
+    request = lowerer.lower([event], model="gpt-5.1")
+    sdk_client = AsyncOpenAI(
+        api_key="synthetic-test-key",
+        base_url="https://provider.example/v1",
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(respond)),
+    )
+    adapter = OpenAIResponsesModelAdapter(
+        client=OpenAISDKResponsesClient(sdk_client, websocket_headers=None),
+        continuation_planner=None,
+        transport_state=None,
+        transport_key=None,
+        websocket_endpoint_eligible=False,
+    )
+    watchdog = make_test_model_stream_watchdog()
+    policy = watchdog.resolve_policy(
+        provider="chatgpt_oauth",
+        model=request.model,
+        inference_profile=None,
+    )
+    try:
+        _ = [
+            response_event
+            async for response_event in adapter.stream(
+                request,
+                watchdog=watchdog,
+                timeout_policy=policy,
+                call_context=ModelStreamCallContext(
+                    call_kind="sampling",
+                    provider="chatgpt_oauth",
+                    model=request.model,
+                    session_id="session-1",
+                    run_id="run-1",
+                    attempt_number=None,
+                    check_stop=None,
+                ),
+            )
+        ]
+    finally:
+        await adapter.close()
+
+    assert captured_body["store"] is False
+    assert captured_body["input"] == [
+        {
+            "type": "image_generation_call",
+            "status": "completed",
+            "result": "cmVoeWRyYXRlZA==",
+        }
+    ]
 
 
 def test_typed_normalizer_requires_exact_completed_wire_type(
@@ -1663,7 +1802,7 @@ def test_typed_normalizer_accepts_omitted_usage_details(
 
 
 def test_typed_terminal_error_fails_without_provider_body() -> None:
-    """Typed error events expose a fixed safe failure message."""
+    """Unknown typed errors remain retryable without exposing provider text."""
     normalizer = OpenAIResponsesOutputNormalizer(
         provider="openai",
         model="gpt-5.1-codex",
@@ -1679,8 +1818,75 @@ def test_typed_terminal_error_fails_without_provider_body() -> None:
         )
     )
 
-    with pytest.raises(ModelCallError, match="^Model call failed\\.$"):
+    with pytest.raises(
+        TransientModelCallError,
+        match="^Model call failed\\.$",
+    ) as raised:
         output.complete()
+
+    assert raised.value.failure_code == "openai_response_error_synthetic_error"
+    assert "provider body" not in str(raised.value)
+
+
+def test_typed_failed_event_classifies_invalid_prompt_without_retry(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Deterministic provider rejection fails once with safe diagnostics."""
+    caplog.set_level(logging.WARNING)
+    normalizer = OpenAIResponsesOutputNormalizer(
+        provider="chatgpt_oauth",
+        model="gpt-5.6-terra",
+    )
+    output = normalizer.start("session-1")
+    output.process_event(
+        _failed_event(
+            code="invalid_prompt",
+            message="provider body must not be surfaced",
+        )
+    )
+
+    with pytest.raises(
+        NonRetryableModelCallError,
+        match="^The model provider rejected the request\\.$",
+    ) as raised:
+        output.complete()
+
+    assert raised.value.failure_code == "openai_response_failed_invalid_prompt"
+    assert "provider body" not in str(raised.value)
+    record = next(
+        record
+        for record in caplog.records
+        if record.message == "OpenAI Responses terminal failure received"
+    )
+    assert record.__dict__["session_id"] == "session-1"
+    assert record.__dict__["openai_responses_terminal_event"] == "response.failed"
+    assert record.__dict__["openai_responses_terminal_code"] == "invalid_prompt"
+    assert record.__dict__["openai_responses_response_id"] == "resp_synthetic"
+    assert "provider body" not in record.getMessage()
+
+
+def test_typed_failed_event_classifies_rate_limit_as_transient() -> None:
+    """Retryable provider failures retain a stable operational code."""
+    normalizer = OpenAIResponsesOutputNormalizer(
+        provider="chatgpt_oauth",
+        model="gpt-5.6-terra",
+    )
+    output = normalizer.start("session-1")
+    output.process_event(
+        _failed_event(
+            code="rate_limit_exceeded",
+            message="retry after provider-private detail",
+        )
+    )
+
+    with pytest.raises(
+        TransientModelCallError,
+        match="^The model provider rate limit was exceeded\\.$",
+    ) as raised:
+        output.complete()
+
+    assert raised.value.failure_code == "openai_response_failed_rate_limit_exceeded"
+    assert "provider-private" not in str(raised.value)
 
 
 def test_cross_adapter_artifacts_use_canonical_fallback() -> None:
@@ -1775,7 +1981,10 @@ async def test_authentication_error_is_mapped_without_raw_provider_text() -> Non
         inference_profile=None,
     )
 
-    with pytest.raises(ModelCallError, match="^Model authentication failed\\.$"):
+    with pytest.raises(
+        NonRetryableModelCallError,
+        match="^Model authentication failed\\.$",
+    ) as raised:
         _ = [
             event
             async for event in adapter.stream(
@@ -1793,6 +2002,10 @@ async def test_authentication_error_is_mapped_without_raw_provider_text() -> Non
                 ),
             )
         ]
+
+    assert raised.value.failure_code == "openai_http_authentication_failed"
+    assert raised.value.__dict__["provider_code"] == "invalid_api_key"
+    assert raised.value.__dict__["status_code"] == 401
 
 
 async def test_missing_previous_response_retries_full_input_once(

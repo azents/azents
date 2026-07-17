@@ -49,7 +49,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ChatView.tsx
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
 last_verified_at: 2026-07-17
-spec_version: 96
+spec_version: 98
 ---
 
 # Agent Execution Loop
@@ -95,7 +95,10 @@ optional canonical JSON arguments. A normally exhausted Responses stream must co
 normalizer requires both the documented SDK event class and exact wire discriminator;
 `response.incomplete`, `response.failed`, and `error` outcomes, plus EOF without a recognized
 terminal event, raise `ModelCallError` before durable model events or markers are appended and flow
-through the failed-run retry/finalization boundary. Completed output items may reconstruct a
+through the failed-run retry/finalization boundary. Typed terminal provider codes are retained only as
+bounded operational metadata: rate-limit, server, and timeout failures are transient; deterministic
+request, policy, quota, context-window, image-input, output-limit, and content-filter failures are
+non-retryable. Raw provider message bodies are neither logged nor surfaced to users. Completed output items may reconstruct a
 successfully completed response but do not independently prove response completion. When the
 completed response includes the optional provider extension `end_turn` with the exact boolean value
 `false`, normalization marks the successful model step as needing follow-up. The execution loop
@@ -298,10 +301,11 @@ history; for client-tool output, the committed `executing_tools` phase may perfo
 first. A later model turn, including tool-less `end_turn = false` continuation, starts at failed
 attempt 1 with a fresh retry budget. WebSocket and REST live projections keep `run.retry` while the
 retry is active and remove it after successful output admission or terminal transition.
-Known non-retryable failures, such as
-deterministic fixture strict-mode `no_fixture_match`, are classified with `retryability =
-non_retryable`, receive `backoff_seconds = 0`, and are finalized on the first failed attempt instead
-of waiting for the retry budget. When retry is
+Known non-retryable failures, including deterministic fixture strict-mode `no_fixture_match` and
+typed provider request, authentication, authorization, policy, quota, context-window, image-input,
+output-limit, and content-filter failures, are classified with `retryability = non_retryable`, receive
+`backoff_seconds = 0`, and are finalized on the first failed attempt instead of waiting for the retry
+budget. When retry is
 exhausted, when a non-retryable failure is observed, or when stop is requested while retry is waiting,
 `FailedRunErrorFinalizer` promotes the latest attempt to durable failed-run output by delegating
 durable append and terminal run updates to the engine failed-run event store. That event-store
@@ -432,7 +436,7 @@ metadata and identity reuse with different bytes fails explicitly.
 
 On a later request, an exactly compatible native Responses artifact reconstructs the sanitized
 `image_generation_call.result` from ModelFile bytes in request-local memory only. ChatGPT OAuth sends
-that reconstructed result and its required provider item ID in the full `store=false` request.
+that reconstructed result without the prior provider item ID in the full `store=false` request.
 Cross-adapter or incompatible replay
 emits a bounded provider-result marker plus the FilePart lowered as rich image input when supported, or
 the normal explicit unavailable-image placeholder otherwise.
@@ -889,6 +893,12 @@ updated by the user.
 
 ## Changelog
 
+- **2026-07-17** (spec_version 98) — Classified safe typed provider terminal failures so deterministic
+  errors finalize immediately while transient provider failures retain retry behavior and stable
+  operational codes.
+- **2026-07-17** (spec_version 97) — Omitted provider item IDs from complete `store=false` replay,
+  including reconstructed generated-image calls, while preserving call continuity fields and image
+  bytes.
 - **2026-07-17** (spec_version 96) — Preserved the required provider item ID when replaying a
   generated image in ChatGPT OAuth `store=false` requests.
 - **2026-07-17** (spec_version 95) — Restored exhaustive `image_generation` lowering, dual file

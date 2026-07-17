@@ -977,14 +977,14 @@ class TestLiteLLMResponsesLowerer:
 
         request = lowerer.lower(transcript, model="gpt-5.1")
 
-        assert request.input == [
-            {
-                "type": "image_generation_call",
-                "id": "image-call-1",
-                "status": "completed",
-                "result": "cmVoeWRyYXRlZA==",
-            }
-        ]
+        expected_item: dict[str, object] = {
+            "type": "image_generation_call",
+            "status": "completed",
+            "result": "cmVoeWRyYXRlZA==",
+        }
+        if provider_id != LLMProvider.CHATGPT_OAUTH:
+            expected_item["id"] = "image-call-1"
+        assert request.input == [expected_item]
         assert request.kwargs.get("store") is (
             False if provider_id == LLMProvider.CHATGPT_OAUTH else None
         )
@@ -1366,8 +1366,8 @@ class TestLiteLLMResponsesLowerer:
 
         assert request.input == [raw_item]
 
-    def test_masks_native_provider_item_id_when_store_is_false(self) -> None:
-        """Mask unstored provider response item ids consistently."""
+    def test_omits_native_provider_item_id_when_store_is_false(self) -> None:
+        """Omit unstored provider response item ids consistently."""
         lowerer = LiteLLMResponsesLowerer(
             provider="openai",
             model="gpt-5.1",
@@ -1388,13 +1388,13 @@ class TestLiteLLMResponsesLowerer:
 
         request = lowerer.lower(transcript, model="gpt-5.1")
 
-        assert request.input == [{"type": "reasoning", "id": None, "summary": []}]
+        assert request.input == [{"type": "reasoning", "summary": []}]
         assert request.kwargs["store"] is False
 
-    def test_masks_native_item_id_but_keeps_call_id_when_store_is_false(
+    def test_omits_native_item_id_but_keeps_call_id_when_store_is_false(
         self,
     ) -> None:
-        """Preserve tool continuity while masking unstored provider item ids."""
+        """Preserve tool continuity while omitting unstored provider item ids."""
         lowerer = LiteLLMResponsesLowerer(
             provider="openai",
             model="gpt-5.1",
@@ -1425,7 +1425,6 @@ class TestLiteLLMResponsesLowerer:
         assert request.input == [
             {
                 "type": "function_call",
-                "id": None,
                 "call_id": "call-1",
                 "name": "read_text",
                 "arguments": "{}",
@@ -1433,8 +1432,8 @@ class TestLiteLLMResponsesLowerer:
         ]
         assert request.kwargs["store"] is False
 
-    def test_masks_all_response_item_ids_when_store_is_false(self) -> None:
-        """Mask ids on native and canonical input items for unstored responses."""
+    def test_omits_all_response_item_ids_when_store_is_false(self) -> None:
+        """Omit ids on native and canonical input items for unstored responses."""
         lowerer = LiteLLMResponsesLowerer(
             provider="openai",
             model="gpt-5.1",
@@ -1498,7 +1497,6 @@ class TestLiteLLMResponsesLowerer:
             {"role": "user", "content": "hello"},
             {
                 "type": "message",
-                "id": None,
                 "role": "assistant",
                 "content": [
                     {
@@ -1509,7 +1507,6 @@ class TestLiteLLMResponsesLowerer:
             },
             {
                 "type": "function_call",
-                "id": None,
                 "call_id": "call-1",
                 "name": "read_text",
                 "arguments": "{}",

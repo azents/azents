@@ -30,6 +30,12 @@ class TransientModelCallError(ModelCallError):
     failure_code: str
 
 
+class NonRetryableModelCallError(ModelCallError):
+    """Non-retryable model call failure with a stable operational code."""
+
+    failure_code: str
+
+
 class ModelStreamTimeoutError(TransientModelCallError):
     """Azents-owned timeout for one streaming model provider attempt."""
 
