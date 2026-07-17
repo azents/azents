@@ -24,8 +24,6 @@ Design documents are accumulated records and are not listed individually in this
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-07-13 | 7 |
 | [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-07-14 | 40 |
 
-_8 documents_
-
 ## Living Specs — Flow
 
 | Title | Owner | Last Verified At | Spec Version |
@@ -44,8 +42,6 @@ _8 documents_
 | [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-07-17 | 8 |
 | [xAI API Key Provider Flow](spec/flow/xai-api-key.md) | @Hardtack | 2026-07-10 | 1 |
 | [xAI OAuth Flow](spec/flow/xai-oauth.md) | @Hardtack | 2026-07-10 | 3 |
-
-_14 documents_
 
 ## Architecture Decision Records (ADR)
 
@@ -221,15 +217,11 @@ _14 documents_
 - [ADR-0164: Materialize Provider-Generated Images as File Resources](adr/0164-materialize-provider-generated-images-as-file-resources.md)
 - [ADR-0165: Make Model Provider Failures Transparent](adr/0165-make-model-provider-failures-transparent.md)
 
-_171 documents_
-
 ## Issues (Bug Tracking)
 
 - [WebSocket write stale design inventory](issues/2026-06-05-websocket-write-stale-design-inventory.md)
 - [Runtime runner stalls after tool result](issues/2026-06-10-runtime-runner-stalls-after-tool-result.md)
 - [Credential provider password reset verification](issues/2026-06-18-credential-password-reset-verification.md)
-
-_3 documents_
 
 ## Notes (Blueprints · Discussion Summaries)
 
@@ -241,18 +233,8 @@ _3 documents_
 - [Session Project Model Research and Discussion Summary](notes/session-project-model-research.md)
 - [Subagent Prompt Hardening Notes](notes/subagent-prompt-hardening-2026-07-09.md)
 
-_7 documents_
-
 ## Documentation Rules · Overview
 
 - [azents documentation structure](AGENTS.md)
 - [azents Documentation Claude Instructions](CLAUDE.md)
 - [azents](README.md)
-
-_3 documents_
-
----
-
-## Statistics
-
-- Total documents: 470

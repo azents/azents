@@ -202,8 +202,6 @@ def render_main_index(docs: list[DocInfo], docs_root: Path, project_name: str) -
             for doc in filtered:
                 lines.append(f"- {link(doc)}")
         lines.append("")
-        lines.append(f"_{len(filtered)} documents_")
-        lines.append("")
 
     domain_specs = [
         doc for doc in docs if doc.top_dir == "spec" and doc.spec_type == "domain"
@@ -242,11 +240,6 @@ def render_main_index(docs: list[DocInfo], docs_root: Path, project_name: str) -
     roots = [doc for doc in docs if not doc.top_dir]
     section("Documentation Rules · Overview", roots)
 
-    lines.append("---")
-    lines.append("")
-    lines.append("## Statistics")
-    lines.append("")
-    lines.append(f"- Total documents: {len(docs)}")
     while lines and lines[-1] == "":
         lines.pop()
     return "\n".join(lines) + "\n"
