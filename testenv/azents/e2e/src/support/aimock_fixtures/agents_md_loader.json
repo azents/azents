@@ -1362,7 +1362,7 @@
         "endpoint": "chat",
         "userMessage": "Watchdog user stop preserves partial",
         "hasToolResult": false,
-        "sequenceIndex": 0
+        "turnIndex": 0
       },
       "response": {
         "content": "WATCHDOG_STOP_PARTIAL abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz"
@@ -1379,7 +1379,7 @@
         "endpoint": "chat",
         "userMessage": "Watchdog user stop preserves partial",
         "hasToolResult": false,
-        "sequenceIndex": 1
+        "turnIndex": 1
       },
       "response": {
         "content": "WATCHDOG_STOP_RETRY_RECOVERED"
