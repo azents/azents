@@ -1118,10 +1118,10 @@ def _drop_orphan_tool_outputs(
 def _mask_response_item_ids_for_unstored_request(
     input_items: Sequence[dict[str, object]],
 ) -> list[dict[str, object]]:
-    """Set response item ids to null when response items are unstored."""
+    """Mask unstored response ids except required generated-image call ids."""
     normalized: list[dict[str, object]] = []
     for item in input_items:
-        if "id" not in item:
+        if "id" not in item or item.get("type") == "image_generation_call":
             normalized.append(item)
             continue
         masked = dict(item)

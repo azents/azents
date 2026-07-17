@@ -926,11 +926,20 @@ class TestLiteLLMResponsesLowerer:
             ],
         }
 
-    def test_rehydrates_compatible_image_generation_result(self) -> None:
-        """Restore generated image Base64 only in same-native request memory."""
+    @pytest.mark.parametrize(
+        "provider_id",
+        [None, LLMProvider.CHATGPT_OAUTH],
+        ids=["stored", "chatgpt-store-false"],
+    )
+    def test_rehydrates_compatible_image_generation_result(
+        self,
+        provider_id: LLMProvider | None,
+    ) -> None:
+        """Restore a valid generated-image item in same-native request memory."""
         lowerer = LiteLLMResponsesLowerer(
             provider="openai",
             model="gpt-5.1",
+            provider_id=provider_id,
             model_file_resolver=_StaticModelFileResolver(
                 ModelFileLoweringContent(
                     data_url="data:image/jpeg;base64,cmVoeWRyYXRlZA=="
@@ -974,6 +983,9 @@ class TestLiteLLMResponsesLowerer:
                 "result": "cmVoeWRyYXRlZA==",
             }
         ]
+        assert request.kwargs.get("store") is (
+            False if provider_id == LLMProvider.CHATGPT_OAUTH else None
+        )
 
     def test_cross_adapter_image_generation_uses_rich_file_fallback(self) -> None:
         """Lower incompatible generated output through shared image policy."""
