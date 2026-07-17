@@ -34,7 +34,6 @@ from azents.engine.events.litellm_responses import (
     LiteLLMResponsesLowerer,
     LiteLLMResponsesModelAdapter,
     LiteLLMResponsesOutputNormalizer,
-    UnsupportedRequiredBuiltinToolError,
     coerce_litellm_completed_response_for_logging,
     guard_litellm_streaming_logging,
 )
@@ -47,6 +46,9 @@ from azents.engine.events.protocols import (
     ReasoningDeltaProjection,
 )
 from azents.engine.events.responses_continuation import ResponsesContinuationPlanner
+from azents.engine.events.responses_lowering import (
+    UnsupportedRequiredBuiltinToolError,
+)
 from azents.engine.events.system_reminders import (
     format_compaction_summary_reminder,
     format_goal_continuation_reminder,
