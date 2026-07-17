@@ -5,6 +5,7 @@ from collections.abc import Callable
 
 import azentsadminclient
 import azentspublicclient
+import pytest
 import requests
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
@@ -422,6 +423,7 @@ class TestModelStreamWatchdog:
             _IDLE_FAILED_PREFIX not in content for content in message_contents(payload)
         )
 
+    @pytest.mark.web_surface
     def test_absolute_cap_discards_failed_prefix_before_retry_and_browser_reload(
         self,
         public_api_client: azentspublicclient.ApiClient,

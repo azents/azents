@@ -25,6 +25,7 @@ jobs:
     outputs:
       python: ${{ github.event_name != 'pull_request' || steps.filter.outputs.python == 'true' }}
       python_e2e: ${{ github.event_name != 'pull_request' || steps.filter.outputs['python-e2e'] == 'true' }}
+      web_surface_e2e: ${{ github.event_name != 'pull_request' || steps.filter.outputs['web-surface-e2e'] == 'true' }}
       typescript: ${{ github.event_name != 'pull_request' || steps.filter.outputs.typescript == 'true' }}
       helm: ${{ github.event_name != 'pull_request' || steps.filter.outputs.helm == 'true' }}
       docker: ${{ github.event_name != 'pull_request' || steps.filter.outputs.docker == 'true' }}
@@ -62,6 +63,20 @@ jobs:
               - 'python/libs/azents-public-client/**'
               - 'python/libs/azents-runtime-control/**'
               - 'testenv/azents/**'
+            web-surface-e2e:
+              - '.dockerignore'
+              - '.github/workflows/**'
+              - 'azents.Dockerfile'
+              - 'azents-admin-web.Dockerfile'
+              - 'azents-web.Dockerfile'
+              - 'proto/**'
+              - 'python/apps/azents/**'
+              - 'python/libs/az-common/**'
+              - 'python/libs/azents-admin-client/**'
+              - 'python/libs/azents-public-client/**'
+              - 'python/libs/azents-runtime-control/**'
+              - 'testenv/azents/**'
+              - 'typescript/**'
             typescript:
               - '.github/workflows/**'
               - 'azents-admin-web.Dockerfile'
@@ -187,7 +202,7 @@ jobs:
           exit 1
 
   ci_python_e2e_run:
-    name: ci-python-e2e-run
+    name: ci-deterministic-e2e-run
     needs: changes
     if: needs.changes.outputs.python_e2e == 'true'
     runs-on: ubuntu-latest
@@ -221,34 +236,68 @@ jobs:
       - name: Run deterministic E2E
         run: |
           cd testenv/azents/e2e
-          uv run pytest -vv -m "not live_external and not runtime_provider" ./src
+          uv run pytest -vv \
+            -m "not live_external and not runtime_provider and not web_surface" \
+            ./src
+
+  ci_web_surface_e2e_run:
+    name: ci-web-surface-e2e-run
+    needs: changes
+    if: needs.changes.outputs.web_surface_e2e == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+      - name: Setup Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.14"
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+      - name: Install dependencies
+        run: |
+          cd testenv/azents/e2e
+          uv sync
+      - name: Run Web Surface E2E
+        run: |
+          cd testenv/azents/e2e
+          uv run pytest -vv \
+            -m "web_surface and not live_external and not runtime_provider" \
+            ./src
 
   ci-python-e2e:
     name: ci-python-e2e
     needs:
       - changes
       - ci_python_e2e_run
+      - ci_web_surface_e2e_run
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - name: Gate Python E2E result
+      - name: Gate E2E results
         run: |
           changes_result='${{ needs.changes.result }}'
-          changed='${{ needs.changes.outputs.python_e2e }}'
-          result='${{ needs.ci_python_e2e_run.result }}'
+          deterministic_changed='${{ needs.changes.outputs.python_e2e }}'
+          deterministic_result='${{ needs.ci_python_e2e_run.result }}'
+          web_surface_changed='${{ needs.changes.outputs.web_surface_e2e }}'
+          web_surface_result='${{ needs.ci_web_surface_e2e_run.result }}'
           if [ "$changes_result" != 'success' ]; then
             echo "changes job failed or was skipped: $changes_result"
             exit 1
           fi
-          if [ "$changed" != 'true' ]; then
-            echo 'Python E2E scope unchanged; passing.'
-            exit 0
+          if [ "$deterministic_changed" = 'true' ] \
+            && [ "$deterministic_result" != 'success' ]; then
+            echo "Deterministic E2E result was: $deterministic_result"
+            exit 1
           fi
-          if [ "$result" = 'success' ]; then
-            exit 0
+          if [ "$web_surface_changed" = 'true' ] \
+            && [ "$web_surface_result" != 'success' ]; then
+            echo "Web Surface E2E result was: $web_surface_result"
+            exit 1
           fi
-          echo "Python E2E scope changed but ci-python-e2e-run result was: $result"
-          exit 1
+          echo 'All changed E2E scopes passed.'
 
   ci_typescript_run:
     name: ci-typescript-run

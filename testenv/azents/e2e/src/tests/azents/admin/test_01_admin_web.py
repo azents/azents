@@ -145,6 +145,7 @@ def _user_id_by_email(
     raise AssertionError("created user was not returned by the Admin API")
 
 
+@pytest.mark.web_surface
 def test_dual_web_auth_link_logout_self_revoke_and_path_routing(
     browser_driver: WebDriver,
     azents_main_web_url: str,

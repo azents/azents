@@ -19,11 +19,12 @@ cd testenv/azents/e2e
 uv run pytest ./src/tests/azents/public/test_health.py
 ```
 
-Deterministic CI translated AWS/ECR credential translated next translated translated runtranslated.
+Required CI uses separate credential-free lanes for deterministic product behavior and deployed web surfaces.
 
 ```bash
 cd testenv/azents/e2e
-uv run pytest -vv -m "not live_external" ./src
+uv run pytest -vv -m "not live_external and not runtime_provider and not web_surface" ./src
+uv run pytest -vv -m "web_surface and not live_external and not runtime_provider" ./src
 ```
 
 Live/external verifytranslated deterministic CI translated translated translated. PR translated `azents-live-e2e` label translated
