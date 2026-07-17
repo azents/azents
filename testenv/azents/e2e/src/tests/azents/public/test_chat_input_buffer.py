@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 import azentsadminclient
 import azentspublicclient
+import pytest
 import requests
 from azentspublicclient.api.agent_v1_api import AgentV1Api
 from azentspublicclient.api.llm_provider_integration_v1_api import (
@@ -519,14 +520,14 @@ def _wait_for_history_user_message_id(
     raise TimeoutError(f"user_message id was not observed: {content}, {last_payload!r}")
 
 
-def _wait_for_interrupted_idle_state(
+def _wait_for_interrupted_stopped_state(
     *,
     server_url: str,
     token: str,
     session_id: str,
     timeout: float = 120,
 ) -> dict[str, object]:
-    """REST history/live t interrupted marker t idle run t t."""
+    """Wait for durable interruption and recoverable stopped live state."""
     deadline = time.monotonic() + timeout
     last_payload: dict[str, object] | None = None
     while time.monotonic() < deadline:
@@ -541,13 +542,24 @@ def _wait_for_interrupted_idle_state(
             session_id=session_id,
         )
         last_payload = {"history": history_payload, "live": live_payload}
+        run_payload = live_payload.get("run")
+        if run_payload is None:
+            time.sleep(0.5)
+            continue
+        run = _object_item(run_payload, label="recoverable stopped run")
+        recovery_payload = run.get("recovery")
+        if recovery_payload is None:
+            time.sleep(0.5)
+            continue
+        recovery = _object_item(recovery_payload, label="stopped run recovery")
         if (
             "interrupted" in _run_marker_statuses(history_payload)
-            and live_payload.get("run") is None
+            and run.get("status") == "stopped"
+            and recovery.get("source_run_id") == run.get("run_id")
         ):
             return history_payload
         time.sleep(0.5)
-    raise TimeoutError(f"interrupted idle state was not observed: {last_payload!r}")
+    raise TimeoutError(f"interrupted stopped state was not observed: {last_payload!r}")
 
 
 def _wait_for_idle_rest_state(
@@ -785,23 +797,38 @@ class TestChatInputBuffer:
         self,
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
+        request: pytest.FixtureRequest,
         azents_public_server_url: str,
-        azents_engine_worker_container: object,
+        azents_engine_worker_container: DockerContainer,
         mock_openai_url: str,
     ) -> None:
         """Promote multiple running-session follow-ups in FIFO order."""
-        del azents_engine_worker_container
         _reset_mock_openai(mock_openai_url)
         workspace = _setup_workspace(
             public_api_client,
             admin_api_client,
             azents_public_server_url,
         )
+        release_file_path = f"/tmp/azents-runtime-hook-qa-{unique()}"
+        _set_release_file(
+            azents_engine_worker_container,
+            release_file_path,
+            present=False,
+        )
+
+        def release_tool() -> None:
+            _set_release_file(
+                azents_engine_worker_container,
+                release_file_path,
+                present=True,
+            )
+
+        request.addfinalizer(release_tool)
         agent_id = _create_agent(
             public_api_client,
             workspace,
-            delay_seconds=5.0,
-            release_file_path=None,
+            delay_seconds=0.0,
+            release_file_path=release_file_path,
         )
 
         initial_response = _write_new_session_message(
@@ -823,6 +850,10 @@ class TestChatInputBuffer:
             session_id=session_id,
             expected_message=_INITIAL_MESSAGE,
             timeout=60,
+        )
+        _wait_for_tool_release_barrier(
+            azents_engine_worker_container,
+            release_file_path,
         )
 
         client_request_id = f"follow-up-{unique()}"
@@ -877,6 +908,7 @@ class TestChatInputBuffer:
         )
         assert _FOLLOW_UP_MESSAGE not in _message_contents(history_payload)
         assert _SECOND_FOLLOW_UP_MESSAGE not in _message_contents(history_payload)
+        release_tool()
 
         final_payload = _wait_for_rest_state(
             server_url=azents_public_server_url,
@@ -1046,7 +1078,7 @@ class TestChatInputBuffer:
         )
 
         assert stop_response["session_id"] == session_id
-        history_payload = _wait_for_interrupted_idle_state(
+        history_payload = _wait_for_interrupted_stopped_state(
             server_url=azents_public_server_url,
             token=workspace.token,
             session_id=session_id,

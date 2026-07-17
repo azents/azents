@@ -101,6 +101,8 @@ def _setup_profile_agent(
 
     def populated_entries() -> list[dict[str, object]] | None:
         response = requests.get(entries_url, headers=_headers(token), timeout=10)
+        if response.status_code == 404:
+            return None
         response.raise_for_status()
         entries = _objects(
             _response_object(response).get("entries"),
