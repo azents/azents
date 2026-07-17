@@ -8,14 +8,14 @@ tags: [backend, engine, llm, openai, oauth, testing, websocket]
 
 ## Scope
 
-This report validates implementation commit `95e357c5` against ADR-0150 and the OpenAI Responses WebSocket transport design. Validation covers dependency resolution, formatting, linting, type safety, deterministic backend behavior, worker retry propagation, timeout cleanup, custom-endpoint HTTP compatibility, and the planned product E2E selection where the local environment permits it.
+This report validates implementation commit `d09ccfee` against ADR-0150 and the OpenAI Responses WebSocket transport design. Validation covers dependency resolution, formatting, linting, type safety, deterministic backend behavior, worker retry ownership and propagation, timeout cleanup, custom-endpoint HTTP compatibility, and the product E2E suite in Docker-enabled CI.
 
 No external provider call was made. No credentials, account headers, provider payloads, response identifiers, model output, or raw WebSocket frames were captured as evidence.
 
 ## Environment
 
 - Branch: `feature/openai-responses-websocket-validation`
-- Implementation commit: `95e357c5`
+- Implementation commit: `d09ccfee`
 - Python: 3.14.6
 - OpenAI SDK: 2.45.0
 - WebSockets: 15.0.1
@@ -33,6 +33,7 @@ No external provider call was made. No credentials, account headers, provider pa
 | Backend tests | `uv run pytest` | Passed: 1,373 passed, 391 skipped |
 | Focused transport and worker regression | OpenAI adapter, watchdog, engine adapter, worker executor, and worker tests | Passed: 132 passed |
 | E2E static quality | `uv run ruff check .`, `uv run ruff format --check .`, and `uv run pyright .` from `testenv/azents/e2e` | Passed |
+| Docker-enabled deterministic E2E | CI run `29553142775`, job `87799775860` | Passed: 164 passed, 11 skipped, 7 deselected |
 | Documentation validation | `uv run python scripts/gen_docs_index.py --docs-root docs/azents --project-name azents --check` | Passed before this report; rerun after report generation |
 | Diff integrity | `git diff --check` | Passed before this report; rerun after report generation |
 
@@ -50,6 +51,7 @@ The backend suite and focused tests verify the following accepted behavior:
 - Connect, send, receive, protocol, and decode failures invalidate the socket, activate keyed HTTP-only state, and surface a safe transient failure code through the failed-Run boundary.
 - Authentication, authorization, quota, provider-availability, User Stop, cancellation, and watchdog timeout paths do not activate sticky HTTP fallback.
 - Application connect, parsed-event idle, and absolute-attempt deadlines close abandoned WebSocket work through the existing watchdog cleanup boundary.
+- The operation-scoped OpenAI SDK client has automatic HTTP retries disabled, so failed-Run retries remain the only provider retry budget.
 - No SDK automatic reconnect or inline WebSocket-to-HTTP replay is enabled.
 
 ## Product E2E Selection
@@ -62,9 +64,9 @@ The planned local E2E selection included:
 - REST User Stop;
 - model-stream idle, absolute, retry-exhaustion, compaction, and Session-title timeout scenarios.
 
-Pytest collected all selected scenarios, but the session fixture could not create its Testcontainers network because the runtime has no Docker socket. All 12 selected scenarios stopped during environment setup before a product assertion ran. This is an environment prerequisite failure, not an observed product failure.
+The local validation runtime had no Docker socket, so its focused 12-scenario selection stopped during Testcontainers setup before product assertions ran. The Docker-enabled CI rerun then completed the deterministic E2E job successfully with 164 passed, 11 skipped, and 7 deselected tests.
 
-The existing AIMock fixture sets `AZ_OPENAI_BASE_URL` to a custom HTTP endpoint, so the selected CI E2E remains the intended regression proof that the deployment-default WebSocket setting does not alter custom-endpoint chat behavior. The E2E selection should run in normal CI or another Docker-enabled environment.
+The AIMock fixture sets `AZ_OPENAI_BASE_URL` to a custom HTTP endpoint. The passing CI suite therefore verifies that the deployment-default WebSocket setting preserves custom-endpoint HTTP behavior, including the failed-Run retry recovery scenario that originally exposed SDK-owned HTTP retries consuming multiple fixture responses.
 
 ## External Validation
 
@@ -76,4 +78,4 @@ The implementation and tests log only bounded operational fields such as provide
 
 ## Conclusion
 
-All available deterministic backend, dependency, formatting, linting, type, and static E2E checks passed. The implementation matches the accepted ownership, fallback, retry, timeout, continuation, provider rollout, and privacy policy. Product E2E execution remains pending only because Docker is unavailable in the local validation runtime; normal CI is expected to provide the required container environment.
+All deterministic backend, dependency, formatting, linting, type, static E2E, and Docker-enabled product E2E checks passed. The implementation matches the accepted ownership, fallback, retry, timeout, continuation, provider rollout, and privacy policy.
