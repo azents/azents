@@ -1209,7 +1209,16 @@ class _OpenAIResponsesOutputStream:
         ):
             raw_item = _sdk_model_dump(native_event.item)
             if isinstance(raw_item.get("type"), str):
-                self._completed_output_items.append(raw_item)
+                self._completed_output_items.append(
+                    {
+                        **raw_item,
+                        **(
+                            {"output_index": native_event.output_index}
+                            if raw_item.get("type") == "reasoning"
+                            else {}
+                        ),
+                    }
+                )
         elif (
             isinstance(native_event, ResponseFunctionCallArgumentsDeltaEvent)
             and native_event.type == "response.function_call_arguments.delta"
@@ -1227,7 +1236,14 @@ class _OpenAIResponsesOutputStream:
             isinstance(native_event, ResponseReasoningSummaryTextDeltaEvent)
             and native_event.type == "response.reasoning_summary_text.delta"
         ):
-            projections.append(ReasoningDeltaProjection(delta=native_event.delta))
+            projections.append(
+                ReasoningDeltaProjection(
+                    delta=native_event.delta,
+                    item_id=native_event.item_id,
+                    output_index=native_event.output_index,
+                    summary_index=native_event.summary_index,
+                )
+            )
         elif (
             isinstance(native_event, ResponseIncompleteEvent)
             and native_event.type == "response.incomplete"

@@ -1138,8 +1138,20 @@ def _stream_projection_emit(projection: StreamProjection) -> Emit:
                     arguments_delta=arguments_delta,
                 )
             )
-        case ReasoningDeltaProjection(delta=delta):
-            return ephemeral(ReasoningDelta(delta=delta))
+        case ReasoningDeltaProjection(
+            delta=delta,
+            item_id=item_id,
+            output_index=output_index,
+            summary_index=summary_index,
+        ):
+            return ephemeral(
+                ReasoningDelta(
+                    delta=delta,
+                    item_id=item_id,
+                    output_index=output_index,
+                    summary_index=summary_index,
+                )
+            )
         case ProviderToolActivityProjection(
             call_id=call_id,
             name=name,

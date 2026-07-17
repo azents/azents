@@ -34,6 +34,9 @@ async def test_content_deltas_flush_as_single_batch() -> None:
             session_id="session-1",
             kind="content",
             content_index=0,
+            item_id=None,
+            output_index=None,
+            summary_index=None,
             delta="hello",
         )
     ]
@@ -66,12 +69,18 @@ async def test_content_index_buffers_are_separate() -> None:
             session_id="session-1",
             kind="content",
             content_index=0,
+            item_id=None,
+            output_index=None,
+            summary_index=None,
             delta="a",
         ),
         LivePartialFlush(
             session_id="session-1",
             kind="content",
             content_index=1,
+            item_id=None,
+            output_index=None,
+            summary_index=None,
             delta="b",
         ),
     ]
@@ -87,8 +96,20 @@ async def test_reasoning_deltas_flush_as_single_batch() -> None:
 
     batcher = LivePartialBatcher(flush, max_delay_seconds=10, max_chars=100)
 
-    await batcher.append_reasoning_delta(session_id="session-1", delta="think")
-    await batcher.append_reasoning_delta(session_id="session-1", delta="ing")
+    await batcher.append_reasoning_delta(
+        session_id="session-1",
+        delta="think",
+        item_id="rs_1",
+        output_index=0,
+        summary_index=0,
+    )
+    await batcher.append_reasoning_delta(
+        session_id="session-1",
+        delta="ing",
+        item_id="rs_1",
+        output_index=0,
+        summary_index=0,
+    )
     await batcher.flush_session("session-1")
 
     assert flushed == [
@@ -96,8 +117,51 @@ async def test_reasoning_deltas_flush_as_single_batch() -> None:
             session_id="session-1",
             kind="reasoning",
             content_index=None,
+            item_id="rs_1",
+            output_index=0,
+            summary_index=0,
             delta="thinking",
         )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_reasoning_item_and_summary_boundaries_flush_separately() -> None:
+    """Preserve reasoning item and summary-part boundaries in flush order."""
+    flushed: list[LivePartialFlush] = []
+
+    async def flush(batch: LivePartialFlush) -> None:
+        flushed.append(batch)
+
+    batcher = LivePartialBatcher(flush, max_delay_seconds=10, max_chars=100)
+
+    await batcher.append_reasoning_delta(
+        session_id="session-1",
+        delta="first",
+        item_id="rs_1",
+        output_index=0,
+        summary_index=0,
+    )
+    await batcher.append_reasoning_delta(
+        session_id="session-1",
+        delta="second",
+        item_id="rs_1",
+        output_index=0,
+        summary_index=1,
+    )
+    await batcher.append_reasoning_delta(
+        session_id="session-1",
+        delta="third",
+        item_id="rs_2",
+        output_index=1,
+        summary_index=0,
+    )
+    await batcher.flush_session("session-1")
+
+    assert [(batch.item_id, batch.summary_index, batch.delta) for batch in flushed] == [
+        ("rs_1", 0, "first"),
+        ("rs_1", 1, "second"),
+        ("rs_2", 0, "third"),
     ]
 
 
@@ -122,6 +186,9 @@ async def test_size_threshold_flushes_immediately() -> None:
             session_id="session-1",
             kind="content",
             content_index=0,
+            item_id=None,
+            output_index=None,
+            summary_index=None,
             delta="hello",
         )
     ]
@@ -137,7 +204,13 @@ async def test_timer_flushes_pending_batch() -> None:
 
     batcher = LivePartialBatcher(flush, max_delay_seconds=0.01, max_chars=100)
 
-    await batcher.append_reasoning_delta(session_id="session-1", delta="a")
+    await batcher.append_reasoning_delta(
+        session_id="session-1",
+        delta="a",
+        item_id="rs_1",
+        output_index=0,
+        summary_index=0,
+    )
     await asyncio.sleep(0.05)
 
     assert flushed == [
@@ -145,6 +218,9 @@ async def test_timer_flushes_pending_batch() -> None:
             session_id="session-1",
             kind="reasoning",
             content_index=None,
+            item_id="rs_1",
+            output_index=0,
+            summary_index=0,
             delta="a",
         )
     ]
@@ -226,9 +302,21 @@ async def test_next_attempt_appends_after_discard() -> None:
         return
 
     batcher = LivePartialBatcher(flush, max_delay_seconds=10, max_chars=100)
-    await batcher.append_reasoning_delta(session_id="session-1", delta="failed")
+    await batcher.append_reasoning_delta(
+        session_id="session-1",
+        delta="failed",
+        item_id="rs_failed",
+        output_index=0,
+        summary_index=0,
+    )
     await batcher.discard_session("session-1", discard)
-    await batcher.append_reasoning_delta(session_id="session-1", delta="recovered")
+    await batcher.append_reasoning_delta(
+        session_id="session-1",
+        delta="recovered",
+        item_id="rs_recovered",
+        output_index=0,
+        summary_index=0,
+    )
     await batcher.flush_session("session-1")
 
     assert flushed == [
@@ -236,6 +324,9 @@ async def test_next_attempt_appends_after_discard() -> None:
             session_id="session-1",
             kind="reasoning",
             content_index=None,
+            item_id="rs_recovered",
+            output_index=0,
+            summary_index=0,
             delta="recovered",
         )
     ]

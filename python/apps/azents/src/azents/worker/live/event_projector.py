@@ -115,10 +115,18 @@ class LiveEventProjector:
                         delta=delta,
                         content_index=content_index,
                     )
-                case ReasoningDelta(delta=delta):
+                case ReasoningDelta(
+                    delta=delta,
+                    item_id=item_id,
+                    output_index=output_index,
+                    summary_index=summary_index,
+                ):
                     await self._partial_batcher.append_reasoning_delta(
                         session_id=session_id,
                         delta=delta,
+                        item_id=item_id,
+                        output_index=output_index,
+                        summary_index=summary_index,
                     )
                 case ProviderToolActivityChanged(
                     call_id=call_id,
@@ -348,9 +356,19 @@ class LiveEventProjector:
                 content_index=batch.content_index,
             )
         else:
+            before = await self._live_event_store.list_by_session_id(batch.session_id)
             live_event = await self._live_event_store.append_reasoning_delta(
                 batch.session_id,
                 delta=batch.delta,
+                item_id=batch.item_id,
+                output_index=batch.output_index,
+                summary_index=batch.summary_index,
+            )
+            after = await self._live_event_store.list_by_session_id(batch.session_id)
+            await self._publish_removed_events(
+                batch.session_id,
+                before=before,
+                after=after,
             )
         await self._publish_event_upserted(live_event)
 

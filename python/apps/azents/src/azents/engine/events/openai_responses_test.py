@@ -21,6 +21,7 @@ from openai.types.responses import (
     ResponseOutputItemDoneEvent,
     ResponseOutputMessage,
     ResponseOutputText,
+    ResponseReasoningSummaryTextDeltaEvent,
     ResponseStreamEvent,
     ResponseTextDeltaEvent,
     ResponseUsage,
@@ -57,7 +58,10 @@ from azents.engine.events.openai_responses import (
     openai_responses_client_config,
     openai_responses_websocket_endpoint_eligible,
 )
-from azents.engine.events.protocols import ProviderToolActivityProjection
+from azents.engine.events.protocols import (
+    ProviderToolActivityProjection,
+    ReasoningDeltaProjection,
+)
 from azents.engine.events.responses_continuation import ResponsesContinuationPlanner
 from azents.engine.events.types import (
     AssistantMessagePayload,
@@ -1479,6 +1483,80 @@ async def test_official_sdk_wire_request_omits_unstored_generated_image_id() -> 
             "result": "cmVoeWRyYXRlZA==",
         }
     ]
+
+
+def test_typed_normalizer_preserves_reasoning_stream_identity() -> None:
+    """Carry reasoning item and summary-part identity into live projection."""
+    output = OpenAIResponsesOutputNormalizer(
+        provider="openai",
+        model="gpt-5.1-codex",
+    ).start("session-1")
+
+    projected = output.process_event(
+        ResponseReasoningSummaryTextDeltaEvent(
+            delta="thinking",
+            item_id="rs_1",
+            output_index=2,
+            sequence_number=1,
+            summary_index=1,
+            type="response.reasoning_summary_text.delta",
+        )
+    )
+
+    assert projected.projections == [
+        ReasoningDeltaProjection(
+            delta="thinking",
+            item_id="rs_1",
+            output_index=2,
+            summary_index=1,
+        )
+    ]
+
+
+def test_typed_completed_message_does_not_replay_output_index() -> None:
+    """Keep reasoning handoff metadata out of non-reasoning replay items."""
+    message = ResponseOutputMessage(
+        id="msg_1",
+        content=[
+            ResponseOutputText(
+                annotations=[],
+                text="done",
+                type="output_text",
+            )
+        ],
+        role="assistant",
+        status="completed",
+        type="message",
+    )
+    output = OpenAIResponsesOutputNormalizer(
+        provider="openai",
+        model="gpt-5.1-codex",
+    ).start("session-1")
+    output.process_event(
+        ResponseOutputItemDoneEvent(
+            item=message,
+            output_index=4,
+            sequence_number=1,
+            type="response.output_item.done",
+        )
+    )
+    output.process_event(
+        _completed_event(_response().model_copy(update={"output": []}))
+    )
+
+    completed = output.complete()
+
+    assert len(completed.events) == 1
+    payload = completed.events[0].payload
+    assert isinstance(payload, AssistantMessagePayload)
+    assert "output_index" not in payload.native_artifact.item
+    request = OpenAIResponsesLowerer(
+        provider="openai",
+        model="gpt-5.1-codex",
+        provider_id=LLMProvider.OPENAI,
+        credential_kwargs={},
+    ).lower(completed.events, model="gpt-5.1-codex")
+    assert "output_index" not in request.input[0]
 
 
 def test_typed_normalizer_requires_exact_completed_wire_type(

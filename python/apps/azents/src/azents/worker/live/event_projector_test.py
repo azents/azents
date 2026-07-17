@@ -23,6 +23,7 @@ from azents.engine.events.types import (
     ActiveToolCall,
     AgentRunState,
     ProviderToolCallPayload,
+    ReasoningPayload,
 )
 from azents.services.chat.data import ChatLiveRunState
 from azents.services.chat.live_events import InMemoryLiveEventStore, RedisLiveEventStore
@@ -317,6 +318,88 @@ async def test_provider_tool_activity_upserts_and_discards_with_model_attempt() 
 
 
 @pytest.mark.asyncio
+async def test_reasoning_stream_preserves_item_and_summary_boundaries() -> None:
+    """Project each reasoning item separately and delimit its summary parts."""
+    store = InMemoryLiveEventStore()
+    broadcast = _Broadcast()
+    projector = _projector(store, broadcast)
+
+    for event in (
+        ReasoningDelta(
+            delta="first",
+            item_id="rs_1",
+            output_index=0,
+            summary_index=0,
+        ),
+        ReasoningDelta(
+            delta="second",
+            item_id="rs_1",
+            output_index=0,
+            summary_index=1,
+        ),
+        ReasoningDelta(
+            delta="third",
+            item_id="rs_2",
+            output_index=1,
+            summary_index=0,
+        ),
+    ):
+        await projector.update("session-001", event)
+    await projector.flush_session("session-001")
+
+    reasoning_events = await store.list_by_session_id("session-001")
+    assert len(reasoning_events) == 2
+    assert [
+        event.payload.text
+        for event in reasoning_events
+        if isinstance(event.payload, ReasoningPayload)
+    ] == ["first\nsecond", "third"]
+    assert [event[1]["type"] for event in broadcast.events] == [
+        "live_event_upserted",
+        "live_event_upserted",
+        "live_event_upserted",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_reasoning_identity_promotion_broadcasts_previous_id_removal() -> None:
+    """Remove the output-position block before upserting its item-ID successor."""
+    store = InMemoryLiveEventStore()
+    broadcast = _Broadcast()
+    projector = _projector(store, broadcast)
+
+    await projector.update(
+        "session-001",
+        ReasoningDelta(
+            delta="first",
+            item_id=None,
+            output_index=0,
+            summary_index=0,
+        ),
+    )
+    await projector.update(
+        "session-001",
+        ReasoningDelta(
+            delta=" continued",
+            item_id="rs_1",
+            output_index=0,
+            summary_index=0,
+        ),
+    )
+    await projector.flush_session("session-001")
+
+    reasoning_events = await store.list_by_session_id("session-001")
+    assert len(reasoning_events) == 1
+    assert isinstance(reasoning_events[0].payload, ReasoningPayload)
+    assert reasoning_events[0].payload.text == "first continued"
+    assert [event[1]["type"] for event in broadcast.events] == [
+        "live_event_upserted",
+        "live_event_removed",
+        "live_event_upserted",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_failed_attempt_discard_store_failure_is_non_fatal() -> None:
     """Live-store cleanup failure does not block durable retry handling."""
     projector = _projector(_FailingDiscardStore(), _Broadcast())
@@ -337,7 +420,12 @@ async def test_failed_attempt_discards_published_model_partials() -> None:
     )
     await projector.update(
         "session-001",
-        ReasoningDelta(delta="failed reasoning"),
+        ReasoningDelta(
+            delta="failed reasoning",
+            item_id="rs_failed",
+            output_index=1,
+            summary_index=0,
+        ),
     )
     await projector.flush_session("session-001")
 

@@ -104,6 +104,9 @@ class ReasoningDeltaProjection(BaseModel):
 
     type: Literal["reasoning_delta"] = "reasoning_delta"
     delta: str
+    item_id: str | None
+    output_index: int | None
+    summary_index: int | None
 
 
 class ProviderToolActivityProjection(BaseModel):

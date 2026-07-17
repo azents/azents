@@ -25,7 +25,10 @@ class LivePartialFlush:
     session_id: str
     kind: LivePartialKind
     delta: str
-    content_index: int | None = None
+    content_index: int | None
+    item_id: str | None
+    output_index: int | None
+    summary_index: int | None
 
 
 @dataclasses.dataclass
@@ -34,6 +37,9 @@ class _PartialBuffer:
 
     kind: LivePartialKind
     content_index: int | None
+    item_id: str | None
+    output_index: int | None
+    summary_index: int | None
     parts: list[str] = dataclasses.field(default_factory=list)
 
     @property
@@ -51,6 +57,9 @@ class _PartialBuffer:
             session_id=session_id,
             kind=self.kind,
             content_index=self.content_index,
+            item_id=self.item_id,
+            output_index=self.output_index,
+            summary_index=self.summary_index,
             delta="".join(self.parts),
         )
 
@@ -70,7 +79,16 @@ class LivePartialBatcher:
         self._max_chars = max_chars
         self._buffers: dict[
             str,
-            OrderedDict[tuple[LivePartialKind, int | None], _PartialBuffer],
+            OrderedDict[
+                tuple[
+                    LivePartialKind,
+                    int | None,
+                    str | None,
+                    int | None,
+                    int | None,
+                ],
+                _PartialBuffer,
+            ],
         ] = {}
         self._timers: dict[str, asyncio.Task[None]] = {}
         self._locks: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
@@ -87,6 +105,9 @@ class LivePartialBatcher:
             session_id=session_id,
             kind="content",
             content_index=content_index,
+            item_id=None,
+            output_index=None,
+            summary_index=None,
             delta=delta,
         )
 
@@ -95,12 +116,18 @@ class LivePartialBatcher:
         *,
         session_id: str,
         delta: str,
+        item_id: str | None,
+        output_index: int | None,
+        summary_index: int | None,
     ) -> None:
         """Add Reasoning delta to batch."""
         await self._append(
             session_id=session_id,
             kind="reasoning",
             content_index=None,
+            item_id=item_id,
+            output_index=output_index,
+            summary_index=summary_index,
             delta=delta,
         )
 
@@ -110,17 +137,32 @@ class LivePartialBatcher:
         session_id: str,
         kind: LivePartialKind,
         content_index: int | None,
+        item_id: str | None,
+        output_index: int | None,
+        summary_index: int | None,
         delta: str,
     ) -> None:
         """Store Delta and flush according to threshold."""
         if not delta:
             return
         async with self._session_lock(session_id):
-            key = (kind, content_index)
+            key = (
+                kind,
+                content_index,
+                item_id,
+                output_index,
+                summary_index,
+            )
             session_buffers = self._buffers.setdefault(session_id, OrderedDict())
             buffer = session_buffers.get(key)
             if buffer is None:
-                buffer = _PartialBuffer(kind=kind, content_index=content_index)
+                buffer = _PartialBuffer(
+                    kind=kind,
+                    content_index=content_index,
+                    item_id=item_id,
+                    output_index=output_index,
+                    summary_index=summary_index,
+                )
                 session_buffers[key] = buffer
             buffer.append(delta)
 

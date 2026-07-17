@@ -130,6 +130,8 @@ def sanitize_responses_native_item(
     for key, value in item.items():
         if item_type == "image_generation_call" and key == "result":
             continue
+        if item_type == "reasoning" and key == "output_index":
+            continue
         if _raw_blob_key(key):
             continue
         sanitized[key] = _sanitize_responses_native_value(value)

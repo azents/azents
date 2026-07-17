@@ -120,20 +120,33 @@ class ResponsesOutputNormalizer:
     ) -> list[Event]:
         """Convert output item list to events."""
         events: list[Event] = []
-        for output_item in output_items:
+        for fallback_output_index, output_item in enumerate(output_items):
             raw_item = response_item_dict(output_item)
             if has_response_output_item_type(raw_item):
-                events.append(self.normalize_output_item(session_id, raw_item))
+                output_index = _int_or_none(raw_item.get("output_index"))
+                events.append(
+                    self.normalize_output_item(
+                        session_id,
+                        raw_item,
+                        output_index=(
+                            output_index
+                            if output_index is not None
+                            else fallback_output_index
+                        ),
+                    )
+                )
         return events
 
     def normalize_output_item(
         self,
         session_id: str,
         output_item: dict[str, object],
+        *,
+        output_index: int,
     ) -> Event:
         """Convert one output item to event."""
         item_type = str(output_item.get("type") or "")
-        artifact = self._artifact(output_item)
+        artifact = self._artifact(output_item, output_index=output_index)
 
         if item_type == "message":
             payload = AssistantMessagePayload(
@@ -223,8 +236,16 @@ class ResponsesOutputNormalizer:
             ),
         )
 
-    def _artifact(self, item: dict[str, object]) -> NativeArtifact:
-        """Create native artifact."""
+    def _artifact(
+        self,
+        item: dict[str, object],
+        *,
+        output_index: int,
+    ) -> NativeArtifact:
+        """Create native artifact with canonical output position metadata."""
+        artifact_item = sanitize_responses_native_item(item)
+        if item.get("type") == "reasoning":
+            artifact_item["output_index"] = output_index
         return NativeArtifact(
             compat_key=self.compat_key,
             adapter=self.adapter,
@@ -232,7 +253,7 @@ class ResponsesOutputNormalizer:
             provider=self.provider,
             model=self.model,
             schema_version=self.schema_version,
-            item=sanitize_responses_native_item(item),
+            item=artifact_item,
         )
 
 
@@ -291,7 +312,18 @@ class _ResponsesOutputStream:
         elif event_type in {"OutputItemDoneEvent", "ResponseOutputItemDoneEvent"}:
             raw_item = response_item_dict(item.get("item"))
             if has_response_output_item_type(raw_item):
-                self._completed_output_items.append(raw_item)
+                output_index = _int_or_none(item.get("output_index"))
+                self._completed_output_items.append(
+                    {
+                        **raw_item,
+                        **(
+                            {"output_index": output_index}
+                            if output_index is not None
+                            and raw_item.get("type") == "reasoning"
+                            else {}
+                        ),
+                    }
+                )
         elif event_type in {
             "FunctionCallArgumentsDeltaEvent",
             "ResponseFunctionCallArgumentsDeltaEvent",
@@ -311,8 +343,14 @@ class _ResponsesOutputStream:
             "ReasoningSummaryTextDeltaEvent",
             "ResponseReasoningSummaryTextDeltaEvent",
         }:
+            item_id = item.get("item_id")
             projections.append(
-                ReasoningDeltaProjection(delta=str(item.get("delta", "")))
+                ReasoningDeltaProjection(
+                    delta=str(item.get("delta", "")),
+                    item_id=item_id if isinstance(item_id, str) else None,
+                    output_index=_int_or_none(item.get("output_index")),
+                    summary_index=_int_or_none(item.get("summary_index")),
+                )
             )
         elif event_type == "ResponseIncompleteEvent":
             self._terminal_error = _incomplete_response_model_error(
