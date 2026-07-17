@@ -799,7 +799,7 @@
               "task": "Effort-only disabled parent target task",
               "agent_type": "default",
               "fork_turns": "none",
-              "reasoning_effort": "medium"
+              "reasoning_effort": "low"
             }
           }
         ]

@@ -300,7 +300,7 @@ def _wait_for_tool_result(
     session_id: str,
     call_id: str,
     timeout: float = 120,
-) -> None:
+) -> dict[str, object]:
     """Wait until a tool call has produced a persisted result."""
     deadline = time.monotonic() + timeout
     last_kinds: list[object] = []
@@ -312,7 +312,7 @@ def _wait_for_tool_result(
                 continue
             payload = _object(event.get("payload"), label="tool result payload")
             if payload.get("call_id") == call_id:
-                return
+                return payload
         time.sleep(0.5)
     raise TimeoutError(f"Tool result was not observed: {call_id}, {last_kinds!r}")
 
@@ -772,6 +772,7 @@ class TestPerPromptInferenceProfile:
             "message",
             "child_name",
             "task",
+            "call_id",
             "expected_effort",
         ),
         [
@@ -779,13 +780,15 @@ class TestPerPromptInferenceProfile:
                 _INHERITED_DISABLED_TARGET_MESSAGE,
                 "inherited_disabled",
                 _INHERITED_DISABLED_TARGET_TASK,
+                "call_subagent_inherit_disabled_target",
                 "high",
             ),
             (
                 _EFFORT_ONLY_DISABLED_TARGET_MESSAGE,
                 "effort_only_disabled",
                 _EFFORT_ONLY_DISABLED_TARGET_TASK,
-                "medium",
+                "call_subagent_effort_only_disabled_target",
+                "low",
             ),
         ],
     )
@@ -798,6 +801,7 @@ class TestPerPromptInferenceProfile:
         message: str,
         child_name: str,
         task: str,
+        call_id: str,
         expected_effort: str,
     ) -> None:
         """Inherit a disabled parent target with or without an effort override."""
@@ -816,6 +820,13 @@ class TestPerPromptInferenceProfile:
             target="Quality",
             effort="high",
         )
+        tool_result = _wait_for_tool_result(
+            server_url=azents_public_server_url,
+            token=token,
+            session_id=root_session_id,
+            call_id=call_id,
+        )
+        assert tool_result.get("status") == "completed", tool_result
         child = _wait_for_tree_node(
             server_url=azents_public_server_url,
             token=token,
