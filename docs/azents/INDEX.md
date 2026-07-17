@@ -16,7 +16,7 @@ Design documents are accumulated records and are not listed individually in this
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
 | [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-07-17 | 49 |
-| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-17 | 107 |
+| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-17 | 106 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-16 | 9 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-17 | 5 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-07-17 | 12 |
@@ -31,13 +31,13 @@ Design documents are accumulated records and are not listed individually in this
 | [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-07-17 | 100 |
 | [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-07-12 | 17 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-07-03 | 3 |
-| [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-17 | 32 |
-| [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-07-17 | 14 |
-| [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-07-17 | 25 |
+| [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-16 | 31 |
+| [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-07-17 | 13 |
+| [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-07-16 | 24 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-07-17 | 16 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
 | [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-06-27 | 2 |
-| [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-07-17 | 21 |
+| [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-07-16 | 20 |
 | [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-07-16 | 15 |
 | [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-07-17 | 8 |
 | [xAI API Key Provider Flow](spec/flow/xai-api-key.md) | @Hardtack | 2026-07-10 | 1 |
@@ -215,7 +215,6 @@ Design documents are accumulated records and are not listed individually in this
 - [ADR-0162: Use Standard Responses for ChatGPT OAuth](adr/0162-use-standard-responses-for-chatgpt-oauth.md)
 - [ADR-0163: Normalize Provider Tool Live Activity Across Model Adapters](adr/0163-normalize-provider-tool-live-activity.md)
 - [ADR-0164: Materialize Provider-Generated Images as File Resources](adr/0164-materialize-provider-generated-images-as-file-resources.md)
-- [ADR-0165: Make Model Provider Failures Transparent](adr/0165-make-model-provider-failures-transparent.md)
 - [ADR-0166: Model-Scoped Subagent Override Policy](adr/0166-subagent-model-override-policy.md)
 
 ## Issues (Bug Tracking)

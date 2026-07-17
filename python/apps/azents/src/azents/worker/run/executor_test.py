@@ -779,27 +779,6 @@ class _AlwaysFailingEngine(_Engine):
         return iterator()
 
 
-class _UserStopCancellingEngine(_Engine):
-    """Engine that propagates a user-stop cancellation."""
-
-    def run(
-        self,
-        request: RunRequest,
-        context: object,
-        *,
-        poll_messages: object = None,
-        check_stop: object = None,
-    ) -> AsyncIterator[Emit]:
-        """Cancel the active run as a user-stop observation."""
-        del request, context, poll_messages, check_stop
-
-        async def iterator() -> AsyncIterator[Emit]:
-            raise asyncio.CancelledError(USER_STOP_CANCEL_MESSAGE)
-            yield  # pragma: no cover
-
-        return iterator()
-
-
 class _CommandHandler:
     """Command handler test double."""
 
