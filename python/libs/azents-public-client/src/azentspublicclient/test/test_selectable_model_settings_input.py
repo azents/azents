@@ -41,7 +41,9 @@ class TestSelectableModelSettingsInput(unittest.TestCase):
                     {
                         'key' : null
                         }
-                    ]
+                    ],
+                subagent_enabled = True,
+                subagent_guidance = ''
             )
         else:
             return SelectableModelSettingsInput(

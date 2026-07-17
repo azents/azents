@@ -777,6 +777,13 @@
         "builtinToolsLabel": "내장 도구",
         "builtinToolWebSearch": "웹 검색",
         "noBuiltinTools": "이 모델이 지원하는 내장 도구가 없습니다.",
+        "subagentsSectionLabel": "서브에이전트",
+        "subagentEnabledLabel": "명시적 서브에이전트 선택에 사용",
+        "subagentEnabledDescription": "이 라벨을 상위 모델에 명시적인 spawn_agent 대상 모델로 표시합니다.",
+        "subagentInheritanceDescription": "명시적 선택을 비활성화해도 활성 상위 모델에서 이 모델을 상속받는 자식 실행은 차단되지 않습니다.",
+        "subagentGuidanceLabel": "서브에이전트 선택 가이드",
+        "subagentGuidanceDescription": "적합한 작업 유형이나 비용·품질 제약을 선택적으로 안내합니다. 최대 {max}자입니다.",
+        "subagentGuidancePlaceholder": "예: 저장소 탐색과 범위가 명확한 조사 작업에 우선 사용하세요.",
         "settingsDone": "완료"
       }
     },

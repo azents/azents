@@ -519,14 +519,14 @@ def _wait_for_history_user_message_id(
     raise TimeoutError(f"user_message id was not observed: {content}, {last_payload!r}")
 
 
-def _wait_for_interrupted_idle_state(
+def _wait_for_interrupted_stopped_state(
     *,
     server_url: str,
     token: str,
     session_id: str,
     timeout: float = 120,
 ) -> dict[str, object]:
-    """REST history/live t interrupted marker t idle run t t."""
+    """Wait for durable interruption and recoverable stopped live state."""
     deadline = time.monotonic() + timeout
     last_payload: dict[str, object] | None = None
     while time.monotonic() < deadline:
@@ -541,13 +541,24 @@ def _wait_for_interrupted_idle_state(
             session_id=session_id,
         )
         last_payload = {"history": history_payload, "live": live_payload}
+        run_payload = live_payload.get("run")
+        if run_payload is None:
+            time.sleep(0.5)
+            continue
+        run = _object_item(run_payload, label="recoverable stopped run")
+        recovery_payload = run.get("recovery")
+        if recovery_payload is None:
+            time.sleep(0.5)
+            continue
+        recovery = _object_item(recovery_payload, label="stopped run recovery")
         if (
             "interrupted" in _run_marker_statuses(history_payload)
-            and live_payload.get("run") is None
+            and run.get("status") == "stopped"
+            and recovery.get("source_run_id") == run.get("run_id")
         ):
             return history_payload
         time.sleep(0.5)
-    raise TimeoutError(f"interrupted idle state was not observed: {last_payload!r}")
+    raise TimeoutError(f"interrupted stopped state was not observed: {last_payload!r}")
 
 
 def _wait_for_idle_rest_state(
@@ -1046,7 +1057,7 @@ class TestChatInputBuffer:
         )
 
         assert stop_response["session_id"] == session_id
-        history_payload = _wait_for_interrupted_idle_state(
+        history_payload = _wait_for_interrupted_stopped_state(
             server_url=azents_public_server_url,
             token=workspace.token,
             session_id=session_id,

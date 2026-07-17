@@ -799,13 +799,15 @@ class TestModelStreamWatchdog:
             retry.get("snapshot"),
             label="stopped retry snapshot",
         )
-        retry_run = json_object_payload(
-            snapshot.get("run"),
-            label="fresh retry run",
-        )
-        assert retry_run.get("run_id") != stopped_run_id
-        assert retry_run.get("retry") is None
-        assert retry_run.get("recovery") is None
+        retry_run_payload = snapshot.get("run")
+        if retry_run_payload is not None:
+            retry_run = json_object_payload(
+                retry_run_payload,
+                label="fresh retry run",
+            )
+            assert retry_run.get("run_id") != stopped_run_id
+            assert retry_run.get("retry") is None
+            assert retry_run.get("recovery") is None
 
         final_history = wait_for_rest_contents(
             server_url=azents_public_server_url,
@@ -813,6 +815,20 @@ class TestModelStreamWatchdog:
             session_id=result.session_id,
             expected=[_USER_STOP_RETRY_RESPONSE],
         )
+        completed_retry_run_ids: set[str] = set()
+        for event in history_events(final_history):
+            if event.get("kind") != "run_marker":
+                continue
+            event_payload = json_object_payload(
+                event.get("payload"),
+                label="retry run marker payload",
+            )
+            if event_payload.get("status") != "completed":
+                continue
+            completed_run_id = event_payload.get("run_id")
+            assert isinstance(completed_run_id, str)
+            completed_retry_run_ids.add(completed_run_id)
+        assert completed_retry_run_ids - {stopped_run_id}
         assert not system_error_events(history)
         assert not system_error_events(final_history)
         assert "run_complete" in message_roles(history)

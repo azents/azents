@@ -32,8 +32,8 @@ code_paths:
 api_routes:
   - /toolkit/v1
   - /shell-environment/v1
-last_verified_at: 2026-07-10
-spec_version: 54
+last_verified_at: 2026-07-17
+spec_version: 55
 ---
 
 # Toolkit
@@ -324,6 +324,13 @@ and subagent execution modes and exposes the coherent collaboration bundle as un
 `spawn_agent` currently supports only `agent_type = default`; unsupported values fail as tool errors.
 Its `fork_turns` parameter defaults to `all`, so the child starts with the parent's current
 model-visible context unless the caller explicitly selects no context or a bounded number of turns.
+The dynamic tool description lists only Agent-owned selectable model options whose
+`settings.subagent_enabled` is true. Each eligible entry includes its label, explicit reasoning-effort
+values, and optional `subagent_guidance`; disabled entries and their guidance are not disclosed. The
+same filtered set validates explicit `model_target_label` values. Missing and disabled labels return
+the same unavailable-override tool error before durable child creation. Omitting the target label,
+including an effort-only override, retains parent-target inheritance even when the inherited option is
+disabled. When every option is disabled, the tool advertises inheritance only.
 Before creating a child, `spawn_agent` enforces the Agent's `subagent_settings` while holding a
 row lock on the root `SessionAgent`, so parallel spawn calls in the same root tree serialize before
 capacity is checked. `max_subagents` limits active subagents across the root `SessionAgent` tree; a
@@ -546,6 +553,7 @@ OpenAPI spec is authoritative for all endpoints. Major operations:
 
 ## Changelog
 
+- **2026-07-17** (spec_version 55) — Filtered explicit subagent model targets by per-option availability and rendered bounded target-specific guidance while preserving inheritance.
 - **2026-07-10** (spec_version 54) — Aligned the root and child Subagent Toolkit prompts with the frozen Codex Multi-Agent V2 usage, workspace, concurrency, and explicit-delegation guidance.
 - **2026-07-10** (spec_version 53) — Made untargeted `wait_agent` calls report explicitly when no descendants exist.
 - **2026-07-10** (spec_version 52) — Identified children in forked-history boundaries and rejected self-targeted `wait_agent` calls.

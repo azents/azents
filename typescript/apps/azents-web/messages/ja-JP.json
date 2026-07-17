@@ -777,6 +777,13 @@
         "builtinToolsLabel": "組み込みツール",
         "builtinToolWebSearch": "ウェブ検索",
         "noBuiltinTools": "このモデルがサポートする組み込みツールはありません。",
+        "subagentsSectionLabel": "サブエージェント",
+        "subagentEnabledLabel": "サブエージェントの明示的な選択に使用する",
+        "subagentEnabledDescription": "このラベルを明示的な spawn_agent の対象として親モデルに表示します。",
+        "subagentInheritanceDescription": "明示的な選択を無効にしても、子が実行中の親からこのモデルを継承することは妨げられません。",
+        "subagentGuidanceLabel": "サブエージェント選択ガイダンス",
+        "subagentGuidanceDescription": "適切なタスク種別やコスト・品質の制約を任意で案内します。最大 {max} 文字です。",
+        "subagentGuidancePlaceholder": "例：リポジトリ探索や範囲が明確な調査に優先して使用します。",
         "settingsDone": "完了"
       }
     },

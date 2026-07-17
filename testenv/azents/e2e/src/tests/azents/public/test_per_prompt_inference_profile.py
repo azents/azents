@@ -33,6 +33,11 @@ _FOLLOWUP_MESSAGE = "Subagent follow-up after override"
 _FOLLOWUP_TASK = "Subagent Fast follow-up task"
 _FULL_HISTORY_REJECTION_MESSAGE = "Subagent reject full-history override"
 _UNKNOWN_TARGET_REJECTION_MESSAGE = "Subagent reject unknown target override"
+_DISABLED_TARGET_REJECTION_MESSAGE = "Subagent reject disabled target override"
+_INHERITED_DISABLED_TARGET_MESSAGE = "Subagent inherit disabled parent target"
+_INHERITED_DISABLED_TARGET_TASK = "Inherited disabled parent target task"
+_EFFORT_ONLY_DISABLED_TARGET_MESSAGE = "Subagent effort-only disabled parent target"
+_EFFORT_ONLY_DISABLED_TARGET_TASK = "Effort-only disabled parent target task"
 
 
 def _headers(token: str) -> dict[str, str]:
@@ -101,6 +106,8 @@ def _setup_profile_agent(
 
     def populated_entries() -> list[dict[str, object]] | None:
         response = requests.get(entries_url, headers=_headers(token), timeout=10)
+        if response.status_code == 404:
+            return None
         response.raise_for_status()
         entries = _objects(
             _response_object(response).get("entries"),
@@ -147,6 +154,8 @@ def _setup_profile_agent(
                         {"name": "web_search"},
                         {"name": "image_generation"},
                     ],
+                    "subagent_enabled": False,
+                    "subagent_guidance": "Reserve for complex synthesis.",
                 },
             },
             {
@@ -161,6 +170,8 @@ def _setup_profile_agent(
                     "context_window_tokens": 32_000,
                     "max_output_tokens": 4_000,
                     "builtin_tools": [],
+                    "subagent_enabled": True,
+                    "subagent_guidance": "Prefer for bounded investigation.",
                 },
             },
         ],
@@ -291,7 +302,7 @@ def _wait_for_tool_result(
     session_id: str,
     call_id: str,
     timeout: float = 120,
-) -> None:
+) -> dict[str, object]:
     """Wait until a tool call has produced a persisted result."""
     deadline = time.monotonic() + timeout
     last_kinds: list[object] = []
@@ -303,7 +314,7 @@ def _wait_for_tool_result(
                 continue
             payload = _object(event.get("payload"), label="tool result payload")
             if payload.get("call_id") == call_id:
-                return
+                return payload
         time.sleep(0.5)
     raise TimeoutError(f"Tool result was not observed: {call_id}, {last_kinds!r}")
 
@@ -759,6 +770,91 @@ class TestPerPromptInferenceProfile:
         )
 
     @pytest.mark.parametrize(
+        (
+            "message",
+            "child_name",
+            "task",
+            "call_id",
+            "expected_effort",
+        ),
+        [
+            (
+                _INHERITED_DISABLED_TARGET_MESSAGE,
+                "inherited_disabled",
+                _INHERITED_DISABLED_TARGET_TASK,
+                "call_subagent_inherit_disabled_target",
+                "high",
+            ),
+            (
+                _EFFORT_ONLY_DISABLED_TARGET_MESSAGE,
+                "effort_only_disabled",
+                _EFFORT_ONLY_DISABLED_TARGET_TASK,
+                "call_subagent_effort_only_disabled_target",
+                "low",
+            ),
+        ],
+    )
+    def test_disabled_target_remains_available_through_inheritance(
+        self,
+        public_api_client: azentspublicclient.ApiClient,
+        admin_api_client: azentsadminclient.ApiClient,
+        azents_public_server_url: str,
+        azents_engine_worker_container: object,
+        message: str,
+        child_name: str,
+        task: str,
+        call_id: str,
+        expected_effort: str,
+    ) -> None:
+        """Inherit a disabled parent target with or without an effort override."""
+        del azents_engine_worker_container
+        token, agent_id, root_session_id = _setup_profile_agent(
+            public_api_client,
+            admin_api_client,
+            azents_public_server_url,
+        )
+        _write_profile(
+            server_url=azents_public_server_url,
+            token=token,
+            agent_id=agent_id,
+            session_id=root_session_id,
+            message=message,
+            target="Quality",
+            effort="high",
+        )
+        tool_result = _wait_for_tool_result(
+            server_url=azents_public_server_url,
+            token=token,
+            session_id=root_session_id,
+            call_id=call_id,
+        )
+        assert tool_result.get("status") == "completed", tool_result
+        child = _wait_for_tree_node(
+            server_url=azents_public_server_url,
+            token=token,
+            agent_id=agent_id,
+            root_session_id=root_session_id,
+            name=child_name,
+        )
+        child_session_id = child.get("agent_session_id")
+        if not isinstance(child_session_id, str):
+            raise AssertionError(f"Child node has no AgentSession ID: {child!r}")
+        _wait_for_input_event(
+            server_url=azents_public_server_url,
+            token=token,
+            session_id=child_session_id,
+            message=task,
+        )
+        _wait_for_session_profile(
+            server_url=azents_public_server_url,
+            token=token,
+            agent_id=agent_id,
+            session_id=child_session_id,
+            target="Quality",
+            effort=expected_effort,
+        )
+
+    @pytest.mark.parametrize(
         ("message", "rejected_name", "call_id"),
         [
             (
@@ -770,6 +866,11 @@ class TestPerPromptInferenceProfile:
                 _UNKNOWN_TARGET_REJECTION_MESSAGE,
                 "invalid_target",
                 "call_subagent_reject_unknown_target",
+            ),
+            (
+                _DISABLED_TARGET_REJECTION_MESSAGE,
+                "invalid_disabled_target",
+                "call_subagent_reject_disabled_target",
             ),
         ],
     )

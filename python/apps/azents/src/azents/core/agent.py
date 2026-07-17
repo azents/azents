@@ -45,6 +45,7 @@ class AgentModelSelection(BaseModel):
 
 MAX_SELECTABLE_MODEL_OPTIONS = 10
 MAX_SELECTABLE_MODEL_LABEL_LENGTH = 80
+MAX_SUBAGENT_GUIDANCE_LENGTH = 500
 DEFAULT_MAIN_MODEL_OPTION_LABEL = "default"
 DEFAULT_LIGHTWEIGHT_MODEL_OPTION_LABEL = "lightweight"
 
@@ -79,6 +80,15 @@ class SelectableModelSettingsInput(BaseModel):
         default=None,
         description="Enabled built-in tools; omitted enables every supported tool",
     )
+    subagent_enabled: bool = Field(
+        default=True,
+        description="Available as an explicit subagent model target",
+    )
+    subagent_guidance: str | None = Field(
+        default=None,
+        max_length=MAX_SUBAGENT_GUIDANCE_LENGTH,
+        description="Optional parent-model guidance for explicit subagent selection",
+    )
 
 
 class SelectableModelSettings(BaseModel):
@@ -96,6 +106,13 @@ class SelectableModelSettings(BaseModel):
     )
     builtin_tools: list[BuiltinToolConfig] = Field(
         description="Enabled built-in tools",
+    )
+    subagent_enabled: bool = Field(
+        description="Available as an explicit subagent model target",
+    )
+    subagent_guidance: str | None = Field(
+        max_length=MAX_SUBAGENT_GUIDANCE_LENGTH,
+        description="Optional parent-model guidance for explicit subagent selection",
     )
 
 
@@ -145,6 +162,8 @@ def default_selectable_model_settings(
                 selection.normalized_capabilities.built_in_tools.supported
             )
         ],
+        subagent_enabled=True,
+        subagent_guidance=None,
     )
 
 

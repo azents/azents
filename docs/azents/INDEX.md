@@ -15,12 +15,12 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
-| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-07-17 | 48 |
+| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-07-17 | 49 |
 | [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-17 | 107 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-16 | 9 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-17 | 5 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-07-17 | 12 |
-| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-07-10 | 54 |
+| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-07-17 | 55 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-07-13 | 7 |
 | [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-07-14 | 40 |
 
@@ -28,7 +28,7 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
-| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-07-17 | 99 |
+| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-07-17 | 100 |
 | [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-07-12 | 17 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-07-03 | 3 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-17 | 32 |
@@ -216,6 +216,7 @@ Design documents are accumulated records and are not listed individually in this
 - [ADR-0163: Normalize Provider Tool Live Activity Across Model Adapters](adr/0163-normalize-provider-tool-live-activity.md)
 - [ADR-0164: Materialize Provider-Generated Images as File Resources](adr/0164-materialize-provider-generated-images-as-file-resources.md)
 - [ADR-0165: Make Model Provider Failures Transparent](adr/0165-make-model-provider-failures-transparent.md)
+- [ADR-0166: Model-Scoped Subagent Override Policy](adr/0166-subagent-model-override-policy.md)
 
 ## Issues (Bug Tracking)
 

@@ -32,6 +32,7 @@ from azents.core.tools import ToolkitStatus, TurnContext
 from azents.engine.events.engine_events import SubagentTreeChanged
 from azents.engine.events.types import AgentRunState, Event, UserMessagePayload
 from azents.engine.run.types import FunctionToolError
+from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
@@ -135,6 +136,25 @@ def _agent() -> Agent:
         created_at=_NOW,
         updated_at=_NOW,
     )
+
+
+class _AgentRepository:
+    """AgentRepository fake with a replaceable current snapshot."""
+
+    def __init__(self, agent: Agent) -> None:
+        """Initialize the current Agent snapshot."""
+        self.agent = agent
+
+    async def get_by_id(
+        self,
+        session: AsyncSession,
+        agent_id: str,
+    ) -> Agent | None:
+        """Return the current Agent snapshot."""
+        del session
+        if agent_id != self.agent.id:
+            return None
+        return self.agent
 
 
 def _event(kind: EventKind, payload: UserMessagePayload, model_order: int) -> Event:
@@ -595,6 +615,8 @@ async def _make_toolkit() -> tuple[
     input_buffer_service = _InputBufferService()
     broker = _Broker()
     run_repository = _AgentRunRepository()
+    agent = _agent()
+    agent_repository = _AgentRepository(agent)
     published_events: list[SubagentTreeChanged] = []
 
     async def publish_event(event: SubagentTreeChanged) -> None:
@@ -609,7 +631,8 @@ async def _make_toolkit() -> tuple[
         ),
         input_buffer_service=cast(InputBufferService, input_buffer_service),
         broker=cast(SessionBroker, broker),
-        agent=_agent(),
+        agent_repository=cast(AgentRepository, agent_repository),
+        agent=agent,
         subagent_settings=SubagentSettings(),
     )
     state = await toolkit.update_context(
@@ -794,7 +817,25 @@ async def test_spawn_agent_schema_lists_labels_without_model_identity() -> None:
         SelectableModelOption(
             label="Research",
             model_selection=selection,
-            settings=make_test_model_settings(),
+            settings=make_test_model_settings().model_copy(
+                update={
+                    "subagent_guidance": (
+                        "Prefer for repository exploration.\nAvoid broad synthesis."
+                    )
+                }
+            ),
+        )
+    )
+    toolkit.agent.selectable_model_options.append(
+        SelectableModelOption(
+            label="Expensive",
+            model_selection=selection,
+            settings=make_test_model_settings().model_copy(
+                update={
+                    "subagent_enabled": False,
+                    "subagent_guidance": "Never advertise this costly target.",
+                }
+            ),
         )
     )
 
@@ -816,11 +857,42 @@ async def test_spawn_agent_schema_lists_labels_without_model_identity() -> None:
     assert "inherited parent Run target is preferred" in rendered
     assert "`Quality` Reasoning efforts: low, medium, high." in rendered
     assert "`Research` Reasoning efforts: medium, xhigh." in rendered
+    assert "Guidance: Prefer for repository exploration." in rendered
+    assert "Avoid broad synthesis." in rendered
+    assert "Expensive" not in rendered
+    assert "Never advertise this costly target." not in rendered
     assert "secret-integration" not in rendered
     assert "secret-physical-model" not in rendered
     assert "Secret Display Name" not in rendered
     assert "secret-family" not in rendered
     assert "secret-parent-runtime-model" not in rendered
+
+
+async def test_spawn_agent_schema_explains_inherit_when_no_targets_are_enabled() -> (
+    None
+):
+    """Keep inherited spawning available when every explicit target is disabled."""
+    toolkit, _repo, _input_service, _broker, _run_repo, _events = await _make_toolkit()
+    for option in toolkit.agent.selectable_model_options:
+        option.settings = option.settings.model_copy(update={"subagent_enabled": False})
+
+    state = await toolkit.update_context(
+        TurnContext(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id=_PARENT_RUN_ID,
+            publish_event=cast(Any, _noop_publish),
+            session_id="root-session",
+        )
+    )
+    tool = next(tool for tool in state.tools if tool.spec.name == "spawn_agent")
+
+    assert "No explicit model target overrides are available." in (
+        tool.spec.description
+    )
+    assert "Omit `model_target_label` to inherit" in tool.spec.description
+    assert "`Quality` Reasoning efforts" not in tool.spec.description
 
 
 async def test_send_message_is_queue_only() -> None:
@@ -1224,7 +1296,7 @@ async def test_wait_agent_rejects_current_agent_target() -> None:
 
 
 async def test_spawn_agent_creates_and_wakes_child_within_limits() -> None:
-    """spawn_agent creates a child when depth and active subagent limits allow it."""
+    """Inherited spawning remains available when its parent target is disabled."""
     (
         toolkit,
         repo,
@@ -1233,6 +1305,11 @@ async def test_spawn_agent_creates_and_wakes_child_within_limits() -> None:
         run_repo,
         published_events,
     ) = await _make_toolkit()
+    toolkit.agent.selectable_model_options[
+        0
+    ].settings = toolkit.agent.selectable_model_options[0].settings.model_copy(
+        update={"subagent_enabled": False}
+    )
     state = await toolkit.update_context(
         TurnContext(
             user_id="user-1",
@@ -1326,6 +1403,154 @@ async def test_spawn_agent_applies_target_override_and_normalized_effort() -> No
     assert child_state[1].effective_auto_compaction_threshold_tokens == 28_800
 
 
+async def test_spawn_agent_allows_effort_only_override_on_disabled_parent_target() -> (
+    None
+):
+    """Effort-only overrides keep the inherited target eligibility boundary."""
+    toolkit, repo, _input_service, _broker, _run_repo, _events = await _make_toolkit()
+    toolkit.agent.selectable_model_options[
+        0
+    ].settings = toolkit.agent.selectable_model_options[0].settings.model_copy(
+        update={"subagent_enabled": False}
+    )
+    state = await toolkit.update_context(
+        TurnContext(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id=_PARENT_RUN_ID,
+            publish_event=cast(Any, _noop_publish),
+            session_id="root-session",
+        )
+    )
+    tool = next(tool for tool in state.tools if tool.spec.name == "spawn_agent")
+
+    await tool.handler(
+        json.dumps(
+            {
+                "name": "reviewer",
+                "task": "Review it",
+                "fork_turns": "none",
+                "reasoning_effort": "low",
+            }
+        )
+    )
+
+    child_state = repo.inference_states[0][1]
+    assert child_state.model_target_label == "Quality"
+    assert child_state.reasoning_effort == ModelReasoningEffort.LOW
+
+
+async def test_spawn_agent_rejects_disabled_explicit_target_without_child_residue() -> (
+    None
+):
+    """Disabled labels fail as explicit overrides before child side effects."""
+    toolkit, repo, input_service, broker, run_repo, events = await _make_toolkit()
+    toolkit.agent.selectable_model_options[
+        0
+    ].settings = toolkit.agent.selectable_model_options[0].settings.model_copy(
+        update={"subagent_enabled": False}
+    )
+    state = await toolkit.update_context(
+        TurnContext(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id=_PARENT_RUN_ID,
+            publish_event=cast(Any, _publish_to(events)),
+            session_id="root-session",
+        )
+    )
+    tool = next(tool for tool in state.tools if tool.spec.name == "spawn_agent")
+
+    with pytest.raises(
+        FunctionToolError,
+        match="is not available for explicit subagent override",
+    ):
+        await tool.handler(
+            json.dumps(
+                {
+                    "name": "reviewer",
+                    "task": "Review it",
+                    "fork_turns": "none",
+                    "model_target_label": "Quality",
+                }
+            )
+        )
+
+    assert repo.created_children == []
+    assert run_repo.pending_creates == []
+    assert repo.inference_states == []
+    assert input_service.enqueued == []
+    assert broker.messages == []
+    assert events == []
+
+
+async def test_spawn_agent_reloads_current_policy_before_explicit_override() -> None:
+    """Later spawn calls enforce policy updates made during the active Run."""
+    toolkit, repo, input_service, broker, run_repo, events = await _make_toolkit()
+    state = await toolkit.update_context(
+        TurnContext(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id=_PARENT_RUN_ID,
+            publish_event=cast(Any, _publish_to(events)),
+            session_id="root-session",
+        )
+    )
+    tool = next(tool for tool in state.tools if tool.spec.name == "spawn_agent")
+    assert "`Quality` Reasoning efforts" in tool.spec.description
+
+    agent_repository = cast(_AgentRepository, toolkit.agent_repository)
+    current_agent = agent_repository.agent.model_copy(deep=True)
+    current_option = current_agent.selectable_model_options[0]
+    current_option.settings = current_option.settings.model_copy(
+        update={"subagent_enabled": False}
+    )
+    agent_repository.agent = current_agent
+
+    with pytest.raises(
+        FunctionToolError,
+        match="is not available for explicit subagent override",
+    ):
+        await tool.handler(
+            json.dumps(
+                {
+                    "name": "reviewer",
+                    "task": "Review it",
+                    "fork_turns": "none",
+                    "model_target_label": "Quality",
+                }
+            )
+        )
+
+    assert repo.created_children == []
+    assert run_repo.pending_creates == []
+    assert repo.inference_states == []
+    assert input_service.enqueued == []
+    assert broker.messages == []
+    assert events == []
+
+    refreshed = await toolkit.update_context(
+        TurnContext(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id=_PARENT_RUN_ID,
+            publish_event=cast(Any, _publish_to(events)),
+            session_id="root-session",
+        )
+    )
+    refreshed_tool = next(
+        tool for tool in refreshed.tools if tool.spec.name == "spawn_agent"
+    )
+    assert "No explicit model target overrides are available." in (
+        refreshed_tool.spec.description
+    )
+    assert "`Quality` Reasoning efforts" not in refreshed_tool.spec.description
+
+
 @pytest.mark.parametrize(
     ("arguments", "expected_error"),
     [
@@ -1335,7 +1560,7 @@ async def test_spawn_agent_applies_target_override_and_normalized_effort() -> No
         ),
         (
             {"fork_turns": "none", "model_target_label": "Missing"},
-            "was not found",
+            "is not available for explicit subagent override",
         ),
         (
             {"fork_turns": "none", "reasoning_effort": "xhigh"},

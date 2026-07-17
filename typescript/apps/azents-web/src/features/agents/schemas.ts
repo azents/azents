@@ -1,7 +1,10 @@
 /** Agent form Zod schema */
 
 import { z } from "zod/v4";
-import { MAX_SELECTABLE_MODEL_OPTIONS } from "./model-selection";
+import {
+  isSubagentGuidanceWithinLimit,
+  MAX_SELECTABLE_MODEL_OPTIONS,
+} from "./model-selection";
 import type { ModelCapabilities } from "@azents/public-client";
 
 const selectableModelOptionFormValueSchema = z.object({
@@ -15,6 +18,11 @@ const selectableModelOptionFormValueSchema = z.object({
   context_window_tokens: z.number().int().positive().nullable(),
   max_output_tokens: z.number().int().positive().nullable(),
   builtin_tools: z.array(z.string()),
+  subagent_enabled: z.boolean(),
+  subagent_guidance: z
+    .string()
+    .nullable()
+    .refine(isSubagentGuidanceWithinLimit),
 });
 
 /** Agent form schema. Agent model selections reference labels from a bounded selectable model list. */

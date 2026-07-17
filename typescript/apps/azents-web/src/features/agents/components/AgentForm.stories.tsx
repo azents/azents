@@ -97,6 +97,8 @@ const baseAgent: AgentResponse = {
         context_window_tokens: null,
         max_output_tokens: null,
         builtin_tools: [{ name: "web_search" }],
+        subagent_enabled: true,
+        subagent_guidance: "Use for complex synthesis tasks.",
       },
     },
     {
@@ -106,6 +108,8 @@ const baseAgent: AgentResponse = {
         context_window_tokens: null,
         max_output_tokens: null,
         builtin_tools: [],
+        subagent_enabled: false,
+        subagent_guidance: null,
       },
     },
   ],

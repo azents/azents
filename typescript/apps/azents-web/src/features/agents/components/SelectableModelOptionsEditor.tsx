@@ -29,7 +29,9 @@ import {
   Select,
   SimpleGrid,
   Stack,
+  Switch,
   Text,
+  Textarea,
   TextInput,
   Tooltip,
 } from "@mantine/core";
@@ -37,8 +39,10 @@ import { IconGripVertical, IconSettings, IconTrash } from "@tabler/icons-react";
 import { useFormatter, useTranslations } from "next-intl";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  createSelectableModelOptionFormValue,
   fallbackSelectableModelLabel,
   MAX_SELECTABLE_MODEL_OPTIONS,
+  MAX_SUBAGENT_GUIDANCE_LENGTH,
   selectableModelLabelSelectData,
 } from "../model-selection";
 import { ModelCatalogPicker } from "./ModelCatalogPicker";
@@ -330,6 +334,43 @@ function SelectableModelSettingsModal({
             </Checkbox.Group>
           )}
         </Stack>
+        <Stack gap="xs">
+          <Text fw={500} size="sm">
+            {t("subagentsSectionLabel")}
+          </Text>
+          <Switch
+            label={t("subagentEnabledLabel")}
+            description={t("subagentEnabledDescription")}
+            checked={option.subagent_enabled}
+            onChange={(event) =>
+              onChange({
+                ...option,
+                subagent_enabled: event.currentTarget.checked,
+              })
+            }
+          />
+          <Text c="dimmed" size="sm">
+            {t("subagentInheritanceDescription")}
+          </Text>
+          <Textarea
+            label={t("subagentGuidanceLabel")}
+            description={t("subagentGuidanceDescription", {
+              max: MAX_SUBAGENT_GUIDANCE_LENGTH,
+            })}
+            placeholder={t("subagentGuidancePlaceholder")}
+            value={option.subagent_guidance ?? ""}
+            disabled={!option.subagent_enabled}
+            maxLength={MAX_SUBAGENT_GUIDANCE_LENGTH}
+            autosize
+            minRows={3}
+            onChange={(event) =>
+              onChange({
+                ...option,
+                subagent_guidance: event.currentTarget.value || null,
+              })
+            }
+          />
+        </Stack>
         <Group justify="flex-end">
           <Button variant="light" onClick={onClose}>
             {t("settingsDone")}
@@ -429,21 +470,7 @@ export function SelectableModelOptionsEditor({
       return;
     }
     const id = createOptionId();
-    const nextOptions = [
-      ...options,
-      {
-        id,
-        label: "",
-        model_provider_integration_id: null,
-        model_selection_value: null,
-        model_display_name: null,
-        model_identifier: null,
-        normalized_capabilities: null,
-        context_window_tokens: null,
-        max_output_tokens: null,
-        builtin_tools: [],
-      },
-    ];
+    const nextOptions = [...options, createSelectableModelOptionFormValue(id)];
     setPendingFocusOptionId(id);
     handleChangeOptions(nextOptions);
   };

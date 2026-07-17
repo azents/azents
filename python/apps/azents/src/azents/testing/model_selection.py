@@ -55,6 +55,8 @@ def make_test_model_settings() -> SelectableModelSettings:
         context_window_tokens=None,
         max_output_tokens=None,
         builtin_tools=[],
+        subagent_enabled=True,
+        subagent_guidance=None,
     )
 
 

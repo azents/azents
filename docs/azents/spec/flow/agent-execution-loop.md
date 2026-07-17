@@ -50,7 +50,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ChatView.tsx
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
 last_verified_at: 2026-07-17
-spec_version: 99
+spec_version: 100
 ---
 
 # Agent Execution Loop
@@ -526,7 +526,7 @@ Subagent collaboration tools communicate through resolved agent input buffers:
   `SessionAgent` row lock for the tree. It fails with a tool error instead of queueing when the root
   tree already has `subagent_settings.max_subagents` active subagents or the requested child would
   exceed `subagent_settings.max_depth`. If allowed, it creates
-  a child `SessionAgent` plus hidden child `AgentSession`. Without a profile override it precreates the child's first pending run with source `parent_run` and the exact current parent-run requested and resolved profile, limits, and parent run id. For `fork_turns = none` or a positive bounded count, optional `model_target_label` and `reasoning_effort` fields may instead pre-resolve an Agent-owned target profile with source `spawn_override`. Full-history `all` forks reject either override. Target-only changes normalize effort from the parent resolved effort; explicit efforts validate exactly. Label, effort, fork, and parent-provenance validation happens before child records or wake-up side effects. The tool description lists Agent-owned labels and explicit effort levels only and does not project physical model or integration metadata. The spawn flow then forks the parent's selected model-visible
+  a child `SessionAgent` plus hidden child `AgentSession`. Without a profile override it precreates the child's first pending run with source `parent_run` and the exact current parent-run requested and resolved profile, limits, and parent run id, regardless of whether that inherited Agent option allows explicit subagent selection. For `fork_turns = none` or a positive bounded count, optional `model_target_label` and `reasoning_effort` fields may instead pre-resolve an Agent-owned target profile with source `spawn_override`. An explicit target resolves only among options whose `settings.subagent_enabled` is true; unknown and disabled labels fail identically before side effects. An effort-only override retains the inherited parent target. Full-history `all` forks reject either override. Target-only changes normalize effort from the parent resolved effort; explicit efforts validate exactly. Label, effort, fork, and parent-provenance validation happens before child records or wake-up side effects. The tool description uses the same enabled-option set, lists labels and explicit effort levels, renders optional bounded `subagent_guidance`, and does not project disabled labels or physical model and integration metadata. If the set is empty, the description advertises inheritance only. The spawn flow then forks the parent's selected model-visible
   context, appends that selected context to the child transcript, appends a
   `system_reminder` event rendered as a `<system-reminder>` boundary when any parent history
   was copied, writes an initial `agent_message`, marks the child running, and sends a broker
@@ -929,6 +929,7 @@ updated by the user.
 
 ## Changelog
 
+- **2026-07-17** (spec_version 100) — Applied per-option explicit subagent target eligibility and bounded guidance while preserving disabled-target inheritance and atomic rejection.
 - **2026-07-17** (spec_version 99) — Replaced provider-specific terminal classes with one bounded
   provider-failure contract, gave every provider category the full retry budget, projected context
   preparation as one live operation, retained every user-stopped active Run as recoverable state, and

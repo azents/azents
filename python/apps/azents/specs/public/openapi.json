@@ -15445,6 +15445,24 @@
             "type": "array",
             "title": "Builtin Tools",
             "description": "Enabled built-in tools"
+          },
+          "subagent_enabled": {
+            "type": "boolean",
+            "title": "Subagent Enabled",
+            "description": "Available as an explicit subagent model target"
+          },
+          "subagent_guidance": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subagent Guidance",
+            "description": "Optional parent-model guidance for explicit subagent selection"
           }
         },
         "additionalProperties": false,
@@ -15452,7 +15470,9 @@
         "required": [
           "context_window_tokens",
           "max_output_tokens",
-          "builtin_tools"
+          "builtin_tools",
+          "subagent_enabled",
+          "subagent_guidance"
         ],
         "title": "SelectableModelSettings",
         "description": "Stored user settings for one selectable model option."
@@ -15499,6 +15519,25 @@
             ],
             "title": "Builtin Tools",
             "description": "Enabled built-in tools; omitted enables every supported tool"
+          },
+          "subagent_enabled": {
+            "type": "boolean",
+            "title": "Subagent Enabled",
+            "description": "Available as an explicit subagent model target",
+            "default": true
+          },
+          "subagent_guidance": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subagent Guidance",
+            "description": "Optional parent-model guidance for explicit subagent selection"
           }
         },
         "additionalProperties": false,

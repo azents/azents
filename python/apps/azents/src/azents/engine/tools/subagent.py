@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field, TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.types import SessionBroker, SessionStopSignal, SessionWakeUp
-from azents.core.agent import SubagentSettings
+from azents.core.agent import SelectableModelOption, SubagentSettings
 from azents.core.enums import (
     AgentRunStatus,
     AgentSessionRunState,
@@ -222,6 +222,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
         event_transcript_repository: EventTranscriptRepository,
         input_buffer_service: InputBufferService,
         broker: SessionBroker,
+        agent_repository: AgentRepository,
         agent: Agent,
         subagent_settings: SubagentSettings,
     ) -> None:
@@ -231,6 +232,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
         self.event_transcript_repository = event_transcript_repository
         self.input_buffer_service = input_buffer_service
         self.broker = broker
+        self.agent_repository = agent_repository
         self.agent = agent
         self.subagent_settings = subagent_settings
         self.session_id: str | None = None
@@ -246,6 +248,8 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
         self.session_id = context.session_id or self.session_id
         self.user_id = context.user_id
         self.publish_event = context.publish_event
+        async with self.session_manager() as session:
+            self.agent = await self._current_agent(session)
         return ToolkitState(
             status=ToolkitStatus.ENABLED,
             tools=[
@@ -282,17 +286,45 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
             ]
         )
 
+    async def _current_agent(self, session: AsyncSession) -> Agent:
+        """Load the current owning Agent policy snapshot."""
+        agent = await self.agent_repository.get_by_id(session, self.agent.id)
+        if agent is None:
+            raise FunctionToolError("Agent was not found")
+        return agent
+
+    @staticmethod
+    def _subagent_override_options(agent: Agent) -> list[SelectableModelOption]:
+        """Return Agent options eligible for explicit subagent selection."""
+        return [
+            option
+            for option in agent.selectable_model_options
+            if option.settings.subagent_enabled
+        ]
+
     def _spawn_agent_description(self) -> str:
         """Build label-only spawn guidance from the current Agent snapshot."""
         target_lines: list[str] = []
-        for option in self.agent.selectable_model_options:
+        for option in self._subagent_override_options(self.agent):
             levels = (
                 option.model_selection.normalized_capabilities.reasoning.effort_levels
             )
             efforts = ", ".join(level.value for level in levels)
             effort_text = efforts if efforts else "none"
-            target_lines.append(f"- `{option.label}` Reasoning efforts: {effort_text}.")
-        targets = "\n".join(target_lines)
+            target_line = f"- `{option.label}` Reasoning efforts: {effort_text}."
+            if option.settings.subagent_guidance is not None:
+                guidance_lines = "\n  ".join(
+                    option.settings.subagent_guidance.splitlines()
+                )
+                target_line = f"{target_line}\n  Guidance: {guidance_lines}"
+            target_lines.append(target_line)
+        if target_lines:
+            targets = "\n".join(target_lines)
+        else:
+            targets = (
+                "No explicit model target overrides are available. "
+                "Omit `model_target_label` to inherit the parent Run profile."
+            )
         guidance = dedent(
             """\
             Create a child subagent for a concrete, bounded task that can run
@@ -335,7 +367,9 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                     raise FunctionToolError(
                         "Current Session has no prepared inference state"
                     )
+                current_agent = await self._current_agent(session)
                 profile = self._derive_spawn_inference_profile(
+                    agent=current_agent,
                     parent_state=parent_session.inference_state,
                     fork_selection=fork_selection,
                     model_target_label=input.model_target_label,
@@ -416,6 +450,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
     def _derive_spawn_inference_profile(
         self,
         *,
+        agent: Agent,
         parent_state: SessionInferenceState,
         fork_selection: ForkTurnsSelection,
         model_target_label: str | None,
@@ -442,14 +477,15 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
             option = next(
                 (
                     option
-                    for option in self.agent.selectable_model_options
+                    for option in self._subagent_override_options(agent)
                     if option.label == model_target_label
                 ),
                 None,
             )
             if option is None:
                 raise FunctionToolError(
-                    f"Model target label '{model_target_label}' was not found"
+                    f"Model target label '{model_target_label}' is not available "
+                    "for explicit subagent override"
                 )
             selection = option.model_selection
             settings = option.settings
@@ -485,8 +521,8 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
             lightweight_option = next(
                 (
                     option
-                    for option in self.agent.selectable_model_options
-                    if option.label == self.agent.lightweight_model_label
+                    for option in agent.selectable_model_options
+                    if option.label == agent.lightweight_model_label
                 ),
                 None,
             )
@@ -1118,6 +1154,7 @@ class SubagentToolkitProvider(ToolkitProvider[SubagentToolkitConfig]):
             event_transcript_repository=EventTranscriptRepository(),
             input_buffer_service=self.input_buffer_service,
             broker=self.broker,
+            agent_repository=self.agent_repository,
             agent=agent,
             subagent_settings=subagent_settings,
         )

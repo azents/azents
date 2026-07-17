@@ -374,6 +374,8 @@ class TestModelSelectionReadiness:
                         "context_window_tokens": 100_000,
                         "max_output_tokens": 12_000,
                         "builtin_tools": [{"name": "web_search"}],
+                        "subagent_enabled": False,
+                        "subagent_guidance": "Reserve for complex synthesis.",
                     },
                 },
                 {
@@ -383,6 +385,8 @@ class TestModelSelectionReadiness:
                         "context_window_tokens": 32_000,
                         "max_output_tokens": 4_000,
                         "builtin_tools": [],
+                        "subagent_enabled": True,
+                        "subagent_guidance": "Prefer for bounded investigation.",
                     },
                 },
             ],
@@ -404,11 +408,15 @@ class TestModelSelectionReadiness:
             "context_window_tokens": 100_000,
             "max_output_tokens": 12_000,
             "builtin_tools": [{"name": "web_search", "config": {}}],
+            "subagent_enabled": False,
+            "subagent_guidance": "Reserve for complex synthesis.",
         }
         assert settings["default_selectable_model_options"][1]["settings"] == {
             "context_window_tokens": 32_000,
             "max_output_tokens": 4_000,
             "builtin_tools": [],
+            "subagent_enabled": True,
+            "subagent_guidance": "Prefer for bounded investigation.",
         }
         assert settings["default_model_selection"]["model_identifier"] == "gpt-5.5"
         assert (
@@ -433,11 +441,15 @@ class TestModelSelectionReadiness:
                 "context_window_tokens": 100_000,
                 "max_output_tokens": 12_000,
                 "builtin_tools": [{"name": "web_search", "config": {}}],
+                "subagent_enabled": False,
+                "subagent_guidance": "Reserve for complex synthesis.",
             },
             {
                 "context_window_tokens": 32_000,
                 "max_output_tokens": 4_000,
                 "builtin_tools": [],
+                "subagent_enabled": True,
+                "subagent_guidance": "Prefer for bounded investigation.",
             },
         ]
         assert agent["main_model_label"] == "default"

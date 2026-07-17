@@ -8,6 +8,13 @@ import type {
 } from "@azents/public-client";
 
 export const MAX_SELECTABLE_MODEL_OPTIONS = 10;
+export const MAX_SUBAGENT_GUIDANCE_LENGTH = 500;
+
+export function isSubagentGuidanceWithinLimit(
+  guidance: string | null,
+): boolean {
+  return guidance == null || guidance.length <= MAX_SUBAGENT_GUIDANCE_LENGTH;
+}
 
 export interface SelectableModelCandidate {
   provider: string;
@@ -27,6 +34,27 @@ export interface SelectableModelOptionFormValue {
   context_window_tokens: number | null;
   max_output_tokens: number | null;
   builtin_tools: string[];
+  subagent_enabled: boolean;
+  subagent_guidance: string | null;
+}
+
+export function createSelectableModelOptionFormValue(
+  id: string,
+): SelectableModelOptionFormValue {
+  return {
+    id,
+    label: "",
+    model_provider_integration_id: null,
+    model_selection_value: null,
+    model_display_name: null,
+    model_identifier: null,
+    normalized_capabilities: null,
+    context_window_tokens: null,
+    max_output_tokens: null,
+    builtin_tools: [],
+    subagent_enabled: true,
+    subagent_guidance: null,
+  };
 }
 
 export interface ModelCatalogAttemptState {
@@ -174,6 +202,8 @@ export function selectableModelOptionFormValueFromStoredOption(
     context_window_tokens: option.settings.context_window_tokens,
     max_output_tokens: option.settings.max_output_tokens,
     builtin_tools: option.settings.builtin_tools.map((tool) => tool.name),
+    subagent_enabled: option.settings.subagent_enabled,
+    subagent_guidance: option.settings.subagent_guidance,
   };
 }
 
@@ -204,6 +234,8 @@ export function selectableModelOptionInputsFromFormValues(
           context_window_tokens: option.context_window_tokens,
           max_output_tokens: option.max_output_tokens,
           builtin_tools: option.builtin_tools.map((name) => ({ name })),
+          subagent_enabled: option.subagent_enabled,
+          subagent_guidance: option.subagent_guidance?.trim() || null,
         },
       },
     ];

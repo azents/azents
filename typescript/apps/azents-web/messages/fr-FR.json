@@ -777,6 +777,13 @@
         "builtinToolsLabel": "Outils intégrés",
         "builtinToolWebSearch": "Recherche web",
         "noBuiltinTools": "Ce modèle ne prend en charge aucun outil intégré.",
+        "subagentsSectionLabel": "Sous-agents",
+        "subagentEnabledLabel": "Disponible pour la sélection explicite des sous-agents",
+        "subagentEnabledDescription": "Affiche cette étiquette au modèle parent comme cible explicite de spawn_agent.",
+        "subagentInheritanceDescription": "Désactiver la sélection explicite n'empêche pas un enfant d'hériter de ce modèle depuis son parent actif.",
+        "subagentGuidanceLabel": "Conseils de sélection pour les sous-agents",
+        "subagentGuidanceDescription": "Conseils facultatifs sur les types de tâches appropriés ou les contraintes de coût et de qualité. {max} caractères maximum.",
+        "subagentGuidancePlaceholder": "Par exemple : privilégier ce modèle pour l'exploration du dépôt et les recherches bien délimitées.",
         "settingsDone": "Terminer"
       }
     },
