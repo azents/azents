@@ -846,6 +846,44 @@ def _wait_for_rest_contents(
     raise TimeoutError(f"REST contents were not observed: {expected}, {last_payload!r}")
 
 
+def _wait_for_completed_rest_contents(
+    *,
+    server_url: str,
+    token: str,
+    session_id: str,
+    expected: list[str],
+    timeout: float = 90,
+) -> dict[str, object]:
+    """Wait for expected content and its durable completed run boundary."""
+    deadline = time.monotonic() + timeout
+    last_payload: dict[str, object] | None = None
+    while time.monotonic() < deadline:
+        payload = _list_history(
+            server_url=server_url,
+            token=token,
+            session_id=session_id,
+        )
+        last_payload = payload
+        items = _message_items(payload)
+        contents = [
+            content for item in items if isinstance(content := item.get("content"), str)
+        ]
+        completed_run = any(
+            item.get("role") == "run_complete" and item.get("status") == "completed"
+            for item in items
+        )
+        if (
+            all(item in contents for item in expected)
+            and any(item.get("role") == "turn_complete" for item in items)
+            and completed_run
+        ):
+            return payload
+        time.sleep(0.5)
+    raise TimeoutError(
+        f"Completed REST contents were not observed: {expected}, {last_payload!r}"
+    )
+
+
 # Shared public-path helpers used by focused execution reliability E2E modules.
 auth_headers = _headers
 connect_chat = _connect_chat
@@ -894,7 +932,7 @@ class TestAgentExecutionPersistence:
             agent_id=agent_id,
             message=_HELLO,
         )
-        payload = _wait_for_rest_contents(
+        payload = _wait_for_completed_rest_contents(
             server_url=azents_public_server_url,
             token=workspace.token,
             session_id=result.session_id,
