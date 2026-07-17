@@ -269,29 +269,34 @@ def _wait_for_completed_retry(
     timeout: float = 90,
 ) -> dict[str, object]:
     """Wait until a different Run durably completes the stopped retry."""
-    observed: dict[str, object] | None = None
-
-    def retry_completed() -> bool:
-        nonlocal observed
+    deadline = time.monotonic() + timeout
+    expected_content_present = False
+    completed_run_ids: set[str] = set()
+    while time.monotonic() < deadline:
         observed = list_history(
             server_url=public_url,
             token=token,
             session_id=session_id,
         )
-        if expected_content not in message_contents(observed):
-            return False
-        return any(
-            run_id != stopped_run_id
-            for run_id in _run_marker_ids(observed, status="completed")
-        )
+        expected_content_present = expected_content in message_contents(observed)
+        completed_run_ids = _run_marker_ids(observed, status="completed")
+        if expected_content_present and any(
+            run_id != stopped_run_id for run_id in completed_run_ids
+        ):
+            return observed
+        time.sleep(0.05)
 
-    _wait_until(
-        retry_completed,
-        timeout=timeout,
-        message=f"fresh retry Run did not complete: {observed!r}",
+    live = list_live(
+        server_url=public_url,
+        token=token,
+        session_id=session_id,
     )
-    assert observed is not None
-    return observed
+    raise TimeoutError(
+        "fresh retry Run did not complete: "
+        f"expected_content_present={expected_content_present!r}, "
+        f"completed_run_ids={sorted(completed_run_ids)!r}, "
+        f"live_run={live.get('run')!r}"
+    )
 
 
 def _post_stop(*, public_url: str, token: str, session_id: str) -> None:

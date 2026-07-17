@@ -455,6 +455,55 @@ def _finalizer(
     )
 
 
+def _record_recovery_publication_order(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    session_repository: _AgentSessionRepository,
+    projector: _LiveEventProjector,
+    event_publisher: _EventPublisher,
+) -> list[str]:
+    """Record Stop consumption and externally visible recovery ordering."""
+    order: list[str] = []
+    clear_stop_request = session_repository.clear_stop_request
+    dispatch_event = event_publisher.dispatch_event
+    publish_live_run_updated = projector.publish_live_run_updated
+
+    async def record_clear_stop_request(
+        session: AsyncSession,
+        *,
+        session_id: str,
+    ) -> object:
+        order.append("clear_stop_request")
+        return await clear_stop_request(session, session_id=session_id)
+
+    async def record_dispatch_event(
+        session_id: str,
+        event: PublishedEvent,
+    ) -> None:
+        order.append("dispatch_run_stopped")
+        await dispatch_event(session_id, event)
+
+    async def record_publish_live_run_updated(
+        session_id: str,
+        run: ChatLiveRunState,
+    ) -> None:
+        order.append("publish_stopped_recovery")
+        await publish_live_run_updated(session_id, run)
+
+    monkeypatch.setattr(
+        session_repository,
+        "clear_stop_request",
+        record_clear_stop_request,
+    )
+    monkeypatch.setattr(event_publisher, "dispatch_event", record_dispatch_event)
+    monkeypatch.setattr(
+        projector,
+        "publish_live_run_updated",
+        record_publish_live_run_updated,
+    )
+    return order
+
+
 @pytest.mark.asyncio
 async def test_finalize_persists_live_events_and_marks_run_terminal() -> None:
     """User stop full finalize cleans up live projection and run state."""
@@ -530,6 +579,41 @@ async def test_finalize_persists_live_events_and_marks_run_terminal() -> None:
     stopped_event = event_publisher.dispatched[0][1]
     assert isinstance(stopped_event, RunStopped)
     assert stopped_event.run_id == "11111111111111111111111111111111"
+
+
+@pytest.mark.asyncio
+async def test_finalize_clears_stop_request_before_recovery_publication(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Retry-visible recovery is published only after Stop intent is consumed."""
+    session_id = "session-001"
+    (
+        finalizer,
+        _,
+        session_repository,
+        _,
+        projector,
+        _,
+        event_publisher,
+    ) = _finalizer(running_run=_running_run(session_id), live_events=[])
+    order = _record_recovery_publication_order(
+        monkeypatch,
+        session_repository=session_repository,
+        projector=projector,
+        event_publisher=event_publisher,
+    )
+
+    await finalizer.finalize(
+        session_id,
+        run_id=None,
+        active_tool_calls=[],
+    )
+
+    assert order == [
+        "clear_stop_request",
+        "dispatch_run_stopped",
+        "publish_stopped_recovery",
+    ]
 
 
 @pytest.mark.asyncio
@@ -660,6 +744,41 @@ async def test_record_interrupted_run_only_records_marker_and_stopped_event() ->
         ("22222222222222222222222222222222", AgentRunStatus.STOPPED)
     ]
     assert run_repository.terminal_sessions == []
+
+
+@pytest.mark.asyncio
+async def test_record_interrupted_run_clears_stop_before_recovery_publication(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Retry-visible cancelled-path recovery follows consumed Stop intent."""
+    session_id = "session-001"
+    running_run = _running_run(session_id)
+    (
+        finalizer,
+        _,
+        session_repository,
+        _,
+        projector,
+        _,
+        event_publisher,
+    ) = _finalizer(running_run=running_run, live_events=[])
+    order = _record_recovery_publication_order(
+        monkeypatch,
+        session_repository=session_repository,
+        projector=projector,
+        event_publisher=event_publisher,
+    )
+
+    await finalizer.record_interrupted_run(
+        session_id,
+        run_id=running_run.id,
+    )
+
+    assert order == [
+        "clear_stop_request",
+        "dispatch_run_stopped",
+        "publish_stopped_recovery",
+    ]
 
 
 @pytest.mark.asyncio

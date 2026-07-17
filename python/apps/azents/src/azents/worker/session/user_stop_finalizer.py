@@ -93,18 +93,19 @@ class UserStopFinalizer:
                 session_id,
                 status=AgentRunStatus.STOPPED,
             )
+            await self._clear_stop_request(session_id)
         else:
             stopped_run = await self._mark_agent_run_stopped_with_recovery(
                 session_id,
                 run_id=effective_run_id,
                 recovery_state=_stopped_recovery_state(running_run),
             )
+            await self._clear_stop_request(session_id)
             await self.event_publisher.dispatch_event(
                 session_id,
                 RunStopped(run_id=effective_run_id),
             )
             await self._publish_stopped_recovery(session_id, stopped_run)
-        await self._clear_stop_request(session_id)
         await self.broker.clear_session_activity(session_id)
 
     async def record_interrupted_run(
@@ -121,12 +122,12 @@ class UserStopFinalizer:
             run_id=run_id,
             recovery_state=_stopped_recovery_state(running_run),
         )
+        await self._clear_stop_request(session_id)
         await self.event_publisher.dispatch_event(
             session_id,
             RunStopped(run_id=run_id),
         )
         await self._publish_stopped_recovery(session_id, stopped_run)
-        await self._clear_stop_request(session_id)
 
     async def _get_running_agent_run(
         self,
