@@ -231,46 +231,55 @@ class TestProviderImageGeneration:
                 reasoning_effort=None,
             )
             deadline = time.monotonic() + 30
+            observed_action_types: list[object] = []
             while time.monotonic() < deadline:
-                raw = websocket.recv(timeout=max(0.1, deadline - time.monotonic()))
+                try:
+                    raw = websocket.recv(timeout=max(0.1, deadline - time.monotonic()))
+                except TimeoutError:
+                    break
                 raw_text = raw.decode() if isinstance(raw, bytes) else raw
                 assert _IMAGE_BASE64 not in raw_text
                 action = json_object_payload(
                     json.loads(raw_text),
                     label="WebSocket action",
                 )
-                if action.get("type") == "live_event_upserted":
+                action_type = action.get("type")
+                observed_action_types.append(action_type)
+                if action_type == "live_event_upserted":
                     event = json_object_payload(
                         action.get("event"),
                         label="provider live event",
                     )
-                    if event.get("kind") != "provider_tool_call":
-                        continue
-                    payload = json_object_payload(
-                        event.get("payload"),
-                        label="provider live payload",
+                    if event.get("kind") == "provider_tool_call":
+                        payload = json_object_payload(
+                            event.get("payload"),
+                            label="provider live payload",
+                        )
+                        if payload.get("name") == "image_generation":
+                            status = payload.get("status")
+                            if isinstance(status, str):
+                                observed_statuses.add(status)
+                elif action_type == "history_event_appended":
+                    event = json_object_payload(
+                        action.get("event"),
+                        label="history appended event",
                     )
-                    if payload.get("name") == "image_generation":
-                        status = payload.get("status")
-                        if isinstance(status, str):
-                            observed_statuses.add(status)
-                if action.get("type") != "history_event_appended":
-                    continue
-                event = json_object_payload(
-                    action.get("event"),
-                    label="history appended event",
-                )
-                if _provider_result([event]) is not None:
-                    durable_result = event
+                    if _provider_result([event]) is not None:
+                        durable_result = event
                 if durable_result is not None and observed_statuses >= {
                     "running",
                     "completed",
                 }:
                     break
-            else:
+            if durable_result is None or not observed_statuses >= {
+                "running",
+                "completed",
+            }:
                 raise TimeoutError(
                     "image-generation live handoff did not complete: "
-                    f"{observed_statuses!r}, {durable_result!r}"
+                    f"statuses={observed_statuses!r}, "
+                    f"durable_result={durable_result!r}, "
+                    f"actions={observed_action_types!r}"
                 )
 
         _wait_for_idle(
