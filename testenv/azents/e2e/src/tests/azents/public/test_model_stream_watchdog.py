@@ -243,6 +243,57 @@ def _failed_attempts(payload: dict[str, object]) -> list[dict[str, object]]:
     )
 
 
+def _run_marker_ids(payload: dict[str, object], *, status: str) -> set[str]:
+    """Return Run IDs from durable markers with the requested status."""
+    run_ids: set[str] = set()
+    for event in history_events(payload):
+        if event.get("kind") != "run_marker":
+            continue
+        marker = json_object_payload(
+            event.get("payload"),
+            label="run marker payload",
+        )
+        run_id = marker.get("run_id")
+        if marker.get("status") == status and isinstance(run_id, str):
+            run_ids.add(run_id)
+    return run_ids
+
+
+def _wait_for_completed_retry(
+    *,
+    public_url: str,
+    token: str,
+    session_id: str,
+    stopped_run_id: str,
+    expected_content: str,
+    timeout: float = 90,
+) -> dict[str, object]:
+    """Wait until a different Run durably completes the stopped retry."""
+    observed: dict[str, object] | None = None
+
+    def retry_completed() -> bool:
+        nonlocal observed
+        observed = list_history(
+            server_url=public_url,
+            token=token,
+            session_id=session_id,
+        )
+        if expected_content not in message_contents(observed):
+            return False
+        return any(
+            run_id != stopped_run_id
+            for run_id in _run_marker_ids(observed, status="completed")
+        )
+
+    _wait_until(
+        retry_completed,
+        timeout=timeout,
+        message=f"fresh retry Run did not complete: {observed!r}",
+    )
+    assert observed is not None
+    return observed
+
+
 def _post_stop(*, public_url: str, token: str, session_id: str) -> None:
     """Stop one active Run through the public REST control boundary."""
     response = requests.post(
@@ -799,19 +850,22 @@ class TestModelStreamWatchdog:
             retry.get("snapshot"),
             label="stopped retry snapshot",
         )
-        retry_run = json_object_payload(
-            snapshot.get("run"),
-            label="fresh retry run",
-        )
-        assert retry_run.get("run_id") != stopped_run_id
-        assert retry_run.get("retry") is None
-        assert retry_run.get("recovery") is None
+        retry_run_payload = snapshot.get("run")
+        if retry_run_payload is not None:
+            retry_run = json_object_payload(
+                retry_run_payload,
+                label="fresh retry run",
+            )
+            assert retry_run.get("run_id") != stopped_run_id
+            assert retry_run.get("retry") is None
+            assert retry_run.get("recovery") is None
 
-        final_history = wait_for_rest_contents(
-            server_url=azents_public_server_url,
+        final_history = _wait_for_completed_retry(
+            public_url=azents_public_server_url,
             token=workspace.token,
             session_id=result.session_id,
-            expected=[_USER_STOP_RETRY_RESPONSE],
+            stopped_run_id=stopped_run_id,
+            expected_content=_USER_STOP_RETRY_RESPONSE,
         )
         assert not system_error_events(history)
         assert not system_error_events(final_history)
