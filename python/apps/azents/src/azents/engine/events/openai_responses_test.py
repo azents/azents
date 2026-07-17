@@ -39,6 +39,7 @@ from websockets.http11 import Response as WebSocketHTTPResponse
 from azents.core.chatgpt_oauth import CHATGPT_OAUTH_BACKEND_BASE_URL
 from azents.core.enums import EventKind, LLMProvider
 from azents.core.llm_catalog import ModelCapabilities
+from azents.engine.events.file_parts import ModelFileLoweringContent
 from azents.engine.events.litellm_responses import LiteLLMResponsesLowerer
 from azents.engine.events.openai_responses import (
     OpenAIResponsesLowerer,
@@ -58,6 +59,7 @@ from azents.engine.events.responses_continuation import ResponsesContinuationPla
 from azents.engine.events.types import (
     AssistantMessagePayload,
     Event,
+    FileOutputPart,
     NativeArtifact,
     ProviderToolResultPayload,
     UserMessagePayload,
@@ -80,6 +82,17 @@ _PNG_BASE64 = (
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ"
     "/pLvAAAAAElFTkSuQmCC"
 )
+
+
+class _StaticModelFileResolver:
+    """Return fixed request-local ModelFile content."""
+
+    def resolve(self, part: FileOutputPart) -> ModelFileLoweringContent:
+        """Resolve one generated image FilePart."""
+        del part
+        return ModelFileLoweringContent(
+            data_url="data:image/jpeg;base64,cmVoeWRyYXRlZA=="
+        )
 
 
 def _event(content: str = "hello") -> Event:
@@ -399,6 +412,132 @@ def test_openai_sdk_lowerer_uses_standard_image_generation_tool(
     assert request.options.get("store") is (
         False if provider_id == LLMProvider.CHATGPT_OAUTH else None
     )
+
+
+def test_chatgpt_oauth_rehydrates_image_generation_with_store_false() -> None:
+    """Replay generated image result when ChatGPT cannot retain responses."""
+    lowerer = OpenAIResponsesLowerer(
+        provider="chatgpt_oauth",
+        model="gpt-5.1",
+        provider_id=LLMProvider.CHATGPT_OAUTH,
+        credential_kwargs={},
+        model_file_resolver=_StaticModelFileResolver(),
+    )
+    artifact = NativeArtifact(
+        compat_key=build_native_compat_key(
+            adapter="openai",
+            native_format="responses",
+            provider="chatgpt_oauth",
+            model="gpt-5.1",
+            schema_version="1",
+        ),
+        adapter="openai",
+        native_format="responses",
+        provider="chatgpt_oauth",
+        model="gpt-5.1",
+        schema_version="1",
+        item={
+            "type": "image_generation_call",
+            "id": "image-call-1",
+            "status": "completed",
+        },
+    )
+    event = Event(
+        id="2" * 32,
+        session_id="session-1",
+        kind=EventKind.PROVIDER_TOOL_RESULT,
+        payload=ProviderToolResultPayload(
+            call_id="image-call-1",
+            name="image_generation",
+            status="completed",
+            output=[
+                FileOutputPart(
+                    model_file_id="model-file-1",
+                    media_type="image/jpeg",
+                    name="generated.jpg",
+                    size=123,
+                    kind="image",
+                )
+            ],
+            native_artifact=artifact,
+        ),
+        created_at=datetime.datetime.now(datetime.UTC),
+    )
+
+    request = lowerer.lower([event], model="gpt-5.1")
+
+    assert request.options.get("store") is False
+    assert request.input == [
+        {
+            "type": "image_generation_call",
+            "id": None,
+            "status": "completed",
+            "result": "cmVoeWRyYXRlZA==",
+        }
+    ]
+
+
+def test_openai_sdk_rehydrates_image_generation_result() -> None:
+    """Replay generated image result through the official OpenAI SDK lowerer."""
+    lowerer = OpenAIResponsesLowerer(
+        provider="openai",
+        model="gpt-5.1",
+        provider_id=LLMProvider.OPENAI,
+        credential_kwargs={},
+        model_file_resolver=_StaticModelFileResolver(),
+    )
+    artifact = NativeArtifact(
+        compat_key=build_native_compat_key(
+            adapter="openai",
+            native_format="responses",
+            provider="openai",
+            model="gpt-5.1",
+            schema_version="1",
+        ),
+        adapter="openai",
+        native_format="responses",
+        provider="openai",
+        model="gpt-5.1",
+        schema_version="1",
+        item={
+            "type": "image_generation_call",
+            "id": "image-call-1",
+            "status": "completed",
+        },
+    )
+    event = Event(
+        id="3" * 32,
+        session_id="session-1",
+        kind=EventKind.PROVIDER_TOOL_RESULT,
+        payload=ProviderToolResultPayload(
+            call_id="image-call-1",
+            name="image_generation",
+            status="completed",
+            output=[
+                FileOutputPart(
+                    model_file_id="model-file-1",
+                    media_type="image/jpeg",
+                    name="generated.jpg",
+                    size=123,
+                    kind="image",
+                )
+            ],
+            native_artifact=artifact,
+        ),
+        created_at=datetime.datetime.now(datetime.UTC),
+    )
+
+    request = lowerer.lower([event], model="gpt-5.1")
+
+    assert request.continuation_store_enabled()
+    assert request.input == [
+        {
+            "type": "image_generation_call",
+            "id": "image-call-1",
+            "status": "completed",
+            "result": "cmVoeWRyYXRlZA==",
+        }
+    ]
 
 
 def test_openai_sdk_lowerer_rejects_invalid_image_generation_config() -> None:

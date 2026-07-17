@@ -129,6 +129,25 @@ def _artifact(item: dict[str, object]) -> NativeArtifact:
     )
 
 
+def _openai_artifact(item: dict[str, object]) -> NativeArtifact:
+    """Create official SDK native artifact for cross-adapter tests."""
+    return NativeArtifact(
+        compat_key=build_native_compat_key(
+            adapter="openai",
+            native_format="responses",
+            provider="openai",
+            model="gpt-5.1",
+            schema_version="1",
+        ),
+        adapter="openai",
+        native_format="responses",
+        provider="openai",
+        model="gpt-5.1",
+        schema_version="1",
+        item=item,
+    )
+
+
 def _event(kind: EventKind, payload: EventPayload) -> Event:
     """Create event for tests."""
     return Event(
@@ -906,6 +925,163 @@ class TestLiteLLMResponsesLowerer:
                 },
             ],
         }
+
+    def test_rehydrates_compatible_image_generation_result(self) -> None:
+        """Restore generated image Base64 only in same-native request memory."""
+        lowerer = LiteLLMResponsesLowerer(
+            provider="openai",
+            model="gpt-5.1",
+            model_file_resolver=_StaticModelFileResolver(
+                ModelFileLoweringContent(
+                    data_url="data:image/jpeg;base64,cmVoeWRyYXRlZA=="
+                )
+            ),
+        )
+        transcript = [
+            _event(
+                EventKind.PROVIDER_TOOL_RESULT,
+                ProviderToolResultPayload(
+                    call_id="image-call-1",
+                    name="image_generation",
+                    status="completed",
+                    output=[
+                        FileOutputPart(
+                            model_file_id="model-file-1",
+                            media_type="image/jpeg",
+                            name="generated.jpg",
+                            size=123,
+                            kind="image",
+                        )
+                    ],
+                    native_artifact=_artifact(
+                        {
+                            "type": "image_generation_call",
+                            "id": "image-call-1",
+                            "status": "completed",
+                        }
+                    ),
+                ),
+            )
+        ]
+
+        request = lowerer.lower(transcript, model="gpt-5.1")
+
+        assert request.input == [
+            {
+                "type": "image_generation_call",
+                "id": "image-call-1",
+                "status": "completed",
+                "result": "cmVoeWRyYXRlZA==",
+            }
+        ]
+
+    def test_cross_adapter_image_generation_uses_rich_file_fallback(self) -> None:
+        """Lower incompatible generated output through shared image policy."""
+        capabilities = ModelCapabilities(
+            modalities=ModelModalities(input=[ModelModality.IMAGE])
+        )
+        lowerer = LiteLLMResponsesLowerer(
+            provider="openai",
+            model="gpt-5.1",
+            model_capabilities=capabilities,
+            model_file_resolver=_StaticModelFileResolver(
+                ModelFileLoweringContent(
+                    data_url="data:image/jpeg;base64,cmVoeWRyYXRlZA=="
+                )
+            ),
+        )
+        transcript = [
+            _event(
+                EventKind.PROVIDER_TOOL_RESULT,
+                ProviderToolResultPayload(
+                    call_id="image-call-1",
+                    name="image_generation",
+                    status="completed",
+                    output=[
+                        FileOutputPart(
+                            model_file_id="model-file-1",
+                            media_type="image/jpeg",
+                            name="generated.jpg",
+                            size=123,
+                            kind="image",
+                        )
+                    ],
+                    native_artifact=_openai_artifact(
+                        {
+                            "type": "image_generation_call",
+                            "id": "image-call-1",
+                            "status": "completed",
+                        }
+                    ),
+                ),
+            )
+        ]
+
+        request = lowerer.lower(transcript, model="gpt-5.1")
+
+        assert request.input == [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "input_text",
+                        "text": ("[provider tool result] image_generation: completed"),
+                    },
+                    {
+                        "type": "input_image",
+                        "detail": "auto",
+                        "image_url": ("data:image/jpeg;base64,cmVoeWRyYXRlZA=="),
+                    },
+                ],
+            }
+        ]
+
+    def test_cross_adapter_image_generation_uses_explicit_placeholder(self) -> None:
+        """Describe generated images explicitly for models without image input."""
+        lowerer = LiteLLMResponsesLowerer(provider="openai", model="text-only")
+        transcript = [
+            _event(
+                EventKind.PROVIDER_TOOL_RESULT,
+                ProviderToolResultPayload(
+                    call_id="image-call-1",
+                    name="image_generation",
+                    status="completed",
+                    output=[
+                        FileOutputPart(
+                            model_file_id="model-file-1",
+                            media_type="image/jpeg",
+                            name="generated.jpg",
+                            size=123,
+                            kind="image",
+                        )
+                    ],
+                    native_artifact=_openai_artifact(
+                        {
+                            "type": "image_generation_call",
+                            "id": "image-call-1",
+                            "status": "completed",
+                        }
+                    ),
+                ),
+            )
+        ]
+
+        request = lowerer.lower(transcript, model="text-only")
+
+        assert request.input[0]["content"] == [
+            {
+                "type": "input_text",
+                "text": "[provider tool result] image_generation: completed",
+            },
+            {
+                "type": "input_text",
+                "text": (
+                    "[file unavailable for rich input] generated.jpg "
+                    "(image/jpeg, 123 bytes). Reason: model does not support "
+                    "this file input."
+                ),
+            },
+        ]
 
     def test_lowers_file_part_as_placeholder_when_unsupported(self) -> None:
         """Lower unsupported FilePart to bounded placeholder instead of silent omit."""

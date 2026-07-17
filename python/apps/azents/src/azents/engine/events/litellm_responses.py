@@ -400,6 +400,22 @@ class LiteLLMResponsesLowerer:
     ) -> dict[str, object] | None:
         """Return raw item that can be replayed same-native."""
         match event.payload:
+            case ProviderToolResultPayload(
+                name="image_generation",
+                output=output,
+                native_artifact=artifact,
+            ):
+                if not artifact.compatible_with(self.compat_key):
+                    return None
+                if not _file_output_parts(output):
+                    return artifact.item
+                result = _rehydrated_image_generation_result(
+                    output,
+                    resolver=self.model_file_resolver,
+                )
+                if result is None:
+                    return None
+                return {**artifact.item, "result": result}
             case (
                 AssistantMessagePayload(native_artifact=artifact)
                 | ReasoningPayload(native_artifact=artifact)
@@ -463,6 +479,29 @@ class LiteLLMResponsesLowerer:
                 return {
                     "role": "assistant",
                     "content": _provider_tool_call_text(name, arguments),
+                }
+            case ProviderToolResultPayload(
+                name="image_generation",
+                status=status,
+                output=output,
+            ):
+                if _file_output_parts(output):
+                    return {
+                        "role": "user",
+                        "content": _lower_image_generation_result(
+                            status,
+                            output,
+                            capabilities=self._file_part_capabilities,
+                            model_file_resolver=self.model_file_resolver,
+                        ),
+                    }
+                return {
+                    "role": "assistant",
+                    "content": _provider_tool_result_text(
+                        "image_generation",
+                        status,
+                        output,
+                    ),
                 }
             case ProviderToolResultPayload(name=name, status=status, output=output):
                 return {
@@ -2136,6 +2175,61 @@ def _lower_tool_output(
     if has_rich_or_placeholder:
         return lowered_parts
     return lower_output_to_text(output)
+
+
+def _file_output_parts(output: ToolOutput) -> list[FileOutputPart]:
+    """Return FileParts from one provider or client tool result."""
+    return [
+        part for part in iter_output_parts(output) if isinstance(part, FileOutputPart)
+    ]
+
+
+def _rehydrated_image_generation_result(
+    output: ToolOutput,
+    *,
+    resolver: ModelFileResolver | None,
+) -> str | None:
+    """Resolve one generated image as plain request-local Base64."""
+    file_parts = _file_output_parts(output)
+    if len(file_parts) != 1 or resolver is None:
+        return None
+    content = resolver.resolve(file_parts[0])
+    if content is None or content.data_url is None:
+        return None
+    header, separator, encoded = content.data_url.partition(";base64,")
+    if not separator or not header.startswith("data:") or not encoded:
+        return None
+    return encoded
+
+
+def _lower_image_generation_result(
+    status: str,
+    output: ToolOutput,
+    *,
+    capabilities: FilePartLoweringCapabilities,
+    model_file_resolver: ModelFileResolver | None,
+) -> list[dict[str, object]]:
+    """Lower an incompatible generated image through shared FilePart policy."""
+    lowered: list[dict[str, object]] = [
+        {
+            "type": "input_text",
+            "text": f"[provider tool result] image_generation: {status}",
+        }
+    ]
+    for part in iter_output_parts(output):
+        if isinstance(part, FileOutputPart):
+            lowered.append(
+                lower_file_output_part(
+                    part,
+                    capabilities=capabilities,
+                    resolver=model_file_resolver,
+                )
+            )
+            continue
+        text = lower_output_to_text([part])
+        if text:
+            lowered.append({"type": "input_text", "text": text})
+    return lowered
 
 
 def _provider_tool_call_text(name: str, arguments: str | None) -> str:

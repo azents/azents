@@ -50,7 +50,10 @@ export function ProviderToolCallCard({
   const hasArguments = toolCall.arguments.trim().length > 0;
   const hasOutput = (toolCall.output?.trim().length ?? 0) > 0;
   const hasAttachments = (toolCall.attachments?.length ?? 0) > 0;
-  const hasDetails = hasArguments || hasOutput || hasAttachments;
+  const showAttachmentsDirectly =
+    toolCall.name === "image_generation" && hasAttachments;
+  const hasDetails =
+    hasArguments || hasOutput || (hasAttachments && !showAttachmentsDirectly);
 
   return (
     <Paper withBorder radius="md" p="sm" mb="xs" bg="var(--mantine-color-body)">
@@ -100,6 +103,9 @@ export function ProviderToolCallCard({
             ) : null}
           </Group>
         </Group>
+        {showAttachmentsDirectly && toolCall.attachments ? (
+          <FileAttachmentList files={toolCall.attachments} />
+        ) : null}
         {opened ? (
           <Stack gap="xs">
             {hasArguments ? (
@@ -118,7 +124,9 @@ export function ProviderToolCallCard({
                 <Code block>{toolCall.output}</Code>
               </Box>
             ) : null}
-            {hasAttachments && toolCall.attachments ? (
+            {hasAttachments &&
+            !showAttachmentsDirectly &&
+            toolCall.attachments ? (
               <FileAttachmentList files={toolCall.attachments} />
             ) : null}
           </Stack>
