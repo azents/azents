@@ -306,6 +306,75 @@ export const WithLiveRunRetry = {
   },
 } satisfies Story;
 
+export const RetryWithProviderToolProgress = {
+  args: {
+    ...baseArgs,
+    messages: [
+      createChatMessage({
+        id: "image-request",
+        role: "user",
+        content: "Generate a golden retriever image.",
+      }),
+      createChatMessage({
+        id: "image-generation-progress",
+        content: null,
+        status: "partial",
+        providerToolCalls: [
+          {
+            id: "image-generation-call",
+            callId: "image-generation-call",
+            name: "image_generation",
+            arguments: "{}",
+            status: "running",
+          },
+        ],
+      }),
+    ],
+    isResponsePending: true,
+    isModelResponsePending: true,
+    liveRun: {
+      run_id: "run-retry-progress-story",
+      phase: "streaming_model",
+      status: "running",
+      inferenceProfile: {
+        model_target_label: "default",
+        model_display_name: "GPT 5.5",
+        reasoning_effort: null,
+      },
+      modelCallStartedAt: new Date(Date.now() - 20_000).toISOString(),
+      retry: {
+        status: "running",
+        lastErrorMessage: "The model WebSocket transport failed.",
+        failedAttemptCount: 1,
+        maxRetries: 5,
+        backoffSeconds: 1,
+        nextRetryAt: "2026-07-17T06:52:21.000Z",
+        attempts: [
+          {
+            attemptNumber: 1,
+            userMessage: "The model WebSocket transport failed.",
+            errorType: "OpenAIResponsesWebSocketTransportError",
+            source: "model",
+            failedAt: "2026-07-17T06:52:20.000Z",
+            backoffSeconds: 1,
+            nextRetryAt: "2026-07-17T06:52:21.000Z",
+            retryability: "transient",
+            failureCode: "openai_responses_websocket_transport_error",
+            truncated: false,
+          },
+        ],
+      },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByText("Image generation")).toBeVisible();
+    await expect(
+      canvas.queryByText("The model WebSocket transport failed."),
+    ).not.toBeInTheDocument();
+  },
+} satisfies Story;
+
 export const StreamingModelWithPartialOutput = {
   args: {
     ...baseArgs,

@@ -16,8 +16,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/agents/**
   - typescript/apps/azents-web/src/features/chat/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
-last_verified_at: 2026-07-16
-spec_version: 31
+last_verified_at: 2026-07-17
+spec_version: 32
 ---
 
 # Chat Session Resync
@@ -228,7 +228,7 @@ Draft persistence and last-selected-profile persistence are separate agent/sessi
 - WS events are replayed on baseline, then applied in realtime.
 - Can display pending input buffer, model response pending indicator, compaction indicator, todo preview, and compact action execution progress blocks. Nonterminal operation projections render at the live timeline tail immediately above pending input buffers and the composer, without using the consumed source buffer as a visual anchor. Terminal completed, failed, and cancelled blocks are reconstructed from durable `action_execution_result` history events and render at their transcript positions.
 - Operation TurnAction execution is live progress, not model response pending state. It does not by itself replace the composer with a stop control or block new input.
-- When `run.retry` is present, renders a failed-run retry card in latest-following state. The card shows the latest safe error, retry budget, client-side countdown to `next_retry_at`, and expandable attempt history; the normal model dots indicator remains below the card when the run phase is `waiting_for_model` or `streaming_model`.
+- When `run.retry` is present and the current retry has not produced a live partial yet, renders a failed-run retry card in latest-following state. The card shows the latest safe error, retry budget, client-side countdown to `next_retry_at`, and expandable attempt history; the normal model dots indicator remains below the card when the run phase is `waiting_for_model` or `streaming_model`. Once text, reasoning, or tool activity from the in-flight retry appears, that live progress replaces the retry card while the durable retry state remains authoritative until successful output admission or another failed attempt.
 - Terminal failed-run `system_error` history items render as one failed-run recovery card with the safe error message inside the card. The manual retry button is visible only when that failed-run event is the latest visible durable event and the session is idle.
 - Human and actionable input rows show their immutable requested target/effort intent. Historical rows do not resolve or embed the associated run's physical model.
 - Token/context usage prefers immutable provenance stored on the durable `turn_marker`: target label, raw nullable effort, display name, effective context window, and automatic-compaction threshold. For historical markers without provenance, a matching active live Run may supply the profile temporarily; otherwise provenance is unavailable and is never inferred from the newest message, current Session, Agent default, or Composer selection.

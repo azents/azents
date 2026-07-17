@@ -49,6 +49,7 @@ import { AuthorizationRequestBubble } from "./AuthorizationRequestBubble";
 import { ChatInput } from "./ChatInput";
 import { CompactionDivider } from "./CompactionDivider";
 import { CompactionIndicator } from "./CompactionIndicator";
+import { hasLiveModelProgress } from "./liveRetryVisibility";
 import { MessageBubble } from "./MessageBubble";
 import { OptimisticInputBubble } from "./OptimisticInputBubble";
 import { PendingInputBufferBubble } from "./PendingInputBufferBubble";
@@ -484,8 +485,14 @@ export function ChatView({
     () => latestVisibleMessageId(messages),
     [messages],
   );
+  const liveModelProgressVisible = useMemo(
+    () => hasLiveModelProgress(messages),
+    [messages],
+  );
   const liveRetryRun =
-    chatTimelineState.type === "LATEST_FOLLOWING" && hasLiveRetry(liveRun)
+    chatTimelineState.type === "LATEST_FOLLOWING" &&
+    hasLiveRetry(liveRun) &&
+    !liveModelProgressVisible
       ? liveRun
       : null;
   const liveRetryVisible = liveRetryRun !== null;
