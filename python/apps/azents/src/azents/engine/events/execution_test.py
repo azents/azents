@@ -236,6 +236,7 @@ class _TranscriptRepo:
     def __init__(self) -> None:
         self.events: list[Event] = []
         self.head_event_ids: list[str | None] = []
+        self.append_sessions: list[AsyncSession] = []
 
     async def list_for_model_input(
         self,
@@ -272,6 +273,7 @@ class _TranscriptRepo:
         create: EventCreate,
     ) -> Event:
         """Materialize append request as event."""
+        self.append_sessions.append(session)
         if create.external_id is not None:
             existing = await self.get_by_external_id(
                 session,
@@ -301,6 +303,18 @@ class _TranscriptRepo:
         )
         self.events.append(event)
         return event
+
+
+class _FailingTranscriptRepo(_TranscriptRepo):
+    """Reject model-output append after prepared metadata is staged."""
+
+    async def append(
+        self,
+        session: AsyncSession,
+        create: EventCreate,
+    ) -> Event:
+        self.append_sessions.append(session)
+        raise RuntimeError("event admission failed")
 
 
 class _Lowerer:
@@ -605,6 +619,40 @@ class _NoUsageNormalizer:
                 needs_follow_up=False,
             )
         )
+
+
+class _PreparedProviderOutput:
+    """Record prepared provider metadata admission and compensation."""
+
+    def __init__(self, normalized: NormalizedAdapterOutput) -> None:
+        self.normalized = normalized
+        self.admitted = False
+        self.persist_sessions: list[AsyncSession] = []
+        self.cleanup_calls = 0
+
+    async def persist(self, session: AsyncSession) -> None:
+        """Record the transaction used for metadata admission."""
+        self.persist_sessions.append(session)
+
+    async def cleanup(self) -> None:
+        """Record object compensation."""
+        if not self.admitted:
+            self.cleanup_calls += 1
+
+
+class _ProviderOutputMaterializer:
+    """Return one assertion-visible prepared provider output."""
+
+    def __init__(self) -> None:
+        self.prepared: _PreparedProviderOutput | None = None
+
+    async def prepare(
+        self,
+        normalized: NormalizedAdapterOutput,
+    ) -> _PreparedProviderOutput:
+        """Prepare the supplied normalized output for admission."""
+        self.prepared = _PreparedProviderOutput(normalized)
+        return self.prepared
 
 
 class _SequenceNormalizer:
@@ -1156,6 +1204,112 @@ async def test_text_run_commits_durable_events_before_output_sink() -> None:
 
     assert status == AgentRunStatus.COMPLETED
     assert committed_event_counts_at_sink == [3]
+
+
+async def test_provider_output_shares_event_admission_transaction() -> None:
+    """Persist provider files and their event references in one DB transaction."""
+    transcript_repo = _TranscriptRepo()
+    materializer = _ProviderOutputMaterializer()
+    execution = AgentRunExecution(
+        session_manager=_session_context,
+        post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_inference_profile=None,
+        model_adapter=_ModelAdapter(),
+        output_normalizer=_Normalizer([_assistant_event()]),
+        model_call_preparer=_model_call_preparer(),
+        provider_output_materializer=materializer,
+        run_repo=_RunRepo(),
+        transcript_repo=transcript_repo,
+    )
+
+    status = await execution.run(
+        AgentRunExecutionRequest(
+            owner_generation=1,
+            tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            run_id="run-1",
+            session_id="session-1",
+            model="gpt-5.1",
+        )
+    )
+
+    assert status == AgentRunStatus.COMPLETED
+    assert materializer.prepared is not None
+    assert materializer.prepared.admitted is True
+    assert materializer.prepared.cleanup_calls == 0
+    assert (
+        materializer.prepared.persist_sessions[0] is transcript_repo.append_sessions[0]
+    )
+
+
+async def test_provider_output_cleans_up_after_event_admission_failure() -> None:
+    """Compensate uploads when the event transaction rejects provider output."""
+    transcript_repo = _FailingTranscriptRepo()
+    materializer = _ProviderOutputMaterializer()
+    execution = AgentRunExecution(
+        session_manager=_session_context,
+        post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_inference_profile=None,
+        model_adapter=_ModelAdapter(),
+        output_normalizer=_Normalizer([_assistant_event()]),
+        model_call_preparer=_model_call_preparer(),
+        provider_output_materializer=materializer,
+        run_repo=_RunRepo(),
+        transcript_repo=transcript_repo,
+    )
+
+    with pytest.raises(RuntimeError, match="event admission failed"):
+        await execution.run(
+            AgentRunExecutionRequest(
+                owner_generation=1,
+                tool_admission_barrier=_OpenToolAdmissionBarrier(),
+                run_id="run-1",
+                session_id="session-1",
+                model="gpt-5.1",
+            )
+        )
+
+    assert materializer.prepared is not None
+    assert materializer.prepared.admitted is False
+    assert materializer.prepared.cleanup_calls == 1
+    assert (
+        materializer.prepared.persist_sessions[0] is transcript_repo.append_sessions[0]
+    )
+
+
+async def test_provider_output_cleans_up_without_durable_event() -> None:
+    """Compensate prepared objects when normalization has no durable result."""
+    materializer = _ProviderOutputMaterializer()
+    execution = AgentRunExecution(
+        session_manager=_session_context,
+        post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_inference_profile=None,
+        model_adapter=_ModelAdapter(),
+        output_normalizer=_Normalizer([]),
+        model_call_preparer=_model_call_preparer(),
+        provider_output_materializer=materializer,
+        run_repo=_RunRepo(),
+        transcript_repo=_TranscriptRepo(),
+    )
+
+    with pytest.raises(ModelCallError, match="without assistant output"):
+        await execution.run(
+            AgentRunExecutionRequest(
+                owner_generation=1,
+                tool_admission_barrier=_OpenToolAdmissionBarrier(),
+                run_id="run-1",
+                session_id="session-1",
+                model="gpt-5.1",
+            )
+        )
+
+    assert materializer.prepared is not None
+    assert materializer.prepared.cleanup_calls == 1
 
 
 async def test_output_without_usage_clears_retry_state_before_publish() -> None:

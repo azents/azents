@@ -1,7 +1,6 @@
 """LiteLLM Responses adapter."""
 
 import asyncio
-import base64
 import dataclasses
 import datetime
 import hashlib
@@ -33,6 +32,7 @@ from azents.engine.events.output_parts import (
     lower_output_to_text,
 )
 from azents.engine.events.protocols import (
+    CompletedAdapterOutput,
     ContentDeltaProjection,
     FunctionCallDeltaProjection,
     NativeEvent,
@@ -41,6 +41,7 @@ from azents.engine.events.protocols import (
     ReasoningDeltaProjection,
     StreamProjection,
 )
+from azents.engine.events.provider_output import pending_image_generation_output
 from azents.engine.events.provider_tool_activity import (
     ProviderToolActivityAccumulator,
     ProviderToolObservation,
@@ -82,7 +83,6 @@ from azents.engine.events.types import (
     SystemReminderPayload,
     TokenUsagePayload,
     ToolOutput,
-    ToolOutputPart,
     UnknownAdapterOutputPayload,
     UserContentPart,
     UserMessagePayload,
@@ -1344,10 +1344,33 @@ class LiteLLMResponsesOutputNormalizer:
         completed_output_items: Sequence[dict[str, object]],
     ) -> list[Event]:
         """Convert completed response output item to event."""
+        return self.normalize_completed_output(
+            session_id,
+            response,
+            completed_output_items,
+        ).events
+
+    def normalize_completed_output(
+        self,
+        session_id: str,
+        response: dict[str, object],
+        completed_output_items: Sequence[dict[str, object]],
+    ) -> CompletedAdapterOutput:
+        """Convert completed items to canonical events and transient files."""
         output = response.get("output")
-        if isinstance(output, list) and output:
-            return self.normalize_output_items(session_id, output)
-        return self.normalize_output_items(session_id, completed_output_items)
+        output_items: Sequence[object] = (
+            output if isinstance(output, list) and output else completed_output_items
+        )
+        events = self.normalize_output_items(session_id, output_items)
+        pending_provider_files = [
+            pending_image_generation_output(raw_item, output_index=output_index)
+            for output_index, output_item in enumerate(output_items)
+            if (raw_item := _dict(output_item)).get("type") == "image_generation_call"
+        ]
+        return CompletedAdapterOutput(
+            events=events,
+            pending_provider_files=pending_provider_files,
+        )
 
     def normalize_output_items(
         self,
@@ -1411,8 +1434,8 @@ class LiteLLMResponsesOutputNormalizer:
                 call_id=call_id,
                 name="image_generation",
                 status="completed",
-                output=_image_generation_output(output_item),
-                attachments=_image_generation_attachments(output_item),
+                output=[],
+                attachments=[],
                 native_artifact=artifact,
             )
             return _event(session_id, EventKind.PROVIDER_TOOL_RESULT, payload)
@@ -1582,15 +1605,16 @@ class _LiteLLMResponsesOutputStream:
 
     def _build_output(self) -> NormalizedAdapterOutput:
         """Build output from received state without validating terminal status."""
-        events = self.normalizer.normalize_completed(
+        completed = self.normalizer.normalize_completed_output(
             self._session_id,
             self._completed_response or {},
             self._completed_output_items,
         )
         return NormalizedAdapterOutput(
             needs_follow_up=(self._completed_response or {}).get("end_turn") is False,
-            events=events,
+            events=completed.events,
             usage=self._usage,
+            pending_provider_files=completed.pending_provider_files,
         )
 
     def interrupt(self) -> NormalizedAdapterOutput:
@@ -2158,48 +2182,6 @@ def _extract_reasoning_part_text(item: dict[str, object], key: str) -> str:
         if isinstance(text, str) and text:
             parts.append(text)
     return "\n".join(parts)
-
-
-def _image_generation_output(item: dict[str, object]) -> list[ToolOutputPart]:
-    """Create image generation output part."""
-    result = item.get("result")
-    if isinstance(result, str) and result:
-        return [
-            OutputTextPart(
-                text=(
-                    "Generated image is available as an attachment "
-                    f"(id: inline:{_image_digest(result)})."
-                )
-            )
-        ]
-    return []
-
-
-def _image_generation_attachments(item: dict[str, object]) -> list[Attachment]:
-    """Create image generation attachment metadata."""
-    result = item.get("result")
-    if isinstance(result, str) and result:
-        return [
-            Attachment(
-                attachment_id=f"inline:{_image_digest(result)}",
-                uri=f"generated-image:{_image_digest(result)}",
-                name="generated-image.png",
-                media_type="image/png",
-                size=0,
-                created_at=datetime.datetime.now(datetime.UTC),
-                source="provider_tool",
-                availability="unavailable",
-            )
-        ]
-    return []
-
-
-def _image_digest(value: str) -> str:
-    """Create short identifier for Base64 image result."""
-    try:
-        return base64.b64decode(value.encode(), validate=False).hex()[:32]
-    except ValueError:
-        return value[:32]
 
 
 def _dict(value: object) -> dict[str, object]:

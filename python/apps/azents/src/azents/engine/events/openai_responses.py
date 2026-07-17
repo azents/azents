@@ -71,6 +71,7 @@ from azents.engine.events.litellm_responses import (
     LiteLLMResponsesOutputNormalizer,
 )
 from azents.engine.events.protocols import (
+    CompletedAdapterOutput,
     ContentDeltaProjection,
     FunctionCallDeltaProjection,
     NormalizedAdapterOutput,
@@ -1036,6 +1037,19 @@ class OpenAIResponsesOutputNormalizer:
             completed_output_items,
         )
 
+    def normalize_completed_output(
+        self,
+        session_id: str,
+        response: dict[str, object],
+        completed_output_items: Sequence[dict[str, object]],
+    ) -> CompletedAdapterOutput:
+        """Normalize completed SDK items including transient provider files."""
+        return self._canonical.normalize_completed_output(
+            session_id,
+            response,
+            completed_output_items,
+        )
+
     def normalize_partial_assistant(self, session_id: str, text: str) -> Event:
         """Create a canonical fallback for interrupted partial text."""
         return self._canonical.normalize_partial_assistant(session_id, text)
@@ -1173,7 +1187,7 @@ class _OpenAIResponsesOutputStream:
         """Build canonical output from all currently completed SDK items."""
         response = self._completed_response
         response_dict = _sdk_model_dump(response) if response is not None else {}
-        events = self.normalizer.normalize_completed(
+        completed = self.normalizer.normalize_completed_output(
             self._session_id,
             response_dict,
             self._completed_output_items,
@@ -1185,8 +1199,9 @@ class _OpenAIResponsesOutputStream:
         )
         return NormalizedAdapterOutput(
             needs_follow_up=response_dict.get("end_turn") is False,
-            events=events,
+            events=completed.events,
             usage=usage,
+            pending_provider_files=completed.pending_provider_files,
         )
 
 
