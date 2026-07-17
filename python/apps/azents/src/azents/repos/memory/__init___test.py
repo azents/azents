@@ -361,7 +361,11 @@ class TestMemoryRepository:
         )
 
         results = await repo.search(
-            rdb_session, agent_id=agent_id, user_id=None, query="target-name"
+            rdb_session,
+            agent_id=agent_id,
+            user_id=None,
+            include_agent_scope=False,
+            query="target-name",
         )
         assert len(results) == 1
         assert results[0].name == "search-target-name"
@@ -391,7 +395,11 @@ class TestMemoryRepository:
         )
 
         results = await repo.search(
-            rdb_session, agent_id=agent_id, user_id=None, query="special_keyword"
+            rdb_session,
+            agent_id=agent_id,
+            user_id=None,
+            include_agent_scope=False,
+            query="special_keyword",
         )
         assert len(results) == 1
         assert results[0].name == "desc-test"
@@ -421,7 +429,11 @@ class TestMemoryRepository:
         )
 
         results = await repo.search(
-            rdb_session, agent_id=agent_id, user_id=None, query="unique_content_string"
+            rdb_session,
+            agent_id=agent_id,
+            user_id=None,
+            include_agent_scope=False,
+            query="unique_content_string",
         )
         assert len(results) == 1
         assert results[0].name == "content-test"
@@ -458,7 +470,11 @@ class TestMemoryRepository:
             )
 
         results = await repo.search(
-            rdb_session, agent_id=agent_id, user_id=None, query="foo   bar"
+            rdb_session,
+            agent_id=agent_id,
+            user_id=None,
+            include_agent_scope=False,
+            query="foo   bar",
         )
 
         assert [result.name for result in results] == ["matching-memory"]
@@ -467,6 +483,114 @@ class TestMemoryRepository:
             rdb_session, agent_id=agent_id, user_id=None, query="FOO bar"
         )
         assert [result.name for result in full_results] == ["matching-memory"]
+
+    async def test_search_partial_ranks_by_distinct_matched_terms(
+        self, rdb_session: AsyncSession
+    ) -> None:
+        """Partial search ranks matches by distinct matched query term count."""
+        workspace_id = await _create_workspace(rdb_session, handle="mem-sp-ws")
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id,
+            model_slug="mem-sp-model",
+            integration_name="mem-sp-int",
+        )
+        repo = MemoryRepository()
+
+        for name, description, content in [
+            ("two-terms", "Alpha appears here", "Body includes beta"),
+            ("alpha-only", "Alpha appears here", "Other content"),
+            ("beta-only", "Other description", "Body includes beta"),
+            ("unrelated", "Other description", "Other content"),
+        ]:
+            await repo.upsert(
+                rdb_session,
+                agent_id=agent_id,
+                user_id=None,
+                create=MemoryCreate(
+                    scope=MemoryScope.AGENT,
+                    type="project",
+                    name=name,
+                    description=description,
+                    content=content,
+                ),
+            )
+
+        results = await repo.search_partial(
+            rdb_session,
+            agent_id=agent_id,
+            user_id=None,
+            include_agent_scope=False,
+            query="ALPHA alpha beta gamma",
+        )
+
+        assert [result.name for result in results] == [
+            "two-terms",
+            "alpha-only",
+            "beta-only",
+        ]
+        assert [result.matched_terms for result in results] == [2, 1, 1]
+        assert all(result.total_terms == 3 for result in results)
+
+    async def test_search_can_limit_results_to_user_scope(
+        self, rdb_session: AsyncSession
+    ) -> None:
+        """Runtime search can distinguish user-only from combined scope."""
+        workspace_id = await _create_workspace(rdb_session, handle="mem-ss-ws")
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id,
+            model_slug="mem-ss-model",
+            integration_name="mem-ss-int",
+        )
+        repo = MemoryRepository()
+        user_id = "search-scope-user"
+
+        await repo.upsert(
+            rdb_session,
+            agent_id=agent_id,
+            user_id=None,
+            create=MemoryCreate(
+                scope=MemoryScope.AGENT,
+                type="feedback",
+                name="agent-shared-term",
+                description="Shared searchable term",
+                content="Agent content",
+            ),
+        )
+        await repo.upsert(
+            rdb_session,
+            agent_id=agent_id,
+            user_id=user_id,
+            create=MemoryCreate(
+                scope=MemoryScope.USER,
+                type="feedback",
+                name="user-shared-term",
+                description="Shared searchable term",
+                content="User content",
+            ),
+        )
+
+        user_results = await repo.search(
+            rdb_session,
+            agent_id=agent_id,
+            user_id=user_id,
+            include_agent_scope=False,
+            query="shared",
+        )
+        combined_results = await repo.search(
+            rdb_session,
+            agent_id=agent_id,
+            user_id=user_id,
+            include_agent_scope=True,
+            query="shared",
+        )
+
+        assert [result.name for result in user_results] == ["user-shared-term"]
+        assert [result.name for result in combined_results] == [
+            "agent-shared-term",
+            "user-shared-term",
+        ]
 
     async def test_delete_by_name_exists(self, rdb_session: AsyncSession) -> None:
         """Deleting existing memory returns True."""

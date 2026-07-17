@@ -1004,7 +1004,8 @@ class TestBuiltinToolkitMemoryPrompt:
         assert "Memories" in (await toolkit.get_dynamic_prompt(ctx))
         dynamic_prompt = await toolkit.get_dynamic_prompt(ctx)
         assert "Memory Rules" in dynamic_prompt
-        assert "case-insensitive AND matching" in dynamic_prompt
+        assert "loaded memory summaries as the primary index" in dynamic_prompt
+        assert "ranked partial matches" in dynamic_prompt
 
     @pytest.mark.asyncio
     async def test_memory_disabled_excludes_memory(self) -> None:
@@ -1045,6 +1046,7 @@ class TestBuiltinToolkitMemoryPrompt:
         assert "Scope selection" not in write_prompt
         assert "What NOT to save" in write_prompt
         assert "Duplicate prevention" in write_prompt
+        assert "empty search result alone" in write_prompt
 
     @pytest.mark.asyncio
     async def test_memory_index_included(self) -> None:

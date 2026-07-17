@@ -15,7 +15,7 @@ Details of all living specs. Synchronized from frontmatter.
 | agent | [Agent Domain Spec](domain/agent.md) | @Hardtack | 2026-07-17 | 48 |
 | conversation | [Conversation & Events](domain/conversation.md) | @Hardtack | 2026-07-17 | 106 |
 | goal | [Goal Domain Spec](domain/goal.md) | - | 2026-07-16 | 9 |
-| memory | [Memory](domain/memory.md) | @Hardtack | 2026-07-09 | 4 |
+| memory | [Memory](domain/memory.md) | @Hardtack | 2026-07-17 | 5 |
 | model-catalog | [Model Catalog Domain Spec](domain/model-catalog.md) | - | 2026-07-17 | 12 |
 | toolkit | [Toolkit](domain/toolkit.md) | @Hardtack | 2026-07-10 | 54 |
 | user-auth | [User & Authentication](domain/user-auth.md) | @Hardtack | 2026-07-13 | 7 |
