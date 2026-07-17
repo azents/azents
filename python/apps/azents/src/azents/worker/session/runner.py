@@ -17,6 +17,7 @@ from azents.broker.types import (
 from azents.core.enums import AgentRunStatus
 from azents.engine.run.contracts import AgentEngineProtocol, ToolkitBinding
 from azents.engine.run.errors import UserVisibleRuntimeError
+from azents.engine.run.model_transport import ModelTransportState
 from azents.engine.run.types import CheckStop, PollMessages, PollMessagesResult
 from azents.rdb.session import SessionManager
 from azents.repos.agent_session.data import PendingSessionCommand
@@ -94,6 +95,7 @@ class SessionRunner:
         user_stop_finalizer: UserStopFinalizer,
         run_executor: RunExecutor,
         engine: AgentEngineProtocol,
+        model_transport_state: ModelTransportState,
     ) -> None:
         self.shutdown_event = shutdown_event
         self.event_publisher = event_publisher
@@ -103,6 +105,7 @@ class SessionRunner:
         self.input_buffer_service = input_buffer_service
         self.idle_continuation_service = idle_continuation_service
         self.run_executor = run_executor
+        self.model_transport_state = model_transport_state
         self.inbox = SessionRunnerInbox()
         self.runner_shutdown = asyncio.Event()
         self.terminated_event = asyncio.Event()
@@ -250,6 +253,7 @@ class SessionRunner:
             prepare_toolkits=self.prepare_toolkits,
             drain_stop_signals=self._drain_stop_signals,
             owner_generation=self.owner_generation,
+            model_transport_state=self.model_transport_state,
             command=command,
         )
 

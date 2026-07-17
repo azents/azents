@@ -1,5 +1,6 @@
 """Official OpenAI SDK Responses adapter tests."""
 
+import asyncio
 import datetime
 import json
 import logging
@@ -19,6 +20,7 @@ from openai.types.responses import (
     ResponseOutputItemDoneEvent,
     ResponseOutputMessage,
     ResponseOutputText,
+    ResponseStreamEvent,
     ResponseTextDeltaEvent,
     ResponseUsage,
     ResponseWebSearchCallCompletedEvent,
@@ -29,17 +31,26 @@ from openai.types.responses.response_usage import (
     InputTokensDetails,
     OutputTokensDetails,
 )
+from websockets.datastructures import Headers
+from websockets.exceptions import InvalidStatus
+from websockets.http11 import Response as WebSocketHTTPResponse
 
+from azents.core.chatgpt_oauth import CHATGPT_OAUTH_BACKEND_BASE_URL
 from azents.core.enums import EventKind, LLMProvider
 from azents.core.llm_catalog import ModelCapabilities
 from azents.engine.events.litellm_responses import LiteLLMResponsesLowerer
 from azents.engine.events.openai_responses import (
     OpenAIResponsesLowerer,
     OpenAIResponsesModelAdapter,
+    OpenAIResponsesOptions,
     OpenAIResponsesOutputNormalizer,
     OpenAIResponsesRequest,
+    OpenAIResponsesWebSocketConnection,
+    OpenAIResponsesWebSocketTransportError,
     OpenAISDKResponsesClient,
+    create_openai_responses_client,
     openai_responses_client_config,
+    openai_responses_websocket_endpoint_eligible,
 )
 from azents.engine.events.protocols import ProviderToolActivityProjection
 from azents.engine.events.responses_continuation import ResponsesContinuationPlanner
@@ -50,8 +61,16 @@ from azents.engine.events.types import (
     UserMessagePayload,
     build_native_compat_key,
 )
-from azents.engine.model_stream import ModelStreamCallContext
-from azents.engine.run.errors import ModelCallError
+from azents.engine.model_stream import (
+    ModelStreamCallContext,
+    ModelStreamTimeoutPolicy,
+    close_stream_response,
+)
+from azents.engine.run.errors import ModelCallError, ModelStreamTimeoutError
+from azents.engine.run.model_transport import (
+    InMemoryModelTransportState,
+    ModelTransportKey,
+)
 from azents.engine.run.types import BuiltinToolSpec
 from azents.testing.model_stream import make_test_model_stream_watchdog
 
@@ -138,6 +157,9 @@ class _FakeClient:
         self.calls.append(kwargs)
         return self.stream
 
+    async def connect_websocket(self) -> OpenAIResponsesWebSocketConnection:
+        raise AssertionError("WebSocket was not expected")
+
     async def close(self) -> None:
         self.closed = True
 
@@ -155,8 +177,101 @@ class _SequencedFakeClient:
             raise result
         return result
 
+    async def connect_websocket(self) -> OpenAIResponsesWebSocketConnection:
+        raise AssertionError("WebSocket was not expected")
+
     async def close(self) -> None:
         self.closed = True
+
+
+class _FakeWebSocketConnection:
+    def __init__(
+        self,
+        events: list[ResponseStreamEvent | Exception],
+        *,
+        create_error: Exception | None = None,
+    ) -> None:
+        self.events = events
+        self.create_error = create_error
+        self.calls: list[dict[str, object]] = []
+        self.closed = False
+
+    async def create_response(self, **kwargs: object) -> None:
+        self.calls.append(kwargs)
+        if self.create_error is not None:
+            raise self.create_error
+
+    async def receive_event(self) -> ResponseStreamEvent:
+        result = self.events.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+class _BlockingWebSocketConnection(_FakeWebSocketConnection):
+    def __init__(self) -> None:
+        super().__init__([])
+        self.receive_started = asyncio.Event()
+
+    async def receive_event(self) -> ResponseStreamEvent:
+        self.receive_started.set()
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+
+class _TransportFakeClient:
+    def __init__(
+        self,
+        *,
+        connection_result: OpenAIResponsesWebSocketConnection | Exception,
+        http_results: list[object],
+    ) -> None:
+        self.connection_result = connection_result
+        self.http_results = http_results
+        self.http_calls: list[dict[str, object]] = []
+        self.connect_count = 0
+        self.closed = False
+
+    async def create_response(self, **kwargs: object) -> object:
+        self.http_calls.append(kwargs)
+        if not self.http_results:
+            raise AssertionError("HTTP was not expected")
+        result = self.http_results.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    async def connect_websocket(self) -> OpenAIResponsesWebSocketConnection:
+        self.connect_count += 1
+        if isinstance(self.connection_result, Exception):
+            raise self.connection_result
+        return self.connection_result
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+def _transport_key() -> ModelTransportKey:
+    return ModelTransportKey(
+        family="openai_responses",
+        provider="openai",
+        provider_integration_id="integration-1",
+    )
+
+
+def _sampling_context(model: str = "gpt-5.1-codex") -> ModelStreamCallContext:
+    return ModelStreamCallContext(
+        call_kind="sampling",
+        provider="openai",
+        model=model,
+        session_id="session-1",
+        run_id="run-1",
+        attempt_number=None,
+        check_stop=None,
+    )
 
 
 def test_openai_lowerer_omits_endpoint_credentials_and_store() -> None:
@@ -191,7 +306,14 @@ def test_chatgpt_lowerer_uses_standard_full_context_request() -> None:
         provider="chatgpt_oauth",
         model="gpt-5.6-luna",
         provider_id=LLMProvider.CHATGPT_OAUTH,
-        credential_kwargs={},
+        credential_kwargs={
+            "api_key": "synthetic-token",
+            "base_url": "https://chatgpt.example/backend-api/codex",
+            "extra_headers": {
+                "originator": "azents",
+                "ChatGPT-Account-Id": "synthetic-account",
+            },
+        },
         tools=[tool],
     )
 
@@ -206,6 +328,7 @@ def test_chatgpt_lowerer_uses_standard_full_context_request() -> None:
     assert request.options.get("instructions") == "Be useful."
     assert request.options.get("store") is False
     assert request.options.get("include") == ["reasoning.encrypted_content"]
+    assert "extra_headers" not in request.options
     assert request.continuation_store_enabled() is False
 
 
@@ -233,6 +356,13 @@ def test_client_config_keeps_endpoint_identity_outside_request(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Client configuration preserves base URL and common identity headers."""
+    for name in (
+        "OPENAI_BASE_URL",
+        "OPENAI_ORG_ID",
+        "OPENAI_PROJECT_ID",
+        "OPENAI_CUSTOM_HEADERS",
+    ):
+        monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("AZ_OPENAI_BASE_URL", "https://openai.example/v1")
     openai_config = openai_responses_client_config(
         provider=LLMProvider.OPENAI,
@@ -256,6 +386,124 @@ def test_client_config_keeps_endpoint_identity_outside_request(
         "originator": "azents",
         "ChatGPT-Account-Id": "account",
     }
+    assert (
+        openai_responses_websocket_endpoint_eligible(
+            provider=LLMProvider.OPENAI,
+            config=openai_config,
+        )
+        is False
+    )
+    assert (
+        openai_responses_websocket_endpoint_eligible(
+            provider=LLMProvider.CHATGPT_OAUTH,
+            config=chatgpt_config,
+        )
+        is False
+    )
+
+    monkeypatch.delenv("AZ_OPENAI_BASE_URL")
+    official_openai_config = openai_responses_client_config(
+        provider=LLMProvider.OPENAI,
+        credential_kwargs={"api_key": "key"},
+    )
+    official_chatgpt_config = openai_responses_client_config(
+        provider=LLMProvider.CHATGPT_OAUTH,
+        credential_kwargs={
+            "api_key": "token",
+            "base_url": CHATGPT_OAUTH_BACKEND_BASE_URL,
+        },
+    )
+
+    assert openai_responses_websocket_endpoint_eligible(
+        provider=LLMProvider.OPENAI,
+        config=official_openai_config,
+    )
+    assert openai_responses_websocket_endpoint_eligible(
+        provider=LLMProvider.CHATGPT_OAUTH,
+        config=official_chatgpt_config,
+    )
+
+
+async def test_client_config_resolves_sdk_environment_for_websocket(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SDK environment routing is included in eligibility and handshake state."""
+    monkeypatch.delenv("AZ_OPENAI_BASE_URL", raising=False)
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://environment.example/v1")
+    monkeypatch.setenv("OPENAI_ORG_ID", "synthetic-organization")
+    monkeypatch.setenv("OPENAI_PROJECT_ID", "synthetic-project")
+    monkeypatch.setenv(
+        "OPENAI_CUSTOM_HEADERS",
+        "X-Environment: environment\nX-Override: environment",
+    )
+    config = openai_responses_client_config(
+        provider=LLMProvider.OPENAI,
+        credential_kwargs={
+            "api_key": "synthetic-test-key",
+            "extra_headers": {"X-Override": "credential"},
+        },
+    )
+
+    assert config.base_url == "https://environment.example/v1"
+    assert config.organization == "synthetic-organization"
+    assert config.project == "synthetic-project"
+    assert config.default_headers == {
+        "X-Environment": "environment",
+        "X-Override": "credential",
+    }
+    assert not openai_responses_websocket_endpoint_eligible(
+        provider=LLMProvider.OPENAI,
+        config=config,
+    )
+
+    client = create_openai_responses_client(config=config)
+    assert isinstance(client, OpenAISDKResponsesClient)
+    assert client.sdk_client.max_retries == 0
+    assert client.websocket_headers == {
+        "OpenAI-Organization": "synthetic-organization",
+        "OpenAI-Project": "synthetic-project",
+        "X-Environment": "environment",
+        "X-Override": "credential",
+    }
+    await client.close()
+
+
+async def test_sdk_websocket_connect_forwards_stable_handshake_headers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The SDK WebSocket receives identity headers and no competing open timeout."""
+    captured: dict[str, object] = {}
+    connection = _FakeWebSocketConnection([_completed_event()])
+
+    class Manager:
+        async def enter(self) -> _FakeWebSocketConnection:
+            return connection
+
+    sdk_client = AsyncOpenAI(api_key="synthetic-test-key")
+
+    def connect(**kwargs: object) -> Manager:
+        captured.update(kwargs)
+        return Manager()
+
+    monkeypatch.setattr(sdk_client.responses, "connect", connect)
+    client = OpenAISDKResponsesClient(
+        sdk_client,
+        websocket_headers={
+            "originator": "azents",
+            "ChatGPT-Account-Id": "synthetic-account",
+        },
+    )
+
+    opened = await client.connect_websocket()
+
+    assert captured["extra_headers"] == {
+        "originator": "azents",
+        "ChatGPT-Account-Id": "synthetic-account",
+    }
+    assert captured["websocket_connection_options"] == {"open_timeout": None}
+    await opened.close()
+    assert connection.closed is True
+    await client.close()
 
 
 async def test_adapter_preserves_omission_null_and_stop_extension() -> None:
@@ -265,6 +513,9 @@ async def test_adapter_preserves_omission_null_and_stop_extension() -> None:
     adapter = OpenAIResponsesModelAdapter(
         client=client,
         continuation_planner=None,
+        transport_state=None,
+        transport_key=None,
+        websocket_endpoint_eligible=False,
     )
     watchdog = make_test_model_stream_watchdog()
     policy = watchdog.resolve_policy(
@@ -312,6 +563,501 @@ async def test_adapter_preserves_omission_null_and_stop_extension() -> None:
     assert client.closed is True
 
 
+async def test_websocket_reuses_one_connection_for_sequential_responses() -> None:
+    """Eligible sequential turns reuse one execution-owned WebSocket."""
+    connection = _FakeWebSocketConnection(
+        [_completed_event(_response(text="first")), _completed_event()]
+    )
+    client = _TransportFakeClient(
+        connection_result=connection,
+        http_results=[],
+    )
+    state = InMemoryModelTransportState(websocket_enabled=True)
+    adapter = OpenAIResponsesModelAdapter(
+        client=client,
+        continuation_planner=None,
+        transport_state=state,
+        transport_key=_transport_key(),
+        websocket_endpoint_eligible=True,
+    )
+    watchdog = make_test_model_stream_watchdog()
+    policy = watchdog.resolve_policy(
+        provider="openai",
+        model="gpt-5.1-codex",
+        inference_profile=None,
+    )
+    first = OpenAIResponsesRequest(
+        model="gpt-5.1-codex",
+        input=[{"role": "user", "content": "first"}],
+        tools=[],
+        options={"store": False},
+    )
+    second = first.model_copy(update={"input": [{"role": "user", "content": "second"}]})
+
+    first_events = [
+        event
+        async for event in adapter.stream(
+            first,
+            watchdog=watchdog,
+            timeout_policy=policy,
+            call_context=_sampling_context(),
+        )
+    ]
+    second_events = [
+        event
+        async for event in adapter.stream(
+            second,
+            watchdog=watchdog,
+            timeout_policy=policy,
+            call_context=_sampling_context(),
+        )
+    ]
+
+    assert len(first_events) == 1
+    assert len(second_events) == 1
+    assert client.connect_count == 1
+    assert client.http_calls == []
+    assert len(connection.calls) == 2
+    assert connection.calls[0]["input"] == first.input
+    assert connection.calls[1]["input"] == second.input
+    assert connection.calls[0]["store"] is False
+    assert connection.calls[0]["previous_response_id"] is omit
+    assert "extra_headers" not in connection.calls[0]
+    assert connection.closed is False
+
+    await adapter.close()
+
+    assert connection.closed is True
+    assert client.closed is True
+
+
+async def test_websocket_reuse_preserves_strict_openai_continuation() -> None:
+    """A healthy socket may use the existing exact continuation planner."""
+    first_response = _response(text="first")
+    connection = _FakeWebSocketConnection(
+        [_completed_event(first_response), _completed_event()]
+    )
+    client = _TransportFakeClient(connection_result=connection, http_results=[])
+    adapter = OpenAIResponsesModelAdapter(
+        client=client,
+        continuation_planner=ResponsesContinuationPlanner(),
+        transport_state=InMemoryModelTransportState(websocket_enabled=True),
+        transport_key=_transport_key(),
+        websocket_endpoint_eligible=True,
+    )
+    watchdog = make_test_model_stream_watchdog()
+    policy = watchdog.resolve_policy(
+        provider="openai",
+        model="gpt-5.1-codex",
+        inference_profile=None,
+    )
+    first = OpenAIResponsesRequest(
+        model="gpt-5.1-codex",
+        input=[{"role": "user", "content": "first"}],
+        tools=[],
+        options={},
+    )
+    output_item = first_response.output[0].model_dump(
+        mode="json",
+        exclude_unset=True,
+        warnings=False,
+    )
+    second = first.model_copy(
+        update={
+            "input": [
+                *first.input,
+                output_item,
+                {"role": "user", "content": "second"},
+            ]
+        }
+    )
+
+    _ = [
+        event
+        async for event in adapter.stream(
+            first,
+            watchdog=watchdog,
+            timeout_policy=policy,
+            call_context=_sampling_context(),
+        )
+    ]
+    _ = [
+        event
+        async for event in adapter.stream(
+            second,
+            watchdog=watchdog,
+            timeout_policy=policy,
+            call_context=_sampling_context(),
+        )
+    ]
+
+    assert client.connect_count == 1
+    assert connection.calls[1]["previous_response_id"] == first_response.id
+    assert connection.calls[1]["input"] == [{"role": "user", "content": "second"}]
+    await adapter.close()
+
+
+@pytest.mark.parametrize(
+    ("websocket_enabled", "endpoint_eligible", "options"),
+    [
+        (False, True, {}),
+        (True, False, {}),
+        (True, True, {"stop": ["END"]}),
+        (True, True, {"extra_headers": {"X-Request": "value"}}),
+    ],
+    ids=["deployment-disabled", "custom-endpoint", "stop", "request-headers"],
+)
+async def test_http_only_conditions_preserve_existing_streaming_path(
+    websocket_enabled: bool,
+    endpoint_eligible: bool,
+    options: OpenAIResponsesOptions,
+) -> None:
+    """Deployment, endpoint, and request restrictions select HTTP."""
+    http_stream = _FakeStream([_completed_event()])
+    client = _TransportFakeClient(
+        connection_result=AssertionError("WebSocket was not expected"),
+        http_results=[http_stream],
+    )
+    adapter = OpenAIResponsesModelAdapter(
+        client=client,
+        continuation_planner=None,
+        transport_state=InMemoryModelTransportState(
+            websocket_enabled=websocket_enabled
+        ),
+        transport_key=_transport_key(),
+        websocket_endpoint_eligible=endpoint_eligible,
+    )
+    request = OpenAIResponsesRequest(
+        model="gpt-5.1-codex",
+        input=[{"role": "user", "content": "hello"}],
+        tools=[],
+        options=options,
+    )
+    watchdog = make_test_model_stream_watchdog()
+    policy = watchdog.resolve_policy(
+        provider="openai",
+        model=request.model,
+        inference_profile=None,
+    )
+
+    events = [
+        event
+        async for event in adapter.stream(
+            request,
+            watchdog=watchdog,
+            timeout_policy=policy,
+            call_context=_sampling_context(),
+        )
+    ]
+
+    assert len(events) == 1
+    assert client.connect_count == 0
+    assert len(client.http_calls) == 1
+    assert http_stream.closed is True
+    await adapter.close()
+
+
+@pytest.mark.parametrize("failure_stage", ["connect", "send", "decode"])
+async def test_websocket_transport_failure_stages_activate_http_fallback(
+    failure_stage: str,
+) -> None:
+    """Connect, send, and decode failures consume the WebSocket attempt."""
+    connection: _FakeWebSocketConnection | None
+    if failure_stage == "connect":
+        connection = None
+        connection_result: OpenAIResponsesWebSocketConnection | Exception = (
+            InvalidStatus(
+                WebSocketHTTPResponse(
+                    status_code=404,
+                    reason_phrase="Not Found",
+                    headers=Headers(),
+                )
+            )
+        )
+    elif failure_stage == "send":
+        connection = _FakeWebSocketConnection(
+            [],
+            create_error=OSError("synthetic-send-failure"),
+        )
+        connection_result = connection
+    else:
+        connection = _FakeWebSocketConnection(
+            [json.JSONDecodeError("synthetic-decode-failure", "", 0)]
+        )
+        connection_result = connection
+
+    state = InMemoryModelTransportState(websocket_enabled=True)
+    key = _transport_key()
+    client = _TransportFakeClient(
+        connection_result=connection_result,
+        http_results=[],
+    )
+    adapter = OpenAIResponsesModelAdapter(
+        client=client,
+        continuation_planner=None,
+        transport_state=state,
+        transport_key=key,
+        websocket_endpoint_eligible=True,
+    )
+    request = OpenAIResponsesRequest(
+        model="gpt-5.1-codex",
+        input=[{"role": "user", "content": "hello"}],
+        tools=[],
+        options={},
+    )
+    watchdog = make_test_model_stream_watchdog()
+    policy = watchdog.resolve_policy(
+        provider="openai",
+        model=request.model,
+        inference_profile=None,
+    )
+
+    with pytest.raises(OpenAIResponsesWebSocketTransportError) as raised:
+        _ = [
+            event
+            async for event in adapter.stream(
+                request,
+                watchdog=watchdog,
+                timeout_policy=policy,
+                call_context=_sampling_context(),
+            )
+        ]
+
+    assert raised.value.stage == failure_stage
+    assert raised.value.status_code == (404 if failure_stage == "connect" else None)
+    assert state.websocket_allowed(key) is False
+    if connection is not None:
+        assert connection.closed is True
+    await adapter.close()
+
+
+async def test_websocket_transport_failure_marks_sticky_http_fallback(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A classified socket failure consumes the attempt and sticks to HTTP."""
+    caplog.set_level(logging.INFO)
+    forbidden_detail = "synthetic-provider-payload-must-not-log"
+    connection = _FakeWebSocketConnection([OSError(forbidden_detail)])
+    state = InMemoryModelTransportState(websocket_enabled=True)
+    key = _transport_key()
+    websocket_client = _TransportFakeClient(
+        connection_result=connection,
+        http_results=[],
+    )
+    adapter = OpenAIResponsesModelAdapter(
+        client=websocket_client,
+        continuation_planner=None,
+        transport_state=state,
+        transport_key=key,
+        websocket_endpoint_eligible=True,
+    )
+    request = OpenAIResponsesRequest(
+        model="gpt-5.1-codex",
+        input=[{"role": "user", "content": "hello"}],
+        tools=[],
+        options={},
+    )
+    watchdog = make_test_model_stream_watchdog()
+    policy = watchdog.resolve_policy(
+        provider="openai",
+        model=request.model,
+        inference_profile=None,
+    )
+
+    with pytest.raises(OpenAIResponsesWebSocketTransportError) as raised:
+        _ = [
+            event
+            async for event in adapter.stream(
+                request,
+                watchdog=watchdog,
+                timeout_policy=policy,
+                call_context=_sampling_context(),
+            )
+        ]
+
+    assert raised.value.stage == "receive"
+    assert state.websocket_allowed(key) is False
+    assert connection.closed is True
+    assert forbidden_detail not in caplog.text
+    await adapter.close()
+
+    http_stream = _FakeStream([_completed_event()])
+    fallback_client = _TransportFakeClient(
+        connection_result=AssertionError("sticky state must select HTTP"),
+        http_results=[http_stream],
+    )
+    fallback_adapter = OpenAIResponsesModelAdapter(
+        client=fallback_client,
+        continuation_planner=None,
+        transport_state=state,
+        transport_key=key,
+        websocket_endpoint_eligible=True,
+    )
+
+    events = [
+        event
+        async for event in fallback_adapter.stream(
+            request,
+            watchdog=watchdog,
+            timeout_policy=policy,
+            call_context=_sampling_context(),
+        )
+    ]
+
+    assert len(events) == 1
+    assert fallback_client.connect_count == 0
+    assert len(fallback_client.http_calls) == 1
+    await fallback_adapter.close()
+
+
+async def test_abandoned_websocket_response_invalidates_without_sticky_fallback() -> (
+    None
+):
+    """Caller abandonment closes unread events without disabling WebSocket."""
+    delta = ResponseTextDeltaEvent(
+        content_index=0,
+        delta="partial",
+        item_id="msg_synthetic",
+        logprobs=[],
+        output_index=0,
+        sequence_number=1,
+        type="response.output_text.delta",
+    )
+    connection = _FakeWebSocketConnection([delta])
+    state = InMemoryModelTransportState(websocket_enabled=True)
+    key = _transport_key()
+    client = _TransportFakeClient(connection_result=connection, http_results=[])
+    adapter = OpenAIResponsesModelAdapter(
+        client=client,
+        continuation_planner=None,
+        transport_state=state,
+        transport_key=key,
+        websocket_endpoint_eligible=True,
+    )
+    request = OpenAIResponsesRequest(
+        model="gpt-5.1-codex",
+        input=[{"role": "user", "content": "hello"}],
+        tools=[],
+        options={},
+    )
+    watchdog = make_test_model_stream_watchdog()
+    policy = watchdog.resolve_policy(
+        provider="openai",
+        model=request.model,
+        inference_profile=None,
+    )
+    stream = adapter.stream(
+        request,
+        watchdog=watchdog,
+        timeout_policy=policy,
+        call_context=_sampling_context(),
+    )
+
+    received = await anext(stream)
+    await close_stream_response(stream)
+
+    assert received is delta
+    assert connection.closed is True
+    assert state.websocket_allowed(key) is True
+    await adapter.close()
+
+
+async def test_websocket_watchdog_timeout_invalidates_without_http_fallback() -> None:
+    """Application timeout closes the active socket without proving incompatibility."""
+    connection = _BlockingWebSocketConnection()
+    state = InMemoryModelTransportState(websocket_enabled=True)
+    key = _transport_key()
+    client = _TransportFakeClient(connection_result=connection, http_results=[])
+    adapter = OpenAIResponsesModelAdapter(
+        client=client,
+        continuation_planner=None,
+        transport_state=state,
+        transport_key=key,
+        websocket_endpoint_eligible=True,
+    )
+    request = OpenAIResponsesRequest(
+        model="gpt-5.1-codex",
+        input=[{"role": "user", "content": "hello"}],
+        tools=[],
+        options={},
+    )
+    timeout_policy = ModelStreamTimeoutPolicy(
+        connect_timeout_seconds=1,
+        parsed_event_idle_timeout_seconds=0.05,
+        absolute_attempt_timeout_seconds=1,
+    )
+    watchdog = make_test_model_stream_watchdog(policy=timeout_policy)
+
+    with pytest.raises(ModelStreamTimeoutError) as raised:
+        _ = [
+            event
+            async for event in adapter.stream(
+                request,
+                watchdog=watchdog,
+                timeout_policy=timeout_policy,
+                call_context=_sampling_context(),
+            )
+        ]
+
+    assert raised.value.timeout_kind == "parsed_event_idle"
+    assert connection.receive_started.is_set()
+    assert connection.closed is True
+    assert state.websocket_allowed(key) is True
+    await adapter.close()
+
+
+async def test_authentication_handshake_failure_does_not_activate_http_fallback() -> (
+    None
+):
+    """Authentication status remains a provider failure instead of fallback proof."""
+    handshake_error = InvalidStatus(
+        WebSocketHTTPResponse(
+            status_code=401,
+            reason_phrase="Unauthorized",
+            headers=Headers(),
+        )
+    )
+    state = InMemoryModelTransportState(websocket_enabled=True)
+    key = _transport_key()
+    client = _TransportFakeClient(
+        connection_result=handshake_error,
+        http_results=[],
+    )
+    adapter = OpenAIResponsesModelAdapter(
+        client=client,
+        continuation_planner=None,
+        transport_state=state,
+        transport_key=key,
+        websocket_endpoint_eligible=True,
+    )
+    request = OpenAIResponsesRequest(
+        model="gpt-5.1-codex",
+        input=[{"role": "user", "content": "hello"}],
+        tools=[],
+        options={},
+    )
+    watchdog = make_test_model_stream_watchdog()
+    policy = watchdog.resolve_policy(
+        provider="openai",
+        model=request.model,
+        inference_profile=None,
+    )
+
+    with pytest.raises(ModelCallError, match="^Model authentication failed\\.$"):
+        _ = [
+            event
+            async for event in adapter.stream(
+                request,
+                watchdog=watchdog,
+                timeout_policy=policy,
+                call_context=_sampling_context(),
+            )
+        ]
+
+    assert state.websocket_allowed(key) is True
+    await adapter.close()
+
+
 async def test_official_sdk_wire_request_preserves_presence_and_stop() -> None:
     """Public SDK serialization omits absent fields and merges the stop extension."""
     captured_body: dict[str, object] = {}
@@ -334,8 +1080,11 @@ async def test_official_sdk_wire_request_preserves_presence_and_stop() -> None:
         http_client=httpx.AsyncClient(transport=httpx.MockTransport(respond)),
     )
     adapter = OpenAIResponsesModelAdapter(
-        client=OpenAISDKResponsesClient(sdk_client),
+        client=OpenAISDKResponsesClient(sdk_client, websocket_headers=None),
         continuation_planner=None,
+        transport_state=None,
+        transport_key=None,
+        websocket_endpoint_eligible=False,
     )
     request = OpenAIResponsesRequest(
         model="gpt-5.1-codex",
@@ -723,6 +1472,9 @@ async def test_authentication_error_is_mapped_without_raw_provider_text() -> Non
     adapter = OpenAIResponsesModelAdapter(
         client=client,
         continuation_planner=None,
+        transport_state=None,
+        transport_key=None,
+        websocket_endpoint_eligible=False,
     )
     logical_request = OpenAIResponsesRequest(
         model="gpt-5.1-codex",
@@ -803,6 +1555,9 @@ async def test_missing_previous_response_retries_full_input_once(
     adapter = OpenAIResponsesModelAdapter(
         client=client,
         continuation_planner=planner,
+        transport_state=None,
+        transport_key=None,
+        websocket_endpoint_eligible=False,
     )
     watchdog = make_test_model_stream_watchdog()
     policy = watchdog.resolve_policy(

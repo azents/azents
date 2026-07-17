@@ -44,6 +44,7 @@ from azents.engine.events.user_messages import make_run_user_message
 from azents.engine.run.contracts import AgentEngineProtocol, ToolkitBinding
 from azents.engine.run.emit import PublishedEvent
 from azents.engine.run.errors import CompactionFailedError, UserVisibleRuntimeError
+from azents.engine.run.model_transport import InMemoryModelTransportState
 from azents.engine.run.types import (
     CheckStop,
     PollMessages,
@@ -357,10 +358,17 @@ class _RunExecutor:
         dispatch_event: Callable[[str, PublishedEvent], Awaitable[None]],
         owner_generation: int,
         tool_admission_barrier: object,
+        model_transport_state: object,
         command: PendingSessionCommand | None = None,
     ) -> RunExecutionResult:
         """Delegate to Host message handling fake."""
-        del shutdown_event, dispatch_event, owner_generation, tool_admission_barrier
+        del (
+            shutdown_event,
+            dispatch_event,
+            owner_generation,
+            tool_admission_barrier,
+            model_transport_state,
+        )
         if command is not None:
             self.host.commands.append(command)
             self.host.command_processed.set()
@@ -654,6 +662,7 @@ def _make_session_runner(host: _Host) -> SessionRunner:
         user_stop_finalizer=cast(UserStopFinalizer, _UserStopFinalizer(host)),
         run_executor=cast(RunExecutor, _RunExecutor(host)),
         engine=cast(AgentEngineProtocol, host),
+        model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
     )
 
 

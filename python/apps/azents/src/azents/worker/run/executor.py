@@ -73,7 +73,7 @@ from azents.engine.run.contracts import (
 from azents.engine.run.emit import Emit, handle_engine_event
 from azents.engine.run.errors import (
     CompactionModelStreamTimeoutError,
-    ModelStreamTimeoutError,
+    TransientModelCallError,
     UserVisibleRuntimeError,
 )
 from azents.engine.run.failure import (
@@ -85,6 +85,7 @@ from azents.engine.run.failure import (
     FailedRunRetryState,
 )
 from azents.engine.run.input import InvokeInput
+from azents.engine.run.model_transport import ModelTransportState
 from azents.engine.run.resolve import (
     ModelTargetNotFound,
     ReasoningEffortUnsupported,
@@ -477,6 +478,7 @@ class RunExecutor:
         dispatch_event: Callable[[str, PublishedEvent], Awaitable[None]],
         owner_generation: int,
         tool_admission_barrier: ToolAdmissionBarrier,
+        model_transport_state: ModelTransportState,
         command: PendingSessionCommand | None = None,
     ) -> RunExecutionResult:
         """Execute one Session processing boundary with cancellation cleanup."""
@@ -490,6 +492,7 @@ class RunExecutor:
                 dispatch_event=dispatch_event,
                 owner_generation=owner_generation,
                 tool_admission_barrier=tool_admission_barrier,
+                model_transport_state=model_transport_state,
                 command=command,
             )
         except asyncio.CancelledError as exc:
@@ -512,6 +515,7 @@ class RunExecutor:
         dispatch_event: Callable[[str, PublishedEvent], Awaitable[None]],
         owner_generation: int,
         tool_admission_barrier: ToolAdmissionBarrier,
+        model_transport_state: ModelTransportState,
         command: PendingSessionCommand | None = None,
     ) -> RunExecutionResult:
         """Handle one session wake-up.
@@ -931,6 +935,7 @@ class RunExecutor:
             run_id=run_id,
             owner_generation=owner_generation,
             tool_admission_barrier=tool_admission_barrier,
+            model_transport_state=model_transport_state,
             publish_event=publish_event,
         )
         context = ToolkitContext(
@@ -1704,7 +1709,7 @@ class RunExecutor:
         message = str(exc)
         retryability: FailedRunRetryability = "unknown"
         failure_code: str | None = None
-        if isinstance(exc, ModelStreamTimeoutError):
+        if isinstance(exc, TransientModelCallError):
             retryability = "transient"
             failure_code = exc.failure_code
         elif _FAILED_RUN_NO_FIXTURE_MATCH_CODE in message:

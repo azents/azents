@@ -67,6 +67,8 @@ from azents.engine.events.openai_responses import (
     OpenAIResponsesOutputNormalizer,
     OpenAIResponsesRequest,
     create_openai_responses_client,
+    openai_responses_client_config,
+    openai_responses_websocket_endpoint_eligible,
 )
 from azents.engine.events.output_parts import iter_output_parts
 from azents.engine.events.protocols import (
@@ -125,6 +127,7 @@ from azents.engine.io.user_input import RunUserMessage
 from azents.engine.model_stream import ModelStreamWatchdog, get_model_stream_watchdog
 from azents.engine.run.contracts import RunContext, RunRequest, ToolkitBinding
 from azents.engine.run.emit import Emit, durable, ephemeral
+from azents.engine.run.model_transport import ModelTransportKey
 from azents.engine.run.types import (
     USER_STOP_CANCEL_MESSAGE,
     CheckStop,
@@ -512,15 +515,33 @@ class AgentEngineAdapter:
             ),
         )
         if _uses_openai_sdk(request.provider):
+            client_config = openai_responses_client_config(
+                provider=request.provider,
+                credential_kwargs=request.credential_kwargs,
+            )
+            integration_id = (
+                request.inference_state.model_selection.llm_provider_integration_id
+                if request.inference_state is not None
+                else None
+            )
             model_adapter = OpenAIResponsesModelAdapter(
-                client=create_openai_responses_client(
-                    provider=request.provider,
-                    credential_kwargs=request.credential_kwargs,
-                ),
+                client=create_openai_responses_client(config=client_config),
                 continuation_planner=(
                     ResponsesContinuationPlanner()
                     if request.provider == LLMProvider.OPENAI
                     else None
+                ),
+                transport_state=context.model_transport_state,
+                transport_key=ModelTransportKey(
+                    family="openai_responses",
+                    provider=request.provider.value,
+                    provider_integration_id=integration_id,
+                ),
+                websocket_endpoint_eligible=(
+                    openai_responses_websocket_endpoint_eligible(
+                        provider=request.provider,
+                        config=client_config,
+                    )
                 ),
             )
             output_normalizer = OpenAIResponsesOutputNormalizer(

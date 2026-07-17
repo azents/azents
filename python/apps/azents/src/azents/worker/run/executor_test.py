@@ -55,10 +55,12 @@ from azents.engine.run.contracts import AgentEngineProtocol, RunContext, RunRequ
 from azents.engine.run.emit import Emit, durable, ephemeral
 from azents.engine.run.errors import (
     ModelCallError,
+    TransientModelCallError,
     UserVisibleRuntimeError,
 )
 from azents.engine.run.failure import FailedRunRetryState
 from azents.engine.run.input import AgentNotFound
+from azents.engine.run.model_transport import InMemoryModelTransportState
 from azents.engine.run.resolve import ResolvedInvokeInputProfile
 from azents.engine.run.types import (
     SHUTDOWN_CANCEL_MESSAGE,
@@ -620,8 +622,9 @@ class _BoundarySwitchEngine(_Engine):
 class _FlakyEngine(_Engine):
     """Engine that fails once and then completes."""
 
-    def __init__(self) -> None:
+    def __init__(self, error: ModelCallError | None = None) -> None:
         self.calls = 0
+        self.error = error or ModelCallError("model temporarily unavailable")
 
     def run(
         self,
@@ -645,7 +648,7 @@ class _FlakyEngine(_Engine):
                         model_call_started_at=datetime.datetime.now(datetime.UTC),
                     )
                 )
-                raise ModelCallError("model temporarily unavailable")
+                raise self.error
             yield ephemeral(RunComplete(run_id=context.run_id))
 
         return iterator()
@@ -735,6 +738,12 @@ class _InternalFlakyEngine(_Engine):
             yield ephemeral(RunComplete(run_id=context.run_id))
 
         return iterator()
+
+
+class _SyntheticTransientModelCallError(TransientModelCallError):
+    """Safe transient model failure used to verify retry persistence."""
+
+    failure_code = "synthetic_transport_failure"
 
 
 class _AlwaysFailingEngine(_Engine):
@@ -949,6 +958,7 @@ def _executor(
             web_url="http://localhost:3000",
             oauth_secret_key="test-secret",
             mcp_proxy_url=None,
+            openai_responses_websocket_enabled=False,
             failed_run_max_retries=failed_run_max_retries,
             failed_run_base_backoff_seconds=1,
             failed_run_backoff_multiplier=2,
@@ -1153,6 +1163,7 @@ async def test_boundary_cancellation_waits_for_live_action_handoff(
             dispatch_event=dispatch_event,
             owner_generation=1,
             tool_admission_barrier=ToolAdmissionBarrier(),
+            model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
         )
     )
     await claim_committed.wait()
@@ -1284,6 +1295,7 @@ async def test_execute_reports_resolve_failure(
         dispatch_event=dispatch_event,
         owner_generation=1,
         tool_admission_barrier=ToolAdmissionBarrier(),
+        model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
     )
 
     assert len(dispatched) == 2
@@ -1386,6 +1398,7 @@ async def test_execute_recovers_activated_run_before_flushing_input(
         dispatch_event=dispatch_event,
         owner_generation=1,
         tool_admission_barrier=ToolAdmissionBarrier(),
+        model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
     )
 
     assert result.run_id == recoverable.id
@@ -1453,6 +1466,7 @@ async def test_execute_persists_recovered_profile_resolution_failure(
         dispatch_event=dispatch_event,
         owner_generation=1,
         tool_admission_barrier=ToolAdmissionBarrier(),
+        model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
     )
 
     assert lifecycle.terminal_runs == [(recoverable.id, AgentRunStatus.FAILED)]
@@ -1526,6 +1540,7 @@ async def test_execute_recovers_activated_command_run(
         dispatch_event=dispatch_event,
         owner_generation=1,
         tool_admission_barrier=ToolAdmissionBarrier(),
+        model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
         command=_pending_command(),
     )
 
@@ -1617,6 +1632,7 @@ async def test_execute_recovers_durable_retry_budget(
         dispatch_event=dispatch_event,
         owner_generation=1,
         tool_admission_barrier=ToolAdmissionBarrier(),
+        model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
     )
 
     assert result.terminal_run_status == AgentRunStatus.FAILED
@@ -1677,6 +1693,7 @@ async def test_execute_claims_manual_retry_profile_before_flushing_input(
         dispatch_event=dispatch_event,
         owner_generation=1,
         tool_admission_barrier=ToolAdmissionBarrier(),
+        model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
     )
 
     assert result.run_id == recoverable.id
@@ -1765,6 +1782,7 @@ async def test_execute_activates_pending_child_from_session_snapshot(
         dispatch_event=dispatch_event,
         owner_generation=1,
         tool_admission_barrier=ToolAdmissionBarrier(),
+        model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
     )
 
     assert result.run_id == recoverable.id
@@ -1851,6 +1869,7 @@ async def test_execute_rebuilds_turn_with_exact_updated_inference_state(
         dispatch_event=dispatch_event,
         owner_generation=1,
         tool_admission_barrier=ToolAdmissionBarrier(),
+        model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
     )
 
     assert result.terminal_run_status == AgentRunStatus.COMPLETED
@@ -1905,6 +1924,7 @@ async def test_execute_enqueues_follow_up_after_context_invalidating_action(
         dispatch_event=dispatch_event,
         owner_generation=1,
         tool_admission_barrier=ToolAdmissionBarrier(),
+        model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
     )
 
     assert result.no_actionable_work is True
@@ -2290,6 +2310,7 @@ async def test_execute_cancels_pending_run_after_terminal_preparation_failure(
         dispatch_event=dispatch_event,
         owner_generation=1,
         tool_admission_barrier=ToolAdmissionBarrier(),
+        model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
     )
 
     assert lifecycle.cancelled_pending_run_ids == [result.run_id]
@@ -2377,6 +2398,7 @@ async def test_execute_preserves_actionable_transcript_eligibility(
         dispatch_event=dispatch_event,
         owner_generation=1,
         tool_admission_barrier=ToolAdmissionBarrier(),
+        model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
     )
 
     assert initial_turn_eligibility == [True]
@@ -2439,6 +2461,7 @@ async def test_execute_ignores_wake_up_without_runtime_input(
         dispatch_event=dispatch_event,
         owner_generation=1,
         tool_admission_barrier=ToolAdmissionBarrier(),
+        model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
     )
 
     assert result == RunExecutionResult(
@@ -2489,6 +2512,7 @@ async def test_execute_runs_pending_command_inside_run_boundary(
         dispatch_event=dispatch_event,
         owner_generation=1,
         tool_admission_barrier=ToolAdmissionBarrier(),
+        model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
         command=_pending_command(),
     )
 
@@ -2539,6 +2563,7 @@ async def test_execute_ignores_unknown_command_without_run_boundary() -> None:
         dispatch_event=dispatch_event,
         owner_generation=1,
         tool_admission_barrier=ToolAdmissionBarrier(),
+        model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
         command=_pending_command("unknown"),
     )
 
@@ -2585,6 +2610,7 @@ async def test_execute_finalizes_command_error_through_failed_run_finalizer(
         dispatch_event=dispatch_event,
         owner_generation=1,
         tool_admission_barrier=ToolAdmissionBarrier(),
+        model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
         command=_pending_command(),
     )
 
@@ -2681,6 +2707,7 @@ async def test_execute_clears_activity_after_run_complete(
         dispatch_event=dispatch_event,
         owner_generation=1,
         tool_admission_barrier=ToolAdmissionBarrier(),
+        model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
     )
 
     assert result.toolkits == []
@@ -2801,7 +2828,9 @@ async def test_execute_retries_failed_run_without_durable_error(
     """A failed attempt persists retry state and retries without durable error."""
     monkeypatch.setattr(run_executor_module, "_FAILED_RUN_RETRY_WAIT_POLL_SECONDS", 0)
     lifecycle = _SessionLifecycle()
-    engine = _FlakyEngine()
+    engine = _FlakyEngine(
+        _SyntheticTransientModelCallError("model temporarily unavailable")
+    )
     finalizer = _FailedRunFinalizer()
     live_event_projector = _LiveEventProjector()
     executor = _executor(
@@ -2860,6 +2889,7 @@ async def test_execute_retries_failed_run_without_durable_error(
         dispatch_event=dispatch_event,
         owner_generation=1,
         tool_admission_barrier=ToolAdmissionBarrier(),
+        model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
     )
 
     assert engine.calls == 2
@@ -2869,6 +2899,8 @@ async def test_execute_retries_failed_run_without_durable_error(
     assert retry_state is not None
     assert retry_state.failed_attempt_count == 1
     assert retry_state.last_user_message == "model temporarily unavailable"
+    assert retry_state.retryability == "transient"
+    assert retry_state.failure_code == "synthetic_transport_failure"
     retry_updates = [
         run.retry
         for _, run in live_event_projector.live_run_updates
@@ -2931,6 +2963,7 @@ async def test_execute_resets_retry_budget_after_successful_model_turn(
         dispatch_event=dispatch_event,
         owner_generation=1,
         tool_admission_barrier=ToolAdmissionBarrier(),
+        model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
     )
 
     assert result.terminal_run_status == AgentRunStatus.COMPLETED
@@ -3019,6 +3052,7 @@ async def test_execute_publishes_retry_state_after_internal_attempt_failure(
         dispatch_event=dispatch_event,
         owner_generation=1,
         tool_admission_barrier=ToolAdmissionBarrier(),
+        model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
     )
 
     assert engine.calls == 2
@@ -3118,6 +3152,7 @@ async def test_execute_finalizes_when_failed_run_retry_is_stopped(
         dispatch_event=dispatch_event,
         owner_generation=1,
         tool_admission_barrier=ToolAdmissionBarrier(),
+        model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
     )
 
     assert engine.calls == 1
@@ -3189,6 +3224,7 @@ async def test_execute_finalizes_when_failed_run_retry_is_exhausted(
         dispatch_event=dispatch_event,
         owner_generation=1,
         tool_admission_barrier=ToolAdmissionBarrier(),
+        model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
     )
 
     assert engine.calls == 2
@@ -3241,6 +3277,7 @@ async def test_execute_preserves_retry_attempt_history_after_live_retry_clear(
         dispatch_event=dispatch_event,
         owner_generation=1,
         tool_admission_barrier=ToolAdmissionBarrier(),
+        model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
     )
 
     assert engine.calls == 3
@@ -3323,6 +3360,7 @@ async def test_execute_finalizes_non_retryable_failed_run_without_waiting(
         dispatch_event=dispatch_event,
         owner_generation=1,
         tool_admission_barrier=ToolAdmissionBarrier(),
+        model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
     )
 
     assert engine.calls == 1

@@ -77,6 +77,7 @@ from azents.engine.hooks.types import (
 from azents.engine.run.contracts import RunContext, RunRequest, ToolkitBinding
 from azents.engine.run.emit import Emit
 from azents.engine.run.errors import CompactionFailedError, ModelCallError
+from azents.engine.run.model_transport import InMemoryModelTransportState
 from azents.engine.run.types import USER_STOP_CANCEL_MESSAGE, CheckStop
 from azents.repos.agent_execution.data import AgentRunCreate, EventCreate
 from azents.repos.agent_session import AgentSessionRepository
@@ -655,6 +656,9 @@ async def test_event_engine_adapter_runs_execution() -> None:
             RunContext(
                 owner_generation=1,
                 tool_admission_barrier=_OpenToolAdmissionBarrier(),
+                model_transport_state=InMemoryModelTransportState(
+                    websocket_enabled=False
+                ),
                 user_id="user-1",
                 run_id="0" * 32,
                 publish_event=_noop_publish,
@@ -705,6 +709,7 @@ async def test_adapter_yields_model_output_before_run_completion() -> None:
         RunContext(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
             user_id="user-1",
             run_id="0" * 32,
             publish_event=_noop_publish,
@@ -752,6 +757,9 @@ async def test_adapter_forwards_user_stop_cancellation_to_execution() -> None:
             RunContext(
                 owner_generation=1,
                 tool_admission_barrier=_OpenToolAdmissionBarrier(),
+                model_transport_state=InMemoryModelTransportState(
+                    websocket_enabled=False
+                ),
                 user_id="user-1",
                 run_id="0" * 32,
                 publish_event=_noop_publish,
@@ -799,6 +807,7 @@ async def test_adapter_drains_run_task_on_stream_close() -> None:
         RunContext(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
             user_id="user-1",
             run_id="0" * 32,
             publish_event=_noop_publish,
@@ -850,6 +859,9 @@ async def test_event_engine_adapter_includes_turn_start_injected_prompts() -> No
             RunContext(
                 owner_generation=1,
                 tool_admission_barrier=_OpenToolAdmissionBarrier(),
+                model_transport_state=InMemoryModelTransportState(
+                    websocket_enabled=False
+                ),
                 user_id="user-1",
                 run_id="0" * 32,
                 publish_event=_noop_publish,
@@ -899,6 +911,9 @@ async def test_adapter_propagates_user_visible_model_call_error() -> None:
             RunContext(
                 owner_generation=1,
                 tool_admission_barrier=_OpenToolAdmissionBarrier(),
+                model_transport_state=InMemoryModelTransportState(
+                    websocket_enabled=False
+                ),
                 user_id="user-1",
                 run_id="0" * 32,
                 publish_event=_noop_publish,
@@ -960,6 +975,9 @@ async def test_model_kwargs_routes_chatgpt_oauth_to_backend_api() -> None:
             RunContext(
                 owner_generation=1,
                 tool_admission_barrier=_OpenToolAdmissionBarrier(),
+                model_transport_state=InMemoryModelTransportState(
+                    websocket_enabled=False
+                ),
                 user_id="user-1",
                 run_id="0" * 32,
                 publish_event=_noop_publish,
@@ -1019,6 +1037,9 @@ async def test_adapter_wires_event_filters_and_session_head_repo() -> None:
             RunContext(
                 owner_generation=1,
                 tool_admission_barrier=_OpenToolAdmissionBarrier(),
+                model_transport_state=InMemoryModelTransportState(
+                    websocket_enabled=False
+                ),
                 user_id="user-1",
                 run_id="0" * 32,
                 publish_event=_noop_publish,
@@ -1418,6 +1439,7 @@ def _run_context() -> RunContext:
     return RunContext(
         owner_generation=1,
         tool_admission_barrier=_OpenToolAdmissionBarrier(),
+        model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
         user_id="user-1",
         run_id="0" * 32,
         publish_event=_noop_publish,
