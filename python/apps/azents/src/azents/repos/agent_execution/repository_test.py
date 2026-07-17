@@ -993,7 +993,7 @@ class TestEventExecutionRepositories:
                 rdb_session,
                 session_id=event_session.id,
             )
-            == retry
+            is None
         )
 
     async def test_failed_run_lookup_by_terminal_result_event(

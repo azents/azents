@@ -2329,11 +2329,11 @@ class TestLiteLLMResponsesModelAdapter:
             if record.message == "Dispatching OpenAI Responses request"
         ] == [False, True, False]
 
-    async def test_litellm_bad_request_is_provider_failure(
+    async def test_litellm_body_shaped_message_uses_safe_fallback(
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Normalize a provider-attributed 400 into the common contract."""
+        """Reject serialized provider bodies while retaining classification."""
 
         async def fail_call(**kwargs: object) -> object:
             del kwargs
@@ -2351,7 +2351,7 @@ class TestLiteLLMResponsesModelAdapter:
 
         with pytest.raises(
             ModelProviderFailure,
-            match="Instructions are required",
+            match="The model provider could not process the request",
         ) as raised:
             _ = [
                 event
@@ -2373,6 +2373,7 @@ class TestLiteLLMResponsesModelAdapter:
         assert raised.value.category is ModelProviderFailureCategory.INVALID_REQUEST
         assert raised.value.status_code == 400
         assert raised.value.integration == "integration-001"
+        assert raised.value.provider_message is None
 
     async def test_auth_error_is_user_visible(
         self,

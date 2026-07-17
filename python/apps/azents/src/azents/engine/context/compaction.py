@@ -392,21 +392,44 @@ def _litellm_provider_failure(
     category: ModelProviderFailureCategory | None,
 ) -> ModelProviderFailure:
     """Convert one typed LiteLLM failure without retaining its SDK object."""
-    body = getattr(exc, "body", None)
-    error = body.get("error") if isinstance(body, dict) else None
-    error_body = error if isinstance(error, dict) else {}
+    error_body = _provider_error_body(getattr(exc, "body", None))
     status_code = getattr(exc, "status_code", None)
     return model_provider_failure(
         operation="compaction",
         provider=provider.value,
         model=model,
         integration=provider_integration_id,
-        provider_message=(error_body.get("message") or getattr(exc, "message", None)),
+        provider_message=(error_body.get("message") or _litellm_provider_message(exc)),
         status_code=status_code if isinstance(status_code, int) else None,
         provider_code=error_body.get("code") or getattr(exc, "code", None),
         provider_error_type=(error_body.get("type") or exc.__class__.__name__),
         category=category,
     )
+
+
+def _provider_error_body(value: object) -> dict[str, object]:
+    """Return the typed provider error object from a LiteLLM body."""
+    if not isinstance(value, dict):
+        return {}
+    error = value.get("error")
+    if isinstance(error, dict):
+        return error
+    return value
+
+
+def _litellm_provider_message(exc: Exception) -> str | None:
+    """Return scalar SDK message text without its exception-class prefix."""
+    message = getattr(exc, "message", None)
+    if not isinstance(message, str):
+        return None
+    prefixes = (
+        f"litellm.{exc.__class__.__name__}: ",
+        f"{exc.__class__.__name__}: ",
+    )
+    for prefix in prefixes:
+        if message.startswith(prefix):
+            return message[len(prefix) :]
+    return message
 
 
 def _estimated_tokens(text: str) -> int:

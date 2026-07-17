@@ -2073,7 +2073,7 @@ async def test_authentication_error_preserves_typed_provider_message() -> None:
     error = AuthenticationError(
         "provider body with credential-shaped text",
         response=httpx.Response(401, request=request_handle),
-        body={"error": {"code": "invalid_api_key", "message": "raw body"}},
+        body={"code": "invalid_api_key", "message": "raw body"},
     )
     client = _SequencedFakeClient([error])
     adapter = OpenAIResponsesModelAdapter(

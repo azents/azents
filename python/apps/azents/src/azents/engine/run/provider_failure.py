@@ -8,12 +8,28 @@ from azents.engine.run.errors import ModelCallError, ModelStreamCallKind
 
 _PROVIDER_MESSAGE_MAX_CHARS = 1000
 _PROVIDER_IDENTIFIER_MAX_CHARS = 96
+_PROVIDER_IDENTITY_MAX_CHARS = 128
 _SECRET_VALUE_PATTERN = re.compile(
-    r"(?i)(authorization|api[_-]?key|access[_-]?token|refresh[_-]?token|"
-    r"cookie|set-cookie|secret|password)\s*[:=]\s*([^\s,;]+)"
+    r"(?i)(authorization|api[_-]?key|token|access[_-]?token|refresh[_-]?token|"
+    r"cookie|set-cookie|credential|secret|password)\s*[:=]\s*([^\s,;]+)"
 )
 _AUTH_SCHEME_PATTERN = re.compile(r"(?i)\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]+")
 _TOKEN_PATTERN = re.compile(r"\b(?:sk|sess|key)-[A-Za-z0-9_-]{8,}\b")
+_COMMON_CREDENTIAL_PATTERN = re.compile(
+    r"\b(?:ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|"
+    r"xox[baprs]-[A-Za-z0-9-]{10,}|AKIA[A-Z0-9]{16})\b"
+)
+_JWT_PATTERN = re.compile(
+    r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b"
+)
+_ECHOED_INPUT_FIELD_PATTERN = re.compile(r"(?is)\b(?:input|prompt|content)\s*[:=]")
+_ECHOED_REQUEST_BODY_PATTERN = re.compile(r"(?is)\brequest\s*[:=]\s*(?:[\[{]|[\"'`])")
+_SDK_BODY_WRAPPER_PATTERN = re.compile(
+    r"(?is)^(?:error|status)\s+code:\s*\d+\s*-\s*[\[{]"
+)
+_SERIALIZED_BODY_PATTERN = re.compile(
+    r"(?is)(?:^|\s)[\[{]\s*[\"'](?:error|message|detail|type|code)[\"']\s*:"
+)
 _URL_CREDENTIAL_PATTERN = re.compile(r"(https?://)[^/\s:@]+:[^/\s@]+@", re.I)
 _CONTROL_PATTERN = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 _WHITESPACE_PATTERN = re.compile(r"\s+")
@@ -81,9 +97,9 @@ class ModelProviderFailure(ModelCallError):
     ) -> None:
         """Store only bounded provider-neutral fields and safe display text."""
         safe_message = sanitize_provider_message(provider_message)
-        safe_provider = sanitize_provider_identifier(provider) or "unknown"
-        safe_integration = sanitize_provider_identifier(integration)
-        safe_model = sanitize_provider_identifier(model) or "unknown"
+        safe_provider = sanitize_provider_identity(provider) or "unknown"
+        safe_integration = sanitize_provider_identity(integration)
+        safe_model = sanitize_provider_identity(model) or "unknown"
         safe_code = sanitize_provider_identifier(provider_code)
         safe_error_type = sanitize_provider_identifier(provider_error_type)
         safe_status = (
@@ -159,20 +175,28 @@ def sanitize_provider_message(value: object) -> str | None:
     """Return bounded provider-authored scalar text with secrets redacted."""
     if not isinstance(value, str):
         return None
-    message = _CONTROL_PATTERN.sub(" ", value).strip()
+    message = _CONTROL_PATTERN.sub("", value).strip()
     if not message:
         return None
     lowered = message.lower()
-    if (lowered.startswith("<html") or lowered.startswith("<!doctype")) and len(
-        message
-    ) > 128:
+    if lowered.startswith("<html") or lowered.startswith("<!doctype"):
         return None
-    if message[:1] in {"{", "["} and len(message) > 256:
+    if message[:1] in {"{", "["}:
+        return None
+    if _SDK_BODY_WRAPPER_PATTERN.search(message) or _SERIALIZED_BODY_PATTERN.search(
+        message
+    ):
+        return None
+    if _ECHOED_INPUT_FIELD_PATTERN.search(
+        message
+    ) or _ECHOED_REQUEST_BODY_PATTERN.search(message):
         return None
     message = _URL_CREDENTIAL_PATTERN.sub(r"\1[REDACTED]@", message)
     message = _AUTH_SCHEME_PATTERN.sub(r"\1 [REDACTED]", message)
     message = _SECRET_VALUE_PATTERN.sub(r"\1=[REDACTED]", message)
     message = _TOKEN_PATTERN.sub("[REDACTED]", message)
+    message = _COMMON_CREDENTIAL_PATTERN.sub("[REDACTED]", message)
+    message = _JWT_PATTERN.sub("[REDACTED]", message)
     message = _WHITESPACE_PATTERN.sub(" ", message).strip()
     if not message:
         return None
@@ -180,15 +204,56 @@ def sanitize_provider_message(value: object) -> str | None:
 
 
 def sanitize_provider_identifier(value: object) -> str | None:
-    """Return one bounded code-like identifier or no value."""
+    """Return one bounded non-secret provider code or error type."""
     if not isinstance(value, str):
         return None
-    identifier = value.strip()[:_PROVIDER_IDENTIFIER_MAX_CHARS]
-    if not identifier or not all(
+    identifier = value.strip()
+    if not identifier or len(identifier) > _PROVIDER_IDENTIFIER_MAX_CHARS:
+        return None
+    if not all(
         char.isalnum() or char in {"_", "-", ".", "/", ":"} for char in identifier
     ):
         return None
+    if _credential_shaped_identifier(identifier):
+        return None
     return identifier
+
+
+def sanitize_provider_identity(value: object) -> str | None:
+    """Return one bounded provider, model, or integration identity."""
+    if not isinstance(value, str):
+        return None
+    identity = value.strip()
+    if not identity or len(identity) > _PROVIDER_IDENTITY_MAX_CHARS:
+        return None
+    if not all(
+        char.isalnum() or char in {"_", "-", ".", "/", ":"} for char in identity
+    ):
+        return None
+    if any(
+        pattern.search(identity)
+        for pattern in (
+            _TOKEN_PATTERN,
+            _COMMON_CREDENTIAL_PATTERN,
+            _JWT_PATTERN,
+        )
+    ):
+        return None
+    return identity
+
+
+def _credential_shaped_identifier(identifier: str) -> bool:
+    """Reject known credentials and long opaque code/type values."""
+    if any(
+        pattern.search(identifier)
+        for pattern in (
+            _TOKEN_PATTERN,
+            _COMMON_CREDENTIAL_PATTERN,
+            _JWT_PATTERN,
+        )
+    ):
+        return True
+    return bool(re.fullmatch(r"[A-Za-z0-9_-]{32,}", identifier))
 
 
 def classify_model_provider_failure(

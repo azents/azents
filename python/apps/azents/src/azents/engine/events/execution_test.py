@@ -39,7 +39,6 @@ from azents.engine.events.types import (
     NativeArtifact,
     OutputTextPart,
     ProviderToolCallPayload,
-    ReasoningPayload,
     RunMarkerPayload,
     SystemPromptAnalysisPayload,
     SystemPromptFragmentPayload,
@@ -562,6 +561,14 @@ class _CompletionFailingOutputStream(_StaticOutputStream):
         raise ModelCallError("Model response stream ended before completion.")
 
 
+class _InterruptFailingOutputStream(_StaticOutputStream):
+    """Incremental normalizer stream that must not finalize a User Stop."""
+
+    def interrupt(self) -> NormalizedAdapterOutput:
+        """Fail if Engine cancellation inspects provider terminal state."""
+        raise AssertionError("User Stop must not normalize interrupted output")
+
+
 class _ProjectingOutputStream(_StaticOutputStream):
     """Return a live content projection for the test delta event."""
 
@@ -607,6 +614,17 @@ class _CompletionFailingNormalizer:
         """Return one completion-failing output stream."""
         del session_id
         return _CompletionFailingOutputStream(
+            NormalizedAdapterOutput(needs_follow_up=False)
+        )
+
+
+class _InterruptFailingNormalizer:
+    """Create streams that reject interrupted-output normalization."""
+
+    def start(self, session_id: str) -> _InterruptFailingOutputStream:
+        """Return one interrupt-failing output stream."""
+        del session_id
+        return _InterruptFailingOutputStream(
             NormalizedAdapterOutput(needs_follow_up=False)
         )
 
@@ -2531,20 +2549,10 @@ async def test_active_entry_without_call_event_fails_invariant() -> None:
         )
 
 
-async def test_model_stream_user_stop_appends_only_assistant_text() -> None:
-    """User stop during streaming stores only assistant text and interrupted marker."""
+async def test_model_stream_user_stop_leaves_persistence_to_finalizer() -> None:
+    """User Stop does not race the finalizer for transcript or Run ownership."""
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
-    assistant = _event(
-        "1",
-        EventKind.ASSISTANT_MESSAGE,
-        AssistantMessagePayload(content="hello", native_artifact=_artifact()),
-    )
-    reasoning = _event(
-        "2",
-        EventKind.REASONING,
-        ReasoningPayload(text="hidden", native_artifact=_artifact()),
-    )
     execution = AgentRunExecution(
         session_manager=_session_context,
         post_lower_filter=_PostFilter(),
@@ -2553,7 +2561,7 @@ async def test_model_stream_user_stop_appends_only_assistant_text() -> None:
         model_stream_provider_integration_id=None,
         model_stream_inference_profile=None,
         model_adapter=_CancellingModelAdapter(),
-        output_normalizer=_Normalizer([assistant, reasoning, _tool_call_event()]),
+        output_normalizer=_InterruptFailingNormalizer(),
         model_call_preparer=_model_call_preparer(
             lowerer=_Lowerer(), tool_executor=_ToolExecutor()
         ),
@@ -2561,30 +2569,26 @@ async def test_model_stream_user_stop_appends_only_assistant_text() -> None:
         transcript_repo=transcript_repo,
     )
 
-    status = await execution.run(
-        AgentRunExecutionRequest(
-            owner_generation=1,
-            tool_admission_barrier=_OpenToolAdmissionBarrier(),
-            run_id="run-1",
-            session_id="session-1",
-            model="gpt-5.1",
-        ),
-    )
+    with pytest.raises(asyncio.CancelledError) as raised:
+        await execution.run(
+            AgentRunExecutionRequest(
+                owner_generation=1,
+                tool_admission_barrier=_OpenToolAdmissionBarrier(),
+                run_id="run-1",
+                session_id="session-1",
+                model="gpt-5.1",
+            ),
+        )
 
-    assert status == AgentRunStatus.INTERRUPTED
-    assert run_repo.terminal == AgentRunStatus.INTERRUPTED
-    assert [event.kind for event in transcript_repo.events] == [
-        EventKind.ASSISTANT_MESSAGE,
-        EventKind.RUN_MARKER,
-    ]
-    marker_payload = transcript_repo.events[-1].payload
-    assert isinstance(marker_payload, RunMarkerPayload)
-    assert marker_payload.status == "interrupted"
+    assert raised.value.args == (USER_STOP_CANCEL_MESSAGE,)
+    assert run_repo.terminal is None
+    assert transcript_repo.events == []
 
 
-async def test_model_stream_user_stop_without_text_appends_only_marker() -> None:
-    """Store only interrupted marker when assistant text is absent."""
+async def test_model_stream_user_stop_propagates_when_run_is_already_stopped() -> None:
+    """Keep Session finalization authoritative when its Stop write wins first."""
     run_repo = _RunRepo()
+    run_repo.terminal = AgentRunStatus.STOPPED
     transcript_repo = _TranscriptRepo()
     execution = AgentRunExecution(
         session_manager=_session_context,
@@ -2602,20 +2606,20 @@ async def test_model_stream_user_stop_without_text_appends_only_marker() -> None
         transcript_repo=transcript_repo,
     )
 
-    status = await execution.run(
-        AgentRunExecutionRequest(
-            owner_generation=1,
-            tool_admission_barrier=_OpenToolAdmissionBarrier(),
-            run_id="run-1",
-            session_id="session-1",
-            model="gpt-5.1",
-        ),
-    )
+    with pytest.raises(asyncio.CancelledError) as raised:
+        await execution.run(
+            AgentRunExecutionRequest(
+                owner_generation=1,
+                tool_admission_barrier=_OpenToolAdmissionBarrier(),
+                run_id="run-1",
+                session_id="session-1",
+                model="gpt-5.1",
+            ),
+        )
 
-    assert status == AgentRunStatus.INTERRUPTED
-    assert [event.kind for event in transcript_repo.events] == [
-        EventKind.RUN_MARKER,
-    ]
+    assert raised.value.args == (USER_STOP_CANCEL_MESSAGE,)
+    assert run_repo.terminal == AgentRunStatus.STOPPED
+    assert transcript_repo.events == []
 
 
 async def test_shutdown_tool_cancellation_repairs_before_reraising() -> None:
@@ -2663,8 +2667,8 @@ async def test_shutdown_tool_cancellation_repairs_before_reraising() -> None:
     assert [call.call_id for call in tool_executor.cancelled_calls] == ["call-1"]
 
 
-async def test_tool_user_stop_appends_cancelled_result_and_interrupts() -> None:
-    """User stop during tool execution stores cancelled result and marker."""
+async def test_tool_user_stop_repairs_result_and_leaves_terminal_to_finalizer() -> None:
+    """User Stop repairs the tool result without racing terminal persistence."""
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
     tool_executor = _CancellingToolExecutor(user_stop=True)
@@ -2684,31 +2688,28 @@ async def test_tool_user_stop_appends_cancelled_result_and_interrupts() -> None:
         transcript_repo=transcript_repo,
     )
 
-    status = await execution.run(
-        AgentRunExecutionRequest(
-            owner_generation=1,
-            tool_admission_barrier=_OpenToolAdmissionBarrier(),
-            run_id="run-1",
-            session_id="session-1",
-            model="gpt-5.1",
-        ),
-    )
+    with pytest.raises(asyncio.CancelledError) as raised:
+        await execution.run(
+            AgentRunExecutionRequest(
+                owner_generation=1,
+                tool_admission_barrier=_OpenToolAdmissionBarrier(),
+                run_id="run-1",
+                session_id="session-1",
+                model="gpt-5.1",
+            ),
+        )
 
-    assert status == AgentRunStatus.INTERRUPTED
-    assert run_repo.terminal == AgentRunStatus.INTERRUPTED
+    assert raised.value.args == (USER_STOP_CANCEL_MESSAGE,)
+    assert run_repo.terminal is None
     assert len(tool_executor.cancelled_calls) == 1
     assert [event.kind for event in transcript_repo.events] == [
         EventKind.CLIENT_TOOL_CALL,
         EventKind.TURN_MARKER,
         EventKind.CLIENT_TOOL_RESULT,
-        EventKind.RUN_MARKER,
     ]
     result_payload = transcript_repo.events[2].payload
     assert isinstance(result_payload, ClientToolResultPayload)
     assert result_payload.status == "cancelled"
-    marker_payload = transcript_repo.events[3].payload
-    assert isinstance(marker_payload, RunMarkerPayload)
-    assert marker_payload.status == "interrupted"
 
 
 async def test_tool_result_output_sink_receives_tool_result() -> None:

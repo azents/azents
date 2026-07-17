@@ -806,7 +806,7 @@ class AgentRunRepository:
         *,
         session_id: str,
     ) -> AgentRunState | None:
-        """Return the latest active or recoverable stopped Run projection."""
+        """Return the latest running or recoverable stopped Run projection."""
         rdb = await session.scalar(
             sa.select(RDBAgentRun)
             .where(RDBAgentRun.session_id == session_id)
@@ -815,7 +815,7 @@ class AgentRunRepository:
         )
         if rdb is None:
             return None
-        if rdb.status in {AgentRunStatus.PENDING, AgentRunStatus.RUNNING}:
+        if rdb.status == AgentRunStatus.RUNNING:
             return self._build(rdb)
         if rdb.status == AgentRunStatus.STOPPED and rdb.recovery_state is not None:
             return self._build(rdb)

@@ -485,9 +485,7 @@ def _map_litellm_provider_error(
     call_context: ModelStreamCallContext,
 ) -> ModelProviderFailure:
     """Convert one final LiteLLM/OpenAI exception into the common contract."""
-    body = getattr(exc, "body", None)
-    error = body.get("error") if isinstance(body, dict) else None
-    error_body = error if isinstance(error, dict) else {}
+    error_body = _provider_error_body(getattr(exc, "body", None))
     status_code = getattr(exc, "status_code", None)
     return model_provider_failure(
         operation=call_context.call_kind,
@@ -502,8 +500,18 @@ def _map_litellm_provider_error(
     )
 
 
+def _provider_error_body(value: object) -> dict[str, object]:
+    """Return the typed provider error object from a LiteLLM body."""
+    if not isinstance(value, dict):
+        return {}
+    nested = value.get("error")
+    if isinstance(nested, dict):
+        return nested
+    return value
+
+
 def _litellm_provider_message(exc: Exception) -> str | None:
-    """Remove LiteLLM's exception-class prefix from typed provider text."""
+    """Return scalar SDK message text without its exception-class prefix."""
     message = getattr(exc, "message", None)
     if not isinstance(message, str):
         return None

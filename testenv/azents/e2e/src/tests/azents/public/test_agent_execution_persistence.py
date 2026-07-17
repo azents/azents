@@ -467,7 +467,7 @@ def _run_command(
             token=token,
             session_id=session_id,
         )
-        if {"compaction_marker", "compaction_summary"} <= set(_message_roles(payload)):
+        if "compaction_summary" in set(_message_roles(payload)):
             return
         time.sleep(0.5)
     raise TimeoutError(f"command did not complete: {command}")
@@ -1455,9 +1455,8 @@ class TestAgentExecutionPersistence:
             token=workspace.token,
             session_id=first.session_id,
         )
-        assert {"compaction_marker", "compaction_summary"} <= set(
-            _message_roles(after_compact)
-        )
+        assert "compaction_summary" in set(_message_roles(after_compact))
+        assert "compaction_marker" not in set(_message_roles(after_compact))
         assert _COMPACT_SEED in _message_contents(after_compact)
         assert _COMPACT_SEED_RESPONSE in _message_contents(after_compact)
 

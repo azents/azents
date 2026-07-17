@@ -7,6 +7,7 @@ from azents.engine.run.provider_failure import (
     ModelProviderFailureRetryability,
     classify_model_provider_failure,
     model_provider_failure,
+    sanitize_provider_identifier,
     sanitize_provider_message,
 )
 
@@ -46,18 +47,48 @@ def test_classifies_provider_neutral_categories(
 def test_sanitizes_provider_message_and_redacts_credentials() -> None:
     """Only bounded scalar provider text crosses the adapter boundary."""
     message = sanitize_provider_message(
-        "Denied. Authorization: Bearer secret-value api_key=sk-abcdefghijk"
+        "Denied. Authorization: Bearer secret-value "
+        "api\x00_key=sk-abcdefghijk credential=opaque-secret"
     )
 
     assert message is not None
     assert "secret-value" not in message
     assert "sk-abcdefghijk" not in message
-    assert message.count("[REDACTED]") >= 1
+    assert "opaque-secret" not in message
+    assert message.count("[REDACTED]") >= 2
 
 
 def test_rejects_large_body_shaped_message() -> None:
     """An arbitrary raw JSON body is not treated as a scalar explanation."""
     assert sanitize_provider_message("{" + "x" * 300 + "}") is None
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "input: user-secret-text",
+        "prompt = user-secret-text",
+        'request: {"api_key":"secret"}',
+        "content: sensitive user message",
+    ],
+)
+def test_rejects_echoed_request_input(message: str) -> None:
+    """Provider text must not retain echoed model request fields."""
+    assert sanitize_provider_message(message) is None
+
+
+@pytest.mark.parametrize(
+    "identifier",
+    [
+        "a" * 97,
+        "a" * 32,
+        "sk-abcdefghijklmnopqrstuvwxyz123456",
+        "ghp_abcdefghijklmnopqrstuvwxyz1234567890",
+    ],
+)
+def test_rejects_unsafe_provider_identifiers(identifier: str) -> None:
+    """Provider code and type fields reject truncation and credential shapes."""
+    assert sanitize_provider_identifier(identifier) is None
 
 
 def test_builds_safe_failure_and_stable_fingerprint() -> None:

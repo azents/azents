@@ -1713,7 +1713,7 @@ def _map_openai_error(
         provider=call_context.provider,
         model=call_context.model,
         integration=integration,
-        provider_message=(error_body.get("message") or getattr(exc, "message", None)),
+        provider_message=error_body.get("message"),
         status_code=status_code,
         provider_code=error_body.get("code") or getattr(exc, "code", None),
         provider_error_type=(error_body.get("type") or exc.__class__.__name__),
@@ -1722,11 +1722,13 @@ def _map_openai_error(
 
 
 def _openai_error_body(exc: OpenAIError) -> dict[str, object]:
-    """Return only the typed provider error object from an SDK status failure."""
+    """Return the typed provider error object from an SDK status failure."""
     if not isinstance(exc, APIStatusError) or not isinstance(exc.body, dict):
         return {}
     error = exc.body.get("error")
-    return error if isinstance(error, dict) else {}
+    if isinstance(error, dict):
+        return error
+    return exc.body
 
 
 def _openai_retry_after_seconds(exc: OpenAIError) -> float | None:
