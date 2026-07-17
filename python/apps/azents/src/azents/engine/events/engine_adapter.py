@@ -87,6 +87,7 @@ from azents.engine.events.protocols import (
     SummaryGenerator,
     TranscriptRepository,
 )
+from azents.engine.events.provider_output import ProviderOutputMaterializer
 from azents.engine.events.responses_continuation import ResponsesContinuationPlanner
 from azents.engine.events.system_prompt import build_system_prompt
 from azents.engine.events.tools import (
@@ -583,6 +584,16 @@ class AgentEngineAdapter:
                 phase=phase,
                 model_call_started_at=model_call_started_at,
                 pre_lower_filter=auto_compaction_filter,
+            ),
+            provider_output_materializer=ProviderOutputMaterializer(
+                exchange_file_service=self.exchange_file_service,
+                model_file_service=self.model_file_service,
+                workspace_id=request.workspace_id,
+                agent_id=request.agent_id,
+                session_id=request.session_id,
+                user_id=context.user_id,
+                run_id=context.run_id,
+                run_index=run_state.run_index,
             ),
             pre_model_lower_hook=model_file_materializer.materialize,
             model_file_pin_repo=self.model_file_pin_repo,

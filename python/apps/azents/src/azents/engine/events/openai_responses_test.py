@@ -59,6 +59,7 @@ from azents.engine.events.types import (
     AssistantMessagePayload,
     Event,
     NativeArtifact,
+    ProviderToolResultPayload,
     UserMessagePayload,
     build_native_compat_key,
 )
@@ -74,6 +75,11 @@ from azents.engine.run.model_transport import (
 )
 from azents.engine.run.types import BuiltinToolSpec
 from azents.testing.model_stream import make_test_model_stream_watchdog
+
+_PNG_BASE64 = (
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ"
+    "/pLvAAAAAElFTkSuQmCC"
+)
 
 
 def _event(content: str = "hello") -> Event:
@@ -1325,6 +1331,39 @@ def test_typed_normalizer_projects_provider_tool_lifecycle() -> None:
         )
     ]
     assert regressive.projections == []
+
+
+def test_typed_normalizer_extracts_transient_generated_image() -> None:
+    """Keep official SDK image bytes transient until Engine materialization."""
+    completed = OpenAIResponsesOutputNormalizer(
+        provider="openai",
+        model="gpt-5.1-codex",
+    ).normalize_completed_output(
+        "session-1",
+        {
+            "output": [
+                {
+                    "type": "image_generation_call",
+                    "id": "image-call-1",
+                    "status": "completed",
+                    "result": _PNG_BASE64,
+                }
+            ]
+        },
+        [],
+    )
+
+    assert len(completed.events) == 1
+    payload = completed.events[0].payload
+    assert isinstance(payload, ProviderToolResultPayload)
+    assert payload.output == []
+    assert payload.attachments == []
+    assert "result" not in payload.native_artifact.item
+    assert len(completed.pending_provider_files) == 1
+    pending = completed.pending_provider_files[0]
+    assert pending.call_id == "image-call-1"
+    assert pending.body.startswith(b"\x89PNG")
+    assert "body" not in completed.model_dump(mode="json")
 
 
 def test_typed_normalizer_projects_generic_provider_tool_output_items() -> None:

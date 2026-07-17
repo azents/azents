@@ -86,7 +86,7 @@ _TEXT_PREVIEW_MEDIA_TYPES = {
 
 
 @dataclasses.dataclass(frozen=True)
-class _PreviewThumbnail:
+class ExchangePreviewThumbnail:
     """Created preview thumbnail bytes and metadata."""
 
     body: bytes
@@ -118,7 +118,7 @@ def exchange_object_key_from_uri(uri: str) -> str | None:
     return object_key
 
 
-def _sanitize_display_filename(filename: str | None) -> str:
+def sanitize_exchange_filename(filename: str | None) -> str:
     """Normalize as display filename safe for download header."""
     raw = filename if filename is not None else "upload"
     sanitized = re.sub(r"[\\/\x00-\x1f\x7f]+", "_", raw).strip().strip(".")
@@ -140,7 +140,10 @@ def _make_text_preview(body: bytes, media_type: str) -> str | None:
     return text[:_MAX_TEXT_PREVIEW_CHARS] + "\n... (truncated)"
 
 
-def _make_preview_thumbnail(body: bytes, media_type: str) -> _PreviewThumbnail | None:
+def make_exchange_preview_thumbnail(
+    body: bytes,
+    media_type: str,
+) -> ExchangePreviewThumbnail | None:
     """Convert image bytes to JPEG thumbnail for attachment preview."""
     if not media_type.startswith("image/"):
         return None
@@ -169,7 +172,7 @@ def _make_preview_thumbnail(body: bytes, media_type: str) -> _PreviewThumbnail |
 
     thumbnail = BytesIO()
     img.save(thumbnail, format="JPEG", quality=85, optimize=True)
-    return _PreviewThumbnail(
+    return ExchangePreviewThumbnail(
         body=thumbnail.getvalue(),
         width=img.width,
         height=img.height,
@@ -446,7 +449,7 @@ class ExchangeFileService:
         origin_type: ExchangeFileOrigin,
     ) -> list[_PreparedExchangeFile]:
         """Prepare stable metadata and object keys before external upload."""
-        safe_filename = _sanitize_display_filename(filename)
+        safe_filename = sanitize_exchange_filename(filename)
         sha256 = hashlib.sha256(body).hexdigest()
         now = datetime.datetime.now(datetime.UTC)
         expires_at = exchange_file_expires_at(now=now, config=self.config)
@@ -476,7 +479,7 @@ class ExchangeFileService:
             )
         ]
 
-        thumbnail_body = _make_preview_thumbnail(body, media_type)
+        thumbnail_body = make_exchange_preview_thumbnail(body, media_type)
         if thumbnail_body is None:
             return prepared
 

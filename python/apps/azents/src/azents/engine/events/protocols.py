@@ -127,6 +127,33 @@ StreamProjection: TypeAlias = Annotated[
 ]
 
 
+class PendingProviderFileOutput(BaseModel):
+    """Transient provider file bytes awaiting durable materialization."""
+
+    model_config = ConfigDict(frozen=True)
+
+    call_id: str = Field(min_length=1)
+    tool_name: Literal["image_generation"]
+    output_index: int = Field(ge=0)
+    filename: str = Field(min_length=1)
+    media_type: str = Field(min_length=1)
+    sha256: str = Field(min_length=64, max_length=64)
+    body: bytes = Field(exclude=True, repr=False)
+
+
+class CompletedAdapterOutput(BaseModel):
+    """Completed canonical events plus transient provider file outputs."""
+
+    model_config = ConfigDict(frozen=True)
+
+    events: list[Event]
+    pending_provider_files: list[PendingProviderFileOutput] = Field(
+        default_factory=list,
+        exclude=True,
+        repr=False,
+    )
+
+
 class NormalizedAdapterOutput(BaseModel):
     """Adapter output normalization result."""
 
@@ -138,6 +165,11 @@ class NormalizedAdapterOutput(BaseModel):
     events: list[Event] = Field(default_factory=list)
     projections: list[StreamProjection] = Field(default_factory=list)
     usage: TokenUsagePayload | None = Field(default=None)
+    pending_provider_files: list[PendingProviderFileOutput] = Field(
+        default_factory=list,
+        exclude=True,
+        repr=False,
+    )
 
 
 class ClientToolExecutor(Protocol):

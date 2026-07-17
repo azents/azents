@@ -92,6 +92,32 @@ TurnEndReason = Literal["completed", "error", "cancelled", "unknown"]
 TurnEndCallback = Callable[[TurnEndReason], Awaitable[None]]
 
 
+class PreparedProviderOutputProtocol(Protocol):
+    """Provider output prepared for transactional metadata admission."""
+
+    normalized: NormalizedAdapterOutput
+    admitted: bool
+
+    async def persist(self, session: AsyncSession) -> None:
+        """Persist prepared metadata in the model-output transaction."""
+        ...
+
+    async def cleanup(self) -> None:
+        """Compensate uploaded objects after failed output admission."""
+        ...
+
+
+class ProviderOutputMaterializerProtocol(Protocol):
+    """Prepare transient provider output for transactional admission."""
+
+    async def prepare(
+        self,
+        normalized: NormalizedAdapterOutput,
+    ) -> PreparedProviderOutputProtocol:
+        """Upload provider files and return transaction-ready output."""
+        ...
+
+
 class PreModelLowerHook(Protocol):
     """Request-local preparation hook before model lowering."""
 
@@ -211,6 +237,7 @@ class AgentRunExecution[
         auto_compaction_filter: AutoCompactionFilter | None = None,
         output_sink: OutputSink | None = None,
         phase_sink: PhaseSink | None = None,
+        provider_output_materializer: ProviderOutputMaterializerProtocol | None = None,
         pre_model_lower_hook: PreModelLowerHook | None = None,
         model_file_pin_repo: ModelFilePinRepositoryProtocol | None = None,
         run_repo: RunStateRepository | None = None,
@@ -230,6 +257,7 @@ class AgentRunExecution[
         self.model_call_preparer = model_call_preparer
         self.output_sink = output_sink
         self.phase_sink = phase_sink
+        self.provider_output_materializer = provider_output_materializer
         self.pre_model_lower_hook = pre_model_lower_hook
         self.model_file_pin_repo = model_file_pin_repo
         self.run_repo = run_repo or AgentRunRepository()
@@ -387,15 +415,31 @@ class AgentRunExecution[
                         request=request,
                         usage=normalized.usage,
                     )
-
-                    await self._update_phase(
-                        request.run_id,
-                        AgentRunPhase.APPENDING_EVENTS,
+                    prepared_provider_output = (
+                        await self.provider_output_materializer.prepare(normalized)
+                        if self.provider_output_materializer is not None
+                        else None
                     )
-                    if not _has_durable_model_output(normalized.events):
-                        raise ModelCallError(
-                            "Model completed without assistant output."
+                    if prepared_provider_output is not None:
+                        normalized = prepared_provider_output.normalized
+
+                    try:
+                        await self._update_phase(
+                            request.run_id,
+                            AgentRunPhase.APPENDING_EVENTS,
                         )
+                        if not _has_durable_model_output(normalized.events):
+                            raise ModelCallError(
+                                "Model completed without assistant output."
+                            )
+                    except asyncio.CancelledError:
+                        if prepared_provider_output is not None:
+                            await prepared_provider_output.cleanup()
+                        raise
+                    except Exception:
+                        if prepared_provider_output is not None:
+                            await prepared_provider_output.cleanup()
+                        raise
                     normalized_tool_calls = [
                         event.payload
                         for event in normalized.events
@@ -409,11 +453,14 @@ class AgentRunExecution[
                         normalized_output: NormalizedAdapterOutput,
                         prepared_call: PreparedModelCall[TNativeRequest],
                         tool_calls: list[ClientToolCallPayload],
+                        prepared_output: PreparedProviderOutputProtocol | None,
                     ) -> None:
                         """Append output and admit its complete foreground call set."""
                         nonlocal appended, turn_marker
                         model_call_started_at: datetime.datetime | None = None
                         async with self.session_manager() as session:
+                            if prepared_output is not None:
+                                await prepared_output.persist(session)
                             appended = await self._append_events(
                                 session,
                                 normalized_output.events,
@@ -463,16 +510,25 @@ class AgentRunExecution[
                         normalized,
                         prepared,
                         normalized_tool_calls,
+                        prepared_provider_output,
                     )
-                    if normalized_tool_calls:
-                        admitted = await request.tool_admission_barrier.run_if_open(
-                            bound_append_model_output
-                        )
-                        if not admitted:
-                            await finish_turn("cancelled")
-                            return AgentRunStatus.RUNNING
-                    else:
-                        await bound_append_model_output()
+                    output_admitted = False
+                    try:
+                        if normalized_tool_calls:
+                            admitted = await request.tool_admission_barrier.run_if_open(
+                                bound_append_model_output
+                            )
+                            if not admitted:
+                                await finish_turn("cancelled")
+                                return AgentRunStatus.RUNNING
+                        else:
+                            await bound_append_model_output()
+                        output_admitted = True
+                        if prepared_provider_output is not None:
+                            prepared_provider_output.admitted = True
+                    finally:
+                        if prepared_provider_output is not None and not output_admitted:
+                            await prepared_provider_output.cleanup()
 
                     turn_events = [turn_marker] if turn_marker is not None else []
                     client_tool_calls = [

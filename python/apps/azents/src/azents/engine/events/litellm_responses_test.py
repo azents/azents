@@ -92,6 +92,11 @@ from azents.testing.model_stream import (
     make_test_model_stream_watchdog,
 )
 
+_PNG_BASE64 = (
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ"
+    "/pLvAAAAAElFTkSuQmCC"
+)
+
 
 class _StaticModelFileResolver:
     """ModelFile resolver for tests."""
@@ -2916,7 +2921,7 @@ class TestLiteLLMResponsesOutputNormalizer:
                             {
                                 "type": "image_generation_call",
                                 "id": "img-1",
-                                "result": "aW1hZ2U=",
+                                "result": _PNG_BASE64,
                             },
                             {"type": "custom_output", "value": 1},
                         ],
@@ -2941,16 +2946,15 @@ class TestLiteLLMResponsesOutputNormalizer:
         assert reasoning.summary == "summary"
         provider_tool_result = output.events[4].payload
         assert isinstance(provider_tool_result, ProviderToolResultPayload)
-        assert provider_tool_result.output == [
-            OutputTextPart(
-                text=(
-                    "Generated image is available as an attachment "
-                    "(id: inline:696d616765)."
-                )
-            )
-        ]
-        assert provider_tool_result.attachments[0].attachment_id == "inline:696d616765"
+        assert provider_tool_result.output == []
+        assert provider_tool_result.attachments == []
         assert "result" not in provider_tool_result.native_artifact.item
+        assert len(output.pending_provider_files) == 1
+        pending = output.pending_provider_files[0]
+        assert pending.call_id == "img-1"
+        assert pending.media_type == "image/png"
+        assert pending.body.startswith(b"\x89PNG")
+        assert "body" not in output.model_dump(mode="json")
         assert output.usage is not None
         assert output.usage.model_dump(mode="json", exclude_none=True) == {
             "prompt_tokens": 12,
