@@ -1,118 +1,176 @@
 ---
 title: "ADR-0150: Define the OpenAI Responses WebSocket Lifecycle"
 created: 2026-07-16
-tags: [architecture, backend, engine, llm, openai, websocket]
+updated: 2026-07-17
+tags: [architecture, backend, engine, llm, openai, oauth, websocket]
 ---
 
 # ADR-0150: Define the OpenAI Responses WebSocket Lifecycle
 
 ## Status
 
-Draft. Paused until the OpenAI-native HTTP lowerer and SDK HTTP migration are designed, implemented, and validated. Recorded WebSocket discussion remains provisional and must be revalidated before this ADR is accepted.
+Accepted. This ADR defines the initial lifecycle, retry, fallback, and provider rollout policy for the standard OpenAI Responses WebSocket transport.
 
 ## Context
 
-ADR-0147 establishes the OpenAI-native Responses transport family: official OpenAI SDK HTTP is migrated first, then WebSocket becomes the preferred Agent transport with the same SDK HTTP path as its physical fallback. This ADR records the WebSocket lifecycle decisions before implementation.
+ADR-0147 established an OpenAI-native Responses transport family in which HTTP and WebSocket consume the same complete logical request and SDK HTTP is the physical fallback. The HTTP phase is now implemented for OpenAI API-key and ChatGPT OAuth sampling, compaction, and automatic Session title generation. ADR-0162 also removed the Responses Lite dialect and standardized ChatGPT OAuth on the normal Responses request contract.
 
-The OpenAI WebSocket protocol keeps one most-recent response continuation state on the active connection. A socket handles one response at a time, has a 60-minute service limit, and cannot restore `store=false` continuation state after reconnection. Connection ownership therefore determines continuation safety, worker handover behavior, and cleanup.
+The WebSocket work is therefore a physical transport addition to the existing `OpenAIResponsesRequest`, adapter, normalizer, watchdog, and failed-Run boundaries. It does not introduce another lowerer, provider dialect, canonical event format, or tool executor.
 
-Codex provides a relevant but not directly identical precedent. Its `ModelClient` is conversation-session scoped, while `ModelClientSession` is turn scoped. Codex lazily opens one socket, reuses it for sequential turns, sends an incremental request only when strict request-extension checks pass, invalidates the socket on terminal stream failure, and switches the remainder of the Codex session to OpenAI HTTP after exhausting its WebSocket retry budget.
+## Current Implementation Baseline
 
-## Confirmed Constraints
+### Sampling lifecycle
 
-- OpenAI WebSocket and HTTP use the same canonical OpenAI lowerer, official SDK, and output-normalization contract.
-- LiteLLM does not send OpenAI fallback requests.
-- ChatGPT OAuth remains full-context HTTP with `store=false`.
-- Logical transcript lowering, compaction, file materialization, and `NativeRequestSizeGuard` remain ahead of physical transport planning.
-- WebSocket continuation state is in memory, bound to one socket generation, and cleared when that socket is replaced or fails.
-- Logs do not contain response IDs, request inputs, model outputs, or raw WebSocket frames.
-- Compatibility modes and legacy OpenAI transport branches are not retained after migration.
+`AgentEngineAdapter.run()` creates one `OpenAIResponsesModelAdapter` and one official SDK client for one `AgentRunExecution` when the provider is OpenAI API-key or ChatGPT OAuth.
 
-## Current Azents Session Ownership Evidence
+- The adapter is reused across sequential model/tool turns within that execution.
+- OpenAI API-key sampling receives a `ResponsesContinuationPlanner`.
+- ChatGPT OAuth sampling receives no continuation planner and always lowers complete logical input with `store=false`.
+- The execution closes the adapter in `finally` on completion, failure, timeout, or cancellation.
+- A failed-Run retry re-enters the engine and creates a new execution-owned adapter and SDK client.
 
-Azents already has a resident per-Session worker scope rather than assigning every follow-up input to an arbitrary worker immediately:
+Compaction and automatic Session title generation are separate bounded SDK HTTP operations. They create and close their own clients and do not share the sampling adapter.
 
-- Redis stores a sticky Session owner lease with a 30-minute TTL.
-- A separate owner heartbeat has a 120-second TTL and is refreshed every 30 seconds while a Run is active and while its `SessionRunner` is idle.
-- Follow-up wake-ups route directly to the live owner worker.
-- `SessionRunner` survives across Agent Runs, processes them sequentially, and owns a Session-scoped toolkit lifecycle until idle timeout, shutdown, or handover.
-- Graceful runner exit cleans Session-scoped resources and immediately releases the owner lease and heartbeat.
-- Worker crash or loss permits another worker to take over after the heartbeat becomes stale; in-memory resources are not handed over.
+### Streaming and normalization
 
-The current implementation has two lease-timing discrepancies that must be resolved before treating the runner as a precise 30-minute inactivity scope.
+`ModelStreamWatchdog` owns response-handle acquisition, parsed-event idle, absolute-attempt, cancellation, and cleanup bounds. It closes the active response wrapper after timeout or caller cancellation and retains non-cooperative cleanup through the process registry.
 
-First, `SessionRunner._loop()` creates `idle_started_at` once and repeatedly passes that same float into `_tick()`. `_tick()` assigns a new local value after processing a message but does not return it to `_loop()`. The effective runner timeout is therefore measured from runner-loop creation rather than reliably resetting after the most recently processed message, despite the spec defining 30 minutes of Session idle time.
+`AgentRunExecution._stream_model()` immediately passes every yielded native event to the output normalizer. Incremental projections may be published before terminal completion. A successful model step still requires the exact documented typed terminal boundary. Failed non-Stop attempts are later removed from live projection by the worker failed-Run retry boundary.
 
-Second, both active-Run and idle heartbeat loops refresh the 120-second owner-heartbeat key every 30 seconds, but they do not refresh the 30-minute owner lock. The owner lock is refreshed separately when an engine event is dispatched. A continuously active but event-silent operation can therefore lose its owner lock after 30 minutes even while its heartbeat loop remains healthy. Session-scoped transport ownership requires the active owner renewal path to keep the lock and heartbeat consistent until the Run becomes idle.
+This means one normalizer state cannot transparently consume part of a WebSocket response and then restart the same logical request over HTTP. Physical fallback after an event has been yielded must occur in a later model attempt after failed-attempt projection cleanup.
 
-## Decision: SessionRunner Owns the WebSocket
+### SessionRunner lifecycle
 
-One `SessionRunner` owns at most one active OpenAI Responses WebSocket transport context. It opens the socket lazily on the first eligible Agent model call and reuses it across sequential model calls and Agent Runs while the same runner retains sticky Session ownership.
+`SessionRunner` processes one Session sequentially and remains warm for up to 30 minutes of Session idle time.
 
-`AgentRunExecution` borrows the Session-owned transport and does not close a healthy socket on ordinary Run completion. The `SessionRunner` closes the socket and clears its continuation state during its existing Session-resource cleanup, before releasing ownership on idle timeout, graceful shutdown, or handover. A crashed worker transfers no connection or continuation state; the takeover worker opens a new socket and begins with a full request lowered from the durable canonical transcript.
+The lifecycle issues recorded in the earlier draft have been fixed:
 
-This scope does not create a worker-global or cross-Session pool. `SessionRunner` already serializes work for one Session, matching the protocol rule that one socket processes one response at a time. Independent one-shot calls outside that lifecycle, including automatic Session title generation, continue to use OpenAI SDK HTTP.
+- the idle baseline resets after each processed wake-up;
+- active Runs renew the sticky owner lease and owner heartbeat;
+- idle runners renew the owner heartbeat until idle timeout;
+- graceful teardown releases ownership and Session-scoped resources;
+- worker handover transfers no in-memory transport state.
 
-The Session idle-baseline and active owner-lock renewal discrepancies identified above must be corrected and covered by lifecycle tests before WebSocket reuse relies on this ownership boundary.
+A worker can host many warm Session runners, so keeping one open model socket for the full runner lifetime has materially different capacity implications from a single-user Codex process.
 
-## Decision: Continuation Requires a Strict Request Extension
+## Revalidated SDK and Protocol Facts
 
-Azents always completes canonical transcript lowering, compaction, file materialization, and `NativeRequestSizeGuard` evaluation against the full logical OpenAI request. Only the physical WebSocket transport planner may replace that full input with an incremental request.
+The pinned official SDK is `openai==2.45.0`.
 
-The Session-owned transport keeps at most one latest completed continuation boundary: socket generation, OpenAI credential and integration identity, a deep copy of the full request, the response ID, and sanitized completed output items. It sends `previous_response_id` with only new input when all of these conditions hold:
+- `AsyncOpenAI.responses.connect()` derives a WebSocket `/responses` URL from the configured HTTP base URL unless `websocket_base_url` is supplied.
+- The generated Responses WebSocket client-event union exposes `response.create` and no foreground Responses cancellation event.
+- Incremental output events do not include a response ID that could safely demultiplex concurrent requests.
+- One socket must therefore have at most one active logical response.
+- Cancelling SDK `recv()` leaves unread events available. A cancelled or abandoned response cannot share its socket with the next request.
+- SDK automatic reconnect is disabled unless `on_reconnecting` is supplied. Reconnect restores a socket and flushes unsent messages but does not replay an already-sent active response.
+- Azents must keep SDK auto-reconnect disabled and own request replay, retry, and fallback.
+- The WebSocket handshake merges SDK authentication with `responses.connect(extra_headers=...)`; `AsyncOpenAI.default_headers` are not automatically copied into this handshake path.
+- ChatGPT account and client-identity headers must be explicitly supplied to the WebSocket connection.
+- `openai[realtime]==2.45.0` declares `websockets>=13,<16`. WebSockets 15.x also satisfies the current MCP and Uvicorn constraints.
+- The generated WebSocket request method cannot represent the current HTTP-only `extra_body` extension used for the `stop` option. Requests with explicit `stop` remain HTTP-only unless a documented WebSocket representation is added.
 
-- the boundary belongs to the currently active socket generation and credential/integration identity;
-- model, instructions, tools, reasoning, include, sampling, prompt-cache, and every other non-input request property match exactly;
-- the current full input is a strict extension consisting of the prior full input, followed by the prior completed output items, followed by at least one new input item.
+Unknown WebSocket discriminators can be materialized by SDK 2.45.0 as an unrelated generated model class while retaining the unknown `type` value. Existing class-and-wire checks must remain in place. Unknown provider metadata events may refresh the stream idle watchdog but do not create canonical output.
 
-Any mismatch sends the full request on the same healthy socket. A successfully completed full or incremental response replaces the one saved boundary.
+The generated union contains `ResponseCompletedEvent` with `type="response.completed"`. The official SDK WebSocket example also contains a compatibility branch for `response.done`. Live ChatGPT OAuth validation completed with `response.completed`; OpenAI Platform terminal behavior was not live-validated before the accepted simultaneous rollout.
 
-WebSocket requests use `store=false`, so continuation exists only in the active socket's server-side cache and Azents process memory. HTTP fallback and a new Session owner always send the full logical request. Azents clears the boundary on socket close, rotation, reconnect, worker handover, HTTP fallback, terminal stream error, credential/integration change, provider continuation rejection, or failure of a full request. Response IDs are never persisted or logged.
+## Live ChatGPT OAuth Evidence
 
-Always sending the apparent transcript tail was rejected because property changes, compaction, or native-item differences could silently change model context. Restricting continuation to one Agent Run was rejected because the selected Session-owned socket can safely reuse a strictly verified boundary across sequential Runs.
+A retained external probe established one authenticated ChatGPT OAuth Responses WebSocket and completed two sequential standard Responses requests on that socket.
 
-## Decision: HTTP Fallback Is Sticky for the SessionRunner Lifetime
+- Standard text output completed.
+- Provider-hosted web search completed.
+- The probe worked with and without the currently observed Responses WebSocket beta header.
+- Each request used complete logical input; ChatGPT connection-local `previous_response_id` continuation was not tested.
+- Provider-specific metadata events appeared alongside standard Responses events.
 
-The Session-owned transport starts in WebSocket mode. Once an eligible WebSocket failure activates HTTP fallback, the transport closes and clears the cached socket and continuation boundary, records HTTP as the active mode, and uses OpenAI SDK HTTP for every remaining model call and failed-Run retry handled by that `SessionRunner`. It does not probe or return to WebSocket after a cooldown or successful HTTP call.
+The probe, token artifacts, response IDs, response text, and raw frames remain outside the repository. OAuth artifacts are retained until the user explicitly authorizes deletion.
 
-WebSocket eligibility resets only when the current `SessionRunner` ends and a later owner creates a new Session transport scope. This matches Codex's session-scoped fallback state while using the Azents sticky ownership lifetime as the session boundary.
+## Review of Earlier Draft Decisions
 
-HTTP fallback is skipped when it would predictably repeat the same failure. Local lowering or validation errors, request-schema and unsupported-parameter errors, authentication and authorization failures, model or quota errors, provider-declared response failure, and other transport-independent failures propagate directly to the model-call failure boundary. WebSocket-specific upgrade, connection, framing, and network failures may activate HTTP fallback. Protocol-specific classifications and the exact relationship between transport fallback and model-call retry are defined below.
+| Earlier draft item | Review | Current treatment |
+| --- | --- | --- |
+| SessionRunner owns the live socket | Revise | `AgentRunExecution` owns and reuses the live socket only within one execution, limiting sockets to active executions. |
+| Strict request-extension continuation | Retain with provider split | Keep the existing strict planner for OpenAI API-key. ChatGPT OAuth continues to send complete input without `previous_response_id`. |
+| HTTP fallback is sticky for the SessionRunner lifetime | Revise | `SessionRunner` retains keyed HTTP-only fallback state without retaining the live socket. |
+| Two WebSocket retries, then two HTTP retries | Replace | WebSocket has no separate retry loop or budget. A transport failure consumes the existing failed-Run retry count, and the next attempt uses HTTP. |
+| SDK automatic reconnect remains disabled | Retain | SDK reconnect does not restore the active logical response. |
+| Cancellation or terminal stream failure invalidates the socket | Retain | Required to prevent unread events from contaminating the next request. |
+| ChatGPT OAuth remains HTTP-only | Obsolete | Standard ChatGPT OAuth Responses WebSocket text and hosted web search have now been validated. |
+| SessionRunner idle and owner-renewal fixes are prerequisites | Resolved | Both discrepancies recorded by the earlier draft are fixed in the current implementation. |
+| One-hour provider socket limit | Remove as an assumption | This was not revalidated from the current documented SDK contract and is not needed for the initial lifecycle decision. |
 
-SDK automatic WebSocket reconnect remains disabled so Azents can keep retry and fallback ownership explicit.
+## Confirmed Engineering Constraints
 
-## Proposed Azents Model-Call Retry Rules
+These constraints do not require further product-level discussion:
 
-This section is a discussion draft rather than an accepted decision.
+- WebSocket and HTTP consume the same complete `OpenAIResponsesRequest` after all lowerers, filters, compaction, file materialization, and size guards.
+- LiteLLM does not send fallback requests for OpenAI-compatible providers.
+- One socket processes one logical response at a time.
+- Successful sequential responses may reuse a healthy socket within its chosen owner scope.
+- User Stop, timeout, cancellation, premature close, framing failure, or decode failure before terminal completion closes and invalidates the socket.
+- SDK automatic reconnect stays disabled.
+- A new socket generation starts without a WebSocket continuation boundary.
+- ChatGPT OAuth uses full logical input, `store=false`, encrypted reasoning inclusion, and no `previous_response_id`.
+- Unknown transport metadata does not create live or durable model output.
+- Requests containing an explicit `stop` option use HTTP.
+- Custom OpenAI-compatible base URLs are not assumed to support WebSocket.
+- Compaction and automatic Session title generation remain HTTP-only in the initial phase.
+- No credentials, authorization codes, account headers, request or response bodies, response IDs, response text, or raw frames are logged or retained as evidence.
 
-One logical model call owns a retry loop above both physical transports. The full lowered and size-checked request remains constant for that loop. A WebSocket retry after connection loss always opens a new socket, clears continuation, and sends the full request. A successful strict continuation request remains an ordinary first attempt rather than a different retry class.
+## Decision 1: AgentRunExecution Owns the Live Socket
 
-The proposed state machine is:
+`AgentRunExecution` owns the live WebSocket. It opens the connection lazily, reuses it across sequential model/tool turns within the execution, and closes it when the execution ends.
 
-1. If the Session transport mode is WebSocket, attempt WebSocket first.
-2. An HTTP 426 WebSocket upgrade response immediately activates sticky HTTP fallback and reruns the same logical model call over HTTP without another WebSocket attempt.
-3. A retryable WebSocket-only failure retries WebSocket with bounded backoff while the WebSocket budget remains.
-4. When that budget is exhausted, activate sticky HTTP fallback, reset the model-call transport retry counter, and rerun the same logical model call over HTTP.
-5. A retryable HTTP failure uses the HTTP retry budget established by the Phase 1 SDK HTTP adapter.
-6. Exhausting HTTP retries fails the logical model call and enters the existing failed-Run boundary.
-7. A transport-independent or non-retryable error fails the logical model call immediately without switching transports.
-8. Once HTTP fallback activates, every later model call and failed-Run retry in the same `SessionRunner` starts and remains on HTTP.
+`SessionRunner` owns only lightweight HTTP-only fallback state keyed to the resolved provider, endpoint, and non-sensitive credential configuration identity. A failed-Run retry can therefore start directly on HTTP after a transport-specific WebSocket failure without retaining an idle socket between Agent Runs.
 
-WebSocket retryable/fallback-eligible failures initially include upgrade and handshake transport failures other than authentication or request rejection, connect timeout, network close, WebSocket framing or envelope decode failure, retryable WebSocket service status, and `websocket_connection_limit_reached`. A provider model failure, rate or quota rejection, authentication or authorization failure, invalid request, unsupported option, lowering or size-guard failure, and other transport-independent errors do not activate HTTP fallback.
+This boundary intentionally reconnects for each later Agent Run. The initial implementation accepts that handshake frequency in exchange for matching the existing adapter lifecycle and limiting live sockets to active executions. Cross-Run connection retention will be reconsidered only if observed connection frequency or handshake overhead becomes an operational problem.
 
-A model-call retry after any parsed event requires Azents to remove that call attempt's assistant and reasoning live projections before the next physical attempt begins. It must never mix events from the failed WebSocket stream with the HTTP or replacement-WebSocket stream. Completed durable output and executed client tool calls are not rolled back; therefore retry remains disallowed after the logical model call has crossed its explicit completion boundary.
+Rejected alternatives:
 
-The retry loop remains inside one Azents model-call watchdog attempt. Its backoff, WebSocket retries, and HTTP fallback do not reset the parsed-event idle or absolute attempt clocks; only a newly parsed provider event resets the idle clock. Each new connection still receives the common connection-establishment timeout. This preserves ADR-0146 and prevents physical transport retries from multiplying the 30-minute absolute bound.
+- Keeping both the socket and fallback state execution-scoped would cause a failed-Run retry to repeat the same WebSocket failure.
+- Keeping the socket for the full SessionRunner lifetime would retain one socket per warm Session for up to 30 minutes and require idle rotation and connection-capacity controls before evidence shows they are necessary.
 
-The retry counts remain an open decision. Codex defaults to five stream retries before fallback, but Azents also has a durable failed-Run retry layer, so copying that numeric budget would multiply worst-case provider attempts. The initial Azents budget should be selected together with the failed-Run interaction; two WebSocket retries before fallback and two HTTP retries after fallback are the current starting proposal, both constrained by the one shared watchdog attempt.
+## Decision 2: WebSocket Fallback Uses the Failed-Run Retry Boundary
 
-## Subsequent Decisions
+Azents does not perform inline WebSocket-to-HTTP fallback inside one model attempt. A WebSocket transport failure before exact terminal completion follows the same failed-Run retry boundary regardless of whether the adapter has yielded a native event.
 
-After ownership is confirmed, this ADR will record:
+1. Close and invalidate the WebSocket.
+2. Mark the matching SessionRunner transport state HTTP-only.
+3. Fail the current model attempt.
+4. Let the worker discard failed-attempt live assistant and reasoning projections. This is a no-op when no event produced a projection.
+5. Let the next failed-Run attempt create a fresh execution and normalizer and execute the complete logical request over SDK HTTP.
 
-- lazy connection, preconnect, idle close, and rotation policy;
-- strict delta-continuation eligibility and full-request fallback;
-- handshake, pre-first-event, and post-first-event failure boundaries;
-- protocol error classification and bounded retry budgets;
-- cancellation, timeout, socket close, and worker-shutdown cleanup;
-- performance, reliability, and live verification gates.
+The transport failure consumes the existing failed-Run retry count and backoff exactly like an HTTP connection or request failure. There is no separate WebSocket retry budget, reconnect loop, or retry exemption. Exhausting the shared retry budget may therefore terminate the Run without an HTTP attempt; this is accepted as the normal consequence of retry exhaustion.
+
+Only failures classified as WebSocket transport failures activate HTTP-only state. Provider response failures, invalid requests, authentication, authorization, quota errors, and model errors do not activate fallback because HTTP is expected to repeat them. User Stop remains an interrupted Run rather than a failed-Run retry and does not mark WebSocket unsupported. An application watchdog expiry invalidates the active socket but does not by itself prove that the WebSocket transport is unsupported.
+
+The first-yielded-event boundary remains relevant to explaining why inline fallback would be unsafe after normalizer mutation, but it does not change the selected retry behavior.
+
+## Decision 3: Roll Out OpenAI Platform and ChatGPT OAuth Together
+
+The initial sampling rollout makes both official OpenAI API-key and ChatGPT OAuth configurations eligible for WebSocket under the same deployment control. OpenAI Platform activation is not blocked on a separate live terminal-event gate.
+
+This accepts the risk that live OpenAI Platform behavior may expose a terminal or event-shape difference not observed through the generated SDK contract or ChatGPT OAuth validation. The existing exact class-and-wire terminal checks remain authoritative; an unrecognized terminal is not promoted to successful completion. If production evidence reveals an incompatibility, the WebSocket change is disabled or cleanly reverted and sampling returns to the existing SDK HTTP path without data migration or artifact rewriting.
+
+The remaining rollout scope is:
+
+- Custom OpenAI-compatible base URLs remain HTTP-only initially.
+- Compaction and automatic Session title generation remain HTTP-only initially.
+- WebSocket eligibility is deployment configuration rather than a stored model capability.
+- Deterministic connection, sequential-response, cancellation, invalidation, and fallback behavior remains covered by automated tests even though OpenAI Platform live validation is not a rollout prerequisite.
+
+Safe telemetry may include provider, model, call kind, selected transport, connection reuse, connection outcome, fallback stage, bounded failure class or status, parsed event count, and timing. Content-bearing fields remain prohibited.
+
+## Remaining Risks
+
+- A request replayed after it may have reached the provider has at-least-once physical execution semantics and may duplicate inference or hosted web-search cost.
+- OpenAI Platform may require an explicit `response.done` adaptation that is not represented by the generated SDK event union.
+- WebSocket handshake headers must remain in lockstep with HTTP credential and identity configuration.
+- A provider or proxy may support HTTP Responses but reject WebSocket upgrade or large frames.
+- A WebSocket transport failure consumes the shared failed-Run retry budget and may terminate the Run before any HTTP attempt when that budget is exhausted.
+
+## Decision Summary
+
+1. `AgentRunExecution` owns and reuses the live socket within one Run, while `SessionRunner` retains only keyed HTTP-only fallback state.
+2. A WebSocket transport failure uses the existing failed-Run retry boundary and shared retry budget; there is no inline fallback or separate WebSocket retry loop.
+3. Official OpenAI API-key and ChatGPT OAuth sampling roll out together under the same deployment control, with SDK HTTP retained as the revert path.
