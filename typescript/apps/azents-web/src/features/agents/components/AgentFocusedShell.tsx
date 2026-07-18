@@ -16,7 +16,10 @@ import {
   useState,
 } from "react";
 import { trpc } from "@/trpc/client";
-import { AgentFocusedSidebar } from "./AgentFocusedSidebar";
+import {
+  AgentFocusedSidebar,
+  type AgentFocusedSidebarUser,
+} from "./AgentFocusedSidebar";
 import type { AgentResponse } from "@azents/public-client";
 import type { ReactNode } from "react";
 
@@ -70,6 +73,18 @@ export function AgentFocusedShell({
       staleTime: 0,
     },
   );
+  const meQuery = trpc.user.me.useQuery(void 0, { retry: false });
+  const profileQuery = trpc.memberProfile.getMyProfile.useQuery(
+    { handle },
+    { retry: false },
+  );
+  const adminAccessQuery = trpc.user.adminAccess.useQuery({}, { retry: false });
+  const logoutMutation = trpc.auth.logout.useMutation({
+    onSuccess: () => {
+      closeDrawer();
+      router.push("/");
+    },
+  });
   const updateTitleMutation = trpc.chat.updateAgentSessionTitle.useMutation();
   const archiveSessionMutation = trpc.chat.archiveAgentSession.useMutation({
     onSuccess: (_result, variables) => {
@@ -114,6 +129,21 @@ export function AgentFocusedShell({
     [archiveSessionMutation, agent.id],
   );
 
+  const handleLogout = useCallback((): void => {
+    logoutMutation.mutate();
+  }, [logoutMutation]);
+
+  const currentUser = useMemo<AgentFocusedSidebarUser | null>(() => {
+    const email = meQuery.data?.email;
+    if (!email) {
+      return null;
+    }
+    return {
+      email,
+      name: profileQuery.data?.name.trim() || email,
+    };
+  }, [meQuery.data?.email, profileQuery.data?.name]);
+
   const mobileNavContext = useMemo(
     () => ({ openAgentNavigation: openDrawer }),
     [openDrawer],
@@ -132,6 +162,10 @@ export function AgentFocusedShell({
         <AgentFocusedSidebar
           handle={handle}
           agent={agent}
+          currentUser={currentUser}
+          adminAccessUrl={adminAccessQuery.data?.url ?? null}
+          loggingOut={logoutMutation.isPending}
+          onLogout={handleLogout}
           sessions={sessionsQuery.data?.items ?? []}
           sessionsLoading={sessionsQuery.isPending}
           sessionsError={sessionsQuery.error?.message ?? null}
@@ -164,6 +198,10 @@ export function AgentFocusedShell({
           <AgentFocusedSidebar
             handle={handle}
             agent={agent}
+            currentUser={currentUser}
+            adminAccessUrl={adminAccessQuery.data?.url ?? null}
+            loggingOut={logoutMutation.isPending}
+            onLogout={handleLogout}
             sessions={sessionsQuery.data?.items ?? []}
             sessionsLoading={sessionsQuery.isPending}
             sessionsError={sessionsQuery.error?.message ?? null}
