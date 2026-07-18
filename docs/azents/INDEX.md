@@ -36,7 +36,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-07-18 | 26 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-07-17 | 16 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
-| [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-06-27 | 2 |
+| [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-07-18 | 3 |
 | [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-07-18 | 21 |
 | [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-07-16 | 15 |
 | [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-07-17 | 8 |

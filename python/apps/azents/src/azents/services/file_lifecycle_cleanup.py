@@ -1,5 +1,6 @@
 """Scheduler-owned file lifecycle cleanup service."""
 
+import asyncio
 import dataclasses
 import datetime
 import logging
@@ -33,16 +34,48 @@ _STALE_PIN_LIMIT = 200
 
 
 @dataclasses.dataclass(frozen=True)
+class PendingBlobDeletionIds:
+    """IDs eligible for blob deletion before the current cleanup pass."""
+
+    artifact_ids: frozenset[str]
+    exchange_file_ids: frozenset[str]
+    model_file_ids: frozenset[str]
+
+
+@dataclasses.dataclass(frozen=True)
+class FileLifecycleBlobDeletionSummary:
+    """Result of the bounded terminal-blob deletion stage."""
+
+    attempted: int
+    artifact_blobs_deleted: int
+    exchange_file_blobs_deleted: int
+    model_file_blobs_deleted: int
+    pending_attempts: int
+    failures: int
+
+
+@dataclasses.dataclass(frozen=True)
+class ModelFileCleanupResult:
+    """Result of one ModelFile metadata cleanup pass."""
+
+    deleted_count: int
+    sessions_advanced: int
+
+
+@dataclasses.dataclass(frozen=True)
 class FileLifecycleCleanupSummary:
     """Summary of one file lifecycle cleanup pass."""
 
-    artifacts_expired: int = 0
-    exchange_files_expired: int = 0
-    model_files_deleted: int = 0
-    stale_pins_released: int = 0
-    sessions_advanced: int = 0
-    blob_delete_retried: int = 0
-    blob_delete_failed: int = 0
+    artifacts_expired: int
+    exchange_files_expired: int
+    model_files_deleted: int
+    stale_pins_released: int
+    sessions_advanced: int
+    artifact_blobs_deleted: int
+    exchange_file_blobs_deleted: int
+    model_file_blobs_deleted: int
+    pending_blob_deletion_attempts: int
+    blob_delete_failed: int
 
     def to_dict(self) -> dict[str, int]:
         """Return scheduler-result-compatible summary."""
@@ -75,22 +108,23 @@ class FileLifecycleCleanupService:
 
     async def cleanup_once(self) -> FileLifecycleCleanupSummary:
         """Run one bounded scheduler cleanup pass."""
+        pending_blob_deletion_ids = await self._list_pending_blob_deletion_ids()
         artifacts_expired = await self._expire_artifacts()
         exchange_expired = await self._expire_exchange_files()
         stale_pins_released = await self._release_stale_pins()
-        (
-            model_files_deleted,
-            sessions_advanced,
-        ) = await self._cleanup_model_files()
-        blob_retried, blob_failures = await self._retry_blob_deletions()
+        model_file_cleanup = await self._cleanup_model_files()
+        blob_deletions = await self._retry_blob_deletions(pending_blob_deletion_ids)
         return FileLifecycleCleanupSummary(
             artifacts_expired=artifacts_expired,
             exchange_files_expired=exchange_expired,
-            model_files_deleted=model_files_deleted,
+            model_files_deleted=model_file_cleanup.deleted_count,
             stale_pins_released=stale_pins_released,
-            sessions_advanced=sessions_advanced,
-            blob_delete_retried=blob_retried,
-            blob_delete_failed=blob_failures,
+            sessions_advanced=model_file_cleanup.sessions_advanced,
+            artifact_blobs_deleted=blob_deletions.artifact_blobs_deleted,
+            exchange_file_blobs_deleted=blob_deletions.exchange_file_blobs_deleted,
+            model_file_blobs_deleted=blob_deletions.model_file_blobs_deleted,
+            pending_blob_deletion_attempts=blob_deletions.pending_attempts,
+            blob_delete_failed=blob_deletions.failures,
         )
 
     async def _expire_artifacts(self) -> int:
@@ -120,7 +154,7 @@ class FileLifecycleCleanupService:
                 limit=_STALE_PIN_LIMIT,
             )
 
-    async def _cleanup_model_files(self) -> tuple[int, int]:
+    async def _cleanup_model_files(self) -> ModelFileCleanupResult:
         async with self.session_manager() as session:
             lagging = await self.agent_session_repository.list_model_file_gc_lagging(
                 session,
@@ -180,12 +214,48 @@ class FileLifecycleCleanupService:
                     updated_at=datetime.datetime.now(datetime.UTC),
                 )
             advanced_count += 1
-        return deleted_count, advanced_count
+        return ModelFileCleanupResult(
+            deleted_count=deleted_count,
+            sessions_advanced=advanced_count,
+        )
 
-    async def _retry_blob_deletions(self) -> tuple[int, int]:
-        """Retry blob deletion for terminal metadata rows without success markers."""
-        attempted = 0
+    async def _list_pending_blob_deletion_ids(self) -> PendingBlobDeletionIds:
+        """Snapshot terminal rows selected before the current cleanup mutations."""
+        async with self.session_manager() as session:
+            artifacts = (
+                await self.artifact_repository.list_expired_pending_blob_deletion(
+                    session,
+                    limit=_ARTIFACT_EXPIRATION_LIMIT,
+                )
+            )
+            exchange_files = (
+                await self.exchange_file_repository.list_expired_pending_blob_deletion(
+                    session,
+                    limit=_EXCHANGE_FILE_EXPIRATION_LIMIT,
+                )
+            )
+            model_files = (
+                await self.model_file_repository.list_deleted_pending_blob_deletion(
+                    session,
+                    limit=_MODEL_FILE_EVENT_LIMIT,
+                )
+            )
+        return PendingBlobDeletionIds(
+            artifact_ids=frozenset(artifact.id for artifact in artifacts),
+            exchange_file_ids=frozenset(file.id for file in exchange_files),
+            model_file_ids=frozenset(model_file.id for model_file in model_files),
+        )
+
+    async def _retry_blob_deletions(
+        self,
+        pending_blob_deletion_ids: PendingBlobDeletionIds,
+    ) -> FileLifecycleBlobDeletionSummary:
+        """Delete a bounded terminal-blob batch and record result counters."""
+        artifact_blobs_deleted = 0
+        exchange_file_blobs_deleted = 0
+        model_file_blobs_deleted = 0
         failures = 0
+        pending_attempts = 0
         async with self.session_manager() as session:
             artifacts = (
                 await self.artifact_repository.list_expired_pending_blob_deletion(
@@ -206,12 +276,15 @@ class FileLifecycleCleanupService:
                 )
             )
         for artifact in artifacts:
-            attempted += 1
+            if artifact.id in pending_blob_deletion_ids.artifact_ids:
+                pending_attempts += 1
             try:
                 await self.s3_service.delete(
                     bucket=self.config.workspace_s3.bucket,
                     key=artifact.storage_key,
                 )
+            except asyncio.CancelledError:
+                raise
             except Exception:
                 failures += 1
                 logger.exception(
@@ -228,13 +301,17 @@ class FileLifecycleCleanupService:
                     artifact_id=artifact.id,
                     blob_deleted_at=datetime.datetime.now(datetime.UTC),
                 )
+            artifact_blobs_deleted += 1
         for file in exchange_files:
-            attempted += 1
+            if file.id in pending_blob_deletion_ids.exchange_file_ids:
+                pending_attempts += 1
             try:
                 await self.s3_service.delete(
                     bucket=self.config.workspace_s3.bucket,
                     key=file.object_key,
                 )
+            except asyncio.CancelledError:
+                raise
             except Exception:
                 failures += 1
                 logger.exception(
@@ -248,13 +325,17 @@ class FileLifecycleCleanupService:
                     file_id=file.id,
                     blob_deleted_at=datetime.datetime.now(datetime.UTC),
                 )
+            exchange_file_blobs_deleted += 1
         for model_file in model_files:
-            attempted += 1
+            if model_file.id in pending_blob_deletion_ids.model_file_ids:
+                pending_attempts += 1
             try:
                 await self.s3_service.delete(
                     bucket=self.config.workspace_s3.bucket,
                     key=model_file.storage_key,
                 )
+            except asyncio.CancelledError:
+                raise
             except Exception:
                 failures += 1
                 logger.exception(
@@ -271,4 +352,12 @@ class FileLifecycleCleanupService:
                     model_file_id=model_file.id,
                     blob_deleted_at=datetime.datetime.now(datetime.UTC),
                 )
-        return attempted, failures
+            model_file_blobs_deleted += 1
+        return FileLifecycleBlobDeletionSummary(
+            attempted=len(artifacts) + len(exchange_files) + len(model_files),
+            artifact_blobs_deleted=artifact_blobs_deleted,
+            exchange_file_blobs_deleted=exchange_file_blobs_deleted,
+            model_file_blobs_deleted=model_file_blobs_deleted,
+            pending_attempts=pending_attempts,
+            failures=failures,
+        )

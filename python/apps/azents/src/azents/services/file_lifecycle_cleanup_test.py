@@ -68,13 +68,13 @@ class _ArtifactRepo:
         limit: int,
     ) -> list[Artifact]:
         """Return terminal Artifacts whose blob delete marker is absent."""
-        del session, limit
+        del session
         return [
             artifact
             for artifact in self.artifacts
             if artifact.status == ArtifactStatus.EXPIRED
             and artifact.blob_deleted_at is None
-        ]
+        ][:limit]
 
     async def mark_blob_deleted(
         self,
@@ -129,13 +129,13 @@ class _ExchangeRepo:
         limit: int,
     ) -> list[ExchangeFile]:
         """Return terminal ExchangeFiles whose blob delete marker is absent."""
-        del session, limit
+        del session
         return [
             file
             for file in self.files
             if file.status == ExchangeFileStatus.EXPIRED
             and file.blob_deleted_at is None
-        ]
+        ][:limit]
 
     async def mark_blob_deleted(
         self,
@@ -212,13 +212,13 @@ class _ModelFileRepo:
         limit: int,
     ) -> list[ModelFile]:
         """Return deleted ModelFiles whose blob delete marker is absent."""
-        del session, limit
+        del session
         return [
             model_file
             for model_file in self.model_files
             if model_file.status == ModelFileStatus.DELETED
             and model_file.blob_deleted_at is None
-        ]
+        ][:limit]
 
     async def mark_blob_deleted(
         self,
@@ -336,6 +336,16 @@ class _S3Service:
         """Record delete call."""
         del bucket
         self.deleted_keys.append(key)
+
+
+class _FailingS3Service(_S3Service):
+    """S3 test double that fails every deletion."""
+
+    async def delete(self, bucket: str, key: str) -> None:
+        """Raise a deterministic storage deletion error."""
+        del bucket, key
+        msg = "storage deletion failed"
+        raise RuntimeError(msg)
 
 
 class _WorkspaceS3Config:
@@ -505,7 +515,11 @@ async def test_cleanup_once_expires_ttl_resources_and_retries_blob_deletion() ->
 
     assert summary.artifacts_expired == 1
     assert summary.exchange_files_expired == 1
-    assert summary.blob_delete_retried == 2
+    assert summary.artifact_blobs_deleted == 1
+    assert summary.exchange_file_blobs_deleted == 1
+    assert summary.model_file_blobs_deleted == 0
+    assert summary.pending_blob_deletion_attempts == 0
+    assert summary.blob_delete_failed == 0
     assert artifact_repo.marked_blob_deleted == ["a" * 32]
     assert exchange_repo.marked_blob_deleted == ["e" * 32]
     assert s3.deleted_keys == [
@@ -528,6 +542,7 @@ async def test_model_file_gc_deletes_unpinned_model_file_and_advances_cursor() -
     summary = await service.cleanup_once()
 
     assert summary.model_files_deleted == 1
+    assert summary.model_file_blobs_deleted == 1
     assert summary.sessions_advanced == 1
     assert model_repo.deleted_requests == [["m" * 32]]
     assert session_repo.advanced == [("session-1", "h" * 32, 10)]
@@ -550,3 +565,91 @@ async def test_model_file_gc_does_not_advance_cursor_when_file_is_pinned() -> No
     assert summary.sessions_advanced == 0
     assert model_repo.deleted_requests == [["m" * 32]]
     assert session_repo.advanced == []
+
+
+@pytest.mark.asyncio
+async def test_cleanup_once_counts_pending_blob_deletion_attempts() -> None:
+    """Cleanup distinguishes prior pending blobs from newly expired resources."""
+    expired_exchange_file = _exchange_file().model_copy(
+        update={
+            "status": ExchangeFileStatus.EXPIRED,
+            "expired_at": _NOW,
+        }
+    )
+    exchange_repo = _ExchangeRepo([expired_exchange_file])
+    service = FileLifecycleCleanupService(
+        session_manager=_session_manager,
+        artifact_repository=cast(Any, _ArtifactRepo([])),
+        exchange_file_repository=cast(Any, exchange_repo),
+        model_file_repository=cast(Any, _ModelFileRepo([])),
+        model_file_pin_repository=cast(Any, _PinRepo()),
+        agent_session_repository=cast(Any, _AgentSessionRepo([])),
+        transcript_repository=cast(Any, _TranscriptRepo([])),
+        s3_service=cast(Any, _S3Service()),
+        config=cast(Any, _Config()),
+    )
+
+    summary = await service.cleanup_once()
+
+    assert summary.exchange_files_expired == 0
+    assert summary.exchange_file_blobs_deleted == 1
+    assert summary.pending_blob_deletion_attempts == 1
+    assert summary.blob_delete_failed == 0
+    assert exchange_repo.marked_blob_deleted == ["e" * 32]
+
+
+@pytest.mark.asyncio
+async def test_cleanup_once_counts_blob_deletion_failures() -> None:
+    """Cleanup reports failed deletes while preserving later retry eligibility."""
+    artifact_repo = _ArtifactRepo([_artifact()])
+    service = FileLifecycleCleanupService(
+        session_manager=_session_manager,
+        artifact_repository=cast(Any, artifact_repo),
+        exchange_file_repository=cast(Any, _ExchangeRepo([])),
+        model_file_repository=cast(Any, _ModelFileRepo([])),
+        model_file_pin_repository=cast(Any, _PinRepo()),
+        agent_session_repository=cast(Any, _AgentSessionRepo([])),
+        transcript_repository=cast(Any, _TranscriptRepo([])),
+        s3_service=cast(Any, _FailingS3Service()),
+        config=cast(Any, _Config()),
+    )
+
+    summary = await service.cleanup_once()
+
+    assert summary.artifacts_expired == 1
+    assert summary.artifact_blobs_deleted == 0
+    assert summary.pending_blob_deletion_attempts == 0
+    assert summary.blob_delete_failed == 1
+    assert artifact_repo.marked_blob_deleted == []
+
+
+@pytest.mark.asyncio
+async def test_cleanup_once_keeps_model_blob_deletion_batch_bounded() -> None:
+    """Pre-existing pending blobs consume the ModelFile deletion batch first."""
+    pending_model_files = [
+        _model_file(ModelFileStatus.DELETED).model_copy(
+            update={
+                "id": f"{index:032x}",
+                "storage_key": f"model-files/workspace-1/session-1/{index}",
+                "deleted_at": _NOW,
+            }
+        )
+        for index in range(200)
+    ]
+    model_repo = _ModelFileRepo([*pending_model_files, _model_file()])
+    s3 = _S3Service()
+    service = _service(
+        model_file_repo=model_repo,
+        agent_session_repo=_AgentSessionRepo([_lagging_session()]),
+        transcript_repo=_TranscriptRepo([_file_event()]),
+        s3_service=s3,
+    )
+
+    summary = await service.cleanup_once()
+
+    assert summary.model_files_deleted == 1
+    assert summary.model_file_blobs_deleted == 200
+    assert summary.pending_blob_deletion_attempts == 200
+    assert len(s3.deleted_keys) == 200
+    assert "model-files/workspace-1/session-1/m" not in s3.deleted_keys
+    assert "m" * 32 not in model_repo.marked_blob_deleted
