@@ -7,6 +7,7 @@ owner: "@Hardtack"
 touches_domains: [agent, conversation, toolkit]
 code_paths:
   - python/apps/azents/src/azents/engine/run/contracts.py
+  - python/apps/azents/src/azents/engine/run/builtin_tools.py
   - python/apps/azents/src/azents/engine/run/errors.py
   - python/apps/azents/src/azents/engine/run/model_transport.py
   - python/apps/azents/src/azents/engine/io/user_input.py
@@ -29,6 +30,8 @@ code_paths:
   - python/apps/azents/src/azents/services/agent_runtime/**
   - python/apps/azents/src/azents/services/input_buffer.py
   - python/apps/azents/src/azents/services/model_file.py
+  - python/apps/azents/src/azents/services/xai_imagine.py
+  - python/apps/azents/src/azents/services/xai_oauth/runtime.py
   - python/apps/azents/src/azents/services/session_title.py
   - python/apps/azents/src/azents/repos/input_buffer/**
   - python/apps/azents/src/azents/repos/action_execution/**
@@ -49,7 +52,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ChatView.tsx
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
 last_verified_at: 2026-07-18
-spec_version: 103
+spec_version: 104
 ---
 
 # Agent Execution Loop
@@ -415,12 +418,16 @@ stream handles, timeouts, or continuation state. Credentials and endpoint identi
 operation-scoped `AsyncOpenAI` client outside the request. Sampling reuses that client across turns in
 one execution; compaction and title generation each own one bounded-operation client. Streams and
 clients close on success, failure, timeout, cancellation, and User Stop. Agent
-model-scoped builtin settings store semantic ids such as `web_search` and `image_generation`; the
-lowerer maps them to provider/model-developer native shapes and fails before provider call if the
-selected model capability does not support the requested hosted tool. Hosted-tool dispatch is
-exhaustive: OpenAI API-key and ChatGPT OAuth use the official Responses tool shape, LiteLLM receives
-the Responses semantic tool for provider-dialect translation, and no configured builtin is silently
-omitted.
+model-scoped builtin settings store semantic ids such as `web_search` and `image_generation`.
+Before lowering, the runtime validates the selected snapshot capability and partitions every semantic
+builtin into one provider-hosted or client-executed implementation. `web_search` remains
+provider-hosted. xAI API-key and xAI OAuth `image_generation` become an auto-bound client function
+tool; an advertised `image_generation` capability for another provider remains provider-hosted.
+Current automatic hosted capability policy covers supported OpenAI API-key and ChatGPT OAuth models,
+while another provider requires explicit trusted metadata. Only provider-hosted specs reach the
+lowerer; LiteLLM receives those specs as Responses semantic tools for provider-dialect translation.
+An unsupported, unimplemented, or unbound required capability fails before provider dispatch, and no
+configured builtin is silently omitted.
 
 OpenAI SDK completion usage maps directly into the existing turn-marker token fields. Its raw usage is
 the SDK usage object serialized to plain JSON and does not synthesize LiteLLM hidden parameters.
@@ -430,6 +437,10 @@ negative values, and non-finite values leave cost unset without failing complete
 OAuth cost is an API price-map estimate, not subscription billing.
 
 Both `xai` and `xai_oauth` use the xAI transport target in this lowerer. For either identity, system instructions become the first `system` input item instead of top-level `instructions`, hosted `web_search` uses the xAI Responses tool target, and Anthropic cache-control hints are omitted. Credential refresh is resolved before the adapter pipeline and remains exclusive to `xai_oauth`; the lowerer does not own OAuth lifecycle state.
+
+For xAI image generation, the auto-bound unprefixed `image_generation` client tool receives only `prompt`, optional `aspect_ratio`, and optional `resolution`; credential material is not part of its schema, arguments, events, runtime workspace, or metadata. The prompt is limited to 1,024 characters, one call generates one image, supported aspect ratios are `auto`, `1:1`, `16:9`, `9:16`, `4:3`, `3:4`, `3:2`, and `2:3`, and resolution is `1k` or `2k`. The backend calls `POST /v1/images/generations` with model `grok-imagine-image-quality`, requests one Base64 result, bounds the response to 30 MiB, and performs at most one transport retry for HTTP/network failures eligible for that retry.
+
+xAI API-key execution uses the selected integration key. xAI OAuth execution starts with the proactively refreshed selected integration token. The first Imagine `401` forces one refresh through the existing persistence service and retries once with the new token; a second `401` returns reconnect-required failure. API-key `401`, `403`, `429`, malformed/oversized output, and exhausted transport failures become sanitized client tool failures. Cancellation propagates immediately. Successful bytes enter the normal generated-file admission path, so the durable `client_tool_result` contains an available Exchange attachment plus a ModelFile-backed file output and never contains Base64 or credentials.
 
 Provider-hosted tool output is normalized as provider tool call/result events and does not enter the
 client tool execution loop or by itself continue the model turn. A completed `image_generation` item
@@ -882,6 +893,7 @@ updated by the user.
 
 ## Changelog
 
+- **2026-07-18** (spec_version 104) — Resolved model-scoped built-ins to provider-hosted or client-executed ownership and added xAI Imagine execution, OAuth refresh, sanitized failure, and generated-file admission semantics.
 - **2026-07-18** (spec_version 103) — Bounded incoming OpenAI Responses WebSocket messages at 32 MiB.
 - **2026-07-18** (spec_version 102) — Routed unclassified provider outcomes through the ordinary
   internal-error path instead of creating provider retry state or generic provider-failure logs.
