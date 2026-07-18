@@ -102,6 +102,7 @@ from azents.engine.run.model_transport import ModelTransportKey, ModelTransportS
 from azents.engine.run.provider_failure import (
     ModelProviderFailure,
     ModelProviderFailureCategory,
+    extract_provider_message_text,
     model_provider_failure,
     sanitize_provider_identifier,
 )
@@ -1713,7 +1714,10 @@ def _map_openai_error(
         provider=call_context.provider,
         model=call_context.model,
         integration=integration,
-        provider_message=(error_body.get("message") or getattr(exc, "message", None)),
+        provider_message=(
+            extract_provider_message_text(error_body.get("message"))
+            or extract_provider_message_text(getattr(exc, "message", None))
+        ),
         status_code=status_code,
         provider_code=error_body.get("code") or getattr(exc, "code", None),
         provider_error_type=(error_body.get("type") or exc.__class__.__name__),
@@ -1725,8 +1729,8 @@ def _openai_error_body(exc: OpenAIError) -> dict[str, object]:
     """Return only the typed provider error object from an SDK status failure."""
     if not isinstance(exc, APIStatusError) or not isinstance(exc.body, dict):
         return {}
-    error = exc.body.get("error")
-    return error if isinstance(error, dict) else {}
+    nested_error = exc.body.get("error")
+    return nested_error if isinstance(nested_error, dict) else exc.body
 
 
 def _openai_retry_after_seconds(exc: OpenAIError) -> float | None:

@@ -2,6 +2,7 @@
 
 import enum
 import hashlib
+import json
 import re
 
 from azents.engine.run.errors import ModelCallError, ModelStreamCallKind
@@ -21,6 +22,7 @@ _WHITESPACE_PATTERN = re.compile(r"\s+")
 _URL_PATTERN = re.compile(r"https?://\S+", re.I)
 _LONG_IDENTIFIER_PATTERN = re.compile(r"\b[a-f0-9]{16,}\b", re.I)
 _NUMBER_PATTERN = re.compile(r"\b\d+\b")
+_SDK_SERIALIZED_ERROR_PATTERN = re.compile(r"(?i)\berror code:\s*\d+\s*-\s*[\[{]")
 
 
 class ModelProviderFailureCategory(enum.StrEnum):
@@ -178,6 +180,30 @@ def sanitize_provider_message(value: object) -> str | None:
     if not message:
         return None
     return message[:_PROVIDER_MESSAGE_MAX_CHARS]
+
+
+def extract_provider_message_text(value: object) -> str | None:
+    """Extract scalar provider text without retaining SDK error serialization."""
+    if not isinstance(value, str):
+        return None
+    message = value.strip()
+    if not message or _SDK_SERIALIZED_ERROR_PATTERN.search(message):
+        return None
+    if message[:1] not in {"{", "["}:
+        return message
+    try:
+        decoded = json.loads(message)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(decoded, dict):
+        return None
+    nested = decoded.get("error")
+    error = nested if isinstance(nested, dict) else decoded
+    for key in ("message", "detail"):
+        candidate = error.get(key)
+        if isinstance(candidate, str):
+            return candidate
+    return None
 
 
 def sanitize_provider_identifier(value: object) -> str | None:

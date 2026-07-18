@@ -6,6 +6,7 @@ from azents.engine.run.provider_failure import (
     ModelProviderFailureCategory,
     ModelProviderFailureRetryability,
     classify_model_provider_failure,
+    extract_provider_message_text,
     model_provider_failure,
     sanitize_provider_message,
 )
@@ -63,6 +64,30 @@ def test_rejects_large_body_shaped_message() -> None:
 def test_rejects_oversized_scalar_message() -> None:
     """Oversized probable body dumps are rejected instead of truncated."""
     assert sanitize_provider_message("x" * ((8 * 1024) + 1)) is None
+
+
+def test_extracts_scalar_message_from_json_error_object() -> None:
+    """JSON provider objects contribute only their scalar message field."""
+    assert (
+        extract_provider_message_text(
+            '{"error":{"message":"Request rejected","code":"invalid_request"}}'
+        )
+        == "Request rejected"
+    )
+    assert (
+        extract_provider_message_text('{"detail":"Instructions are required"}')
+        == "Instructions are required"
+    )
+
+
+def test_rejects_sdk_serialized_error_message() -> None:
+    """SDK status wrappers never cross the provider failure boundary."""
+    assert (
+        extract_provider_message_text(
+            "Error code: 429 - {'error': {'message': 'Request rejected'}}"
+        )
+        is None
+    )
 
 
 def test_builds_safe_failure_and_stable_fingerprint() -> None:

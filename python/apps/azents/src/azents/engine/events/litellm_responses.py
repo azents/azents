@@ -38,6 +38,7 @@ from azents.engine.model_stream import (
 )
 from azents.engine.run.provider_failure import (
     ModelProviderFailure,
+    extract_provider_message_text,
     model_provider_failure,
 )
 
@@ -486,15 +487,24 @@ def map_litellm_provider_error(
 ) -> ModelProviderFailure:
     """Convert one final LiteLLM/OpenAI exception into the common contract."""
     body = getattr(exc, "body", None)
-    error = body.get("error") if isinstance(body, dict) else None
-    error_body = error if isinstance(error, dict) else {}
+    nested_error = body.get("error") if isinstance(body, dict) else None
+    error_body = (
+        nested_error
+        if isinstance(nested_error, dict)
+        else body
+        if isinstance(body, dict)
+        else {}
+    )
     status_code = getattr(exc, "status_code", None)
     return model_provider_failure(
         operation=call_context.call_kind,
         provider=call_context.provider,
         model=call_context.model,
         integration=call_context.provider_integration_id,
-        provider_message=(error_body.get("message") or _litellm_provider_message(exc)),
+        provider_message=(
+            extract_provider_message_text(error_body.get("message"))
+            or _litellm_provider_message(exc)
+        ),
         status_code=status_code if isinstance(status_code, int) else None,
         provider_code=error_body.get("code") or getattr(exc, "code", None),
         provider_error_type=(error_body.get("type") or exc.__class__.__name__),
@@ -513,8 +523,9 @@ def _litellm_provider_message(exc: Exception) -> str | None:
     )
     for prefix in prefixes:
         if message.startswith(prefix):
-            return message[len(prefix) :]
-    return message
+            message = message[len(prefix) :]
+            break
+    return extract_provider_message_text(message)
 
 
 def _retry_after_seconds(exc: Exception) -> float | None:

@@ -2067,13 +2067,26 @@ def test_pricing_failure_preserves_successful_usage(
     assert completed.usage.cost_usd is None
 
 
-async def test_authentication_error_preserves_typed_provider_message() -> None:
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"error": {"code": "invalid_api_key", "message": "raw body"}},
+        {
+            "code": "invalid_api_key",
+            "message": "raw body",
+            "type": "authentication_error",
+        },
+    ],
+)
+async def test_authentication_error_preserves_typed_provider_message(
+    body: dict[str, object],
+) -> None:
     """Final SDK status failures preserve bounded provider-authored text."""
     request_handle = httpx.Request("POST", "https://provider.example/responses")
     error = AuthenticationError(
-        "provider body with credential-shaped text",
+        "Error code: 401 - {'error': {'message': 'raw body'}}",
         response=httpx.Response(401, request=request_handle),
-        body={"error": {"code": "invalid_api_key", "message": "raw body"}},
+        body=body,
     )
     client = _SequencedFakeClient([error])
     adapter = OpenAIResponsesModelAdapter(

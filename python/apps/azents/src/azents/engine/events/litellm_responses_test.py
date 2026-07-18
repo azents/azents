@@ -36,6 +36,7 @@ from azents.engine.events.litellm_responses import (
     LiteLLMResponsesOutputNormalizer,
     coerce_litellm_completed_response_for_logging,
     guard_litellm_streaming_logging,
+    map_litellm_provider_error,
 )
 from azents.engine.events.protocols import (
     ContentDeltaProjection,
@@ -2373,6 +2374,38 @@ class TestLiteLLMResponsesModelAdapter:
         assert raised.value.category is ModelProviderFailureCategory.INVALID_REQUEST
         assert raised.value.status_code == 400
         assert raised.value.integration == "integration-001"
+
+    def test_direct_litellm_error_body_ignores_sdk_serialization(self) -> None:
+        """Direct typed body fields win over LiteLLM's serialized message."""
+        failure = map_litellm_provider_error(
+            BadRequestError(
+                message=(
+                    "Error code: 400 - {'error': {'message': 'Request rejected'}}"
+                ),
+                model="gpt-5.1-codex",
+                llm_provider="openai",
+                body={
+                    "message": "Request rejected",
+                    "type": "invalid_request_error",
+                    "code": "invalid_request",
+                },
+            ),
+            call_context=ModelStreamCallContext(
+                call_kind="sampling",
+                provider="openai",
+                provider_integration_id="integration-001",
+                model="gpt-5.1-codex",
+                session_id="session-1",
+                run_id="run-1",
+                attempt_number=1,
+                check_stop=None,
+            ),
+        )
+
+        assert failure.provider_message == "Request rejected"
+        assert failure.provider_code == "invalid_request"
+        assert failure.provider_error_type == "invalid_request_error"
+        assert "Error code" not in failure.user_message
 
     async def test_auth_error_is_user_visible(
         self,
