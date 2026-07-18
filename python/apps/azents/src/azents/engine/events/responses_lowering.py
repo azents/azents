@@ -53,6 +53,7 @@ from azents.engine.events.types import (
     UserMessagePayload,
     build_native_compat_key,
 )
+from azents.engine.run.builtin_tools import UnsupportedRequiredBuiltinToolError
 from azents.engine.run.types import BuiltinToolSpec
 
 _DEFAULT_INSTRUCTIONS = "You are a helpful assistant."
@@ -124,10 +125,6 @@ def _format_skill_loaded_event(payload: SkillLoadedPayload) -> str:
             "</skill_body>",
         ]
     )
-
-
-class UnsupportedRequiredBuiltinToolError(ValueError):
-    """Raised when adapter does not support required builtin tool."""
 
 
 def _uses_input_message_instructions(

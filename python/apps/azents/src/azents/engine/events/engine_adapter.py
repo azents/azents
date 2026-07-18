@@ -126,6 +126,10 @@ from azents.engine.hooks.types import (
 )
 from azents.engine.io.user_input import RunUserMessage
 from azents.engine.model_stream import ModelStreamWatchdog, get_model_stream_watchdog
+from azents.engine.run.builtin_tools import (
+    ClientBuiltinToolImplementationUnavailableError,
+    resolve_builtin_tools,
+)
 from azents.engine.run.contracts import RunContext, RunRequest, ToolkitBinding
 from azents.engine.run.emit import Emit, durable, ephemeral
 from azents.engine.run.model_transport import ModelTransportKey
@@ -417,6 +421,19 @@ class AgentEngineAdapter:
                 dynamic_toolkit_prompts=catalog.dynamic_prompt_fragment_inputs,
                 injected_prompts=injected_prompts,
             )
+            resolved_builtin_tools = resolve_builtin_tools(
+                selected=request.builtin_tools,
+                provider=request.provider,
+                supported=request.model_capabilities.built_in_tools.supported,
+            )
+            if resolved_builtin_tools.client_executed:
+                names = ", ".join(
+                    tool.name for tool in resolved_builtin_tools.client_executed
+                )
+                raise ClientBuiltinToolImplementationUnavailableError(
+                    f"Client builtin tool implementation is unavailable: {names}"
+                )
+
             lowerer_type = (
                 OpenAIResponsesLowerer
                 if _uses_openai_sdk(request.provider)
@@ -437,7 +454,7 @@ class AgentEngineAdapter:
                 top_p=request.top_p,
                 stop=request.stop,
                 reasoning_effort=request.reasoning_effort,
-                hosted_tools=request.builtin_tools,
+                hosted_tools=resolved_builtin_tools.provider_hosted,
                 prompt_cache_scope=request.session_id,
                 model_developer=request.model_developer,
                 model_capabilities=request.model_capabilities,

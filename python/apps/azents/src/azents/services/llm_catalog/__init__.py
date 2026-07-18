@@ -61,6 +61,7 @@ from azents.repos.llm_catalog.data import (
 )
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationWithSecrets
+from azents.services.builtin_capabilities import supported_builtin_capabilities
 from azents.services.chatgpt_oauth.data import ProviderRejected, ProviderUnavailable
 from azents.services.chatgpt_oauth.runtime import ensure_runtime_tokens
 from azents.services.model_listing.data import ModelListingOutput
@@ -70,7 +71,6 @@ from azents.services.model_listing.providers import (
     list_chatgpt_models_for_integration,
     list_vertex_models_for_integration,
 )
-from azents.services.provider_hosted_tools import supported_provider_hosted_tools
 from azents.testing.deterministic_model_listing import (
     build_deterministic_listing,
     parse_deterministic_fixture_variant,
@@ -1307,7 +1307,7 @@ def _capabilities_from_litellm_metadata(
             effort_levels=_reasoning_effort_levels(provider_info),
         ),
         built_in_tools=ModelBuiltInToolCapabilities(
-            supported=supported_provider_hosted_tools(
+            supported=supported_builtin_capabilities(
                 provider=provider,
                 model_identifier=model_identifier,
                 metadata=metadata,

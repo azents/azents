@@ -64,10 +64,10 @@ class FunctionToolSpec(BaseModel):
 
 
 class BuiltinToolSpec(BaseModel):
-    """Provider built-in tool spec.
+    """Selected semantic built-in capability.
 
-    Tool executed server-side and requiring no handler.
-    Provider-specific declaration format is decided by name.
+    Runtime resolution decides whether the provider or an Azents client handler executes
+    the capability.
     """
 
     model_config = ConfigDict(frozen=True)
