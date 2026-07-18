@@ -78,6 +78,7 @@ from azents.engine.events.provider_tool_activity import (
     ProviderToolActivityAccumulator,
     ProviderToolObservation,
 )
+from azents.engine.events.provider_tool_semantics import RESPONSES_PROVIDER_TOOL_SPECS
 from azents.engine.events.responses_continuation import (
     ResponsesContinuationPlan,
     ResponsesContinuationPlanner,
@@ -1428,17 +1429,10 @@ def _provider_tool_output_item_observation(
     item_type = item.get("type")
     if not isinstance(item_type, str):
         return None
-    name_by_type = {
-        "web_search_call": "web_search",
-        "web_search": "web_search",
-        "file_search_call": "file_search",
-        "code_interpreter_call": "code_interpreter",
-        "image_generation_call": "image_generation",
-        "mcp_call": "mcp",
-    }
-    name = name_by_type.get(item_type)
-    if name is None:
+    spec = RESPONSES_PROVIDER_TOOL_SPECS.get(item_type)
+    if spec is None:
         return None
+    name = spec.resolve_name(item)
     call_id = _string_value(item.get("call_id") or item.get("id"))
     if not call_id:
         return None

@@ -14,6 +14,7 @@ from azents.engine.events.types import (
     FileOutputPart,
     InputTextPart,
     OutputTextPart,
+    ProviderToolCallPayload,
     ProviderToolResultPayload,
     ToolOutput,
     ToolOutputPart,
@@ -137,12 +138,27 @@ def _degrade_event_file_parts(event: Event) -> Event:
         return event.model_copy(
             update={"payload": payload.model_copy(update={"content": content})}
         )
-    if isinstance(payload, ClientToolResultPayload | ProviderToolResultPayload):
+    if isinstance(payload, ClientToolResultPayload):
         output = _degrade_tool_output(event, payload.output)
         if output is payload.output:
             return event
         return event.model_copy(
             update={"payload": payload.model_copy(update={"output": output})}
+        )
+    if isinstance(payload, ProviderToolCallPayload | ProviderToolResultPayload):
+        output = _degrade_tool_output(event, payload.semantic.output)
+        if output is payload.semantic.output:
+            return event
+        return event.model_copy(
+            update={
+                "payload": payload.model_copy(
+                    update={
+                        "semantic": payload.semantic.model_copy(
+                            update={"output": output}
+                        )
+                    }
+                )
+            }
         )
     return event
 

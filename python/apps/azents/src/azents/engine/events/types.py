@@ -8,8 +8,10 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    SerializerFunctionWrapHandler,
     SkipValidation,
     TypeAdapter,
+    model_serializer,
     model_validator,
 )
 
@@ -195,6 +197,52 @@ OutputContentPart = Annotated[
 ]
 ToolOutputPart = OutputContentPart
 ToolOutput = str | list[ToolOutputPart]
+
+
+class ProviderToolReference(BaseModel):
+    """Provider-neutral reference exposed by a hosted tool."""
+
+    model_config = ConfigDict(frozen=True)
+
+    kind: Literal["url", "file", "other"]
+    uri: str | None = Field(max_length=4096)
+    title: str | None = Field(max_length=1000)
+    excerpt: str | None = Field(max_length=4000)
+    metadata: dict[str, str]
+
+    @model_serializer(mode="wrap")
+    def serialize_required_nullable_fields(
+        self,
+        handler: SerializerFunctionWrapHandler,
+    ) -> dict[str, object]:
+        """Preserve explicit nullable reference fields in canonical JSON."""
+        serialized: dict[str, object] = handler(self)
+        serialized["uri"] = self.uri
+        serialized["title"] = self.title
+        serialized["excerpt"] = self.excerpt
+        return serialized
+
+
+class ProviderToolSemanticContent(BaseModel):
+    """Provider-neutral model-visible hosted-tool content."""
+
+    model_config = ConfigDict(frozen=True)
+
+    input: str | None = Field(max_length=30_000)
+    output: ToolOutput
+    references: list[ProviderToolReference]
+
+    @model_serializer(mode="wrap")
+    def serialize_required_nullable_fields(
+        self,
+        handler: SerializerFunctionWrapHandler,
+    ) -> dict[str, object]:
+        """Preserve explicit nullable semantic input in canonical JSON."""
+        serialized: dict[str, object] = handler(self)
+        serialized["input"] = self.input
+        return serialized
+
+
 UserContentPart = Annotated[
     InputTextPart | FileOutputPart,
     Field(discriminator="type"),
@@ -272,9 +320,30 @@ class ProviderToolCallPayload(BaseModel):
 
     call_id: str = Field(min_length=1)
     name: str = Field(min_length=1)
-    arguments: str | None = Field(default=None)
-    status: Literal["running", "completed", "failed"] | None = Field(default=None)
+    status: Literal["running", "completed", "failed"] | None
+    semantic: ProviderToolSemanticContent
+    attachments: list[Attachment]
     native_artifact: NativeArtifact = Field(description="Native artifact")
+
+    @model_serializer(mode="wrap")
+    def serialize_required_nullable_fields(
+        self,
+        handler: SerializerFunctionWrapHandler,
+    ) -> dict[str, object]:
+        """Preserve explicit nullable call status in canonical JSON."""
+        serialized: dict[str, object] = handler(self)
+        serialized["status"] = self.status
+        return serialized
+
+    @property
+    def arguments(self) -> str | None:
+        """Return semantic input during staged consumer migration."""
+        return self.semantic.input
+
+    @property
+    def output(self) -> ToolOutput:
+        """Return semantic output during staged consumer migration."""
+        return self.semantic.output
 
 
 class ClientToolResultPayload(BaseModel):
@@ -296,11 +365,31 @@ class ProviderToolResultPayload(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     call_id: str = Field(min_length=1)
-    name: str | None = Field(default=None)
+    name: str | None
     status: Literal["completed", "failed", "cancelled", "interrupted"]
-    output: ToolOutput = Field(default_factory=list)
-    attachments: list[Attachment] = Field(default_factory=list)
+    semantic: ProviderToolSemanticContent
+    attachments: list[Attachment]
     native_artifact: NativeArtifact = Field(description="Native artifact")
+
+    @model_serializer(mode="wrap")
+    def serialize_required_nullable_fields(
+        self,
+        handler: SerializerFunctionWrapHandler,
+    ) -> dict[str, object]:
+        """Preserve explicit nullable result name in canonical JSON."""
+        serialized: dict[str, object] = handler(self)
+        serialized["name"] = self.name
+        return serialized
+
+    @property
+    def arguments(self) -> str | None:
+        """Return semantic input during staged consumer migration."""
+        return self.semantic.input
+
+    @property
+    def output(self) -> ToolOutput:
+        """Return semantic output during staged consumer migration."""
+        return self.semantic.output
 
 
 class TokenUsagePayload(BaseModel):

@@ -21,6 +21,10 @@ from azents.engine.events.provider_tool_activity import (
     ProviderToolActivityAccumulator,
     ProviderToolObservation,
 )
+from azents.engine.events.provider_tool_semantics import (
+    RESPONSES_PROVIDER_TOOL_SPECS,
+    normalize_responses_provider_tool_item,
+)
 from azents.engine.events.responses_continuation import sanitize_responses_native_item
 from azents.engine.events.types import (
     AssistantMessagePayload,
@@ -182,29 +186,47 @@ class ResponsesOutputNormalizer:
                 native_artifact=artifact,
             )
             return _event(session_id, EventKind.CLIENT_TOOL_CALL, payload)
-        if item_type in {"web_search_call", "web_search"}:
+        provider_tool = normalize_responses_provider_tool_item(output_item)
+        if provider_tool is not None:
             call_id = str(output_item.get("call_id") or output_item.get("id") or "")
-            payload = ProviderToolCallPayload(
+            if not call_id:
+                return _event(
+                    session_id,
+                    EventKind.UNKNOWN_ADAPTER_OUTPUT,
+                    UnknownAdapterOutputPayload(
+                        native_artifact=artifact,
+                        reason=f"{item_type}:missing_call_id",
+                    ),
+                )
+            if provider_tool.event_kind == EventKind.PROVIDER_TOOL_RESULT:
+                result_payload = ProviderToolResultPayload(
+                    call_id=call_id,
+                    name=provider_tool.name,
+                    status=_canonical_provider_tool_result_status(
+                        output_item.get("status")
+                    ),
+                    semantic=provider_tool.semantic,
+                    attachments=[],
+                    native_artifact=artifact,
+                )
+                return _event(
+                    session_id,
+                    EventKind.PROVIDER_TOOL_RESULT,
+                    result_payload,
+                )
+            call_payload = ProviderToolCallPayload(
                 call_id=call_id,
-                name="web_search",
-                arguments=None,
+                name=provider_tool.name,
                 status=_canonical_provider_tool_status(output_item.get("status")),
-                native_artifact=artifact,
-            )
-            return _event(session_id, EventKind.PROVIDER_TOOL_CALL, payload)
-        if item_type == "image_generation_call":
-            call_id = str(
-                output_item.get("call_id") or output_item.get("id") or uuid7().hex
-            )
-            payload = ProviderToolResultPayload(
-                call_id=call_id,
-                name="image_generation",
-                status="completed",
-                output=[],
+                semantic=provider_tool.semantic,
                 attachments=[],
                 native_artifact=artifact,
             )
-            return _event(session_id, EventKind.PROVIDER_TOOL_RESULT, payload)
+            return _event(
+                session_id,
+                EventKind.PROVIDER_TOOL_CALL,
+                call_payload,
+            )
 
         return _event(
             session_id,
@@ -557,17 +579,10 @@ def _provider_tool_output_item_observation(
     item_type = item.get("type")
     if not isinstance(item_type, str):
         return None
-    name_by_type = {
-        "web_search_call": "web_search",
-        "web_search": "web_search",
-        "file_search_call": "file_search",
-        "code_interpreter_call": "code_interpreter",
-        "image_generation_call": "image_generation",
-        "mcp_call": "mcp",
-    }
-    name = name_by_type.get(item_type)
-    if name is None:
+    spec = RESPONSES_PROVIDER_TOOL_SPECS.get(item_type)
+    if spec is None:
         return None
+    name = spec.resolve_name(item)
     call_id = item.get("call_id") or item.get("id")
     if not isinstance(call_id, str) or not call_id:
         return None
@@ -619,13 +634,37 @@ def _canonical_provider_tool_status(
         "searching",
         "generating",
         "interpreting",
+        "calling",
     }:
         return "running"
     if normalized in {"completed", "done", "succeeded"}:
         return "completed"
-    if normalized in {"failed", "error"}:
+    if normalized in {
+        "failed",
+        "error",
+        "incomplete",
+        "cancelled",
+        "canceled",
+        "interrupted",
+    }:
         return "failed"
     return None
+
+
+def _canonical_provider_tool_result_status(
+    native_status: object,
+) -> Literal["completed", "failed", "cancelled", "interrupted"]:
+    """Map one terminal provider-tool result state to the canonical status."""
+    if not isinstance(native_status, str):
+        return "completed"
+    normalized = native_status.lower().replace("-", "_")
+    if normalized in {"failed", "error"}:
+        return "failed"
+    if normalized in {"cancelled", "canceled"}:
+        return "cancelled"
+    if normalized in {"incomplete", "interrupted"}:
+        return "interrupted"
+    return "completed"
 
 
 def _incomplete_response_model_error(
