@@ -8,6 +8,7 @@
  */
 import {
   ActionIcon,
+  Avatar,
   Badge,
   Box,
   Button,
@@ -33,6 +34,7 @@ import {
   IconBrightnessAuto,
   IconCheck,
   IconChevronLeft,
+  IconChevronRight,
   IconDots,
   IconExternalLink,
   IconLayoutGrid,
@@ -48,10 +50,9 @@ import {
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useCallback, useState } from "react";
 import { useColorMode } from "@/shared/providers/color-mode";
-import { trpc } from "@/trpc/client";
 import { AgentAvatar } from "./AgentAvatar";
 import styles from "./AgentFocusedShell.module.css";
 import type { ColorModePreference } from "@/shared/lib/color-mode";
@@ -60,9 +61,18 @@ import type {
   AgentSessionResponse,
 } from "@azents/public-client";
 
+export interface AgentFocusedSidebarUser {
+  name: string;
+  email: string;
+}
+
 interface AgentFocusedSidebarProps {
   handle: string;
   agent: AgentResponse;
+  currentUser: AgentFocusedSidebarUser | null;
+  adminAccessUrl: string | null;
+  loggingOut: boolean;
+  onLogout: () => void;
   sessions?: AgentSessionResponse[];
   sessionsLoading?: boolean;
   sessionsError?: string | null;
@@ -114,9 +124,61 @@ function getColorModeIcon(
   );
 }
 
+function getUserInitial(name: string): string {
+  return Array.from(name.trim())[0]?.toLocaleUpperCase() ?? "?";
+}
+
+interface ColorModeMenuItemsProps {
+  preference: ColorModePreference;
+  onSelect: (preference: ColorModePreference) => void;
+}
+
+function ColorModeMenuItems({
+  preference,
+  onSelect,
+}: ColorModeMenuItemsProps): React.ReactElement {
+  const t = useTranslations("common");
+
+  return (
+    <>
+      <Menu.Item
+        leftSection={<IconSun size={rem(16)} />}
+        rightSection={
+          preference === "light" ? <IconCheck size={rem(16)} /> : null
+        }
+        onClick={() => onSelect("light")}
+      >
+        {t("light")}
+      </Menu.Item>
+      <Menu.Item
+        leftSection={<IconMoon size={rem(16)} />}
+        rightSection={
+          preference === "dark" ? <IconCheck size={rem(16)} /> : null
+        }
+        onClick={() => onSelect("dark")}
+      >
+        {t("dark")}
+      </Menu.Item>
+      <Menu.Item
+        leftSection={<IconBrightnessAuto size={rem(16)} />}
+        rightSection={
+          preference === "system" ? <IconCheck size={rem(16)} /> : null
+        }
+        onClick={() => onSelect("system")}
+      >
+        {t("system")}
+      </Menu.Item>
+    </>
+  );
+}
+
 export function AgentFocusedSidebar({
   handle,
   agent,
+  currentUser,
+  adminAccessUrl,
+  loggingOut,
+  onLogout,
   sessions = [],
   sessionsLoading = false,
   sessionsError = null,
@@ -133,7 +195,6 @@ export function AgentFocusedSidebar({
   const tAppBar = useTranslations("appBar");
   const tCommon = useTranslations("common");
   const tWorkspaceSidebar = useTranslations("workspace.sidebar");
-  const router = useRouter();
   const pathname = usePathname();
   const workspacePath = `/w/${handle}`;
   const basePath = `${workspacePath}/agents/${agent.id}`;
@@ -147,23 +208,6 @@ export function AgentFocusedSidebar({
   const [editingTitle, setEditingTitle] = useState("");
   const [archiveTarget, setArchiveTarget] =
     useState<AgentSessionResponse | null>(null);
-  const { data: adminAccess } = trpc.user.adminAccess.useQuery(
-    {},
-    {
-      retry: false,
-    },
-  );
-
-  const logoutMutation = trpc.auth.logout.useMutation({
-    onSuccess: () => {
-      onNavigate?.();
-      router.push("/");
-    },
-  });
-
-  const handleLogout = useCallback((): void => {
-    logoutMutation.mutate();
-  }, [logoutMutation]);
 
   const handleSelectColorMode = useCallback(
     (newPreference: ColorModePreference): void => {
@@ -176,6 +220,14 @@ export function AgentFocusedSidebar({
     },
     [setColorMode, setColorScheme],
   );
+
+  const handleLogout = useCallback((): void => {
+    onLogout();
+  }, [onLogout]);
+
+  const userName =
+    currentUser?.name.trim() || currentUser?.email || tAppBar("account");
+  const userEmail = currentUser?.email ?? null;
 
   const handleOpenRename = useCallback(
     (session: AgentSessionResponse): void => {
@@ -293,7 +345,7 @@ export function AgentFocusedSidebar({
       </Modal>
 
       <Stack h="100%" gap={0} style={{ overflow: "hidden" }}>
-        <Stack px="md" pt="md" pb="md" gap="sm">
+        <Stack p={{ base: "md", lg: "sm" }} className={styles.agentSummary}>
           <Button
             component={Link}
             href={workspacePath}
@@ -317,12 +369,22 @@ export function AgentFocusedSidebar({
               }`}
             >
               <Group gap="sm" wrap="nowrap" align="center">
-                <AgentAvatar
-                  name={agent.name}
-                  avatar={agent.avatar ?? null}
-                  size={40}
-                  radius="xl"
-                />
+                <Box hiddenFrom="lg">
+                  <AgentAvatar
+                    name={agent.name}
+                    avatar={agent.avatar ?? null}
+                    size={40}
+                    radius="xl"
+                  />
+                </Box>
+                <Box visibleFrom="lg">
+                  <AgentAvatar
+                    name={agent.name}
+                    avatar={agent.avatar ?? null}
+                    size={32}
+                    radius="xl"
+                  />
+                </Box>
                 <Box style={{ minWidth: 0, flex: 1 }}>
                   <Text fw={700} size="sm" truncate>
                     {agent.name}
@@ -347,11 +409,17 @@ export function AgentFocusedSidebar({
             </Tooltip>
           </Group>
           {agent.description && (
-            <Text mt="xs" size="xs" c="dimmed" lineClamp={2}>
+            <Text
+              mt={{ base: "xs", lg: 0 }}
+              size="xs"
+              c="dimmed"
+              lineClamp={2}
+              className={styles.agentDescription}
+            >
               {agent.description}
             </Text>
           )}
-          <Group mt="sm" gap="xs">
+          <Group mt={{ base: "sm", lg: 0 }} gap="xs">
             <Badge
               size="xs"
               variant="dot"
@@ -506,87 +574,164 @@ export function AgentFocusedSidebar({
           </Stack>
         </ScrollArea>
 
-        <Divider />
+        <Box visibleFrom="lg">
+          <Divider />
+          <Box p="xs">
+            <Menu shadow="md" width={rem(272)} position="top-start" offset={8}>
+              <Menu.Target>
+                <UnstyledButton className={styles.userMenuTrigger}>
+                  <Group gap="sm" wrap="nowrap">
+                    <Avatar size={32} radius="xl" color="orange">
+                      {getUserInitial(userName)}
+                    </Avatar>
+                    <Box style={{ flex: 1, minWidth: 0 }}>
+                      <Text size="sm" fw={600} truncate>
+                        {userName}
+                      </Text>
+                      {userEmail && (
+                        <Text size="xs" c="dimmed" truncate>
+                          {userEmail}
+                        </Text>
+                      )}
+                    </Box>
+                    <IconChevronRight size={rem(16)} />
+                  </Group>
+                </UnstyledButton>
+              </Menu.Target>
+              <Menu.Dropdown>
+                <Box px="sm" py="xs">
+                  <Text size="sm" fw={600} truncate>
+                    {userName}
+                  </Text>
+                  {userEmail && (
+                    <Text size="xs" c="dimmed" truncate>
+                      {userEmail}
+                    </Text>
+                  )}
+                </Box>
+                <Divider />
+                <Menu.Item
+                  component={Link}
+                  href="/workspaces"
+                  leftSection={<IconLayoutGrid size={rem(16)} />}
+                  onClick={onNavigate}
+                >
+                  {tWorkspaceSidebar("workspaces")}
+                </Menu.Item>
+                <Menu.Item
+                  component={Link}
+                  href="/account"
+                  leftSection={<IconUser size={rem(16)} />}
+                  onClick={onNavigate}
+                >
+                  {tAppBar("account")}
+                </Menu.Item>
+                {adminAccessUrl && (
+                  <Menu.Item
+                    component="a"
+                    href={adminAccessUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    leftSection={<IconShieldLock size={rem(16)} />}
+                    rightSection={<IconExternalLink size={rem(14)} />}
+                    onClick={onNavigate}
+                  >
+                    {tAppBar("admin")}
+                  </Menu.Item>
+                )}
+                <Menu.Sub>
+                  <Menu.Sub.Target>
+                    <Menu.Sub.Item
+                      leftSection={getColorModeIcon(preference, mode)}
+                      rightSection={
+                        <Text size="xs" c="dimmed">
+                          {tCommon(preference)}
+                        </Text>
+                      }
+                    >
+                      {tCommon("colorMode")}
+                    </Menu.Sub.Item>
+                  </Menu.Sub.Target>
+                  <Menu.Sub.Dropdown w={rem(180)}>
+                    <ColorModeMenuItems
+                      preference={preference}
+                      onSelect={handleSelectColorMode}
+                    />
+                  </Menu.Sub.Dropdown>
+                </Menu.Sub>
+                <Menu.Divider />
+                <Menu.Item
+                  color="red"
+                  leftSection={<IconLogout size={rem(16)} />}
+                  disabled={loggingOut}
+                  onClick={handleLogout}
+                >
+                  {tAppBar("logout")}
+                </Menu.Item>
+              </Menu.Dropdown>
+            </Menu>
+          </Box>
+        </Box>
 
-        <Stack gap={0} p="xs">
-          <NavLink
-            component={Link}
-            href="/workspaces"
-            label={tWorkspaceSidebar("workspaces")}
-            leftSection={<IconLayoutGrid size={rem(18)} />}
-            onClick={onNavigate}
-          />
-          <NavLink
-            component={Link}
-            href="/account"
-            label={tAppBar("account")}
-            leftSection={<IconUser size={rem(18)} />}
-            onClick={onNavigate}
-          />
-          {adminAccess?.url && (
+        <Box hiddenFrom="lg">
+          <Divider />
+          <Stack gap={0} p="xs">
             <NavLink
-              component="a"
-              href={adminAccess.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              label={tAppBar("admin")}
-              leftSection={<IconShieldLock size={rem(18)} />}
-              rightSection={<IconExternalLink size={rem(16)} />}
+              component={Link}
+              href="/workspaces"
+              label={tWorkspaceSidebar("workspaces")}
+              leftSection={<IconLayoutGrid size={rem(18)} />}
               onClick={onNavigate}
             />
-          )}
-          <Menu shadow="md" width={rem(180)} position="top-start">
-            <Menu.Target>
-              <Button
-                variant="subtle"
-                color="gray"
-                justify="flex-start"
-                fullWidth
-                leftSection={getColorModeIcon(preference, mode)}
-                styles={{ inner: { justifyContent: "flex-start" } }}
-              >
-                {tCommon("colorMode")}
-              </Button>
-            </Menu.Target>
-            <Menu.Dropdown>
-              <Menu.Item
-                leftSection={<IconSun size={rem(16)} />}
-                rightSection={
-                  preference === "light" ? <IconCheck size={rem(16)} /> : null
-                }
-                onClick={() => handleSelectColorMode("light")}
-              >
-                {tCommon("light")}
-              </Menu.Item>
-              <Menu.Item
-                leftSection={<IconMoon size={rem(16)} />}
-                rightSection={
-                  preference === "dark" ? <IconCheck size={rem(16)} /> : null
-                }
-                onClick={() => handleSelectColorMode("dark")}
-              >
-                {tCommon("dark")}
-              </Menu.Item>
-              <Menu.Item
-                leftSection={<IconBrightnessAuto size={rem(16)} />}
-                rightSection={
-                  preference === "system" ? <IconCheck size={rem(16)} /> : null
-                }
-                onClick={() => handleSelectColorMode("system")}
-              >
-                {tCommon("system")}
-              </Menu.Item>
-            </Menu.Dropdown>
-          </Menu>
-          <NavLink
-            component="button"
-            type="button"
-            label={tAppBar("logout")}
-            leftSection={<IconLogout size={rem(18)} />}
-            disabled={logoutMutation.isPending}
-            onClick={handleLogout}
-          />
-        </Stack>
+            <NavLink
+              component={Link}
+              href="/account"
+              label={tAppBar("account")}
+              leftSection={<IconUser size={rem(18)} />}
+              onClick={onNavigate}
+            />
+            {adminAccessUrl && (
+              <NavLink
+                component="a"
+                href={adminAccessUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                label={tAppBar("admin")}
+                leftSection={<IconShieldLock size={rem(18)} />}
+                rightSection={<IconExternalLink size={rem(16)} />}
+                onClick={onNavigate}
+              />
+            )}
+            <Menu shadow="md" width={rem(180)} position="top-start">
+              <Menu.Target>
+                <Button
+                  variant="subtle"
+                  color="gray"
+                  justify="flex-start"
+                  fullWidth
+                  leftSection={getColorModeIcon(preference, mode)}
+                  styles={{ inner: { justifyContent: "flex-start" } }}
+                >
+                  {tCommon("colorMode")}
+                </Button>
+              </Menu.Target>
+              <Menu.Dropdown>
+                <ColorModeMenuItems
+                  preference={preference}
+                  onSelect={handleSelectColorMode}
+                />
+              </Menu.Dropdown>
+            </Menu>
+            <NavLink
+              component="button"
+              type="button"
+              label={tAppBar("logout")}
+              leftSection={<IconLogout size={rem(18)} />}
+              disabled={loggingOut}
+              onClick={handleLogout}
+            />
+          </Stack>
+        </Box>
       </Stack>
     </>
   );

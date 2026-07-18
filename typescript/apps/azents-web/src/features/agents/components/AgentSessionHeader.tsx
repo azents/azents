@@ -9,7 +9,6 @@
 
 import {
   ActionIcon,
-  Badge,
   Box,
   Button,
   Group,
@@ -33,7 +32,6 @@ import { useTranslations } from "next-intl";
 import { useRouter, useSearchParams } from "next/navigation";
 import { type ReactNode, useCallback, useMemo, useState } from "react";
 import { trpc } from "@/trpc/client";
-import { formatModelSelectionSummary } from "../model-selection";
 import { AgentAvatar } from "./AgentAvatar";
 import { useAgentFocusedShellMobileNav } from "./AgentFocusedShell";
 import type {
@@ -117,7 +115,6 @@ export function AgentSessionHeader({
     () => resolveActiveTab(searchParams.get("page")),
     [searchParams],
   );
-  const modelSummary = formatModelSelectionSummary(agent.model_selection);
 
   const handleOpenRename = useCallback((): void => {
     setEditingTitle(session?.title ?? "");
@@ -249,58 +246,26 @@ export function AgentSessionHeader({
         <Group
           visibleFrom="lg"
           align="center"
-          gap="md"
+          gap={0}
           px="lg"
-          py="sm"
+          pt="sm"
+          pb="xs"
           wrap="nowrap"
         >
-          <AgentAvatar
-            name={agent.name}
-            avatar={agent.avatar ?? null}
-            size={40}
-          />
-          <Stack gap={2} style={{ flex: 1, minWidth: 0 }}>
-            <Group gap="xs" wrap="wrap">
-              <Group gap={4} wrap="nowrap" style={{ minWidth: 0 }}>
-                <Text fw={600} size="md" truncate>
-                  {sessionTitle}
-                </Text>
-                <ActionIcon
-                  variant="subtle"
-                  size="sm"
-                  onClick={handleOpenRename}
-                  aria-label={t("sessions.rename")}
-                  style={{ flexShrink: 0 }}
-                >
-                  <IconPencil size={rem(14)} />
-                </ActionIcon>
-              </Group>
-              <Badge
-                size="sm"
-                variant="dot"
-                color={agent.enabled ? "green" : "gray"}
-              >
-                {agent.enabled ? t("status.enabled") : t("status.disabled")}
-              </Badge>
-              <Badge
-                size="sm"
-                variant="light"
-                color={agent.type === "public" ? "blue" : "gray"}
-              >
-                {agent.type === "public"
-                  ? t("visibility.public")
-                  : t("visibility.private")}
-              </Badge>
-              <Badge size="sm" variant="default">
-                {modelSummary}
-              </Badge>
-            </Group>
-            {agent.description && (
-              <Text size="xs" c="dimmed" truncate>
-                {agent.description}
-              </Text>
-            )}
-          </Stack>
+          <Group gap={4} wrap="nowrap" style={{ flex: 1, minWidth: 0 }}>
+            <Text fw={600} size="md" truncate>
+              {sessionTitle}
+            </Text>
+            <ActionIcon
+              variant="subtle"
+              size="sm"
+              onClick={handleOpenRename}
+              aria-label={t("sessions.rename")}
+              style={{ flexShrink: 0 }}
+            >
+              <IconPencil size={rem(14)} />
+            </ActionIcon>
+          </Group>
           {activeTab === "chat" && chatControls && (
             <Box style={{ flexShrink: 0 }}>{chatControls}</Box>
           )}

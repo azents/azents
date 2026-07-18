@@ -1,4 +1,5 @@
 import { rem } from "@mantine/core";
+import { userEvent, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { AgentFocusedSidebar } from "./AgentFocusedSidebar";
 import type {
@@ -89,6 +90,13 @@ const meta = {
   args: {
     handle: "engineering",
     agent,
+    currentUser: {
+      name: "Alex Morgan",
+      email: "alex@example.com",
+    },
+    adminAccessUrl: "https://admin.example.com",
+    loggingOut: false,
+    onLogout: () => {},
     sessions,
     activeSessionId: "sess_primary",
     onCreateSession: () => {},
@@ -102,6 +110,13 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Loaded = {} satisfies Story;
+
+export const UserMenuOpen = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(canvas.getByRole("button", { name: /Alex Morgan/i }));
+  },
+} satisfies Story;
 
 export const LoadingSessions = {
   args: {

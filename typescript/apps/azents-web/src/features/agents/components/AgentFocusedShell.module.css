@@ -1,3 +1,7 @@
+.agentSummary {
+  gap: var(--mantine-spacing-sm) !important;
+}
+
 .sidebarLink :global(.mantine-NavLink-label) {
   min-width: 0;
 }
@@ -13,6 +17,39 @@
 .agentInfoLink {
   border-radius: var(--mantine-radius-md);
   padding: var(--mantine-spacing-xs);
+}
+
+.userMenuTrigger {
+  display: block;
+  width: 100%;
+  border-radius: var(--mantine-radius-md);
+  padding: var(--mantine-spacing-xs);
+  text-align: left;
+}
+
+.userMenuTrigger:hover {
+  background: var(--mantine-color-default-hover);
+}
+
+@media (min-width: $mantine-breakpoint-lg) {
+  .agentSummary {
+    gap: var(--mantine-spacing-2xs) !important;
+  }
+
+  .backToWorkspaceButton {
+    min-height: calc(
+      var(--mantine-spacing-sm) + var(--mantine-spacing-md)
+    );
+    padding-inline: var(--mantine-spacing-xs);
+  }
+
+  .agentInfoLink {
+    padding: var(--mantine-spacing-2xs);
+  }
+
+  .agentDescription {
+    line-height: 1.25;
+  }
 }
 
 .agentInfoLink:hover {
