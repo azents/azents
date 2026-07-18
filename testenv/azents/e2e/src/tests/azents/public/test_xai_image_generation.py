@@ -627,7 +627,12 @@ class TestXaiImageGeneration:
         )
         assert payload.get("status") == "failed"
         assert payload.get("attachments") == []
-        assert payload.get("output") == []
+        assert payload.get("output") == [
+            {
+                "type": "text",
+                "text": "xAI OAuth reconnect is required for image generation.",
+            }
+        ]
         assert _journal(openai_proxy_url, _IMAGINE_JOURNAL_PATH) == [
             {
                 "prompt": "A deterministic rejected xAI OAuth aurora",
