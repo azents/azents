@@ -38,8 +38,11 @@ from azents.engine.model_stream import (
 )
 from azents.engine.run.provider_failure import (
     ModelProviderFailure,
+    ModelProviderFailureCategory,
+    classify_model_provider_failure,
     extract_provider_message_text,
     model_provider_failure,
+    sanitize_provider_identifier,
 )
 
 _TOOLS_ADAPTER: TypeAdapter[list[ToolParam]] = TypeAdapter(list[ToolParam])
@@ -213,9 +216,13 @@ class LiteLLMResponsesModelAdapter:
         except asyncio.CancelledError:
             raise
         except (LiteLLMOpenAIError, OpenAIBaseError) as exc:
-            # LiteLLM retry finishes inside aresponses, then only the final
-            # provider-attributed failure crosses the Engine boundary.
-            raise map_litellm_provider_error(exc, call_context=call_context) from None
+            # LiteLLM retry finishes inside aresponses, then only a classified
+            # provider failure crosses the Engine boundary. Unknown SDK errors
+            # retain their original traceback through internal-error handling.
+            failure = map_litellm_provider_error(exc, call_context=call_context)
+            if failure is None:
+                raise
+            raise failure from None
         finally:
             await close_stream_response(response)
 
@@ -484,8 +491,8 @@ def map_litellm_provider_error(
     exc: LiteLLMOpenAIError | OpenAIBaseError,
     *,
     call_context: ModelStreamCallContext,
-) -> ModelProviderFailure:
-    """Convert one final LiteLLM/OpenAI exception into the common contract."""
+) -> ModelProviderFailure | None:
+    """Map one classified SDK exception or return None for bare re-raise."""
     body = getattr(exc, "body", None)
     nested_error = body.get("error") if isinstance(body, dict) else None
     error_body = (
@@ -495,7 +502,21 @@ def map_litellm_provider_error(
         if isinstance(body, dict)
         else {}
     )
-    status_code = getattr(exc, "status_code", None)
+    status_value = getattr(exc, "status_code", None)
+    status_code = status_value if isinstance(status_value, int) else None
+    provider_code = sanitize_provider_identifier(
+        error_body.get("code") or getattr(exc, "code", None)
+    )
+    provider_error_type = sanitize_provider_identifier(
+        error_body.get("type") or exc.__class__.__name__
+    )
+    category = classify_model_provider_failure(
+        status_code=status_code,
+        provider_code=provider_code,
+        provider_error_type=provider_error_type,
+    )
+    if category is ModelProviderFailureCategory.UNKNOWN:
+        return None
     return model_provider_failure(
         operation=call_context.call_kind,
         provider=call_context.provider,
@@ -505,10 +526,11 @@ def map_litellm_provider_error(
             extract_provider_message_text(error_body.get("message"))
             or _litellm_provider_message(exc)
         ),
-        status_code=status_code if isinstance(status_code, int) else None,
-        provider_code=error_body.get("code") or getattr(exc, "code", None),
-        provider_error_type=(error_body.get("type") or exc.__class__.__name__),
+        status_code=status_code,
+        provider_code=provider_code,
+        provider_error_type=provider_error_type,
         retry_hint_seconds=_retry_after_seconds(exc),
+        category=category,
     )
 
 

@@ -23,7 +23,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/llm-settings/**
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
 last_verified_at: 2026-07-18
-spec_version: 14
+spec_version: 15
 ---
 
 # ChatGPT OAuth Flow
@@ -210,7 +210,7 @@ Rules:
   `store=false`, request encrypted reasoning content for stateless replay, send complete logical
   input over either physical transport, and never use `previous_response_id`.
 - Immediately before a `store=false` runtime call, omit top-level Responses input item `id` fields. Azents events and external ids remain preserved in the database, while provider response item ids are not replayed as stored references. Tool `call_id` values and reconstructed `image_generation_call.result` bytes remain in the request for stateless continuity.
-- Typed terminal events, SDK exceptions, and transport failures use the common `ModelProviderFailure` contract. Only the bounded, redacted provider-authored reason may reach retry state, UI, or logs. Every provider-attributed category receives the complete current Run retry budget; category and retryability remain diagnostic metadata.
+- Typed terminal events, SDK exceptions, and transport failures use the common `ModelProviderFailure` contract only when their typed status or identifiers map to a known category. Only the bounded, redacted provider-authored reason may reach retry state, UI, or provider-failure logs. Every classified category receives the complete current Run retry budget; category and retryability remain diagnostic metadata. Unclassified outcomes raise through the ordinary internal-error path and do not create provider retry state or generic provider-error presentation.
 - Runtime requests use `originator: azents`, an `azents/<version>` User-Agent, and the connected `ChatGPT-Account-Id` rather than impersonating Codex CLI identity.
 - Sampling always uses the standard Responses contract regardless of model name or backend request-dialect hints. Tools remain in the top-level `tools` field and instructions remain in the top-level `instructions` field.
 - Compaction and title generation use the same standard Responses dialect. They send ordinary user input plus top-level instructions, no sampling tools, and omit `max_output_tokens` while retaining `store=false`, encrypted reasoning inclusion, and common client identity headers.
@@ -253,6 +253,7 @@ Rules:
 
 | Date | Version | Change | Rationale |
 |---|---|---|---|
+| 2026-07-18 | 15 | Routed unclassified provider outcomes to internal-error handling without provider retry state | Preserve actionable incident tracebacks instead of generic unknown-provider logs |
 | 2026-07-18 | 14 | Unified provider failures under the bounded common contract and full Run retry budget | ADR-0165 coordinated provider-failure cutover |
 | 2026-07-17 | 13 | Classified typed terminal failures with bounded diagnostics and immediate finalization for deterministic provider errors | Avoid blind retries while preserving safe transient recovery |
 | 2026-07-17 | 12 | Omitted provider item IDs from `store=false` replay while retaining tool call continuity and reconstructed generated-image results | ChatGPT stateless Responses wire contract |

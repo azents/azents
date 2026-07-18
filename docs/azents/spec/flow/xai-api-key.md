@@ -22,7 +22,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/llm-settings/**
   - testenv/azents/e2e/src/tests/azents/public/test_llm_provider_integration.py
 last_verified_at: 2026-07-18
-spec_version: 2
+spec_version: 3
 ---
 
 # xAI API Key Provider Flow
@@ -88,7 +88,7 @@ Both xAI provider identities share these transport rules:
 
 A model-call HTTP 403 surfaces as a user-visible provider failure and does not trigger token-expiry refresh handling. In the separate OAuth refresh path, HTTP 403 persists `entitlement_denied` rather than treating the token as merely expired.
 
-LiteLLM HTTP, transport, and typed terminal failures are normalized into the common `ModelProviderFailure` contract. The default presentation preserves only the bounded, redacted provider-authored reason under `Model provider error`; credentials, headers, request/output data, raw bodies, and SDK serialization remain excluded. Every provider-attributed failure receives the complete current Run retry budget regardless of category or diagnostic retryability.
+LiteLLM HTTP, transport, and typed terminal failures are normalized into the common `ModelProviderFailure` contract only when their typed status or identifiers map to a known category. The default presentation preserves only the bounded, redacted provider-authored reason under `Model provider error`; credentials, headers, request/output data, raw bodies, and SDK serialization remain excluded. Every classified provider failure receives the complete current Run retry budget regardless of category or diagnostic retryability. Unclassified outcomes follow internal-error handling and do not create provider retry state or generic provider-error presentation.
 
 ## Frontend Behavior
 
@@ -109,5 +109,6 @@ LiteLLM HTTP, transport, and typed terminal failures are normalized into the com
 
 | Date | Version | Change | Rationale |
 |---|---:|---|---|
+| 2026-07-18 | 3 | Routed unclassified provider outcomes to internal-error handling without provider retry state | Preserve actionable incident tracebacks instead of generic unknown-provider logs |
 | 2026-07-18 | 2 | Applied the bounded common provider-failure contract and complete Run retry budget | ADR-0165 coordinated provider-failure cutover |
 | 2026-07-10 | 1 | Documented the stable xAI API-key integration, catalog, runtime, UI, and security behavior | `docs/azents/design/xai-api-key-provider.md` |

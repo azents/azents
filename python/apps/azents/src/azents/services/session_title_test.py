@@ -34,7 +34,7 @@ from azents.engine.events.types import (
 )
 from azents.engine.model_stream import ModelStreamCallContext
 from azents.engine.run.provider_failure import (
-    ModelProviderFailureCategory,
+    UnclassifiedModelProviderError,
     model_provider_failure,
 )
 from azents.engine.run.retry_policy import FailedRunRetryPolicy
@@ -276,12 +276,12 @@ class TestSessionTitleHelpers:
         assert fields["provider_failure_fingerprint"] == failure.fingerprint
         assert fields["provider_failure_retry_outcome"] == "exhausted"
 
-    async def test_generate_title_retries_unknown_provider_failure(
+    async def test_generate_title_propagates_unclassified_provider_failure(
         self,
         monkeypatch: pytest.MonkeyPatch,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """Standalone title generation uses the shared full retry budget."""
+        """Standalone title generation does not retry unclassified outcomes."""
         service = SessionTitleService(
             agent_repository=cast(AgentRepository, _AgentRepository()),
             agent_session_repository=cast(
@@ -301,63 +301,43 @@ class TestSessionTitleHelpers:
                 max_backoff_seconds=0,
             ),
         )
-        failure = model_provider_failure(
-            operation="session_title",
-            provider="openai",
-            model="gpt-5.1",
-            integration="integration-001",
-            provider_message="A new provider outcome occurred.",
-            status_code=None,
-            provider_code="future_failure",
-            provider_error_type="future_error",
-            category=ModelProviderFailureCategory.UNKNOWN,
-        )
         attempts: list[int] = []
 
-        async def fail_twice(**kwargs: object) -> str | None:
+        async def fail_once(**kwargs: object) -> str | None:
             attempt_number = kwargs["attempt_number"]
             assert isinstance(attempt_number, int)
             attempts.append(attempt_number)
-            if len(attempts) <= 2:
-                raise failure
-            return "Recovered title"
+            model_provider_failure(
+                operation="session_title",
+                provider="openai",
+                model="gpt-5.1",
+                integration="integration-001",
+                provider_message="A new provider outcome occurred.",
+                status_code=None,
+                provider_code="future_failure",
+                provider_error_type="future_error",
+            )
 
         monkeypatch.setattr(
             session_title_module,
             "generate_session_title_with_model",
-            fail_twice,
+            fail_once,
         )
         caplog.set_level(logging.WARNING, logger=session_title_module.logger.name)
 
-        result = await service._generate_title(  # pyright: ignore[reportPrivateUsage]  # Exercise the standalone retry boundary directly.
-            agent_id="agent-001",
-            session_id="session-001",
-            generation_event_id="0" * 32,
-            context="Compare two insurance options",
-        )
+        with pytest.raises(UnclassifiedModelProviderError):
+            await service._generate_title(  # pyright: ignore[reportPrivateUsage]  # Exercise the standalone retry boundary directly.
+                agent_id="agent-001",
+                session_id="session-001",
+                generation_event_id="0" * 32,
+                context="Compare two insurance options",
+            )
 
-        assert result == "Recovered title"
-        assert attempts == [1, 2, 3]
-        warning_records = [
+        assert attempts == [1]
+        assert not [
             record
             for record in caplog.records
             if record.getMessage() == "Automatic session title provider attempt failed"
-        ]
-        assert [
-            record.__dict__["provider_failure_retry_outcome"]
-            for record in warning_records
-        ] == ["scheduled", "scheduled"]
-        error_records = [
-            record
-            for record in caplog.records
-            if record.getMessage() == "Unknown model provider failure"
-        ]
-        assert len(error_records) == 2
-        assert [
-            record.__dict__["provider_failure_fingerprint"] for record in error_records
-        ] == [
-            failure.fingerprint,
-            failure.fingerprint,
         ]
 
     async def test_title_retry_stops_after_manual_title_change(

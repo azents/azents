@@ -66,7 +66,6 @@ from azents.engine.run.input import AgentNotFound
 from azents.engine.run.model_transport import InMemoryModelTransportState
 from azents.engine.run.provider_failure import (
     ModelProviderFailure,
-    ModelProviderFailureCategory,
     model_provider_failure,
 )
 from azents.engine.run.resolve import ResolvedInvokeInputProfile
@@ -3348,72 +3347,6 @@ def test_chat_live_retry_state_hides_provider_diagnostic_taxonomy() -> None:
     assert len(projected.attempts) == 1
     assert projected.attempts[0].retryability == "unknown"
     assert projected.attempts[0].failure_code is None
-
-
-@pytest.mark.asyncio
-async def test_record_unknown_provider_failure_alerts_on_every_attempt(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """Every unknown attempt alerts immediately with a stable fingerprint."""
-    lifecycle = _SessionLifecycle()
-    executor = _executor(lifecycle)
-    failure = model_provider_failure(
-        operation="sampling",
-        provider="openai",
-        model="gpt-4o",
-        integration=None,
-        provider_message="Unrecognized provider outcome 8127.",
-        status_code=None,
-        provider_code="future_failure",
-        provider_error_type="future_error",
-        category=ModelProviderFailureCategory.UNKNOWN,
-    )
-    first_attempt = executor._failed_run_attempt_from_user_visible_error(  # pyright: ignore[reportPrivateUsage]  # Exercise provider-attempt logging directly.
-        failure,
-        attempt_number=1,
-        source="model",
-    )
-    second_attempt = executor._failed_run_attempt_from_user_visible_error(  # pyright: ignore[reportPrivateUsage]  # Exercise provider-attempt logging directly.
-        failure,
-        attempt_number=2,
-        source="model",
-    )
-
-    with caplog.at_level(logging.WARNING, logger=run_executor_module.__name__):
-        first_state = await executor._record_failed_run_attempt(  # pyright: ignore[reportPrivateUsage]  # Exercise provider-attempt logging directly.
-            session_id="session-001",
-            run_id="run-001",
-            attempt=first_attempt,
-            previous_retry_state=None,
-        )
-        await executor._record_failed_run_attempt(  # pyright: ignore[reportPrivateUsage]  # Exercise provider-attempt logging directly.
-            session_id="session-001",
-            run_id="run-001",
-            attempt=second_attempt,
-            previous_retry_state=first_state,
-        )
-
-    warnings = [
-        record
-        for record in caplog.records
-        if record.getMessage() == "Model provider attempt failed"
-    ]
-    alerts = [
-        record
-        for record in caplog.records
-        if record.getMessage() == "Unknown model provider failure"
-    ]
-    assert [record.__dict__["attempt_number"] for record in warnings] == [1, 2]
-    assert all(record.levelno == logging.WARNING for record in warnings)
-    assert [record.__dict__["attempt_number"] for record in alerts] == [1, 2]
-    assert all(record.levelno == logging.ERROR for record in alerts)
-    assert all(
-        record.__dict__["provider_failure_category"] == "unknown" for record in alerts
-    )
-    assert all(
-        record.__dict__["provider_failure_fingerprint"] == failure.fingerprint
-        for record in alerts
-    )
 
 
 @pytest.mark.asyncio
