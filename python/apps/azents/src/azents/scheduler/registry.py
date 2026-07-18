@@ -1,6 +1,7 @@
 """Scheduled task registry."""
 
 import datetime
+import logging
 
 from azents.scheduler.types import (
     RetryPolicy,
@@ -10,6 +11,8 @@ from azents.scheduler.types import (
 )
 from azents.services.file_lifecycle_cleanup import FileLifecycleCleanupService
 from azents.services.llm_catalog import SystemCatalogProjectionService
+
+logger = logging.getLogger(__name__)
 
 
 async def heartbeat_handler(context: TaskContext) -> TaskResult:
@@ -50,6 +53,14 @@ async def file_lifecycle_cleanup_handler(context: TaskContext) -> TaskResult:
     """Run bounded scheduler-owned file lifecycle cleanup."""
     service = await context.container.solve(FileLifecycleCleanupService)
     summary = await service.cleanup_once()
+    logger.info(
+        "File lifecycle cleanup completed",
+        extra={
+            "task_key": context.task_key,
+            "manual_triggered": context.manual_triggered,
+            **summary.to_dict(),
+        },
+    )
     return TaskResult(
         summary={
             "task_key": context.task_key,

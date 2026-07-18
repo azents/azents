@@ -20,8 +20,8 @@ code_paths:
   - infra/argocd/azents-server/base/scheduler-pdb.yaml
   - infra/charts/azents/templates/server/scheduler-deployment.yaml.tpl
   - infra/charts/azents/templates/server/scheduler-pdb.yaml.tpl
-last_verified_at: 2026-06-27
-spec_version: 2
+last_verified_at: 2026-07-18
+spec_version: 3
 ---
 
 # Periodic Execution Flow Spec
@@ -79,7 +79,7 @@ The row stores:
 - manual requested timestamp
 - created/updated timestamps
 
-There is no attempt history table. Attempt details are emitted through structured logs and the current state row stores only the latest summary.
+There is no attempt history table. Attempt details are emitted through structured logs and the current state row stores only the latest summary. The `file_lifecycle_cleanup` handler also emits a `File lifecycle cleanup completed` log after a successful pass. Its structured fields include the task key, manual-trigger flag, and the cleanup result counters stored in the task summary.
 
 ## Scheduler loop
 
@@ -163,6 +163,15 @@ ModelFile GC scans events in `(cursor_order, head_order]`, extracts FilePart `mo
 marks available unpinned ModelFiles deleted, attempts blob deletion, and advances the session GC cursor
 only through the processed range. Access denial is metadata-driven; failed blob deletion is logged and
 can be retried by a later pass.
+
+The successful task result and completion log include these lifecycle counters:
+
+- `artifacts_expired`, `exchange_files_expired`, and `model_files_deleted` count metadata transitions in the current pass;
+- `artifact_blobs_deleted`, `exchange_file_blobs_deleted`, and `model_file_blobs_deleted` count successful object-store deletions by resource type;
+- `pending_blob_deletion_attempts` counts selected terminal rows that were already pending blob deletion before the pass began; and
+- `blob_delete_failed` counts failed object-store deletion attempts.
+
+The pending snapshot is used only for observability. The actual object-store batch remains bounded at 100 Artifact rows, 100 ExchangeFile rows, and 200 ModelFile rows, with terminal rows selected after the metadata work so existing retry ordering is preserved.
 
 ## CLI operations
 
