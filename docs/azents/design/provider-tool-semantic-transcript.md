@@ -2,6 +2,7 @@
 title: "Provider Tool Semantic Transcript Design"
 created: 2026-07-18
 updated: 2026-07-18
+implemented: 2026-07-18
 tags: [backend, engine, llm, tools, compaction]
 ---
 

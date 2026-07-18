@@ -93,7 +93,7 @@ api_routes:
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-07-18
-spec_version: 109
+spec_version: 110
 ---
 
 # Conversation & Events
@@ -442,6 +442,15 @@ compaction can insert model-visible system events without renumbering the whole 
 Compaction keeps append-only storage while presenting future model input from a single
 `compaction_summary` head event.
 
+Both `provider_tool_call` and `provider_tool_result` store required provider-neutral semantic
+content under `payload.semantic`: nullable readable `input`, model-visible `output`, and typed
+`references`. References carry kind `url | file | other`, nullable URI/title/excerpt, and stable
+string metadata. Both event kinds also own attachments because a provider may expose result content
+or generated files in either native item shape. Adapters normalize provider-exposed semantic content
+before persistence, apply canonical field and collection bounds, and keep provider-only fields inside
+the opaque native artifact. The persisted contract does not use top-level provider-tool `arguments`
+or `output` fields.
+
 `ProviderToolCallPayload.status` is the nullable provider-neutral lifecycle state `running`,
 `completed`, or `failed`. Live provider-tool calls carry the latest observed canonical state. Durable
 calls carry a terminal state when the adapter can normalize one, while historical or final-only
@@ -456,13 +465,15 @@ adapter:native_format:provider:model:schema_version
 ```
 
 Official OpenAI SDK Responses artifacts use adapter identity `openai`; LiteLLM Responses artifacts
-use `litellm`. A mismatch always reconstructs provider input from canonical events. This includes
-forward cutover from old LiteLLM artifacts and a code-version rollback that reads newer OpenAI-native
-artifacts; cross-adapter objects are never replayed as though they shared schema ownership.
+use `litellm`. A mismatch always reconstructs provider input from canonical events. Provider-tool
+fallback uses one deterministic readable rendering of semantic input, output, references, excerpts,
+and stable metadata rather than inspecting native artifacts. This includes forward cutover from old
+LiteLLM artifacts and a code-version rollback that reads newer OpenAI-native artifacts;
+cross-adapter objects are never replayed as though they shared schema ownership.
 
-Completed `image_generation` results use a provider-neutral durable shape. The result `output`
-contains a ModelFile-backed `FileOutputPart`, and `attachments` contains the independently stored
-Exchange original. Provider Base64, decoded bytes, and native `result` fields are transient only and
+Completed `image_generation` results use a provider-neutral durable shape. The result
+`semantic.output` contains a ModelFile-backed `FileOutputPart`, and `attachments` contains the
+independently stored Exchange original. Provider Base64, decoded bytes, and native `result` fields are transient only and
 are excluded from event payloads, native artifacts, REST/WebSocket projections, and frontend state.
 Provider-hosted generation retains provider tool call/result event ownership. xAI Imagine generation
 retains client tool call/result ownership while using the same durable output and attachment fields;
@@ -514,11 +525,15 @@ output uses native output identity or response/content indices, reasoning uses n
 projection root, and client/provider tool pairs use `call_id`. Selectors merge call and result events
 across raw page boundaries. Provider-tool calls render provider-neutral `running`, `completed`, and
 `failed` states from their canonical status; a missing live status is treated as running, while a
-missing durable status uses the neutral historical fallback. Semantic tool names such as `web_search` and `image_generation` select presentation labels without
-branching on provider identity or execution ownership. Provider and client tool results preserve their
-own completion/failure status, output, and attachments. An available `image_generation` attachment
-renders directly in the owning provider-tool or client-tool card without requiring the user to expand
-diagnostic details; preview and download continue through the Exchange attachment surface.
+missing durable status uses the neutral historical fallback. Semantic tool names such as `web_search`
+and `image_generation` select presentation labels without branching on provider identity or execution
+ownership. Provider-tool call and result projections preserve their canonical semantic input, output,
+references, status, attachments, and output-part files. Client-tool results preserve their own
+completion or failure status, output, and attachments. Cards render typed references with URI/title,
+optional excerpt, and stable metadata without reading the native artifact. An available
+`image_generation` attachment renders directly in the owning provider-tool or client-tool card without
+requiring the user to expand diagnostic details; preview and download continue through the Exchange
+attachment surface.
 Live `agent_message` events use the same source-labeled internal-agent row as their durable form. When
 a live entity and durable event describe the same semantic output, the durable projection replaces
 the live projection without a duplicate or disappearance.
@@ -730,15 +745,18 @@ summary hooks may enrich the generated summary before continuity is appended. Th
 content also includes bounded `Recent User Messages` and `Recent Transcript` sections. The
 user-message section keeps the last five user messages visible even when a long tool-heavy run leaves
 no user messages in the recent turn window. The transcript section uses readable model-visible
-excerpts from the last five completed model turns. Each excerpt is truncated independently before it
-is embedded in the summary payload, so oversized tool output cannot remain as an unbounded raw tail or
-storage JSON dump.
+excerpts from the last five completed model turns. Provider-tool call and result excerpts use the same
+deterministic semantic renderer as cross-native lowering, so input, output, typed references, and
+bounded reference metadata survive compaction without exposing opaque artifacts. Each excerpt is
+truncated independently before it is embedded in the summary payload, so oversized tool output cannot
+remain as an unbounded raw tail or storage JSON dump.
 
 ## 9. Invariants
 
 - `AgentSession` is the conversation boundary; interface type is not a session partition.
 - Event transcript is the durable model/tool source of truth.
-- Native artifacts are opaque replay optimizations, never event state.
+- Native artifacts are opaque same-native replay optimizations, never canonical event state.
+- Every durable provider-tool call/result carries bounded provider-neutral semantic input, output, and references; model-visible consumers do not parse native artifacts.
 - `agent_runs.phase` and `active_tool_calls` are the durable UI activity source.
 - Classified provider failures retain only bounded redacted diagnostics through retry state and terminal failed-run history; every classified category receives the complete configured retry budget, while unclassified provider outcomes are internal errors and do not enter provider retry state.
 - User Stop is terminal, clears retry and live-operation state, and never creates a stopped-Run recovery or replay source.
