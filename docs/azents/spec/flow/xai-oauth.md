@@ -22,7 +22,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/llm-settings/**
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
 last_verified_at: 2026-07-18
-spec_version: 4
+spec_version: 5
 ---
 
 # xAI OAuth Flow
@@ -175,7 +175,7 @@ Rules:
 
 - Refresh applies only to integrations whose provider is `xai_oauth`.
 - Runtime calls pass `api_key=<access token>`, `base_url=https://api.x.ai/v1`, `api_base=https://api.x.ai/v1`, and `custom_llm_provider=xai`.
-- After runtime credentials resolve, LiteLLM HTTP, transport, and typed terminal failures use the common `ModelProviderFailure` contract. The UI retains only the bounded, redacted provider-authored reason under `Model provider error`, and every provider-attributed failure receives the complete current Run retry budget regardless of category or diagnostic retryability.
+- After runtime credentials resolve, LiteLLM HTTP, transport, and typed terminal failures use the common `ModelProviderFailure` contract only when their typed status or identifiers map to a known category. The UI retains only the bounded, redacted provider-authored reason under `Model provider error`, and every classified provider failure receives the complete current Run retry budget regardless of category or diagnostic retryability. Unclassified outcomes follow internal-error handling and do not create provider retry state or generic provider-error presentation.
 - OAuth and API-key identities share xAI transport lowering: the first `system` input item carries system instructions, top-level `instructions` is omitted, hosted `web_search` uses the xAI Responses tool target, and Anthropic cache-control hints are not applied.
 - Transient network/provider failures mark the integration `temporarily_unavailable` and can be retried by a later run.
 - Token refresh 400/401 marks the integration `refresh_required`.
@@ -213,6 +213,7 @@ Rules:
 
 | Date | Version | Change | Rationale |
 |---|---|---|---|
+| 2026-07-18 | 5 | Routed unclassified provider outcomes to internal-error handling without provider retry state | Preserve actionable incident tracebacks instead of generic unknown-provider logs |
 | 2026-07-18 | 4 | Applied the bounded common provider-failure contract and complete Run retry budget | ADR-0165 coordinated provider-failure cutover |
 | 2026-07-10 | 3 | Clarified separation from the stable API-key provider and documented shared xAI transport/catalog behavior | `docs/azents/design/xai-api-key-provider.md` |
 | 2026-07-10 | 2 | Adopted the public Grok CLI client identity and made the experimental provider available without operator OAuth configuration | OpenCode xAI OAuth and ChatGPT OAuth parity review |

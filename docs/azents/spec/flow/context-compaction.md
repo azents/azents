@@ -17,7 +17,7 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_run.py
   - python/apps/azents/src/azents/rdb/models/agent.py
 last_verified_at: 2026-07-18
-spec_version: 25
+spec_version: 26
 ---
 
 # Context Compaction
@@ -70,10 +70,12 @@ standard OpenAI-compatible helper sends ordinary user input plus top-level instr
 `store=false`, encrypted reasoning inclusion, and no `previous_response_id`.
 Non-migrated providers receive `max_output_tokens` from the dynamic summary budget through the
 LiteLLM helper. Both adapter families preserve only a bounded redacted provider message and typed safe
-diagnostics. An automatic compaction provider failure consumes the active model turn's standard full
-retry budget regardless of category; the next attempt rebuilds from current durable history. Manual
-compaction uses its command Run's same failed-run controller and fresh budget. Provider retry hints are
-diagnostic and do not replace the standard backoff schedule.
+diagnostics for classified provider failures. An automatic classified compaction provider failure
+consumes the active model turn's standard full retry budget regardless of category; the next attempt
+rebuilds from current durable history. An unclassified provider outcome bypasses compaction provider
+retry state and follows the ordinary internal-error path. Manual compaction uses its command Run's same
+failed-run controller and fresh budget. Provider retry hints are diagnostic and do not replace the
+standard backoff schedule.
 
 The summary budget is based on the model context window:
 
@@ -198,7 +200,7 @@ the immediate shape of the recent interaction.
 - Auto, manual, and fallback compaction share the same summary prompt and budget policy.
 - Manual compaction uses the command run context when dispatching session compaction and summary enrichment hooks.
 - Automatic and manual compaction expose one Run-scoped `preparing_context` live operation whose identity remains stable across retry and is removed at every terminal boundary.
-- Every provider-attributed compaction failure uses the common bounded failure contract and the owning Run's full retry budget; no provider category finalizes early.
+- Every classified provider-attributed compaction failure uses the common bounded failure contract and the owning Run's full retry budget; unclassified provider outcomes are internal errors and do not enter provider retry state.
 - Summary model calls use watched streaming transport without publishing user-facing deltas. OpenAI
   API-key and ChatGPT OAuth omit API-level `max_output_tokens`; non-migrated providers receive the
   dynamic summary budget through the LiteLLM helper.
@@ -208,6 +210,8 @@ the immediate shape of the recent interaction.
 
 ## Changelog
 
+- **2026-07-18** (spec_version 26) — Routed unclassified compaction provider outcomes through
+  internal-error handling instead of provider retry state.
 - **2026-07-18** (spec_version 25) — Deferred the adjacent compaction marker/summary pair until one
   successful commit, projected one stable context-preparation operation, and routed every
   provider-attributed automatic or manual compaction failure through the owning Run's full retry budget.

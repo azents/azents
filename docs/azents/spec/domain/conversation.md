@@ -93,7 +93,7 @@ api_routes:
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-07-18
-spec_version: 107
+spec_version: 108
 ---
 
 # Conversation & Events
@@ -362,10 +362,12 @@ and the in-flight retry attempt. Successful model output admission clears `retry
 transaction that appends the output, so a later model turn starts with a fresh retry budget and REST
 resync cannot recover an earlier turn's error. Terminal run updates also clear `retry_state`
 defensively so retry progress cannot leak into completed, stopped, failed, interrupted, or cancelled
-runs. Provider-attributed retry state may retain only the closed category, diagnostic retryability,
-bounded redacted provider message, safe code/type/status/retry hint, internal provider/model/integration
-identifiers, and stable safe fingerprint. Every provider category uses the complete failed-run budget;
-diagnostic `non_retryable` does not short-circuit a typed provider failure.
+runs. Classified provider-attributed retry state may retain only the closed category, diagnostic
+retryability, bounded redacted provider message, safe code/type/status/retry hint, internal
+provider/model/integration identifiers, and stable safe fingerprint. Every classified provider
+category uses the complete failed-run budget; diagnostic `non_retryable` does not short-circuit a
+typed provider failure. An unclassified provider outcome does not create provider retry state and
+instead follows the ordinary internal-error path.
 
 A run is precreated as `pending` and associated with its ordered durable input events through
 `agent_run_input_events`. Normal buffered input resolves its requested profile before activation, then
@@ -734,7 +736,7 @@ storage JSON dump.
 - Event transcript is the durable model/tool source of truth.
 - Native artifacts are opaque replay optimizations, never event state.
 - `agent_runs.phase` and `active_tool_calls` are the durable UI activity source.
-- Typed provider failures retain only bounded redacted diagnostics through retry state and terminal failed-run history; every provider category receives the complete configured retry budget.
+- Classified provider failures retain only bounded redacted diagnostics through retry state and terminal failed-run history; every classified category receives the complete configured retry budget, while unclassified provider outcomes are internal errors and do not enter provider retry state.
 - User Stop is terminal, clears retry and live-operation state, and never creates a stopped-Run recovery or replay source.
 - Public chat UI state is restored from `/history`, `/live`, the dedicated Subagent Tree API, and event WebSocket actions, including session todo, action execution state, and subagent tree invalidations.
 - Existing transcript/session data migration is not required for the private service cutover.

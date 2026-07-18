@@ -102,6 +102,7 @@ from azents.engine.run.model_transport import ModelTransportKey, ModelTransportS
 from azents.engine.run.provider_failure import (
     ModelProviderFailure,
     ModelProviderFailureCategory,
+    classify_model_provider_failure,
     extract_provider_message_text,
     model_provider_failure,
     sanitize_provider_identifier,
@@ -765,7 +766,7 @@ class OpenAIResponsesModelAdapter:
                 category=_websocket_failure_category(failure.status_code),
             ) from None
         except OpenAIError as exc:
-            raise _map_openai_error(
+            failure = _map_openai_error(
                 exc,
                 call_context=call_context,
                 integration=(
@@ -773,7 +774,10 @@ class OpenAIResponsesModelAdapter:
                     if self.transport_key is not None
                     else call_context.provider_integration_id
                 ),
-            ) from None
+            )
+            if failure is None:
+                raise
+            raise failure from None
         finally:
             await close_stream_response(response)
             if physical_response is not response:
@@ -1705,10 +1709,23 @@ def _map_openai_error(
     *,
     call_context: ModelStreamCallContext,
     integration: str | None,
-) -> ModelProviderFailure:
-    """Convert one final SDK failure into the common provider contract."""
+) -> ModelProviderFailure | None:
+    """Map one classified SDK exception or return None for bare re-raise."""
     status_code = exc.status_code if isinstance(exc, APIStatusError) else None
     error_body = _openai_error_body(exc)
+    provider_code = sanitize_provider_identifier(
+        error_body.get("code") or getattr(exc, "code", None)
+    )
+    provider_error_type = sanitize_provider_identifier(
+        error_body.get("type") or exc.__class__.__name__
+    )
+    category = classify_model_provider_failure(
+        status_code=status_code,
+        provider_code=provider_code,
+        provider_error_type=provider_error_type,
+    )
+    if category is ModelProviderFailureCategory.UNKNOWN:
+        return None
     return model_provider_failure(
         operation=call_context.call_kind,
         provider=call_context.provider,
@@ -1719,9 +1736,10 @@ def _map_openai_error(
             or extract_provider_message_text(getattr(exc, "message", None))
         ),
         status_code=status_code,
-        provider_code=error_body.get("code") or getattr(exc, "code", None),
-        provider_error_type=(error_body.get("type") or exc.__class__.__name__),
+        provider_code=provider_code,
+        provider_error_type=provider_error_type,
         retry_hint_seconds=_openai_retry_after_seconds(exc),
+        category=category,
     )
 
 

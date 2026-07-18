@@ -91,7 +91,6 @@ from azents.engine.run.input import InvokeInput
 from azents.engine.run.model_transport import ModelTransportState
 from azents.engine.run.provider_failure import (
     ModelProviderFailure,
-    ModelProviderFailureCategory,
     ModelProviderFailureRetryability,
 )
 from azents.engine.run.resolve import (
@@ -1835,8 +1834,6 @@ class RunExecutor:
                 },
             )
             L.warning("Model provider attempt failed")
-            if provider_failure.category is ModelProviderFailureCategory.UNKNOWN:
-                L.error("Unknown model provider failure")
         return retry_state
 
     async def _wait_for_failed_run_retry(

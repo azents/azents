@@ -9,7 +9,7 @@ from collections.abc import AsyncIterator
 import httpx
 import pytest
 from litellm.types.llms.openai import ResponsesAPIResponse
-from openai import AsyncOpenAI, AuthenticationError, BadRequestError, omit
+from openai import AsyncOpenAI, AuthenticationError, BadRequestError, OpenAIError, omit
 from openai.types.responses import (
     Response,
     ResponseCompletedEvent,
@@ -84,6 +84,7 @@ from azents.engine.run.model_transport import (
 from azents.engine.run.provider_failure import (
     ModelProviderFailure,
     ModelProviderFailureCategory,
+    UnclassifiedModelProviderError,
 )
 from azents.engine.run.types import BuiltinToolSpec
 from azents.testing.model_stream import make_test_model_stream_watchdog
@@ -799,6 +800,45 @@ async def test_adapter_preserves_omission_null_and_stop_extension() -> None:
     assert stream.closed is True
     await adapter.close()
     assert client.closed is True
+
+
+async def test_unclassified_sdk_error_is_reraised() -> None:
+    """Preserve the original SDK exception and traceback for incidents."""
+    original = OpenAIError("synthetic unclassified SDK failure")
+    client = _SequencedFakeClient([original])
+    adapter = OpenAIResponsesModelAdapter(
+        client=client,
+        continuation_planner=None,
+        transport_state=None,
+        transport_key=None,
+        websocket_endpoint_eligible=False,
+    )
+    request = OpenAIResponsesRequest(
+        model="gpt-5.1-codex",
+        input=[{"role": "user", "content": "hello"}],
+        tools=[],
+        options={},
+    )
+    watchdog = make_test_model_stream_watchdog()
+    policy = watchdog.resolve_policy(
+        provider="openai",
+        model=request.model,
+        inference_profile=None,
+    )
+
+    with pytest.raises(OpenAIError) as raised:
+        _ = [
+            event
+            async for event in adapter.stream(
+                request,
+                watchdog=watchdog,
+                timeout_policy=policy,
+                call_context=_sampling_context(),
+            )
+        ]
+
+    assert raised.value is original
+    await adapter.close()
 
 
 async def test_websocket_reuses_one_connection_for_sequential_responses() -> None:
@@ -1915,8 +1955,8 @@ def test_typed_normalizer_accepts_omitted_usage_details(
     assert completed.usage.cost_usd == 0.25
 
 
-def test_typed_terminal_error_preserves_safe_provider_message() -> None:
-    """Unknown typed errors preserve bounded provider-authored text."""
+def test_unclassified_typed_terminal_error_is_internal() -> None:
+    """Unknown typed errors bypass provider-failure recovery immediately."""
     normalizer = OpenAIResponsesOutputNormalizer(
         provider="openai",
         model="gpt-5.1-codex",
@@ -1924,26 +1964,23 @@ def test_typed_terminal_error_preserves_safe_provider_message() -> None:
         integration=None,
     )
     output = normalizer.start("session-1")
-    output.process_event(
-        ResponseErrorEvent(
-            code="synthetic_error",
-            message="provider body must not be surfaced",
-            param=None,
-            sequence_number=1,
-            type="error",
-        )
-    )
 
     with pytest.raises(
-        ModelProviderFailure,
-        match=("^Model provider error: provider body must not be surfaced$"),
-    ) as raised:
-        output.complete()
-
-    assert raised.value.category is ModelProviderFailureCategory.UNKNOWN
-    assert raised.value.failure_code == "model_provider_unknown"
-    assert raised.value.provider_code == "synthetic_error"
-    assert raised.value.provider_message == "provider body must not be surfaced"
+        UnclassifiedModelProviderError,
+        match=(
+            "provider_code=synthetic_error, provider_error_type=response_error, "
+            "provider_message=provider body must not be surfaced"
+        ),
+    ):
+        output.process_event(
+            ResponseErrorEvent(
+                code="synthetic_error",
+                message="provider body must not be surfaced",
+                param=None,
+                sequence_number=1,
+                type="error",
+            )
+        )
 
 
 def test_typed_failed_event_classifies_invalid_prompt() -> None:

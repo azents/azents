@@ -367,7 +367,10 @@ async def _summarize_text_attempt(
     except ModelCallError as exc:
         raise CompactionFailedError(exc.user_message) from exc
     except (LiteLLMOpenAIError, OpenAIBaseError) as exc:
-        raise map_litellm_provider_error(exc, call_context=call_context) from None
+        failure = map_litellm_provider_error(exc, call_context=call_context)
+        if failure is None:
+            raise
+        raise failure from None
 
 
 def _estimated_tokens(text: str) -> int:

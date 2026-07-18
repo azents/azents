@@ -50,8 +50,65 @@ class ModelProviderFailureRetryability(enum.StrEnum):
     UNKNOWN = "unknown"
 
 
+class UnclassifiedModelProviderError(RuntimeError):
+    """Unclassified provider outcome that must follow internal-error handling."""
+
+    operation: ModelStreamCallKind
+    provider_message: str | None
+    status_code: int | None
+    provider_code: str | None
+    provider_error_type: str | None
+    provider: str
+    integration: str | None
+    model: str
+
+    def __init__(
+        self,
+        *,
+        operation: ModelStreamCallKind,
+        provider_message: object,
+        status_code: int | None,
+        provider_code: object,
+        provider_error_type: object,
+        provider: str,
+        integration: str | None,
+        model: str,
+    ) -> None:
+        """Retain bounded diagnostics without entering provider-failure recovery."""
+        self.operation = operation
+        self.provider_message = sanitize_provider_message(provider_message)
+        self.status_code = (
+            status_code
+            if isinstance(status_code, int) and 100 <= status_code <= 599
+            else None
+        )
+        self.provider_code = sanitize_provider_identifier(provider_code)
+        self.provider_error_type = sanitize_provider_identifier(provider_error_type)
+        self.provider = sanitize_provider_identifier(provider) or "unknown"
+        self.integration = sanitize_provider_identifier(integration)
+        self.model = sanitize_provider_identifier(model) or "unknown"
+        diagnostics = [
+            f"operation={self.operation}",
+            f"provider={self.provider}",
+            f"model={self.model}",
+        ]
+        if self.integration is not None:
+            diagnostics.append(f"integration={self.integration}")
+        if self.status_code is not None:
+            diagnostics.append(f"status_code={self.status_code}")
+        if self.provider_code is not None:
+            diagnostics.append(f"provider_code={self.provider_code}")
+        if self.provider_error_type is not None:
+            diagnostics.append(f"provider_error_type={self.provider_error_type}")
+        if self.provider_message is not None:
+            diagnostics.append(f"provider_message={self.provider_message}")
+        super().__init__(
+            "Unclassified model provider failure: " + ", ".join(diagnostics)
+        )
+
+
 class ModelProviderFailure(ModelCallError):
-    """One safe provider-attributed failure crossing the Engine boundary."""
+    """One classified provider-attributed failure crossing the Engine boundary."""
 
     operation: ModelStreamCallKind
     category: ModelProviderFailureCategory
@@ -101,6 +158,17 @@ class ModelProviderFailure(ModelCallError):
             and 0 <= retry_hint_seconds <= 86_400
             else None
         )
+        if category is ModelProviderFailureCategory.UNKNOWN:
+            raise UnclassifiedModelProviderError(
+                operation=operation,
+                provider_message=safe_message,
+                status_code=safe_status,
+                provider_code=safe_code,
+                provider_error_type=safe_error_type,
+                provider=safe_provider,
+                integration=safe_integration,
+                model=safe_model,
+            ) from None
         display_message = safe_message or (
             "The model provider could not process the request."
         )

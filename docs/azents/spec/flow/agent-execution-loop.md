@@ -49,7 +49,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ChatView.tsx
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
 last_verified_at: 2026-07-18
-spec_version: 101
+spec_version: 102
 ---
 
 # Agent Execution Loop
@@ -94,13 +94,17 @@ optional canonical JSON arguments. A normally exhausted Responses stream must co
 `response.completed` terminal event before its normalized output can be appended. The OpenAI SDK
 normalizer requires both the documented SDK event class and exact wire discriminator;
 `response.incomplete`, `response.failed`, and `error` outcomes, plus EOF without a recognized
-terminal event, raise before durable model events or markers are appended and flow through the
-failed-run retry/finalization boundary. Provider-attributed SDK exceptions, transport failures, and
-typed terminal events become one `ModelProviderFailure` contract. It retains only a bounded redacted
-provider-authored scalar message and validated safe diagnostics; raw bodies, credentials, headers,
-request/model output, stream frames, and SDK serialization never cross the adapter boundary. Every
-typed provider failure receives the complete configured Run retry budget regardless of category or
-diagnostic retryability. Completed output items may reconstruct a successfully completed response but
+terminal event, raise before durable model events or markers are appended. Provider-attributed SDK
+exceptions, transport failures, and typed terminal events enter the `ModelProviderFailure` contract
+only when their status or typed identifiers map to a known category. That contract retains only a
+bounded redacted provider-authored scalar message and validated safe diagnostics; raw bodies,
+credentials, headers, request/model output, stream frames, and SDK serialization never cross the
+adapter boundary. Every classified provider failure receives the complete configured Run retry budget
+regardless of category or diagnostic retryability. An unclassified SDK exception is re-raised unchanged
+through the ordinary internal-error traceback path, bypassing provider retry state and user-visible
+provider failure presentation. When a typed terminal event has no source exception to re-raise, it
+becomes an internal error containing bounded scalar diagnostics instead.
+Completed output items may reconstruct a successfully completed response but
 do not independently prove response completion. When the
 completed response includes the optional provider extension `end_turn` with the exact boolean value
 `false`, normalization marks the successful model step as needing follow-up. The execution loop
@@ -306,9 +310,10 @@ attempt 1 with a fresh retry budget. WebSocket and REST live projections keep `r
 retry is active and remove it after successful output admission or terminal transition.
 Known non-provider deterministic failures, including fixture strict-mode `no_fixture_match`, may
 retain `retryability = non_retryable`, receive `backoff_seconds = 0`, and finalize on the first failed
-attempt. A typed provider failure always consumes the standard backoff and complete configured retry
-budget even when its diagnostic retryability is `non_retryable` or `user_action_required`. When retry
-is exhausted, or when a non-provider non-retryable failure is observed, `FailedRunErrorFinalizer`
+attempt. A classified provider failure always consumes the standard backoff and complete configured
+retry budget even when its diagnostic retryability is `non_retryable` or `user_action_required`.
+Unclassified provider outcomes follow internal-error handling rather than provider retry handling. When
+retry is exhausted, or when a non-provider non-retryable failure is observed, `FailedRunErrorFinalizer`
 promotes the latest attempt to durable failed-run output by delegating durable append and terminal run
 updates to the engine failed-run event store. That boundary appends the terminal `system_error` with
 failed-run metadata, appends the failed run marker, and marks the run `failed` while clearing retry
@@ -876,6 +881,8 @@ updated by the user.
 
 ## Changelog
 
+- **2026-07-18** (spec_version 102) — Routed unclassified provider outcomes through the ordinary
+  internal-error path instead of creating provider retry state or generic provider-failure logs.
 - **2026-07-18** (spec_version 101) — Added the bounded provider-failure contract, complete-budget
   provider retry across compaction and sampling, stable context-preparation live state, best-effort
   title retry, and terminal non-replayable User Stop precedence.

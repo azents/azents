@@ -39,7 +39,6 @@ from azents.engine.responses import (
 from azents.engine.run.errors import ModelCallError, ModelStreamTimeoutError
 from azents.engine.run.provider_failure import (
     ModelProviderFailure,
-    ModelProviderFailureCategory,
     model_provider_failure,
 )
 from azents.engine.run.retry_policy import (
@@ -298,8 +297,6 @@ class SessionTitleService:
                     },
                 )
                 L.warning("Automatic session title provider attempt failed")
-                if exc.category is ModelProviderFailureCategory.UNKNOWN:
-                    L.error("Unknown model provider failure")
                 if not retry_available:
                     return None
                 await asyncio.sleep(self.retry_policy.backoff_seconds(attempt_number))
@@ -426,7 +423,10 @@ async def generate_session_title_with_model(
             provider_error_type=exc.event_type,
         ) from None
     except (LiteLLMOpenAIError, OpenAIBaseError) as exc:
-        raise map_litellm_provider_error(exc, call_context=call_context) from None
+        failure = map_litellm_provider_error(exc, call_context=call_context)
+        if failure is None:
+            raise
+        raise failure from None
     if not text:
         return None
     return clean_generated_title(text)

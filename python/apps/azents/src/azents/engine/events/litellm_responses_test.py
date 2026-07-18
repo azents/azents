@@ -18,6 +18,7 @@ from litellm.types.llms.openai import (
     ResponseCompletedEvent,
     ResponsesAPIResponse,
 )
+from openai import OpenAIError as OpenAIBaseError
 from pydantic import ValidationError
 
 from azents.core.enums import EventKind, LLMModelDeveloper, LLMProvider
@@ -91,6 +92,7 @@ from azents.engine.model_stream import (
 from azents.engine.run.provider_failure import (
     ModelProviderFailure,
     ModelProviderFailureCategory,
+    UnclassifiedModelProviderError,
 )
 from azents.engine.run.types import BuiltinToolSpec
 from azents.testing.model_stream import (
@@ -2375,6 +2377,33 @@ class TestLiteLLMResponsesModelAdapter:
         assert raised.value.status_code == 400
         assert raised.value.integration == "integration-001"
 
+    async def test_unclassified_sdk_error_is_reraised(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Preserve the original SDK exception and traceback for incidents."""
+        original = OpenAIBaseError("synthetic unclassified SDK failure")
+
+        async def fail_call(**kwargs: object) -> object:
+            del kwargs
+            raise original
+
+        monkeypatch.setattr(
+            "azents.engine.events.litellm_responses.aresponses",
+            fail_call,
+        )
+        adapter = _TestLiteLLMResponsesModelAdapter()
+
+        with pytest.raises(OpenAIBaseError) as raised:
+            _ = [
+                event
+                async for event in adapter.stream(
+                    NativeModelRequest(model="gpt-5.1-codex", input=[]),
+                )
+            ]
+
+        assert raised.value is original
+
     def test_direct_litellm_error_body_ignores_sdk_serialization(self) -> None:
         """Direct typed body fields win over LiteLLM's serialized message."""
         failure = map_litellm_provider_error(
@@ -2402,6 +2431,7 @@ class TestLiteLLMResponsesModelAdapter:
             ),
         )
 
+        assert failure is not None
         assert failure.provider_message == "Request rejected"
         assert failure.provider_code == "invalid_request"
         assert failure.provider_error_type == "invalid_request_error"
@@ -2975,30 +3005,6 @@ class TestLiteLLMResponsesOutputNormalizer:
                 ModelProviderFailureCategory.INVALID_REQUEST,
                 "max_output_tokens",
             ),
-            (
-                "ResponseFailedEvent",
-                {
-                    "response": {
-                        "error": {
-                            "message": "Provider rejected the response",
-                            "code": "provider_failed",
-                        }
-                    }
-                },
-                "Model provider error: Provider rejected the response",
-                ModelProviderFailureCategory.UNKNOWN,
-                "provider_failed",
-            ),
-            (
-                "ResponseErrorEvent",
-                {
-                    "message": "Provider stream failed",
-                    "code": "stream_failed",
-                },
-                "Model provider error: Provider stream failed",
-                ModelProviderFailureCategory.UNKNOWN,
-                "stream_failed",
-            ),
         ],
     )
     def test_rejects_unsuccessful_terminal_event(
@@ -3036,6 +3042,62 @@ class TestLiteLLMResponsesOutputNormalizer:
         assert raised.value.category is category
         assert raised.value.provider_code == provider_code
 
+    @pytest.mark.parametrize(
+        ("event_type", "item", "expected_detail"),
+        [
+            (
+                "ResponseFailedEvent",
+                {
+                    "response": {
+                        "error": {
+                            "message": "Provider rejected the response",
+                            "code": "provider_failed",
+                        }
+                    }
+                },
+                (
+                    "provider_code=provider_failed, "
+                    "provider_error_type=response_failed, "
+                    "provider_message=Provider rejected the response"
+                ),
+            ),
+            (
+                "ResponseErrorEvent",
+                {
+                    "message": "Provider stream failed",
+                    "code": "stream_failed",
+                },
+                (
+                    "provider_code=stream_failed, "
+                    "provider_error_type=response_error, "
+                    "provider_message=Provider stream failed"
+                ),
+            ),
+            (
+                "ResponseErrorEvent",
+                {},
+                "provider_error_type=response_error",
+            ),
+        ],
+    )
+    def test_unclassified_terminal_event_is_internal(
+        self,
+        event_type: str,
+        item: dict[str, object],
+        expected_detail: str,
+    ) -> None:
+        """Unclassified terminal events bypass provider-failure recovery."""
+        normalizer = LiteLLMResponsesOutputNormalizer(
+            provider="openai",
+            model="gpt-5.1",
+            operation="sampling",
+            integration=None,
+        )
+        output_stream = normalizer.start("session-1")
+
+        with pytest.raises(UnclassifiedModelProviderError, match=expected_detail):
+            output_stream.process_event(NativeEvent(type=event_type, item=item))
+
     def test_interrupt_does_not_mask_unsuccessful_terminal_event(self) -> None:
         """Keep provider failure authoritative over later cancellation."""
         normalizer = LiteLLMResponsesOutputNormalizer(
@@ -3063,8 +3125,8 @@ class TestLiteLLMResponsesOutputNormalizer:
         assert raised.value.category is ModelProviderFailureCategory.INVALID_REQUEST
         assert raised.value.provider_code == "max_output_tokens"
 
-    def test_bounds_unsuccessful_terminal_details(self) -> None:
-        """Keep provider terminal details bounded and scalar-only."""
+    def test_bounds_unclassified_terminal_details(self) -> None:
+        """Keep internal provider diagnostics bounded and scalar-only."""
         normalizer = LiteLLMResponsesOutputNormalizer(
             provider="openai",
             model="gpt-5.1",
@@ -3072,21 +3134,21 @@ class TestLiteLLMResponsesOutputNormalizer:
             integration=None,
         )
         output_stream = normalizer.start("session-1")
-        output_stream.process_event(
-            NativeEvent(
-                type="ResponseErrorEvent",
-                item={
-                    "message": "x" * 1200,
-                    "code": {"raw": "not user safe"},
-                },
+
+        with pytest.raises(UnclassifiedModelProviderError) as raised:
+            output_stream.process_event(
+                NativeEvent(
+                    type="ResponseErrorEvent",
+                    item={
+                        "message": "x" * 1200,
+                        "code": {"raw": "not user safe"},
+                    },
+                )
             )
-        )
 
-        with pytest.raises(ModelProviderFailure) as raised:
-            output_stream.complete()
-
-        assert str(raised.value) == f"Model provider error: {'x' * 1000}"
         assert raised.value.provider_message == "x" * 1000
+        assert raised.value.provider_code is None
+        assert str(raised.value).endswith("provider_message=" + ("x" * 1000))
 
     def test_accepts_explicitly_completed_reasoning_only_response(self) -> None:
         """Keep explicit completed reasoning-only output in current scope."""

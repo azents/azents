@@ -2,9 +2,11 @@
 
 import pytest
 
+from azents.engine.run.errors import ModelCallError
 from azents.engine.run.provider_failure import (
     ModelProviderFailureCategory,
     ModelProviderFailureRetryability,
+    UnclassifiedModelProviderError,
     classify_model_provider_failure,
     extract_provider_message_text,
     model_provider_failure,
@@ -121,21 +123,44 @@ def test_builds_safe_failure_and_stable_fingerprint() -> None:
     assert first.fingerprint == second.fingerprint
 
 
-def test_unknown_failure_uses_bounded_fallback() -> None:
-    """Missing provider text remains attributed without inventing diagnostics."""
-    failure = model_provider_failure(
-        operation="compaction",
-        provider="custom",
-        model="model",
-        integration=None,
-        provider_message=None,
-        status_code=None,
-        provider_code="new_code",
-        provider_error_type=None,
-    )
+def test_unknown_failure_raises_internal_error_with_bounded_diagnostics() -> None:
+    """Unclassified outcomes bypass provider recovery and remain internal errors."""
+    with pytest.raises(
+        UnclassifiedModelProviderError,
+        match=(
+            "^Unclassified model provider failure: operation=compaction, "
+            "provider=custom, model=model, provider_code=new_code$"
+        ),
+    ) as raised:
+        model_provider_failure(
+            operation="compaction",
+            provider="custom",
+            model="model",
+            integration=None,
+            provider_message=None,
+            status_code=None,
+            provider_code="new_code",
+            provider_error_type=None,
+        )
 
-    assert failure.category == ModelProviderFailureCategory.UNKNOWN
-    assert failure.retryability == ModelProviderFailureRetryability.UNKNOWN
-    assert failure.user_message == (
-        "Model provider error: The model provider could not process the request."
-    )
+    assert raised.value.provider_code == "new_code"
+    assert raised.value.provider_message is None
+    assert not isinstance(raised.value, ModelCallError)
+
+
+def test_unknown_failure_redacts_internal_diagnostics() -> None:
+    """Internal error diagnostics remain bounded and credential-safe."""
+    with pytest.raises(UnclassifiedModelProviderError) as raised:
+        model_provider_failure(
+            operation="sampling",
+            provider="custom",
+            model="model",
+            integration=None,
+            provider_message="Rejected api_key=sk-abcdefghijk",
+            status_code=None,
+            provider_code="future_failure",
+            provider_error_type="future_error",
+        )
+
+    assert "sk-abcdefghijk" not in str(raised.value)
+    assert "provider_message=Rejected api_key=[REDACTED]" in str(raised.value)
