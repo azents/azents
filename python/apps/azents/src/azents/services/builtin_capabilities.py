@@ -1,4 +1,4 @@
-"""Trusted capability policy for provider-hosted built-in tools."""
+"""Trusted policy for effective built-in model capabilities."""
 
 from collections.abc import Mapping, Sequence
 
@@ -12,7 +12,7 @@ _IMAGE_GENERATION_OPENAI_MODEL_PREFIXES = (
 )
 
 
-def supported_provider_hosted_tools(
+def supported_builtin_capabilities(
     *,
     provider: LLMProvider,
     model_identifier: str,

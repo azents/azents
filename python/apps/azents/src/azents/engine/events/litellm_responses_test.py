@@ -48,9 +48,6 @@ from azents.engine.events.protocols import (
     ReasoningDeltaProjection,
 )
 from azents.engine.events.responses_continuation import ResponsesContinuationPlanner
-from azents.engine.events.responses_lowering import (
-    UnsupportedRequiredBuiltinToolError,
-)
 from azents.engine.events.system_reminders import (
     format_compaction_summary_reminder,
     format_goal_continuation_reminder,
@@ -89,6 +86,7 @@ from azents.engine.model_stream import (
     ModelStreamTimeoutPolicy,
     ModelStreamWatchdog,
 )
+from azents.engine.run.builtin_tools import UnsupportedRequiredBuiltinToolError
 from azents.engine.run.provider_failure import (
     ModelProviderFailure,
     ModelProviderFailureCategory,
