@@ -776,6 +776,7 @@
         "noTokenCap": "Aucune limite utilisateur",
         "builtinToolsLabel": "Outils intégrés",
         "builtinToolWebSearch": "Recherche web",
+        "builtinToolImageGeneration": "Génération d’images",
         "noBuiltinTools": "Ce modèle ne prend en charge aucun outil intégré.",
         "subagentsSectionLabel": "Sous-agents",
         "subagentEnabledLabel": "Disponible pour la sélection explicite des sous-agents",

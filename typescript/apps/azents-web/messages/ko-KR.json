@@ -776,6 +776,7 @@
         "noTokenCap": "사용자 한도 없음",
         "builtinToolsLabel": "내장 도구",
         "builtinToolWebSearch": "웹 검색",
+        "builtinToolImageGeneration": "이미지 생성",
         "noBuiltinTools": "이 모델이 지원하는 내장 도구가 없습니다.",
         "subagentsSectionLabel": "서브에이전트",
         "subagentEnabledLabel": "명시적 서브에이전트 선택에 사용",
