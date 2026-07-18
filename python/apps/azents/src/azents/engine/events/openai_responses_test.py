@@ -712,10 +712,10 @@ async def test_client_config_resolves_sdk_environment_for_websocket(
     await client.close()
 
 
-async def test_sdk_websocket_connect_forwards_stable_handshake_headers(
+async def test_sdk_websocket_connect_forwards_bounded_receive_limit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The SDK WebSocket receives identity headers and no competing open timeout."""
+    """The SDK WebSocket receives identity headers and a bounded 32 MiB limit."""
     captured: dict[str, object] = {}
     connection = _FakeWebSocketConnection([_completed_event()])
 
@@ -744,7 +744,10 @@ async def test_sdk_websocket_connect_forwards_stable_handshake_headers(
         "originator": "azents",
         "ChatGPT-Account-Id": "synthetic-account",
     }
-    assert captured["websocket_connection_options"] == {"open_timeout": None}
+    assert captured["websocket_connection_options"] == {
+        "open_timeout": None,
+        "max_size": 32 * 1024 * 1024,
+    }
     await opened.close()
     assert connection.closed is True
     await client.close()
