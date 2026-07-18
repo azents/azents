@@ -48,8 +48,8 @@ code_paths:
   - python/apps/azents/src/azents/worker/session/**
   - typescript/apps/azents-web/src/features/chat/components/ChatView.tsx
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
-last_verified_at: 2026-07-17
-spec_version: 100
+last_verified_at: 2026-07-18
+spec_version: 101
 ---
 
 # Agent Execution Loop
@@ -94,12 +94,14 @@ optional canonical JSON arguments. A normally exhausted Responses stream must co
 `response.completed` terminal event before its normalized output can be appended. The OpenAI SDK
 normalizer requires both the documented SDK event class and exact wire discriminator;
 `response.incomplete`, `response.failed`, and `error` outcomes, plus EOF without a recognized
-terminal event, raise `ModelCallError` before durable model events or markers are appended and flow
-through the failed-run retry/finalization boundary. Typed terminal provider codes are retained only as
-bounded operational metadata: rate-limit, server, and timeout failures are transient; deterministic
-request, policy, quota, context-window, image-input, output-limit, and content-filter failures are
-non-retryable. Raw provider message bodies are neither logged nor surfaced to users. Completed output items may reconstruct a
-successfully completed response but do not independently prove response completion. When the
+terminal event, raise before durable model events or markers are appended and flow through the
+failed-run retry/finalization boundary. Provider-attributed SDK exceptions, transport failures, and
+typed terminal events become one `ModelProviderFailure` contract. It retains only a bounded redacted
+provider-authored scalar message and validated safe diagnostics; raw bodies, credentials, headers,
+request/model output, stream frames, and SDK serialization never cross the adapter boundary. Every
+typed provider failure receives the complete configured Run retry budget regardless of category or
+diagnostic retryability. Completed output items may reconstruct a successfully completed response but
+do not independently prove response completion. When the
 completed response includes the optional provider extension `end_turn` with the exact boolean value
 `false`, normalization marks the successful model step as needing follow-up. The execution loop
 appends that step's durable output and turn marker, then starts the next model step without treating it
@@ -266,13 +268,14 @@ The foreground `RunRequest` uses the selected Session settings: `max_output_toke
 `terminal_result_event_id` and `terminal_result_message` store the user-safe terminal output projection for a completed, failed, stopped, interrupted, or cancelled run. Subagent parent observation and Subagent Tree unread/result previews read this projection instead of scanning child transcript history.
 
 `retry_state` is nullable durable JSON on `agent_runs`. When present, it records the active model
-turn's failed-run retry progress and includes the latest user-safe error message, failed attempt
-count, max retries, backoff seconds, `next_retry_at`, error type/source, retryability, failure code,
-and a bounded `attempts` list. Each attempt summary contains attempt number, user-safe message,
-error type/source, failed timestamp, retryability, failure code, truncation flag, backoff seconds,
-and the next retry timestamp. `/live` exposes this as the optional `run.retry` projection so retry
-UI can restore the current turn's live retry card and attempt history without durable transcript
-retry-attempt events.
+turn's failed-run retry progress and includes the provider/runtime presentation kind, latest user-safe
+error message, failed attempt count, max retries, backoff seconds, `next_retry_at`, error type/source,
+retryability, failure code, and a bounded `attempts` list. Provider failures additionally retain only
+the bounded typed contract needed for handover, finalization, and structured telemetry. Each attempt
+summary contains attempt number, user-safe message, error type/source, failed timestamp,
+retryability, failure code, truncation flag, backoff seconds, and the next retry timestamp. `/live`
+exposes this as the optional `run.retry` projection so retry UI can restore the current turn's live
+retry card and attempt history without durable transcript retry-attempt events.
 
 Failed-run retry is owned by the worker run boundary, not by the event execution core. User-visible
 model/runtime errors that stop a run attempt propagate out of `AgentRunExecution` without appending a
@@ -301,17 +304,20 @@ history; for client-tool output, the committed `executing_tools` phase may perfo
 first. A later model turn, including tool-less `end_turn = false` continuation, starts at failed
 attempt 1 with a fresh retry budget. WebSocket and REST live projections keep `run.retry` while the
 retry is active and remove it after successful output admission or terminal transition.
-Known non-retryable failures, including deterministic fixture strict-mode `no_fixture_match` and
-typed provider request, authentication, authorization, policy, quota, context-window, image-input,
-output-limit, and content-filter failures, are classified with `retryability = non_retryable`, receive
-`backoff_seconds = 0`, and are finalized on the first failed attempt instead of waiting for the retry
-budget. When retry is
-exhausted, when a non-retryable failure is observed, or when stop is requested while retry is waiting,
-`FailedRunErrorFinalizer` promotes the latest attempt to durable failed-run output by delegating
-durable append and terminal run updates to the engine failed-run event store. That event-store
-boundary appends the terminal `system_error` with failed-run metadata, appends the failed run marker,
-and marks the run `failed` while clearing retry state. The worker finalizer then emits `RunComplete`
-and clears live activity.
+Known non-provider deterministic failures, including fixture strict-mode `no_fixture_match`, may
+retain `retryability = non_retryable`, receive `backoff_seconds = 0`, and finalize on the first failed
+attempt. A typed provider failure always consumes the standard backoff and complete configured retry
+budget even when its diagnostic retryability is `non_retryable` or `user_action_required`. When retry
+is exhausted, or when a non-provider non-retryable failure is observed, `FailedRunErrorFinalizer`
+promotes the latest attempt to durable failed-run output by delegating durable append and terminal run
+updates to the engine failed-run event store. That boundary appends the terminal `system_error` with
+failed-run metadata, appends the failed run marker, and marks the run `failed` while clearing retry
+state. The worker finalizer then emits `RunComplete` and clears live activity.
+
+User Stop has priority before failed-attempt persistence, after retry-state publication, during
+backoff, and during a retry attempt. Stop uses the ordinary terminal interruption path, clears retry
+and context-preparation live state, appends no provider `system_error`, exposes no failed-run Retry
+action, and never creates stopped-Run recovery or replay state.
 
 Command wake-ups execute through the same `RunExecutor` boundary as normal model runs. A pending
 command is resolved before the `agent_runs` row is created; unknown-command or pre-run resolve
@@ -641,14 +647,17 @@ generation uses the operation-scoped official OpenAI SDK helper from
 `engine/context/compaction.py`; other providers continue through the shared LiteLLM Responses helper.
 The OpenAI-compatible helper uses standard Responses input and instructions, omits
 `max_output_tokens`, and never uses sampling continuation. ChatGPT OAuth additionally uses full input,
-`store=false`, and encrypted reasoning inclusion. If summary generation fails, the
-failure is propagated to the caller instead of being published as a successful compaction. The
-existing transcript remains append-only.
+`store=false`, and encrypted reasoning inclusion. Automatic and manual compaction publish one stable
+Run-scoped `preparing_context` operation while planning, provider generation, enrichment, retry, and
+backoff are active. A failed attempt appends neither marker nor summary; after successful generation
+and revalidation, one transaction appends the adjacent marker/summary pair and moves the model-input
+head. Provider failures use the owning Run's full retry budget.
 
-Automatic Session title generation follows the same provider routing and standard helper dialect.
-OpenAI-compatible title calls omit `max_output_tokens`; a timeout, premature EOF, terminal failure, or
-sanitized provider failure preserves the deterministic initial title and does not fail an otherwise
-completed agent Run.
+Automatic Session title generation follows the same provider routing, typed failure contract, shared
+retry policy, and standard helper dialect in an operation-scoped best-effort loop.
+OpenAI-compatible title calls omit `max_output_tokens`; retries revalidate that the original initial
+prompt still owns automatic title generation. Timeout or exhaustion preserves the deterministic
+initial title and does not fail an otherwise completed Agent Run.
 
 ## 7. Entrypoints And Projection
 
@@ -775,32 +784,6 @@ Primary checks:
   legacy `LLMClient` references
 
 
-## Changelog
-
-- **2026-07-17** — v95. Restored exhaustive `image_generation` lowering, dual file admission,
-  request-local replay, and continuation-safe sanitization across OpenAI SDK, ChatGPT OAuth, and
-  LiteLLM.
-- **2026-07-17** — v94. Added execution-owned persistent OpenAI Responses WebSocket sampling,
-  SessionRunner-scoped HTTP fallback, shared failed-Run retry handling, and transport-aware
-  continuation and watchdog behavior.
-- **2026-07-16** — v93. Added adapter-local provider-tool lifecycle extraction, shared canonical
-  accumulation, attempt-local live cleanup, and durable provider-tool handoff.
-- **2026-07-16** — v92. Removed Responses Lite routing and standardized ChatGPT OAuth sampling on the standard Responses contract.
-- **2026-07-12** — v73. Added exact terminal Run correlation, durable-before-publication ordering, and exact per-turn inference provenance.
-- **2026-07-12** — v71. Promoted sequential single-head preparation, Session-owned per-turn inference snapshots, buffer-only action transport, buffer-keyed operation execution, handled preparation failures, and same-run profile changes.
-- **2026-07-11** — v70. Added bounded-fork subagent inference overrides, label-only schema guidance, atomic validation, and session-last-used continuation semantics.
-- **2026-07-10** — v69. Added profile-aware FIFO promotion, atomic run activation, immutable resolved provenance, and exact parent-run profile inheritance.
-- **2026-07-10** — v68. Documented shared xAI API-key/OAuth transport lowering while preserving OAuth-only credential refresh.
-- **2026-07-09** — v66. Documented forked-history `<system-reminder>` boundaries, explicit agent-message envelopes, and Codex v2 agent targeting and list visibility.
-- **2026-07-09** — v65. Clarified that selectable model labels are resolved before run start and runtime receives effective model snapshots only.
-- **2026-07-09** — v64. Documented `spawn_agent` active subagent and depth limit enforcement before child-session side effects.
-- **2026-07-09** — v63. Documented default subagent context forking and child-session human write rejection before side effects.
-- **2026-07-08** — v62. Documented subagent worker scheduling through normal session runs, `agent_message` mailbox promotion, subagent execution-mode tool resolution, terminal result projections, and subtree stop behavior.
-- **2026-07-08** — v61. Process TurnActions at every model-call turn boundary; failed actions are marked failed and FIFO processing continues, while context invalidation exits through a follow-up wake-up without a completed run marker.
-- **2026-07-08** — v60. Process TurnActions at every model-call turn boundary and close the current run when an operation action blocks or invalidates context.
-- **2026-07-06** — v59. Removed the session-initialization run gate and documented terminal `action_execution_result` history events.
-- **2026-07-05** — v56. Reflected operation TurnAction processing before model dispatch and Project context invalidation after worktree setup.
-
 ## Database session boundaries
 
 Run execution uses short database sessions around one durable read or state transition. Model
@@ -893,6 +876,9 @@ updated by the user.
 
 ## Changelog
 
+- **2026-07-18** (spec_version 101) — Added the bounded provider-failure contract, complete-budget
+  provider retry across compaction and sampling, stable context-preparation live state, best-effort
+  title retry, and terminal non-replayable User Stop precedence.
 - **2026-07-17** (spec_version 100) — Applied per-option explicit subagent target eligibility and bounded guidance while preserving disabled-target inheritance and atomic rejection.
 - **2026-07-17** (spec_version 98) — Classified safe typed provider terminal failures so deterministic
   errors finalize immediately while transient provider failures retain retry behavior and stable

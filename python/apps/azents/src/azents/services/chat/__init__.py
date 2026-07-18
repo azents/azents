@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     AgentProjectDefaultItemType,
+    AgentRunPhase,
     AgentRunStatus,
     AgentSessionKind,
     AgentSessionPrimaryKind,
@@ -68,6 +69,7 @@ from .data import (
     AgentNotFound,
     ArchiveSessionError,
     ArchiveSessionResult,
+    ChatLiveRunOperation,
     ChatLiveRunRetryAttempt,
     ChatLiveRunRetryState,
     ChatLiveRunState,
@@ -1085,9 +1087,19 @@ class ChatSessionService:
                 status=run.status,
                 inference_profile=inference_profile,
                 model_call_started_at=run.model_call_started_at,
+                operation=(
+                    ChatLiveRunOperation(
+                        kind="preparing_context",
+                        operation_id=f"{run.id}:preparing-context",
+                        status="running",
+                    )
+                    if run.phase == AgentRunPhase.COMPACTING
+                    else None
+                ),
                 retry=None
                 if run.retry_state is None
                 else ChatLiveRunRetryState(
+                    error_kind=run.retry_state.error_kind,
                     status=run.retry_state.status,
                     last_error_message=run.retry_state.last_user_message,
                     failed_attempt_count=run.retry_state.failed_attempt_count,
@@ -1107,7 +1119,7 @@ class ChatSessionService:
                             failure_code=attempt.failure_code,
                             truncated=attempt.truncated,
                         )
-                        for attempt in run.retry_state.attempts
+                        for attempt in run.retry_state.public_attempts()
                     ],
                 ),
             )

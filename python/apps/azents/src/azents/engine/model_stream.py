@@ -119,6 +119,7 @@ class ModelStreamCallContext:
 
     call_kind: ModelStreamCallKind
     provider: str
+    provider_integration_id: str | None
     model: str
     session_id: str | None
     run_id: str | None
@@ -805,6 +806,7 @@ def _context_log_fields(context: ModelStreamCallContext) -> dict[str, object]:
         "run_id": context.run_id,
         "model_stream_call_kind": context.call_kind,
         "provider": context.provider,
+        "provider_integration_id": context.provider_integration_id,
         "model": context.model,
         "model_stream_attempt_number": context.attempt_number,
     }

@@ -177,6 +177,7 @@ def _summary_model_call(
     async def call_summary(
         *,
         provider: LLMProvider,
+        provider_integration_id: str | None,
         model: str,
         credential_kwargs: dict[str, object],
         system_prompt: str,
@@ -188,6 +189,7 @@ def _summary_model_call(
         return await summarize_text_with_model(
             watchdog=watchdog,
             provider=provider,
+            provider_integration_id=provider_integration_id,
             model=model,
             credential_kwargs=credential_kwargs,
             system_prompt=system_prompt,
@@ -205,6 +207,13 @@ class EventEngineAdapterConfig:
     """Event engine adapter configuration."""
 
     native_request_max_input_chars: int = 16_000_000
+
+
+@dataclasses.dataclass
+class _CompactionLiveState:
+    """Track legacy compaction events from the durable Run phase."""
+
+    active: bool = False
 
 
 _SUMMARY_INPUT_OVERHEAD_TOKENS = 8_000
@@ -366,6 +375,7 @@ class AgentEngineAdapter:
         hook_dispatcher = RuntimeHookDispatcher()
         run_hook_providers = _runtime_hook_provider_refs(request.toolkits)
         emit_queue = _AsyncEventEmitQueue()
+        compaction_live_state = _CompactionLiveState()
 
         async def prepare_model_call(
             *,
@@ -479,7 +489,6 @@ class AgentEngineAdapter:
             )
 
         async def on_auto_compaction_started() -> None:
-            await emit_queue.put(ephemeral(CompactionStarted(continuing=True)))
             await hook_dispatcher.dispatch_observation(
                 run_hook_providers,
                 "on_session_compact",
@@ -515,15 +524,15 @@ class AgentEngineAdapter:
                 run_id=context.run_id,
             ),
         )
+        integration_id = (
+            request.inference_state.model_selection.llm_provider_integration_id
+            if request.inference_state is not None
+            else None
+        )
         if _uses_openai_sdk(request.provider):
             client_config = openai_responses_client_config(
                 provider=request.provider,
                 credential_kwargs=request.credential_kwargs,
-            )
-            integration_id = (
-                request.inference_state.model_selection.llm_provider_integration_id
-                if request.inference_state is not None
-                else None
             )
             model_adapter = OpenAIResponsesModelAdapter(
                 client=create_openai_responses_client(config=client_config),
@@ -548,12 +557,16 @@ class AgentEngineAdapter:
             output_normalizer = OpenAIResponsesOutputNormalizer(
                 provider=provider,
                 model=request.model,
+                operation="sampling",
+                integration=integration_id,
             )
         else:
             model_adapter = LiteLLMResponsesModelAdapter(None)
             output_normalizer = LiteLLMResponsesOutputNormalizer(
                 provider=provider,
                 model=request.model,
+                operation="sampling",
+                integration=integration_id,
             )
 
         execution = self.execution_factory(
@@ -568,6 +581,7 @@ class AgentEngineAdapter:
             model_adapter=model_adapter,
             model_stream_watchdog=self.model_stream_watchdog,
             model_stream_provider=provider,
+            model_stream_provider_integration_id=integration_id,
             model_stream_inference_profile=(
                 request.inference_state.model_target_label
                 if request.inference_state is not None
@@ -583,7 +597,7 @@ class AgentEngineAdapter:
                 run_id=context.run_id,
                 phase=phase,
                 model_call_started_at=model_call_started_at,
-                pre_lower_filter=auto_compaction_filter,
+                compaction_state=compaction_live_state,
             ),
             provider_output_materializer=ProviderOutputMaterializer(
                 exchange_file_service=self.exchange_file_service,
@@ -695,14 +709,15 @@ async def _emit_phase_change(
     run_id: str,
     phase: AgentRunPhase,
     model_call_started_at: datetime.datetime | None,
-    pre_lower_filter: EventAutoCompactionFilter,
+    compaction_state: _CompactionLiveState,
 ) -> None:
-    """Reflect run phase and auto compaction lifecycle in legacy stream."""
-    if phase == AgentRunPhase.PREPARING_INPUT:
-        pre_lower_filter.was_compacted = False
-    if phase == AgentRunPhase.WAITING_FOR_MODEL and pre_lower_filter.was_compacted:
+    """Reflect durable Run phase and auto compaction in the legacy stream."""
+    if phase == AgentRunPhase.COMPACTING and not compaction_state.active:
+        compaction_state.active = True
+        await queue.put(ephemeral(CompactionStarted(continuing=True)))
+    elif phase != AgentRunPhase.COMPACTING and compaction_state.active:
+        compaction_state.active = False
         await queue.put(ephemeral(CompactionComplete(continuing=True)))
-        pre_lower_filter.was_compacted = False
     await queue.put(
         ephemeral(
             RunPhaseChanged(
@@ -925,8 +940,14 @@ def _event_summary_generator(
         credential_kwargs = (
             request.compaction_credential_kwargs or request.credential_kwargs
         )
+        provider_integration_id = request.compaction_provider_integration_id
+        if request.compaction_provider is None and request.inference_state is not None:
+            provider_integration_id = (
+                request.inference_state.model_selection.llm_provider_integration_id
+            )
         summary = await summarize(
             provider=provider,
+            provider_integration_id=provider_integration_id,
             model=model,
             credential_kwargs=dict(credential_kwargs),
             system_prompt=SUMMARY_SYSTEM_PROMPT,

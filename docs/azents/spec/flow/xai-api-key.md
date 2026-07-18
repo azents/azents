@@ -21,8 +21,8 @@ code_paths:
   - python/apps/azents/src/azents/engine/run/resolve.py
   - typescript/apps/azents-web/src/features/llm-settings/**
   - testenv/azents/e2e/src/tests/azents/public/test_llm_provider_integration.py
-last_verified_at: 2026-07-10
-spec_version: 1
+last_verified_at: 2026-07-18
+spec_version: 2
 ---
 
 # xAI API Key Provider Flow
@@ -88,6 +88,8 @@ Both xAI provider identities share these transport rules:
 
 A model-call HTTP 403 surfaces as a user-visible provider failure and does not trigger token-expiry refresh handling. In the separate OAuth refresh path, HTTP 403 persists `entitlement_denied` rather than treating the token as merely expired.
 
+LiteLLM HTTP, transport, and typed terminal failures are normalized into the common `ModelProviderFailure` contract. The default presentation preserves only the bounded, redacted provider-authored reason under `Model provider error`; credentials, headers, request/output data, raw bodies, and SDK serialization remain excluded. Every provider-attributed failure receives the complete current Run retry budget regardless of category or diagnostic retryability.
+
 ## Frontend Behavior
 
 - `xai` appears in the Add integration modal only when returned by the provider capability API.
@@ -107,4 +109,5 @@ A model-call HTTP 403 surfaces as a user-visible provider failure and does not t
 
 | Date | Version | Change | Rationale |
 |---|---:|---|---|
+| 2026-07-18 | 2 | Applied the bounded common provider-failure contract and complete Run retry budget | ADR-0165 coordinated provider-failure cutover |
 | 2026-07-10 | 1 | Documented the stable xAI API-key integration, catalog, runtime, UI, and security behavior | `docs/azents/design/xai-api-key-provider.md` |

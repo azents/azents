@@ -418,9 +418,7 @@ async def test_finalize_persists_live_events_and_marks_run_terminal() -> None:
 
 
 @pytest.mark.asyncio
-async def test_finalize_preserves_recovery_state_when_terminal_persistence_fails() -> (
-    None
-):
+async def test_finalize_preserves_retry_state_when_terminal_persistence_fails() -> None:
     """Stop intent and activity remain available for retry after DB failure."""
     session_id = "session-001"
     (

@@ -92,8 +92,8 @@ api_routes:
   - /chat/v1/exchange-files/{file_id}/download
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
-last_verified_at: 2026-07-17
-spec_version: 106
+last_verified_at: 2026-07-18
+spec_version: 107
 ---
 
 # Conversation & Events
@@ -362,7 +362,10 @@ and the in-flight retry attempt. Successful model output admission clears `retry
 transaction that appends the output, so a later model turn starts with a fresh retry budget and REST
 resync cannot recover an earlier turn's error. Terminal run updates also clear `retry_state`
 defensively so retry progress cannot leak into completed, stopped, failed, interrupted, or cancelled
-runs.
+runs. Provider-attributed retry state may retain only the closed category, diagnostic retryability,
+bounded redacted provider message, safe code/type/status/retry hint, internal provider/model/integration
+identifiers, and stable safe fingerprint. Every provider category uses the complete failed-run budget;
+diagnostic `non_retryable` does not short-circuit a typed provider failure.
 
 A run is precreated as `pending` and associated with its ordered durable input events through
 `agent_run_input_events`. Normal buffered input resolves its requested profile before activation, then
@@ -420,9 +423,12 @@ follow the embedded Skill body; the original user action message is promoted as 
 does not create a duplicate action-message bubble.
 
 `system_error` payloads may include optional user-safe failed-run metadata under `failure`. The
-metadata identifies terminal failed-run output, finalization reason, retry counts, last error type,
-and future retry classification fields. Stack traces, raw provider response bodies, and credential
-details are not stored in durable transcript payloads.
+metadata identifies terminal failed-run output, provider/runtime presentation kind, finalization
+reason, retry counts, last error type, diagnostic retryability/failure code, and bounded attempt
+summaries. A provider-authored scalar message may be stored only after the common deterministic
+bounding and secret-redaction boundary. Stack traces, credentials, headers, cookies, request/model
+output, arbitrary raw provider bodies, raw stream frames, and SDK serialization are not stored in
+durable transcript payloads.
 
 Attachments are payload-specific, not event-common. Tool result output is always a part array using
 `output_text`, `output_image`, `output_file`, `output_audio`, or `output_video`.
@@ -543,7 +549,7 @@ WebSocket chat clients receive subscription and event actions:
   integration controls;
 - `compaction_started` and `compaction_complete` for transient compaction UI state;
 - `todo_state_changed` when the session-scoped TodoToolkit State changes;
-- `live_run_updated` when the authoritative running run projection changes, including failed-run retry state;
+- `live_run_updated` when the authoritative running Run projection changes, including failed-run retry state and the optional context-preparation operation;
 - `live_run_cleared` with the exact terminal `run_id` when cleanup removes that current run projection;
 - `action_execution_updated` when an active operation TurnAction execution projection changes;
 - `action_execution_removed` after an operation's durable terminal snapshot replaces its live state;
@@ -563,8 +569,9 @@ Durable/live handoff follows these invariants:
   because the event arrived through the history action.
 - `live_event_removed` removes only the live projection. It must not remove a durable view model that
   has already been promoted from `history_event_appended`.
-- `live_run_updated` replaces the current `run` live-state snapshot atomically; `live_run_cleared`
-  clears only when its required `run_id` exactly matches the current live run, and it does not remove
+- `live_run_updated` replaces the current `run` live-state snapshot atomically, including profile,
+  retry, and context-preparation operation fields; `live_run_cleared` clears only when its required
+  `run_id` exactly matches the current live run, and it does not remove
   durable transcript events. A delayed terminal or clear for Run A cannot clear a newer Run B.
 - When a durable event has a matching live counterpart, the worker publishes the history
   append action before publishing the live removal action.
@@ -702,13 +709,18 @@ not duplicate metadata or delete objects already referenced by an earlier commit
 
 ## 8. Compaction
 
-Compaction is append-only. It appends `compaction_marker` and `compaction_summary`, keeps old events
-for UI/audit, and moves `agent_sessions.model_input_head_event_id` to the summary id so future model
-input starts from the compacted head.
+Compaction is append-only. Planning and external summary generation write no transcript lifecycle
+event. After generation and enrichment succeed, one transaction appends adjacent
+`compaction_marker` and `compaction_summary` events, keeps old events for UI/audit, and moves
+`agent_sessions.model_input_head_event_id` to the summary id so future model input starts from the
+compacted head. Failed, cancelled, stopped, and stale-plan attempts append neither event and do not
+move the head.
 
 Future model input is selected and sorted by event `model_order`. Auto and manual compaction both
-summarize the full selected model-input transcript into one `compaction_summary` event. Runtime
-compaction summary hooks may enrich the generated summary before continuity is appended. The summary
+summarize the full selected model-input transcript into one `compaction_summary` event. While the
+provider operation is active, the Run exposes one stable `preparing_context` live operation; retries
+and backoff update the same identity and every terminal boundary removes it. Runtime compaction
+summary hooks may enrich the generated summary before continuity is appended. The summary
 content also includes bounded `Recent User Messages` and `Recent Transcript` sections. The
 user-message section keeps the last five user messages visible even when a long tool-heavy run leaves
 no user messages in the recent turn window. The transcript section uses readable model-visible
@@ -722,6 +734,8 @@ storage JSON dump.
 - Event transcript is the durable model/tool source of truth.
 - Native artifacts are opaque replay optimizations, never event state.
 - `agent_runs.phase` and `active_tool_calls` are the durable UI activity source.
+- Typed provider failures retain only bounded redacted diagnostics through retry state and terminal failed-run history; every provider category receives the complete configured retry budget.
+- User Stop is terminal, clears retry and live-operation state, and never creates a stopped-Run recovery or replay source.
 - Public chat UI state is restored from `/history`, `/live`, the dedicated Subagent Tree API, and event WebSocket actions, including session todo, action execution state, and subagent tree invalidations.
 - Existing transcript/session data migration is not required for the private service cutover.
 - Web chat message/edit/command writes have a single REST commit boundary; WebSocket is not a fallback write path.
@@ -755,6 +769,7 @@ Current verification:
 
 ## 11. Changelog
 
+- **2026-07-18** — v107. Added bounded typed provider-failure metadata, complete-budget provider retry, reconnect-safe context preparation, atomic successful compaction commit, and terminal non-replayable User Stop.
 - **2026-07-17** — v106. Added Base64-free dual materialization, request-local replay, retry-safe admission, and direct attachment presentation for provider-hosted generated images.
 - **2026-07-16** — v105. Added provider-neutral live provider-tool lifecycle state, Redis resync,
   attempt cleanup, semantic frontend presentation, and durable-before-live-removal handoff.

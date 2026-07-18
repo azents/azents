@@ -48,6 +48,7 @@ from azents.services.chat.context import (
     SessionContextSystemPromptFragment,
 )
 from azents.services.chat.data import (
+    ChatLiveRunOperation,
     ChatLiveRunRetryAttempt,
     ChatLiveRunRetryState,
     ChatLiveRunState,
@@ -555,7 +556,7 @@ class ChatWriteSnapshotResponse(BaseModel):
     )
     run: ChatLiveRunStateResponse | None = Field(
         default=None,
-        description="Currently running run status",
+        description="Currently running Run status",
     )
     session_run_state: AgentSessionRunState = Field(
         description="Authoritative run_state for the current session",
@@ -1792,6 +1793,9 @@ class ChatLiveRunRetryAttemptResponse(BaseModel):
 class ChatLiveRunRetryStateResponse(BaseModel):
     """Current live failed-run retry state response."""
 
+    error_kind: Literal["model_provider", "runtime"] = Field(
+        description="Provider or runtime presentation kind"
+    )
     status: str = Field(description="Current retry status")
     last_error_message: str = Field(description="Latest user-safe error message")
     failed_attempt_count: int = Field(description="Failed attempt count")
@@ -1806,6 +1810,7 @@ class ChatLiveRunRetryStateResponse(BaseModel):
     def from_domain(cls, retry: ChatLiveRunRetryState) -> Self:
         """Convert from live run retry state domain model."""
         return cls(
+            error_kind=retry.error_kind,
             status=retry.status,
             last_error_message=retry.last_error_message,
             failed_attempt_count=retry.failed_attempt_count,
@@ -1816,6 +1821,23 @@ class ChatLiveRunRetryStateResponse(BaseModel):
                 ChatLiveRunRetryAttemptResponse.from_domain(attempt)
                 for attempt in retry.attempts
             ],
+        )
+
+
+class ChatLiveRunOperationResponse(BaseModel):
+    """Current live Run operation response."""
+
+    kind: Literal["preparing_context"] = Field(description="Operation kind")
+    operation_id: str = Field(description="Stable operation identity")
+    status: Literal["running"] = Field(description="Current operation status")
+
+    @classmethod
+    def from_domain(cls, operation: ChatLiveRunOperation) -> Self:
+        """Convert from live Run operation domain model."""
+        return cls(
+            kind=operation.kind,
+            operation_id=operation.operation_id,
+            status=operation.status,
         )
 
 
@@ -1830,6 +1852,11 @@ class ChatLiveRunStateResponse(BaseModel):
     )
     model_call_started_at: datetime.datetime | None = Field(
         description="Current model call start time, or null outside a model call",
+    )
+    operation: ChatLiveRunOperationResponse | None = Field(
+        default=None,
+        description="Current live Run operation",
+        exclude_if=lambda value: value is None,
     )
     retry: ChatLiveRunRetryStateResponse | None = Field(
         default=None,
@@ -1846,6 +1873,9 @@ class ChatLiveRunStateResponse(BaseModel):
             status=run.status,
             inference_profile=run.inference_profile,
             model_call_started_at=run.model_call_started_at,
+            operation=None
+            if run.operation is None
+            else ChatLiveRunOperationResponse.from_domain(run.operation),
             retry=None
             if run.retry is None
             else ChatLiveRunRetryStateResponse.from_domain(run.retry),
@@ -1863,7 +1893,7 @@ class LiveEventListResponse(BaseModel):
     )
     run: ChatLiveRunStateResponse | None = Field(
         default=None,
-        description="Currently running run status",
+        description="Currently running Run status",
     )
     session_run_state: AgentSessionRunState = Field(
         description="Authoritative run_state for the current session",

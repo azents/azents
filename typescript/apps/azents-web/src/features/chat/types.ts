@@ -252,6 +252,8 @@ export type FailedRunFinalizationReason =
   | "retry_stopped_by_user"
   | "non_retryable";
 
+export type FailedRunErrorKind = "model_provider" | "runtime";
+
 export type FailedRunRetryability =
   | "unknown"
   | "transient"
@@ -273,6 +275,7 @@ export interface FailedRunAttemptSummary {
 
 export interface FailedRunFailureMetadata {
   kind: "failed_run";
+  error_kind: FailedRunErrorKind;
   finalization_reason: FailedRunFinalizationReason;
   failed_attempt_count: number;
   max_retries: number;
@@ -605,6 +608,7 @@ export type AgentRunStatus =
   | "cancelled";
 
 export interface ChatLiveRunRetryState {
+  errorKind: FailedRunErrorKind;
   status: string;
   lastErrorMessage: string;
   failedAttemptCount: number;
@@ -614,6 +618,14 @@ export interface ChatLiveRunRetryState {
   attempts: FailedRunAttemptSummary[];
 }
 
+export interface PreparingContextRunOperation {
+  kind: "preparing_context";
+  operationId: string;
+  status: "running";
+}
+
+export type ChatLiveRunOperation = PreparingContextRunOperation;
+
 export interface ChatLiveRunState {
   run_id: string;
   phase: AgentRunPhase;
@@ -621,6 +633,7 @@ export interface ChatLiveRunState {
   inferenceProfile: AppliedInferenceProfile;
   modelCallStartedAt: string | null;
   retry?: ChatLiveRunRetryState | null;
+  operation?: ChatLiveRunOperation | null;
 }
 
 export type ChatEvent =

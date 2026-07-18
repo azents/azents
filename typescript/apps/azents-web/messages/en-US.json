@@ -1393,7 +1393,7 @@
       "resumeHintPlaceholder": "e.g. The blocker is resolved; continue from the failed CI job."
     },
     "compaction": {
-      "inProgress": "Compacting context…",
+      "inProgress": "Preparing conversation context…",
       "summary": "Previous conversation was summarized",
       "expand": "Show summary",
       "collapse": "Hide summary"
@@ -1519,6 +1519,7 @@
     "chooseWorktreeSourceFolder": "Choose source folder…",
     "failedRunRecovery": {
       "errorTitle": "Error",
+      "providerErrorTitle": "Model provider error",
       "liveTitle": "Retrying after a failed run",
       "terminalTitle": "Run failed after retrying",
       "nonRetryableTitle": "Run failed without retrying",

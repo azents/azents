@@ -32,6 +32,7 @@ const attempts = [
 ];
 
 const liveRetry: ChatLiveRunRetryState = {
+  errorKind: "model_provider",
   status: "waiting",
   lastErrorMessage: "The provider is temporarily rate limited.",
   failedAttemptCount: 2,
@@ -43,6 +44,7 @@ const liveRetry: ChatLiveRunRetryState = {
 
 const terminalFailure: FailedRunFailureMetadata = {
   kind: "failed_run",
+  error_kind: "model_provider",
   finalization_reason: "retry_exhausted",
   failed_attempt_count: 5,
   max_retries: 5,

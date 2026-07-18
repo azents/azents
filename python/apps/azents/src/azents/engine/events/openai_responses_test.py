@@ -52,7 +52,6 @@ from azents.engine.events.openai_responses import (
     OpenAIResponsesOutputNormalizer,
     OpenAIResponsesRequest,
     OpenAIResponsesWebSocketConnection,
-    OpenAIResponsesWebSocketTransportError,
     OpenAISDKResponsesClient,
     create_openai_responses_client,
     openai_responses_client_config,
@@ -77,15 +76,14 @@ from azents.engine.model_stream import (
     ModelStreamTimeoutPolicy,
     close_stream_response,
 )
-from azents.engine.run.errors import (
-    ModelCallError,
-    ModelStreamTimeoutError,
-    NonRetryableModelCallError,
-    TransientModelCallError,
-)
+from azents.engine.run.errors import ModelStreamTimeoutError
 from azents.engine.run.model_transport import (
     InMemoryModelTransportState,
     ModelTransportKey,
+)
+from azents.engine.run.provider_failure import (
+    ModelProviderFailure,
+    ModelProviderFailureCategory,
 )
 from azents.engine.run.types import BuiltinToolSpec
 from azents.testing.model_stream import make_test_model_stream_watchdog
@@ -315,6 +313,7 @@ def _sampling_context(model: str = "gpt-5.1-codex") -> ModelStreamCallContext:
     return ModelStreamCallContext(
         call_kind="sampling",
         provider="openai",
+        provider_integration_id=None,
         model=model,
         session_id="session-1",
         run_id="run-1",
@@ -780,6 +779,7 @@ async def test_adapter_preserves_omission_null_and_stop_extension() -> None:
             call_context=ModelStreamCallContext(
                 call_kind="sampling",
                 provider="openai",
+                provider_integration_id=None,
                 model=request.model,
                 session_id="session-1",
                 run_id="run-1",
@@ -1050,7 +1050,10 @@ async def test_websocket_transport_failure_stages_activate_http_fallback(
         inference_profile=None,
     )
 
-    with pytest.raises(OpenAIResponsesWebSocketTransportError) as raised:
+    with pytest.raises(
+        ModelProviderFailure,
+        match="^Model provider error: The model WebSocket transport failed\\.$",
+    ) as raised:
         _ = [
             event
             async for event in adapter.stream(
@@ -1061,7 +1064,8 @@ async def test_websocket_transport_failure_stages_activate_http_fallback(
             )
         ]
 
-    assert raised.value.stage == failure_stage
+    assert raised.value.category is ModelProviderFailureCategory.TRANSPORT
+    assert raised.value.provider_code == f"websocket_{failure_stage}"
     assert raised.value.status_code == (404 if failure_stage == "connect" else None)
     assert state.websocket_allowed(key) is False
     if connection is not None:
@@ -1102,7 +1106,10 @@ async def test_websocket_transport_failure_marks_sticky_http_fallback(
         inference_profile=None,
     )
 
-    with pytest.raises(OpenAIResponsesWebSocketTransportError) as raised:
+    with pytest.raises(
+        ModelProviderFailure,
+        match="^Model provider error: The model WebSocket transport failed\\.$",
+    ) as raised:
         _ = [
             event
             async for event in adapter.stream(
@@ -1113,7 +1120,8 @@ async def test_websocket_transport_failure_marks_sticky_http_fallback(
             )
         ]
 
-    assert raised.value.stage == "receive"
+    assert raised.value.category is ModelProviderFailureCategory.TRANSPORT
+    assert raised.value.provider_code == "websocket_receive"
     assert state.websocket_allowed(key) is False
     assert connection.closed is True
     assert forbidden_detail not in caplog.text
@@ -1282,8 +1290,8 @@ async def test_authentication_handshake_failure_does_not_activate_http_fallback(
     )
 
     with pytest.raises(
-        NonRetryableModelCallError,
-        match="^Model authentication failed\\.$",
+        ModelProviderFailure,
+        match="^Model provider error: Model authentication failed\\.$",
     ) as raised:
         _ = [
             event
@@ -1295,9 +1303,11 @@ async def test_authentication_handshake_failure_does_not_activate_http_fallback(
             )
         ]
 
-    assert raised.value.failure_code == (
-        "openai_websocket_handshake_authentication_failed"
-    )
+    assert raised.value.category is ModelProviderFailureCategory.AUTHENTICATION
+    assert raised.value.failure_code == "model_provider_authentication"
+    assert raised.value.provider_code == "websocket_connect"
+    assert raised.value.status_code == 401
+    assert raised.value.integration == "integration-1"
     assert state.websocket_allowed(key) is True
     await adapter.close()
 
@@ -1352,6 +1362,7 @@ async def test_official_sdk_wire_request_preserves_presence_and_stop() -> None:
                 call_context=ModelStreamCallContext(
                     call_kind="sampling",
                     provider="openai",
+                    provider_integration_id=None,
                     model=request.model,
                     session_id="session-1",
                     run_id="run-1",
@@ -1464,6 +1475,7 @@ async def test_official_sdk_wire_request_omits_unstored_generated_image_id() -> 
                 call_context=ModelStreamCallContext(
                     call_kind="sampling",
                     provider="chatgpt_oauth",
+                    provider_integration_id="integration-chatgpt",
                     model=request.model,
                     session_id="session-1",
                     run_id="run-1",
@@ -1490,6 +1502,8 @@ def test_typed_normalizer_preserves_reasoning_stream_identity() -> None:
     output = OpenAIResponsesOutputNormalizer(
         provider="openai",
         model="gpt-5.1-codex",
+        operation="sampling",
+        integration=None,
     ).start("session-1")
 
     projected = output.process_event(
@@ -1531,6 +1545,8 @@ def test_typed_completed_message_does_not_replay_output_index() -> None:
     output = OpenAIResponsesOutputNormalizer(
         provider="openai",
         model="gpt-5.1-codex",
+        operation="sampling",
+        integration=None,
     ).start("session-1")
     output.process_event(
         ResponseOutputItemDoneEvent(
@@ -1570,6 +1586,8 @@ def test_typed_normalizer_requires_exact_completed_wire_type(
     normalizer = OpenAIResponsesOutputNormalizer(
         provider="openai",
         model="gpt-5.1-codex",
+        operation="sampling",
+        integration=None,
     )
     output = normalizer.start("session-1")
     mismatched = ResponseCompletedEvent.model_construct(
@@ -1580,8 +1598,14 @@ def test_typed_normalizer_requires_exact_completed_wire_type(
 
     output.process_event(mismatched)
 
-    with pytest.raises(ModelCallError, match="ended before completion"):
+    with pytest.raises(
+        ModelProviderFailure,
+        match="ended before completion",
+    ) as raised:
         output.complete()
+
+    assert raised.value.category is ModelProviderFailureCategory.TRANSPORT
+    assert raised.value.provider_code == "stream_ended_before_completion"
 
 
 def test_typed_normalizer_builds_openai_artifact_usage_and_cost(
@@ -1601,6 +1625,8 @@ def test_typed_normalizer_builds_openai_artifact_usage_and_cost(
     normalizer = OpenAIResponsesOutputNormalizer(
         provider="openai",
         model="gpt-5.1-codex",
+        operation="sampling",
+        integration=None,
     )
     output = normalizer.start("session-1")
     output.process_event(
@@ -1647,6 +1673,8 @@ def test_typed_normalizer_projects_provider_tool_lifecycle() -> None:
     output = OpenAIResponsesOutputNormalizer(
         provider="openai",
         model="gpt-5.1-codex",
+        operation="sampling",
+        integration=None,
     ).start("session-1")
 
     running = output.process_event(
@@ -1698,6 +1726,8 @@ def test_typed_normalizer_extracts_transient_generated_image() -> None:
     completed = OpenAIResponsesOutputNormalizer(
         provider="openai",
         model="gpt-5.1-codex",
+        operation="sampling",
+        integration=None,
     ).normalize_completed_output(
         "session-1",
         {
@@ -1738,6 +1768,8 @@ def test_typed_stream_extracts_transient_generated_image() -> None:
     output = OpenAIResponsesOutputNormalizer(
         provider="openai",
         model="gpt-5.1-codex",
+        operation="sampling",
+        integration=None,
     ).start("session-1")
 
     output.process_event(
@@ -1770,6 +1802,8 @@ def test_typed_normalizer_projects_generic_provider_tool_output_items() -> None:
     output = OpenAIResponsesOutputNormalizer(
         provider="openai",
         model="gpt-5.1-codex",
+        operation="sampling",
+        integration=None,
     ).start("session-1")
     action = ActionSearch(
         type="search",
@@ -1864,6 +1898,8 @@ def test_typed_normalizer_accepts_omitted_usage_details(
     output = OpenAIResponsesOutputNormalizer(
         provider="openai",
         model="gpt-5.1-codex",
+        operation="sampling",
+        integration=None,
     ).start("session-1")
     output.process_event(_completed_event(response))
 
@@ -1879,11 +1915,13 @@ def test_typed_normalizer_accepts_omitted_usage_details(
     assert completed.usage.cost_usd == 0.25
 
 
-def test_typed_terminal_error_fails_without_provider_body() -> None:
-    """Unknown typed errors remain retryable without exposing provider text."""
+def test_typed_terminal_error_preserves_safe_provider_message() -> None:
+    """Unknown typed errors preserve bounded provider-authored text."""
     normalizer = OpenAIResponsesOutputNormalizer(
         provider="openai",
         model="gpt-5.1-codex",
+        operation="sampling",
+        integration=None,
     )
     output = normalizer.start("session-1")
     output.process_event(
@@ -1897,23 +1935,24 @@ def test_typed_terminal_error_fails_without_provider_body() -> None:
     )
 
     with pytest.raises(
-        TransientModelCallError,
-        match="^Model call failed\\.$",
+        ModelProviderFailure,
+        match=("^Model provider error: provider body must not be surfaced$"),
     ) as raised:
         output.complete()
 
-    assert raised.value.failure_code == "openai_response_error_synthetic_error"
-    assert "provider body" not in str(raised.value)
+    assert raised.value.category is ModelProviderFailureCategory.UNKNOWN
+    assert raised.value.failure_code == "model_provider_unknown"
+    assert raised.value.provider_code == "synthetic_error"
+    assert raised.value.provider_message == "provider body must not be surfaced"
 
 
-def test_typed_failed_event_classifies_invalid_prompt_without_retry(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """Deterministic provider rejection fails once with safe diagnostics."""
-    caplog.set_level(logging.WARNING)
+def test_typed_failed_event_classifies_invalid_prompt() -> None:
+    """Provider rejection preserves safe text and neutral classification."""
     normalizer = OpenAIResponsesOutputNormalizer(
         provider="chatgpt_oauth",
         model="gpt-5.6-terra",
+        operation="sampling",
+        integration=None,
     )
     output = normalizer.start("session-1")
     output.process_event(
@@ -1924,30 +1963,24 @@ def test_typed_failed_event_classifies_invalid_prompt_without_retry(
     )
 
     with pytest.raises(
-        NonRetryableModelCallError,
-        match="^The model provider rejected the request\\.$",
+        ModelProviderFailure,
+        match=("^Model provider error: provider body must not be surfaced$"),
     ) as raised:
         output.complete()
 
-    assert raised.value.failure_code == "openai_response_failed_invalid_prompt"
-    assert "provider body" not in str(raised.value)
-    record = next(
-        record
-        for record in caplog.records
-        if record.message == "OpenAI Responses terminal failure received"
-    )
-    assert record.__dict__["session_id"] == "session-1"
-    assert record.__dict__["openai_responses_terminal_event"] == "response.failed"
-    assert record.__dict__["openai_responses_terminal_code"] == "invalid_prompt"
-    assert record.__dict__["openai_responses_response_id"] == "resp_synthetic"
-    assert "provider body" not in record.getMessage()
+    assert raised.value.category is ModelProviderFailureCategory.INVALID_REQUEST
+    assert raised.value.failure_code == "model_provider_invalid_request"
+    assert raised.value.provider_code == "invalid_prompt"
+    assert raised.value.provider_message == "provider body must not be surfaced"
 
 
-def test_typed_failed_event_classifies_rate_limit_as_transient() -> None:
-    """Retryable provider failures retain a stable operational code."""
+def test_typed_failed_event_classifies_rate_limit() -> None:
+    """Rate limits preserve safe text and neutral classification."""
     normalizer = OpenAIResponsesOutputNormalizer(
         provider="chatgpt_oauth",
         model="gpt-5.6-terra",
+        operation="sampling",
+        integration=None,
     )
     output = normalizer.start("session-1")
     output.process_event(
@@ -1958,13 +1991,15 @@ def test_typed_failed_event_classifies_rate_limit_as_transient() -> None:
     )
 
     with pytest.raises(
-        TransientModelCallError,
-        match="^The model provider rate limit was exceeded\\.$",
+        ModelProviderFailure,
+        match=("^Model provider error: retry after provider-private detail$"),
     ) as raised:
         output.complete()
 
-    assert raised.value.failure_code == "openai_response_failed_rate_limit_exceeded"
-    assert "provider-private" not in str(raised.value)
+    assert raised.value.category is ModelProviderFailureCategory.RATE_LIMIT
+    assert raised.value.failure_code == "model_provider_rate_limit"
+    assert raised.value.provider_code == "rate_limit_exceeded"
+    assert raised.value.provider_message == "retry after provider-private detail"
 
 
 def test_cross_adapter_artifacts_use_canonical_fallback() -> None:
@@ -2020,6 +2055,8 @@ def test_pricing_failure_preserves_successful_usage(
     output = OpenAIResponsesOutputNormalizer(
         provider="openai",
         model="gpt-5.1-codex",
+        operation="sampling",
+        integration=None,
     ).start("session-1")
     output.process_event(_completed_event())
 
@@ -2030,13 +2067,26 @@ def test_pricing_failure_preserves_successful_usage(
     assert completed.usage.cost_usd is None
 
 
-async def test_authentication_error_is_mapped_without_raw_provider_text() -> None:
-    """Final SDK status failures expose only fixed user-safe messages."""
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"error": {"code": "invalid_api_key", "message": "raw body"}},
+        {
+            "code": "invalid_api_key",
+            "message": "raw body",
+            "type": "authentication_error",
+        },
+    ],
+)
+async def test_authentication_error_preserves_typed_provider_message(
+    body: dict[str, object],
+) -> None:
+    """Final SDK status failures preserve bounded provider-authored text."""
     request_handle = httpx.Request("POST", "https://provider.example/responses")
     error = AuthenticationError(
-        "provider body with credential-shaped text",
+        "Error code: 401 - {'error': {'message': 'raw body'}}",
         response=httpx.Response(401, request=request_handle),
-        body={"error": {"code": "invalid_api_key", "message": "raw body"}},
+        body=body,
     )
     client = _SequencedFakeClient([error])
     adapter = OpenAIResponsesModelAdapter(
@@ -2060,8 +2110,8 @@ async def test_authentication_error_is_mapped_without_raw_provider_text() -> Non
     )
 
     with pytest.raises(
-        NonRetryableModelCallError,
-        match="^Model authentication failed\\.$",
+        ModelProviderFailure,
+        match="^Model provider error: raw body$",
     ) as raised:
         _ = [
             event
@@ -2072,6 +2122,7 @@ async def test_authentication_error_is_mapped_without_raw_provider_text() -> Non
                 call_context=ModelStreamCallContext(
                     call_kind="sampling",
                     provider="openai",
+                    provider_integration_id="integration-openai",
                     model=logical_request.model,
                     session_id="session-1",
                     run_id="run-1",
@@ -2081,9 +2132,11 @@ async def test_authentication_error_is_mapped_without_raw_provider_text() -> Non
             )
         ]
 
-    assert raised.value.failure_code == "openai_http_authentication_failed"
-    assert raised.value.__dict__["provider_code"] == "invalid_api_key"
-    assert raised.value.__dict__["status_code"] == 401
+    assert raised.value.category is ModelProviderFailureCategory.AUTHENTICATION
+    assert raised.value.failure_code == "model_provider_authentication"
+    assert raised.value.provider_message == "raw body"
+    assert raised.value.provider_code == "invalid_api_key"
+    assert raised.value.status_code == 401
 
 
 async def test_missing_previous_response_retries_full_input_once(
@@ -2152,6 +2205,7 @@ async def test_missing_previous_response_retries_full_input_once(
             call_context=ModelStreamCallContext(
                 call_kind="sampling",
                 provider="openai",
+                provider_integration_id=None,
                 model=follow_up.model,
                 session_id="session-1",
                 run_id="run-1",

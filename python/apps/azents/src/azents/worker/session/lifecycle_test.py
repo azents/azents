@@ -18,12 +18,19 @@ from azents.repos.input_buffer import InputBufferRepository
 from azents.worker.session.lifecycle import SessionLifecycleService
 
 
+class _Session:
+    """Minimal async DB session test double."""
+
+    async def commit(self) -> None:
+        """Accept transaction commit."""
+
+
 class _SessionScope(AbstractAsyncContextManager[AsyncSession]):
     """DB session context for tests."""
 
     async def __aenter__(self) -> AsyncSession:
         """Return test session."""
-        return cast(AsyncSession, object())
+        return cast(AsyncSession, _Session())
 
     async def __aexit__(self, *exc_info: object) -> None:
         """No resources to clean up."""
@@ -136,6 +143,7 @@ class _AgentRunRepository:
         self.terminal_session_ids: list[str] = []
         self.terminal_run_ids: list[str] = []
         self.activation_run_ids: list[str] = []
+        self.phase_updates: list[tuple[str, AgentRunPhase]] = []
 
     async def get_active_by_session_id(
         self,
@@ -186,6 +194,21 @@ class _AgentRunRepository:
         if self.activated_run is None:
             raise AssertionError("Activation test run was not configured")
         return self.activated_run
+
+    async def update_phase(
+        self,
+        session: AsyncSession,
+        run_id: str,
+        phase: AgentRunPhase,
+        *,
+        active_tool_calls: list[object] | None = None,
+    ) -> AgentRunState:
+        """Record the initial durable phase selected during activation."""
+        del session, active_tool_calls
+        self.phase_updates.append((run_id, phase))
+        if self.activated_run is None:
+            raise AssertionError("Activation test run was not configured")
+        return self.activated_run.model_copy(update={"phase": phase})
 
     async def mark_session_running_terminal(
         self,
@@ -357,6 +380,33 @@ async def test_terminal_update_rejects_cross_session_run() -> None:
 
 
 @pytest.mark.asyncio
+async def test_activate_pending_sets_initial_phase_before_commit() -> None:
+    """Pending activation persists its reconnect-safe initial phase."""
+    activated_run = _running_run().model_copy(update={"phase": AgentRunPhase.IDLE})
+    agent_run_repository = _AgentRunRepository(
+        None,
+        activated_run=activated_run,
+    )
+    service = _service(
+        agent_run_repository=agent_run_repository,
+        agent_session_repository=_AgentSessionRepository(),
+        pending_input=False,
+    )
+
+    run = await service.activate_pending_agent_run(
+        "session-001",
+        run_id=activated_run.id,
+        initial_phase=AgentRunPhase.COMPACTING,
+    )
+
+    assert run.phase == AgentRunPhase.COMPACTING
+    assert agent_run_repository.activation_run_ids == [activated_run.id]
+    assert agent_run_repository.phase_updates == [
+        (activated_run.id, AgentRunPhase.COMPACTING)
+    ]
+
+
+@pytest.mark.asyncio
 async def test_activate_pending_rejects_session_mismatch() -> None:
     """Pending activation cannot cross the requested session boundary."""
     activated_run = _running_run().model_copy(update={"session_id": "session-002"})
@@ -374,6 +424,8 @@ async def test_activate_pending_rejects_session_mismatch() -> None:
         await service.activate_pending_agent_run(
             "session-001",
             run_id=activated_run.id,
+            initial_phase=AgentRunPhase.COMPACTING,
         )
 
     assert agent_run_repository.activation_run_ids == [activated_run.id]
+    assert agent_run_repository.phase_updates == []

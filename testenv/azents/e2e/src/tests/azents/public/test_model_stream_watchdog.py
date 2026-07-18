@@ -52,10 +52,16 @@ _EVENTS_RESET_RESPONSE = (
 _RETRY_EXHAUSTION_PROMPT = "Watchdog retry exhaustion"
 _USER_STOP_PROMPT = "Watchdog user stop preserves partial"
 _USER_STOP_PARTIAL = "WATCHDOG_STOP_PARTIAL"
+_PROVIDER_STOP_PROMPT = "Provider retry stop"
+_PROVIDER_COMPACTION_SEED = "Provider compaction failure seed"
+_PROVIDER_COMPACTION_SEED_RESPONSE = "Provider compaction failure seed response."
 _COMPACTION_SEED = "Watchdog compaction timeout seed"
 _COMPACTION_SEED_RESPONSE = "Watchdog compaction timeout seed response."
 _TITLE_PROMPT = "Watchdog session title timeout"
 _TITLE_RESPONSE = "WATCHDOG_TITLE_RUN_COMPLETED"
+_TITLE_PROVIDER_RETRY_PROMPT = "Provider title retry"
+_TITLE_PROVIDER_RETRY_RESPONSE = "PROVIDER_TITLE_RUN_COMPLETED"
+_TITLE_PROVIDER_RETRY_TITLE = "Provider title retry recovered"
 
 
 def _wait_until(
@@ -220,20 +226,24 @@ def _wait_for_ws_removed_event(
     )
 
 
-def _failed_attempts(payload: dict[str, object]) -> list[dict[str, object]]:
-    """Return the terminal failed-run attempt history."""
+def _failed_run_failure(payload: dict[str, object]) -> dict[str, object]:
+    """Return the single terminal failed-run failure metadata object."""
     failed_events = failed_run_error_events(payload)
     assert len(failed_events) == 1, failed_events
     event_payload = json_object_payload(
         failed_events[0].get("payload"),
         label="failed-run event payload",
     )
-    failure = json_object_payload(
+    return json_object_payload(
         event_payload.get("failure"),
         label="failed-run failure",
     )
+
+
+def _failed_attempts(payload: dict[str, object]) -> list[dict[str, object]]:
+    """Return the terminal failed-run attempt history."""
     return json_object_list_payload(
-        failure.get("attempts"),
+        _failed_run_failure(payload).get("attempts"),
         label="failed-run attempts",
     )
 
@@ -270,6 +280,120 @@ def _post_compact(
         timeout=10,
     )
     response.raise_for_status()
+
+
+def _wait_for_live_provider_retry(
+    *,
+    public_url: str,
+    token: str,
+    session_id: str,
+    failed_attempt_count: int,
+    preparing_context: bool,
+    timeout: float = 15,
+) -> dict[str, object]:
+    """Wait for provider retry state and optional context-preparation operation."""
+    observed: dict[str, object] | None = None
+
+    def provider_retry_visible() -> bool:
+        nonlocal observed
+        observed = list_live(
+            server_url=public_url,
+            token=token,
+            session_id=session_id,
+        )
+        run_payload = observed.get("run")
+        if run_payload is None:
+            return False
+        run = json_object_payload(run_payload, label="live run")
+        retry_payload = run.get("retry")
+        if retry_payload is None:
+            return False
+        retry = json_object_payload(retry_payload, label="live retry")
+        observed_attempt_count = retry.get("failed_attempt_count")
+        if (
+            retry.get("error_kind") != "model_provider"
+            or not isinstance(observed_attempt_count, int)
+            or observed_attempt_count < failed_attempt_count
+        ):
+            return False
+        attempts = json_object_list_payload(
+            retry.get("attempts"),
+            label="live provider retry attempts",
+        )
+        if not attempts or any(
+            attempt.get("retryability") != "unknown"
+            or attempt.get("failure_code") is not None
+            for attempt in attempts
+        ):
+            return False
+        if not preparing_context:
+            return True
+        operation_payload = run.get("operation")
+        if operation_payload is None:
+            return False
+        operation = json_object_payload(
+            operation_payload,
+            label="live run operation",
+        )
+        return (
+            operation.get("kind") == "preparing_context"
+            and operation.get("status") == "running"
+            and isinstance(operation.get("operation_id"), str)
+        )
+
+    _wait_until(
+        provider_retry_visible,
+        timeout=timeout,
+        message=f"live provider retry did not appear: {observed!r}",
+    )
+    assert observed is not None
+    return observed
+
+
+def _wait_for_stopped_without_failure(
+    *,
+    public_url: str,
+    token: str,
+    session_id: str,
+    timeout: float = 15,
+) -> dict[str, object]:
+    """Wait for ordinary stopped history and complete live-state cleanup."""
+    observed: dict[str, object] | None = None
+
+    def stopped() -> bool:
+        nonlocal observed
+        observed = list_history(
+            server_url=public_url,
+            token=token,
+            session_id=session_id,
+        )
+        interrupted = False
+        for event in history_events(observed):
+            if event.get("kind") != "run_marker":
+                continue
+            event_payload = json_object_payload(
+                event.get("payload"),
+                label="run marker payload",
+            )
+            if event_payload.get("status") == "interrupted":
+                interrupted = True
+                break
+        if not interrupted or failed_run_error_events(observed):
+            return False
+        live = list_live(
+            server_url=public_url,
+            token=token,
+            session_id=session_id,
+        )
+        return live.get("run") is None
+
+    _wait_until(
+        stopped,
+        timeout=timeout,
+        message=f"provider retry did not converge to terminal Stop: {observed!r}",
+    )
+    assert observed is not None
+    return observed
 
 
 def _wait_for_interrupted_partial(
@@ -645,6 +769,49 @@ class TestModelStreamWatchdog:
         assert not system_error_events(payload)
         assert "run_complete" in message_roles(payload)
 
+    def test_user_stop_during_provider_retry_stays_terminal_and_non_replayable(
+        self,
+        public_api_client: azentspublicclient.ApiClient,
+        admin_api_client: azentsadminclient.ApiClient,
+        azents_public_server_url: str,
+        azents_engine_worker_container: object,
+    ) -> None:
+        """Stop during provider backoff creates no failed-run recovery state."""
+        del azents_engine_worker_container
+        workspace = setup_workspace(
+            public_api_client,
+            admin_api_client,
+            azents_public_server_url,
+        )
+        agent_id = create_agent(public_api_client, workspace)
+        result = run_message(
+            public_api_client=public_api_client,
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            message=_PROVIDER_STOP_PROMPT,
+        )
+        _wait_for_live_provider_retry(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=result.session_id,
+            failed_attempt_count=1,
+            preparing_context=False,
+        )
+        _post_stop(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=result.session_id,
+        )
+        payload = _wait_for_stopped_without_failure(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=result.session_id,
+        )
+
+        assert not system_error_events(payload)
+        assert not failed_run_error_events(payload)
+
     def test_compaction_timeout_uses_run_retry_and_commits_no_summary(
         self,
         public_api_client: azentspublicclient.ApiClient,
@@ -686,10 +853,94 @@ class TestModelStreamWatchdog:
             expected_attempts=4,
         )
 
-        assert "compaction_summary" not in message_roles(payload)
+        roles = message_roles(payload)
+        assert "compaction_marker" not in roles
+        assert "compaction_summary" not in roles
+        assert len(failed_run_error_events(payload)) == 1
         assert {
             attempt.get("failure_code") for attempt in _failed_attempts(payload)
         } == {"model_stream_idle_timeout"}
+
+    def test_compaction_provider_failure_keeps_one_live_operation_until_exhaustion(
+        self,
+        public_api_client: azentspublicclient.ApiClient,
+        admin_api_client: azentsadminclient.ApiClient,
+        azents_public_server_url: str,
+        azents_engine_worker_container: object,
+    ) -> None:
+        """Provider compaction retries keep one operation and commit no summary."""
+        del azents_engine_worker_container
+        workspace = setup_workspace(
+            public_api_client,
+            admin_api_client,
+            azents_public_server_url,
+        )
+        agent_id = create_agent(public_api_client, workspace)
+        result = run_message(
+            public_api_client=public_api_client,
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            message=_PROVIDER_COMPACTION_SEED,
+        )
+        wait_for_rest_contents(
+            server_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=result.session_id,
+            expected=[_PROVIDER_COMPACTION_SEED_RESPONSE],
+        )
+        _post_compact(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            session_id=result.session_id,
+        )
+        first_live = _wait_for_live_provider_retry(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=result.session_id,
+            failed_attempt_count=1,
+            preparing_context=True,
+        )
+        first_run = json_object_payload(first_live.get("run"), label="live run")
+        first_operation = json_object_payload(
+            first_run.get("operation"),
+            label="live run operation",
+        )
+        second_live = _wait_for_live_provider_retry(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=result.session_id,
+            failed_attempt_count=2,
+            preparing_context=True,
+        )
+        second_run = json_object_payload(second_live.get("run"), label="live run")
+        second_operation = json_object_payload(
+            second_run.get("operation"),
+            label="live run operation",
+        )
+        assert second_operation.get("operation_id") == first_operation.get(
+            "operation_id"
+        )
+
+        payload = wait_for_failed_run_error(
+            server_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=result.session_id,
+            expected_attempts=4,
+        )
+        failure = _failed_run_failure(payload)
+        attempts = _failed_attempts(payload)
+
+        assert failure.get("error_kind") == "model_provider"
+        assert [attempt.get("attempt_number") for attempt in attempts] == [1, 2, 3, 4]
+        assert all(
+            str(attempt.get("user_message", "")).startswith("Model provider error:")
+            for attempt in attempts
+        )
+        roles = message_roles(payload)
+        assert "compaction_marker" not in roles
+        assert "compaction_summary" not in roles
 
     def test_session_title_timeout_does_not_fail_completed_run(
         self,
@@ -732,3 +983,56 @@ class TestModelStreamWatchdog:
         session = json_object(response)
         assert session.get("title") == _TITLE_PROMPT
         assert session.get("title_source") == "auto_initial"
+
+    def test_session_title_provider_failure_retries_without_failing_run(
+        self,
+        public_api_client: azentspublicclient.ApiClient,
+        admin_api_client: azentsadminclient.ApiClient,
+        azents_public_server_url: str,
+        azents_engine_worker_container: object,
+    ) -> None:
+        """Best-effort title generation retries provider failures independently."""
+        del azents_engine_worker_container
+        workspace = setup_workspace(
+            public_api_client,
+            admin_api_client,
+            azents_public_server_url,
+        )
+        agent_id = create_agent(public_api_client, workspace)
+        result = run_message(
+            public_api_client=public_api_client,
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            message=_TITLE_PROVIDER_RETRY_PROMPT,
+        )
+        payload = wait_for_rest_contents(
+            server_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=result.session_id,
+            expected=[_TITLE_PROVIDER_RETRY_RESPONSE],
+        )
+        assert not system_error_events(payload)
+
+        observed: dict[str, object] | None = None
+
+        def title_recovered() -> bool:
+            nonlocal observed
+            response = requests.get(
+                f"{azents_public_server_url}/chat/v1/agents/{agent_id}"
+                f"/sessions/{result.session_id}",
+                headers=auth_headers(workspace.token),
+                timeout=10,
+            )
+            response.raise_for_status()
+            observed = json_object(response)
+            return (
+                observed.get("title") == _TITLE_PROVIDER_RETRY_TITLE
+                and observed.get("title_source") == "auto_generated"
+            )
+
+        _wait_until(
+            title_recovered,
+            timeout=15,
+            message=f"provider title retry did not recover: {observed!r}",
+        )

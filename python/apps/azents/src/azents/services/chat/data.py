@@ -7,7 +7,11 @@ from typing import Literal
 from azents.core.enums import AgentRunPhase, AgentRunStatus, AgentSessionRunState
 from azents.core.inference_profile import AppliedInferenceProfile
 from azents.engine.events.types import Event
-from azents.engine.run.failure import FailedRunAttemptSource, FailedRunRetryability
+from azents.engine.run.failure import (
+    FailedRunAttemptSource,
+    FailedRunErrorKind,
+    FailedRunRetryability,
+)
 from azents.engine.tools.goal import GoalStateSnapshot, GoalStatus
 from azents.engine.tools.todo import TodoStateSnapshot
 from azents.repos.action_execution.data import ActionExecutionProjection
@@ -24,6 +28,15 @@ class PaginatedEvents:
     items: list[Event]
     has_more: bool
     has_newer: bool = False
+
+
+@dataclasses.dataclass(frozen=True)
+class ChatLiveRunOperation:
+    """Current live operation projected within one Run."""
+
+    kind: Literal["preparing_context"]
+    operation_id: str
+    status: Literal["running"]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -46,6 +59,7 @@ class ChatLiveRunRetryAttempt:
 class ChatLiveRunRetryState:
     """Current live failed-run retry state."""
 
+    error_kind: FailedRunErrorKind
     status: str
     last_error_message: str
     failed_attempt_count: int
@@ -64,6 +78,7 @@ class ChatLiveRunState:
     status: AgentRunStatus
     inference_profile: AppliedInferenceProfile
     model_call_started_at: datetime.datetime | None
+    operation: ChatLiveRunOperation | None = None
     retry: ChatLiveRunRetryState | None = None
 
 

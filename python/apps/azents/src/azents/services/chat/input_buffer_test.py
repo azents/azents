@@ -415,6 +415,61 @@ class TestChatSessionInputBuffer:
             },
         )
 
+    async def test_list_live_events_projects_compacting_as_one_live_operation(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """A compacting Run restores one stable context-preparation operation."""
+        async with rdb_session_manager() as session:
+            session_id, user_id, buffer_id = await _create_session_with_buffer(
+                session,
+                handle="chat-live-compacting-operation",
+                slug="chat-live-compacting-operation",
+            )
+            await InputBufferRepository().delete_by_session_and_id(
+                session,
+                session_id,
+                buffer_id,
+            )
+            now = datetime.datetime.now(datetime.UTC)
+            await AgentSessionRepository().set_inference_state(
+                session,
+                session_id=session_id,
+                inference_state=SessionInferenceState(
+                    model_target_label="main",
+                    model_selection=make_test_model_selection(),
+                    model_settings=make_test_model_settings(),
+                    reasoning_effort=ModelReasoningEffort.HIGH,
+                    effective_context_window_tokens=100_000,
+                    effective_auto_compaction_threshold_tokens=80_000,
+                    resolved_at=now,
+                ),
+            )
+            run = await AgentRunRepository().create(
+                session,
+                AgentRunCreate(
+                    session_id=session_id,
+                    parent_agent_run_id=None,
+                    phase=AgentRunPhase.COMPACTING,
+                ),
+            )
+
+        result = await _service(rdb_session_manager).list_live_events(
+            session_id,
+            user_id=user_id,
+        )
+
+        assert isinstance(result, Success)
+        assert result.value.run is not None
+        assert result.value.run.run_id == run.id
+        assert result.value.run.operation is not None
+        assert result.value.run.operation.kind == "preparing_context"
+        assert result.value.run.operation.operation_id == (
+            f"{run.id}:preparing-context"
+        )
+        assert result.value.run.operation.status == "running"
+        assert result.value.session_run_state == AgentSessionRunState.RUNNING
+
     async def test_flushed_input_buffer_remains_in_message_history(
         self,
         rdb_session_manager: SessionManager[AsyncSession],

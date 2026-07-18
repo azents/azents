@@ -97,12 +97,15 @@ from azents.engine.model_stream import (
     close_stream_response,
     connect_only_http_timeout,
 )
-from azents.engine.run.errors import (
-    ModelCallError,
-    NonRetryableModelCallError,
-    TransientModelCallError,
-)
+from azents.engine.run.errors import ModelStreamCallKind
 from azents.engine.run.model_transport import ModelTransportKey, ModelTransportState
+from azents.engine.run.provider_failure import (
+    ModelProviderFailure,
+    ModelProviderFailureCategory,
+    extract_provider_message_text,
+    model_provider_failure,
+    sanitize_provider_identifier,
+)
 from azents.engine.run.types import BuiltinToolSpec
 
 logger = logging.getLogger(__name__)
@@ -140,38 +143,6 @@ _OPENAI_REQUEST_OPTION_KEYS = {
     "tool_choice",
     "top_p",
 }
-_SAFE_ERROR_CODE_MAX_CHARS = 96
-_SAFE_PROVIDER_IDENTIFIER_MAX_CHARS = 160
-_TRANSIENT_RESPONSE_ERROR_CODES = frozenset(
-    {"rate_limit_exceeded", "server_error", "vector_store_timeout"}
-)
-_NON_RETRYABLE_RESPONSE_ERROR_CODES = frozenset(
-    {
-        "bio_policy",
-        "context_length_exceeded",
-        "cyber_policy",
-        "insufficient_quota",
-        "invalid_prompt",
-    }
-)
-_IMAGE_RESPONSE_ERROR_CODES = frozenset(
-    {
-        "empty_image_file",
-        "failed_to_download_image",
-        "image_content_policy_violation",
-        "image_file_not_found",
-        "image_file_too_large",
-        "image_parse_error",
-        "image_too_large",
-        "image_too_small",
-        "invalid_base64_image",
-        "invalid_image",
-        "invalid_image_format",
-        "invalid_image_mode",
-        "invalid_image_url",
-        "unsupported_image_media_type",
-    }
-)
 OpenAIResponsesPhysicalTransport = Literal["http", "websocket"]
 OpenAIResponsesWebSocketFailureStage = Literal[
     "connect",
@@ -348,74 +319,6 @@ class OpenAIResponsesClientConfig:
     organization: str | None
     project: str | None
     default_headers: dict[str, str] | None
-
-
-class OpenAIResponsesProviderError(RuntimeError):
-    """Sanitized non-user-visible OpenAI provider failure."""
-
-    def __init__(
-        self,
-        *,
-        error_type: str,
-        status_code: int | None,
-        code: str | None,
-    ) -> None:
-        """Retain only allowlisted bounded operational metadata."""
-        super().__init__("OpenAI Responses request failed.")
-        self.error_type = error_type
-        self.status_code = status_code
-        self.code = code
-
-
-class _OpenAIResponsesTransientError(TransientModelCallError):
-    """Retryable classified OpenAI Responses failure."""
-
-    def __init__(
-        self,
-        message: str,
-        *,
-        failure_code: str,
-        provider_code: str | None,
-        status_code: int | None,
-    ) -> None:
-        super().__init__(message)
-        self.failure_code = failure_code
-        self.provider_code = provider_code
-        self.status_code = status_code
-
-
-class _OpenAIResponsesNonRetryableError(NonRetryableModelCallError):
-    """Non-retryable classified OpenAI Responses failure."""
-
-    def __init__(
-        self,
-        message: str,
-        *,
-        failure_code: str,
-        provider_code: str | None,
-        status_code: int | None,
-    ) -> None:
-        super().__init__(message)
-        self.failure_code = failure_code
-        self.provider_code = provider_code
-        self.status_code = status_code
-
-
-class OpenAIResponsesWebSocketTransportError(TransientModelCallError):
-    """User-safe WebSocket transport failure for failed-Run retry."""
-
-    failure_code = "openai_responses_websocket_transport_error"
-
-    def __init__(
-        self,
-        *,
-        stage: OpenAIResponsesWebSocketFailureStage,
-        status_code: int | None,
-    ) -> None:
-        """Retain only the safe transport stage and optional handshake status."""
-        super().__init__("The model WebSocket transport failed.")
-        self.stage: OpenAIResponsesWebSocketFailureStage = stage
-        self.status_code = status_code
 
 
 class _OpenAIResponsesWebSocketFailure(Exception):
@@ -848,23 +751,29 @@ class OpenAIResponsesModelAdapter:
                 raise RuntimeError(
                     "WebSocket failure occurred without transport state"
                 ) from None
-            self.transport_state.mark_http_only(self.transport_key)
-            logger.warning(
-                "OpenAI Responses WebSocket transport failed",
-                extra={
-                    "provider": call_context.provider,
-                    "model": call_context.model,
-                    "openai_responses_websocket_failure_stage": failure.stage,
-                    "openai_responses_websocket_status_code": failure.status_code,
-                    "openai_responses_http_only_activated": True,
-                },
-            )
-            raise OpenAIResponsesWebSocketTransportError(
-                stage=failure.stage,
+            if _websocket_failure_activates_http_fallback(failure.status_code):
+                self.transport_state.mark_http_only(self.transport_key)
+            raise model_provider_failure(
+                operation=call_context.call_kind,
+                provider=call_context.provider,
+                model=call_context.model,
+                integration=self.transport_key.provider_integration_id,
+                provider_message=_websocket_failure_message(failure.status_code),
                 status_code=failure.status_code,
+                provider_code=f"websocket_{failure.stage}",
+                provider_error_type="websocket_transport",
+                category=_websocket_failure_category(failure.status_code),
             ) from None
         except OpenAIError as exc:
-            raise _map_openai_error(exc) from None
+            raise _map_openai_error(
+                exc,
+                call_context=call_context,
+                integration=(
+                    self.transport_key.provider_integration_id
+                    if self.transport_key is not None
+                    else call_context.provider_integration_id
+                ),
+            ) from None
         finally:
             await close_stream_response(response)
             if physical_response is not response:
@@ -951,13 +860,9 @@ class OpenAIResponsesModelAdapter:
             await self._invalidate_websocket()
             raise
         except InvalidStatus as exc:
-            status_code = _websocket_status_code(exc)
-            mapped = _map_websocket_handshake_status(status_code)
-            if mapped is not None:
-                raise mapped from None
             raise _OpenAIResponsesWebSocketFailure(
                 stage="connect",
-                status_code=status_code,
+                status_code=_websocket_status_code(exc),
             ) from None
         except (OSError, WebSocketException) as exc:
             raise _OpenAIResponsesWebSocketFailure(stage="connect") from exc
@@ -1047,51 +952,39 @@ def _websocket_status_code(exc: InvalidStatus) -> int | None:
     return status_code if isinstance(status_code, int) else None
 
 
-def _map_websocket_handshake_status(status_code: int | None) -> ModelCallError | None:
-    """Map provider/auth handshake statuses without activating HTTP fallback."""
-    return _map_openai_status_error(
-        status_code=status_code,
-        provider_code=None,
-        failure_code_prefix="openai_websocket_handshake",
-    )
+def _websocket_failure_activates_http_fallback(status_code: int | None) -> bool:
+    """Return whether a socket failure proves endpoint incompatibility."""
+    if status_code in {401, 403, 429}:
+        return False
+    return status_code is None or status_code < 500
 
 
-def _map_openai_status_error(
-    *,
-    status_code: int | None,
-    provider_code: str | None,
-    failure_code_prefix: str,
-) -> ModelCallError | None:
-    """Classify one safe OpenAI HTTP-like status."""
+def _websocket_failure_message(status_code: int | None) -> str:
+    """Return a user-safe classified WebSocket failure message."""
     if status_code == 401:
-        return _OpenAIResponsesNonRetryableError(
-            "Model authentication failed.",
-            failure_code=f"{failure_code_prefix}_authentication_failed",
-            provider_code=provider_code,
-            status_code=status_code,
-        )
+        return "Model authentication failed."
     if status_code == 403:
-        return _OpenAIResponsesNonRetryableError(
-            "Model access was denied.",
-            failure_code=f"{failure_code_prefix}_access_denied",
-            provider_code=provider_code,
-            status_code=status_code,
-        )
+        return "Model access was denied."
     if status_code == 429:
-        return _OpenAIResponsesTransientError(
-            "The model provider rate limit was exceeded.",
-            failure_code=f"{failure_code_prefix}_rate_limit_exceeded",
-            provider_code=provider_code,
-            status_code=status_code,
-        )
+        return "The model provider rate limit was exceeded."
     if status_code is not None and status_code >= 500:
-        return _OpenAIResponsesTransientError(
-            "The model provider is temporarily unavailable.",
-            failure_code=f"{failure_code_prefix}_server_error",
-            provider_code=provider_code,
-            status_code=status_code,
-        )
-    return None
+        return "The model provider is temporarily unavailable."
+    return "The model WebSocket transport failed."
+
+
+def _websocket_failure_category(
+    status_code: int | None,
+) -> ModelProviderFailureCategory:
+    """Classify handshake statuses while keeping endpoint failures transport-scoped."""
+    if status_code == 401:
+        return ModelProviderFailureCategory.AUTHENTICATION
+    if status_code == 403:
+        return ModelProviderFailureCategory.PERMISSION
+    if status_code == 429:
+        return ModelProviderFailureCategory.RATE_LIMIT
+    if status_code is not None and status_code >= 500:
+        return ModelProviderFailureCategory.PROVIDER_UNAVAILABLE
+    return ModelProviderFailureCategory.TRANSPORT
 
 
 class _OpenAIResponsesCanonicalNormalizer(ResponsesOutputNormalizer):
@@ -1107,13 +1000,24 @@ class OpenAIResponsesOutputNormalizer:
     native_format = "responses"
     schema_version = "1"
 
-    def __init__(self, *, provider: str, model: str) -> None:
-        """Configure OpenAI-native artifact ownership."""
-        self.provider = provider
-        self.model = model
+    def __init__(
+        self,
+        *,
+        provider: str,
+        model: str,
+        operation: ModelStreamCallKind,
+        integration: str | None,
+    ) -> None:
+        """Configure OpenAI-native artifact and failure ownership."""
+        self.provider: str = provider
+        self.model: str = model
+        self.operation: ModelStreamCallKind = operation
+        self.integration: str | None = integration
         self._canonical = _OpenAIResponsesCanonicalNormalizer(
             provider=provider,
             model=model,
+            operation=operation,
+            integration=integration,
         )
 
     def start(self, session_id: str) -> "_OpenAIResponsesOutputStream":
@@ -1165,7 +1069,7 @@ class _OpenAIResponsesOutputStream:
         self._completed_output_items: list[dict[str, object]] = []
         self._completed_response: Response | None = None
         self._completed_response_seen = False
-        self._terminal_error: ModelCallError | None = None
+        self._terminal_error: ModelProviderFailure | None = None
         self._partial_text: list[str] = []
         self._provider_tool_activity = ProviderToolActivityAccumulator()
 
@@ -1252,12 +1156,13 @@ class _OpenAIResponsesOutputStream:
             provider_code = reason.reason if reason is not None else None
             self._terminal_error = _map_openai_terminal_error(
                 outcome="incomplete",
+                operation=self.normalizer.operation,
+                provider=self.normalizer.provider,
+                model=self.normalizer.model,
+                integration=self.normalizer.integration,
+                provider_message=None,
                 provider_code=provider_code,
-            )
-            self._log_terminal_error(
-                event_type=native_event.type,
-                provider_code=provider_code,
-                response_id=native_event.response.id,
+                provider_error_type="response_incomplete",
             )
         elif (
             isinstance(native_event, ResponseFailedEvent)
@@ -1265,14 +1170,18 @@ class _OpenAIResponsesOutputStream:
         ):
             response_error = native_event.response.error
             provider_code = response_error.code if response_error is not None else None
+            provider_message = (
+                response_error.message if response_error is not None else None
+            )
             self._terminal_error = _map_openai_terminal_error(
                 outcome="failed",
+                operation=self.normalizer.operation,
+                provider=self.normalizer.provider,
+                model=self.normalizer.model,
+                integration=self.normalizer.integration,
+                provider_message=provider_message,
                 provider_code=provider_code,
-            )
-            self._log_terminal_error(
-                event_type=native_event.type,
-                provider_code=provider_code,
-                response_id=native_event.response.id,
+                provider_error_type="response_failed",
             )
         elif (
             isinstance(native_event, ResponseErrorEvent)
@@ -1280,12 +1189,13 @@ class _OpenAIResponsesOutputStream:
         ):
             self._terminal_error = _map_openai_terminal_error(
                 outcome="error",
+                operation=self.normalizer.operation,
+                provider=self.normalizer.provider,
+                model=self.normalizer.model,
+                integration=self.normalizer.integration,
+                provider_message=native_event.message,
                 provider_code=native_event.code,
-            )
-            self._log_terminal_error(
-                event_type=native_event.type,
-                provider_code=native_event.code,
-                response_id=None,
+                provider_error_type="response_error",
             )
         elif (
             isinstance(native_event, ResponseCompletedEvent)
@@ -1299,34 +1209,22 @@ class _OpenAIResponsesOutputStream:
             projections=projections,
         )
 
-    def _log_terminal_error(
-        self,
-        *,
-        event_type: str,
-        provider_code: str | None,
-        response_id: str | None,
-    ) -> None:
-        """Log bounded terminal metadata without provider message bodies."""
-        logger.warning(
-            "OpenAI Responses terminal failure received",
-            extra={
-                "session_id": self._session_id,
-                "provider": self.normalizer.provider,
-                "model": self.normalizer.model,
-                "openai_responses_terminal_event": event_type,
-                "openai_responses_terminal_code": _safe_provider_error_code(
-                    provider_code
-                ),
-                "openai_responses_response_id": _safe_provider_identifier(response_id),
-            },
-        )
-
     def complete(self) -> NormalizedAdapterOutput:
         """Build durable output only after typed explicit completion."""
         if self._terminal_error is not None:
             raise self._terminal_error
         if not self._completed_response_seen or self._completed_response is None:
-            raise ModelCallError("Model response stream ended before completion.")
+            raise model_provider_failure(
+                operation=self.normalizer.operation,
+                provider=self.normalizer.provider,
+                model=self.normalizer.model,
+                integration=self.normalizer.integration,
+                provider_message="The model response stream ended before completion.",
+                status_code=None,
+                provider_code="stream_ended_before_completion",
+                provider_error_type="response_stream_transport",
+                category=ModelProviderFailureCategory.TRANSPORT,
+            )
         return self._build_output()
 
     def interrupt(self) -> NormalizedAdapterOutput:
@@ -1707,6 +1605,8 @@ async def call_openai_responses_text(
     normalizer = OpenAIResponsesOutputNormalizer(
         provider=provider.value,
         model=model,
+        operation=call_context.call_kind,
+        integration=call_context.provider_integration_id,
     )
     stream = normalizer.start(call_context.session_id or "bounded-operation")
     try:
@@ -1745,128 +1645,114 @@ def _assistant_text(events: Sequence[Event]) -> str:
 def _map_openai_terminal_error(
     *,
     outcome: Literal["error", "failed", "incomplete"],
+    operation: ModelStreamCallKind,
+    provider: str,
+    model: str,
+    integration: str | None,
+    provider_message: str | None,
     provider_code: str | None,
-) -> ModelCallError:
-    """Classify typed terminal events without retaining provider message bodies."""
-    safe_code = _safe_provider_error_code(provider_code)
-    failure_code = f"openai_response_{outcome}"
-    if safe_code is not None:
-        failure_code = f"{failure_code}_{safe_code}"
-
-    if outcome == "incomplete":
-        if safe_code == "max_output_tokens":
-            return _OpenAIResponsesNonRetryableError(
-                "The model response reached its output token limit.",
-                failure_code=failure_code,
-                provider_code=safe_code,
-                status_code=None,
-            )
-        if safe_code == "content_filter":
-            return _OpenAIResponsesNonRetryableError(
-                "The model response was blocked by a content filter.",
-                failure_code=failure_code,
-                provider_code=safe_code,
-                status_code=None,
-            )
-        return _OpenAIResponsesTransientError(
-            "Model response was incomplete.",
-            failure_code=failure_code,
-            provider_code=safe_code,
-            status_code=None,
-        )
-
-    known_transient = safe_code in _TRANSIENT_RESPONSE_ERROR_CODES
-    known_non_retryable = (
-        safe_code in _NON_RETRYABLE_RESPONSE_ERROR_CODES
-        or safe_code in _IMAGE_RESPONSE_ERROR_CODES
-    )
-    if known_transient or not known_non_retryable:
-        message = (
-            "Model call failed." if outcome == "error" else "Model response failed."
-        )
-        if safe_code == "rate_limit_exceeded":
-            message = "The model provider rate limit was exceeded."
-        elif safe_code == "server_error":
-            message = "The model provider is temporarily unavailable."
-        elif safe_code == "vector_store_timeout":
-            message = "The model vector store timed out."
-        return _OpenAIResponsesTransientError(
-            message,
-            failure_code=failure_code,
-            provider_code=safe_code,
-            status_code=None,
-        )
-
-    if safe_code in _IMAGE_RESPONSE_ERROR_CODES:
-        message = "The model provider rejected an input image."
-        if safe_code == "image_content_policy_violation":
-            message = "The model provider rejected an input image due to policy."
-    elif safe_code in {"bio_policy", "cyber_policy"}:
-        message = "The model provider rejected the request due to policy."
-    elif safe_code == "context_length_exceeded":
-        message = "The model context window was exceeded."
-    elif safe_code == "insufficient_quota":
-        message = "The model provider quota was exceeded."
-    else:
-        message = "The model provider rejected the request."
-    return _OpenAIResponsesNonRetryableError(
-        message,
-        failure_code=failure_code,
-        provider_code=safe_code,
+    provider_error_type: str,
+) -> ModelProviderFailure:
+    """Convert one typed terminal event into the common provider contract."""
+    return model_provider_failure(
+        operation=operation,
+        provider=provider,
+        model=model,
+        integration=integration,
+        provider_message=(
+            provider_message
+            or _openai_terminal_fallback_message(outcome, provider_code)
+        ),
         status_code=None,
+        provider_code=provider_code,
+        provider_error_type=provider_error_type,
     )
 
 
-def _map_openai_error(exc: OpenAIError) -> Exception:
-    """Convert SDK failures without retaining raw provider bodies or causes."""
+def _openai_terminal_fallback_message(
+    outcome: Literal["error", "failed", "incomplete"],
+    provider_code: str | None,
+) -> str:
+    """Return a concise classified fallback when OpenAI omits a message."""
+    if provider_code == "max_output_tokens":
+        return "The model response reached its output token limit."
+    if provider_code in {
+        "content_filter",
+        "bio_policy",
+        "cyber_policy",
+        "image_content_policy_violation",
+    }:
+        return "The model provider rejected the request due to policy."
+    if provider_code == "context_length_exceeded":
+        return "The model context window was exceeded."
+    if provider_code == "insufficient_quota":
+        return "The model provider quota was exceeded."
+    if provider_code == "rate_limit_exceeded":
+        return "The model provider rate limit was exceeded."
+    if provider_code == "server_error":
+        return "The model provider is temporarily unavailable."
+    if provider_code == "vector_store_timeout":
+        return "The model vector store timed out."
+    if outcome == "incomplete":
+        return "The model response was incomplete."
+    if outcome == "failed":
+        return "The model response failed."
+    return "The model provider could not process the request."
+
+
+def _map_openai_error(
+    exc: OpenAIError,
+    *,
+    call_context: ModelStreamCallContext,
+    integration: str | None,
+) -> ModelProviderFailure:
+    """Convert one final SDK failure into the common provider contract."""
     status_code = exc.status_code if isinstance(exc, APIStatusError) else None
-    code = _safe_openai_error_code(exc)
-    classified = _map_openai_status_error(
+    error_body = _openai_error_body(exc)
+    return model_provider_failure(
+        operation=call_context.call_kind,
+        provider=call_context.provider,
+        model=call_context.model,
+        integration=integration,
+        provider_message=(
+            extract_provider_message_text(error_body.get("message"))
+            or extract_provider_message_text(getattr(exc, "message", None))
+        ),
         status_code=status_code,
-        provider_code=code,
-        failure_code_prefix="openai_http",
+        provider_code=error_body.get("code") or getattr(exc, "code", None),
+        provider_error_type=(error_body.get("type") or exc.__class__.__name__),
+        retry_hint_seconds=_openai_retry_after_seconds(exc),
     )
-    if classified is not None:
-        return classified
-    return OpenAIResponsesProviderError(
-        error_type=exc.__class__.__name__,
-        status_code=status_code,
-        code=code,
-    )
+
+
+def _openai_error_body(exc: OpenAIError) -> dict[str, object]:
+    """Return only the typed provider error object from an SDK status failure."""
+    if not isinstance(exc, APIStatusError) or not isinstance(exc.body, dict):
+        return {}
+    nested_error = exc.body.get("error")
+    return nested_error if isinstance(nested_error, dict) else exc.body
+
+
+def _openai_retry_after_seconds(exc: OpenAIError) -> float | None:
+    """Extract a numeric Retry-After hint without retaining headers."""
+    if not isinstance(exc, APIStatusError):
+        return None
+    value = exc.response.headers.get("retry-after")
+    if not isinstance(value, str):
+        return None
+    try:
+        seconds = float(value)
+    except ValueError:
+        return None
+    return seconds if 0 <= seconds <= 86_400 else None
 
 
 def _safe_openai_error_code(exc: OpenAIError) -> str | None:
-    """Extract one bounded scalar provider code without copying error text."""
-    raw_code = getattr(exc, "code", None)
-    if raw_code is None and isinstance(exc, APIStatusError):
-        body = exc.body
-        if isinstance(body, dict):
-            error = body.get("error")
-            if isinstance(error, dict):
-                raw_code = error.get("code")
-    return _safe_provider_error_code(raw_code)
-
-
-def _safe_provider_error_code(value: object) -> str | None:
-    """Allow only a bounded operational provider error code."""
-    if not isinstance(value, str):
-        return None
-    code = value.strip()[:_SAFE_ERROR_CODE_MAX_CHARS]
-    if not code or not all(char.isalnum() or char in {"_", "-", "."} for char in code):
-        return None
-    return code
-
-
-def _safe_provider_identifier(value: object) -> str | None:
-    """Allow only a bounded opaque provider identifier."""
-    if not isinstance(value, str):
-        return None
-    identifier = value.strip()[:_SAFE_PROVIDER_IDENTIFIER_MAX_CHARS]
-    if not identifier or not all(
-        char.isalnum() or char in {"_", "-", "."} for char in identifier
-    ):
-        return None
-    return identifier
+    """Extract one bounded scalar provider code for continuation handling."""
+    error_body = _openai_error_body(exc)
+    return sanitize_provider_identifier(
+        error_body.get("code") or getattr(exc, "code", None)
+    )
 
 
 def _is_previous_response_not_found(exc: OpenAIError) -> bool:

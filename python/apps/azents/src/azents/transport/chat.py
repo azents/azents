@@ -124,6 +124,7 @@ def chat_live_run_updated_dump(
     retry = None
     if run.retry is not None:
         retry = {
+            "error_kind": run.retry.error_kind,
             "status": run.retry.status,
             "last_error_message": run.retry.last_error_message,
             "failed_attempt_count": run.retry.failed_attempt_count,
@@ -146,6 +147,13 @@ def chat_live_run_updated_dump(
                 for attempt in run.retry.attempts
             ],
         }
+    operation = None
+    if run.operation is not None:
+        operation = {
+            "kind": run.operation.kind,
+            "operation_id": run.operation.operation_id,
+            "status": run.operation.status,
+        }
     return {
         "type": "live_run_updated",
         "session_id": session_id,
@@ -157,6 +165,7 @@ def chat_live_run_updated_dump(
             "model_call_started_at": run.model_call_started_at.isoformat()
             if run.model_call_started_at is not None
             else None,
+            "operation": operation,
             "retry": retry,
         },
     }
