@@ -1,7 +1,7 @@
 """add subagent model policy settings
 
-Revision ID: e63aa6b8545b
-Revises: 09c8f1c58681
+Revision ID: d54f4767b88e
+Revises: a8ee43314ef5
 Create Date: 2026-07-17 15:41:26.870478
 
 """
@@ -11,8 +11,8 @@ from typing import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "e63aa6b8545b"
-down_revision: str | Sequence[str] | None = "09c8f1c58681"
+revision: str = "d54f4767b88e"
+down_revision: str | Sequence[str] | None = "a8ee43314ef5"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -120,6 +120,6 @@ def upgrade() -> None:
 def downgrade() -> None:
     """Refuse downgrade because later subagent policy intent may exist."""
     raise RuntimeError(
-        "e63aa6b8545b is irreversible because later selectable model settings may "
+        "d54f4767b88e is irreversible because later selectable model settings may "
         "contain explicit subagent policy intent"
     )
