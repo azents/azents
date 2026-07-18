@@ -254,8 +254,16 @@ function SelectableModelSettingsModal({
     option.normalized_capabilities?.context_window?.max_output_tokens ?? null;
   const supportedTools =
     option.normalized_capabilities?.built_in_tools?.supported ?? [];
-  const formatToolLabel = (tool: string): string =>
-    tool === "web_search" ? t("builtinToolWebSearch") : tool;
+  const formatToolLabel = (tool: string): string => {
+    switch (tool) {
+      case "web_search":
+        return t("builtinToolWebSearch");
+      case "image_generation":
+        return t("builtinToolImageGeneration");
+      default:
+        return tool;
+    }
+  };
 
   return (
     <Modal

@@ -12,7 +12,7 @@ import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
 const capabilities: ModelCapabilities = {
   reasoning: { supported: true, effort_levels: ["low", "medium", "high"] },
-  built_in_tools: { supported: ["web_search"] },
+  built_in_tools: { supported: ["web_search", "image_generation"] },
   context_window: { max_input_tokens: 1_000_000, max_output_tokens: null },
   modalities: { input: ["text"], output: ["text"] },
   tool_calling: { supported: true },
@@ -48,7 +48,7 @@ const defaultOption: SelectableModelOptionFormValue = {
   normalized_capabilities: capabilities,
   context_window_tokens: 128_000,
   max_output_tokens: 8_000,
-  builtin_tools: ["web_search"],
+  builtin_tools: ["web_search", "image_generation"],
   subagent_enabled: true,
   subagent_guidance: "Use for complex synthesis tasks.",
 };
@@ -164,6 +164,7 @@ export const SettingsModal = {
       body.getByRole("dialog", { name: "Settings for default" }),
     ).toBeVisible();
     await expect(body.getByLabelText("Web search")).toBeChecked();
+    await expect(body.getByLabelText("Image generation")).toBeChecked();
   },
 } satisfies Story;
 

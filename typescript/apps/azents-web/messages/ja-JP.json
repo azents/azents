@@ -776,6 +776,7 @@
         "noTokenCap": "ユーザー上限なし",
         "builtinToolsLabel": "組み込みツール",
         "builtinToolWebSearch": "ウェブ検索",
+        "builtinToolImageGeneration": "画像生成",
         "noBuiltinTools": "このモデルがサポートする組み込みツールはありません。",
         "subagentsSectionLabel": "サブエージェント",
         "subagentEnabledLabel": "サブエージェントの明示的な選択に使用する",

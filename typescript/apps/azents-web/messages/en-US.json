@@ -776,6 +776,7 @@
         "noTokenCap": "No user cap",
         "builtinToolsLabel": "Built-in tools",
         "builtinToolWebSearch": "Web search",
+        "builtinToolImageGeneration": "Image generation",
         "noBuiltinTools": "This model has no supported built-in tools.",
         "subagentsSectionLabel": "Subagents",
         "subagentEnabledLabel": "Available for explicit subagent selection",
