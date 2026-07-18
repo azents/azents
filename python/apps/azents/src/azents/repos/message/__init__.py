@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.enums import EventKind, MessageRole
 from azents.engine.events.action_messages import ActionMessagePayload
 from azents.engine.events.output_parts import iter_output_parts
+from azents.engine.events.provider_tool_rendering import render_provider_tool_semantic
 from azents.engine.events.types import (
     ActionExecutionResultPayload,
     AgentMessagePayload,
@@ -179,7 +180,7 @@ def _to_chat_message(row: RDBEvent) -> ChatMessage | None:
                 metadata=None,
                 created_at=row.created_at,
             )
-        case ClientToolCallPayload() | ProviderToolCallPayload():
+        case ClientToolCallPayload():
             return ChatMessage(
                 id=row.id,
                 session_id=row.session_id,
@@ -189,7 +190,7 @@ def _to_chat_message(row: RDBEvent) -> ChatMessage | None:
                     FunctionToolCall(
                         id=payload.call_id,
                         name=payload.name,
-                        arguments=payload.arguments or "",
+                        arguments=payload.arguments,
                     )
                 ],
                 tool_call_id=None,
@@ -197,6 +198,27 @@ def _to_chat_message(row: RDBEvent) -> ChatMessage | None:
                 reasoning_summary=None,
                 usage=None,
                 metadata=None,
+                created_at=row.created_at,
+            )
+        case ProviderToolCallPayload():
+            return ChatMessage(
+                id=row.id,
+                session_id=row.session_id,
+                role=MessageRole.ASSISTANT,
+                content=render_provider_tool_semantic(payload),
+                tool_calls=[
+                    FunctionToolCall(
+                        id=payload.call_id,
+                        name=payload.name,
+                        arguments=payload.semantic.input or "",
+                    )
+                ],
+                tool_call_id=None,
+                attachments=_attachments(payload.attachments)
+                + _output_part_attachments(payload.semantic.output),
+                reasoning_summary=None,
+                usage=None,
+                metadata={"status": payload.status or "unknown"},
                 created_at=row.created_at,
             )
         case ClientToolResultPayload():
@@ -219,11 +241,11 @@ def _to_chat_message(row: RDBEvent) -> ChatMessage | None:
                 id=row.id,
                 session_id=row.session_id,
                 role=MessageRole.ASSISTANT,
-                content=_tool_output_text(payload.output),
+                content=render_provider_tool_semantic(payload),
                 tool_calls=None,
                 tool_call_id=payload.call_id,
                 attachments=_attachments(payload.attachments)
-                + _output_part_attachments(payload.output),
+                + _output_part_attachments(payload.semantic.output),
                 reasoning_summary=None,
                 usage=None,
                 metadata={"status": payload.status},

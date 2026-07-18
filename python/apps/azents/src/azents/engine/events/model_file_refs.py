@@ -40,13 +40,16 @@ def file_parts(event: Event) -> list[FileOutputPart]:
         if isinstance(payload.content, str):
             return []
         return [part for part in payload.content if isinstance(part, FileOutputPart)]
-    if isinstance(
-        payload,
-        ClientToolResultPayload | ProviderToolCallPayload | ProviderToolResultPayload,
-    ):
+    if isinstance(payload, ClientToolResultPayload):
         return [
             part
             for part in iter_output_parts(payload.output)
+            if isinstance(part, FileOutputPart)
+        ]
+    if isinstance(payload, ProviderToolCallPayload | ProviderToolResultPayload):
+        return [
+            part
+            for part in iter_output_parts(payload.semantic.output)
             if isinstance(part, FileOutputPart)
         ]
     return []

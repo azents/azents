@@ -10,6 +10,7 @@ from collections.abc import Awaitable, Callable
 from typing import Literal, TypeAlias
 
 from azents.engine.events.engine_events import EngineEvent
+from azents.engine.events.provider_tool_rendering import render_provider_tool_semantic
 from azents.engine.events.types import (
     ArtifactOutputPart,
     AssistantMessagePayload,
@@ -17,6 +18,7 @@ from azents.engine.events.types import (
     ClientToolResultPayload,
     Event,
     OutputTextPart,
+    ProviderToolCallPayload,
     ProviderToolResultPayload,
     SystemErrorPayload,
 )
@@ -128,10 +130,15 @@ def _collect_event_result(
         attachments.extend(_runtime_attachments_from_event(payload.attachments))
         attachments.extend(_runtime_attachments_from_output(payload.content))
         return
-    if isinstance(payload, ClientToolResultPayload | ProviderToolResultPayload):
+    if isinstance(payload, ClientToolResultPayload):
         _append_event_text(payload.output, texts)
         attachments.extend(_runtime_attachments_from_event(payload.attachments))
         attachments.extend(_runtime_attachments_from_output(payload.output))
+        return
+    if isinstance(payload, ProviderToolCallPayload | ProviderToolResultPayload):
+        texts.append(render_provider_tool_semantic(payload))
+        attachments.extend(_runtime_attachments_from_event(payload.attachments))
+        attachments.extend(_runtime_attachments_from_output(payload.semantic.output))
         return
     if isinstance(payload, SystemErrorPayload) and payload.content:
         texts.append(payload.content)
