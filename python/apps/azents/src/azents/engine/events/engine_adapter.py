@@ -22,6 +22,7 @@ from azents.core.enums import (
     LLMProvider,
 )
 from azents.core.tools import TurnContext
+from azents.core.xai import resolve_xai_api_base_url
 from azents.engine.context.compaction import (
     SUMMARY_SYSTEM_PROMPT,
     SUMMARY_USER_TEMPLATE,
@@ -201,7 +202,10 @@ def _xai_imagine_client_factory() -> XaiImagineClientFactory:
     async def create() -> AsyncIterator[XaiImagineClient]:
         timeout = httpx.Timeout(60.0, connect=10.0)
         async with httpx.AsyncClient(timeout=timeout) as http_client:
-            yield XaiImagineClient(http_client)
+            yield XaiImagineClient(
+                http_client,
+                base_url=resolve_xai_api_base_url(),
+            )
 
     return create
 

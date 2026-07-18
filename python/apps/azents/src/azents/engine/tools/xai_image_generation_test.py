@@ -31,7 +31,10 @@ def _factory(
     @contextlib.asynccontextmanager
     async def create() -> AsyncIterator[XaiImagineClient]:
         async with httpx.AsyncClient(transport=transport) as http_client:
-            yield XaiImagineClient(http_client)
+            yield XaiImagineClient(
+                http_client,
+                base_url="https://api.x.ai/v1",
+            )
 
     return create
 

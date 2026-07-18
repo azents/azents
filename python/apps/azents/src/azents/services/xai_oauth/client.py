@@ -13,8 +13,8 @@ from azents.core.xai_oauth import (
     XAI_OAUTH_CLIENT_ID,
     XAI_OAUTH_DEVICE_CODE_URL,
     XAI_OAUTH_SCOPE,
-    XAI_OAUTH_TOKEN_URL,
     XaiOAuthConnectionMethod,
+    resolve_xai_oauth_token_url,
 )
 
 from .data import (
@@ -96,7 +96,7 @@ class XaiOAuthClient:
         """Poll Device authentication completion once."""
         try:
             response = await self._http_client.post(
-                XAI_OAUTH_TOKEN_URL,
+                resolve_xai_oauth_token_url(),
                 data={
                     "grant_type": _DEVICE_CODE_GRANT_TYPE,
                     "client_id": XAI_OAUTH_CLIENT_ID,
@@ -144,7 +144,7 @@ class XaiOAuthClient:
         """Refresh token using Refresh token grant."""
         try:
             response = await self._http_client.post(
-                XAI_OAUTH_TOKEN_URL,
+                resolve_xai_oauth_token_url(),
                 data={
                     "grant_type": "refresh_token",
                     "refresh_token": refresh_token,

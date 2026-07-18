@@ -50,7 +50,9 @@ async def test_generate_uses_bearer_auth_and_base64_response() -> None:
         return httpx.Response(200, json={"data": [{"b64_json": "aW1hZ2U="}]})
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http_client:
-        result = await XaiImagineClient(http_client).generate(
+        result = await XaiImagineClient(
+            http_client, base_url="https://api.x.ai/v1"
+        ).generate(
             _request(),
             access_token="secret-token",
         )
@@ -77,7 +79,9 @@ async def test_generate_classifies_provider_errors(
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http_client:
         with pytest.raises(error_type) as raised:
-            await XaiImagineClient(http_client).generate(
+            await XaiImagineClient(
+                http_client, base_url="https://api.x.ai/v1"
+            ).generate(
                 _request(),
                 access_token="secret-token",
             )
@@ -100,6 +104,7 @@ async def test_generate_retries_one_server_failure() -> None:
     async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http_client:
         result = await XaiImagineClient(
             http_client,
+            base_url="https://api.x.ai/v1",
             sleep=_no_sleep,
         ).generate(_request(), access_token="secret-token")
 
@@ -120,6 +125,7 @@ async def test_generate_fails_after_bounded_server_retries() -> None:
         with pytest.raises(XaiImagineUnavailableError):
             await XaiImagineClient(
                 http_client,
+                base_url="https://api.x.ai/v1",
                 sleep=_no_sleep,
             ).generate(_request(), access_token="secret-token")
 
@@ -144,7 +150,9 @@ async def test_generate_rejects_invalid_success_response(
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http_client:
         with pytest.raises(XaiImagineInvalidResponseError):
-            await XaiImagineClient(http_client).generate(
+            await XaiImagineClient(
+                http_client, base_url="https://api.x.ai/v1"
+            ).generate(
                 _request(),
                 access_token="secret-token",
             )
@@ -174,7 +182,9 @@ async def test_generate_rejects_oversized_response(
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http_client:
         with pytest.raises(XaiImagineInvalidResponseError, match="size limit"):
-            await XaiImagineClient(http_client).generate(
+            await XaiImagineClient(
+                http_client, base_url="https://api.x.ai/v1"
+            ).generate(
                 _request(),
                 access_token="secret-token",
             )
@@ -194,7 +204,9 @@ async def test_generate_propagates_cancellation() -> None:
     """Do not convert run cancellation into a retryable provider failure."""
     async with httpx.AsyncClient(transport=_CancellingTransport()) as http_client:
         with pytest.raises(asyncio.CancelledError):
-            await XaiImagineClient(http_client).generate(
+            await XaiImagineClient(
+                http_client, base_url="https://api.x.ai/v1"
+            ).generate(
                 _request(),
                 access_token="secret-token",
             )

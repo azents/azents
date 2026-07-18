@@ -1,6 +1,7 @@
 """xAI OAuth constants and session state."""
 
 import enum
+import os
 
 XAI_OAUTH_ISSUER = "https://auth.x.ai"
 # Public native-app client identity used by the Grok CLI OAuth flow.
@@ -9,6 +10,11 @@ XAI_OAUTH_DISCOVERY_URL = f"{XAI_OAUTH_ISSUER}/.well-known/openid-configuration"
 XAI_OAUTH_DEVICE_CODE_URL = f"{XAI_OAUTH_ISSUER}/oauth2/device/code"
 XAI_OAUTH_TOKEN_URL = f"{XAI_OAUTH_ISSUER}/oauth2/token"
 XAI_OAUTH_SCOPE = "openid profile email offline_access api:access grok-cli:access"
+
+
+def resolve_xai_oauth_token_url() -> str:
+    """Return the configured xAI OAuth token endpoint."""
+    return os.environ.get("AZ_XAI_OAUTH_TOKEN_URL", XAI_OAUTH_TOKEN_URL)
 
 
 class XaiOAuthConnectionMethod(enum.StrEnum):

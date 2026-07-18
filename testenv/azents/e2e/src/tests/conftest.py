@@ -479,6 +479,8 @@ def _configure_azents_server_container(
         .with_env("AZ_LLM_CATALOG_STARTUP_SYNC_ENABLED", "true")
         .with_env("AZ_LLM_CATALOG_SOURCE_MODE", "fixture")
         .with_env("AZ_OPENAI_BASE_URL", "http://openai-proxy:8081/v1")
+        .with_env("AZ_XAI_API_BASE_URL", "http://openai-proxy:8081/v1")
+        .with_env("AZ_XAI_OAUTH_TOKEN_URL", "http://openai-proxy:8081/oauth2/token")
         .with_env("AZ_TESTENV_RUNTIME_HOOK_QA_ENABLED", "true")
         .with_env("AZ_TOOL_INTERNAL_ERROR_DETAILS", "true")
         .with_env("AZ_AGENT_HOME_IDLE_TIMEOUT_SECS", "60")

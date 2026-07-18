@@ -7,10 +7,7 @@ from collections.abc import Awaitable, Callable
 
 import httpx
 
-from azents.core.xai import XAI_API_BASE_URL
-
 XAI_IMAGINE_MODEL = "grok-imagine-image-quality"
-_XAI_IMAGE_GENERATIONS_URL = f"{XAI_API_BASE_URL}/images/generations"
 _MAX_RESPONSE_BYTES = 30 * 1024 * 1024
 _MAX_TRANSPORT_ATTEMPTS = 2
 
@@ -55,9 +52,11 @@ class XaiImagineClient:
         self,
         http_client: httpx.AsyncClient,
         *,
+        base_url: str,
         sleep: Callable[[float], Awaitable[None]] | None = None,
     ) -> None:
         self.http_client = http_client
+        self.base_url = base_url.rstrip("/")
         self.sleep = sleep
 
     async def generate(
@@ -71,7 +70,7 @@ class XaiImagineClient:
             try:
                 async with self.http_client.stream(
                     "POST",
-                    _XAI_IMAGE_GENERATIONS_URL,
+                    f"{self.base_url}/images/generations",
                     headers={
                         "Authorization": f"Bearer {access_token}",
                         "Accept": "application/json",

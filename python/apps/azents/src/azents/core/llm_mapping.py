@@ -21,7 +21,7 @@ from azents.core.credentials import (
     XaiOAuthSecrets,
 )
 from azents.core.enums import LLMProvider
-from azents.core.xai import XAI_API_BASE_URL
+from azents.core.xai import resolve_xai_api_base_url
 from azents.repos.llm_provider_integration.data import (
     LLMProviderIntegrationWithSecrets,
 )
@@ -78,8 +78,8 @@ def build_credential_kwargs(
             if integration.provider == LLMProvider.XAI:
                 return {
                     "api_key": key,
-                    "base_url": XAI_API_BASE_URL,
-                    "api_base": XAI_API_BASE_URL,
+                    "base_url": resolve_xai_api_base_url(),
+                    "api_base": resolve_xai_api_base_url(),
                     "custom_llm_provider": "xai",
                 }
             return {"api_key": key}
@@ -98,8 +98,8 @@ def build_credential_kwargs(
         case XaiOAuthSecrets(access_token=token):
             return {
                 "api_key": token,
-                "base_url": XAI_API_BASE_URL,
-                "api_base": XAI_API_BASE_URL,
+                "base_url": resolve_xai_api_base_url(),
+                "api_base": resolve_xai_api_base_url(),
                 "custom_llm_provider": "xai",
             }
         case AwsSecrets(secret_access_key=secret):
