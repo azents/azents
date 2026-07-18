@@ -1429,7 +1429,6 @@ export const ChatInput = memo(function ChatInput({
           radius={rem(12)}
           px="xs"
           py={rem(6)}
-          shadow="xs"
           style={{
             position: "relative",
             border: `${rem(1)} solid var(--mantine-color-default-border)`,
