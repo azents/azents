@@ -4,7 +4,7 @@ import dataclasses
 import hashlib
 import json
 import os
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import ClassVar
 
 from openai.types.responses.response_includable import ResponseIncludable
@@ -306,20 +306,27 @@ class ResponsesRequestLowerer:
         match event.payload:
             case ProviderToolResultPayload(
                 name="image_generation",
+                status=status,
                 output=output,
                 native_artifact=artifact,
             ):
                 if not artifact.compatible_with(self.compat_key):
                     return None
-                if not _file_output_parts(output):
-                    return artifact.item
-                result = _rehydrated_image_generation_result(
-                    output,
-                    resolver=self.model_file_resolver,
+                if _file_output_parts(output):
+                    result = _rehydrated_image_generation_result(
+                        output,
+                        resolver=self.model_file_resolver,
+                    )
+                    if result is None:
+                        return None
+                else:
+                    native_result = artifact.item.get("result")
+                    result = native_result if isinstance(native_result, str) else None
+                return _lower_image_generation_native_item(
+                    artifact.item,
+                    status=status,
+                    result=result,
                 )
-                if result is None:
-                    return None
-                return {**artifact.item, "result": result}
             case ReasoningPayload(native_artifact=artifact):
                 if artifact.compatible_with(self.compat_key):
                     return sanitize_responses_native_item(dict(artifact.item))
@@ -706,6 +713,36 @@ def _drop_orphan_tool_outputs(
             continue
         filtered.append(item)
     return filtered
+
+
+def _lower_image_generation_native_item(
+    native_item: Mapping[str, object],
+    *,
+    status: str,
+    result: str | None,
+) -> dict[str, object]:
+    """Rebuild one generated-image replay item for the Responses input schema."""
+    native_status = native_item.get("status")
+    if isinstance(native_status, str) and native_status in {
+        "in_progress",
+        "completed",
+        "generating",
+        "failed",
+    }:
+        replay_status = native_status
+    elif status == "completed":
+        replay_status = "completed"
+    else:
+        replay_status = "failed"
+    lowered: dict[str, object] = {
+        "type": "image_generation_call",
+        "status": replay_status,
+        "result": result,
+    }
+    native_id = native_item.get("id")
+    if isinstance(native_id, str) and native_id:
+        lowered["id"] = native_id
+    return lowered
 
 
 def _omit_response_item_ids_for_unstored_request(
