@@ -975,6 +975,9 @@ class TestLiteLLMResponsesLowerer:
                             "type": "image_generation_call",
                             "id": "image-call-1",
                             "status": "completed",
+                            "action": "generate",
+                            "revised_prompt": "output-only prompt",
+                            "provider_extension": "output-only value",
                         }
                     ),
                 ),
@@ -1324,13 +1327,15 @@ class TestLiteLLMResponsesLowerer:
 
         assert request.input == [raw_item]
 
-    def test_passes_through_same_native_provider_tool_result_artifact(self) -> None:
-        """Use provider tool result native item as-is when compat key is same."""
+    def test_rebuilds_same_native_image_generation_result_artifact(self) -> None:
+        """Rebuild provider image output as a valid Responses input item."""
         lowerer = LiteLLMResponsesLowerer(provider="openai", model="gpt-5.1")
         raw_item: dict[str, object] = {
             "type": "image_generation_call",
             "id": "img-1",
             "status": "completed",
+            "action": "generate",
+            "provider_extension": "output-only value",
         }
         transcript = [
             _event(
@@ -1347,7 +1352,14 @@ class TestLiteLLMResponsesLowerer:
 
         request = lowerer.lower(transcript, model="gpt-5.1")
 
-        assert request.input == [raw_item]
+        assert request.input == [
+            {
+                "type": "image_generation_call",
+                "id": "img-1",
+                "status": "completed",
+                "result": None,
+            }
+        ]
 
     def test_passes_through_same_native_reasoning_artifact(self) -> None:
         """Use reasoning native item as-is when compat key is same."""

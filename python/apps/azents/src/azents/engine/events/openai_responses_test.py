@@ -444,7 +444,7 @@ def test_openai_sdk_lowerer_uses_standard_image_generation_tool(
 
 
 def test_chatgpt_oauth_rehydrates_image_generation_with_store_false() -> None:
-    """Replay generated image result when ChatGPT cannot retain responses."""
+    """Replay only valid generated-image fields for stateless ChatGPT."""
     lowerer = OpenAIResponsesLowerer(
         provider="chatgpt_oauth",
         model="gpt-5.1",
@@ -469,6 +469,9 @@ def test_chatgpt_oauth_rehydrates_image_generation_with_store_false() -> None:
             "type": "image_generation_call",
             "id": "image-call-1",
             "status": "completed",
+            "action": "generate",
+            "revised_prompt": "output-only prompt",
+            "provider_extension": "output-only value",
         },
     )
     event = Event(
@@ -506,7 +509,7 @@ def test_chatgpt_oauth_rehydrates_image_generation_with_store_false() -> None:
 
 
 def test_openai_sdk_rehydrates_image_generation_result() -> None:
-    """Replay generated image result through the official OpenAI SDK lowerer."""
+    """Replay only valid generated-image fields through the SDK lowerer."""
     lowerer = OpenAIResponsesLowerer(
         provider="openai",
         model="gpt-5.1",
@@ -531,6 +534,9 @@ def test_openai_sdk_rehydrates_image_generation_result() -> None:
             "type": "image_generation_call",
             "id": "image-call-1",
             "status": "completed",
+            "action": "generate",
+            "revised_prompt": "output-only prompt",
+            "provider_extension": "output-only value",
         },
     )
     event = Event(
@@ -1423,8 +1429,8 @@ async def test_official_sdk_wire_request_preserves_presence_and_stop() -> None:
     assert "previous_response_id" not in captured_body
 
 
-async def test_official_sdk_wire_request_omits_unstored_generated_image_id() -> None:
-    """Match the ChatGPT stateless replay body rather than SDK input typing."""
+async def test_official_sdk_wire_request_sanitizes_unstored_generated_image() -> None:
+    """Send only the ChatGPT stateless generated-image input contract."""
     captured_body: dict[str, object] = {}
 
     async def respond(request: httpx.Request) -> httpx.Response:
@@ -1463,6 +1469,9 @@ async def test_official_sdk_wire_request_omits_unstored_generated_image_id() -> 
             "type": "image_generation_call",
             "id": "image-call-1",
             "status": "completed",
+            "action": "generate",
+            "revised_prompt": "output-only prompt",
+            "provider_extension": "output-only value",
         },
     )
     event = Event(
