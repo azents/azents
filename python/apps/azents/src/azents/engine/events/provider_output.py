@@ -617,7 +617,9 @@ class ProviderOutputMaterializer:
             image = by_call_id[payload.call_id]
             updated_payload = payload.model_copy(
                 update={
-                    "output": [image.file_part],
+                    "semantic": payload.semantic.model_copy(
+                        update={"output": [image.file_part]}
+                    ),
                     "attachments": [image.attachment],
                 }
             )

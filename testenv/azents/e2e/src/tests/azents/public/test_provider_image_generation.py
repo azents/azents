@@ -301,9 +301,14 @@ class TestProviderImageGeneration:
             results[0].get("payload"),
             label="durable provider result payload",
         )
+        assert "output" not in result_payload
+        semantic = json_object_payload(
+            result_payload.get("semantic"),
+            label="provider result semantic content",
+        )
         output = json_object_list_payload(
-            result_payload.get("output"),
-            label="provider result output",
+            semantic.get("output"),
+            label="provider result semantic output",
         )
         attachments = json_object_list_payload(
             result_payload.get("attachments"),

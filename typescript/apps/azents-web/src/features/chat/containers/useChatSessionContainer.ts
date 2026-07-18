@@ -202,6 +202,29 @@ function stringField(
   return typeof value === "string" ? value : null;
 }
 
+interface ProviderToolSemanticValue {
+  input: string | null;
+  output: unknown;
+}
+
+function providerToolSemanticFromValue(
+  value: unknown,
+): ProviderToolSemanticValue | null {
+  if (
+    !isRecord(value) ||
+    !("input" in value) ||
+    (value.input !== null && typeof value.input !== "string") ||
+    !("output" in value) ||
+    !Array.isArray(value.references)
+  ) {
+    return null;
+  }
+  return {
+    input: value.input,
+    output: value.output,
+  };
+}
+
 function numberField(
   record: Record<string, unknown>,
   key: string,
@@ -1029,20 +1052,27 @@ function mapEvents(
       case "provider_tool_call": {
         const callId = stringField(payload, "call_id");
         const name = stringField(payload, "name");
-        if (callId === null || name === null) {
+        const semantic = providerToolSemanticFromValue(payload.semantic);
+        if (callId === null || name === null || semantic === null) {
           return messages;
         }
+        const semanticOutput = semantic.output;
         return applyProviderToolCallItem(
           messages,
           {
             id: callId,
             callId,
             name,
-            arguments: stringField(payload, "arguments") ?? "",
+            arguments: semantic.input ?? "",
             status: providerToolCallStatusFromPayload(
               payload.status,
               messageStatus,
             ),
+            output: contentText(semanticOutput),
+            attachments: [
+              ...eventAttachments(payload),
+              ...contentAttachments(semanticOutput),
+            ],
           },
           event.id,
           event.created_at,
@@ -1066,20 +1096,19 @@ function mapEvents(
       }
       case "provider_tool_result": {
         const callId = stringField(payload, "call_id");
-        if (callId === null) {
+        const semantic = providerToolSemanticFromValue(payload.semantic);
+        if (callId === null || semantic === null) {
           return messages;
         }
+        const semanticOutput = semantic.output;
         return applyProviderToolCallOutput(messages, {
           callId,
           name: stringField(payload, "name") ?? "Provider tool",
-          output: contentText(payload.output),
-          status:
-            payload.status === "completed" || payload.status === "success"
-              ? "completed"
-              : "failed",
+          output: contentText(semanticOutput),
+          status: payload.status === "completed" ? "completed" : "failed",
           attachments: [
             ...eventAttachments(payload),
-            ...contentAttachments(payload.output),
+            ...contentAttachments(semanticOutput),
           ],
           fallbackMessageId: event.id,
           createdAt: event.created_at,

@@ -17,6 +17,9 @@ from azents.core.inference_profile import (
 )
 from azents.core.redis import create_redis_client
 from azents.engine.events.action_messages import ActionMessagePayload, ChatAction
+from azents.engine.events.provider_tool_semantics import (
+    provider_tool_semantic_input_content,
+)
 from azents.engine.events.types import (
     ActiveToolCall,
     AgentMessagePayload,
@@ -226,8 +229,9 @@ def _provider_tool_activity_live_event(
         payload=ProviderToolCallPayload(
             call_id=call_id,
             name=name,
-            arguments=arguments,
             status=status,
+            semantic=provider_tool_semantic_input_content(arguments),
+            attachments=[],
             native_artifact=_live_native_artifact(
                 projection="provider_tool_call",
                 source="provider_tool_activity",

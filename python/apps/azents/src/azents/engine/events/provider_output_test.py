@@ -27,6 +27,7 @@ from azents.engine.events.types import (
     FileOutputPart,
     NativeArtifact,
     ProviderToolResultPayload,
+    ProviderToolSemanticContent,
     build_native_compat_key,
 )
 from azents.engine.run.errors import ModelCallError
@@ -323,7 +324,11 @@ def _normalized_output(
             call_id="image-call-1",
             name="image_generation",
             status="completed",
-            output=[],
+            semantic=ProviderToolSemanticContent(
+                input=None,
+                output=[],
+                references=[],
+            ),
             attachments=[],
             native_artifact=_artifact(),
         ),

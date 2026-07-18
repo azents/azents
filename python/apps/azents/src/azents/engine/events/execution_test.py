@@ -40,6 +40,7 @@ from azents.engine.events.types import (
     NativeArtifact,
     OutputTextPart,
     ProviderToolCallPayload,
+    ProviderToolSemanticContent,
     ReasoningPayload,
     RunMarkerPayload,
     SystemPromptAnalysisPayload,
@@ -999,7 +1000,13 @@ def _provider_tool_call_event() -> Event:
         payload=ProviderToolCallPayload(
             call_id="provider-call-1",
             name="web_search",
-            arguments=None,
+            status=None,
+            semantic=ProviderToolSemanticContent(
+                input=None,
+                output=[],
+                references=[],
+            ),
+            attachments=[],
             native_artifact=_artifact(),
         ),
         created_at=datetime.datetime.now(datetime.UTC),

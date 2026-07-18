@@ -74,6 +74,7 @@ from azents.engine.events.types import (
     OutputTextPart,
     ProviderToolCallPayload,
     ProviderToolResultPayload,
+    ProviderToolSemanticContent,
     ReasoningPayload,
     RunMarkerPayload,
     SkillLoadedPayload,
@@ -959,15 +960,20 @@ class TestLiteLLMResponsesLowerer:
                     call_id="image-call-1",
                     name="image_generation",
                     status="completed",
-                    output=[
-                        FileOutputPart(
-                            model_file_id="model-file-1",
-                            media_type="image/jpeg",
-                            name="generated.jpg",
-                            size=123,
-                            kind="image",
-                        )
-                    ],
+                    semantic=ProviderToolSemanticContent(
+                        input=None,
+                        output=[
+                            FileOutputPart(
+                                model_file_id="model-file-1",
+                                media_type="image/jpeg",
+                                name="generated.jpg",
+                                size=123,
+                                kind="image",
+                            )
+                        ],
+                        references=[],
+                    ),
+                    attachments=[],
                     native_artifact=_artifact(
                         {
                             "type": "image_generation_call",
@@ -1018,15 +1024,20 @@ class TestLiteLLMResponsesLowerer:
                     call_id="image-call-1",
                     name="image_generation",
                     status="completed",
-                    output=[
-                        FileOutputPart(
-                            model_file_id="model-file-1",
-                            media_type="image/jpeg",
-                            name="generated.jpg",
-                            size=123,
-                            kind="image",
-                        )
-                    ],
+                    semantic=ProviderToolSemanticContent(
+                        input=None,
+                        output=[
+                            FileOutputPart(
+                                model_file_id="model-file-1",
+                                media_type="image/jpeg",
+                                name="generated.jpg",
+                                size=123,
+                                kind="image",
+                            )
+                        ],
+                        references=[],
+                    ),
+                    attachments=[],
                     native_artifact=_openai_artifact(
                         {
                             "type": "image_generation_call",
@@ -1067,15 +1078,20 @@ class TestLiteLLMResponsesLowerer:
                     call_id="image-call-1",
                     name="image_generation",
                     status="completed",
-                    output=[
-                        FileOutputPart(
-                            model_file_id="model-file-1",
-                            media_type="image/jpeg",
-                            name="generated.jpg",
-                            size=123,
-                            kind="image",
-                        )
-                    ],
+                    semantic=ProviderToolSemanticContent(
+                        input=None,
+                        output=[
+                            FileOutputPart(
+                                model_file_id="model-file-1",
+                                media_type="image/jpeg",
+                                name="generated.jpg",
+                                size=123,
+                                kind="image",
+                            )
+                        ],
+                        references=[],
+                    ),
+                    attachments=[],
                     native_artifact=_openai_artifact(
                         {
                             "type": "image_generation_call",
@@ -1315,7 +1331,13 @@ class TestLiteLLMResponsesLowerer:
                 ProviderToolCallPayload(
                     call_id="ws-1",
                     name="web_search",
-                    arguments=None,
+                    status="completed",
+                    semantic=ProviderToolSemanticContent(
+                        input=None,
+                        output=[],
+                        references=[],
+                    ),
+                    attachments=[],
                     native_artifact=_artifact(raw_item),
                 ),
             )
@@ -1342,7 +1364,12 @@ class TestLiteLLMResponsesLowerer:
                     call_id="img-1",
                     name="image_generation",
                     status="completed",
-                    output="Generated image",
+                    semantic=ProviderToolSemanticContent(
+                        input=None,
+                        output="Generated image",
+                        references=[],
+                    ),
+                    attachments=[],
                     native_artifact=_artifact(raw_item),
                 ),
             )
@@ -1946,7 +1973,13 @@ class TestLiteLLMResponsesLowerer:
                 ProviderToolCallPayload(
                     call_id="ws-1",
                     name="web_search",
-                    arguments='{"query":"docs"}',
+                    status=None,
+                    semantic=ProviderToolSemanticContent(
+                        input='{"query":"docs"}',
+                        output=[],
+                        references=[],
+                    ),
+                    attachments=[],
                     native_artifact=_artifact({"type": "web_search_call"}),
                 ),
             ),
@@ -1956,9 +1989,14 @@ class TestLiteLLMResponsesLowerer:
                     call_id="img-1",
                     name="image_generation",
                     status="completed",
-                    output=[
-                        OutputTextPart(text="generated image"),
-                    ],
+                    semantic=ProviderToolSemanticContent(
+                        input=None,
+                        output=[
+                            OutputTextPart(text="generated image"),
+                        ],
+                        references=[],
+                    ),
+                    attachments=[],
                     native_artifact=_artifact({"type": "image_generation_call"}),
                 ),
             ),

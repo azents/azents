@@ -68,6 +68,7 @@ from azents.engine.events.types import (
     FileOutputPart,
     NativeArtifact,
     ProviderToolResultPayload,
+    ProviderToolSemanticContent,
     UserMessagePayload,
     build_native_compat_key,
 )
@@ -482,15 +483,20 @@ def test_chatgpt_oauth_rehydrates_image_generation_with_store_false() -> None:
             call_id="image-call-1",
             name="image_generation",
             status="completed",
-            output=[
-                FileOutputPart(
-                    model_file_id="model-file-1",
-                    media_type="image/jpeg",
-                    name="generated.jpg",
-                    size=123,
-                    kind="image",
-                )
-            ],
+            semantic=ProviderToolSemanticContent(
+                input=None,
+                output=[
+                    FileOutputPart(
+                        model_file_id="model-file-1",
+                        media_type="image/jpeg",
+                        name="generated.jpg",
+                        size=123,
+                        kind="image",
+                    )
+                ],
+                references=[],
+            ),
+            attachments=[],
             native_artifact=artifact,
         ),
         created_at=datetime.datetime.now(datetime.UTC),
@@ -547,15 +553,20 @@ def test_openai_sdk_rehydrates_image_generation_result() -> None:
             call_id="image-call-1",
             name="image_generation",
             status="completed",
-            output=[
-                FileOutputPart(
-                    model_file_id="model-file-1",
-                    media_type="image/jpeg",
-                    name="generated.jpg",
-                    size=123,
-                    kind="image",
-                )
-            ],
+            semantic=ProviderToolSemanticContent(
+                input=None,
+                output=[
+                    FileOutputPart(
+                        model_file_id="model-file-1",
+                        media_type="image/jpeg",
+                        name="generated.jpg",
+                        size=123,
+                        kind="image",
+                    )
+                ],
+                references=[],
+            ),
+            attachments=[],
             native_artifact=artifact,
         ),
         created_at=datetime.datetime.now(datetime.UTC),
@@ -1485,15 +1496,20 @@ async def test_official_sdk_wire_request_sanitizes_unstored_generated_image() ->
             call_id="image-call-1",
             name="image_generation",
             status="completed",
-            output=[
-                FileOutputPart(
-                    model_file_id="model-file-1",
-                    media_type="image/jpeg",
-                    name="generated.jpg",
-                    size=123,
-                    kind="image",
-                )
-            ],
+            semantic=ProviderToolSemanticContent(
+                input=None,
+                output=[
+                    FileOutputPart(
+                        model_file_id="model-file-1",
+                        media_type="image/jpeg",
+                        name="generated.jpg",
+                        size=123,
+                        kind="image",
+                    )
+                ],
+                references=[],
+            ),
+            attachments=[],
             native_artifact=artifact,
         ),
         created_at=datetime.datetime.now(datetime.UTC),

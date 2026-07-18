@@ -9,6 +9,7 @@ from azents.engine.events.types import (
     ClientToolResultPayload,
     Event,
     FileOutputPart,
+    ProviderToolCallPayload,
     ProviderToolResultPayload,
     UserMessagePayload,
 )
@@ -39,7 +40,10 @@ def file_parts(event: Event) -> list[FileOutputPart]:
         if isinstance(payload.content, str):
             return []
         return [part for part in payload.content if isinstance(part, FileOutputPart)]
-    if isinstance(payload, ClientToolResultPayload | ProviderToolResultPayload):
+    if isinstance(
+        payload,
+        ClientToolResultPayload | ProviderToolCallPayload | ProviderToolResultPayload,
+    ):
         return [
             part
             for part in iter_output_parts(payload.output)

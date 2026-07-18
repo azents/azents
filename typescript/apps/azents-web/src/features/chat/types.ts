@@ -176,18 +176,33 @@ export interface ClientToolResultPayload {
   attachments: EventAttachment[];
 }
 
+export interface ProviderToolReference {
+  kind: "url" | "file" | "other";
+  uri: string | null;
+  title: string | null;
+  excerpt: string | null;
+  metadata: Record<string, string>;
+}
+
+export interface ProviderToolSemanticContent {
+  input: string | null;
+  output: string | OutputPart[];
+  references: ProviderToolReference[];
+}
+
 export interface ProviderToolCallPayload {
   call_id: string;
   name: string;
-  arguments?: string | null;
-  status?: "running" | "completed" | "failed" | null;
+  status: "running" | "completed" | "failed" | null;
+  semantic: ProviderToolSemanticContent;
+  attachments: EventAttachment[];
 }
 
 export interface ProviderToolResultPayload {
   call_id: string;
-  name?: string | null;
+  name: string | null;
   status: ToolResultStatus;
-  output: string | OutputPart[];
+  semantic: ProviderToolSemanticContent;
   attachments: EventAttachment[];
 }
 

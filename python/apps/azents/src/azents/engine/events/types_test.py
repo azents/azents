@@ -18,7 +18,10 @@ from azents.engine.events.types import (
     FileOutputPart,
     InputTextPart,
     NativeArtifact,
+    ProviderToolCallPayload,
+    ProviderToolReference,
     ProviderToolResultPayload,
+    ProviderToolSemanticContent,
     SystemErrorPayload,
     TokenUsagePayload,
     TurnMarkerPayload,
@@ -237,11 +240,76 @@ def test_provider_tool_result_is_not_client_tool_result_subclass() -> None:
         call_id="provider-1",
         name="image_generation",
         status="completed",
+        semantic=ProviderToolSemanticContent(
+            input=None,
+            output=[],
+            references=[],
+        ),
+        attachments=[],
         native_artifact=_artifact(),
     )
 
     assert type(payload) is ProviderToolResultPayload
     assert not isinstance(payload, ClientToolResultPayload)
+
+
+def test_provider_tool_required_nullable_fields_survive_exclude_none_dump() -> None:
+    reference = ProviderToolReference(
+        kind="url",
+        uri=None,
+        title=None,
+        excerpt=None,
+        metadata={},
+    )
+    payload = ProviderToolCallPayload(
+        call_id="provider-1",
+        name="web_search",
+        status=None,
+        semantic=ProviderToolSemanticContent(
+            input=None,
+            output=[],
+            references=[reference],
+        ),
+        attachments=[],
+        native_artifact=_artifact(),
+    )
+
+    dumped = payload.model_dump(mode="json", exclude_none=True)
+
+    assert dumped["status"] is None
+    assert dumped["semantic"]["input"] is None
+    assert dumped["semantic"]["references"] == [
+        {
+            "kind": "url",
+            "uri": None,
+            "title": None,
+            "excerpt": None,
+            "metadata": {},
+        }
+    ]
+    assert ProviderToolCallPayload.model_validate(dumped) == payload
+
+
+def test_provider_tool_payload_rejects_legacy_positional_fields() -> None:
+    with pytest.raises(ValidationError):
+        ProviderToolCallPayload.model_validate(
+            {
+                "call_id": "provider-1",
+                "name": "web_search",
+                "arguments": '{"query":"Azents"}',
+                "native_artifact": _artifact(),
+            }
+        )
+    with pytest.raises(ValidationError):
+        ProviderToolResultPayload.model_validate(
+            {
+                "call_id": "provider-1",
+                "name": "web_search",
+                "status": "completed",
+                "output": "legacy",
+                "native_artifact": _artifact(),
+            }
+        )
 
 
 def test_function_tool_result_metadata_defaults_to_isolated_dicts() -> None:
