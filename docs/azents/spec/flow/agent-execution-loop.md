@@ -49,7 +49,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ChatView.tsx
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
 last_verified_at: 2026-07-18
-spec_version: 102
+spec_version: 103
 ---
 
 # Agent Execution Loop
@@ -128,8 +128,9 @@ that runner and is discarded on runner teardown or worker handover.
 One `OpenAIResponsesModelAdapter` and official SDK client belong to one `AgentRunExecution`. For
 eligible sampling, the adapter lazily opens at most one Responses WebSocket, allows only one active
 logical response, serially reuses a healthy connection across model/tool turns, and closes the socket
-before the SDK client when the execution ends. SDK automatic reconnect is disabled. User Stop,
-watchdog expiry, execution cancellation, pre-terminal stream abandonment, decode failure, or
+before the SDK client when the execution ends. Incoming WebSocket messages have an explicit bounded
+32 MiB receive limit. SDK automatic reconnect is disabled. User Stop, watchdog expiry, execution
+cancellation, pre-terminal stream abandonment, decode failure, or
 WebSocket I/O failure closes and invalidates the connection so unread events cannot enter a later
 response.
 
@@ -881,6 +882,7 @@ updated by the user.
 
 ## Changelog
 
+- **2026-07-18** (spec_version 103) — Bounded incoming OpenAI Responses WebSocket messages at 32 MiB.
 - **2026-07-18** (spec_version 102) — Routed unclassified provider outcomes through the ordinary
   internal-error path instead of creating provider retry state or generic provider-failure logs.
 - **2026-07-18** (spec_version 101) — Added the bounded provider-failure contract, complete-budget

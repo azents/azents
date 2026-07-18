@@ -111,6 +111,7 @@ from azents.engine.run.types import BuiltinToolSpec
 
 logger = logging.getLogger(__name__)
 
+_OPENAI_RESPONSES_WEBSOCKET_MAX_SIZE = 32 * 1024 * 1024
 _RESPONSE_INPUT_ADAPTER: TypeAdapter[ResponseInputParam] = TypeAdapter(
     ResponseInputParam
 )
@@ -501,7 +502,10 @@ class OpenAISDKResponsesClient:
         connect: Any = self.sdk_client.responses.connect
         manager = connect(
             extra_headers=self.websocket_headers,
-            websocket_connection_options={"open_timeout": None},
+            websocket_connection_options={
+                "open_timeout": None,
+                "max_size": _OPENAI_RESPONSES_WEBSOCKET_MAX_SIZE,
+            },
         )
         connection = await manager.enter()
         return OpenAISDKResponsesWebSocketConnection(connection)
