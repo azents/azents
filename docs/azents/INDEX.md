@@ -217,6 +217,7 @@ Design documents are accumulated records and are not listed individually in this
 - [ADR-0164: Materialize Provider-Generated Images as File Resources](adr/0164-materialize-provider-generated-images-as-file-resources.md)
 - [ADR-0165: Make Model Provider Failures Transparent](adr/0165-make-model-provider-failures-transparent.md)
 - [ADR-0166: Model-Scoped Subagent Override Policy](adr/0166-subagent-model-override-policy.md)
+- [ADR-0167: Normalize Provider Tool Semantic Transcript Content](adr/0167-normalize-provider-tool-semantic-transcript.md)
 
 ## Issues (Bug Tracking)
 
