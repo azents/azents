@@ -8,10 +8,13 @@ from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, 
 from contextlib import asynccontextmanager
 from io import BytesIO
 from types import SimpleNamespace
+from typing import Annotated
 from unittest.mock import AsyncMock
 
 import pytest
 from azcommon.result import Failure, Success
+from fastapi import Depends
+from fastapi.dependencies.utils import get_dependant
 from PIL import Image
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -625,6 +628,17 @@ class _CompactionSummaryHookToolkit(Toolkit[BaseModel]):
         return CompactionSummaryReplace(
             summary=context.summary + "\n\n## Toolkit Enrichment\n- extra"
         )
+
+
+def test_agent_engine_adapter_dependency_graph_is_valid() -> None:
+    """FastAPI can construct the complete adapter dependency graph."""
+
+    def endpoint(
+        adapter: Annotated[AgentEngineAdapter, Depends(AgentEngineAdapter)],
+    ) -> None:
+        del adapter
+
+    assert get_dependant(path="/", call=endpoint).dependencies
 
 
 def test_hooked_tool_executor_forwards_request_cancel() -> None:

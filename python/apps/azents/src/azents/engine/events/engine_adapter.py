@@ -154,6 +154,9 @@ from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepo
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
+from azents.repos.llm_provider_integration.deps import (
+    get_llm_provider_integration_repository,
+)
 from azents.repos.model_file_pin import ModelFilePinRepository
 from azents.services.artifact import ArtifactService
 from azents.services.exchange_file import ExchangeFileService
@@ -279,7 +282,7 @@ class AgentEngineAdapter:
     model_file_service: Annotated[ModelFileService, Depends(ModelFileService)]
     integration_repository: Annotated[
         LLMProviderIntegrationRepository,
-        Depends(LLMProviderIntegrationRepository),
+        Depends(get_llm_provider_integration_repository),
     ]
     xai_imagine_client_factory: Annotated[
         XaiImagineClientFactory,
