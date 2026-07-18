@@ -29,7 +29,7 @@ from .data import (
     ProviderUnavailable,
     TokenSet,
 )
-from .runtime import ensure_runtime_tokens
+from .runtime import ensure_runtime_tokens, refresh_runtime_tokens
 
 _TEST_KEY = Fernet.generate_key().decode()
 
@@ -119,6 +119,52 @@ class TestEnsureRuntimeTokens:
 
         assert isinstance(result, Success)
         assert result.value.id == integration_id
+
+    async def test_forced_refresh_rotates_a_fresh_rejected_token(
+        self, rdb_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Refresh a still-fresh token after Imagine rejects it with 401."""
+        expires_at = datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=2)
+        repo, integration_id = await _create_integration(
+            rdb_session,
+            expires_at=expires_at,
+        )
+        integration = await repo.get_by_id_with_secrets(rdb_session, integration_id)
+        assert integration is not None
+
+        async def fake_refresh(
+            _self: XaiOAuthClient,
+            *,
+            refresh_token: str,
+            connection_method: XaiOAuthConnectionMethod,
+        ) -> Result[
+            TokenSet,
+            ProviderRejected | ProviderEntitlementDenied | ProviderUnavailable,
+        ]:
+            assert refresh_token == "old-refresh-token"
+            return Success(
+                TokenSet(
+                    access_token="forced-access-token",
+                    refresh_token="forced-refresh-token",
+                    expires_at=datetime.datetime.now(datetime.UTC)
+                    + datetime.timedelta(hours=1),
+                    connection_method=connection_method,
+                )
+            )
+
+        monkeypatch.setattr(XaiOAuthClient, "refresh_tokens", fake_refresh)
+
+        result = await refresh_runtime_tokens(
+            integration=integration,
+            integration_repository=repo,
+            session_manager=cast(
+                SessionManager[AsyncSession], _SessionManager(rdb_session)
+            ),
+        )
+
+        assert isinstance(result, Success)
+        assert isinstance(result.value.secrets, XaiOAuthSecrets)
+        assert result.value.secrets.access_token == "forced-access-token"
 
     async def test_near_expiry_refresh_persists_rotated_tokens(
         self, rdb_session: AsyncSession, monkeypatch: pytest.MonkeyPatch

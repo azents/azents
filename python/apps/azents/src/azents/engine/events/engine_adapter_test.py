@@ -1,15 +1,24 @@
 """Event engine adapter assembly tests."""
 
 import asyncio
+import base64
 import datetime
 import functools
-from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Sequence
+from contextlib import asynccontextmanager
+from io import BytesIO
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
+from azcommon.result import Failure, Success
+from PIL import Image
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import azents.engine.events.engine_adapter as engine_adapter_module
 from azents.core.chatgpt_oauth import CHATGPT_OAUTH_BACKEND_BASE_URL
+from azents.core.credentials import XaiOAuthSecrets
 from azents.core.enums import (
     AgentRunPhase,
     AgentRunStatus,
@@ -17,8 +26,11 @@ from azents.core.enums import (
     AgentSessionStartReason,
     AgentSessionStatus,
     EventKind,
+    LLMModelDeveloper,
     LLMProvider,
 )
+from azents.core.inference_profile import SessionInferenceState
+from azents.core.llm_catalog import ModelBuiltInToolCapabilities, ModelCapabilities
 from azents.core.tools import Toolkit, ToolkitState, ToolkitStatus, TurnContext
 from azents.engine.context.compaction import (
     SummaryModelCall,
@@ -30,6 +42,7 @@ from azents.engine.events.engine_adapter import (
     EventEngineAdapterConfig,
     RunExecutionFactory,
     _HookedClientToolExecutor,  # pyright: ignore[reportPrivateUsage]  # Fix Hook wrapper cancellation contract.
+    _xai_imagine_client_factory,  # pyright: ignore[reportPrivateUsage]  # Test-only default dependency.
 )
 from azents.engine.events.engine_events import RunComplete
 from azents.engine.events.execution import (
@@ -47,6 +60,7 @@ from azents.engine.events.openai_responses import (
     OpenAIResponsesRequest,
 )
 from azents.engine.events.protocols import (
+    NativeModelRequest,
     NativeRequestInspection,
     NormalizedAdapterOutput,
     OutputSink,
@@ -78,7 +92,13 @@ from azents.engine.run.contracts import RunContext, RunRequest, ToolkitBinding
 from azents.engine.run.emit import Emit
 from azents.engine.run.errors import CompactionFailedError, ModelCallError
 from azents.engine.run.model_transport import InMemoryModelTransportState
-from azents.engine.run.types import USER_STOP_CANCEL_MESSAGE, CheckStop
+from azents.engine.run.types import (
+    USER_STOP_CANCEL_MESSAGE,
+    BuiltinToolSpec,
+    CheckStop,
+    FunctionToolError,
+)
+from azents.engine.tools.xai_image_generation import XaiImagineClientFactory
 from azents.repos.agent_execution.data import AgentRunCreate, EventCreate
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession
@@ -86,6 +106,20 @@ from azents.repos.model_file_pin import ModelFilePinRepository
 from azents.services.artifact import ArtifactService
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.model_file import ModelFileService
+from azents.services.xai_imagine import (
+    XaiImagineAuthenticationError,
+    XaiImagineClient,
+    XaiImagineRequest,
+)
+from azents.services.xai_oauth.data import (
+    ProviderEntitlementDenied,
+    ProviderRejected,
+    ProviderUnavailable,
+)
+from azents.testing.model_selection import (
+    make_test_model_selection,
+    make_test_model_settings,
+)
 from azents.testing.model_stream import make_test_model_stream_watchdog
 
 
@@ -678,6 +712,279 @@ async def test_event_engine_adapter_runs_execution() -> None:
     )
     assert isinstance(prepared_request.options.get("prompt_cache_key"), str)
     assert isinstance(_events(emits)[0], RunComplete)
+
+
+def _valid_png_base64() -> str:
+    """Return one deterministic valid PNG payload."""
+    body = BytesIO()
+    Image.new("RGB", (1, 1), color=(255, 0, 0)).save(body, format="PNG")
+    return base64.b64encode(body.getvalue()).decode()
+
+
+class _RefreshingImagineClient(XaiImagineClient):
+    """Record credentials and reject the known stale token."""
+
+    def __init__(self, tokens: list[str]) -> None:
+        self.tokens = tokens
+
+    async def generate(
+        self,
+        request: XaiImagineRequest,
+        *,
+        access_token: str,
+    ) -> str:
+        """Reject the old token and return one deterministic image otherwise."""
+        del request
+        self.tokens.append(access_token)
+        if access_token == "old-access-token":
+            raise XaiImagineAuthenticationError(
+                "xAI Imagine rejected the integration credential."
+            )
+        return _valid_png_base64()
+
+
+def _refreshing_imagine_client_factory(tokens: list[str]) -> XaiImagineClientFactory:
+    """Return a factory sharing one assertion-visible credential log."""
+
+    @asynccontextmanager
+    async def create() -> AsyncIterator[XaiImagineClient]:
+        yield _RefreshingImagineClient(tokens)
+
+    return create
+
+
+def _xai_oauth_inference_state() -> SessionInferenceState:
+    """Return xAI OAuth inference state with a selected integration identity."""
+    return SessionInferenceState(
+        model_target_label="planning",
+        model_selection=make_test_model_selection(
+            integration_id="integration-1",
+            provider=LLMProvider.XAI_OAUTH,
+            model_identifier="grok-4",
+            model_developer=LLMModelDeveloper.XAI,
+        ),
+        model_settings=make_test_model_settings(),
+        reasoning_effort=None,
+        effective_context_window_tokens=128_000,
+        effective_auto_compaction_threshold_tokens=102_400,
+        resolved_at=datetime.datetime.now(datetime.UTC),
+    )
+
+
+async def test_xai_image_generation_is_bound_as_client_function_tool() -> None:
+    """Expose Imagine to Grok without lowering it as a provider-hosted tool."""
+    execution = _Execution()
+    adapter = _agent_engine_adapter(
+        session_manager=_session_context,
+        execution_factory=lambda **kwargs: (
+            setattr(
+                execution,
+                "model_call_preparer",
+                kwargs["model_call_preparer"],
+            )
+            or execution
+        ),
+    )
+
+    _ = [
+        emit
+        async for emit in adapter.run(
+            RunRequest(
+                session_id="session-1",
+                user_messages=[],
+                agent_prompt=None,
+                toolkits=[],
+                provider=LLMProvider.XAI,
+                model="xai/grok-4",
+                model_capabilities=ModelCapabilities(
+                    built_in_tools=ModelBuiltInToolCapabilities(
+                        supported=["image_generation"]
+                    )
+                ),
+                credential_kwargs={"api_key": "xai-api-key"},
+                workspace_id="workspace-1",
+                agent_id="agent-1",
+                auto_compaction_threshold_tokens=None,
+                inference_state=None,
+                compaction_provider_integration_id=None,
+                builtin_tools=[BuiltinToolSpec(name="image_generation", config={})],
+            ),
+            RunContext(
+                owner_generation=1,
+                tool_admission_barrier=_OpenToolAdmissionBarrier(),
+                model_transport_state=InMemoryModelTransportState(
+                    websocket_enabled=False
+                ),
+                user_id="user-1",
+                run_id="0" * 32,
+                publish_event=_noop_publish,
+            ),
+        )
+    ]
+
+    assert execution.prepared_model_call is not None
+    prepared_request = execution.prepared_model_call.native_request
+    assert isinstance(prepared_request, NativeModelRequest)
+    assert [tool["name"] for tool in prepared_request.tools] == ["image_generation"]
+    assert all(tool.get("type") == "function" for tool in prepared_request.tools)
+
+
+async def test_xai_oauth_refresh_updates_later_model_turn_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reuse a forced-refresh token for later model calls and tool bindings."""
+    tokens: list[str] = []
+    execution = _Execution()
+    integration_repository = AsyncMock()
+    integration_repository.get_by_id_with_secrets.return_value = SimpleNamespace(
+        workspace_id="workspace-1",
+        provider=LLMProvider.XAI_OAUTH,
+    )
+
+    async def refresh_tokens(**_kwargs: object) -> object:
+        return Success(
+            SimpleNamespace(
+                secrets=XaiOAuthSecrets(
+                    access_token="new-access-token",
+                    refresh_token="refresh-token",
+                    id_token=None,
+                    expires_at=datetime.datetime.now(datetime.UTC)
+                    + datetime.timedelta(hours=1),
+                )
+            )
+        )
+
+    monkeypatch.setattr(
+        engine_adapter_module,
+        "refresh_runtime_tokens",
+        refresh_tokens,
+    )
+    adapter = _agent_engine_adapter(
+        session_manager=_session_context,
+        execution_factory=lambda **kwargs: (
+            setattr(
+                execution,
+                "model_call_preparer",
+                kwargs["model_call_preparer"],
+            )
+            or execution
+        ),
+        integration_repository=integration_repository,
+        xai_imagine_client_factory=_refreshing_imagine_client_factory(tokens),
+    )
+    request = RunRequest(
+        session_id="session-1",
+        user_messages=[],
+        agent_prompt=None,
+        toolkits=[],
+        provider=LLMProvider.XAI_OAUTH,
+        model="xai/grok-4",
+        model_capabilities=ModelCapabilities(
+            built_in_tools=ModelBuiltInToolCapabilities(supported=["image_generation"])
+        ),
+        credential_kwargs={"api_key": "old-access-token"},
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        auto_compaction_threshold_tokens=None,
+        inference_state=_xai_oauth_inference_state(),
+        compaction_provider_integration_id=None,
+        builtin_tools=[BuiltinToolSpec(name="image_generation", config={})],
+    )
+
+    _ = [emit async for emit in adapter.run(request, _run_context())]
+
+    assert execution.prepared_model_call is not None
+    first_result = await execution.prepared_model_call.tool_executor.execute(
+        ClientToolCallPayload(
+            call_id="call-1",
+            name="image_generation",
+            arguments='{"prompt":"First image"}',
+            native_artifact=_artifact({"type": "function_call"}),
+        )
+    )
+    assert first_result.status == "completed"
+    assert request.credential_kwargs["api_key"] == "new-access-token"
+    assert execution.model_call_preparer is not None
+    second_prepared = await execution.model_call_preparer(
+        transcript=[],
+        model="xai/grok-4",
+    )
+    second_request = second_prepared.native_request
+    assert isinstance(second_request, NativeModelRequest)
+    assert second_request.kwargs["api_key"] == "new-access-token"
+
+    second_result = await second_prepared.tool_executor.execute(
+        ClientToolCallPayload(
+            call_id="call-2",
+            name="image_generation",
+            arguments='{"prompt":"Second image"}',
+            native_artifact=_artifact({"type": "function_call"}),
+        )
+    )
+
+    assert second_result.status == "completed"
+    assert tokens == ["old-access-token", "new-access-token", "new-access-token"]
+
+
+@pytest.mark.parametrize(
+    ("refresh_error", "expected_message"),
+    [
+        (
+            ProviderRejected(reason="rejected"),
+            "xAI OAuth reconnect is required for image generation.",
+        ),
+        (
+            ProviderEntitlementDenied(reason="denied"),
+            "xAI Imagine access is not permitted for this account.",
+        ),
+        (
+            ProviderUnavailable(reason="unavailable"),
+            "xAI OAuth is temporarily unavailable. Try again later.",
+        ),
+    ],
+)
+async def test_xai_oauth_refresh_preserves_failure_classification(
+    monkeypatch: pytest.MonkeyPatch,
+    refresh_error: ProviderRejected | ProviderEntitlementDenied | ProviderUnavailable,
+    expected_message: str,
+) -> None:
+    """Keep forced-refresh credential, entitlement, and outage errors distinct."""
+    integration_repository = AsyncMock()
+    integration_repository.get_by_id_with_secrets.return_value = SimpleNamespace(
+        workspace_id="workspace-1",
+        provider=LLMProvider.XAI_OAUTH,
+    )
+
+    async def refresh_tokens(**_kwargs: object) -> object:
+        return Failure(refresh_error)
+
+    monkeypatch.setattr(
+        engine_adapter_module,
+        "refresh_runtime_tokens",
+        refresh_tokens,
+    )
+    adapter = _agent_engine_adapter(
+        integration_repository=integration_repository,
+        xai_imagine_client_factory=_refreshing_imagine_client_factory([]),
+    )
+    request = RunRequest(
+        session_id="session-1",
+        user_messages=[],
+        agent_prompt=None,
+        toolkits=[],
+        provider=LLMProvider.XAI_OAUTH,
+        model="xai/grok-4",
+        credential_kwargs={"api_key": "old-access-token"},
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        auto_compaction_threshold_tokens=None,
+        inference_state=_xai_oauth_inference_state(),
+        compaction_provider_integration_id=None,
+    )
+    tool = adapter._xai_image_generation_tool(request)  # pyright: ignore[reportPrivateUsage]  # Verify forced-refresh error mapping.
+
+    with pytest.raises(FunctionToolError, match=expected_message):
+        await tool.handler('{"prompt":"Image"}')
 
 
 async def test_adapter_yields_model_output_before_run_completion() -> None:
@@ -1501,6 +1808,8 @@ def _agent_engine_adapter(
     transcript_repo: _TranscriptRepo | None = None,
     compactor: _Compactor | _FailingCompactor | None = None,
     summary_model_call: SummaryModelCall | None = None,
+    integration_repository: AsyncMock | None = None,
+    xai_imagine_client_factory: XaiImagineClientFactory | None = None,
 ) -> AgentEngineAdapter:
     """Create AgentEngineAdapter for tests."""
     watchdog = make_test_model_stream_watchdog()
@@ -1509,6 +1818,10 @@ def _agent_engine_adapter(
         artifact_service=artifact_service or _ArtifactService(),
         exchange_file_service=exchange_file_service or _ExchangeFileService(),
         model_file_service=model_file_service or _ModelFileService(),
+        integration_repository=integration_repository or AsyncMock(),
+        xai_imagine_client_factory=(
+            xai_imagine_client_factory or _xai_imagine_client_factory()
+        ),
         config=config or EventEngineAdapterConfig(),
         model_stream_watchdog=watchdog,
         execution_factory=execution_factory or (lambda **kwargs: _Execution()),

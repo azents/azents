@@ -20,6 +20,7 @@ from azents.engine.events.execution import (
     PreparedModelCall,
     TurnEndReason,
 )
+from azents.engine.events.generated_files import PendingGeneratedFileOutput
 from azents.engine.events.protocols import (
     ContentDeltaProjection,
     NativeEvent,
@@ -686,6 +687,69 @@ class _ProviderOutputMaterializer:
         return self.prepared
 
 
+class _PreparedClientToolOutput:
+    """Record client generated-file admission and compensation."""
+
+    def __init__(self, result: ClientToolResultPayload) -> None:
+        self.result = result.model_copy(
+            update={
+                "output": [OutputTextPart(text="stored image")],
+                "pending_generated_files": [],
+            }
+        )
+        self.admitted = False
+        self.persist_sessions: list[AsyncSession] = []
+        self.cleanup_calls = 0
+
+    async def persist(self, session: AsyncSession) -> None:
+        """Record the result transaction used for file metadata."""
+        self.persist_sessions.append(session)
+
+    async def cleanup(self) -> None:
+        """Record compensation before result admission."""
+        if not self.admitted:
+            self.cleanup_calls += 1
+
+
+class _ClientToolOutputMaterializer:
+    """Prepare one assertion-visible generated client result."""
+
+    def __init__(self) -> None:
+        self.prepared: _PreparedClientToolOutput | None = None
+
+    async def prepare_client_result(
+        self,
+        result: ClientToolResultPayload,
+    ) -> _PreparedClientToolOutput:
+        """Prepare the generated result for admission."""
+        self.prepared = _PreparedClientToolOutput(result)
+        return self.prepared
+
+
+class _FailingPreparedClientToolOutput(_PreparedClientToolOutput):
+    """Fail after recording the generated-file admission transaction."""
+
+    async def persist(self, session: AsyncSession) -> None:
+        """Simulate storage metadata admission failure after object preparation."""
+        await super().persist(session)
+        raise RuntimeError("generated-file admission failed")
+
+
+class _FailingClientToolOutputMaterializer:
+    """Prepare a client result whose persistence fails."""
+
+    def __init__(self) -> None:
+        self.prepared: _FailingPreparedClientToolOutput | None = None
+
+    async def prepare_client_result(
+        self,
+        result: ClientToolResultPayload,
+    ) -> _FailingPreparedClientToolOutput:
+        """Return the failing prepared result."""
+        self.prepared = _FailingPreparedClientToolOutput(result)
+        return self.prepared
+
+
 class _SequenceNormalizer:
     """Return normalized output by stream call order."""
 
@@ -745,6 +809,31 @@ class _ToolExecutor:
     def request_cancel(self, call: ClientToolCallPayload) -> None:
         """Record cancellation request."""
         self.cancelled_calls.append(call)
+
+
+class _GeneratedFileToolExecutor(_ToolExecutor):
+    """Return a result containing transient generated image bytes."""
+
+    async def execute(self, call: ClientToolCallPayload) -> ClientToolResultPayload:
+        """Return one generated-file result skeleton."""
+        self.executed_calls.append(call)
+        return ClientToolResultPayload(
+            call_id=call.call_id,
+            name=call.name,
+            status="completed",
+            output=[],
+            pending_generated_files=[
+                PendingGeneratedFileOutput(
+                    call_id=call.call_id,
+                    tool_name=call.name,
+                    output_index=0,
+                    filename="generated.png",
+                    media_type="image/png",
+                    sha256="a" * 64,
+                    body=b"generated-image",
+                )
+            ],
+        )
 
 
 class _OrderedToolExecutor(_ToolExecutor):
@@ -1826,6 +1915,185 @@ async def test_unlimited_tool_run_executes_tool_then_completes() -> None:
     assert AgentRunPhase.EXECUTING_TOOLS in run_repo.phases
     assert any(
         event.kind == EventKind.CLIENT_TOOL_RESULT for event in transcript_repo.events
+    )
+
+
+async def test_generated_client_result_materializes_in_result_transaction() -> None:
+    """Admit generated files atomically with the durable client tool result."""
+    run_repo = _RunRepo()
+    transcript_repo = _TranscriptRepo()
+    materializer = _ClientToolOutputMaterializer()
+    execution = AgentRunExecution(
+        session_manager=_session_context,
+        post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_provider_integration_id=None,
+        model_stream_inference_profile=None,
+        model_adapter=_ModelAdapter(),
+        output_normalizer=_SequenceNormalizer(
+            [
+                [_tool_call_event()],
+                [_assistant_event()],
+            ]
+        ),
+        model_call_preparer=_model_call_preparer(
+            lowerer=_Lowerer(), tool_executor=_GeneratedFileToolExecutor()
+        ),
+        client_tool_output_materializer=materializer,
+        run_repo=run_repo,
+        transcript_repo=transcript_repo,
+    )
+
+    status = await execution.run(
+        AgentRunExecutionRequest(
+            owner_generation=1,
+            tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            run_id="run-1",
+            session_id="session-1",
+            model="grok-4",
+            max_turns=None,
+        ),
+    )
+
+    assert status == AgentRunStatus.COMPLETED
+    assert materializer.prepared is not None
+    assert materializer.prepared.admitted is True
+    assert materializer.prepared.cleanup_calls == 0
+    result_event = next(
+        event
+        for event in transcript_repo.events
+        if event.kind == EventKind.CLIENT_TOOL_RESULT
+    )
+    payload = result_event.payload
+    assert isinstance(payload, ClientToolResultPayload)
+    assert payload.output == [OutputTextPart(text="stored image")]
+    assert payload.pending_generated_files == []
+    result_session = next(
+        session
+        for event, session in zip(
+            transcript_repo.events,
+            transcript_repo.append_sessions,
+            strict=True,
+        )
+        if event.kind == EventKind.CLIENT_TOOL_RESULT
+    )
+    assert materializer.prepared.persist_sessions[0] is result_session
+
+
+async def test_generated_client_result_cleans_up_after_admission_failure() -> None:
+    """Compensate prepared objects and append a sanitized failed result."""
+    run_repo = _RunRepo()
+    transcript_repo = _TranscriptRepo()
+    materializer = _FailingClientToolOutputMaterializer()
+    execution = AgentRunExecution(
+        session_manager=_session_context,
+        post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_provider_integration_id=None,
+        model_stream_inference_profile=None,
+        model_adapter=_ModelAdapter(),
+        output_normalizer=_SequenceNormalizer(
+            [
+                [_tool_call_event()],
+                [_assistant_event()],
+            ]
+        ),
+        model_call_preparer=_model_call_preparer(
+            lowerer=_Lowerer(), tool_executor=_GeneratedFileToolExecutor()
+        ),
+        client_tool_output_materializer=materializer,
+        run_repo=run_repo,
+        transcript_repo=transcript_repo,
+    )
+
+    status = await execution.run(
+        AgentRunExecutionRequest(
+            owner_generation=1,
+            tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            run_id="run-1",
+            session_id="session-1",
+            model="grok-4",
+            max_turns=None,
+        ),
+    )
+
+    assert status == AgentRunStatus.COMPLETED
+    assert materializer.prepared is not None
+    assert materializer.prepared.admitted is False
+    assert materializer.prepared.cleanup_calls == 1
+    result_event = next(
+        event
+        for event in transcript_repo.events
+        if event.kind == EventKind.CLIENT_TOOL_RESULT
+    )
+    payload = result_event.payload
+    assert isinstance(payload, ClientToolResultPayload)
+    assert payload.status == "failed"
+    assert payload.output == [
+        OutputTextPart(text="Generated image output could not be stored.")
+    ]
+    assert payload.pending_generated_files == []
+    assert run_repo.active_tool_calls == []
+
+
+async def test_generated_client_result_without_materializer_fails_safely(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Reject transient generated bytes when durable output storage is absent."""
+    run_repo = _RunRepo()
+    transcript_repo = _TranscriptRepo()
+    execution = AgentRunExecution(
+        session_manager=_session_context,
+        post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_provider_integration_id=None,
+        model_stream_inference_profile=None,
+        model_adapter=_ModelAdapter(),
+        output_normalizer=_SequenceNormalizer(
+            [
+                [_tool_call_event()],
+                [_assistant_event()],
+            ]
+        ),
+        model_call_preparer=_model_call_preparer(
+            lowerer=_Lowerer(), tool_executor=_GeneratedFileToolExecutor()
+        ),
+        run_repo=run_repo,
+        transcript_repo=transcript_repo,
+    )
+
+    with caplog.at_level(logging.ERROR, logger="azents.engine.events.execution"):
+        status = await execution.run(
+            AgentRunExecutionRequest(
+                owner_generation=1,
+                tool_admission_barrier=_OpenToolAdmissionBarrier(),
+                run_id="run-1",
+                session_id="session-1",
+                model="grok-4",
+                max_turns=None,
+            ),
+        )
+
+    assert status == AgentRunStatus.COMPLETED
+    result_event = next(
+        event
+        for event in transcript_repo.events
+        if event.kind == EventKind.CLIENT_TOOL_RESULT
+    )
+    payload = result_event.payload
+    assert isinstance(payload, ClientToolResultPayload)
+    assert payload.status == "failed"
+    assert payload.output == [
+        OutputTextPart(text="Generated image output storage is unavailable.")
+    ]
+    assert payload.pending_generated_files == []
+    assert b"generated-image" not in result_event.model_dump_json().encode()
+    assert any(
+        record.message == "Client generated-file materializer is unavailable"
+        for record in caplog.records
     )
 
 

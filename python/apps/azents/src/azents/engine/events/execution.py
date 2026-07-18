@@ -118,6 +118,32 @@ class ProviderOutputMaterializerProtocol(Protocol):
         ...
 
 
+class PreparedClientToolOutputProtocol(Protocol):
+    """Client tool result prepared for transactional file admission."""
+
+    result: ClientToolResultPayload
+    admitted: bool
+
+    async def persist(self, session: AsyncSession) -> None:
+        """Persist prepared metadata in the tool-result transaction."""
+        ...
+
+    async def cleanup(self) -> None:
+        """Compensate uploaded objects after failed result admission."""
+        ...
+
+
+class ClientToolOutputMaterializerProtocol(Protocol):
+    """Prepare transient client tool output for transactional admission."""
+
+    async def prepare_client_result(
+        self,
+        result: ClientToolResultPayload,
+    ) -> PreparedClientToolOutputProtocol:
+        """Prepare client-generated files and return transaction-ready output."""
+        ...
+
+
 class PreModelLowerHook(Protocol):
     """Request-local preparation hook before model lowering."""
 
@@ -244,6 +270,8 @@ class AgentRunExecution[
         output_sink: OutputSink | None = None,
         phase_sink: PhaseSink | None = None,
         provider_output_materializer: ProviderOutputMaterializerProtocol | None = None,
+        client_tool_output_materializer: ClientToolOutputMaterializerProtocol
+        | None = None,
         pre_model_lower_hook: PreModelLowerHook | None = None,
         model_file_pin_repo: ModelFilePinRepositoryProtocol | None = None,
         run_repo: RunStateRepository | None = None,
@@ -265,6 +293,7 @@ class AgentRunExecution[
         self.output_sink = output_sink
         self.phase_sink = phase_sink
         self.provider_output_materializer = provider_output_materializer
+        self.client_tool_output_materializer = client_tool_output_materializer
         self.pre_model_lower_hook = pre_model_lower_hook
         self.model_file_pin_repo = model_file_pin_repo
         self.run_repo = run_repo or AgentRunRepository()
@@ -876,14 +905,83 @@ class AgentRunExecution[
         result: ClientToolResultPayload,
     ) -> Event:
         """Append one terminal result and remove only its active ownership entry."""
-        async with self.session_manager() as session:
-            event = await self._finalize_tool_result_in_session(
-                session,
-                run_id=run_id,
-                session_id=session_id,
-                call=call,
-                result=result,
+        prepared: PreparedClientToolOutputProtocol | None = None
+        if (
+            result.pending_generated_files
+            and self.client_tool_output_materializer is None
+        ):
+            logger.error(
+                "Client generated-file materializer is unavailable",
+                extra={"call_id": call.call_id, "tool_name": call.name},
             )
+            result = ClientToolResultPayload(
+                call_id=call.call_id,
+                name=call.name,
+                status="failed",
+                output=[
+                    OutputTextPart(
+                        text="Generated image output storage is unavailable."
+                    )
+                ],
+            )
+        if result.pending_generated_files:
+            materializer = self.client_tool_output_materializer
+            if materializer is None:
+                raise AssertionError("Generated-file materializer invariant violated")
+            try:
+                prepared = await materializer.prepare_client_result(result)
+                async with self.session_manager() as session:
+                    await prepared.persist(session)
+                    event = await self._finalize_tool_result_in_session(
+                        session,
+                        run_id=run_id,
+                        session_id=session_id,
+                        call=call,
+                        result=prepared.result,
+                    )
+                prepared.admitted = True
+            except asyncio.CancelledError:
+                if prepared is not None:
+                    await prepared.cleanup()
+                raise
+            except Exception as exc:
+                if prepared is not None:
+                    await prepared.cleanup()
+                logger.exception(
+                    "Client generated-file admission failed",
+                    extra={
+                        "call_id": call.call_id,
+                        "tool_name": call.name,
+                        "error_type": exc.__class__.__name__,
+                    },
+                )
+                failed = ClientToolResultPayload(
+                    call_id=call.call_id,
+                    name=call.name,
+                    status="failed",
+                    output=[
+                        OutputTextPart(
+                            text="Generated image output could not be stored."
+                        )
+                    ],
+                )
+                async with self.session_manager() as session:
+                    event = await self._finalize_tool_result_in_session(
+                        session,
+                        run_id=run_id,
+                        session_id=session_id,
+                        call=call,
+                        result=failed,
+                    )
+        else:
+            async with self.session_manager() as session:
+                event = await self._finalize_tool_result_in_session(
+                    session,
+                    run_id=run_id,
+                    session_id=session_id,
+                    call=call,
+                    result=result,
+                )
         if self.output_sink is not None:
             await self.output_sink(
                 NormalizedAdapterOutput(needs_follow_up=False, events=[]),

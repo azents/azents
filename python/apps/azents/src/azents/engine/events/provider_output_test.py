@@ -17,10 +17,12 @@ from azents.core.enums import EventKind
 from azents.engine.events.protocols import NormalizedAdapterOutput
 from azents.engine.events.provider_output import (
     ProviderOutputMaterializer,
+    generated_image_output,
     pending_image_generation_output,
 )
 from azents.engine.events.types import (
     AgentRunState,
+    ClientToolResultPayload,
     Event,
     FileOutputPart,
     NativeArtifact,
@@ -505,6 +507,45 @@ async def test_materializes_exchange_and_model_file_in_one_admission() -> None:
     assert len(exchange_repository.created) == 2
     assert len(exchange_repository.preview_links) == 1
     assert len(model_repository.created) == 1
+    assert s3_service.deleted == []
+
+
+async def test_materializes_client_tool_image_with_shared_storage_contract() -> None:
+    """Attach client-generated image resources in the result transaction."""
+    materializer, exchange_repository, model_repository, s3_service = _materializer()
+    generated = generated_image_output(_PNG_BASE64, output_index=0)
+    result = ClientToolResultPayload(
+        call_id="image-call-1",
+        name="image_generation",
+        status="completed",
+        output=[],
+        pending_generated_files=[
+            pending_image_generation_output(
+                {"id": "image-call-1", "result": _PNG_BASE64},
+                output_index=0,
+            )
+        ],
+    )
+
+    prepared = await materializer.prepare_client_result(result)
+
+    assert prepared.result.pending_generated_files == []
+    assert len(prepared.result.output) == 1
+    assert isinstance(prepared.result.output[0], FileOutputPart)
+    assert len(prepared.result.attachments) == 1
+    assert prepared.result.attachments[0].source == "client_tool"
+    assert generated.sha256 in prepared.result.output[0].metadata["source_sha256"]
+    serialized = prepared.result.model_dump_json()
+    assert _PNG_BASE64 not in serialized
+
+    await prepared.persist(_Session())
+    prepared.admitted = True
+    await prepared.cleanup()
+
+    assert len(s3_service.uploaded) == 3
+    assert len(exchange_repository.created) == 2
+    assert len(model_repository.created) == 1
+    assert model_repository.created[0].metadata["source_kind"] == "client_tool"
     assert s3_service.deleted == []
 
 

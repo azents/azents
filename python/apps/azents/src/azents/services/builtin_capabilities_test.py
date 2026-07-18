@@ -34,6 +34,42 @@ def test_explicit_flag_enables_litellm_routed_provider() -> None:
     ) == ["image_generation"]
 
 
+def test_xai_function_calling_chat_model_gets_image_generation() -> None:
+    """Project Imagine as an effective capability for xAI chat models."""
+    metadata = {"mode": "chat", "supports_function_calling": True}
+
+    assert supported_builtin_capabilities(
+        provider=LLMProvider.XAI,
+        model_identifier="grok-new-alias",
+        metadata=metadata,
+    ) == ["image_generation"]
+    assert supported_builtin_capabilities(
+        provider=LLMProvider.XAI_OAUTH,
+        model_identifier="grok-new-alias",
+        metadata=metadata,
+    ) == ["image_generation"]
+
+
+def test_xai_requires_chat_function_calling() -> None:
+    """Do not expose the client tool when the language model cannot call it."""
+    assert (
+        supported_builtin_capabilities(
+            provider=LLMProvider.XAI,
+            model_identifier="grok-no-tools",
+            metadata={"mode": "chat", "supports_function_calling": False},
+        )
+        == []
+    )
+    assert (
+        supported_builtin_capabilities(
+            provider=LLMProvider.XAI,
+            model_identifier="grok-embedding",
+            metadata={"mode": "embedding", "supports_function_calling": True},
+        )
+        == []
+    )
+
+
 def test_generic_image_output_modality_is_not_capability_evidence() -> None:
     """Do not infer the hosted tool from generic image output modality."""
     assert (
