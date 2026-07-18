@@ -11199,6 +11199,35 @@
         "title": "ChatInputWriteRequest",
         "description": "REST composer input write request."
       },
+      "ChatLiveRunOperationResponse": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "preparing_context",
+            "title": "Kind",
+            "description": "Operation kind"
+          },
+          "operation_id": {
+            "type": "string",
+            "title": "Operation Id",
+            "description": "Stable operation identity"
+          },
+          "status": {
+            "type": "string",
+            "const": "running",
+            "title": "Status",
+            "description": "Current operation status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "operation_id",
+          "status"
+        ],
+        "title": "ChatLiveRunOperationResponse",
+        "description": "Current live Run operation response."
+      },
       "ChatLiveRunRetryAttemptResponse": {
         "properties": {
           "attempt_number": {
@@ -11276,6 +11305,15 @@
       },
       "ChatLiveRunRetryStateResponse": {
         "properties": {
+          "error_kind": {
+            "type": "string",
+            "enum": [
+              "model_provider",
+              "runtime"
+            ],
+            "title": "Error Kind",
+            "description": "Provider or runtime presentation kind"
+          },
           "status": {
             "type": "string",
             "title": "Status",
@@ -11317,6 +11355,7 @@
         },
         "type": "object",
         "required": [
+          "error_kind",
           "status",
           "last_error_message",
           "failed_attempt_count",
@@ -11359,6 +11398,17 @@
             ],
             "title": "Model Call Started At",
             "description": "Current model call start time, or null outside a model call"
+          },
+          "operation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ChatLiveRunOperationResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Current live Run operation"
           },
           "retry": {
             "anyOf": [
@@ -11550,7 +11600,7 @@
                 "type": "null"
               }
             ],
-            "description": "Currently running run status"
+            "description": "Currently running Run status"
           },
           "session_run_state": {
             "$ref": "#/components/schemas/AgentSessionRunState",
@@ -13167,7 +13217,7 @@
                 "type": "null"
               }
             ],
-            "description": "Currently running run status"
+            "description": "Currently running Run status"
           },
           "session_run_state": {
             "$ref": "#/components/schemas/AgentSessionRunState",

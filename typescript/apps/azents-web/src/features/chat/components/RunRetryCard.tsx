@@ -75,6 +75,14 @@ function useRetryCountdown(nextRetryAt: string | null): number | null {
   return Math.max(0, Math.ceil((target - now) / 1000));
 }
 
+const MODEL_PROVIDER_ERROR_PREFIX = "Model provider error:";
+
+function providerMessageBody(message: string): string {
+  return message.startsWith(MODEL_PROVIDER_ERROR_PREFIX)
+    ? message.slice(MODEL_PROVIDER_ERROR_PREFIX.length).trim()
+    : message;
+}
+
 function formatFullDateTime(iso: string, locale: string): string {
   const date = new Date(iso);
   if (!Number.isFinite(date.getTime())) {
@@ -182,12 +190,19 @@ function AttemptHistory({
 export function RunRetryCard(props: RunRetryCardProps): React.ReactElement {
   const t = useTranslations("chat");
   const isLive = props.variant === "live";
-  const attempts = isLive
-    ? props.retry.attempts
-    : (props.failure.attempts ?? []);
-  const retry = isLive ? props.retry : null;
+  const providerFailure = isLive
+    ? props.retry.errorKind === "model_provider"
+    : props.failure.error_kind === "model_provider";
+  const attempts = providerFailure
+    ? []
+    : isLive
+      ? props.retry.attempts
+      : (props.failure.attempts ?? []);
   const countdown = useRetryCountdown(isLive ? props.retry.nextRetryAt : null);
-  const message = isLive ? retry?.lastErrorMessage : props.message;
+  const rawMessage = isLive ? props.retry.lastErrorMessage : props.message;
+  const message = providerFailure
+    ? providerMessageBody(rawMessage)
+    : rawMessage;
 
   return (
     <Box mb="md" w="100%" style={{ minWidth: 0 }}>
@@ -202,13 +217,15 @@ export function RunRetryCard(props: RunRetryCardProps): React.ReactElement {
           <Group gap="xs" align="flex-start" wrap="nowrap">
             <IconAlertTriangle
               aria-hidden="true"
-              size={20}
+              size={rem(20)}
               stroke={1.8}
               color="var(--mantine-color-orange-6)"
               style={{ flexShrink: 0 }}
             />
             <Text size="sm" fw={700}>
-              {t("failedRunRecovery.errorTitle")}
+              {providerFailure
+                ? t("failedRunRecovery.providerErrorTitle")
+                : t("failedRunRecovery.errorTitle")}
             </Text>
           </Group>
 
@@ -257,7 +274,7 @@ export function RunRetryCard(props: RunRetryCardProps): React.ReactElement {
                 size="xs"
                 variant="light"
                 color="orange"
-                leftSection={<IconRefresh size={14} />}
+                leftSection={<IconRefresh size={rem(14)} />}
                 loading={props.isRetryPending}
                 onClick={props.onRetry}
               >

@@ -127,6 +127,7 @@ __all__ = [
     "ChatGPTOAuthSessionStatus",
     "ChatInputWriteRequest",
     "ChatInputWriteRequestAction",
+    "ChatLiveRunOperationResponse",
     "ChatLiveRunRetryAttemptResponse",
     "ChatLiveRunRetryStateResponse",
     "ChatLiveRunStateResponse",
@@ -429,6 +430,7 @@ from azentspublicclient.models.chat_gpto_auth_secrets import ChatGPTOAuthSecrets
 from azentspublicclient.models.chat_gpto_auth_session_status import ChatGPTOAuthSessionStatus as ChatGPTOAuthSessionStatus
 from azentspublicclient.models.chat_input_write_request import ChatInputWriteRequest as ChatInputWriteRequest
 from azentspublicclient.models.chat_input_write_request_action import ChatInputWriteRequestAction as ChatInputWriteRequestAction
+from azentspublicclient.models.chat_live_run_operation_response import ChatLiveRunOperationResponse as ChatLiveRunOperationResponse
 from azentspublicclient.models.chat_live_run_retry_attempt_response import ChatLiveRunRetryAttemptResponse as ChatLiveRunRetryAttemptResponse
 from azentspublicclient.models.chat_live_run_retry_state_response import ChatLiveRunRetryStateResponse as ChatLiveRunRetryStateResponse
 from azentspublicclient.models.chat_live_run_state_response import ChatLiveRunStateResponse as ChatLiveRunStateResponse

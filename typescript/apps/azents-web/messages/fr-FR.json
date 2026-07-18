@@ -1393,7 +1393,7 @@
       "resumeHintPlaceholder": "Ex. Le blocage est levé ; reprenez depuis le job CI en échec."
     },
     "compaction": {
-      "inProgress": "Compactage du contexte…",
+      "inProgress": "Préparation du contexte de la conversation…",
       "summary": "La conversation précédente a été résumée",
       "expand": "Afficher le résumé",
       "collapse": "Masquer le résumé"
@@ -1519,6 +1519,7 @@
     "chooseWorktreeSourceFolder": "Choose source folder…",
     "failedRunRecovery": {
       "errorTitle": "Erreur",
+      "providerErrorTitle": "Erreur du fournisseur de modèle",
       "liveTitle": "Nouvelle tentative après un échec d’exécution",
       "terminalTitle": "Exécution échouée après les nouvelles tentatives",
       "nonRetryableTitle": "Exécution échouée sans nouvelle tentative",

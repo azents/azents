@@ -227,7 +227,6 @@ const baseArgs = {
   onResetToLatest: noop,
   onSubmitMessageEdit: sendMessage,
   onRetryFailedRun: sendMessage,
-  isCompacting: false,
   wasCommandBlocked: false,
   isStopAvailable: false,
   isStopPending: false,
@@ -280,6 +279,7 @@ export const WithLiveRunRetry = {
       },
       modelCallStartedAt: new Date(Date.now() - 5_000).toISOString(),
       retry: {
+        errorKind: "model_provider",
         status: "running",
         lastErrorMessage: "The provider returned a temporary rate limit.",
         failedAttemptCount: 1,
@@ -303,6 +303,36 @@ export const WithLiveRunRetry = {
       },
     },
     isModelResponsePending: true,
+  },
+} satisfies Story;
+
+export const WithPreparingContext = {
+  args: {
+    ...baseArgs,
+    isResponsePending: true,
+    liveRun: {
+      run_id: "run-preparing-context-story",
+      phase: "compacting",
+      status: "running",
+      inferenceProfile: {
+        model_target_label: "default",
+        model_display_name: "GPT 5.5",
+        reasoning_effort: null,
+      },
+      modelCallStartedAt: null,
+      retry: null,
+      operation: {
+        kind: "preparing_context",
+        operationId: "run-preparing-context-story:preparing-context",
+        status: "running",
+      },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.getByText("Preparing conversation context…"),
+    ).toBeVisible();
   },
 } satisfies Story;
 

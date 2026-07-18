@@ -2,9 +2,11 @@
 
 from azents.api.public.chat.v1.data import (
     ChatEditMessageWriteRequest,
+    ChatLiveRunRetryStateResponse,
     ChatMessageWriteRequest,
     UploadResponse,
 )
+from azents.services.chat.data import ChatLiveRunRetryState
 
 
 def test_upload_response_does_not_expose_file_part() -> None:
@@ -71,3 +73,21 @@ def test_chat_edit_message_write_request_ignores_client_owned_file_parts() -> No
 
     assert not hasattr(request, "file_parts")
     assert request.attachments == ["exchange://workspace/agent/file"]
+
+
+def test_live_retry_response_preserves_error_kind() -> None:
+    """REST live retry state keeps the provider/runtime presentation kind."""
+    response = ChatLiveRunRetryStateResponse.from_domain(
+        ChatLiveRunRetryState(
+            error_kind="model_provider",
+            status="waiting",
+            last_error_message="Model provider error: Request rejected.",
+            failed_attempt_count=1,
+            max_retries=10,
+            backoff_seconds=1,
+            next_retry_at="2026-07-18T00:00:01+00:00",
+            attempts=[],
+        )
+    )
+
+    assert response.model_dump(mode="json")["error_kind"] == "model_provider"

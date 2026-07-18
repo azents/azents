@@ -45,6 +45,7 @@ import type {
   ChatViewState,
   ConnectionStatus,
   FailedRunAttemptSummary,
+  FailedRunErrorKind,
   FailedRunFailureMetadata,
   FailedRunFinalizationReason,
   FailedRunRetryability,
@@ -402,6 +403,18 @@ function failedRunFinalizationReasonFromValue(
   }
 }
 
+function failedRunErrorKindFromValue(
+  value: unknown,
+): FailedRunErrorKind | null {
+  switch (value) {
+    case "model_provider":
+    case "runtime":
+      return value;
+    default:
+      return null;
+  }
+}
+
 function failedRunRetryabilityFromValue(
   value: unknown,
 ): FailedRunRetryability | null {
@@ -474,12 +487,14 @@ function failedRunFailureFromValue(
   if (!isRecord(failure) || failure.kind !== "failed_run") {
     return null;
   }
+  const errorKind = failedRunErrorKindFromValue(failure.error_kind);
   const finalizationReason = failedRunFinalizationReasonFromValue(
     failure.finalization_reason,
   );
   const failedAttemptCount = numberField(failure, "failed_attempt_count");
   const maxRetries = numberField(failure, "max_retries");
   if (
+    errorKind === null ||
     finalizationReason === null ||
     failedAttemptCount === null ||
     maxRetries === null
@@ -488,6 +503,7 @@ function failedRunFailureFromValue(
   }
   return {
     kind: "failed_run",
+    error_kind: errorKind,
     finalization_reason: finalizationReason,
     failed_attempt_count: failedAttemptCount,
     max_retries: maxRetries,
@@ -502,6 +518,7 @@ function failedRunFailureFromValue(
 function liveRunRetryFromRecord(
   record: Record<string, unknown>,
 ): ChatLiveRunState["retry"] {
+  const errorKind = failedRunErrorKindFromValue(record.error_kind);
   const status = stringField(record, "status");
   const lastErrorMessage = stringField(record, "last_error_message");
   const failedAttemptCount = numberField(record, "failed_attempt_count");
@@ -509,6 +526,7 @@ function liveRunRetryFromRecord(
   const backoffSeconds = numberField(record, "backoff_seconds");
   const nextRetryAt = stringField(record, "next_retry_at");
   if (
+    errorKind === null ||
     status === null ||
     lastErrorMessage === null ||
     failedAttemptCount === null ||
@@ -519,6 +537,7 @@ function liveRunRetryFromRecord(
     return null;
   }
   return {
+    errorKind,
     status,
     lastErrorMessage,
     failedAttemptCount,
@@ -526,6 +545,23 @@ function liveRunRetryFromRecord(
     backoffSeconds,
     nextRetryAt,
     attempts: failedRunAttemptsFromValue(record.attempts),
+  };
+}
+
+function liveRunOperationFromValue(
+  value: unknown,
+): ChatLiveRunState["operation"] {
+  if (!isRecord(value) || value.kind !== "preparing_context") {
+    return null;
+  }
+  const operationId = stringField(value, "operation_id");
+  if (operationId === null || value.status !== "running") {
+    return null;
+  }
+  return {
+    kind: "preparing_context",
+    operationId,
+    status: "running",
   };
 }
 
@@ -557,6 +593,7 @@ function chatLiveRunStateFromValue(value: unknown): ChatLiveRunState | null {
     inferenceProfile,
     modelCallStartedAt: stringField(value, "model_call_started_at"),
     retry,
+    operation: liveRunOperationFromValue(value.operation),
   };
 }
 

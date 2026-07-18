@@ -167,6 +167,16 @@ function hasLiveRetry(
   return liveRun?.retry !== null && typeof liveRun?.retry !== "undefined";
 }
 
+function hasLiveOperation(
+  liveRun: ChatLiveRunState | null,
+): liveRun is ChatLiveRunState & {
+  operation: NonNullable<ChatLiveRunState["operation"]>;
+} {
+  return (
+    liveRun?.operation !== null && typeof liveRun?.operation !== "undefined"
+  );
+}
+
 /** latest compaction summary position returns.. */
 function getLatestCompactionIndex(messages: ChatMessage[]): number {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
@@ -272,6 +282,9 @@ function getTimelineItemIds(
   if (hasLiveRetry(liveRun)) {
     ids.push(`live-run-retry:${liveRun.run_id}`);
   }
+  if (hasLiveOperation(liveRun)) {
+    ids.push(`live-run-operation:${liveRun.operation.operationId}`);
+  }
   for (const actionExecution of placement.liveTail) {
     ids.push(actionExecutionTimelineItemId(actionExecution));
   }
@@ -359,8 +372,6 @@ interface ChatViewProps {
   ) => Promise<boolean>;
   /** retry the latest terminal failed run */
   onRetryFailedRun: (failedEventId: string) => Promise<boolean>;
-  /** Context compaction whether in progress */
-  isCompacting: boolean;
   /** whether commands are blocked during Run */
   wasCommandBlocked: boolean;
   /** Session run_state based on stop button exposed whether */
@@ -413,7 +424,6 @@ export function ChatView({
   onResetToLatest,
   onSubmitMessageEdit,
   onRetryFailedRun,
-  isCompacting,
   wasCommandBlocked,
   isStopAvailable,
   isStopPending,
@@ -488,7 +498,12 @@ export function ChatView({
     chatTimelineState.type === "LATEST_FOLLOWING" && hasLiveRetry(liveRun)
       ? liveRun
       : null;
+  const liveOperationRun =
+    chatTimelineState.type === "LATEST_FOLLOWING" && hasLiveOperation(liveRun)
+      ? liveRun
+      : null;
   const liveRetryVisible = liveRetryRun !== null;
+  const liveOperationVisible = liveOperationRun !== null;
   const visibleActionExecutions = useMemo(
     () =>
       chatTimelineState.type === "LATEST_FOLLOWING"
@@ -506,6 +521,7 @@ export function ChatView({
     messages.length > 0 ||
     pendingInputBuffers.length > 0 ||
     liveRetryVisible ||
+    liveOperationVisible ||
     visibleActionExecutions.length > 0;
   const editingMessageIndex = useMemo(() => {
     if (!editingMessage) {
@@ -1308,28 +1324,21 @@ export function ChatView({
                   />
                 ))}
                 {liveRetryRun !== null && (
-                  <>
-                    <RunRetryCard
-                      variant="live"
-                      retry={liveRetryRun.retry}
-                      phase={liveRetryRun.phase}
-                    />
-                    {isModelResponsePending && (
-                      <AgentRunIndicator
-                        modelCallStartedAt={liveRetryRun.modelCallStartedAt}
-                      />
-                    )}
-                  </>
+                  <RunRetryCard
+                    variant="live"
+                    retry={liveRetryRun.retry}
+                    phase={liveRetryRun.phase}
+                  />
                 )}
+                {liveOperationRun !== null && <CompactionIndicator />}
                 {chatTimelineState.type === "LATEST_FOLLOWING" &&
                   !liveRetryVisible &&
+                  !liveOperationVisible &&
                   isModelResponsePending && (
                     <AgentRunIndicator
                       modelCallStartedAt={liveRun?.modelCallStartedAt ?? null}
                     />
                   )}
-                {chatTimelineState.type === "LATEST_FOLLOWING" &&
-                  isCompacting && <CompactionIndicator />}
                 {actionExecutionPlacement.liveTail.map((actionExecution) => (
                   <ActionExecutionTimelineCard
                     key={actionExecution.execution.id}

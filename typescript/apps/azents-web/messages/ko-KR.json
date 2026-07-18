@@ -1393,7 +1393,7 @@
       "resumeHintPlaceholder": "예: blocker가 해소됐으니 실패한 CI job부터 이어서 확인하세요."
     },
     "compaction": {
-      "inProgress": "컨텍스트 압축 중…",
+      "inProgress": "대화 컨텍스트 준비 중…",
       "summary": "이전 대화가 요약되었습니다",
       "expand": "요약 보기",
       "collapse": "요약 숨기기"
@@ -1518,7 +1518,8 @@
     "noLocalBranches": "이 Project에서 사용할 수 있는 로컬 브랜치가 없습니다.",
     "chooseWorktreeSourceFolder": "원본 폴더 선택…",
     "failedRunRecovery": {
-      "errorTitle": "에러",
+      "errorTitle": "오류",
+      "providerErrorTitle": "모델 제공업체 오류",
       "liveTitle": "실패한 실행 재시도 중",
       "terminalTitle": "재시도 후 실행 실패",
       "nonRetryableTitle": "재시도하지 않고 실행 실패",

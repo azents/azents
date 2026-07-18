@@ -417,6 +417,37 @@ class _PreFilter:
         return list(self._events)
 
 
+class _AutoCompactionFilter:
+    """Auto-compaction filter with controllable start and failure behavior."""
+
+    def __init__(
+        self,
+        *,
+        starts: bool,
+        failure: Exception | None = None,
+    ) -> None:
+        self.starts = starts
+        self.failure = failure
+        self.was_compacted = False
+
+    async def compact(
+        self,
+        transcript: Sequence[Event],
+        *,
+        on_started: Callable[[], Awaitable[None]] | None = None,
+    ) -> list[Event]:
+        """Optionally start compaction before returning or raising."""
+        self.was_compacted = False
+        if not self.starts:
+            return list(transcript)
+        assert on_started is not None
+        await on_started()
+        if self.failure is not None:
+            raise self.failure
+        self.was_compacted = True
+        return list(transcript)
+
+
 class _PostFilter:
     """Post-lower filter for tests."""
 
@@ -918,6 +949,7 @@ async def test_text_run_completes() -> None:
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
+        model_stream_provider_integration_id=None,
         model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
@@ -982,6 +1014,7 @@ async def test_model_follow_up_continues_without_tool_call() -> None:
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
+        model_stream_provider_integration_id=None,
         model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=normalizer,
@@ -1079,6 +1112,7 @@ async def test_external_run_callbacks_observe_no_open_db_session() -> None:
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
+        model_stream_provider_integration_id=None,
         model_stream_inference_profile=None,
         model_adapter=AssertingModelAdapter(),
         output_normalizer=_SequenceNormalizer(
@@ -1125,6 +1159,7 @@ async def test_model_delta_reaches_output_sink_before_stream_completion() -> Non
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
+        model_stream_provider_integration_id=None,
         model_stream_inference_profile=None,
         model_adapter=model_adapter,
         output_normalizer=_ProjectingNormalizer([_assistant_event()]),
@@ -1181,6 +1216,7 @@ async def test_text_run_commits_durable_events_before_output_sink() -> None:
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
+        model_stream_provider_integration_id=None,
         model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
@@ -1215,6 +1251,7 @@ async def test_provider_output_shares_event_admission_transaction() -> None:
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
+        model_stream_provider_integration_id=None,
         model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
@@ -1252,6 +1289,7 @@ async def test_provider_output_cleans_up_after_event_admission_failure() -> None
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
+        model_stream_provider_integration_id=None,
         model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
@@ -1288,6 +1326,7 @@ async def test_provider_output_cleans_up_without_durable_event() -> None:
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
+        model_stream_provider_integration_id=None,
         model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([]),
@@ -1331,6 +1370,7 @@ async def test_output_without_usage_clears_retry_state_before_publish() -> None:
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
+        model_stream_provider_integration_id=None,
         model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_NoUsageNormalizer([_assistant_event()]),
@@ -1377,6 +1417,7 @@ async def test_text_run_output_sink_receives_run_marker() -> None:
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
+        model_stream_provider_integration_id=None,
         model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
@@ -1449,6 +1490,7 @@ async def test_model_usage_is_appended_as_turn_marker(
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
+        model_stream_provider_integration_id=None,
         model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()], usage=usage),
@@ -1518,6 +1560,7 @@ async def test_model_input_uses_session_head_event_id() -> None:
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
+        model_stream_provider_integration_id=None,
         model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
@@ -1552,6 +1595,7 @@ async def test_closed_admission_barrier_prevents_call_and_handler_start() -> Non
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
+        model_stream_provider_integration_id=None,
         model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_tool_call_event()]),
@@ -1588,6 +1632,7 @@ async def test_tool_run_with_turn_limit_interrupts_after_tool_result() -> None:
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
+        model_stream_provider_integration_id=None,
         model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_tool_call_event(), _assistant_event()]),
@@ -1632,6 +1677,7 @@ async def test_parallel_calls_finalize_independently() -> None:
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
+        model_stream_provider_integration_id=None,
         model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer(
@@ -1695,6 +1741,7 @@ async def test_term_after_admission_keeps_normal_result_and_run_recoverable() ->
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
+        model_stream_provider_integration_id=None,
         model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_tool_call_event("call-2")]),
@@ -1748,6 +1795,7 @@ async def test_unlimited_tool_run_executes_tool_then_completes() -> None:
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
+        model_stream_provider_integration_id=None,
         model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_SequenceNormalizer(
@@ -1812,6 +1860,7 @@ async def test_model_call_preparer_runs_for_each_model_turn() -> None:
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
+        model_stream_provider_integration_id=None,
         model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_SequenceNormalizer(
@@ -1877,6 +1926,7 @@ async def test_model_call_preparer_turn_end_receives_error_reason() -> None:
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
+        model_stream_provider_integration_id=None,
         model_stream_inference_profile=None,
         model_adapter=_FailingModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
@@ -1908,6 +1958,7 @@ async def test_provider_tool_call_completes_without_next_model_turn() -> None:
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
+        model_stream_provider_integration_id=None,
         model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_SequenceNormalizer(
@@ -1951,6 +2002,7 @@ async def test_provider_tool_call_with_message_completes_one_turn() -> None:
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
+        model_stream_provider_integration_id=None,
         model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_SequenceNormalizer(
@@ -1986,6 +2038,108 @@ async def test_provider_tool_call_with_message_completes_one_turn() -> None:
     ]
 
 
+async def test_auto_compaction_does_not_publish_phase_when_threshold_is_not_met() -> (
+    None
+):
+    """Ordinary turns do not flash the context-preparation live operation."""
+    run_repo = _RunRepo()
+    execution = AgentRunExecution(
+        session_manager=_session_context,
+        post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_provider_integration_id=None,
+        model_stream_inference_profile=None,
+        model_adapter=_ModelAdapter(),
+        output_normalizer=_Normalizer([_assistant_event()]),
+        model_call_preparer=_model_call_preparer(),
+        auto_compaction_filter=_AutoCompactionFilter(starts=False),
+        run_repo=run_repo,
+        transcript_repo=_TranscriptRepo(),
+    )
+
+    status = await execution.run(
+        AgentRunExecutionRequest(
+            owner_generation=1,
+            tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            run_id="run-1",
+            session_id="session-1",
+            model="gpt-5.1",
+        ),
+    )
+
+    assert status == AgentRunStatus.COMPLETED
+    assert AgentRunPhase.COMPACTING not in run_repo.phases
+
+
+async def test_auto_compaction_restores_preparing_phase_after_success() -> None:
+    """Successful compaction closes the live operation before model lowering."""
+    run_repo = _RunRepo()
+    execution = AgentRunExecution(
+        session_manager=_session_context,
+        post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_provider_integration_id=None,
+        model_stream_inference_profile=None,
+        model_adapter=_ModelAdapter(),
+        output_normalizer=_Normalizer([_assistant_event()]),
+        model_call_preparer=_model_call_preparer(),
+        auto_compaction_filter=_AutoCompactionFilter(starts=True),
+        run_repo=run_repo,
+        transcript_repo=_TranscriptRepo(),
+    )
+
+    status = await execution.run(
+        AgentRunExecutionRequest(
+            owner_generation=1,
+            tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            run_id="run-1",
+            session_id="session-1",
+            model="gpt-5.1",
+        ),
+    )
+
+    assert status == AgentRunStatus.COMPLETED
+    compacting_index = run_repo.phases.index(AgentRunPhase.COMPACTING)
+    assert run_repo.phases[compacting_index + 1] == AgentRunPhase.PREPARING_INPUT
+
+
+async def test_auto_compaction_keeps_compacting_phase_after_failure() -> None:
+    """Failed compaction keeps one live operation while retry owns the error."""
+    run_repo = _RunRepo()
+    execution = AgentRunExecution(
+        session_manager=_session_context,
+        post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_provider_integration_id=None,
+        model_stream_inference_profile=None,
+        model_adapter=_ModelAdapter(),
+        output_normalizer=_Normalizer([_assistant_event()]),
+        model_call_preparer=_model_call_preparer(),
+        auto_compaction_filter=_AutoCompactionFilter(
+            starts=True,
+            failure=ModelCallError("compaction provider failure"),
+        ),
+        run_repo=run_repo,
+        transcript_repo=_TranscriptRepo(),
+    )
+
+    with pytest.raises(ModelCallError, match="compaction provider failure"):
+        await execution.run(
+            AgentRunExecutionRequest(
+                owner_generation=1,
+                tool_admission_barrier=_OpenToolAdmissionBarrier(),
+                run_id="run-1",
+                session_id="session-1",
+                model="gpt-5.1",
+            ),
+        )
+
+    assert run_repo.phases[-1] == AgentRunPhase.COMPACTING
+
+
 async def test_compacted_run_continues_with_summary_without_terminal_marker() -> None:
     """After auto compaction, continue model call without past run marker."""
     run_repo = _RunRepo()
@@ -2015,6 +2169,7 @@ async def test_compacted_run_continues_with_summary_without_terminal_marker() ->
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
+        model_stream_provider_integration_id=None,
         model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
@@ -2082,6 +2237,7 @@ async def test_tool_turn_polls_input_before_next_model_call() -> None:
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
+        model_stream_provider_integration_id=None,
         model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_SequenceNormalizer(
@@ -2147,6 +2303,7 @@ async def test_context_invalidation_yields_for_request_refresh() -> None:
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
+        model_stream_provider_integration_id=None,
         model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_SequenceNormalizer(
@@ -2195,6 +2352,7 @@ async def test_orphan_tool_call_without_state_is_cancelled_before_lowering() -> 
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
+        model_stream_provider_integration_id=None,
         model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
@@ -2249,6 +2407,7 @@ async def test_active_unresolved_tool_call_is_cancelled_before_lowering() -> Non
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
+        model_stream_provider_integration_id=None,
         model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
@@ -2301,6 +2460,7 @@ async def test_stale_active_entry_with_result_is_removed_without_replacement() -
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
+        model_stream_provider_integration_id=None,
         model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
@@ -2349,6 +2509,7 @@ async def test_active_entry_without_call_event_fails_invariant() -> None:
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
+        model_stream_provider_integration_id=None,
         model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
@@ -2388,6 +2549,7 @@ async def test_model_stream_user_stop_appends_only_assistant_text() -> None:
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
+        model_stream_provider_integration_id=None,
         model_stream_inference_profile=None,
         model_adapter=_CancellingModelAdapter(),
         output_normalizer=_Normalizer([assistant, reasoning, _tool_call_event()]),
@@ -2428,6 +2590,7 @@ async def test_model_stream_user_stop_without_text_appends_only_marker() -> None
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
+        model_stream_provider_integration_id=None,
         model_stream_inference_profile=None,
         model_adapter=_CancellingModelAdapter(),
         output_normalizer=_Normalizer([]),
@@ -2464,6 +2627,7 @@ async def test_shutdown_tool_cancellation_repairs_before_reraising() -> None:
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
+        model_stream_provider_integration_id=None,
         model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_tool_call_event()]),
@@ -2508,6 +2672,7 @@ async def test_tool_user_stop_appends_cancelled_result_and_interrupts() -> None:
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
+        model_stream_provider_integration_id=None,
         model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_tool_call_event()]),
@@ -2564,6 +2729,7 @@ async def test_tool_result_output_sink_receives_tool_result() -> None:
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
+        model_stream_provider_integration_id=None,
         model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_tool_call_event()]),
@@ -2599,6 +2765,7 @@ async def test_tool_failure_appends_failed_tool_result() -> None:
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
+        model_stream_provider_integration_id=None,
         model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_tool_call_event()]),
@@ -2642,6 +2809,7 @@ async def test_run_input_preparation_does_not_run_lifecycle_cleanup() -> None:
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
+        model_stream_provider_integration_id=None,
         model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
@@ -2687,6 +2855,7 @@ async def test_pre_model_lower_hook_runs_before_lowerer() -> None:
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
+        model_stream_provider_integration_id=None,
         model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([_assistant_event()]),
@@ -2724,6 +2893,7 @@ async def test_model_completion_error_propagates_for_retry() -> None:
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
+        model_stream_provider_integration_id=None,
         model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_CompletionFailingNormalizer(),
@@ -2759,6 +2929,7 @@ async def test_empty_model_output_propagates_for_retry() -> None:
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
+        model_stream_provider_integration_id=None,
         model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([]),
@@ -2798,6 +2969,7 @@ async def test_blank_assistant_message_propagates_for_retry() -> None:
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
+        model_stream_provider_integration_id=None,
         model_stream_inference_profile=None,
         model_adapter=_ModelAdapter(),
         output_normalizer=_Normalizer([blank_message]),
@@ -2832,6 +3004,7 @@ async def test_model_call_error_propagates_for_retry() -> None:
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
+        model_stream_provider_integration_id=None,
         model_stream_inference_profile=None,
         model_adapter=_FailingModelAdapter(),
         output_normalizer=_Normalizer([]),
@@ -2867,6 +3040,7 @@ async def test_execution_closes_operation_scoped_adapter() -> None:
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
+        model_stream_provider_integration_id=None,
         model_stream_inference_profile=None,
         model_adapter=model_adapter,
         output_normalizer=_Normalizer([_assistant_event()]),

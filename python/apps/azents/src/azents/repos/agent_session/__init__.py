@@ -776,6 +776,24 @@ class AgentSessionRepository:
         )
         return result.scalar_one_or_none()
 
+    async def lock_model_input_head_if_current(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        expected_event_id: str | None,
+    ) -> bool:
+        """Lock the Session and verify the planned model-input head."""
+        result = await session.execute(
+            sa.select(RDBAgentSession)
+            .where(RDBAgentSession.id == session_id)
+            .with_for_update()
+        )
+        rdb = result.scalar_one_or_none()
+        if rdb is None:
+            raise ValueError("AgentSession not found")
+        return rdb.model_input_head_event_id == expected_event_id
+
     async def move_model_input_head(
         self,
         session: AsyncSession,

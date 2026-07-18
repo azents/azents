@@ -162,6 +162,7 @@ export const FailedRunErrorResponse = {
       },
       failedRunFailure: {
         kind: "failed_run",
+        error_kind: "runtime",
         finalization_reason: "retry_exhausted",
         failed_attempt_count: 10,
         max_retries: 10,

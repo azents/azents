@@ -75,6 +75,10 @@ class CompactionFailedError(RuntimeError):
     """Context compaction failure."""
 
 
+class CompactionPlanStaleError(CompactionFailedError):
+    """Compaction plan no longer matches the current model-input head."""
+
+
 class CompactionContextWindowExceededError(CompactionFailedError):
     """Compaction summary model input exceeded context window."""
 

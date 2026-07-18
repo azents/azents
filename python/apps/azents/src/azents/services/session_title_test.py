@@ -1,12 +1,12 @@
 """Session title helper tests."""
 
 import datetime
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any, cast
 
 import pytest
-from openai import OpenAIError
 
 import azents.services.session_title as session_title_module
 from azents.core.agent import (
@@ -32,6 +32,12 @@ from azents.engine.events.types import (
     NativeArtifact,
     UserMessagePayload,
 )
+from azents.engine.model_stream import ModelStreamCallContext
+from azents.engine.run.provider_failure import (
+    ModelProviderFailureCategory,
+    model_provider_failure,
+)
+from azents.engine.run.retry_policy import FailedRunRetryPolicy
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_session import AgentSessionRepository
@@ -92,10 +98,12 @@ class TestSessionTitleHelpers:
         watchdog = make_test_model_stream_watchdog()
         title = await generate_session_title_with_model(
             provider=LLMProvider.ANTHROPIC,
+            provider_integration_id=None,
             model="anthropic/test",
             credential_kwargs={},
             context="Compare two insurance options",
             session_id=None,
+            attempt_number=None,
             watchdog=watchdog,
         )
 
@@ -148,10 +156,12 @@ class TestSessionTitleHelpers:
         watchdog = make_test_model_stream_watchdog()
         title = await generate_session_title_with_model(
             provider=provider,
+            provider_integration_id="integration-title",
             model="gpt-test",
             credential_kwargs={"api_key": "test-key"},
             context="Describe the SDK migration",
             session_id="session-1",
+            attempt_number=3,
             watchdog=watchdog,
         )
 
@@ -171,11 +181,16 @@ class TestSessionTitleHelpers:
             "format": {"type": "text"},
             "verbosity": "low",
         }
+        call_context = call["call_context"]
+        assert isinstance(call_context, ModelStreamCallContext)
+        assert call_context.provider_integration_id == "integration-title"
+        assert call_context.attempt_number == 3
         assert "max_output_tokens" not in call
 
     async def test_generate_title_logs_model_failure(
         self,
         monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         """Model call failures are logged by the title service and not re-raised."""
         service = SessionTitleService(
@@ -190,11 +205,28 @@ class TestSessionTitleHelpers:
             ),
             session_manager=cast(Any, _session_manager),
             model_stream_watchdog=make_test_model_stream_watchdog(),
+            retry_policy=FailedRunRetryPolicy(
+                max_retries=0,
+                base_backoff_seconds=0,
+                backoff_multiplier=1,
+                max_backoff_seconds=0,
+            ),
+        )
+
+        failure = model_provider_failure(
+            operation="session_title",
+            provider="openai",
+            model="gpt-5.1",
+            integration=None,
+            provider_message="Stream must be set to true",
+            status_code=400,
+            provider_code="invalid_request",
+            provider_error_type="bad_request",
         )
 
         async def raise_bad_request(**kwargs: object) -> str | None:
             del kwargs
-            raise OpenAIError("Stream must be set to true")
+            raise failure
 
         monkeypatch.setattr(
             session_title_module,
@@ -214,12 +246,7 @@ class TestSessionTitleHelpers:
             created_at=datetime.datetime.now(datetime.UTC),
         )
 
-        log_calls: list[tuple[str, dict[str, object]]] = []
-
-        def record_exception(message: str, **kwargs: object) -> None:
-            log_calls.append((message, kwargs))
-
-        monkeypatch.setattr(session_title_module.logger, "exception", record_exception)
+        caplog.set_level(logging.WARNING, logger=session_title_module.logger.name)
 
         result = await service.generate_from_initial_prompt(
             session_id="session-001",
@@ -227,19 +254,180 @@ class TestSessionTitleHelpers:
         )
 
         assert result is None
-        assert log_calls == [
-            (
-                "Automatic session title generation failed",
-                {
-                    "extra": {
-                        "session_id": "session-001",
-                        "agent_id": "agent-001",
-                        "provider": "openai",
-                        "model": "gpt-test",
-                    }
-                },
-            )
+        records = [
+            record
+            for record in caplog.records
+            if record.getMessage() == "Automatic session title provider attempt failed"
         ]
+        assert len(records) == 1
+        fields = records[0].__dict__
+        assert fields["session_id"] == "session-001"
+        assert fields["agent_id"] == "agent-001"
+        assert fields["attempt_number"] == 1
+        assert fields["provider_failure_operation"] == "session_title"
+        assert fields["provider_failure_provider"] == "openai"
+        assert fields["provider_failure_integration"] is None
+        assert fields["provider_failure_model"] == "gpt-5.1"
+        assert fields["provider_failure_category"] == "invalid_request"
+        assert fields["provider_failure_retryability"] == "non_retryable"
+        assert fields["provider_failure_status_code"] == 400
+        assert fields["provider_failure_code"] == "invalid_request"
+        assert fields["provider_failure_error_type"] == "bad_request"
+        assert fields["provider_failure_fingerprint"] == failure.fingerprint
+        assert fields["provider_failure_retry_outcome"] == "exhausted"
+
+    async def test_generate_title_retries_unknown_provider_failure(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Standalone title generation uses the shared full retry budget."""
+        service = SessionTitleService(
+            agent_repository=cast(AgentRepository, _AgentRepository()),
+            agent_session_repository=cast(
+                AgentSessionRepository,
+                _AgentSessionRepository(),
+            ),
+            integration_repository=cast(
+                LLMProviderIntegrationRepository,
+                _IntegrationRepository(),
+            ),
+            session_manager=cast(Any, _session_manager),
+            model_stream_watchdog=make_test_model_stream_watchdog(),
+            retry_policy=FailedRunRetryPolicy(
+                max_retries=2,
+                base_backoff_seconds=0,
+                backoff_multiplier=1,
+                max_backoff_seconds=0,
+            ),
+        )
+        failure = model_provider_failure(
+            operation="session_title",
+            provider="openai",
+            model="gpt-5.1",
+            integration="integration-001",
+            provider_message="A new provider outcome occurred.",
+            status_code=None,
+            provider_code="future_failure",
+            provider_error_type="future_error",
+            category=ModelProviderFailureCategory.UNKNOWN,
+        )
+        attempts: list[int] = []
+
+        async def fail_twice(**kwargs: object) -> str | None:
+            attempt_number = kwargs["attempt_number"]
+            assert isinstance(attempt_number, int)
+            attempts.append(attempt_number)
+            if len(attempts) <= 2:
+                raise failure
+            return "Recovered title"
+
+        monkeypatch.setattr(
+            session_title_module,
+            "generate_session_title_with_model",
+            fail_twice,
+        )
+        caplog.set_level(logging.WARNING, logger=session_title_module.logger.name)
+
+        result = await service._generate_title(  # pyright: ignore[reportPrivateUsage]  # Exercise the standalone retry boundary directly.
+            agent_id="agent-001",
+            session_id="session-001",
+            generation_event_id="0" * 32,
+            context="Compare two insurance options",
+        )
+
+        assert result == "Recovered title"
+        assert attempts == [1, 2, 3]
+        warning_records = [
+            record
+            for record in caplog.records
+            if record.getMessage() == "Automatic session title provider attempt failed"
+        ]
+        assert [
+            record.__dict__["provider_failure_retry_outcome"]
+            for record in warning_records
+        ] == ["scheduled", "scheduled"]
+        error_records = [
+            record
+            for record in caplog.records
+            if record.getMessage() == "Unknown model provider failure"
+        ]
+        assert len(error_records) == 2
+        assert [
+            record.__dict__["provider_failure_fingerprint"] for record in error_records
+        ] == [
+            failure.fingerprint,
+            failure.fingerprint,
+        ]
+
+    async def test_title_retry_stops_after_manual_title_change(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A manual title change prevents the next provider attempt."""
+
+        class MutableTitleRepository(_AgentSessionRepository):
+            source = AgentSessionTitleSource.AUTO_INITIAL
+
+            async def get_by_id(
+                self,
+                session: object,
+                session_id: str,
+            ) -> AgentSession:
+                current = await super().get_by_id(session, session_id)
+                return current.model_copy(update={"title_source": self.source})
+
+        title_repository = MutableTitleRepository()
+        service = SessionTitleService(
+            agent_repository=cast(AgentRepository, _AgentRepository()),
+            agent_session_repository=cast(AgentSessionRepository, title_repository),
+            integration_repository=cast(
+                LLMProviderIntegrationRepository,
+                _IntegrationRepository(),
+            ),
+            session_manager=cast(Any, _session_manager),
+            model_stream_watchdog=make_test_model_stream_watchdog(),
+            retry_policy=FailedRunRetryPolicy(
+                max_retries=2,
+                base_backoff_seconds=0,
+                backoff_multiplier=1,
+                max_backoff_seconds=0,
+            ),
+        )
+        failure = model_provider_failure(
+            operation="session_title",
+            provider="openai",
+            model="gpt-5.1",
+            integration="integration-001",
+            provider_message="Temporarily unavailable.",
+            status_code=503,
+            provider_code="service_unavailable",
+            provider_error_type="server_error",
+        )
+        attempts = 0
+
+        async def fail_after_manual_update(**kwargs: object) -> str | None:
+            nonlocal attempts
+            del kwargs
+            attempts += 1
+            title_repository.source = AgentSessionTitleSource.MANUAL
+            raise failure
+
+        monkeypatch.setattr(
+            session_title_module,
+            "generate_session_title_with_model",
+            fail_after_manual_update,
+        )
+
+        result = await service._generate_title(  # pyright: ignore[reportPrivateUsage]  # Exercise retry ownership revalidation.
+            agent_id="agent-001",
+            session_id="session-001",
+            generation_event_id="0" * 32,
+            context="Compare two insurance options",
+        )
+
+        assert result is None
+        assert attempts == 1
 
     def test_initial_prompt_context_uses_only_user_text(self) -> None:
         """Initial prompt context excludes later transcript content."""

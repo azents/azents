@@ -35,6 +35,7 @@ class TestChatLiveRunRetryStateResponse(unittest.TestCase):
         model = ChatLiveRunRetryStateResponse()
         if include_optional:
             return ChatLiveRunRetryStateResponse(
+                error_kind = 'model_provider',
                 status = '',
                 last_error_message = '',
                 failed_attempt_count = 56,
@@ -43,20 +44,21 @@ class TestChatLiveRunRetryStateResponse(unittest.TestCase):
                 next_retry_at = '',
                 attempts = [
                     azentspublicclient.models.chat_live_run_retry_attempt_response.ChatLiveRunRetryAttemptResponse(
-                        attempt_number = 56, 
-                        user_message = '', 
-                        error_type = '', 
-                        source = '', 
-                        failed_at = '', 
-                        backoff_seconds = 56, 
-                        next_retry_at = '', 
-                        retryability = '', 
-                        failure_code = '', 
+                        attempt_number = 56,
+                        user_message = '',
+                        error_type = '',
+                        source = '',
+                        failed_at = '',
+                        backoff_seconds = 56,
+                        next_retry_at = '',
+                        retryability = '',
+                        failure_code = '',
                         truncated = True, )
                     ]
             )
         else:
             return ChatLiveRunRetryStateResponse(
+                error_kind = 'model_provider',
                 status = '',
                 last_error_message = '',
                 failed_attempt_count = 56,
@@ -65,15 +67,15 @@ class TestChatLiveRunRetryStateResponse(unittest.TestCase):
                 next_retry_at = '',
                 attempts = [
                     azentspublicclient.models.chat_live_run_retry_attempt_response.ChatLiveRunRetryAttemptResponse(
-                        attempt_number = 56, 
-                        user_message = '', 
-                        error_type = '', 
-                        source = '', 
-                        failed_at = '', 
-                        backoff_seconds = 56, 
-                        next_retry_at = '', 
-                        retryability = '', 
-                        failure_code = '', 
+                        attempt_number = 56,
+                        user_message = '',
+                        error_type = '',
+                        source = '',
+                        failed_at = '',
+                        backoff_seconds = 56,
+                        next_retry_at = '',
+                        retryability = '',
+                        failure_code = '',
                         truncated = True, )
                     ],
         )

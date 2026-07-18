@@ -23,6 +23,7 @@ from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.agent_run_phase import AgentRunPhase
 from azentspublicclient.models.agent_run_status import AgentRunStatus
 from azentspublicclient.models.applied_inference_profile import AppliedInferenceProfile
+from azentspublicclient.models.chat_live_run_operation_response import ChatLiveRunOperationResponse
 from azentspublicclient.models.chat_live_run_retry_state_response import ChatLiveRunRetryStateResponse
 from typing import Optional, Set
 from typing_extensions import Self
@@ -36,9 +37,10 @@ class ChatLiveRunStateResponse(BaseModel):
     status: AgentRunStatus = Field(description="Current run status")
     inference_profile: AppliedInferenceProfile = Field(description="Inference settings applied to the active turn")
     model_call_started_at: Optional[datetime]
+    operation: Optional[ChatLiveRunOperationResponse] = None
     retry: Optional[ChatLiveRunRetryStateResponse] = None
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["run_id", "phase", "status", "inference_profile", "model_call_started_at", "retry"]
+    __properties: ClassVar[List[str]] = ["run_id", "phase", "status", "inference_profile", "model_call_started_at", "operation", "retry"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -84,6 +86,9 @@ class ChatLiveRunStateResponse(BaseModel):
         # override the default output from pydantic by calling `to_dict()` of inference_profile
         if self.inference_profile:
             _dict['inference_profile'] = self.inference_profile.to_dict()
+        # override the default output from pydantic by calling `to_dict()` of operation
+        if self.operation:
+            _dict['operation'] = self.operation.to_dict()
         # override the default output from pydantic by calling `to_dict()` of retry
         if self.retry:
             _dict['retry'] = self.retry.to_dict()
@@ -96,6 +101,11 @@ class ChatLiveRunStateResponse(BaseModel):
         # and model_fields_set contains the field
         if self.model_call_started_at is None and "model_call_started_at" in self.model_fields_set:
             _dict['model_call_started_at'] = None
+
+        # set to None if operation (nullable) is None
+        # and model_fields_set contains the field
+        if self.operation is None and "operation" in self.model_fields_set:
+            _dict['operation'] = None
 
         # set to None if retry (nullable) is None
         # and model_fields_set contains the field
@@ -119,6 +129,7 @@ class ChatLiveRunStateResponse(BaseModel):
             "status": obj.get("status"),
             "inference_profile": AppliedInferenceProfile.from_dict(obj["inference_profile"]) if obj.get("inference_profile") is not None else None,
             "model_call_started_at": obj.get("model_call_started_at"),
+            "operation": ChatLiveRunOperationResponse.from_dict(obj["operation"]) if obj.get("operation") is not None else None,
             "retry": ChatLiveRunRetryStateResponse.from_dict(obj["retry"]) if obj.get("retry") is not None else None
         })
         # store additional fields in additional_properties

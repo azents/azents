@@ -16,8 +16,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/agents/**
   - typescript/apps/azents-web/src/features/chat/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
-last_verified_at: 2026-07-16
-spec_version: 31
+last_verified_at: 2026-07-18
+spec_version: 32
 ---
 
 # Chat Session Resync
@@ -71,7 +71,7 @@ sequenceDiagram
 | `history_event_appended` | server → client | `session_id`, `event` | persisted event append. |
 | `live_event_upserted` | server → client | `session_id`, `event` | non-durable live event projection upsert. |
 | `live_event_removed` | server → client | `session_id`, `event_id` | non-durable live projection removal. |
-| `live_run_updated` | server → client | `session_id`, `run` | authoritative current run projection replacement, including `run.retry`. |
+| `live_run_updated` | server → client | `session_id`, `run` | authoritative current Run projection replacement, including `run.operation` and `run.retry`. |
 | `live_run_cleared` | server → client | `session_id`, `run_id` | removes the current run only when the terminal Run ID matches exactly. |
 | `input_actions_updated` | server → client | `session_id` | composer action definitions changed; client reloads `/actions`. |
 | `runtime_error` | server → client | `message` | user-facing runtime failure control. |
@@ -138,16 +138,23 @@ Response fields:
 | --- | --- |
 | `partial_history.items` | ordered partial history projection list to synthesize after durable history, including current assistant/reasoning partials and provider-tool activity. |
 | `input_buffers` | pending user input buffer projection list not yet injected into model turn. |
-| `run` | currently running run projection. `null` if absent. Includes running profile provenance, nullable `model_call_started_at` for the current model turn, plus `run.retry` with failed-run retry status, latest user-safe error, attempt count, retry budget, next retry timestamp, and bounded attempt history when retry is active. |
+| `run` | currently running Run projection. `null` if absent. Includes profile provenance, nullable `model_call_started_at`, optional stable `run.operation` for context preparation, and optional `run.retry` with provider/runtime presentation kind, latest user-safe error, attempt count, retry budget, next retry timestamp, and bounded attempt history. |
 | `session_run_state` | authoritative run state of session. |
 | `todo` | session-scoped TodoToolkit State snapshot. `null` if absent. |
 | `action_executions` | current nonterminal operation TurnAction execution projections, each with execution state and live progress events. Terminal completed, failed, and cancelled snapshots are recovered only from durable history events. |
 
 `run.retry` represents only the active model turn's retry cycle. It remains present during backoff and
-the in-flight retry model call so a reconnect can recover current progress. Successful model output
-admission clears the durable retry state in the output transaction, and the next authoritative REST
-or WebSocket run snapshot omits `run.retry`. A later turn or inference-profile change cannot inherit
-an earlier completed turn's retry card.
+the in-flight retry model call so a reconnect can recover current progress. Its `error_kind` selects
+provider versus runtime presentation without exposing provider identity or diagnostic taxonomy.
+Successful model output admission clears the durable retry state in the output transaction, and the
+next authoritative REST or WebSocket Run snapshot omits `run.retry`. A later turn or inference-profile
+change cannot inherit an earlier completed turn's retry card.
+
+`run.operation` is the reconnect-safe live operation for the active Run. Context preparation uses
+`kind = preparing_context`, `status = running`, and one stable `operation_id` across provider retry and
+backoff. Successful commit, failure exhaustion, cancellation, and User Stop remove the operation from
+the authoritative Run replacement. Transient `compaction_started` and `compaction_complete` controls
+may trigger reconciliation, but they are not the source of truth for the preparation indicator.
 
 `snapshot` in REST write response follows same taxonomy. `snapshot.partial_history_events` is partial history projection list synthesized into chat timeline, `snapshot.input_buffer_events` is pending user input buffer projection list, `snapshot.todo` is same session todo snapshot, and `snapshot.action_executions` is the current nonterminal operation TurnAction projection list.
 
@@ -409,7 +416,9 @@ finite transaction periodically.
 - Every resync is a finite epoch/generation-guarded transaction with a fresh REST query and eventual release of its owned observation buffer.
 - REST baseline is applied as latest source only after session subscription ack and a successful health check for that transaction.
 - REST `/live` does not return aggregate event list and returns live state taxonomy snapshot split into `partial_history`, `input_buffers`, `run`, `session_run_state`, `todo`, and `action_executions`.
-- `live_run_updated` and REST `/live.run` are the authoritative current run snapshot sources; clients replace the stored run snapshot rather than merging individual retry or profile fields.
+- `live_run_updated` and REST `/live.run` are the authoritative current Run snapshot sources; clients replace the stored Run rather than merging individual operation, retry, or profile fields.
+- `run.operation` restores one stable context-preparation indicator across reconnect and retry; transient compaction controls do not reconstruct that state.
+- `run.retry.error_kind` distinguishes provider presentation from runtime presentation without exposing provider identity or taxonomy.
 - Requested inference intent is restored from durable/pending data, and unresolved physical provenance is never inferred from current Agent or Composer state.
 - Usage provenance requires an exact run-id match.
 - `action_execution_updated` and REST `/live.action_executions` are the authoritative nonterminal operation progress sources; clients upsert by execution ID and render live executions above pending input without requiring a transcript or buffer anchor.
@@ -434,6 +443,7 @@ finite transaction periodically.
 
 ## 11. Changelog
 
+- **2026-07-18** — v32. Added reconnect-safe context-preparation operation replacement and provider/runtime retry presentation discrimination.
 - **2026-07-16** — v31. Added deterministic provider-tool live identity, canonical lifecycle status
   resync, and durable-before-live-removal handoff without duplicate cards.
 - **2026-07-16** — v30. Limited live retry recovery to the active model turn and required successful output admission to remove durable retry state before later resync.

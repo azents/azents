@@ -1393,7 +1393,7 @@
       "resumeHintPlaceholder": "例: ブロッカーは解消済みです。失敗したCIジョブから確認してください。"
     },
     "compaction": {
-      "inProgress": "コンテキスト圧縮中…",
+      "inProgress": "会話コンテキストを準備中…",
       "summary": "以前の会話が要約されました",
       "expand": "要約を表示",
       "collapse": "要約を非表示"
@@ -1519,6 +1519,7 @@
     "chooseWorktreeSourceFolder": "Choose source folder…",
     "failedRunRecovery": {
       "errorTitle": "エラー",
+      "providerErrorTitle": "モデルプロバイダーエラー",
       "liveTitle": "失敗した実行を再試行中",
       "terminalTitle": "再試行後に実行が失敗しました",
       "nonRetryableTitle": "再試行せずに実行が失敗しました",

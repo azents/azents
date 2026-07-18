@@ -55,8 +55,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.AgentRuntimeV1Api(api_client)
-    agent_id = 'agent_id_example' # str | 
-    handle = 'handle_example' # str | 
+    agent_id = 'agent_id_example' # str |
+    handle = 'handle_example' # str |
 
     try:
         # Get Agent Runtime
@@ -309,6 +309,7 @@ Class | Method | HTTP request | Description
  - [ChatGPTOAuthSessionStatus](azentspublicclient/docs/ChatGPTOAuthSessionStatus.md)
  - [ChatInputWriteRequest](azentspublicclient/docs/ChatInputWriteRequest.md)
  - [ChatInputWriteRequestAction](azentspublicclient/docs/ChatInputWriteRequestAction.md)
+ - [ChatLiveRunOperationResponse](azentspublicclient/docs/ChatLiveRunOperationResponse.md)
  - [ChatLiveRunRetryAttemptResponse](azentspublicclient/docs/ChatLiveRunRetryAttemptResponse.md)
  - [ChatLiveRunRetryStateResponse](azentspublicclient/docs/ChatLiveRunRetryStateResponse.md)
  - [ChatLiveRunStateResponse](azentspublicclient/docs/ChatLiveRunStateResponse.md)

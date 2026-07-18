@@ -418,7 +418,25 @@ class EventPayloadRepository(Protocol):
 
 
 class SessionHeadMoveRepository(Protocol):
-    """Session head update repository."""
+    """Session head lookup and update repository."""
+
+    async def get_by_id(
+        self,
+        session: AsyncSession,
+        agent_session_id: str,
+    ) -> "SessionHeadState | None":
+        """Fetch current model-input head state."""
+        ...
+
+    async def lock_model_input_head_if_current(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        expected_event_id: str | None,
+    ) -> bool:
+        """Lock the Session and verify the planned model-input head."""
+        ...
 
     async def move_model_input_head(
         self,

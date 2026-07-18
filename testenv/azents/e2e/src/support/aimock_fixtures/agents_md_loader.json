@@ -18,10 +18,47 @@
     {
       "match": {
         "endpoint": "chat",
+        "userMessage": "Provider title retry",
+        "systemMessage": "You are a session title generator",
+        "sequenceIndex": 0
+      },
+      "response": {
+        "error": {
+          "message": "Title provider failure. api_key=dummy-title-secret Bearer dummy-title-token\u0001 retry required.",
+          "type": "rate_limit_error",
+          "code": "rate_limit"
+        },
+        "status": 429
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Provider title retry",
+        "systemMessage": "You are a session title generator",
+        "sequenceIndex": 1
+      },
+      "response": {
+        "content": "Provider title retry recovered"
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
         "systemMessage": "You are a session title generator"
       },
       "response": {
         "content": "Upload session initialized."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Provider title retry",
+        "hasToolResult": false
+      },
+      "response": {
+        "content": "PROVIDER_TITLE_RUN_COMPLETED"
       }
     },
     {
@@ -886,13 +923,77 @@
     {
       "match": {
         "endpoint": "chat",
+        "userMessage": "Provider retry stop",
+        "hasToolResult": false,
+        "sequenceIndex": 0
+      },
+      "response": {
+        "error": {
+          "message": "Deterministic provider retry stop attempt 1 failed.",
+          "type": "invalid_request_error",
+          "code": "invalid_request"
+        },
+        "status": 400
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Provider retry stop",
+        "hasToolResult": false,
+        "sequenceIndex": 1
+      },
+      "response": {
+        "error": {
+          "message": "Deterministic provider retry stop attempt 2 failed.",
+          "type": "invalid_request_error",
+          "code": "invalid_request"
+        },
+        "status": 400
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Provider retry stop",
+        "hasToolResult": false,
+        "sequenceIndex": 2
+      },
+      "response": {
+        "error": {
+          "message": "Deterministic provider retry stop attempt 3 failed.",
+          "type": "invalid_request_error",
+          "code": "invalid_request"
+        },
+        "status": 400
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Provider retry stop",
+        "hasToolResult": false,
+        "sequenceIndex": 3
+      },
+      "response": {
+        "error": {
+          "message": "Deterministic provider retry stop attempt 4 failed.",
+          "type": "invalid_request_error",
+          "code": "invalid_request"
+        },
+        "status": 400
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
         "userMessage": "Failed run retry once then succeed",
         "hasToolResult": false,
         "sequenceIndex": 0
       },
       "response": {
         "error": {
-          "message": "Deterministic retry attempt 1 failed.",
+          "message": "Deterministic provider failure. api_key=dummy-provider-secret-value Bearer dummy-provider-token-value\u0001 request rejected.",
           "type": "rate_limit_error",
           "code": "rate_limit"
         },
@@ -1372,6 +1473,80 @@
         "ttft": 0,
         "tps": 20,
         "jitter": 0
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "systemMessage": "You are a context compaction engine for a long-running coding agent.",
+        "userMessage": "Provider compaction failure seed",
+        "sequenceIndex": 0
+      },
+      "response": {
+        "error": {
+          "message": "Deterministic provider compaction failure seed attempt 1 failed.",
+          "type": "invalid_request_error",
+          "code": "invalid_request"
+        },
+        "status": 400
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "systemMessage": "You are a context compaction engine for a long-running coding agent.",
+        "userMessage": "Provider compaction failure seed",
+        "sequenceIndex": 1
+      },
+      "response": {
+        "error": {
+          "message": "Deterministic provider compaction failure seed attempt 2 failed.",
+          "type": "invalid_request_error",
+          "code": "invalid_request"
+        },
+        "status": 400
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "systemMessage": "You are a context compaction engine for a long-running coding agent.",
+        "userMessage": "Provider compaction failure seed",
+        "sequenceIndex": 2
+      },
+      "response": {
+        "error": {
+          "message": "Deterministic provider compaction failure seed attempt 3 failed.",
+          "type": "invalid_request_error",
+          "code": "invalid_request"
+        },
+        "status": 400
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "systemMessage": "You are a context compaction engine for a long-running coding agent.",
+        "userMessage": "Provider compaction failure seed",
+        "sequenceIndex": 3
+      },
+      "response": {
+        "error": {
+          "message": "Deterministic provider compaction failure seed attempt 4 failed.",
+          "type": "invalid_request_error",
+          "code": "invalid_request"
+        },
+        "status": 400
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Provider compaction failure seed",
+        "hasToolResult": false
+      },
+      "response": {
+        "content": "Provider compaction failure seed response."
       }
     },
     {
