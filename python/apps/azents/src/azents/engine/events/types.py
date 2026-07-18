@@ -19,6 +19,7 @@ from azents.core.inference_profile import (
     RequestedInferenceProfile,
 )
 from azents.engine.events.action_messages import ActionMessagePayload
+from azents.engine.events.generated_files import PendingGeneratedFileOutput
 from azents.engine.run.failure import (
     FailedRunFailureMetadata,
     FailedRunRetryState,
@@ -288,6 +289,11 @@ class ClientToolResultPayload(BaseModel):
     output: ToolOutput = Field(default_factory=list)
     attachments: list[Attachment] = Field(default_factory=list)
     metadata: JSONObject = Field(default_factory=dict)
+    pending_generated_files: list[PendingGeneratedFileOutput] = Field(
+        default_factory=list,
+        exclude=True,
+        repr=False,
+    )
 
 
 class ProviderToolResultPayload(BaseModel):

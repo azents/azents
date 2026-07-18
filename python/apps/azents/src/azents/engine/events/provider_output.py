@@ -16,12 +16,14 @@ from PIL import Image, UnidentifiedImageError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import ExchangeFileOrigin
-from azents.engine.events.protocols import (
-    NormalizedAdapterOutput,
-    PendingProviderFileOutput,
+from azents.engine.events.generated_files import (
+    GeneratedFileOutput,
+    PendingGeneratedFileOutput,
 )
+from azents.engine.events.protocols import NormalizedAdapterOutput
 from azents.engine.events.types import (
     Attachment,
+    ClientToolResultPayload,
     Event,
     FileOutputPart,
     ProviderToolResultPayload,
@@ -111,6 +113,35 @@ class PreparedProviderOutput:
 
 
 @dataclasses.dataclass
+class PreparedClientToolOutput:
+    """Prepared client tool output awaiting transactional admission."""
+
+    result: ClientToolResultPayload
+    materializer: "ProviderOutputMaterializer"
+    generated_images: tuple[_PreparedGeneratedImage, ...]
+    uploaded_keys: set[str] = dataclasses.field(default_factory=set)
+    admitted: bool = False
+
+    async def persist(self, session: AsyncSession) -> None:
+        """Persist file metadata in the caller's tool-result transaction."""
+        await self.materializer.persist(
+            session,
+            self.generated_images,
+            uploaded_keys=self.uploaded_keys,
+        )
+
+    async def cleanup(self) -> None:
+        """Compensate uploaded objects unless result admission succeeded."""
+        if self.admitted or not self.uploaded_keys:
+            return
+        await self.materializer.cleanup(
+            self.generated_images,
+            uploaded_keys=self.uploaded_keys,
+        )
+        self.uploaded_keys.clear()
+
+
+@dataclasses.dataclass
 class ProviderOutputMaterializer:
     """Materialize transient provider images as Exchange and ModelFile resources."""
 
@@ -137,11 +168,38 @@ class ProviderOutputMaterializer:
             )
         await self._validate_scope()
         generated_images = tuple(
-            self._prepare_generated_image(file) for file in pending
+            self._prepare_generated_image(file, source_kind="provider_tool")
+            for file in pending
         )
         self._validate_unique_outputs(generated_images)
         return PreparedProviderOutput(
             normalized=self._attach_resources(normalized, generated_images),
+            materializer=self,
+            generated_images=generated_images,
+        )
+
+    async def prepare_client_result(
+        self,
+        result: ClientToolResultPayload,
+    ) -> PreparedClientToolOutput:
+        """Prepare transient client-generated images for result admission."""
+        pending = result.pending_generated_files
+        if not pending:
+            return PreparedClientToolOutput(
+                result=result,
+                materializer=self,
+                generated_images=(),
+            )
+        await self._validate_scope()
+        if any(file.call_id != result.call_id for file in pending):
+            raise ModelCallError("Generated image result identity is invalid.")
+        generated_images = tuple(
+            self._prepare_generated_image(file, source_kind="client_tool")
+            for file in pending
+        )
+        self._validate_unique_outputs(generated_images)
+        return PreparedClientToolOutput(
+            result=self._attach_client_resources(result, generated_images),
             materializer=self,
             generated_images=generated_images,
         )
@@ -381,7 +439,9 @@ class ProviderOutputMaterializer:
 
     def _prepare_generated_image(
         self,
-        pending: PendingProviderFileOutput,
+        pending: PendingGeneratedFileOutput,
+        *,
+        source_kind: Literal["provider_tool", "client_tool"],
     ) -> _PreparedGeneratedImage:
         """Prepare dual resource metadata and bytes for one pending image."""
         user_id = self._required_user_id()
@@ -478,7 +538,7 @@ class ProviderOutputMaterializer:
             )
         )
         file_metadata = {
-            "source_kind": "provider_tool",
+            "source_kind": source_kind,
             "source_tool_name": pending.tool_name,
             "source_call_id": pending.call_id,
             "source_media_type": pending.media_type,
@@ -506,7 +566,7 @@ class ProviderOutputMaterializer:
             media_type=pending.media_type,
             size=len(pending.body),
             created_at=now,
-            source="provider_tool",
+            source=source_kind,
             preview_title=filename,
             preview_thumbnail_uri=preview_uri,
             preview_thumbnail_media_type=preview_media_type,
@@ -572,6 +632,25 @@ class ProviderOutputMaterializer:
             }
         )
 
+    @staticmethod
+    def _attach_client_resources(
+        result: ClientToolResultPayload,
+        generated_images: tuple[_PreparedGeneratedImage, ...],
+    ) -> ClientToolResultPayload:
+        """Replace a client result skeleton with durable file references."""
+        if len(generated_images) != 1:
+            raise ModelCallError("Generated image result count is invalid.")
+        image = generated_images[0]
+        if image.call_id != result.call_id:
+            raise ModelCallError("Generated image result identity is invalid.")
+        return result.model_copy(
+            update={
+                "output": [image.file_part],
+                "attachments": [image.attachment],
+                "pending_generated_files": [],
+            }
+        )
+
     async def _upload(
         self,
         generated_images: tuple[_PreparedGeneratedImage, ...],
@@ -606,7 +685,7 @@ def pending_image_generation_output(
     output_item: dict[str, object],
     *,
     output_index: int,
-) -> PendingProviderFileOutput:
+) -> PendingGeneratedFileOutput:
     """Decode and validate one provider image generation result."""
     call_id = output_item.get("call_id") or output_item.get("id")
     if not isinstance(call_id, str) or not call_id:
@@ -614,7 +693,25 @@ def pending_image_generation_output(
     result = output_item.get("result")
     if not isinstance(result, str) or not result:
         raise ModelCallError("Generated image result is missing.")
-    encoded, media_hint = _split_image_data_url(result)
+    generated = generated_image_output(result, output_index=output_index)
+    return PendingGeneratedFileOutput(
+        call_id=call_id,
+        tool_name="image_generation",
+        output_index=generated.output_index,
+        filename=generated.filename,
+        media_type=generated.media_type,
+        sha256=generated.sha256,
+        body=generated.body,
+    )
+
+
+def generated_image_output(
+    encoded_result: str,
+    *,
+    output_index: int,
+) -> GeneratedFileOutput:
+    """Decode and validate one client or provider generated image."""
+    encoded, media_hint = _split_image_data_url(encoded_result)
     if len(encoded) > _MAX_ENCODED_IMAGE_CHARS:
         raise ModelCallError("Generated image result exceeds the size limit.")
     try:
@@ -627,9 +724,7 @@ def pending_image_generation_output(
     if media_hint is not None and media_hint != media_type:
         raise ModelCallError("Generated image result has an invalid media type.")
     sha256 = hashlib.sha256(body).hexdigest()
-    return PendingProviderFileOutput(
-        call_id=call_id,
-        tool_name="image_generation",
+    return GeneratedFileOutput(
         output_index=output_index,
         filename=f"generated-image-{sha256[:12]}.{extension}",
         media_type=media_type,

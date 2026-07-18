@@ -12,6 +12,7 @@ from pydantic import TypeAdapter
 
 from azents.core.tools import ToolkitStatus, TurnContext
 from azents.engine.events.execution import ClientToolExecutor
+from azents.engine.events.generated_files import PendingGeneratedFileOutput
 from azents.engine.events.output_parts import enforce_tool_output_text_hard_cap
 from azents.engine.events.system_prompt import ToolkitPromptInput
 from azents.engine.events.types import (
@@ -64,6 +65,25 @@ class ToolCatalog:
             }
             for tool in sorted(self.tools.values(), key=lambda item: item.spec.name)
         ]
+
+
+def extend_tool_catalog(
+    catalog: ToolCatalog,
+    additional_tools: Sequence[FunctionTool],
+) -> ToolCatalog:
+    """Return a catalog extended with collision-checked auto-bound tools."""
+    tools = dict(catalog.tools)
+    for tool in additional_tools:
+        name = tool.spec.name
+        if name in tools:
+            raise ValueError(f"Tool name is already bound: {name}")
+        tools[name] = tool
+    return ToolCatalog(
+        tools=tools,
+        static_prompt_fragment_inputs=catalog.static_prompt_fragment_inputs,
+        dynamic_prompt_fragment_inputs=catalog.dynamic_prompt_fragment_inputs,
+        active_toolkit_bindings=catalog.active_toolkit_bindings,
+    )
 
 
 async def build_tool_catalog(
@@ -279,6 +299,18 @@ def _tool_result_payload(
         status="completed",
         output=enforce_tool_output_text_hard_cap(output),
         metadata=dict(result.metadata),
+        pending_generated_files=[
+            PendingGeneratedFileOutput(
+                call_id=call.call_id,
+                tool_name=call.name,
+                output_index=generated.output_index,
+                filename=generated.filename,
+                media_type=generated.media_type,
+                sha256=generated.sha256,
+                body=generated.body,
+            )
+            for generated in result.generated_files
+        ],
     )
 
 

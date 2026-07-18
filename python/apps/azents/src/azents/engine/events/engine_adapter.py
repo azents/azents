@@ -8,10 +8,13 @@ import logging
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from typing import Annotated, Protocol, assert_never
 
+import httpx
+from azcommon.result import Failure, Success
 from azcommon.uuid import uuid7
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.credentials import XaiOAuthSecrets
 from azents.core.enums import (
     AgentRunPhase,
     AgentRunStatus,
@@ -93,6 +96,7 @@ from azents.engine.events.system_prompt import build_system_prompt
 from azents.engine.events.tools import (
     ToolCatalogClientToolExecutor,
     build_tool_catalog,
+    extend_tool_catalog,
 )
 from azents.engine.events.types import (
     AssistantMessagePayload,
@@ -136,17 +140,34 @@ from azents.engine.run.model_transport import ModelTransportKey
 from azents.engine.run.types import (
     USER_STOP_CANCEL_MESSAGE,
     CheckStop,
+    FunctionTool,
+    FunctionToolError,
     PollMessages,
+)
+from azents.engine.tools.xai_image_generation import (
+    XaiImageGenerationExecutor,
+    XaiImagineClientFactory,
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
+from azents.repos.llm_provider_integration.deps import (
+    get_llm_provider_integration_repository,
+)
 from azents.repos.model_file_pin import ModelFilePinRepository
 from azents.services.artifact import ArtifactService
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.model_file import ModelFileService
+from azents.services.xai_imagine import XaiImagineClient
+from azents.services.xai_oauth.data import (
+    ProviderEntitlementDenied,
+    ProviderRejected,
+    ProviderUnavailable,
+)
+from azents.services.xai_oauth.runtime import refresh_runtime_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -171,6 +192,18 @@ RunExecutionFactory = Callable[..., RunExecution]
 def _agent_run_execution_factory() -> RunExecutionFactory:
     """AgentRunExecution factory dependency."""
     return AgentRunExecution
+
+
+def _xai_imagine_client_factory() -> XaiImagineClientFactory:
+    """Build operation-scoped xAI Imagine clients."""
+
+    @contextlib.asynccontextmanager
+    async def create() -> AsyncIterator[XaiImagineClient]:
+        timeout = httpx.Timeout(60.0, connect=10.0)
+        async with httpx.AsyncClient(timeout=timeout) as http_client:
+            yield XaiImagineClient(http_client)
+
+    return create
 
 
 def _summary_model_call(
@@ -247,6 +280,14 @@ class AgentEngineAdapter:
     artifact_service: Annotated[ArtifactService, Depends(ArtifactService)]
     exchange_file_service: Annotated[ExchangeFileService, Depends(ExchangeFileService)]
     model_file_service: Annotated[ModelFileService, Depends(ModelFileService)]
+    integration_repository: Annotated[
+        LLMProviderIntegrationRepository,
+        Depends(get_llm_provider_integration_repository),
+    ]
+    xai_imagine_client_factory: Annotated[
+        XaiImagineClientFactory,
+        Depends(_xai_imagine_client_factory),
+    ]
     config: Annotated[EventEngineAdapterConfig, Depends(EventEngineAdapterConfig)]
     model_stream_watchdog: Annotated[
         ModelStreamWatchdog,
@@ -266,6 +307,80 @@ class AgentEngineAdapter:
     ]
     compactor: Annotated[ManualCompactor, Depends(EventCompactor)]
     summary_model_call: Annotated[SummaryModelCall, Depends(_summary_model_call)]
+
+    def _xai_image_generation_tool(self, request: RunRequest) -> FunctionTool:
+        """Build the auto-bound Imagine tool from the selected xAI integration."""
+        access_token = request.credential_kwargs.get("api_key")
+        if not isinstance(access_token, str) or not access_token:
+            raise ClientBuiltinToolImplementationUnavailableError(
+                "xAI image generation requires an integration credential."
+            )
+        integration_id = (
+            request.inference_state.model_selection.llm_provider_integration_id
+            if request.inference_state is not None
+            else None
+        )
+
+        async def refresh_access_token() -> str:
+            if integration_id is None:
+                raise FunctionToolError(
+                    "xAI OAuth reconnect is required for image generation."
+                )
+            async with self.session_manager() as session:
+                integration = await self.integration_repository.get_by_id_with_secrets(
+                    session,
+                    integration_id,
+                )
+            if (
+                integration is None
+                or integration.workspace_id != request.workspace_id
+                or integration.provider != LLMProvider.XAI_OAUTH
+            ):
+                raise FunctionToolError(
+                    "xAI OAuth reconnect is required for image generation."
+                )
+            refresh_result = await refresh_runtime_tokens(
+                integration=integration,
+                integration_repository=self.integration_repository,
+                session_manager=self.session_manager,
+            )
+            match refresh_result:
+                case Failure(error):
+                    match error:
+                        case ProviderRejected():
+                            message = (
+                                "xAI OAuth reconnect is required for image generation."
+                            )
+                        case ProviderEntitlementDenied():
+                            message = (
+                                "xAI Imagine access is not permitted for this account."
+                            )
+                        case ProviderUnavailable():
+                            message = (
+                                "xAI OAuth is temporarily unavailable. Try again later."
+                            )
+                        case _ as unreachable:
+                            assert_never(unreachable)
+                    raise FunctionToolError(message)
+                case Success(refreshed):
+                    if not isinstance(refreshed.secrets, XaiOAuthSecrets):
+                        raise FunctionToolError(
+                            "xAI OAuth reconnect is required for image generation."
+                        )
+                    access_token = refreshed.secrets.access_token
+                    request.credential_kwargs["api_key"] = access_token
+                    return access_token
+
+        return XaiImageGenerationExecutor(
+            provider=request.provider,
+            access_token=access_token,
+            client_factory=self.xai_imagine_client_factory,
+            refresh_access_token=(
+                refresh_access_token
+                if request.provider == LLMProvider.XAI_OAUTH
+                else None
+            ),
+        ).make_tool()
 
     async def save_error_message(self, session_id: str, content: str) -> Event:
         """Store Event system_error."""
@@ -426,13 +541,21 @@ class AgentEngineAdapter:
                 provider=request.provider,
                 supported=request.model_capabilities.built_in_tools.supported,
             )
-            if resolved_builtin_tools.client_executed:
-                names = ", ".join(
-                    tool.name for tool in resolved_builtin_tools.client_executed
-                )
+            client_builtin_tools: list[FunctionTool] = []
+            for tool in resolved_builtin_tools.client_executed:
+                if tool.name == "image_generation" and request.provider in {
+                    LLMProvider.XAI,
+                    LLMProvider.XAI_OAUTH,
+                }:
+                    client_builtin_tools.append(
+                        self._xai_image_generation_tool(request)
+                    )
+                    continue
                 raise ClientBuiltinToolImplementationUnavailableError(
-                    f"Client builtin tool implementation is unavailable: {names}"
+                    f"Client builtin tool implementation is unavailable: {tool.name}"
                 )
+            if client_builtin_tools:
+                catalog = extend_tool_catalog(catalog, client_builtin_tools)
 
             lowerer_type = (
                 OpenAIResponsesLowerer
@@ -586,6 +709,16 @@ class AgentEngineAdapter:
                 integration=integration_id,
             )
 
+        generated_output_materializer = ProviderOutputMaterializer(
+            exchange_file_service=self.exchange_file_service,
+            model_file_service=self.model_file_service,
+            workspace_id=request.workspace_id,
+            agent_id=request.agent_id,
+            session_id=request.session_id,
+            user_id=context.user_id,
+            run_id=context.run_id,
+            run_index=run_state.run_index,
+        )
         execution = self.execution_factory(
             session_manager=self.session_manager,
             post_lower_filter=PostLowerFilterPipeline(
@@ -616,16 +749,8 @@ class AgentEngineAdapter:
                 model_call_started_at=model_call_started_at,
                 compaction_state=compaction_live_state,
             ),
-            provider_output_materializer=ProviderOutputMaterializer(
-                exchange_file_service=self.exchange_file_service,
-                model_file_service=self.model_file_service,
-                workspace_id=request.workspace_id,
-                agent_id=request.agent_id,
-                session_id=request.session_id,
-                user_id=context.user_id,
-                run_id=context.run_id,
-                run_index=run_state.run_index,
-            ),
+            provider_output_materializer=generated_output_materializer,
+            client_tool_output_materializer=generated_output_materializer,
             pre_model_lower_hook=model_file_materializer.materialize,
             model_file_pin_repo=self.model_file_pin_repo,
             run_repo=self.run_repo,

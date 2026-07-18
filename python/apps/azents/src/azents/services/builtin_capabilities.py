@@ -49,6 +49,11 @@ def _supports_image_generation(
         if _string_sequence_contains(value, "image_generation"):
             return True
 
+    if provider in {LLMProvider.XAI, LLMProvider.XAI_OAUTH}:
+        return (
+            metadata.get("mode") == "chat"
+            and metadata.get("supports_function_calling") is True
+        )
     if provider not in {LLMProvider.OPENAI, LLMProvider.CHATGPT_OAUTH}:
         return False
     normalized = model_identifier.removeprefix("openai/").lower()

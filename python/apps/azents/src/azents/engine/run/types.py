@@ -15,6 +15,7 @@ from pydantic import (
     SkipValidation,
 )
 
+from azents.engine.events.generated_files import GeneratedFileOutput
 from azents.engine.io.attachments import RuntimeAttachment
 from azents.engine.io.user_input import RunUserMessage
 
@@ -86,6 +87,11 @@ class FunctionToolResult(BaseModel):
 
     output: str | list[RawDict]
     metadata: JSONObject = Field(default_factory=dict)
+    generated_files: list[GeneratedFileOutput] = Field(
+        default_factory=list,
+        exclude=True,
+        repr=False,
+    )
 
 
 # Async function taking JSON string args and returning string or ToolResult
