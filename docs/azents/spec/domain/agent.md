@@ -24,12 +24,13 @@ code_paths:
   - python/apps/azents/src/azents/services/agent_runtime/**
   - python/apps/azents/src/azents/services/llm_provider_integration/**
   - python/apps/azents/src/azents/services/model_listing/**
-  - python/apps/azents/src/azents/services/provider_hosted_tools.py
+  - python/apps/azents/src/azents/services/builtin_capabilities.py
   - python/apps/azents/src/azents/services/workspace_model_settings/**
   - python/apps/azents/src/azents/api/public/agent/**
   - python/apps/azents/src/azents/api/public/llm_provider_integration/**
   - python/apps/azents/src/azents/api/public/workspace_model_settings/**
   - python/apps/azents/src/azents/engine/run/contracts.py
+  - python/apps/azents/src/azents/engine/run/builtin_tools.py
   - python/apps/azents/src/azents/engine/context/window.py
   - python/apps/azents/src/azents/engine/tools/**
   - python/apps/azents/src/azents/worker/run/**
@@ -46,8 +47,8 @@ api_routes:
   - /llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/start
   - /llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/{session_id}
   - /chat/v1
-last_verified_at: 2026-07-17
-spec_version: 49
+last_verified_at: 2026-07-18
+spec_version: 50
 ---
 
 # Agent Domain Spec
@@ -297,11 +298,11 @@ Runtime does not query Workspace defaults or model listing. Workspace defaults a
 
 ## 4. Built-in Tool Validation
 
-Each selectable model option owns its provider-hosted built-in tool opt-in list. Model snapshot `normalized_capabilities.built_in_tools.supported` means only selectable capability; a supported tool omitted from that option's settings is not exposed when the option is selected.
+Each selectable model option owns a semantic built-in tool opt-in list. Model snapshot `normalized_capabilities.built_in_tools.supported` means the capability is selectable; it does not prescribe whether the provider or Azents executes it. A supported tool omitted from that option's settings is not exposed when the option is selected.
 
 The configurable implemented registry contains `web_search` and `image_generation`. Capability projection filters out unimplemented identifiers such as `web_fetch`. Agent and Workspace submit normalization rejects unknown, duplicate, or capability-unsupported names per option. `image_generation` uses the same model-scoped validation contract as other builtins and does not restore historical provider-specific Agent validation conditions.
 
-Runtime passes the selected Session settings as `BuiltinToolSpec(name, config)`. OpenAI API-key and ChatGPT OAuth runs lower the semantic builtins through the official Responses SDK path; other providers use the LiteLLM Responses lowerer. Every lowerer performs capability validation again to protect stale snapshots or direct `RunRequest` construction. Configured hosted tools are dispatched exhaustively: a selected semantic builtin is lowered to its provider-native shape or fails before provider dispatch, never silently omitted.
+Runtime passes the selected Session settings as `BuiltinToolSpec(name, config)` and resolves every selected semantic capability to one execution owner before provider dispatch. `web_search` remains provider-hosted. xAI API-key and xAI OAuth `image_generation` become an auto-bound unprefixed client function tool backed by Imagine; an advertised `image_generation` capability for any other provider remains provider-hosted. The maintained automatic hosted policy currently advertises this capability for supported OpenAI API-key and ChatGPT OAuth models, while another provider requires an explicit trusted metadata declaration. Only the provider-hosted partition reaches the request lowerer. A capability missing from the selected snapshot, unimplemented by the resolver, or lacking its required client binding fails before provider dispatch; no configured builtin is silently omitted or exposed through both execution paths.
 
 ## 5. Context Window / Compaction
 
@@ -333,6 +334,7 @@ Following contracts do not exist in current system.
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-07-18 | 50 | Resolved semantic built-ins to provider-hosted or client-executed ownership per selected model provider |
 | 2026-07-17 | 49 | Added per-option explicit subagent target availability and bounded parent-model selection guidance |
 | 2026-07-17 | 48 | Restored model-scoped `image_generation` selection and exhaustive OpenAI/ChatGPT/LiteLLM hosted-tool lowering |
 | 2026-07-16 | 47 | Moved context, output, and built-in tool intent to selectable model options and persisted selected settings on AgentSession |

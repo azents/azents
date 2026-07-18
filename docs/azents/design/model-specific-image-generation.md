@@ -1,6 +1,7 @@
 ---
 title: "Model-Specific Image Generation Execution"
 created: 2026-07-18
+implemented: 2026-07-18
 tags: [backend, engine, frontend, llm, storage, tools, security, testenv]
 ---
 

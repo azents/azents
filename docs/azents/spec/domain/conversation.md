@@ -93,7 +93,7 @@ api_routes:
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-07-18
-spec_version: 108
+spec_version: 109
 ---
 
 # Conversation & Events
@@ -464,9 +464,13 @@ Completed `image_generation` results use a provider-neutral durable shape. The r
 contains a ModelFile-backed `FileOutputPart`, and `attachments` contains the independently stored
 Exchange original. Provider Base64, decoded bytes, and native `result` fields are transient only and
 are excluded from event payloads, native artifacts, REST/WebSocket projections, and frontend state.
-The same-native lowerer may reconstruct the native image result from the ModelFile in request-local
-memory. An incompatible adapter or model lowers the FilePart through the normal rich-image path or an
-explicit bounded unavailable-image placeholder.
+Provider-hosted generation retains provider tool call/result event ownership. xAI Imagine generation
+retains client tool call/result ownership while using the same durable output and attachment fields;
+credentials and transient generated-file bytes are excluded from both event forms. The same-native
+lowerer may reconstruct a provider-hosted native image result from the ModelFile in request-local
+memory. An incompatible adapter or model, and every later-model use of a client-generated result,
+lowers the FilePart through the normal rich-image path or an explicit bounded unavailable-image
+placeholder.
 
 ## 5. History And Live Event APIs
 
@@ -510,11 +514,11 @@ output uses native output identity or response/content indices, reasoning uses n
 projection root, and client/provider tool pairs use `call_id`. Selectors merge call and result events
 across raw page boundaries. Provider-tool calls render provider-neutral `running`, `completed`, and
 `failed` states from their canonical status; a missing live status is treated as running, while a
-missing durable status uses the neutral historical fallback. Semantic hosted-tool names such as
-`web_search` and `image_generation` select presentation labels without branching on provider identity.
-Provider tool results preserve completion/failure status, output text, and attachments. An available
-`image_generation` attachment renders directly in the provider-tool card without requiring the user
-to expand diagnostic details; preview and download continue through the Exchange attachment surface.
+missing durable status uses the neutral historical fallback. Semantic tool names such as `web_search` and `image_generation` select presentation labels without
+branching on provider identity or execution ownership. Provider and client tool results preserve their
+own completion/failure status, output, and attachments. An available `image_generation` attachment
+renders directly in the owning provider-tool or client-tool card without requiring the user to expand
+diagnostic details; preview and download continue through the Exchange attachment surface.
 Live `agent_message` events use the same source-labeled internal-agent row as their durable form. When
 a live entity and durable event describe the same semantic output, the durable projection replaces
 the live projection without a duplicate or disappearance.
@@ -771,6 +775,7 @@ Current verification:
 
 ## 11. Changelog
 
+- **2026-07-18** — v109. Added xAI client-owned image-generation events with the shared Base64-free attachment and ModelFile output contract.
 - **2026-07-18** — v107. Added bounded typed provider-failure metadata, complete-budget provider retry, reconnect-safe context preparation, atomic successful compaction commit, and terminal non-replayable User Stop.
 - **2026-07-17** — v106. Added Base64-free dual materialization, request-local replay, retry-safe admission, and direct attachment presentation for provider-hosted generated images.
 - **2026-07-16** — v105. Added provider-neutral live provider-tool lifecycle state, Redis resync,
