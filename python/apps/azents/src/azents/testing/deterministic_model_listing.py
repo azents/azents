@@ -149,12 +149,21 @@ def _candidate(
     lightweight: bool,
 ) -> NormalizedModelCandidate:
     """Build fixture candidate."""
+    if provider in {LLMProvider.XAI, LLMProvider.XAI_OAUTH}:
+        identifier = "grok-4-fast" if lightweight else "grok-4"
+        display_name = (
+            "Grok 4 Fast Deterministic" if lightweight else "Grok 4 Deterministic"
+        )
+        family = "grok-4-fast" if lightweight else "grok-4"
+        developer = LLMModelDeveloper.XAI
+    else:
+        developer = LLMModelDeveloper.OPENAI
     max_input_tokens = 64_000 if lightweight else 128_000
     return NormalizedModelCandidate(
         provider=provider,
         model_identifier=identifier,
         model_display_name=display_name,
-        model_developer=LLMModelDeveloper.OPENAI,
+        model_developer=developer,
         model_family=family,
         normalized_capabilities=ModelCapabilities(
             context_window=ModelContextWindow(

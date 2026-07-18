@@ -1671,6 +1671,124 @@
         ],
         "totalDurationMs": 300
       }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "xAI API-key image generation",
+        "hasToolResult": false
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_xai_api_key_image_generation",
+            "name": "image_generation",
+            "arguments": {
+              "prompt": "A deterministic xAI API-key aurora"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_xai_api_key_image_generation"
+      },
+      "response": {
+        "content": "XAI_API_KEY_IMAGE_GENERATION_COMPLETED"
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "xAI OAuth image generation",
+        "hasToolResult": false
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_xai_oauth_image_generation",
+            "name": "image_generation",
+            "arguments": {
+              "prompt": "A deterministic xAI OAuth aurora"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_xai_oauth_image_generation"
+      },
+      "response": {
+        "content": "XAI_OAUTH_IMAGE_GENERATION_COMPLETED"
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "xAI OAuth image generation after 401",
+        "hasToolResult": false
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_xai_oauth_refresh_image_generation",
+            "name": "image_generation",
+            "arguments": {
+              "prompt": "A deterministic xAI OAuth refresh aurora"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_xai_oauth_refresh_image_generation"
+      },
+      "response": {
+        "content": "XAI_OAUTH_REFRESH_IMAGE_GENERATION_COMPLETED"
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "xAI OAuth image generation repeated 401",
+        "hasToolResult": false
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_xai_oauth_rejected_image_generation",
+            "name": "image_generation",
+            "arguments": {
+              "prompt": "A deterministic rejected xAI OAuth aurora"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_xai_oauth_rejected_image_generation"
+      },
+      "response": {
+        "content": "XAI_OAUTH_REJECTED_IMAGE_GENERATION_COMPLETED"
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "xAI image generation disabled",
+        "hasToolResult": false
+      },
+      "response": {
+        "content": "XAI_IMAGE_GENERATION_DISABLED_COMPLETED"
+      }
     }
   ]
 }

@@ -45,6 +45,7 @@ from azents.core.llm_catalog_sync import (
     IntegrationCatalogSyncTrigger,
     evaluate_integration_catalog_sync_policy,
 )
+from azents.core.llm_mapping import to_runtime_model
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.llm_catalog import (
@@ -1016,7 +1017,10 @@ def project_deterministic_integration_entries(
                 provider=provider,
                 provider_model_identifier=candidate.model_identifier,
                 lowerer_target=LLMCatalogLowererTarget.LITELLM,
-                runtime_model_identifier=candidate.model_identifier,
+                runtime_model_identifier=to_runtime_model(
+                    provider,
+                    candidate.model_identifier,
+                ),
                 display_name=candidate.model_display_name,
                 normalized_capabilities=candidate.normalized_capabilities.model_dump(
                     mode="json"
