@@ -873,7 +873,13 @@ class RunExecutor:
         )
         if agent_run.status == AgentRunStatus.PENDING:
             agent_run = await self.session_lifecycle.activate_pending_agent_run(
-                message.session_id, run_id=run_id
+                message.session_id,
+                run_id=run_id,
+                initial_phase=(
+                    AgentRunPhase.COMPACTING
+                    if command is not None
+                    else AgentRunPhase.IDLE
+                ),
             )
         elif agent_run.status != AgentRunStatus.RUNNING:
             raise ValueError("Recoverable AgentRun is already terminal")

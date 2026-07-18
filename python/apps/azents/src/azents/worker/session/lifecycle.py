@@ -237,8 +237,9 @@ class SessionLifecycleService:
         session_id: str,
         *,
         run_id: str,
+        initial_phase: AgentRunPhase,
     ) -> AgentRunState:
-        """Activate a model-independent pending AgentRun."""
+        """Activate a pending AgentRun with its reconnect-safe initial phase."""
         async with self.session_manager() as db_session:
             run = await self.agent_run_repository.activate_pending(
                 db_session,
@@ -247,6 +248,11 @@ class SessionLifecycleService:
             )
             if run.session_id != session_id:
                 raise ValueError("AgentRun session mismatch")
+            run = await self.agent_run_repository.update_phase(
+                db_session,
+                run_id,
+                initial_phase,
+            )
             await db_session.commit()
             return run
 

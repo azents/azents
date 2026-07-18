@@ -200,6 +200,7 @@ class _SessionLifecycle:
         self.wake_ups: list[SessionWakeUp] = []
         self.pending_run_create_calls = 0
         self.activation_calls = 0
+        self.activation_phases: list[AgentRunPhase] = []
         self.inherited_activation_calls = 0
         self.cancelled_pending_run_ids: list[str] = []
 
@@ -311,14 +312,20 @@ class _SessionLifecycle:
     async def activate_pending_agent_run(
         self,
         session_id: str,
-        **kwargs: object,
+        *,
+        run_id: str,
+        initial_phase: AgentRunPhase,
     ) -> _PendingRun:
         """Accept activation before provider invocation."""
-        del session_id, kwargs
+        del session_id, run_id
         self.activation_calls += 1
+        self.activation_phases.append(initial_phase)
         if self.order is not None:
             self.order.append("activate_pending")
-        return _PendingRun(status=AgentRunStatus.RUNNING)
+        return _PendingRun(
+            status=AgentRunStatus.RUNNING,
+            phase=initial_phase,
+        )
 
     async def activate_inherited_pending_agent_run(
         self,
@@ -2613,6 +2620,7 @@ async def test_execute_runs_pending_command_inside_run_boundary(
 
     assert len(handler.requests) == 1
     assert len(handler.contexts) == 1
+    assert lifecycle.activation_phases == [AgentRunPhase.COMPACTING]
     run_id = result.run_id
     assert run_id is not None
     assert handler.contexts[0].run_id == run_id
