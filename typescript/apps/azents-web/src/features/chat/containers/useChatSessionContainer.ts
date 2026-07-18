@@ -21,6 +21,10 @@ import {
   shouldProjectLivePartialEvent,
 } from "../hooks/chatStopProjection";
 import {
+  liveRunForDisplay,
+  resolveDismissedLiveRetryKey,
+} from "../hooks/liveRetryVisibility";
+import {
   applyProviderToolCallItem,
   applyProviderToolCallOutput,
   providerToolCallStatusFromPayload,
@@ -1463,6 +1467,7 @@ interface ManagedLiveState {
   partialHistory: PartialHistoryState;
   pendingInputBuffers: PendingInputBuffer[];
   liveRun: ChatLiveRunState | null;
+  dismissedLiveRetryKey: string | null;
   liveRunPhase: AgentRunPhase | null;
   sessionRunState: SessionRunState;
   isResponsePending: boolean;
@@ -1523,6 +1528,7 @@ function emptyManagedLiveState(): ManagedLiveState {
     partialHistory: emptyPartialHistoryState(),
     pendingInputBuffers: [],
     liveRun: null,
+    dismissedLiveRetryKey: null,
     liveRunPhase: null,
     sessionRunState: "idle",
     isResponsePending: false,
@@ -1696,6 +1702,11 @@ function replaceLiveStateFromSnapshot(
       partialHistory: partialHistoryWithGoalContinuations,
       pendingInputBuffers,
       liveRun,
+      dismissedLiveRetryKey: resolveDismissedLiveRetryKey(
+        liveRun,
+        previous?.dismissedLiveRetryKey ?? null,
+        partialHistory.order.length > 0,
+      ),
       liveRunPhase: currentLiveRunPhase,
       sessionRunState:
         liveRun?.status === "running"
@@ -2071,7 +2082,14 @@ export function useChatSessionContainer(
     sessionCurrentInferenceProfile ??
     agentDefaultInferenceProfile;
   const pendingInputBuffers = managedLiveState.pendingInputBuffers;
-  const liveRun = managedLiveState.liveRun;
+  const liveRun = useMemo(
+    () =>
+      liveRunForDisplay(
+        managedLiveState.liveRun,
+        managedLiveState.dismissedLiveRetryKey,
+      ),
+    [managedLiveState.dismissedLiveRetryKey, managedLiveState.liveRun],
+  );
   const isResponsePending = managedLiveState.isResponsePending;
   const isModelResponsePending = isModelRunPhase(managedLiveState.liveRunPhase);
   const sessionRunState = managedLiveState.sessionRunState;
@@ -2165,6 +2183,7 @@ export function useChatSessionContainer(
           return {
             ...prev,
             liveRun: null,
+            dismissedLiveRetryKey: null,
             liveRunPhase: null,
             sessionRunState: "idle",
             isResponsePending: false,
@@ -2258,6 +2277,11 @@ export function useChatSessionContainer(
         setManagedLiveState((prev) => ({
           ...prev,
           liveRun: nextLiveRun,
+          dismissedLiveRetryKey: resolveDismissedLiveRetryKey(
+            nextLiveRun,
+            prev.dismissedLiveRetryKey,
+            false,
+          ),
           liveRunPhase: nextLiveRunPhase,
           sessionRunState:
             nextLiveRun.status === "running" ? "running" : prev.sessionRunState,
@@ -2324,6 +2348,11 @@ export function useChatSessionContainer(
             partialHistory: upsertPartialHistoryEvent(
               prev.partialHistory,
               responseEvent,
+            ),
+            dismissedLiveRetryKey: resolveDismissedLiveRetryKey(
+              prev.liveRun,
+              prev.dismissedLiveRetryKey,
+              true,
             ),
             isResponsePending: liveActivityResponsePending(
               prev.isResponsePending,

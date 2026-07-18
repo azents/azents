@@ -17,7 +17,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
 last_verified_at: 2026-07-18
-spec_version: 32
+spec_version: 33
 ---
 
 # Chat Session Resync
