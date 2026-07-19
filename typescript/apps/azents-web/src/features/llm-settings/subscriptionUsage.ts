@@ -50,7 +50,8 @@ export function supportsSubscriptionUsage(provider: string): boolean {
   return (
     provider === "chatgpt_oauth" ||
     provider === "xai_oauth" ||
-    provider === "openrouter"
+    provider === "openrouter" ||
+    provider === "kimi_oauth"
   );
 }
 

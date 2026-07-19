@@ -420,6 +420,7 @@
         "chatgpt_oauth": "ChatGPT subscription",
         "xai": "xAI API key",
         "xai_oauth": "xAI Grok OAuth",
+        "kimi_oauth": "Kimi subscription",
         "openrouter": "OpenRouter"
       },
       "chatgptOAuth": {
@@ -526,6 +527,28 @@
         "copyCode": "Copy code",
         "copied": "Copied",
         "connectWithDeviceCode": "Connect with device code",
+        "cancel": "Cancel",
+        "statusError": "Device authorization {status}."
+      },
+      "kimiOAuth": {
+        "title": "Kimi subscription",
+        "experimentalBadge": "Experimental",
+        "description": "Connect a Kimi Code subscription with device authorization.",
+        "deviceOnly": "Azents stores the resulting device identity and tokens encrypted on the server.",
+        "availabilityNotice": "Available models and quota depend on your Kimi subscription entitlement.",
+        "connected": "Connected",
+        "reconnectRequired": "Reconnect required",
+        "temporarilyUnavailable": "Temporarily unavailable",
+        "disabled": "Disabled",
+        "connectionFailed": "Kimi connection failed",
+        "deviceInstruction": "Open <link>Kimi authorization</link> and enter the code below.",
+        "openVerificationPage": "Open Kimi authorization page",
+        "copyCode": "Copy code",
+        "copied": "Copied",
+        "expiresAt": "Code expires {value}",
+        "connectWithDeviceCode": "Connect Kimi subscription",
+        "reconnectWithDeviceCode": "Reconnect Kimi subscription",
+        "tryAgain": "Try again",
         "cancel": "Cancel",
         "statusError": "Device authorization {status}."
       }

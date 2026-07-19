@@ -76,3 +76,37 @@ export const XaiEditPreservesOmittedApiKey = {
     });
   },
 } satisfies Story;
+
+export const KimiReconnectRequired = {
+  args: {
+    availableProviderValues: ["kimi_oauth"],
+    formModal: {
+      type: "EDIT",
+      integration: {
+        id: "integration-kimi",
+        provider: "kimi_oauth",
+        name: "Team Kimi subscription",
+        config: {
+          type: "kimi_oauth",
+          connection_method: "device",
+          status: "refresh_required",
+          connected_at: "2026-07-19T00:00:00Z",
+          last_refreshed_at: "2026-07-19T00:00:00Z",
+          last_failed_at: "2026-07-19T01:00:00Z",
+          last_failure_reason: "refresh token rejected",
+        },
+        enabled: true,
+        created_at: "2026-07-19T00:00:00Z",
+        updated_at: "2026-07-19T01:00:00Z",
+      },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement.ownerDocument.body);
+    await expect(page.getByText("Reconnect required")).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Reconnect Kimi subscription" }),
+    ).toBeVisible();
+    await expect(page.queryByLabelText("API Key")).not.toBeInTheDocument();
+  },
+} satisfies Story;

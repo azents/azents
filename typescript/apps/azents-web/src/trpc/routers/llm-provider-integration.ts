@@ -11,6 +11,9 @@ import {
   chatgptOauthV1CancelDevice,
   chatgptOauthV1PollDevice,
   chatgptOauthV1StartDevice,
+  kimiOauthV1CancelDevice,
+  kimiOauthV1PollDevice,
+  kimiOauthV1StartDevice,
   llmProviderIntegrationV1CreateIntegration,
   llmProviderIntegrationV1DeleteIntegration,
   llmProviderIntegrationV1GetSubscriptionUsage,
@@ -461,6 +464,70 @@ export const llmProviderIntegrationRouter = router({
     .mutation(async ({ ctx, input }) => {
       try {
         const { data } = await xaiOauthV1CancelDevice({
+          client: ctx.apiClient,
+          path: { handle: input.handle, session_id: input.sessionId },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          400: "BAD_REQUEST",
+          401: "UNAUTHORIZED",
+          403: "FORBIDDEN",
+          404: "NOT_FOUND",
+          409: "CONFLICT",
+        });
+      }
+    }),
+
+  startKimiOauthDevice: publicProcedure
+    .input(z.object({ handle: z.string().min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { data } = await kimiOauthV1StartDevice({
+          client: ctx.apiClient,
+          path: { handle: input.handle },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          401: "UNAUTHORIZED",
+          403: "FORBIDDEN",
+        });
+      }
+    }),
+
+  getKimiOauthDeviceStatus: publicProcedure
+    .input(
+      z.object({ handle: z.string().min(1), sessionId: z.string().min(1) }),
+    )
+    .query(async ({ ctx, input }) => {
+      try {
+        const { data } = await kimiOauthV1PollDevice({
+          client: ctx.apiClient,
+          path: { handle: input.handle, session_id: input.sessionId },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          400: "BAD_REQUEST",
+          401: "UNAUTHORIZED",
+          403: "FORBIDDEN",
+          404: "NOT_FOUND",
+          409: "CONFLICT",
+        });
+      }
+    }),
+
+  cancelKimiOauthDevice: publicProcedure
+    .input(
+      z.object({ handle: z.string().min(1), sessionId: z.string().min(1) }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { data } = await kimiOauthV1CancelDevice({
           client: ctx.apiClient,
           path: { handle: input.handle, session_id: input.sessionId },
           throwOnError: true,

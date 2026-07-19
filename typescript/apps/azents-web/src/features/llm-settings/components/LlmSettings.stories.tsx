@@ -25,6 +25,23 @@ const integrations: LlmProviderIntegrationResponse[] = [
     updated_at: "2026-07-10T00:00:00Z",
   },
   {
+    id: "integration-kimi-oauth",
+    provider: "kimi_oauth",
+    name: "Kimi Code subscription",
+    config: {
+      type: "kimi_oauth",
+      connection_method: "device",
+      status: "refresh_required",
+      connected_at: "2026-07-19T00:00:00Z",
+      last_refreshed_at: "2026-07-19T00:00:00Z",
+      last_failed_at: null,
+      last_failure_reason: null,
+    },
+    enabled: true,
+    created_at: "2026-07-19T00:00:00Z",
+    updated_at: "2026-07-19T00:00:00Z",
+  },
+  {
     id: "integration-openrouter",
     provider: "openrouter",
     name: "OpenRouter workspace",
@@ -55,7 +72,7 @@ const meta = {
     mutationState: { type: "IDLE", error: null },
     canManage: true,
     providerOptions: [],
-    availableProviderValues: ["xai", "xai_oauth", "openrouter"],
+    availableProviderValues: ["xai", "xai_oauth", "kimi_oauth", "openrouter"],
     modelOptions: [],
     catalogStates: new Map(),
     modelsLoading: false,
@@ -76,13 +93,16 @@ export default meta;
 
 type Story = StoryObj<typeof meta>;
 
-export const XaiCredentialModes = {
+export const SubscriptionCredentialModes = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(canvas.getByText("xAI API key")).toBeVisible();
     await expect(canvas.getByText("xAI Grok OAuth")).toBeVisible();
+    await expect(canvas.getByText("Kimi subscription")).toBeVisible();
     await expect(canvas.getByText("Production xAI API")).toBeVisible();
     await expect(canvas.getByText("Personal Grok account")).toBeVisible();
+    await expect(canvas.getByText("Kimi Code subscription")).toBeVisible();
+    await expect(canvas.getByText("Reconnect required")).toBeVisible();
     await expect(canvas.getByText("OpenRouter")).toBeVisible();
     await expect(canvas.getByText("OpenRouter workspace")).toBeVisible();
   },
