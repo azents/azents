@@ -833,6 +833,7 @@ async def test_event_engine_adapter_runs_execution() -> None:
                 credential_kwargs={"api_key": "test"},
                 workspace_id="workspace-1",
                 agent_id="agent-1",
+                tool_search_enabled=False,
                 auto_compaction_threshold_tokens=None,
                 inference_state=None,
                 compaction_provider_integration_id=None,
@@ -861,6 +862,68 @@ async def test_event_engine_adapter_runs_execution() -> None:
     )
     assert isinstance(prepared_request.options.get("prompt_cache_key"), str)
     assert isinstance(_events(emits)[0], RunComplete)
+
+
+async def test_disabled_tool_search_exposes_complete_catalog() -> None:
+    """Preserve the complete legacy tool catalog when Tool Search is disabled."""
+    toolkit = _DeferredToolkit(["probe", "other"])
+    store = _ToolWorkingSetStore()
+    execution = _Execution()
+    adapter = _agent_engine_adapter(
+        tool_working_set_store=store,
+        execution_factory=lambda **kwargs: (
+            setattr(
+                execution,
+                "model_call_preparer",
+                kwargs["model_call_preparer"],
+            )
+            or execution
+        ),
+    )
+    request = RunRequest(
+        session_id="session-1",
+        user_messages=[],
+        agent_prompt=None,
+        toolkits=[
+            ToolkitBinding(
+                toolkit=toolkit,
+                slug="service",
+                use_prefix=True,
+                toolkit_type="github",
+            )
+        ],
+        model="gpt-5.1",
+        credential_kwargs={"api_key": "test"},
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        tool_search_enabled=False,
+        auto_compaction_threshold_tokens=None,
+        inference_state=None,
+        compaction_provider_integration_id=None,
+    )
+
+    _ = [emit async for emit in adapter.run(request, _run_context())]
+
+    assert execution.prepared_model_call is not None
+    prepared = execution.prepared_model_call
+    native_request = prepared.native_request
+    assert isinstance(native_request, OpenAIResponsesRequest)
+    assert [tool["name"] for tool in native_request.tools] == [
+        "service__other",
+        "service__probe",
+    ]
+
+    result = await prepared.tool_executor.execute(
+        ClientToolCallPayload(
+            call_id="probe-1",
+            name="service__probe",
+            arguments="{}",
+            native_artifact=_artifact({"type": "function_call"}),
+        )
+    )
+
+    assert result.status == "completed"
+    assert (await store.load("agent-1", "session-1")).tool_names == []
 
 
 async def test_tool_search_activation_updates_the_next_prepared_call() -> None:
@@ -895,6 +958,7 @@ async def test_tool_search_activation_updates_the_next_prepared_call() -> None:
         credential_kwargs={"api_key": "test"},
         workspace_id="workspace-1",
         agent_id="agent-1",
+        tool_search_enabled=True,
         auto_compaction_threshold_tokens=None,
         inference_state=None,
         compaction_provider_integration_id=None,
@@ -1060,6 +1124,7 @@ async def test_xai_image_generation_is_bound_as_client_function_tool() -> None:
                 credential_kwargs={"api_key": "xai-api-key"},
                 workspace_id="workspace-1",
                 agent_id="agent-1",
+                tool_search_enabled=False,
                 auto_compaction_threshold_tokens=None,
                 inference_state=None,
                 compaction_provider_integration_id=None,
@@ -1141,6 +1206,7 @@ async def test_xai_oauth_refresh_updates_later_model_turn_credentials(
         credential_kwargs={"api_key": "old-access-token"},
         workspace_id="workspace-1",
         agent_id="agent-1",
+        tool_search_enabled=False,
         auto_compaction_threshold_tokens=None,
         inference_state=_xai_oauth_inference_state(),
         compaction_provider_integration_id=None,
@@ -1233,6 +1299,7 @@ async def test_xai_oauth_refresh_preserves_failure_classification(
         credential_kwargs={"api_key": "old-access-token"},
         workspace_id="workspace-1",
         agent_id="agent-1",
+        tool_search_enabled=False,
         auto_compaction_threshold_tokens=None,
         inference_state=_xai_oauth_inference_state(),
         compaction_provider_integration_id=None,
@@ -1267,6 +1334,7 @@ async def test_adapter_yields_model_output_before_run_completion() -> None:
             credential_kwargs={"api_key": "test"},
             workspace_id="workspace-1",
             agent_id="agent-1",
+            tool_search_enabled=False,
             auto_compaction_threshold_tokens=None,
             inference_state=None,
             compaction_provider_integration_id=None,
@@ -1316,6 +1384,7 @@ async def test_adapter_forwards_user_stop_cancellation_to_execution() -> None:
                 credential_kwargs={"api_key": "test"},
                 workspace_id="workspace-1",
                 agent_id="agent-1",
+                tool_search_enabled=False,
                 auto_compaction_threshold_tokens=None,
                 inference_state=None,
                 compaction_provider_integration_id=None,
@@ -1367,6 +1436,7 @@ async def test_adapter_drains_run_task_on_stream_close() -> None:
             credential_kwargs={"api_key": "test"},
             workspace_id="workspace-1",
             agent_id="agent-1",
+            tool_search_enabled=False,
             auto_compaction_threshold_tokens=None,
             inference_state=None,
             compaction_provider_integration_id=None,
@@ -1420,6 +1490,7 @@ async def test_event_engine_adapter_includes_turn_start_injected_prompts() -> No
                 credential_kwargs={"api_key": "test"},
                 workspace_id="workspace-1",
                 agent_id="agent-1",
+                tool_search_enabled=False,
                 auto_compaction_threshold_tokens=None,
                 inference_state=None,
                 compaction_provider_integration_id=None,
@@ -1473,6 +1544,7 @@ async def test_adapter_propagates_user_visible_model_call_error() -> None:
                 credential_kwargs={"api_key": "test"},
                 workspace_id="workspace-1",
                 agent_id="agent-1",
+                tool_search_enabled=False,
                 auto_compaction_threshold_tokens=None,
                 inference_state=None,
                 compaction_provider_integration_id=None,
@@ -1538,6 +1610,7 @@ async def test_model_kwargs_routes_chatgpt_oauth_to_backend_api() -> None:
                 },
                 workspace_id="workspace-1",
                 agent_id="agent-1",
+                tool_search_enabled=False,
                 auto_compaction_threshold_tokens=None,
                 inference_state=None,
                 compaction_provider_integration_id=None,
@@ -1614,6 +1687,7 @@ async def test_model_kwargs_keep_openrouter_on_litellm_responses() -> None:
                 },
                 workspace_id="workspace-1",
                 agent_id="agent-1",
+                tool_search_enabled=False,
                 auto_compaction_threshold_tokens=None,
                 inference_state=None,
                 compaction_provider_integration_id=None,
@@ -1675,6 +1749,7 @@ async def test_adapter_wires_event_filters_and_session_head_repo() -> None:
                 credential_kwargs={"api_key": "test"},
                 workspace_id="workspace-1",
                 agent_id="agent-1",
+                tool_search_enabled=False,
                 auto_compaction_threshold_tokens=None,
                 inference_state=None,
                 compaction_provider_integration_id=None,
@@ -1780,6 +1855,7 @@ async def test_manual_compact_runs_append_only_event_compactor() -> None:
                 credential_kwargs={"api_key": "test"},
                 workspace_id="workspace-1",
                 agent_id="agent-1",
+                tool_search_enabled=False,
                 auto_compaction_threshold_tokens=None,
                 inference_state=None,
                 compaction_provider_integration_id=None,
@@ -1863,6 +1939,7 @@ async def test_manual_compact_runs_compaction_summary_hook() -> None:
                 credential_kwargs={"api_key": "test"},
                 workspace_id="workspace-1",
                 agent_id="agent-1",
+                tool_search_enabled=False,
                 auto_compaction_threshold_tokens=None,
                 inference_state=None,
                 compaction_provider_integration_id=None,
@@ -1982,6 +2059,7 @@ async def test_manual_compact_trims_summary_input_to_checkpoint_and_tail() -> No
                 credential_kwargs={"api_key": "test"},
                 workspace_id="workspace-1",
                 agent_id="agent-1",
+                tool_search_enabled=False,
                 auto_compaction_threshold_tokens=None,
                 inference_state=None,
                 compaction_provider_integration_id=None,
@@ -2037,6 +2115,7 @@ async def test_manual_compact_propagates_compaction_failure() -> None:
             credential_kwargs={"api_key": "test"},
             workspace_id="workspace-1",
             agent_id="agent-1",
+            tool_search_enabled=False,
             auto_compaction_threshold_tokens=None,
             inference_state=None,
             compaction_provider_integration_id=None,

@@ -734,6 +734,7 @@ async def resolve_invoke_input_with_model_source(
                 credential_kwargs=credential_kwargs,
                 workspace_id=agent.workspace_id,
                 agent_id=invoke_input.agent_id,
+                tool_search_enabled=agent.tool_search_enabled,
                 auto_compaction_threshold_tokens=None,
                 inference_state=None,
                 compaction_provider_integration_id=(

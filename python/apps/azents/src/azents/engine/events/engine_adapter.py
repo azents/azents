@@ -597,76 +597,94 @@ class AgentEngineAdapter:
                 if request.inference_state is not None
                 else None
             )
-            budget = resolve_tool_declaration_budget(
-                registry=build_default_tool_request_compatibility_registry(),
-                key=ToolRequestCompatibilityKey(
-                    provider=request.provider,
-                    adapter=lowerer_type.adapter,
-                    native_format=lowerer_type.native_format,
-                    model_identifier=model,
-                    model_developer=request.model_developer,
-                    model_family=model_family,
-                ),
-                provider_hosted=ProviderHostedToolDeclarationCounts(
-                    total_tools=len(resolved_builtin_tools.provider_hosted),
-                    function_declarations=0,
-                ),
-            )
-            search_index = DeferredToolSearchIndex(list(catalog.entries.values()))
-            if search_index.entries:
-                direct_count_with_search = len(catalog.direct_tool_names) + 1
-                if budget.client_function_capacity is None:
-                    activation_capacity = None
-                else:
-                    activation_capacity = max(
-                        0,
-                        budget.client_function_capacity - direct_count_with_search,
-                    )
-                search_tool = make_tool_search_tool(
-                    index=search_index,
-                    store=self.tool_working_set_store,
-                    agent_id=request.agent_id,
-                    session_id=request.session_id,
-                    activation_capacity=activation_capacity,
+            provider_visible_tool_names: tuple[str, ...]
+            deferred_tool_names: frozenset[str]
+            if request.tool_search_enabled:
+                budget = resolve_tool_declaration_budget(
+                    registry=build_default_tool_request_compatibility_registry(),
+                    key=ToolRequestCompatibilityKey(
+                        provider=request.provider,
+                        adapter=lowerer_type.adapter,
+                        native_format=lowerer_type.native_format,
+                        model_identifier=model,
+                        model_developer=request.model_developer,
+                        model_family=model_family,
+                    ),
+                    provider_hosted=ProviderHostedToolDeclarationCounts(
+                        total_tools=len(resolved_builtin_tools.provider_hosted),
+                        function_declarations=0,
+                    ),
                 )
-                catalog = extend_tool_catalog(catalog, [search_tool])
+                search_index = DeferredToolSearchIndex(list(catalog.entries.values()))
+                if search_index.entries:
+                    direct_count_with_search = len(catalog.direct_tool_names) + 1
+                    if budget.client_function_capacity is None:
+                        activation_capacity = None
+                    else:
+                        activation_capacity = max(
+                            0,
+                            budget.client_function_capacity - direct_count_with_search,
+                        )
+                    search_tool = make_tool_search_tool(
+                        index=search_index,
+                        store=self.tool_working_set_store,
+                        agent_id=request.agent_id,
+                        session_id=request.session_id,
+                        activation_capacity=activation_capacity,
+                    )
+                    catalog = extend_tool_catalog(catalog, [search_tool])
 
-            working_set = await self.tool_working_set_store.load(
-                request.agent_id,
-                request.session_id,
-            )
-            projection = project_tool_catalog(
-                entries=catalog.entries,
-                working_set=working_set,
-                budget=budget,
-            )
-            logger.info(
-                "Prepared model tool projection",
-                extra={
-                    "session_id": request.session_id,
-                    "run_id": context.run_id,
-                    "provider": request.provider.value,
-                    "model": model,
-                    "tool_budget_rule_id": (
-                        budget.rule.rule_id if budget.rule is not None else None
-                    ),
-                    "resolved_tool_limit": budget.maximum_declarations,
-                    "counted_provider_hosted_tools": (
-                        budget.counted_provider_hosted_declarations
-                    ),
-                    "direct_tool_count": len(projection.direct_tool_names),
-                    "active_deferred_tool_count": len(
-                        projection.active_deferred_tool_names
-                    ),
-                    "visible_deferred_tool_count": len(
-                        projection.visible_deferred_tool_names
-                    ),
-                },
-            )
+                working_set = await self.tool_working_set_store.load(
+                    request.agent_id,
+                    request.session_id,
+                )
+                projection = project_tool_catalog(
+                    entries=catalog.entries,
+                    working_set=working_set,
+                    budget=budget,
+                )
+                provider_visible_tool_names = projection.provider_visible_tool_names
+                deferred_tool_names = frozenset(catalog.deferred_tool_names)
+                logger.info(
+                    "Prepared model tool projection",
+                    extra={
+                        "session_id": request.session_id,
+                        "run_id": context.run_id,
+                        "provider": request.provider.value,
+                        "model": model,
+                        "tool_budget_rule_id": (
+                            budget.rule.rule_id if budget.rule is not None else None
+                        ),
+                        "resolved_tool_limit": budget.maximum_declarations,
+                        "counted_provider_hosted_tools": (
+                            budget.counted_provider_hosted_declarations
+                        ),
+                        "direct_tool_count": len(projection.direct_tool_names),
+                        "active_deferred_tool_count": len(
+                            projection.active_deferred_tool_names
+                        ),
+                        "visible_deferred_tool_count": len(
+                            projection.visible_deferred_tool_names
+                        ),
+                    },
+                )
+            else:
+                provider_visible_tool_names = tuple(catalog.tools)
+                deferred_tool_names = frozenset()
+                logger.info(
+                    "Prepared complete model tool catalog",
+                    extra={
+                        "session_id": request.session_id,
+                        "run_id": context.run_id,
+                        "provider": request.provider.value,
+                        "model": model,
+                        "tool_count": len(provider_visible_tool_names),
+                    },
+                )
             lowerer = lowerer_type(
                 provider=provider,
                 model=model,
-                tools=catalog.native_tools_for(projection.provider_visible_tool_names),
+                tools=catalog.native_tools_for(provider_visible_tool_names),
                 provider_id=request.provider,
                 credential_kwargs=(
                     {}
@@ -694,13 +712,15 @@ class AgentEngineAdapter:
                 session_id=request.session_id,
                 run_id=context.run_id,
             )
-            working_set_tool_executor = _WorkingSetClientToolExecutor(
-                inner=hooked_tool_executor,
-                deferred_tool_names=frozenset(catalog.deferred_tool_names),
-                store=self.tool_working_set_store,
-                agent_id=request.agent_id,
-                session_id=request.session_id,
-            )
+            prepared_tool_executor: ClientToolExecutor = hooked_tool_executor
+            if request.tool_search_enabled:
+                prepared_tool_executor = _WorkingSetClientToolExecutor(
+                    inner=hooked_tool_executor,
+                    deferred_tool_names=deferred_tool_names,
+                    store=self.tool_working_set_store,
+                    agent_id=request.agent_id,
+                    session_id=request.session_id,
+                )
 
             async def on_turn_end(reason: TurnEndReason) -> None:
                 await hook_dispatcher.dispatch_observation(
@@ -732,7 +752,7 @@ class AgentEngineAdapter:
                 native_request=native_request,
                 inference_state=request.inference_state,
                 system_prompt_analysis=system_prompt_result.analysis,
-                tool_executor=working_set_tool_executor,
+                tool_executor=prepared_tool_executor,
                 on_turn_end=on_turn_end,
             )
 
