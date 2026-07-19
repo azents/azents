@@ -12,6 +12,9 @@ import azentspublicclient
 import pytest
 from azentsadminclient.api.system_v1_api import SystemV1Api
 from azentsadminclient.api.user_v1_api import UserV1Api as AdminUserV1Api
+from azentsadminclient.models.file_lifecycle_settings_update_request import (
+    FileLifecycleSettingsUpdateRequest,
+)
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.remote.webdriver import WebDriver
@@ -145,6 +148,20 @@ def _user_id_by_email(
     raise AssertionError("created user was not returned by the Admin API")
 
 
+def _set_retention(system_api: SystemV1Api, retention_days: int | None) -> None:
+    """Apply a future-archive retention revision."""
+    current = system_api.system_v1_get_file_lifecycle_settings()
+    if current.archived_session_retention_days == retention_days:
+        return
+    system_api.system_v1_update_file_lifecycle_settings(
+        FileLifecycleSettingsUpdateRequest(
+            expected_revision=current.revision,
+            archived_session_retention_days=retention_days,
+            application_scope="new_archives_only",
+        )
+    )
+
+
 @pytest.mark.web_surface
 def test_dual_web_auth_link_logout_self_revoke_and_path_routing(
     browser_driver: WebDriver,
@@ -262,3 +279,53 @@ def test_dual_web_auth_link_logout_self_revoke_and_path_routing(
             SystemV1Api(ordinary_client).system_v1_get_system_admin_me()
     if cast(Any, revoked.value).status != 403:
         raise AssertionError("self-revoked Admin session did not lose authorization")
+
+
+@pytest.mark.web_surface
+def test_admin_retention_page_updates_future_archive_policy(
+    browser_driver: WebDriver,
+    azents_admin_web_url: str,
+    system_bootstrap_evidence: SystemBootstrapEvidence,
+    admin_api_client: azentsadminclient.ApiClient,
+) -> None:
+    """Admin Web exposes and persists the future-only retention workflow."""
+    system_api = SystemV1Api(admin_api_client)
+    _set_retention(system_api, 30)
+    try:
+        _login_admin_web(
+            browser_driver,
+            base_url=azents_admin_web_url,
+            email=system_bootstrap_evidence.email,
+            password=_BOOTSTRAP_PASSWORD,
+        )
+        _wait(browser_driver).until(
+            ec.element_to_be_clickable((By.LINK_TEXT, "Retention"))
+        ).click()
+        _wait(browser_driver).until(ec.url_contains("/retention"))
+        _wait(browser_driver).until(
+            ec.visibility_of_element_located(
+                (By.XPATH, "//*[contains(., 'Archived session retention')]")
+            )
+        )
+
+        retention_input = _wait(browser_driver).until(
+            ec.element_to_be_clickable((By.CSS_SELECTOR, "input[type='number']"))
+        )
+        retention_input.send_keys(Keys.CONTROL, "a")
+        retention_input.send_keys("14")
+        _wait(browser_driver).until(
+            ec.element_to_be_clickable(
+                (By.XPATH, "//button[normalize-space()='Save retention policy']")
+            )
+        ).click()
+        _wait(browser_driver).until(
+            ec.visibility_of_element_located(
+                (By.XPATH, "//*[contains(., 'Archive retention settings updated.')]")
+            )
+        )
+        assert (
+            system_api.system_v1_get_file_lifecycle_settings().archived_session_retention_days
+            == 14
+        )
+    finally:
+        _set_retention(system_api, 30)
