@@ -47,6 +47,13 @@ class TestLLMProviderIntegrationV1Api(unittest.TestCase):
         """
         pass
 
+    def test_llm_provider_integration_v1_get_subscription_usage(self) -> None:
+        """Test case for llm_provider_integration_v1_get_subscription_usage
+
+        Get Subscription Usage
+        """
+        pass
+
     def test_llm_provider_integration_v1_list_integration_catalog_entries(self) -> None:
         """Test case for llm_provider_integration_v1_list_integration_catalog_entries
 

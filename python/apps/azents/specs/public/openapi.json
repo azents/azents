@@ -5519,6 +5519,82 @@
         }
       }
     },
+    "/llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations/{integration_id}/subscription-usage": {
+      "get": {
+        "tags": [
+          "LLM Provider Integration v1"
+        ],
+        "summary": "Get Subscription Usage",
+        "description": "Read live subscription usage for one LLM provider integration.",
+        "operationId": "llm_provider_integration_v1_get_subscription_usage",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "integration_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Integration Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/SubscriptionUsageAvailableResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SubscriptionUsageExternalResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SubscriptionUsageUnavailableResponse"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "type",
+                    "mapping": {
+                      "available": "#/components/schemas/SubscriptionUsageAvailableResponse",
+                      "external": "#/components/schemas/SubscriptionUsageExternalResponse",
+                      "unavailable": "#/components/schemas/SubscriptionUsageUnavailableResponse"
+                    }
+                  },
+                  "title": "Response Llm Provider Integration V1 Get Subscription Usage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations/{integration_id}/catalog-entries": {
       "get": {
         "tags": [
@@ -11109,6 +11185,118 @@
         "title": "ChatGPTOAuthSessionStatus",
         "description": "ChatGPT OAuth session status."
       },
+      "ChatGPTSubscriptionFinancialDetailsResponse": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "chatgpt",
+            "title": "Type"
+          },
+          "has_credits": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Has Credits"
+          },
+          "unlimited": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unlimited"
+          },
+          "balance": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Balance"
+          },
+          "spend_limit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spend Limit"
+          },
+          "spend_used": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spend Used"
+          },
+          "spend_remaining_percent": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spend Remaining Percent"
+          },
+          "spend_resets_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spend Resets At"
+          },
+          "reached_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reached Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "has_credits",
+          "unlimited",
+          "balance",
+          "spend_limit",
+          "spend_used",
+          "spend_remaining_percent",
+          "spend_resets_at",
+          "reached_type"
+        ],
+        "title": "ChatGPTSubscriptionFinancialDetailsResponse",
+        "description": "Management-only ChatGPT subscription financial details."
+      },
       "ChatInputWriteRequest": {
         "properties": {
           "agent_id": {
@@ -16193,6 +16381,255 @@
         "title": "SubagentTreeResponse",
         "description": "Subagent Tree response."
       },
+      "SubscriptionUsageAvailableResponse": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "available",
+            "title": "Type"
+          },
+          "integration_id": {
+            "type": "string",
+            "title": "Integration Id"
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "chatgpt_oauth",
+              "xai_oauth"
+            ],
+            "title": "Provider"
+          },
+          "fetched_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Fetched At"
+          },
+          "plan_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plan Label"
+          },
+          "limits": {
+            "items": {
+              "$ref": "#/components/schemas/SubscriptionUsageLimitResponse"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Limits"
+          },
+          "financial_details": {
+            "anyOf": [
+              {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/ChatGPTSubscriptionFinancialDetailsResponse"
+                  },
+                  {
+                    "$ref": "#/components/schemas/XaiSubscriptionFinancialDetailsResponse"
+                  }
+                ],
+                "discriminator": {
+                  "propertyName": "type",
+                  "mapping": {
+                    "chatgpt": "#/components/schemas/ChatGPTSubscriptionFinancialDetailsResponse",
+                    "xai": "#/components/schemas/XaiSubscriptionFinancialDetailsResponse"
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Financial Details"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "integration_id",
+          "provider",
+          "fetched_at",
+          "plan_label",
+          "limits",
+          "financial_details"
+        ],
+        "title": "SubscriptionUsageAvailableResponse",
+        "description": "Public available subscription usage response."
+      },
+      "SubscriptionUsageExternalResponse": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "external",
+            "title": "Type"
+          },
+          "integration_id": {
+            "type": "string",
+            "title": "Integration Id"
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "chatgpt_oauth",
+              "xai_oauth"
+            ],
+            "title": "Provider"
+          },
+          "fetched_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Fetched At"
+          },
+          "url": {
+            "type": "string",
+            "maxLength": 2083,
+            "minLength": 1,
+            "format": "uri",
+            "title": "Url"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "integration_id",
+          "provider",
+          "fetched_at",
+          "url",
+          "message"
+        ],
+        "title": "SubscriptionUsageExternalResponse",
+        "description": "Public provider-managed subscription usage response."
+      },
+      "SubscriptionUsageLimitResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "used_percent": {
+            "type": "number",
+            "title": "Used Percent"
+          },
+          "window_minutes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window Minutes"
+          },
+          "resets_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resets At"
+          },
+          "primary": {
+            "type": "boolean",
+            "title": "Primary"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "used_percent",
+          "window_minutes",
+          "resets_at",
+          "primary"
+        ],
+        "title": "SubscriptionUsageLimitResponse",
+        "description": "Normalized public subscription usage window."
+      },
+      "SubscriptionUsageUnavailableReason": {
+        "type": "string",
+        "enum": [
+          "disabled",
+          "reconnect_required",
+          "account_metadata_missing",
+          "permission_denied",
+          "entitlement_unavailable",
+          "rate_limited",
+          "temporarily_unavailable",
+          "invalid_provider_response",
+          "unsupported_account"
+        ],
+        "title": "SubscriptionUsageUnavailableReason",
+        "description": "Controlled reasons a subscription usage read is unavailable."
+      },
+      "SubscriptionUsageUnavailableResponse": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "unavailable",
+            "title": "Type"
+          },
+          "integration_id": {
+            "type": "string",
+            "title": "Integration Id"
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "chatgpt_oauth",
+              "xai_oauth"
+            ],
+            "title": "Provider"
+          },
+          "fetched_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Fetched At"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/SubscriptionUsageUnavailableReason"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "retryable": {
+            "type": "boolean",
+            "title": "Retryable"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "integration_id",
+          "provider",
+          "fetched_at",
+          "reason",
+          "message",
+          "retryable"
+        ],
+        "title": "SubscriptionUsageUnavailableResponse",
+        "description": "Public controlled unavailable subscription usage response."
+      },
       "SystemUserRole": {
         "type": "string",
         "enum": [
@@ -17508,6 +17945,93 @@
         ],
         "title": "XaiOAuthSessionStatus",
         "description": "xAI OAuth session status."
+      },
+      "XaiSubscriptionFinancialDetailsResponse": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "xai",
+            "title": "Type"
+          },
+          "prepaid_balance_cents": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prepaid Balance Cents"
+          },
+          "payg_cap_cents": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payg Cap Cents"
+          },
+          "payg_used_cents": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payg Used Cents"
+          },
+          "auto_top_up_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Auto Top Up Enabled"
+          },
+          "auto_top_up_amount_cents": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Auto Top Up Amount Cents"
+          },
+          "auto_top_up_monthly_maximum_cents": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Auto Top Up Monthly Maximum Cents"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "prepaid_balance_cents",
+          "payg_cap_cents",
+          "payg_used_cents",
+          "auto_top_up_enabled",
+          "auto_top_up_amount_cents",
+          "auto_top_up_monthly_maximum_cents"
+        ],
+        "title": "XaiSubscriptionFinancialDetailsResponse",
+        "description": "Management-only xAI subscription financial details."
       }
     },
     "securitySchemes": {

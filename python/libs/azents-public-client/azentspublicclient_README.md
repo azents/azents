@@ -173,6 +173,7 @@ Class | Method | HTTP request | Description
 *LLMProviderIntegrationV1Api* | [**llm_provider_integration_v1_create_integration**](azentspublicclient/docs/LLMProviderIntegrationV1Api.md#llm_provider_integration_v1_create_integration) | **POST** /llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations | Create Integration
 *LLMProviderIntegrationV1Api* | [**llm_provider_integration_v1_delete_integration**](azentspublicclient/docs/LLMProviderIntegrationV1Api.md#llm_provider_integration_v1_delete_integration) | **DELETE** /llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations/{integration_id} | Delete Integration
 *LLMProviderIntegrationV1Api* | [**llm_provider_integration_v1_get_integration**](azentspublicclient/docs/LLMProviderIntegrationV1Api.md#llm_provider_integration_v1_get_integration) | **GET** /llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations/{integration_id} | Get Integration
+*LLMProviderIntegrationV1Api* | [**llm_provider_integration_v1_get_subscription_usage**](azentspublicclient/docs/LLMProviderIntegrationV1Api.md#llm_provider_integration_v1_get_subscription_usage) | **GET** /llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations/{integration_id}/subscription-usage | Get Subscription Usage
 *LLMProviderIntegrationV1Api* | [**llm_provider_integration_v1_list_integration_catalog_entries**](azentspublicclient/docs/LLMProviderIntegrationV1Api.md#llm_provider_integration_v1_list_integration_catalog_entries) | **GET** /llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations/{integration_id}/catalog-entries | List Integration Catalog Entries
 *LLMProviderIntegrationV1Api* | [**llm_provider_integration_v1_list_integration_providers**](azentspublicclient/docs/LLMProviderIntegrationV1Api.md#llm_provider_integration_v1_list_integration_providers) | **GET** /llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations/providers | List Integration Providers
 *LLMProviderIntegrationV1Api* | [**llm_provider_integration_v1_list_integrations**](azentspublicclient/docs/LLMProviderIntegrationV1Api.md#llm_provider_integration_v1_list_integrations) | **GET** /llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations | List Integrations
@@ -307,6 +308,7 @@ Class | Method | HTTP request | Description
  - [ChatGPTOAuthDeviceStatusResponse](azentspublicclient/docs/ChatGPTOAuthDeviceStatusResponse.md)
  - [ChatGPTOAuthSecrets](azentspublicclient/docs/ChatGPTOAuthSecrets.md)
  - [ChatGPTOAuthSessionStatus](azentspublicclient/docs/ChatGPTOAuthSessionStatus.md)
+ - [ChatGPTSubscriptionFinancialDetailsResponse](azentspublicclient/docs/ChatGPTSubscriptionFinancialDetailsResponse.md)
  - [ChatInputWriteRequest](azentspublicclient/docs/ChatInputWriteRequest.md)
  - [ChatInputWriteRequestAction](azentspublicclient/docs/ChatInputWriteRequestAction.md)
  - [ChatLiveRunOperationResponse](azentspublicclient/docs/ChatLiveRunOperationResponse.md)
@@ -428,6 +430,7 @@ Class | Method | HTTP request | Description
  - [RequestedInferenceProfile](azentspublicclient/docs/RequestedInferenceProfile.md)
  - [ResetAgentRuntimeRequest](azentspublicclient/docs/ResetAgentRuntimeRequest.md)
  - [ResponseChatV1ReadAgentWorkspacePath](azentspublicclient/docs/ResponseChatV1ReadAgentWorkspacePath.md)
+ - [ResponseLlmProviderIntegrationV1GetSubscriptionUsage](azentspublicclient/docs/ResponseLlmProviderIntegrationV1GetSubscriptionUsage.md)
  - [RuntimeDesiredState](azentspublicclient/docs/RuntimeDesiredState.md)
  - [RuntimeLifecycleCommandType](azentspublicclient/docs/RuntimeLifecycleCommandType.md)
  - [RuntimeProviderConnectionState](azentspublicclient/docs/RuntimeProviderConnectionState.md)
@@ -459,6 +462,12 @@ Class | Method | HTTP request | Description
  - [SubagentSettings](azentspublicclient/docs/SubagentSettings.md)
  - [SubagentTreeNodeResponse](azentspublicclient/docs/SubagentTreeNodeResponse.md)
  - [SubagentTreeResponse](azentspublicclient/docs/SubagentTreeResponse.md)
+ - [SubscriptionUsageAvailableResponse](azentspublicclient/docs/SubscriptionUsageAvailableResponse.md)
+ - [SubscriptionUsageAvailableResponseFinancialDetails](azentspublicclient/docs/SubscriptionUsageAvailableResponseFinancialDetails.md)
+ - [SubscriptionUsageExternalResponse](azentspublicclient/docs/SubscriptionUsageExternalResponse.md)
+ - [SubscriptionUsageLimitResponse](azentspublicclient/docs/SubscriptionUsageLimitResponse.md)
+ - [SubscriptionUsageUnavailableReason](azentspublicclient/docs/SubscriptionUsageUnavailableReason.md)
+ - [SubscriptionUsageUnavailableResponse](azentspublicclient/docs/SubscriptionUsageUnavailableResponse.md)
  - [SystemUserRole](azentspublicclient/docs/SystemUserRole.md)
  - [TestConnectionRequest](azentspublicclient/docs/TestConnectionRequest.md)
  - [TestConnectionResponse](azentspublicclient/docs/TestConnectionResponse.md)
@@ -496,6 +505,7 @@ Class | Method | HTTP request | Description
  - [XaiOAuthDeviceStatusResponse](azentspublicclient/docs/XaiOAuthDeviceStatusResponse.md)
  - [XaiOAuthSecrets](azentspublicclient/docs/XaiOAuthSecrets.md)
  - [XaiOAuthSessionStatus](azentspublicclient/docs/XaiOAuthSessionStatus.md)
+ - [XaiSubscriptionFinancialDetailsResponse](azentspublicclient/docs/XaiSubscriptionFinancialDetailsResponse.md)
 
 
 <a id="documentation-for-authorization"></a>
@@ -510,7 +520,3 @@ Authentication schemes defined for the API:
 
 
 ## Author
-
-
-
-

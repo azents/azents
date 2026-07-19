@@ -1,6 +1,7 @@
 """ChatGPT OAuth constants and session state."""
 
 import enum
+import os
 from typing import Final
 
 CHATGPT_OAUTH_ISSUER = "https://auth.openai.com"
@@ -14,8 +15,16 @@ CHATGPT_OAUTH_DEVICE_TOKEN_URL = f"{CHATGPT_OAUTH_ISSUER}/api/accounts/deviceaut
 CHATGPT_OAUTH_DEVICE_VERIFICATION_URL = f"{CHATGPT_OAUTH_ISSUER}/codex/device"
 CHATGPT_OAUTH_DEVICE_REDIRECT_URI = f"{CHATGPT_OAUTH_ISSUER}/deviceauth/callback"
 CHATGPT_OAUTH_BACKEND_BASE_URL = "https://chatgpt.com/backend-api/codex"
+CHATGPT_USAGE_BASE_URL = "https://chatgpt.com/backend-api"
 AZENTS_VERSION: Final = "0.1.0"
 CHATGPT_OAUTH_PROTOCOL_VERSION: Final = "0.144.0"
+
+
+def resolve_chatgpt_usage_base_url() -> str:
+    """Resolve the non-secret ChatGPT usage backend root."""
+    return os.environ.get("AZ_CHATGPT_USAGE_BASE_URL", CHATGPT_USAGE_BASE_URL).rstrip(
+        "/"
+    )
 
 
 def build_chatgpt_oauth_headers(*, account_id: str | None) -> dict[str, str]:

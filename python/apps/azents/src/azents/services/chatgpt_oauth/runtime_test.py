@@ -3,6 +3,7 @@
 import datetime
 import uuid
 from typing import cast
+from unittest.mock import AsyncMock
 
 import pytest
 from azcommon.result import Failure, Result, Success
@@ -18,13 +19,16 @@ from azents.core.crypto import CredentialCipher
 from azents.core.enums import LLMProvider
 from azents.rdb.session import SessionManager
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
-from azents.repos.llm_provider_integration.data import LLMProviderIntegrationCreate
+from azents.repos.llm_provider_integration.data import (
+    LLMProviderIntegrationCreate,
+    LLMProviderIntegrationWithSecrets,
+)
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
 
 from .client import ChatGPTOAuthClient
 from .data import ProviderRejected, ProviderUnavailable, TokenSet
-from .runtime import ensure_runtime_tokens
+from .runtime import ensure_runtime_tokens, refresh_runtime_tokens
 
 _TEST_KEY = Fernet.generate_key().decode()
 
@@ -92,6 +96,83 @@ async def _create_integration(
 class TestEnsureRuntimeTokens:
     """ensure_runtime_tokens tests."""
 
+    @pytest.mark.parametrize(
+        ("integration", "ensure_succeeds"),
+        [
+            (
+                LLMProviderIntegrationWithSecrets(
+                    id="integration-1",
+                    workspace_id="workspace-1",
+                    provider=LLMProvider.OPENAI,
+                    name="Non-ChatGPT provider",
+                    config=ChatGPTOAuthConfig(
+                        connection_method=ChatGPTOAuthConnectionMethod.CALLBACK.value,
+                        status=ChatGPTOAuthConnectionStatus.CONNECTED.value,
+                        connected_at=datetime.datetime.now(datetime.UTC),
+                        last_refreshed_at=datetime.datetime.now(datetime.UTC),
+                    ),
+                    enabled=True,
+                    created_at=datetime.datetime.now(datetime.UTC),
+                    updated_at=datetime.datetime.now(datetime.UTC),
+                    secrets=ChatGPTOAuthSecrets(
+                        access_token="access-token",
+                        refresh_token="refresh-token",
+                        expires_at=datetime.datetime.now(datetime.UTC)
+                        + datetime.timedelta(hours=1),
+                    ),
+                ),
+                True,
+            ),
+            (
+                LLMProviderIntegrationWithSecrets(
+                    id="integration-1",
+                    workspace_id="workspace-1",
+                    provider=LLMProvider.CHATGPT_OAUTH,
+                    name="Invalid config",
+                    config=None,
+                    enabled=True,
+                    created_at=datetime.datetime.now(datetime.UTC),
+                    updated_at=datetime.datetime.now(datetime.UTC),
+                    secrets=ChatGPTOAuthSecrets(
+                        access_token="access-token",
+                        refresh_token="refresh-token",
+                        expires_at=datetime.datetime.now(datetime.UTC)
+                        + datetime.timedelta(hours=1),
+                    ),
+                ),
+                False,
+            ),
+        ],
+    )
+    async def test_existing_validation_behavior_remains_unchanged(
+        self,
+        integration: LLMProviderIntegrationWithSecrets,
+        ensure_succeeds: bool,
+    ) -> None:
+        """Preserve validation behavior in normal and forced refresh entry points."""
+        repository = cast(LLMProviderIntegrationRepository, AsyncMock())
+        session_manager = cast(SessionManager[AsyncSession], AsyncMock())
+
+        ensured = await ensure_runtime_tokens(
+            integration=integration,
+            integration_repository=repository,
+            session_manager=session_manager,
+        )
+        refreshed = await refresh_runtime_tokens(
+            integration=integration,
+            integration_repository=repository,
+            session_manager=session_manager,
+        )
+
+        if ensure_succeeds:
+            assert isinstance(ensured, Success)
+            assert ensured.value is integration
+        else:
+            assert isinstance(ensured, Failure)
+            assert isinstance(ensured.error, ProviderRejected)
+        assert isinstance(refreshed, Failure)
+        assert isinstance(refreshed.error, ProviderRejected)
+
     async def test_fresh_token_returns_existing_integration(
         self, rdb_session: AsyncSession
     ) -> None:
@@ -114,6 +195,49 @@ class TestEnsureRuntimeTokens:
 
         assert isinstance(result, Success)
         assert result.value.id == integration_id
+
+    async def test_forced_refresh_rotates_a_fresh_token(
+        self, rdb_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Forced refresh does not apply the normal five-minute freshness shortcut."""
+        expires_at = datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=1)
+        repo, integration_id = await _create_integration(
+            rdb_session,
+            expires_at=expires_at,
+        )
+        integration = await repo.get_by_id_with_secrets(rdb_session, integration_id)
+        assert integration is not None
+
+        async def fake_refresh(
+            _self: ChatGPTOAuthClient,
+            *,
+            refresh_token: str,
+            connection_method: ChatGPTOAuthConnectionMethod,
+        ) -> Result[TokenSet, ProviderRejected | ProviderUnavailable]:
+            assert refresh_token == "old-refresh-token"
+            return Success(
+                TokenSet(
+                    access_token="forced-access-token",
+                    refresh_token="forced-refresh-token",
+                    expires_at=datetime.datetime.now(datetime.UTC)
+                    + datetime.timedelta(hours=1),
+                    connection_method=connection_method,
+                )
+            )
+
+        monkeypatch.setattr(ChatGPTOAuthClient, "refresh_tokens", fake_refresh)
+
+        result = await refresh_runtime_tokens(
+            integration=integration,
+            integration_repository=repo,
+            session_manager=cast(
+                SessionManager[AsyncSession], _SessionManager(rdb_session)
+            ),
+        )
+
+        assert isinstance(result, Success)
+        assert isinstance(result.value.secrets, ChatGPTOAuthSecrets)
+        assert result.value.secrets.access_token == "forced-access-token"
 
     async def test_near_expiry_refresh_persists_rotated_tokens(
         self, rdb_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
