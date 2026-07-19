@@ -67,6 +67,7 @@ from azents.engine.events.types import (
     Event,
     FileOutputPart,
     NativeArtifact,
+    ProviderToolCallPayload,
     ProviderToolResultPayload,
     ProviderToolSemanticContent,
     UserMessagePayload,
@@ -1813,7 +1814,7 @@ def test_typed_normalizer_extracts_transient_generated_image() -> None:
 
     assert len(completed.events) == 1
     payload = completed.events[0].payload
-    assert isinstance(payload, ProviderToolResultPayload)
+    assert isinstance(payload, ProviderToolCallPayload)
     assert payload.output == []
     assert payload.attachments == []
     assert "result" not in payload.native_artifact.item
@@ -1854,7 +1855,7 @@ def test_typed_stream_extracts_transient_generated_image() -> None:
 
     assert len(completed.events) == 1
     payload = completed.events[0].payload
-    assert isinstance(payload, ProviderToolResultPayload)
+    assert isinstance(payload, ProviderToolCallPayload)
     assert "result" not in payload.native_artifact.item
     assert len(completed.pending_provider_files) == 1
     pending = completed.pending_provider_files[0]

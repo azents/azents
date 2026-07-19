@@ -3399,18 +3399,18 @@ class TestLiteLLMResponsesOutputNormalizer:
             EventKind.REASONING,
             EventKind.CLIENT_TOOL_CALL,
             EventKind.PROVIDER_TOOL_CALL,
-            EventKind.PROVIDER_TOOL_RESULT,
+            EventKind.PROVIDER_TOOL_CALL,
             EventKind.UNKNOWN_ADAPTER_OUTPUT,
         ]
         reasoning = output.events[1].payload
         assert isinstance(reasoning, ReasoningPayload)
         assert reasoning.text is None
         assert reasoning.summary == "summary"
-        provider_tool_result = output.events[4].payload
-        assert isinstance(provider_tool_result, ProviderToolResultPayload)
-        assert provider_tool_result.output == []
-        assert provider_tool_result.attachments == []
-        assert "result" not in provider_tool_result.native_artifact.item
+        provider_tool_call = output.events[4].payload
+        assert isinstance(provider_tool_call, ProviderToolCallPayload)
+        assert provider_tool_call.output == []
+        assert provider_tool_call.attachments == []
+        assert "result" not in provider_tool_call.native_artifact.item
         assert len(output.pending_provider_files) == 1
         pending = output.pending_provider_files[0]
         assert pending.call_id == "img-1"

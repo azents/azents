@@ -22,11 +22,12 @@ from azents.engine.events.provider_output import (
 )
 from azents.engine.events.types import (
     AgentRunState,
+    AttachmentOutputPart,
     ClientToolResultPayload,
     Event,
     FileOutputPart,
     NativeArtifact,
-    ProviderToolResultPayload,
+    ProviderToolCallPayload,
     ProviderToolSemanticContent,
     build_native_compat_key,
 )
@@ -319,8 +320,8 @@ def _normalized_output(
     event = Event(
         id="00000000000000000000000000000001",
         session_id="session-1",
-        kind=EventKind.PROVIDER_TOOL_RESULT,
-        payload=ProviderToolResultPayload(
+        kind=EventKind.PROVIDER_TOOL_CALL,
+        payload=ProviderToolCallPayload(
             call_id="image-call-1",
             name="image_generation",
             status="completed",
@@ -494,12 +495,13 @@ async def test_materializes_exchange_and_model_file_in_one_admission() -> None:
     assert s3_service.uploaded == {}
     assert prepared.normalized.pending_provider_files == []
     payload = prepared.normalized.events[0].payload
-    assert isinstance(payload, ProviderToolResultPayload)
-    assert len(payload.output) == 1
+    assert isinstance(payload, ProviderToolCallPayload)
+    assert len(payload.output) == 2
     assert isinstance(payload.output[0], FileOutputPart)
-    assert len(payload.attachments) == 1
-    assert payload.attachments[0].availability == "available"
-    assert payload.attachments[0].uri.startswith("exchange://")
+    assert isinstance(payload.output[1], AttachmentOutputPart)
+    assert payload.output[1].availability == "available"
+    assert payload.output[1].uri.startswith("exchange://")
+    assert payload.attachments == []
     serialized = prepared.normalized.model_dump_json()
     assert _PNG_BASE64 not in serialized
     assert "generated-image:" not in serialized
@@ -535,10 +537,11 @@ async def test_materializes_client_tool_image_with_shared_storage_contract() -> 
     prepared = await materializer.prepare_client_result(result)
 
     assert prepared.result.pending_generated_files == []
-    assert len(prepared.result.output) == 1
+    assert len(prepared.result.output) == 2
     assert isinstance(prepared.result.output[0], FileOutputPart)
-    assert len(prepared.result.attachments) == 1
-    assert prepared.result.attachments[0].source == "client_tool"
+    assert isinstance(prepared.result.output[1], AttachmentOutputPart)
+    assert prepared.result.output[1].uri.startswith("exchange://")
+    assert prepared.result.attachments == []
     assert generated.sha256 in prepared.result.output[0].metadata["source_sha256"]
     serialized = prepared.result.model_dump_json()
     assert _PNG_BASE64 not in serialized
