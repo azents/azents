@@ -56,7 +56,15 @@ export function ProviderToolCallCard({
     hasArguments || hasOutput || (hasAttachments && !showAttachmentsDirectly);
 
   return (
-    <Paper withBorder radius="md" p="sm" mb="xs" bg="var(--mantine-color-body)">
+    <Paper
+      withBorder
+      radius="md"
+      p="sm"
+      mb="xs"
+      bg="var(--mantine-color-body)"
+      data-provider-tool-name={toolCall.name}
+      data-provider-tool-status={toolCall.status}
+    >
       <Stack gap="xs">
         <Group gap="xs" justify="space-between" wrap="nowrap">
           <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>

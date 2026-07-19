@@ -14,6 +14,7 @@ import requests
 from azentspublicclient.api.user_v1_api import UserV1Api
 from azentspublicclient.api.workspace_v1_api import WorkspaceV1Api
 from pydantic import TypeAdapter
+from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.remote.webdriver import WebDriver
@@ -261,37 +262,53 @@ def _open_authenticated_session(
     wait.until(ec.url_contains(session_id))
 
 
-def _has_single_completed_image_projection(driver: WebDriver) -> bool:
-    """Return whether one completed image card owns one rendered attachment."""
+def _image_projection_counts(driver: WebDriver) -> tuple[int, int, int]:
+    """Return bounded card, completed-card, and image counts for diagnostics."""
     cards = [
         element
         for element in driver.find_elements(
-            By.XPATH,
-            "//*[normalize-space()='Image generation']"
-            "/ancestor::div[.//img[contains(@src, '/api/chat/exchange-files/')]][1]",
+            By.CSS_SELECTOR,
+            '[data-provider-tool-name="image_generation"]',
         )
         if element.is_displayed()
     ]
-    if len(cards) != 1:
-        return False
-    card = cards[0]
-    completed = [
+    completed_cards = [
         element
-        for element in card.find_elements(
-            By.XPATH,
-            ".//*[normalize-space()='Completed']",
+        for element in driver.find_elements(
+            By.CSS_SELECTOR,
+            '[data-provider-tool-name="image_generation"]'
+            '[data-provider-tool-status="completed"]',
         )
         if element.is_displayed()
     ]
     attachments = [
         element
+        for card in cards
         for element in card.find_elements(
-            By.XPATH,
-            ".//img[contains(@src, '/api/chat/exchange-files/')]",
+            By.CSS_SELECTOR,
+            'img[src*="/api/chat/exchange-files/"]',
         )
         if element.is_displayed()
     ]
-    return len(completed) == 1 and len(attachments) == 1
+    return len(cards), len(completed_cards), len(attachments)
+
+
+def _has_single_completed_image_projection(driver: WebDriver) -> bool:
+    """Return whether one completed image card owns one rendered attachment."""
+    return _image_projection_counts(driver) == (1, 1, 1)
+
+
+def _wait_for_single_completed_image_projection(driver: WebDriver) -> None:
+    """Wait for the strict card projection and report only bounded DOM counts."""
+    try:
+        WebDriverWait(driver, 30).until(_has_single_completed_image_projection)
+    except TimeoutException as exc:
+        cards, completed_cards, attachments = _image_projection_counts(driver)
+        raise AssertionError(
+            "expected one completed provider image card with one Exchange image; "
+            f"observed cards={cards}, completed_cards={completed_cards}, "
+            f"exchange_images={attachments}"
+        ) from exc
 
 
 class TestProviderImageGeneration:
@@ -556,6 +573,6 @@ class TestProviderImageGeneration:
             session_id=session_id,
         )
 
-        browser_wait.until(_has_single_completed_image_projection)
+        _wait_for_single_completed_image_projection(browser_driver)
         browser_driver.refresh()
-        browser_wait.until(_has_single_completed_image_projection)
+        _wait_for_single_completed_image_projection(browser_driver)
