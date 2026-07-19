@@ -10,6 +10,8 @@ code_paths:
   - python/apps/azents/src/azents/engine/run/builtin_tools.py
   - python/apps/azents/src/azents/engine/run/errors.py
   - python/apps/azents/src/azents/engine/run/model_transport.py
+  - python/apps/azents/src/azents/engine/run/tool_budget.py
+  - python/apps/azents/src/azents/engine/tooling/tool_search.py
   - python/apps/azents/src/azents/engine/io/user_input.py
   - python/apps/azents/src/azents/engine/events/**
   - python/apps/azents/src/azents/engine/tools/**
@@ -52,7 +54,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ChatView.tsx
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
 last_verified_at: 2026-07-19
-spec_version: 108
+spec_version: 109
 ---
 
 # Agent Execution Loop
@@ -633,6 +635,32 @@ contains entered toolkit instances only. The engine then calls
 `update_context(TurnContext)` on that snapshot to build current tool specs and prompt
 fragments.
 
+### Prepared-Call Tool Projection
+
+Every model step builds a fresh immutable executable Tool Catalog after current Toolkit context and client-executed built-ins are resolved. `RunRequest.tool_search_enabled` carries the current Agent setting into that immutable preparation boundary.
+
+When Tool Search is disabled, preparation exposes the complete executable client-tool catalog in canonical final-name order. It does not inject `tool_search`, apply direct/deferred membership, resolve a compatibility budget, load or mutate working-set state, or wrap execution with deferred recency tracking.
+
+When Tool Search is enabled, the catalog classifies core tools as pinned direct functions and attached service operations as deferred. When deferred entries exist, the engine adds the direct `tool_search` function backed by a search index over that exact catalog snapshot.
+
+Before exposing schemas on the enabled path, preparation resolves provider-hosted built-ins and a tool-declaration budget from the code-owned provider-request compatibility registry. The normalized request key contains provider, adapter/lowering mode, native format, runtime model identifier, model developer, and normalized family. Rules match deterministically by exact model, then model family, then endpoint. An equally specific overlap is invalid configuration.
+
+The current registry applies these reviewed hard limits:
+
+- xAI API-key and xAI OAuth LiteLLM Responses paths: 200 total tool declarations;
+- Vertex AI LiteLLM Responses paths for Google/Gemini models: 128 function declarations, using the conservative value from conflicting official 128 and 512 documentation;
+- direct Gemini API and Vertex-hosted non-Google models: no matched hard-limit rule.
+
+An unmatched request path is unlimited. Preparation does not invent a global soft cap or truncate active tools from an unknown limit. For a matched rule, provider-hosted declarations reserve capacity only when they share that rule's counting scope. Pinned direct client functions consume the remaining capacity first. If direct functions do not fit, preparation raises `ToolDeclarationBudgetExceededError` before lowerer or provider I/O rather than silently dropping a direct capability.
+
+Remaining explicit capacity is filled from the AgentSession's shared deferred working set in most-recent-first order. A smaller model path hides the non-fitting tail without deleting it; a later larger or unlimited path can expose that same state. Tool Search activates only the highest-ranked results that can become visible on the next call under the current explicit deferred capacity and reports when the requested result count was reduced. With no explicit limit, all active currently available deferred names are visible.
+
+Provider-facing client schemas are sorted canonically by final model-visible name after membership is selected. Recency changes membership only and does not reorder an identical visible set. Provider adapters receive the already-projected functions and must not independently truncate or perform LRU selection.
+
+One `PreparedModelCall` freezes the executable catalog, deferred search index, provider-visible projection, and executor routing together. A response can invoke only handlers from the snapshot whose schemas it received; a tool that appears after preparation is not executable by that response. `tool_search` updates session state but its matches first enter schemas when the following model call is prepared. An emitted deferred call refreshes session recency before hook denial, handler error, or result normalization, while the in-flight executor remains immutable.
+
+Structured preparation logs record the matched rule ID and aggregate limit, hosted, direct, active-deferred, and visible-deferred counts. They do not record tool arguments or credentials.
+
 A DB-registered Toolkit is omitted only when its persisted configuration or credentials fail
 validation. Unexpected provider implementation failures propagate through run preparation instead of
 being logged and disguised as a successfully resolved run with a missing Toolkit. Runtime instruction
@@ -808,6 +836,8 @@ Primary checks:
 - `cd python/apps/azents && uv run pytest src/azents/runtime/file_resource_lifecycle_verification_test.py -q`
 - `cd python/apps/azents && uv run pytest src/azents/runtime -q`
 - `cd python/apps/azents && uv run pytest src/azents/engine/events/execution_test.py src/azents/engine/events/filters_test.py src/azents/engine/events/engine_adapter_test.py`
+- `cd python/apps/azents && uv run pytest src/azents/engine/run/tool_budget_test.py src/azents/engine/tooling/tool_search_test.py src/azents/engine/events/tools_test.py src/azents/engine/events/engine_adapter_test.py src/azents/engine/events/litellm_responses_test.py src/azents/engine/events/openai_responses_test.py src/azents/engine/tools/mcp_base_test.py src/azents/engine/tooling/toolkit_state_test.py`
+- `cd testenv/azents/e2e && uv run pytest -q src/tests/azents/public/test_runtime_hooks.py -k tool_search`
 - `cd python/apps/azents && uv run pyright`
 - deterministic azents E2E CI for text/tool/UI projection behavior
 - deterministic action-based Git worktree lifecycle E2E coverage, including existing-session Register Project actions, durable buffer-keyed execution recovery, and terminal success/failure history
@@ -912,6 +942,7 @@ updated by the user.
 
 ## Changelog
 
+- **2026-07-19** — v109. Added Agent-level default-disabled Tool Search; the enabled path applies provider-budgeted prepared-call projection, immutable catalog/search/executor snapshots, next-call activation, and deferred recency refresh.
 - **2026-07-19** — v108. Logged sanitized structured diagnostics for every provider-attributed error and recovered typed fields from bounded LiteLLM SDK serialization.
 - **2026-07-19** — v107. Extended OpenRouter response-handle acquisition to 60 seconds while preserving the common stream idle and absolute attempt bounds.
 - **2026-07-19** — v106. Replaced provider call/result durability with one provider-call event, canonical output-part attachments, and same-/cross-native replay without duplicated rich input.
