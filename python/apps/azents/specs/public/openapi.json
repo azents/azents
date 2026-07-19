@@ -10408,7 +10408,7 @@
           "api_key"
         ],
         "title": "ApiKeySecrets",
-        "description": "API key based secrets for OpenAI, Anthropic, and Google Gemini."
+        "description": "API key based secrets for supported developer API providers."
       },
       "AppliedInferenceProfile": {
         "properties": {
@@ -13045,7 +13045,8 @@
           "google",
           "xai",
           "meta",
-          "mistral"
+          "mistral",
+          "other"
         ],
         "title": "LLMModelDeveloper",
         "description": "LLM model developer."
@@ -13057,6 +13058,7 @@
           "chatgpt_oauth",
           "xai",
           "xai_oauth",
+          "openrouter",
           "anthropic",
           "google_gemini",
           "aws_bedrock",

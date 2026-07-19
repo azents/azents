@@ -115,6 +115,15 @@ class TestToLitellmModel:
 
         assert result == "xai/grok-4.5"
 
+    def test_openrouter(self) -> None:
+        """OpenRouter keeps its publisher-qualified model identifier."""
+        result = to_litellm_model(
+            LLMProvider.OPENROUTER,
+            "anthropic/claude-sonnet-4.6",
+        )
+
+        assert result == "openrouter/anthropic/claude-sonnet-4.6"
+
 
 class TestToRuntimeModel:
     """to_runtime_model function tests."""
@@ -146,6 +155,15 @@ class TestToRuntimeModel:
         result = to_runtime_model(provider, "grok-4.5")
 
         assert result == "xai/grok-4.5"
+
+    def test_openrouter_uses_litellm_routing_id(self) -> None:
+        """OpenRouter runtime uses the LiteLLM OpenRouter routing prefix."""
+        result = to_runtime_model(
+            LLMProvider.OPENROUTER,
+            "anthropic/claude-sonnet-4.6",
+        )
+
+        assert result == "openrouter/anthropic/claude-sonnet-4.6"
 
 
 class TestBuildCredentialKwargs:

@@ -12,13 +12,32 @@ from azents.core.chatgpt_oauth import (
     CHATGPT_OAUTH_BACKEND_BASE_URL,
     CHATGPT_OAUTH_PROTOCOL_VERSION,
 )
-from azents.core.credentials import ChatGPTOAuthConfig, ChatGPTOAuthSecrets
-from azents.core.enums import LLMProvider
+from azents.core.credentials import (
+    ApiKeySecrets,
+    ChatGPTOAuthConfig,
+    ChatGPTOAuthSecrets,
+)
+from azents.core.enums import LLMModelDeveloper, LLMProvider
 from azents.core.llm_catalog import ModelModality, ModelReasoningEffort
 from azents.repos.llm_provider_integration.data import (
     LLMProviderIntegrationWithSecrets,
 )
 from azents.services.model_listing import providers
+
+
+def _openrouter_integration() -> LLMProviderIntegrationWithSecrets:
+    now = datetime.datetime.now(datetime.UTC)
+    return LLMProviderIntegrationWithSecrets(
+        id="openrouter-integration-id",
+        workspace_id="workspace-id",
+        provider=LLMProvider.OPENROUTER,
+        name="OpenRouter",
+        config=None,
+        enabled=True,
+        created_at=now,
+        updated_at=now,
+        secrets=ApiKeySecrets(api_key="openrouter-test-key"),
+    )
 
 
 def _chatgpt_integration() -> LLMProviderIntegrationWithSecrets:
@@ -241,3 +260,115 @@ async def test_list_chatgpt_models_uses_backend_capability_metadata(
         == 128000
     )
     assert empty_modalities_candidate.normalized_capabilities.modalities.input == []
+
+
+class _FakeOpenRouterAsyncClient:
+    def __init__(self, *, timeout: float) -> None:
+        assert timeout == 20.0
+
+    async def __aenter__(self) -> "_FakeOpenRouterAsyncClient":
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        del args
+
+    async def get(
+        self,
+        url: str,
+        *,
+        params: dict[str, str],
+        headers: dict[str, str],
+    ) -> httpx.Response:
+        assert url == f"{providers.OPENROUTER_API_BASE_URL}/models/user"
+        assert params == {"output_modalities": "text"}
+        assert headers == {"Authorization": "Bearer openrouter-test-key"}
+        return httpx.Response(
+            status_code=200,
+            request=httpx.Request("GET", url),
+            json={
+                "data": [
+                    {
+                        "id": "anthropic/claude-example",
+                        "name": "Claude Example",
+                        "description": "not persisted",
+                        "architecture": {
+                            "input_modalities": ["text", "image", "file"],
+                            "output_modalities": ["text"],
+                        },
+                        "context_length": 200000,
+                        "top_provider": {"max_completion_tokens": 32000},
+                        "supported_parameters": [
+                            "tools",
+                            "parallel_tool_calls",
+                            "reasoning",
+                            "reasoning_effort",
+                            "temperature",
+                            "max_tokens",
+                            "top_p",
+                            "top_k",
+                            "stop",
+                            "structured_outputs",
+                        ],
+                        "pricing": {"prompt": "0.1", "completion": "0.2"},
+                        "links": {"homepage": "https://example.invalid"},
+                        "benchmarks": {"score": 1},
+                    },
+                    {
+                        "id": "new-publisher/new-model",
+                        "name": "New Model",
+                        "supported_parameters": [],
+                    },
+                    ["invalid"],
+                    {"name": "Missing id"},
+                    {
+                        "id": "vendor/image-only-output",
+                        "architecture": {"output_modalities": ["image"]},
+                    },
+                ]
+            },
+        )
+
+
+@pytest.mark.asyncio
+async def test_list_openrouter_models_projects_account_metadata_without_allowlist(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OpenRouter listing keeps every valid text model and safe capabilities."""
+    monkeypatch.setattr(httpx, "AsyncClient", _FakeOpenRouterAsyncClient)
+
+    result = await providers.list_openrouter_models_for_integration(
+        _openrouter_integration()
+    )
+
+    assert result.summary.source == "openrouter:account_models"
+    assert result.summary.returned_count == 2
+    assert result.summary.skipped_count == 3
+    known, unknown = result.models
+    assert known.model_identifier == "anthropic/claude-example"
+    assert known.model_developer == LLMModelDeveloper.ANTHROPIC
+    assert known.normalized_capabilities.context_window.max_input_tokens == 200000
+    assert known.normalized_capabilities.context_window.max_output_tokens == 32000
+    assert known.normalized_capabilities.modalities.input == [
+        ModelModality.TEXT,
+        ModelModality.IMAGE,
+    ]
+    assert known.normalized_capabilities.tool_calling.supported is True
+    assert known.normalized_capabilities.tool_calling.parallel_tool_calls is True
+    assert known.normalized_capabilities.tool_calling.strict_json_schema is None
+    assert known.normalized_capabilities.reasoning.effort_levels == [
+        ModelReasoningEffort.LOW,
+        ModelReasoningEffort.MEDIUM,
+        ModelReasoningEffort.HIGH,
+    ]
+    assert known.normalized_capabilities.built_in_tools.supported == ["web_search"]
+    assert known.normalized_capabilities.parameters.temperature is True
+    assert known.normalized_capabilities.parameters.max_output_tokens is True
+    assert known.normalized_capabilities.parameters.top_p is True
+    assert known.normalized_capabilities.parameters.top_k is True
+    assert known.normalized_capabilities.parameters.stop_sequences is True
+    assert known.source_metadata is not None
+    assert "description" not in known.source_metadata
+    assert "links" not in known.source_metadata
+    assert "benchmarks" not in known.source_metadata
+    assert unknown.model_developer == LLMModelDeveloper.OTHER
+    assert unknown.normalized_capabilities.modalities.input == [ModelModality.TEXT]

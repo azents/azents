@@ -46,6 +46,7 @@ class LLMProvider(enum.StrEnum):
     CHATGPT_OAUTH = "chatgpt_oauth"
     XAI = "xai"
     XAI_OAUTH = "xai_oauth"
+    OPENROUTER = "openrouter"
     ANTHROPIC = "anthropic"
     GOOGLE_GEMINI = "google_gemini"
     AWS_BEDROCK = "aws_bedrock"
@@ -61,6 +62,7 @@ class LLMModelDeveloper(enum.StrEnum):
     XAI = "xai"
     META = "meta"
     MISTRAL = "mistral"
+    OTHER = "other"
 
 
 class LLMModelLifecycleStatus(enum.StrEnum):

@@ -70,6 +70,7 @@ from azents.services.model_listing.providers import (
     ListingProviderError,
     list_bedrock_models_for_integration,
     list_chatgpt_models_for_integration,
+    list_openrouter_models_for_integration,
     list_vertex_models_for_integration,
 )
 from azents.testing.deterministic_model_listing import (
@@ -105,6 +106,7 @@ _PROVIDER_TO_DEVELOPER: dict[LLMProvider, LLMModelDeveloper] = {
     LLMProvider.CHATGPT_OAUTH: LLMModelDeveloper.OPENAI,
     LLMProvider.XAI: LLMModelDeveloper.XAI,
     LLMProvider.XAI_OAUTH: LLMModelDeveloper.XAI,
+    LLMProvider.OPENROUTER: LLMModelDeveloper.OTHER,
     LLMProvider.ANTHROPIC: LLMModelDeveloper.ANTHROPIC,
     LLMProvider.GOOGLE_GEMINI: LLMModelDeveloper.GOOGLE,
     LLMProvider.GOOGLE_VERTEX_AI: LLMModelDeveloper.GOOGLE,
@@ -126,7 +128,7 @@ def _developer_from_entry(entry: LLMCatalogEntry) -> LLMModelDeveloper:
         for developer in LLMModelDeveloper:
             if developer.value in lowered:
                 return developer
-    return _PROVIDER_TO_DEVELOPER.get(entry.provider, LLMModelDeveloper.ANTHROPIC)
+    return _PROVIDER_TO_DEVELOPER.get(entry.provider, LLMModelDeveloper.OTHER)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -803,6 +805,12 @@ class IntegrationCatalogProjectionService:
                     listing=listing,
                     source_hash=source_snapshot.source_hash,
                 )
+            elif integration.provider == LLMProvider.OPENROUTER:
+                entries = project_openrouter_integration_entries(
+                    integration_id=integration.id,
+                    listing=listing,
+                    source_hash=source_snapshot.source_hash,
+                )
             else:
                 entries = project_integration_entries(
                     integration_id=integration.id,
@@ -997,6 +1005,8 @@ async def _list_provider_visible_models(
         return await list_bedrock_models_for_integration(integration)
     if integration.provider == LLMProvider.CHATGPT_OAUTH:
         return await list_chatgpt_models_for_integration(integration)
+    if integration.provider == LLMProvider.OPENROUTER:
+        return await list_openrouter_models_for_integration(integration)
     if integration.provider == LLMProvider.GOOGLE_VERTEX_AI:
         return await list_vertex_models_for_integration(integration)
     raise RuntimeError("Unsupported integration catalog provider")
@@ -1075,6 +1085,49 @@ def project_chatgpt_integration_entries(
                 },
                 projection_metadata={
                     "lowerer_target": LLMCatalogLowererTarget.LITELLM.value,
+                    "freshness_rank": model_freshness_rank(candidate.model_identifier),
+                },
+                hidden_reason=None,
+            )
+        )
+    return entries
+
+
+def project_openrouter_integration_entries(
+    *,
+    integration_id: str,
+    listing: ModelListingOutput,
+    source_hash: str,
+) -> list[LLMCatalogEntryCreate]:
+    """Project OpenRouter account models without LiteLLM visibility matching."""
+    entries: list[LLMCatalogEntryCreate] = []
+    for candidate in listing.models:
+        entries.append(
+            LLMCatalogEntryCreate(
+                provider=LLMProvider.OPENROUTER,
+                provider_model_identifier=candidate.model_identifier,
+                lowerer_target=LLMCatalogLowererTarget.LITELLM,
+                runtime_model_identifier=to_runtime_model(
+                    LLMProvider.OPENROUTER,
+                    candidate.model_identifier,
+                ),
+                display_name=candidate.model_display_name,
+                normalized_capabilities=candidate.normalized_capabilities.model_dump(
+                    mode="json"
+                ),
+                lifecycle_status=LLMModelLifecycleStatus.ACTIVE,
+                visibility_status=LLMCatalogEntryVisibility.SELECTABLE,
+                provider_integration_id=integration_id,
+                publisher=candidate.model_developer.value,
+                family=candidate.model_family,
+                source_metadata={
+                    "provider_listing_source": listing.summary.source,
+                    "provider_metadata": candidate.source_metadata,
+                    "source_hash": source_hash,
+                },
+                projection_metadata={
+                    "lowerer_target": LLMCatalogLowererTarget.LITELLM.value,
+                    "target_metadata_match_required": False,
                     "freshness_rank": model_freshness_rank(candidate.model_identifier),
                 },
                 hidden_reason=None,
