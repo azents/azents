@@ -22,8 +22,8 @@ code_paths:
   - infra/charts/azents/**
   - infra/argocd/azents-runtime-provider-kubernetes/**
   - infra/argocd/azents-server/**
-last_verified_at: 2026-07-12
-spec_version: 17
+last_verified_at: 2026-07-19
+spec_version: 18
 ---
 
 # Agent Runtime Control
@@ -143,11 +143,15 @@ Runner is operation-only. It handles operations inside an already provisioned Ru
 
 `file.grep` accepts a workspace file path or directory path plus a regex pattern. The Runner performs file discovery, text decoding, regex matching, line limiting, file limiting, exclude filtering, searched-file limiting, and scanned-byte limiting inside the Runtime workspace, then returns a structured final payload of matched files, line matches, truncation status, and truncation reason. Callers should not implement grep by issuing `file.list` plus one `file.read` operation per file.
 
+Runner executes blocking file read/download, write/upload, stat, list, grep, delete, mkdir, move, bulk-delete, and bulk-move sections through a dedicated `ThreadPoolExecutor` instead of on the asyncio event loop. The production default is eight filesystem workers, bounded independently from ordinary Runner admission and owner scheduling limits. This prevents one admitted recursive traversal or regex scan from blocking unrelated async operations after fair scheduling has dispatched them.
+
+Recursive list and grep helpers receive a thread-safe cancellation signal. Cancelling the async handler sets that signal, and traversal plus line scanning check it between blocking operations. Cancellation is cooperative and does not preempt an operating-system filesystem call already executing in a worker thread. Existing final payloads and semantic file error mappings remain unchanged.
+
 Git operations are typed Runner operations, not arbitrary shell strings. `list_git_refs` previews local branches, remote branches, tags, default branch, and HEAD commit for a source Project path. `create_git_worktree` creates a branch-backed worktree from a source Project and starting ref and returns the final worktree path, branch name, and base commit. `remove_git_worktree` removes an owned worktree path with explicit force policy. `delete_git_branch` deletes only the requested branch in the source repository. These operations return semantic failures for non-Git paths, invalid refs, collisions, and Git command failures so product services can show user-safe setup or cleanup summaries.
 
 Runner registration and state reports include a mounted workspace path. Control compares it with the provider-reported path and records an explicit failure if they differ. A Runner `busy` report means it is healthy and actively executing an operation, so Control persists it as `ready` rather than treating it as a Runtime failure. Operation routing uses runner generation fencing so stale runner streams cannot complete newer operations.
 
-Every ordinary Runner operation carries common nullable `owner_session_id` scheduling context in the operation request and domain envelope. Server-side clients require callers to pass the nullable value explicitly. Session-scoped process, file, Skill projection, Project registration, and worktree operations pass the invoking Agent Session ID. Subagents use their own Agent Session ID. Agent Workspace management, Agent Project catalog work, pre-Session Git preview, and other Agent-level operations pass `None` and use the system owner. Ownership is trusted scheduling and operator-diagnostic context, not authorization proof, and it is not exposed in model-visible tool output.
+Every ordinary Runner operation carries common nullable `owner_session_id` scheduling context in the operation request and domain envelope. Server-side clients require callers to pass the nullable value explicitly. Session-scoped process, file, Skill projection, Project registration, and worktree operations pass the invoking Agent Session ID. This includes internal file stat/list/read operations performed after a successful visible `read` to discover AGENTS.md and Claude Rules appendices. Subagents use their own Agent Session ID for both visible and appendix-internal work while resolving files against their parent Agent Runtime. Agent Workspace management, Agent Project catalog work, pre-Session Git preview, and other Agent-level operations pass `None` and use the system owner. Ownership is trusted scheduling and operator-diagnostic context, not authorization proof, and it is not exposed in model-visible tool output.
 
 Ordinary process, file, and Git operations share owner and Runtime capacity. The default active limits are 10 per Agent Session, 10 for the system owner, and 50 for the Runtime. Each owner has a FIFO pending queue. The Runner visits eligible owner queues in round-robin order, skips owners already at their active limit, and advances the rotation after each dispatch. FIFO is guaranteed within one owner; cross-owner order is fair rather than globally FIFO. A long-running owner cannot block unrelated Session or system work while Runtime capacity remains available.
 
@@ -155,7 +159,7 @@ Admission occurs directly at the Runner transport receive boundary. There is no 
 
 Session termination uses a separate control queue with default concurrency 4. Termination and mandatory Runner cleanup do not consume ordinary 10/50 capacity, so user stop remains available while ordinary work is saturated. The control queue is not a general priority path for user operations.
 
-The Runner reports READY/BUSY state with active operation IDs and string-encoded diagnostic snapshots for Runtime, system, per-Session, and control pending/active counts plus cumulative queue rejection and pre-execution timeout counts. Structured JSON logs record request and generation identity, ownership class and Session ID, admission/scheduling counts, `queue_wait_ms`, `execution_ms`, and configured limits. Queue pressure and final operation failures remain tool observations; they do not trigger Runtime lifecycle transitions or server/runtime restarts.
+The Runner reports READY/BUSY state with active operation IDs and string-encoded diagnostic snapshots for Runtime, system, per-Session, and control pending/active counts plus cumulative queue rejection and pre-execution timeout counts. Structured JSON logs record request and generation identity, ownership class and Session ID, admission/scheduling counts, `queue_wait_ms`, `execution_ms`, and configured limits. Each offloaded filesystem operation also records `filesystem_status`, `filesystem_queue_wait_ms`, `filesystem_execution_ms`, and `filesystem_max_workers`, separating executor pressure from ordinary scheduling time. Queue pressure and final operation failures remain tool observations; they do not trigger Runtime lifecycle transitions or server/runtime restarts.
 
 The Runner reads six validated deployment settings: `AZ_RUNTIME_RUNNER_MAX_CONCURRENT_OPERATIONS_PER_SESSION`, `AZ_RUNTIME_RUNNER_MAX_CONCURRENT_SYSTEM_OPERATIONS`, `AZ_RUNTIME_RUNNER_MAX_CONCURRENT_OPERATIONS`, `AZ_RUNTIME_RUNNER_MAX_PENDING_OPERATIONS_PER_OWNER`, `AZ_RUNTIME_RUNNER_MAX_PENDING_OPERATIONS`, and `AZ_RUNTIME_RUNNER_MAX_CONCURRENT_CONTROL_OPERATIONS`. Docker and Kubernetes Providers forward only these allowlisted Runner settings. Provider reuse checks compare the exact managed setting set, so changing or removing an override replaces the Runtime workload. Kubernetes Helm values expose the six settings under `runtimeProviderKubernetes.runnerLimits`; existing Runtimes must be restarted after limit changes.
 
@@ -203,6 +207,7 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
+- **2026-07-19** (spec_version 18) — Added the bounded eight-worker filesystem executor, cooperative traversal cancellation, filesystem-specific queue/execution diagnostics, and explicit invoking-Session ownership for appendix-internal file operations.
 - **2026-07-12** (spec_version 17) — Removed the Background Runner operation protocol and reserved `RunnerOperationRequest` field 7 while preserving explicit process observation.
 - **2026-07-12** (spec_version 16) — Removed the obsolete background-operation completion publication path; process completion remains caller-observed through Runner events and `write_stdin` polling.
 - **2026-07-11** (spec_version 15) — Defined Runner `busy` reports as healthy operation activity normalized to durable `ready` state.

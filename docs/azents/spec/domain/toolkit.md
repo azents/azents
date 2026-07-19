@@ -32,8 +32,8 @@ code_paths:
 api_routes:
   - /toolkit/v1
   - /shell-environment/v1
-last_verified_at: 2026-07-17
-spec_version: 55
+last_verified_at: 2026-07-19
+spec_version: 56
 ---
 
 # Toolkit
@@ -218,6 +218,10 @@ Memory Read and Memory Write are resolved as separate auto-bound capabilities. M
 - Runtime process tool results are text for model visibility plus generic `metadata` on the client tool result payload. Metadata includes process status, process id when present, exit code when exited, truncation facts, and missing reason when unavailable. The engine preserves this metadata generically and does not branch on exec-specific keys.
 - The legacy `bash` tool is no longer exposed as the model-visible runtime shell command tool. Existing file tools continue to use Runner file operations.
 
+One `RuntimeRunnerFileStorage` instance is created per Runtime Toolkit turn and shared by visible file tools and instruction appendix loaders. The storage is bound to the Runtime Agent identity, carries the invoking Agent Session ID as `owner_session_id` on every Runner file operation, and lazily reuses one ready Runtime ID/generation snapshot for its lifetime. A subagent therefore uses its parent Agent Runtime while retaining its own Session ownership. An in-flight storage instance does not retry a failed mutation against a replacement Runner generation.
+
+Structured logs separate visible file-tool duration and Runtime operation count from appendix processing. They include tool status, Session identity, phase duration, candidate/discovery/cache/dedupe counts, and internal list/stat/read counts as applicable. Raw file content, rendered appendix content, and model-visible output are not logged.
+
 ### Runtime Hook Provider Contract
 
 Runtime `Toolkit` instance can explicitly register supported lifecycle callbacks through `hooks() -> RuntimeHooks`. Registration is `TypedDict(total=False)` mapping. Dispatcher does not infer by method existence; it only calls callbacks present in mapping key.
@@ -256,12 +260,13 @@ Shell runtime treats AGENTS.md as a successful `read` tool result appendix, not 
 
 - Root instruction candidate is `/workspace/agent/AGENTS.md` for read targets under `/workspace/agent`.
 - Registered Project instruction candidates are `AGENTS.md` files from the Project root to the read target directory, parent-to-child.
-- Candidate content is read fresh from Runtime file storage only while handling a successful `read` result.
-- Missing and non-file candidates are ignored.
+- Candidate content is read fresh from Runtime file storage only while handling a successful `read` result. AGENTS.md content is not cached.
+- Missing and non-file candidates are ignored and cached as discovery misses for five seconds within the Session-managed Toolkit instance, avoiding repeated stat operations during read bursts.
+- The Toolkit instance serializes appendix processing with a Session-local lock. After acquiring it, each caller reloads persistent dedupe state and removes already-appended paths before stat/read I/O, so parallel reads append and read each candidate at most once per dedupe lifecycle.
 - Reading an `AGENTS.md` file does not append that same file as its own appendix.
 - `write`, `edit`, `delete`, `grep`, `glob`, `import_file`, `present_file`, and `read_image` do not append AGENTS.md instructions in this contract.
 - Toolkit State stores only a sorted dedupe path list under namespace `builtin`, state name `agents_md_appendix_dedupe`; it does not store AGENTS.md content.
-- `on_session_compact` clears the dedupe path list so future reads may append current AGENTS.md content again.
+- `on_session_compact` clears both the dedupe path list and the local missing-candidate cache so future reads may discover and append current AGENTS.md content again.
 - Appendix content uses the existing AGENTS.md content cap and is appended after the original read output in a `<system-reminder>` block.
 - Prompt builds and toolkit startup must not start or touch Runtime solely to discover AGENTS.md.
 
@@ -284,6 +289,7 @@ Candidate roots:
 - Workspace-root rules are evaluated before Project-root rules.
 - Nested `.claude/rules` roots below arbitrary subdirectories are not discovered.
 - Only Markdown files (`.md`) are candidates.
+- Each supported root's sorted Markdown path list is cached for five seconds within the Session-managed Toolkit instance. The cache stores discovery paths only; rule content, parsed frontmatter, and path-match results remain uncached.
 - Missing rule roots and repo/config-level issues are skipped quietly.
 
 Matching and safety:
@@ -301,11 +307,12 @@ Matching and safety:
 Appendix and state:
 
 - Candidate content is read fresh from Runtime file storage only while handling a successful `read` result.
+- The Toolkit instance serializes discovery, persistent dedupe reload, pre-I/O path filtering, stat/read work, state update, and rendering with a Session-local lock. A parallel caller that acquires the lock later skips paths appended by the first caller before content I/O.
 - `write`, `edit`, `delete`, `grep`, `glob`, `import_file`, `present_file`, and `read_image` do not append Claude rules in this contract.
 - Rule content is rendered raw, including frontmatter, inside a `<system-reminder>` appendix after the original read output.
 - Claude rules use their own per-file content cap and truncation marker.
 - Toolkit State stores only a sorted dedupe path list under namespace `claude_rules`, state name `claude_rules_appendix_dedupe`; it does not store rule file content.
-- `on_session_compact` clears the dedupe path list so future reads may append current Claude rules again.
+- `on_session_compact` clears both the dedupe path list and the local rule-path discovery cache so future reads may discover and append current Claude rules again.
 - Runtime/FileStorage communication failures after a successful read are logged as errors and leave the read output unchanged.
 - Toolkit State failures and code bugs are not swallowed by `ClaudeRulesToolkit`; they flow to the runtime hook dispatcher fail-open path.
 
@@ -553,6 +560,7 @@ OpenAPI spec is authoritative for all endpoints. Major operations:
 
 ## Changelog
 
+- **2026-07-19** (spec_version 56) — Added Session-owned Runtime file storage snapshot reuse, structured file-tool and appendix diagnostics, five-second AGENTS.md/Claude Rules discovery caches, Session-local singleflight, pre-I/O dedupe, and compaction cache reset behavior.
 - **2026-07-17** (spec_version 55) — Filtered explicit subagent model targets by per-option availability and rendered bounded target-specific guidance while preserving inheritance.
 - **2026-07-10** (spec_version 54) — Aligned the root and child Subagent Toolkit prompts with the frozen Codex Multi-Agent V2 usage, workspace, concurrency, and explicit-delegation guidance.
 - **2026-07-10** (spec_version 53) — Made untargeted `wait_agent` calls report explicitly when no descendants exist.
