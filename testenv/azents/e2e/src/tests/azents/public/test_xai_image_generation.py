@@ -108,7 +108,11 @@ def _setup_xai_agent(
         ),
         _headers=_headers(token),
     )
-    integration_name = "__testenv_model_listing:deterministic-model-settings"
+    integration_name = (
+        "__testenv_model_listing:deterministic-model-settings"
+        if provider == LLMProvider.XAI
+        else "xAI OAuth Image Generation QA"
+    )
     if provider == LLMProvider.XAI:
         integration = LLMProviderIntegrationV1Api(
             public_api_client
@@ -144,6 +148,8 @@ def _setup_xai_agent(
         f"{server_url}/llm-provider-integration/v1/workspaces/{handle}/"
         f"llm-provider-integrations/{integration_id}/catalog-entries"
     )
+    quality_identifier = "grok-4"
+    fast_identifier = "grok-4-fast" if provider == LLMProvider.XAI else "grok-4-1-fast"
 
     def populated_entries() -> list[dict[str, object]] | None:
         response = requests.get(entries_url, headers=_headers(token), timeout=10)
@@ -155,7 +161,7 @@ def _setup_xai_agent(
             label="xAI catalog entries",
         )
         identifiers = {entry.get("provider_model_identifier") for entry in entries}
-        if {"grok-4", "grok-4-fast"}.issubset(identifiers):
+        if {quality_identifier, fast_identifier}.issubset(identifiers):
             return entries
         return None
 
@@ -193,7 +199,7 @@ def _setup_xai_agent(
                 "selectable_model_options": [
                     {
                         "label": "Quality",
-                        "model_selection": selection("grok-4"),
+                        "model_selection": selection(quality_identifier),
                         "settings": {
                             "context_window_tokens": 96_000,
                             "max_output_tokens": 12_000,
@@ -204,7 +210,7 @@ def _setup_xai_agent(
                     },
                     {
                         "label": "Fast",
-                        "model_selection": selection("grok-4-fast"),
+                        "model_selection": selection(fast_identifier),
                         "settings": {
                             "context_window_tokens": 32_000,
                             "max_output_tokens": 4_000,
