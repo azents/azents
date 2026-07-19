@@ -1187,7 +1187,6 @@ def test_apply_active_tool_call_event_tracks_until_output() -> None:
             call_id="call-1",
             status="completed",
             output="/tmp",
-            attachments=[],
         ),
         created_at=datetime.now(timezone.utc),
     )
@@ -1271,7 +1270,6 @@ async def test_dispatch_event_publishes_history_before_live_removal() -> None:
             call_id="call-1",
             status="completed",
             output="done",
-            attachments=[],
         ),
         created_at=datetime.now(timezone.utc),
     )
@@ -1417,7 +1415,6 @@ async def test_dispatch_flushes_live_partial_batch_during_event_update() -> None
             call_id="call-1",
             status="completed",
             output="done",
-            attachments=[],
         ),
         created_at=datetime.now(timezone.utc),
     )

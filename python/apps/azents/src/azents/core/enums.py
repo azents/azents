@@ -225,7 +225,6 @@ class EventKind(enum.StrEnum):
     CLIENT_TOOL_CALL = "client_tool_call"
     CLIENT_TOOL_RESULT = "client_tool_result"
     PROVIDER_TOOL_CALL = "provider_tool_call"
-    PROVIDER_TOOL_RESULT = "provider_tool_result"
     TURN_MARKER = "turn_marker"
     RUN_MARKER = "run_marker"
     INTERRUPTED = "interrupted"

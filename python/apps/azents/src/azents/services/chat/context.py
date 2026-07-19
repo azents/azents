@@ -17,7 +17,6 @@ from azents.engine.events.types import (
     ClientToolResultPayload,
     Event,
     ProviderToolCallPayload,
-    ProviderToolResultPayload,
     ReasoningPayload,
     SkillLoadedPayload,
     SystemPromptAnalysisPayload,
@@ -290,7 +289,7 @@ def _build_stats(events: list[Event]) -> SessionContextStats:
                 stats.reasoning_events += 1
             case EventKind.CLIENT_TOOL_CALL | EventKind.PROVIDER_TOOL_CALL:
                 stats.tool_calls += 1
-            case EventKind.CLIENT_TOOL_RESULT | EventKind.PROVIDER_TOOL_RESULT:
+            case EventKind.CLIENT_TOOL_RESULT:
                 stats.tool_results += 1
             case EventKind.TURN_MARKER:
                 stats.turn_markers += 1
@@ -335,7 +334,7 @@ def _build_breakdown(
             chars["tool"] += len(payload.name) + len(payload.arguments)
         elif isinstance(payload, ClientToolResultPayload):
             chars["tool"] += sum(_output_part_chars(part) for part in payload.output)
-        elif isinstance(payload, ProviderToolCallPayload | ProviderToolResultPayload):
+        elif isinstance(payload, ProviderToolCallPayload):
             chars["tool"] += len(render_provider_tool_semantic(payload))
 
     known_chars = {key: value for key, value in chars.items() if value > 0}

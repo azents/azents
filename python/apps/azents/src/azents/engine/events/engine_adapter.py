@@ -110,7 +110,6 @@ from azents.engine.events.types import (
     InputTextPart,
     OutputTextPart,
     ProviderToolCallPayload,
-    ProviderToolResultPayload,
     ReasoningPayload,
     SystemErrorPayload,
     UserMessagePayload,
@@ -1145,7 +1144,7 @@ def _render_event_for_summary(event: Event) -> str:
                 f"[Client tool result: {name or 'unknown'} {status}] "
                 f"{_event_text_content(output)}"
             )
-        case ProviderToolCallPayload() | ProviderToolResultPayload() as payload:
+        case ProviderToolCallPayload() as payload:
             return render_provider_tool_semantic(payload)
         case CompactionSummaryPayload(content=content):
             return f"[Existing Checkpoint]: {content}"

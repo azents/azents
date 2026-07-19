@@ -68,7 +68,6 @@ from azents.engine.events.types import (
     FileOutputPart,
     NativeArtifact,
     ProviderToolCallPayload,
-    ProviderToolResultPayload,
     ProviderToolSemanticContent,
     UserMessagePayload,
     build_native_compat_key,
@@ -479,8 +478,8 @@ def test_chatgpt_oauth_rehydrates_image_generation_with_store_false() -> None:
     event = Event(
         id="2" * 32,
         session_id="session-1",
-        kind=EventKind.PROVIDER_TOOL_RESULT,
-        payload=ProviderToolResultPayload(
+        kind=EventKind.PROVIDER_TOOL_CALL,
+        payload=ProviderToolCallPayload(
             call_id="image-call-1",
             name="image_generation",
             status="completed",
@@ -497,7 +496,6 @@ def test_chatgpt_oauth_rehydrates_image_generation_with_store_false() -> None:
                 ],
                 references=[],
             ),
-            attachments=[],
             native_artifact=artifact,
         ),
         created_at=datetime.datetime.now(datetime.UTC),
@@ -567,7 +565,6 @@ def test_openai_sdk_rehydrates_image_generation_call() -> None:
                 ],
                 references=[],
             ),
-            attachments=[],
             native_artifact=artifact,
         ),
         created_at=datetime.datetime.now(datetime.UTC),
@@ -1492,8 +1489,8 @@ async def test_official_sdk_wire_request_sanitizes_unstored_generated_image() ->
     event = Event(
         id="4" * 32,
         session_id="session-1",
-        kind=EventKind.PROVIDER_TOOL_RESULT,
-        payload=ProviderToolResultPayload(
+        kind=EventKind.PROVIDER_TOOL_CALL,
+        payload=ProviderToolCallPayload(
             call_id="image-call-1",
             name="image_generation",
             status="completed",
@@ -1510,7 +1507,6 @@ async def test_official_sdk_wire_request_sanitizes_unstored_generated_image() ->
                 ],
                 references=[],
             ),
-            attachments=[],
             native_artifact=artifact,
         ),
         created_at=datetime.datetime.now(datetime.UTC),
@@ -1816,7 +1812,6 @@ def test_typed_normalizer_extracts_transient_generated_image() -> None:
     payload = completed.events[0].payload
     assert isinstance(payload, ProviderToolCallPayload)
     assert payload.output == []
-    assert payload.attachments == []
     assert "result" not in payload.native_artifact.item
     assert len(completed.pending_provider_files) == 1
     pending = completed.pending_provider_files[0]

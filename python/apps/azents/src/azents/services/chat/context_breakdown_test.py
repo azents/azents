@@ -10,7 +10,6 @@ from azents.engine.events.types import (
     OutputTextPart,
     ProviderToolCallPayload,
     ProviderToolReference,
-    ProviderToolResultPayload,
     ProviderToolSemanticContent,
     build_native_compat_key,
 )
@@ -55,22 +54,20 @@ def _semantic(label: str) -> ProviderToolSemanticContent:
     )
 
 
-def test_context_breakdown_counts_full_provider_call_and_result_semantics() -> None:
+def test_context_breakdown_counts_full_provider_call_semantics() -> None:
     """Count provider input, output, and references through shared rendering."""
     call = ProviderToolCallPayload(
         call_id="call-1",
         name="web_search",
         status="completed",
         semantic=_semantic("call"),
-        attachments=[],
         native_artifact=_native_artifact(),
     )
-    result = ProviderToolResultPayload(
+    result = ProviderToolCallPayload(
         call_id="result-1",
         name="file_search",
         status="completed",
         semantic=_semantic("result"),
-        attachments=[],
         native_artifact=_native_artifact(),
     )
     now = datetime.datetime.now(datetime.UTC)
@@ -85,7 +82,7 @@ def test_context_breakdown_counts_full_provider_call_and_result_semantics() -> N
         Event(
             id="1" * 32,
             session_id="session-1",
-            kind=EventKind.PROVIDER_TOOL_RESULT,
+            kind=EventKind.PROVIDER_TOOL_CALL,
             payload=result,
             created_at=now,
         ),

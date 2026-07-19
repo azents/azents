@@ -20,7 +20,6 @@ from azents.engine.events.types import (
     NativeArtifact,
     ProviderToolCallPayload,
     ProviderToolReference,
-    ProviderToolResultPayload,
     ProviderToolSemanticContent,
     SystemErrorPayload,
     TokenUsagePayload,
@@ -235,8 +234,8 @@ def test_system_error_payload_uses_event_fields() -> None:
     }
 
 
-def test_provider_tool_result_is_not_client_tool_result_subclass() -> None:
-    payload = ProviderToolResultPayload(
+def test_provider_tool_call_is_not_client_tool_result_subclass() -> None:
+    payload = ProviderToolCallPayload(
         call_id="provider-1",
         name="image_generation",
         status="completed",
@@ -245,11 +244,10 @@ def test_provider_tool_result_is_not_client_tool_result_subclass() -> None:
             output=[],
             references=[],
         ),
-        attachments=[],
         native_artifact=_artifact(),
     )
 
-    assert type(payload) is ProviderToolResultPayload
+    assert type(payload) is ProviderToolCallPayload
     assert not isinstance(payload, ClientToolResultPayload)
 
 
@@ -270,7 +268,6 @@ def test_provider_tool_required_nullable_fields_survive_exclude_none_dump() -> N
             output=[],
             references=[reference],
         ),
-        attachments=[],
         native_artifact=_artifact(),
     )
 
@@ -301,7 +298,7 @@ def test_provider_tool_payload_rejects_legacy_positional_fields() -> None:
             }
         )
     with pytest.raises(ValidationError):
-        ProviderToolResultPayload.model_validate(
+        ProviderToolCallPayload.model_validate(
             {
                 "call_id": "provider-1",
                 "name": "web_search",

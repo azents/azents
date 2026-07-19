@@ -41,7 +41,6 @@ from azents.engine.events.types import (
     Event,
     OutputTextPart,
     ProviderToolCallPayload,
-    ProviderToolResultPayload,
     ReasoningPayload,
     RunMarkerPayload,
     SystemPromptAnalysisPayload,
@@ -1428,7 +1427,6 @@ def _has_durable_model_output(events: Sequence[Event]) -> bool:
             case (
                 ClientToolCallPayload()
                 | ProviderToolCallPayload()
-                | ProviderToolResultPayload()
                 | UnknownAdapterOutputPayload()
             ):
                 return True

@@ -50,7 +50,6 @@ from azents.engine.events.types import (
     OutputContentPart,
     OutputTextPart,
     ProviderToolCallPayload,
-    ProviderToolResultPayload,
     SystemReminderPayload,
     ToolOutput,
     ToolOutputPart,
@@ -854,7 +853,7 @@ def _model_visible_event_value(event: Event) -> object | None:
             "call_id": payload.call_id,
             "output": _visible_tool_output_value(payload.output),
         }
-    if isinstance(payload, ProviderToolCallPayload | ProviderToolResultPayload):
+    if isinstance(payload, ProviderToolCallPayload):
         return {
             "role": "assistant",
             "content": render_provider_tool_semantic(payload),
@@ -924,7 +923,7 @@ def _model_visible_event_text(
             _visible_tool_output(payload.output),
             include_label=include_label,
         )
-    if isinstance(payload, ProviderToolCallPayload | ProviderToolResultPayload):
+    if isinstance(payload, ProviderToolCallPayload):
         return _format_continuity_block(
             "Assistant",
             render_provider_tool_semantic(payload),
@@ -998,7 +997,7 @@ def _payload_attachment_uris(payload: EventPayload) -> list[str]:
         for part in iter_output_parts(payload.output):
             if isinstance(part, AttachmentOutputPart):
                 uris.append(part.uri)
-    if isinstance(payload, ProviderToolCallPayload | ProviderToolResultPayload):
+    if isinstance(payload, ProviderToolCallPayload):
         for part in iter_output_parts(payload.semantic.output):
             if isinstance(part, AttachmentOutputPart):
                 uris.append(part.uri)
@@ -1007,14 +1006,7 @@ def _payload_attachment_uris(payload: EventPayload) -> list[str]:
 
 def _payload_attachments(payload: EventPayload) -> list[Attachment]:
     """Return payload attachment list."""
-    if isinstance(
-        payload,
-        UserMessagePayload
-        | AssistantMessagePayload
-        | ClientToolResultPayload
-        | ProviderToolCallPayload
-        | ProviderToolResultPayload,
-    ):
+    if isinstance(payload, UserMessagePayload | AssistantMessagePayload):
         return payload.attachments
     return []
 
@@ -1070,33 +1062,22 @@ def _refresh_attachment_availability(
             update={"attachments": attachments.value, "content": content.value}
         )
     if isinstance(payload, ClientToolResultPayload):
-        attachments = _refresh_attachment_list(
-            payload.attachments,
-            statuses,
-        )
         output = _refresh_tool_output_attachment_parts(
             payload.output,
             statuses,
         )
-        if not attachments.changed and not output.changed:
+        if not output.changed:
             return None
-        return payload.model_copy(
-            update={"attachments": attachments.value, "output": output.value}
-        )
-    if isinstance(payload, ProviderToolCallPayload | ProviderToolResultPayload):
-        attachments = _refresh_attachment_list(
-            payload.attachments,
-            statuses,
-        )
+        return payload.model_copy(update={"output": output.value})
+    if isinstance(payload, ProviderToolCallPayload):
         output = _refresh_tool_output_attachment_parts(
             payload.semantic.output,
             statuses,
         )
-        if not attachments.changed and not output.changed:
+        if not output.changed:
             return None
         return payload.model_copy(
             update={
-                "attachments": attachments.value,
                 "semantic": payload.semantic.model_copy(
                     update={"output": output.value}
                 ),
@@ -1198,7 +1179,7 @@ def _payload_file_parts(payload: EventPayload) -> list[FileOutputPart]:
             for part in iter_output_parts(payload.output)
             if isinstance(part, FileOutputPart)
         ]
-    if isinstance(payload, ProviderToolCallPayload | ProviderToolResultPayload):
+    if isinstance(payload, ProviderToolCallPayload):
         return [
             part
             for part in iter_output_parts(payload.semantic.output)
@@ -1231,7 +1212,7 @@ def _replace_unavailable_file_parts(
         if not output.changed:
             return None
         return payload.model_copy(update={"output": output.value})
-    if isinstance(payload, ProviderToolCallPayload | ProviderToolResultPayload):
+    if isinstance(payload, ProviderToolCallPayload):
         output = _replace_tool_output_file_parts(payload.semantic.output, statuses)
         if not output.changed:
             return None

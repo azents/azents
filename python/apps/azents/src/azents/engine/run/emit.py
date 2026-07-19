@@ -19,7 +19,6 @@ from azents.engine.events.types import (
     Event,
     OutputTextPart,
     ProviderToolCallPayload,
-    ProviderToolResultPayload,
     SystemErrorPayload,
 )
 from azents.engine.events.types import (
@@ -132,12 +131,10 @@ def _collect_event_result(
         return
     if isinstance(payload, ClientToolResultPayload):
         _append_event_text(payload.output, texts)
-        attachments.extend(_runtime_attachments_from_event(payload.attachments))
         attachments.extend(_runtime_attachments_from_output(payload.output))
         return
-    if isinstance(payload, ProviderToolCallPayload | ProviderToolResultPayload):
+    if isinstance(payload, ProviderToolCallPayload):
         texts.append(render_provider_tool_semantic(payload))
-        attachments.extend(_runtime_attachments_from_event(payload.attachments))
         attachments.extend(_runtime_attachments_from_output(payload.semantic.output))
         return
     if isinstance(payload, SystemErrorPayload) and payload.content:

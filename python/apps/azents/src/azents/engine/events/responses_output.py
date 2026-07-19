@@ -34,7 +34,6 @@ from azents.engine.events.types import (
     NativeArtifact,
     OutputTextPart,
     ProviderToolCallPayload,
-    ProviderToolResultPayload,
     ReasoningPayload,
     TokenUsagePayload,
     UnknownAdapterOutputPayload,
@@ -198,28 +197,11 @@ class ResponsesOutputNormalizer:
                         reason=f"{item_type}:missing_call_id",
                     ),
                 )
-            if provider_tool.event_kind == EventKind.PROVIDER_TOOL_RESULT:
-                result_payload = ProviderToolResultPayload(
-                    call_id=call_id,
-                    name=provider_tool.name,
-                    status=_canonical_provider_tool_result_status(
-                        output_item.get("status")
-                    ),
-                    semantic=provider_tool.semantic,
-                    attachments=[],
-                    native_artifact=artifact,
-                )
-                return _event(
-                    session_id,
-                    EventKind.PROVIDER_TOOL_RESULT,
-                    result_payload,
-                )
             call_payload = ProviderToolCallPayload(
                 call_id=call_id,
                 name=provider_tool.name,
                 status=_canonical_provider_tool_status(output_item.get("status")),
                 semantic=provider_tool.semantic,
-                attachments=[],
                 native_artifact=artifact,
             )
             return _event(
@@ -603,25 +585,38 @@ def _provider_tool_output_item_status(
 ) -> Literal["running", "completed", "failed"]:
     """Resolve output-item status while respecting terminal done frames."""
     canonical = _canonical_provider_tool_status(native_status)
+    activity_status: Literal["running", "completed", "failed"] | None
+    match canonical:
+        case "cancelled" | "interrupted":
+            activity_status = "failed"
+        case "running" | "completed" | "failed":
+            activity_status = canonical
+        case None:
+            activity_status = None
     if default_status != "completed":
-        return canonical or default_status
+        return activity_status or default_status
     normalized = (
         native_status.lower().replace("-", "_")
         if isinstance(native_status, str)
         else None
     )
-    if canonical == "failed" or normalized in {
-        "incomplete",
-        "cancelled",
-        "canceled",
-    }:
+    if activity_status == "failed" or normalized == "incomplete":
         return "failed"
     return "completed"
 
 
 def _canonical_provider_tool_status(
     native_status: object,
-) -> Literal["running", "completed", "failed"] | None:
+) -> (
+    Literal[
+        "running",
+        "completed",
+        "failed",
+        "cancelled",
+        "interrupted",
+    ]
+    | None
+):
     """Map one native provider-tool state to the canonical lifecycle."""
     if not isinstance(native_status, str):
         return None
@@ -639,32 +634,13 @@ def _canonical_provider_tool_status(
         return "running"
     if normalized in {"completed", "done", "succeeded"}:
         return "completed"
-    if normalized in {
-        "failed",
-        "error",
-        "incomplete",
-        "cancelled",
-        "canceled",
-        "interrupted",
-    }:
-        return "failed"
-    return None
-
-
-def _canonical_provider_tool_result_status(
-    native_status: object,
-) -> Literal["completed", "failed", "cancelled", "interrupted"]:
-    """Map one terminal provider-tool result state to the canonical status."""
-    if not isinstance(native_status, str):
-        return "completed"
-    normalized = native_status.lower().replace("-", "_")
-    if normalized in {"failed", "error"}:
+    if normalized in {"failed", "error", "incomplete"}:
         return "failed"
     if normalized in {"cancelled", "canceled"}:
         return "cancelled"
-    if normalized in {"incomplete", "interrupted"}:
+    if normalized == "interrupted":
         return "interrupted"
-    return "completed"
+    return None
 
 
 def _incomplete_response_model_error(

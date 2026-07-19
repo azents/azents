@@ -12,10 +12,7 @@ from azcommon.testing.images import get_docker_hub_image
 from testcontainers.postgres import PostgresContainer
 
 from azents.consts import PROJECT_ROOT
-from azents.engine.events.types import (
-    ProviderToolCallPayload,
-    ProviderToolResultPayload,
-)
+from azents.engine.events.types import ProviderToolCallPayload
 
 _MIGRATION_PATH = (
     PROJECT_ROOT / "db-schemas/rdb/migrations/versions/"
@@ -119,21 +116,21 @@ def test_provider_tool_semantic_payload_upgrade_and_downgrade(
 
                 upgraded = _event_payloads(connection)
                 call_payload = ProviderToolCallPayload.model_validate(upgraded["call"])
-                result_payload = ProviderToolResultPayload.model_validate(
-                    upgraded["result"]
-                )
+                result_payload = upgraded["result"]
+                result_semantic = result_payload["semantic"]
+                assert isinstance(result_semantic, dict)
                 assert call_payload.status is None
                 assert call_payload.semantic.input == '{"query":"Azents"}'
                 assert call_payload.semantic.output == []
                 assert call_payload.semantic.references == []
-                assert call_payload.attachments == []
-                assert result_payload.name is None
-                assert result_payload.semantic.input is None
-                assert result_payload.semantic.output == "result text"
-                assert result_payload.semantic.references == []
-                assert result_payload.attachments == []
+                assert upgraded["call"]["attachments"] == []
+                assert result_payload["name"] is None
+                assert result_semantic["input"] is None
+                assert result_semantic["output"] == "result text"
+                assert result_semantic["references"] == []
+                assert result_payload["attachments"] == []
                 assert "arguments" not in upgraded["call"]
-                assert "output" not in upgraded["result"]
+                assert "output" not in result_payload
 
                 with patch.object(migration, "op", operations):
                     migration.downgrade()

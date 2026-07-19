@@ -330,7 +330,6 @@ def _normalized_output(
                 output=[],
                 references=[],
             ),
-            attachments=[],
             native_artifact=_artifact(),
         ),
         created_at=datetime.datetime.now(datetime.UTC),
@@ -501,7 +500,6 @@ async def test_materializes_exchange_and_model_file_in_one_admission() -> None:
     assert isinstance(payload.output[1], AttachmentOutputPart)
     assert payload.output[1].availability == "available"
     assert payload.output[1].uri.startswith("exchange://")
-    assert payload.attachments == []
     serialized = prepared.normalized.model_dump_json()
     assert _PNG_BASE64 not in serialized
     assert "generated-image:" not in serialized
@@ -541,7 +539,6 @@ async def test_materializes_client_tool_image_with_shared_storage_contract() -> 
     assert isinstance(prepared.result.output[0], FileOutputPart)
     assert isinstance(prepared.result.output[1], AttachmentOutputPart)
     assert prepared.result.output[1].uri.startswith("exchange://")
-    assert prepared.result.attachments == []
     assert generated.sha256 in prepared.result.output[0].metadata["source_sha256"]
     serialized = prepared.result.model_dump_json()
     assert _PNG_BASE64 not in serialized

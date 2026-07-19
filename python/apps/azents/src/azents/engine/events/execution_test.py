@@ -1006,7 +1006,6 @@ def _provider_tool_call_event() -> Event:
                 output=[],
                 references=[],
             ),
-            attachments=[],
             native_artifact=_artifact(),
         ),
         created_at=datetime.datetime.now(datetime.UTC),

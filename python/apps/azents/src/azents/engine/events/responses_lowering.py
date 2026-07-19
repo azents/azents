@@ -32,6 +32,7 @@ from azents.engine.events.types import (
     AgentMessagePayload,
     AssistantMessagePayload,
     Attachment,
+    AttachmentOutputPart,
     ClientToolCallPayload,
     ClientToolResultPayload,
     CompactionSummaryPayload,
@@ -43,7 +44,6 @@ from azents.engine.events.types import (
     OutputContentPart,
     OutputTextPart,
     ProviderToolCallPayload,
-    ProviderToolResultPayload,
     ReasoningPayload,
     RunMarkerPayload,
     SkillLoadedPayload,
@@ -219,9 +219,9 @@ class ResponsesRequestLowerer:
             kwargs["instructions"] = instructions
 
         for event in transcript:
-            native_item = self._compatible_native_item(event)
-            if native_item is not None:
-                input_items.append(native_item)
+            native_items = self._compatible_native_items(event)
+            if native_items is not None:
+                input_items.extend(native_items)
                 continue
 
             lowered = self._lower_event(event)
@@ -296,11 +296,11 @@ class ResponsesRequestLowerer:
             _append_include_value(kwargs, _REASONING_ENCRYPTED_CONTENT_INCLUDE)
         return kwargs
 
-    def _compatible_native_item(
+    def _compatible_native_items(
         self,
         event: Event,
-    ) -> dict[str, object] | None:
-        """Return raw item that can be replayed same-native."""
+    ) -> list[dict[str, object]] | None:
+        """Return same-native replay items, including Azents-local context."""
         match event.payload:
             case (
                 ProviderToolCallPayload(
@@ -308,20 +308,14 @@ class ResponsesRequestLowerer:
                     status=status,
                     semantic=semantic,
                     native_artifact=artifact,
-                )
-                | ProviderToolResultPayload(
-                    name="image_generation",
-                    status=status,
-                    semantic=semantic,
-                    native_artifact=artifact,
-                )
+                ) as payload
             ):
-                output = semantic.output
                 if not artifact.compatible_with(self.compat_key):
                     return None
-                if _file_output_parts(output):
+                file_parts = _file_output_parts(semantic.output)
+                if file_parts:
                     result = _rehydrated_image_generation_result(
-                        output,
+                        semantic.output,
                         resolver=self.model_file_resolver,
                     )
                     if result is None:
@@ -329,23 +323,48 @@ class ResponsesRequestLowerer:
                 else:
                     native_result = artifact.item.get("result")
                     result = native_result if isinstance(native_result, str) else None
-                return _lower_image_generation_native_item(
+                native_item = _lower_image_generation_native_item(
                     artifact.item,
                     status=status,
                     result=result,
                 )
+                local_parts = [
+                    part
+                    for part in iter_output_parts(semantic.output)
+                    if isinstance(part, AttachmentOutputPart)
+                ]
+                if not local_parts:
+                    return [native_item]
+                local_payload = payload.model_copy(
+                    update={
+                        "semantic": semantic.model_copy(
+                            update={
+                                "input": None,
+                                "output": local_parts,
+                                "references": [],
+                            }
+                        )
+                    }
+                )
+                return [
+                    native_item,
+                    _lower_provider_tool_semantic_payload(
+                        local_payload,
+                        capabilities=self._file_part_capabilities,
+                        model_file_resolver=self.model_file_resolver,
+                    ),
+                ]
             case ReasoningPayload(native_artifact=artifact):
                 if artifact.compatible_with(self.compat_key):
-                    return sanitize_responses_native_item(dict(artifact.item))
+                    return [sanitize_responses_native_item(dict(artifact.item))]
             case (
                 AssistantMessagePayload(native_artifact=artifact)
                 | ClientToolCallPayload(native_artifact=artifact)
                 | ProviderToolCallPayload(native_artifact=artifact)
-                | ProviderToolResultPayload(native_artifact=artifact)
                 | UnknownAdapterOutputPayload(native_artifact=artifact)
             ):
                 if artifact.compatible_with(self.compat_key):
-                    return artifact.item
+                    return [artifact.item]
             case _:
                 pass
         return None
@@ -395,7 +414,7 @@ class ResponsesRequestLowerer:
                 }
             case AssistantMessagePayload(content=content):
                 return {"role": "assistant", "content": _lower_output_content(content)}
-            case ProviderToolCallPayload() | ProviderToolResultPayload() as payload:
+            case ProviderToolCallPayload() as payload:
                 return _lower_provider_tool_semantic_payload(
                     payload,
                     capabilities=self._file_part_capabilities,
@@ -903,7 +922,7 @@ def _rehydrated_image_generation_result(
 
 
 def _lower_provider_tool_semantic_payload(
-    payload: ProviderToolCallPayload | ProviderToolResultPayload,
+    payload: ProviderToolCallPayload,
     *,
     capabilities: FilePartLoweringCapabilities,
     model_file_resolver: ModelFileResolver | None,
