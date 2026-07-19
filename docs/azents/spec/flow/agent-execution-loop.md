@@ -33,6 +33,8 @@ code_paths:
   - python/apps/azents/src/azents/services/action_execution.py
   - python/apps/azents/src/azents/services/agent_runtime/**
   - python/apps/azents/src/azents/services/input_buffer.py
+  - python/apps/azents/src/azents/services/agent_mailbox.py
+  - python/apps/azents/src/azents/services/subagent_terminal_result.py
   - python/apps/azents/src/azents/services/model_file.py
   - python/apps/azents/src/azents/services/xai_imagine.py
   - python/apps/azents/src/azents/services/xai_oauth/runtime.py
@@ -58,7 +60,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ChatView.tsx
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
 last_verified_at: 2026-07-19
-spec_version: 110
+spec_version: 111
 ---
 
 # Agent Execution Loop
@@ -298,7 +300,7 @@ selection or queries a later Session value while appending an earlier turn.
 
 The foreground `RunRequest` uses the selected Session settings: `max_output_tokens` is clamped against the selected model capability, enabled built-in tools are lowered only from that option, and the effective input window combines the selected foreground context cap with the Agent lightweight option context cap. An explicit empty built-in tool list remains all-off. Automatic retry, recovery, and worker takeover rebuild from the Session-owned selection and settings snapshots rather than rematching the mutable Agent option list.
 
-`terminal_result_event_id` and `terminal_result_message` store the user-safe terminal output projection for a completed, failed, stopped, interrupted, or cancelled run. Subagent parent observation and Subagent Tree unread/result previews read this projection instead of scanning child transcript history.
+`terminal_result_event_id` and `terminal_result_message` store the user-safe terminal output projection for a completed, failed, stopped, interrupted, or cancelled run. The Subagent Tree reads this projection instead of scanning child transcript history. A subagent Run also stores its durable direct-parent delivery state, terminal-result InputBuffer identity, and enqueue time so terminal mailbox delivery remains idempotent after the buffer is promoted and deleted.
 
 `retry_state` is nullable durable JSON on `agent_runs`. When present, it records the active model
 turn's failed-run retry progress and includes the provider/runtime presentation kind, latest user-safe
@@ -573,25 +575,51 @@ Subagent collaboration tools communicate through resolved agent input buffers:
   explicitly select no context or a bounded number of recent turns through `fork_turns`. The
   boundary reminder is inserted immediately after copied parent history for `fork_turns=all` or a
   positive integer selection. It identifies the child by name and full path, marks preceding messages
-  as inherited parent context, and states that `wait_agent` only observes descendants rather than the
-  current agent. `wait_agent` also rejects an explicitly resolved self target at tool execution time.
+  as inherited parent context, and states that targetless `wait_agent` observes the child's current
+  mailbox plus descendants rather than another selected agent.
 - Agent references follow Codex v2 visibility and targeting semantics within the current root tree.
   `list_agents` includes the root and the known agent tree, including ancestors of the caller.
 - `send_message` writes an `agent_message` to any resolved agent, including the root, without waking it.
 - `followup_task` writes an `agent_message`, marks the target running, and sends a broker wake-up,
   but rejects the root as a target.
+- `wait_agent` accepts only optional `timeout_seconds` and observes any pending mailbox message for
+  the current SessionAgent plus activity across its entire descendant subtree. It repairs direct-child
+  terminal delivery before each observation, prioritizes mailbox activity over no-descendant/all-idle/
+  timeout outcomes, and never consumes buffers or acknowledges terminal results itself.
 - `interrupt_agent` rejects the root and the caller itself, then records stop intent only for the
   resolved target's current run.
 
-`agent_message` lowering renders the mailbox payload as an explicit task envelope for the target
-child session. `spawn_agent` and `followup_task` render `Message Type: NEW_TASK`; `send_message`
-renders `Message Type: MESSAGE`. The envelope includes the target path as task name, sender path,
-and payload text so a subagent can distinguish its current assignment from inherited forked
-history. The first child run initializes `agent_sessions.last_model_target_label` and
+`agent_message` lowering renders mailbox payloads as explicit source-labeled envelopes for the target
+session. `spawn_agent` and `followup_task` render `Message Type: NEW_TASK`; `send_message` renders
+`Message Type: MESSAGE`; terminal results render `Message Type: AGENT_RESULT` with the terminal Run
+status. The envelope includes the target path as task name, sender path, and payload text. Terminal
+payloads additionally retain source Run identity/index/status and nullable terminal event identity in
+durable metadata, while model-visible content uses only the safe terminal projection or fixed status
+fallback. The first child run initializes `agent_sessions.last_model_target_label` and
 `last_reasoning_effort` from its selected requested profile. Later `followup_task` runs therefore use
 normal session-last-used precedence and re-resolve the saved Agent-owned label against the current
 Agent snapshot rather than pinning the first run's physical snapshot. Broker wake-ups remain
 payload-free; recovery is based on persisted input buffers and `agent_sessions.run_state`.
+
+Every InputBuffer records producer-owned scheduling intent. User, Goal, action, spawn, and follow-up
+input uses `wake_session`; `send_message` and terminal `agent_result` use `queue_only`. The session
+runner and locked idle transition consider only pending commands, active Runs, inbox wake-ups, and
+`wake_session` rows as follow-up work. A terminal session may therefore become idle while queue-only
+mailbox input remains. A later wake-producing input starts one Run and normal FIFO preparation
+promotes the older queue-only rows before or with the triggering input.
+
+When a current subagent Run becomes terminal, `SubagentTerminalResultService` locks the Run, validates
+its direct parent, inserts one idempotent queue-only `agent_result`, and writes the Run delivery marker
+in the same transaction. Normal terminal handling attempts this side effect before idle evaluation.
+Parent `wait_agent` polling repairs eligible results from direct children, and a later Run in the
+source child session repairs older eligible terminal results. Delivery failure is logged but does not
+roll the Run back or keep the child running.
+
+Input preparation validates every promoted `agent_result` against the actual direct child and terminal
+Run metadata before monotonically advancing that child's parent-observation cursor. Cursor update,
+event append or deduplication, and buffer deletion share one transaction. After commit, the executor
+publishes `subagent_tree_changed` for each advanced child. Merely enqueueing or observing a result in
+`wait_agent` leaves it unread.
 
 Human-authored direct writes are root-session only. REST message/edit/command/failed-run retry paths reject `session_kind = subagent` before creating input buffers,
 chat write requests, pending commands, operation mutations, live projections, or broker wake-ups.
@@ -695,9 +723,9 @@ If the run is stopped while tools are active, the loop records deterministic can
 did not produce a result. User-requested stop also appends an `interrupted` durable event before the
 terminal `run_marker(status=interrupted)` so the next model input can receive the interruption
 reminder and the UI can show a non-chat timeline divider. After user stop, the session runner starts
-another turn only when pending input buffers remain. If no pending input buffer exists, queued wake-up
-messages for the same session are discarded so reconnect or duplicate wake-up signals do not resume
-model execution by themselves.
+another turn only when pending `wake_session` input remains. Queue-only mailbox rows do not resume
+execution. If no wake-producing input exists, queued wake-up messages for the same session are
+discarded so reconnect or duplicate signals do not resume model execution by themselves.
 
 ## 6. Compaction
 
@@ -922,19 +950,22 @@ The required run-completion order is:
 
 1. Persist the terminal AgentRun state and durable terminal transcript output.
 2. Publish or observe the correlated terminal control event (`RunComplete` or `RunStopped`).
-3. Check whether follow-up work already exists.
-4. If follow-up work exists, keep or restore `running` and continue with the next run.
-5. If no follow-up work exists, transition `AgentSession.run_state` to `idle`.
-6. Clear session activity state that belongs to the completed run.
-7. Run `on_session_idle` hooks.
-8. Collect returned continuation prompts.
-9. Enqueue collected prompts through `InputBufferService`, which inserts the buffers and marks
-   `AgentSession.run_state` as `running` in the same database transaction.
-10. Publish pending-buffer live state and send a broker wake-up signal.
+3. For a linked subagent, attempt durable terminal `agent_result` delivery to its direct parent.
+4. Check whether follow-up work already exists as an inbox wake-up, pending command, or pending
+   `wake_session` input; queue-only mailbox rows are not follow-up work.
+5. If follow-up work exists, keep or restore `running` and continue with the next run.
+6. If no follow-up work exists, transition `AgentSession.run_state` to `idle`.
+7. Clear session activity state that belongs to the completed run.
+8. Run `on_session_idle` hooks.
+9. Collect returned continuation prompts.
+10. In one locked transaction, enqueue those prompts as `wake_session` input and mark the Session
+    running; then publish pending-buffer live state.
+11. Send a payload-free broker wake-up signal.
 
 `on_session_idle` hook providers do not write durable transcript events directly and do not send
-broker wake-ups. They return continuation input only. The input-buffer service owns the atomic
-handoff from idle hook result to recoverable runner work.
+broker wake-ups. They return continuation input only. `IdleContinuationService` owns the atomic
+handoff from idle hook results to recoverable runner work through `InputBufferService` and the Session
+repository.
 
 A graceful worker shutdown is not an idle transition. If shutdown is observed while a run is active,
 the departing worker preserves `running` state and hands over by wake-up instead of marking the
@@ -961,6 +992,7 @@ updated by the user.
 
 ## Changelog
 
+- **2026-07-19** (spec_version 111) — Added explicit wake versus queue-only input scheduling, idempotent direct-parent terminal mailbox delivery and repair, targetless mailbox activity waiting, and promotion-time observation acknowledgment.
 - **2026-07-19** — v110. Added archived-tree execution rejection, worker/recovery active-state filtering, irreversible purge owner fencing, stop signaling, and pre-fence restore semantics.
 - **2026-07-19** — v109. Added Agent-level default-disabled Tool Search; the enabled path applies provider-budgeted prepared-call projection, immutable catalog/search/executor snapshots, next-call activation, and deferred recency refresh.
 - **2026-07-19** — v108. Logged sanitized structured diagnostics for every provider-attributed error and recovered typed fields from bounded LiteLLM SDK serialization.

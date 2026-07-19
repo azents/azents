@@ -15,6 +15,8 @@ code_paths:
   - python/apps/azents/src/azents/engine/hooks/**
   - python/apps/azents/src/azents/engine/events/**
   - python/apps/azents/src/azents/engine/tools/**
+  - python/apps/azents/src/azents/services/agent_mailbox.py
+  - python/apps/azents/src/azents/services/subagent_terminal_result.py
   - python/apps/azents/src/azents/engine/run/resolve.py
   - python/apps/azents/src/azents/engine/run/tool_budget.py
   - python/apps/azents/src/azents/engine/tooling/tool_search.py
@@ -35,7 +37,7 @@ api_routes:
   - /toolkit/v1
   - /shell-environment/v1
 last_verified_at: 2026-07-19
-spec_version: 58
+spec_version: 59
 ---
 
 # Toolkit
@@ -365,30 +367,39 @@ returned as clear tool errors and do not queue the requested task.
 The static toolkit prompt selects the Codex Multi-Agent V2 root or child usage hint from the current
 `SessionAgent.kind`. Both variants append the shared direct-tool-call and shared-workspace hint, the
 configured concurrency slot count as `max_subagents + 1`, and the explicit-request-only delegation
-policy. Azents changes only provider/runtime terminology, terminal-result delivery wording, and the
+policy. Azents changes only provider/runtime terminology, mailbox coordination wording, and the
 tool-availability claim: mailbox envelopes are described as model input, `exec_command` replaces
-Codex `functions.exec` namespaces, terminal child results remain observable through `wait_agent`, and
-child execution is described as lacking Azents root/user-facing capabilities. Maximum depth remains a
-runtime spawn constraint and is not included in the prompt. When parent history is forked, the
-boundary reminder identifies the child by name
-and full path, distinguishes inherited parent actions from the child's own actions, and reserves
-`wait_agent` for descendants. A self-targeted `wait_agent` call fails as a tool error.
-The toolkit stores inter-agent delivery as target session `agent_message` input buffers. `send_message`
-queues without waking the target, while `spawn_agent` and `followup_task` mark the target session
-running and send normal broker wake-up signals. `wait_agent` reads unread terminal run projections and
-advances the child observation cursor only for returned results. When no unread result is available but
-one or more selected targets are still running, `wait_agent` polls until the requested timeout expires or
-a terminal result becomes available; timeout responses are emitted only after that wait window. When an
-untargeted call has no descendants, it returns `No descendant agents to wait for.` instead of reporting
-an empty unread-result state. A target is considered running when either its latest run is running or
-its linked `AgentSession` is still marked running before the latest run row is available. `interrupt_agent` records stop intent only for the named
-target session and returns its previous projected status; it does not close, delete, or recursively stop
-descendants.
+Codex `functions.exec` namespaces, `wait_agent` observes current-agent mailbox activity and descendant
+idleness, and child execution is described as lacking Azents root/user-facing capabilities. Maximum
+depth remains a runtime spawn constraint and is not included in the prompt. When parent history is
+forked, the boundary reminder identifies the child by name and full path, distinguishes inherited
+parent actions from the child's own actions, and explains that `wait_agent` observes only that child's
+descendants and current mailbox rather than the child itself.
 
-The toolkit emits non-durable `subagent_tree_changed` events as invalidation signals. Durable tree
-state remains in `SessionAgent`, linked `AgentSession`, and latest `agent_runs` rows. Parent observation
-wording is terminal-result based: `wait_agent` exposes unread terminal child results, not immediate
-human delivery guarantees.
+The toolkit stores inter-agent delivery as target-session `agent_message` input buffers through the
+typed mailbox service. `send_message` uses `queue_only` scheduling and does not wake or mark the target
+running. `spawn_agent` and `followup_task` use `wake_session`, mark the target running, and send normal
+payload-free broker wake-up signals. A terminal child Run is delivered to its persisted direct parent
+as one queue-only `agent_result`; terminal content is the user-safe Run projection or a fixed status
+fallback, never internal exception or provider diagnostic text.
+
+`wait_agent` has no `agent_name` field. Its only input is optional `timeout_seconds`, defaulting to 30
+and bounded from 0 through 600; unknown fields are rejected. Each observation first repairs eligible
+terminal results from direct children, then checks any pending `agent_message` in the current agent's
+mailbox and activity across the full current descendant subtree. Mailbox activity has priority and
+returns `Mailbox updated.` without payload content. An empty tree returns `No descendant agents to wait
+for.`, an entirely idle subtree returns `All descendant agents are idle.`, and deadline expiry while
+any descendant remains active returns `Wait timed out; active descendants: ...` with
+`timed_out = true`. Active means a running Session, a pending/running Run, or pending `wake_session`
+input; queue-only input alone does not make a descendant active. `timeout_seconds = 0` performs one
+immediate observation. Waiting never consumes mailbox rows and never advances observation cursors;
+the next model boundary performs FIFO promotion.
+
+`interrupt_agent` records stop intent only for the named target session and returns its previous
+projected status; it does not close, delete, or recursively stop descendants. The toolkit emits
+non-durable `subagent_tree_changed` invalidations for durable tree changes. Terminal unread state
+clears only after validated `agent_result` promotion advances the direct child's observation cursor;
+`wait_agent` observation by itself does not acknowledge the result.
 
 ### Goal/Todo Prompt and Result Stability
 
@@ -578,6 +589,7 @@ OpenAPI spec is authoritative for all endpoints. Major operations:
 
 ## Changelog
 
+- **2026-07-19** (spec_version 59) — Made `wait_agent` targetless and mailbox-activity based, preserved source-owned wake scheduling, and moved terminal unread acknowledgment to mailbox promotion.
 - **2026-07-19** (spec_version 58) — Made Tool Search an Agent-level opt-in capability that defaults to the complete legacy model-visible catalog.
 - **2026-07-19** (spec_version 57) — Added direct/deferred tool exposure, deterministic Tool Search metadata and activation, and session-shared final-name recency through Toolkit State.
 - **2026-07-19** (spec_version 56) — Added Session-owned Runtime file storage snapshot reuse, structured file-tool and appendix diagnostics, five-second AGENTS.md/Claude Rules discovery caches, Session-local singleflight, pre-I/O dedupe, and compaction cache reset behavior.
