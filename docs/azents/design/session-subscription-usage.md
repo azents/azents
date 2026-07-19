@@ -136,7 +136,7 @@ The existing endpoint may return financial fields for integration managers. The 
 
 ## Test Strategy
 
-### E2E primary validation matrix
+### Deterministic UI validation matrix
 
 | Scenario | Expected result |
 |---|---|
@@ -147,27 +147,28 @@ The existing endpoint may return financial fields for integration managers. The 
 | failed refresh after success | last successful percentage remains with stale state |
 | API-key model | no subscription indicator or usage request |
 | model changes between integrations | indicator and detail switch to the newly selected integration |
-| read-only member | operational detail visible, financial detail absent |
-| desktop | compact indicator and popover detail are keyboard reachable |
-| mobile | bottom-sheet detail is reachable and composer remains usable |
+| read-only projection | operational detail is visible and financial detail is absent |
+| desktop | compact indicator and popover detail are represented by desktop stories |
+| mobile | compact indicator and bottom-sheet detail are represented by mobile stories |
 
 ### Unit and component coverage
 
-- Pure projection tests cover selected-option resolution and severity.
-- Storybook stories cover available, warning, critical, loading, stale, unavailable, external, and unsupported states.
-- Interaction tests verify refresh, external action, model switching, and accessibility labels.
+- Pure projection tests cover selected-option resolution, provider eligibility, model switching, severity, stale snapshots, and non-percent states.
+- Storybook stories cover available, warning, critical, loading, stale, unavailable, external, unsupported, desktop, and mobile states.
+- Storybook interaction assertions verify refresh, trusted external navigation, accessible labels, and the absence of financial detail.
+- The production and Storybook builds verify integration with the real composer components and responsive render paths.
 
-### Fixture requirements
+### E2E scope
 
-Reuse deterministic subscription-usage proxy scenarios and API-created OAuth integrations from the existing validation suite. Add only session/model-selection setup required to bind an Agent selectable option to the fixture integration. No live provider credential is required for CI.
+No new Web Surface E2E is required for this frontend-only projection. The existing subscription-usage feature stack already validates the public endpoint, provider adapters, permission projection, stale behavior, and deterministic proxy scenarios. This change reuses that shipped query contract without modifying backend behavior, persistence, authentication, or provider requests. Duplicating the same provider scenarios through a new browser fixture would add maintenance scope without increasing contract coverage.
 
 ### CI policy
 
-The implementation must pass TypeScript formatting, lint, typecheck, build, component tests, and deterministic web-surface E2E. Optional live provider smoke tests remain excluded from required CI.
+The implementation must pass TypeScript formatting, cache-independent lint, typecheck, unit tests, the production web build, and the Storybook build. Optional live provider smoke tests remain excluded from required CI.
 
 ### Evidence
 
-The validation phase records commands, CI run links, scenario results, implementation/spec comparison, and any corrected defects in a dated design validation report.
+The validation phase records commands, CI run links, deterministic scenario coverage, implementation/spec comparison, and any corrected defects in a dated design validation report.
 
 ## Rollout and Cleanup
 
