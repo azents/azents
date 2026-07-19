@@ -331,7 +331,8 @@
           "rate_limited": "プロバイダーが使用量リクエストを制限しています。",
           "temporarily_unavailable": "プロバイダーは一時的に利用できません。",
           "invalid_provider_response": "プロバイダーの使用量レスポンスが変更されたか、無効です。",
-          "unsupported_account": "このプロバイダーアカウントでは使用量を取得できません。"
+          "unsupported_account": "このプロバイダーアカウントでは使用量を取得できません。",
+          "no_credit_limit": "このAPIキーには表示可能なクレジット上限がありません。"
         },
         "financial": {
           "plan": "プラン",
@@ -351,7 +352,20 @@
           "paygUsed": "従量課金利用額",
           "autoTopUp": "自動チャージ",
           "autoTopUpAmount": "チャージ金額",
-          "autoTopUpMaximum": "月間自動チャージ上限"
+          "autoTopUpMaximum": "月間自動チャージ上限",
+          "creditLimit": "クレジット上限",
+          "creditRemaining": "残りクレジット",
+          "usageAllTime": "累計使用量",
+          "usageDaily": "日次使用量",
+          "usageWeekly": "週次使用量",
+          "usageMonthly": "月次使用量",
+          "limitReset": "上限のリセット周期",
+          "byokIncluded": "BYOK使用量を含む",
+          "resetValues": {
+            "daily": "毎日",
+            "weekly": "毎週",
+            "monthly": "毎月"
+          }
         }
       },
       "createTitle": "LLM連携を追加",

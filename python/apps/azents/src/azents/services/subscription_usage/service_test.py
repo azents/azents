@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.chatgpt_oauth import ChatGPTOAuthConnectionMethod
 from azents.core.credentials import (
+    ApiKeySecrets,
     ChatGPTOAuthConfig,
     ChatGPTOAuthSecrets,
     XaiOAuthConfig,
@@ -130,6 +131,24 @@ def _xai_integration(
     )
 
 
+def _openrouter_integration(
+    *, enabled: bool = True
+) -> LLMProviderIntegrationWithSecrets:
+    """Build one OpenRouter API-key integration for service tests."""
+    now = datetime.datetime.now(datetime.UTC)
+    return LLMProviderIntegrationWithSecrets(
+        id="openrouter-integration-1",
+        workspace_id="workspace-1",
+        provider=LLMProvider.OPENROUTER,
+        name="OpenRouter",
+        config=None,
+        enabled=enabled,
+        created_at=now,
+        updated_at=now,
+        secrets=ApiKeySecrets(api_key="openrouter-key"),
+    )
+
+
 def _xai_payload(*, prepaid_balance: int = 0) -> dict[str, object]:
     """Return one valid xAI credits response."""
     return {
@@ -178,6 +197,7 @@ async def _service(
             http_client=http_client,
             chatgpt_usage_base_url="https://usage.example.test/backend-api",
             xai_usage_base_url="https://xai-usage.example.test/v1",
+            openrouter_usage_base_url="https://openrouter.example.test/api/v1",
         ),
         repository,
     )
@@ -232,6 +252,83 @@ async def test_api_key_provider_is_unsupported() -> None:
 
     assert isinstance(result, Failure)
     assert isinstance(result.error, SubscriptionUsageUnsupportedProvider)
+
+
+async def test_openrouter_key_credit_usage_is_available() -> None:
+    """Project OpenRouter key credit through the shared usage contract."""
+    integration = _openrouter_integration()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/key"
+        assert request.headers["authorization"] == "Bearer openrouter-key"
+        return httpx.Response(
+            200,
+            json={
+                "data": {
+                    "limit": 50.0,
+                    "limit_remaining": 37.5,
+                    "limit_reset": "monthly",
+                    "include_byok_in_limit": True,
+                    "usage": 20.0,
+                    "usage_daily": 1.0,
+                    "usage_weekly": 5.0,
+                    "usage_monthly": 12.5,
+                }
+            },
+        )
+
+    service, _ = await _service(handler, integration=integration)
+    try:
+        result = await service.read(
+            integration_id=integration.id,
+            workspace_id=integration.workspace_id,
+            include_financial_details=True,
+        )
+    finally:
+        await service.http_client.aclose()
+
+    assert isinstance(result, Success)
+    assert isinstance(result.value, SubscriptionUsageAvailable)
+    assert result.value.provider == LLMProvider.OPENROUTER
+    assert result.value.limits[0].used_percent == 25.0
+    assert result.value.financial_details is not None
+
+
+async def test_openrouter_null_limit_returns_no_credit_limit_outcome() -> None:
+    """Preserve a successful read while leaving unlimited keys undisplayed."""
+    integration = _openrouter_integration()
+    service, _ = await _service(
+        lambda _request: httpx.Response(
+            200,
+            json={
+                "data": {
+                    "limit": None,
+                    "limit_remaining": None,
+                    "limit_reset": None,
+                    "include_byok_in_limit": False,
+                    "usage": 20.0,
+                    "usage_daily": 1.0,
+                    "usage_weekly": 5.0,
+                    "usage_monthly": 12.5,
+                }
+            },
+        ),
+        integration=integration,
+    )
+    try:
+        result = await service.read(
+            integration_id=integration.id,
+            workspace_id=integration.workspace_id,
+            include_financial_details=True,
+        )
+    finally:
+        await service.http_client.aclose()
+
+    assert isinstance(result, Success)
+    assert isinstance(result.value, SubscriptionUsageUnavailable)
+    assert result.value.provider == LLMProvider.OPENROUTER
+    assert result.value.reason == SubscriptionUsageUnavailableReason.NO_CREDIT_LIMIT
+    assert result.value.retryable is False
 
 
 @pytest.mark.parametrize(

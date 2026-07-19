@@ -93,6 +93,21 @@ void test("selected model resolves and switches its provider integration", () =>
         subagent_guidance: null,
       },
     },
+    {
+      label: "OpenRouter",
+      model_selection: {
+        ...modelSelection,
+        llm_provider_integration_id: "integration-openrouter",
+        provider: "openrouter",
+      },
+      settings: {
+        context_window_tokens: null,
+        max_output_tokens: null,
+        builtin_tools: [],
+        subagent_enabled: true,
+        subagent_guidance: null,
+      },
+    },
   ];
 
   assert.deepEqual(
@@ -107,6 +122,13 @@ void test("selected model resolves and switches its provider integration", () =>
     {
       integrationId: "integration-xai",
       provider: "xai_oauth",
+    },
+  );
+  assert.deepEqual(
+    resolveComposerSubscriptionSelection(switchableOptions, "OpenRouter"),
+    {
+      integrationId: "integration-openrouter",
+      provider: "openrouter",
     },
   );
   assert.equal(

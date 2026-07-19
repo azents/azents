@@ -35,6 +35,7 @@ class SubscriptionUsageUnavailableReason(str, Enum):
     TEMPORARILY_UNAVAILABLE = 'temporarily_unavailable'
     INVALID_PROVIDER_RESPONSE = 'invalid_provider_response'
     UNSUPPORTED_ACCOUNT = 'unsupported_account'
+    NO_CREDIT_LIMIT = 'no_credit_limit'
 
     @classmethod
     def from_json(cls, json_str: str) -> Self:

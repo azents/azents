@@ -26,6 +26,7 @@ from azents.services.llm_provider_integration.data import (
 )
 from azents.services.subscription_usage.data import (
     ChatGPTSubscriptionFinancialDetails,
+    OpenRouterSubscriptionFinancialDetails,
     SubscriptionUsageAvailable,
     SubscriptionUsageExternal,
     SubscriptionUsageFinancialDetails,
@@ -274,7 +275,7 @@ class LLMProviderIntegrationUpdateRequest(LLMProviderIntegrationUpdateInput):
     pass
 
 
-SubscriptionUsageProvider = Literal["chatgpt_oauth", "xai_oauth"]
+SubscriptionUsageProvider = Literal["chatgpt_oauth", "xai_oauth", "openrouter"]
 
 
 class SubscriptionUsageLimitResponse(BaseModel):
@@ -360,9 +361,41 @@ class XaiSubscriptionFinancialDetailsResponse(BaseModel):
         )
 
 
+class OpenRouterSubscriptionFinancialDetailsResponse(BaseModel):
+    """Management-only OpenRouter API-key credit details."""
+
+    type: Literal["openrouter"]
+    credit_limit: float
+    credit_remaining: float
+    usage: float
+    usage_daily: float
+    usage_weekly: float
+    usage_monthly: float
+    limit_reset: str | None
+    include_byok_in_limit: bool
+
+    @classmethod
+    def convert_from(
+        cls, data: OpenRouterSubscriptionFinancialDetails
+    ) -> "OpenRouterSubscriptionFinancialDetailsResponse":
+        """Convert normalized OpenRouter credit details to public data."""
+        return cls(
+            type="openrouter",
+            credit_limit=data.credit_limit,
+            credit_remaining=data.credit_remaining,
+            usage=data.usage,
+            usage_daily=data.usage_daily,
+            usage_weekly=data.usage_weekly,
+            usage_monthly=data.usage_monthly,
+            limit_reset=data.limit_reset,
+            include_byok_in_limit=data.include_byok_in_limit,
+        )
+
+
 SubscriptionUsageFinancialDetailsResponse = Annotated[
     ChatGPTSubscriptionFinancialDetailsResponse
-    | XaiSubscriptionFinancialDetailsResponse,
+    | XaiSubscriptionFinancialDetailsResponse
+    | OpenRouterSubscriptionFinancialDetailsResponse,
     Field(discriminator="type"),
 ]
 
@@ -470,6 +503,8 @@ def convert_subscription_usage_financial_details(
             return ChatGPTSubscriptionFinancialDetailsResponse.convert_from(data)
         case XaiSubscriptionFinancialDetails():
             return XaiSubscriptionFinancialDetailsResponse.convert_from(data)
+        case OpenRouterSubscriptionFinancialDetails():
+            return OpenRouterSubscriptionFinancialDetailsResponse.convert_from(data)
         case _:
             assert_never(data)
 
@@ -495,5 +530,7 @@ def _subscription_usage_provider(provider: LLMProvider) -> SubscriptionUsageProv
         return "chatgpt_oauth"
     if provider == LLMProvider.XAI_OAUTH:
         return "xai_oauth"
+    if provider == LLMProvider.OPENROUTER:
+        return "openrouter"
     msg = "Subscription usage response has an unsupported provider."
     raise ValueError(msg)

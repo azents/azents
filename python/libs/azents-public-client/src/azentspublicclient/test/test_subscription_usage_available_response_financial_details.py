@@ -49,7 +49,15 @@ class TestSubscriptionUsageAvailableResponseFinancialDetails(unittest.TestCase):
                 payg_used_cents = 56,
                 auto_top_up_enabled = True,
                 auto_top_up_amount_cents = 56,
-                auto_top_up_monthly_maximum_cents = 56
+                auto_top_up_monthly_maximum_cents = 56,
+                credit_limit = 1.337,
+                credit_remaining = 1.337,
+                usage = 1.337,
+                usage_daily = 1.337,
+                usage_weekly = 1.337,
+                usage_monthly = 1.337,
+                limit_reset = '',
+                include_byok_in_limit = True
             )
         else:
             return SubscriptionUsageAvailableResponseFinancialDetails(
@@ -68,6 +76,14 @@ class TestSubscriptionUsageAvailableResponseFinancialDetails(unittest.TestCase):
                 auto_top_up_enabled = True,
                 auto_top_up_amount_cents = 56,
                 auto_top_up_monthly_maximum_cents = 56,
+                credit_limit = 1.337,
+                credit_remaining = 1.337,
+                usage = 1.337,
+                usage_daily = 1.337,
+                usage_weekly = 1.337,
+                usage_monthly = 1.337,
+                limit_reset = '',
+                include_byok_in_limit = True,
         )
         """
 

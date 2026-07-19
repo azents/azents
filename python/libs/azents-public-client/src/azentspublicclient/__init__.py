@@ -219,6 +219,7 @@ __all__ = [
     "MySystemRolesResponse",
     "OAuthAuthorizeResponse",
     "OAuthExchangeRequest",
+    "OpenRouterSubscriptionFinancialDetailsResponse",
     "PartialHistoryResponse",
     "PasswordLoginRequest",
     "PasswordLoginResponse",
@@ -531,6 +532,7 @@ from azentspublicclient.models.my_join_request_response import MyJoinRequestResp
 from azentspublicclient.models.my_system_roles_response import MySystemRolesResponse as MySystemRolesResponse
 from azentspublicclient.models.o_auth_authorize_response import OAuthAuthorizeResponse as OAuthAuthorizeResponse
 from azentspublicclient.models.o_auth_exchange_request import OAuthExchangeRequest as OAuthExchangeRequest
+from azentspublicclient.models.open_router_subscription_financial_details_response import OpenRouterSubscriptionFinancialDetailsResponse as OpenRouterSubscriptionFinancialDetailsResponse
 from azentspublicclient.models.partial_history_response import PartialHistoryResponse as PartialHistoryResponse
 from azentspublicclient.models.password_login_request import PasswordLoginRequest as PasswordLoginRequest
 from azentspublicclient.models.password_login_response import PasswordLoginResponse as PasswordLoginResponse

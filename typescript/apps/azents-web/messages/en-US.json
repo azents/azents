@@ -331,7 +331,8 @@
           "rate_limited": "The provider is rate limiting usage requests.",
           "temporarily_unavailable": "The provider is temporarily unavailable.",
           "invalid_provider_response": "The provider usage response has changed or is invalid.",
-          "unsupported_account": "Usage is unavailable for this provider account."
+          "unsupported_account": "Usage is unavailable for this provider account.",
+          "no_credit_limit": "This API key does not have a displayable credit limit."
         },
         "financial": {
           "plan": "Plan",
@@ -351,7 +352,20 @@
           "paygUsed": "Pay-as-you-go used",
           "autoTopUp": "Auto top-up",
           "autoTopUpAmount": "Top-up amount",
-          "autoTopUpMaximum": "Monthly top-up maximum"
+          "autoTopUpMaximum": "Monthly top-up maximum",
+          "creditLimit": "Credit limit",
+          "creditRemaining": "Credit remaining",
+          "usageAllTime": "All-time usage",
+          "usageDaily": "Daily usage",
+          "usageWeekly": "Weekly usage",
+          "usageMonthly": "Monthly usage",
+          "limitReset": "Limit reset",
+          "byokIncluded": "BYOK usage included",
+          "resetValues": {
+            "daily": "Daily",
+            "weekly": "Weekly",
+            "monthly": "Monthly"
+          }
         }
       },
       "createTitle": "Add LLM Integration",

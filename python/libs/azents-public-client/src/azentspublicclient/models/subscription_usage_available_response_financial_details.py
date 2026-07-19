@@ -18,12 +18,13 @@ import pprint
 from pydantic import BaseModel, ConfigDict, Field, StrictStr, ValidationError, field_validator
 from typing import Any, List, Optional
 from azentspublicclient.models.chat_gpt_subscription_financial_details_response import ChatGPTSubscriptionFinancialDetailsResponse
+from azentspublicclient.models.open_router_subscription_financial_details_response import OpenRouterSubscriptionFinancialDetailsResponse
 from azentspublicclient.models.xai_subscription_financial_details_response import XaiSubscriptionFinancialDetailsResponse
 from pydantic import StrictStr, Field
 from typing import Union, List, Set, Optional, Dict
 from typing_extensions import Literal, Self
 
-SUBSCRIPTIONUSAGEAVAILABLERESPONSEFINANCIALDETAILS_ONE_OF_SCHEMAS = ["ChatGPTSubscriptionFinancialDetailsResponse", "XaiSubscriptionFinancialDetailsResponse"]
+SUBSCRIPTIONUSAGEAVAILABLERESPONSEFINANCIALDETAILS_ONE_OF_SCHEMAS = ["ChatGPTSubscriptionFinancialDetailsResponse", "OpenRouterSubscriptionFinancialDetailsResponse", "XaiSubscriptionFinancialDetailsResponse"]
 
 class SubscriptionUsageAvailableResponseFinancialDetails(BaseModel):
     """
@@ -33,8 +34,10 @@ class SubscriptionUsageAvailableResponseFinancialDetails(BaseModel):
     oneof_schema_1_validator: Optional[ChatGPTSubscriptionFinancialDetailsResponse] = None
     # data type: XaiSubscriptionFinancialDetailsResponse
     oneof_schema_2_validator: Optional[XaiSubscriptionFinancialDetailsResponse] = None
-    actual_instance: Optional[Union[ChatGPTSubscriptionFinancialDetailsResponse, XaiSubscriptionFinancialDetailsResponse]] = None
-    one_of_schemas: Set[str] = { "ChatGPTSubscriptionFinancialDetailsResponse", "XaiSubscriptionFinancialDetailsResponse" }
+    # data type: OpenRouterSubscriptionFinancialDetailsResponse
+    oneof_schema_3_validator: Optional[OpenRouterSubscriptionFinancialDetailsResponse] = None
+    actual_instance: Optional[Union[ChatGPTSubscriptionFinancialDetailsResponse, OpenRouterSubscriptionFinancialDetailsResponse, XaiSubscriptionFinancialDetailsResponse]] = None
+    one_of_schemas: Set[str] = { "ChatGPTSubscriptionFinancialDetailsResponse", "OpenRouterSubscriptionFinancialDetailsResponse", "XaiSubscriptionFinancialDetailsResponse" }
 
     model_config = ConfigDict(
         validate_assignment=True,
@@ -73,12 +76,17 @@ class SubscriptionUsageAvailableResponseFinancialDetails(BaseModel):
             error_messages.append(f"Error! Input type `{type(v)}` is not `XaiSubscriptionFinancialDetailsResponse`")
         else:
             match += 1
+        # validate data type: OpenRouterSubscriptionFinancialDetailsResponse
+        if not isinstance(v, OpenRouterSubscriptionFinancialDetailsResponse):
+            error_messages.append(f"Error! Input type `{type(v)}` is not `OpenRouterSubscriptionFinancialDetailsResponse`")
+        else:
+            match += 1
         if match > 1:
             # more than 1 match
-            raise ValueError("Multiple matches found when setting `actual_instance` in SubscriptionUsageAvailableResponseFinancialDetails with oneOf schemas: ChatGPTSubscriptionFinancialDetailsResponse, XaiSubscriptionFinancialDetailsResponse. Details: " + ", ".join(error_messages))
+            raise ValueError("Multiple matches found when setting `actual_instance` in SubscriptionUsageAvailableResponseFinancialDetails with oneOf schemas: ChatGPTSubscriptionFinancialDetailsResponse, OpenRouterSubscriptionFinancialDetailsResponse, XaiSubscriptionFinancialDetailsResponse. Details: " + ", ".join(error_messages))
         elif match == 0:
             # no match
-            raise ValueError("No match found when setting `actual_instance` in SubscriptionUsageAvailableResponseFinancialDetails with oneOf schemas: ChatGPTSubscriptionFinancialDetailsResponse, XaiSubscriptionFinancialDetailsResponse. Details: " + ", ".join(error_messages))
+            raise ValueError("No match found when setting `actual_instance` in SubscriptionUsageAvailableResponseFinancialDetails with oneOf schemas: ChatGPTSubscriptionFinancialDetailsResponse, OpenRouterSubscriptionFinancialDetailsResponse, XaiSubscriptionFinancialDetailsResponse. Details: " + ", ".join(error_messages))
         else:
             return v
 
@@ -108,13 +116,19 @@ class SubscriptionUsageAvailableResponseFinancialDetails(BaseModel):
             match += 1
         except (ValidationError, ValueError) as e:
             error_messages.append(str(e))
+        # deserialize data into OpenRouterSubscriptionFinancialDetailsResponse
+        try:
+            instance.actual_instance = OpenRouterSubscriptionFinancialDetailsResponse.from_json(json_str)
+            match += 1
+        except (ValidationError, ValueError) as e:
+            error_messages.append(str(e))
 
         if match > 1:
             # more than 1 match
-            raise ValueError("Multiple matches found when deserializing the JSON string into SubscriptionUsageAvailableResponseFinancialDetails with oneOf schemas: ChatGPTSubscriptionFinancialDetailsResponse, XaiSubscriptionFinancialDetailsResponse. Details: " + ", ".join(error_messages))
+            raise ValueError("Multiple matches found when deserializing the JSON string into SubscriptionUsageAvailableResponseFinancialDetails with oneOf schemas: ChatGPTSubscriptionFinancialDetailsResponse, OpenRouterSubscriptionFinancialDetailsResponse, XaiSubscriptionFinancialDetailsResponse. Details: " + ", ".join(error_messages))
         elif match == 0:
             # no match
-            raise ValueError("No match found when deserializing the JSON string into SubscriptionUsageAvailableResponseFinancialDetails with oneOf schemas: ChatGPTSubscriptionFinancialDetailsResponse, XaiSubscriptionFinancialDetailsResponse. Details: " + ", ".join(error_messages))
+            raise ValueError("No match found when deserializing the JSON string into SubscriptionUsageAvailableResponseFinancialDetails with oneOf schemas: ChatGPTSubscriptionFinancialDetailsResponse, OpenRouterSubscriptionFinancialDetailsResponse, XaiSubscriptionFinancialDetailsResponse. Details: " + ", ".join(error_messages))
         else:
             return instance
 
@@ -128,7 +142,7 @@ class SubscriptionUsageAvailableResponseFinancialDetails(BaseModel):
         else:
             return json.dumps(self.actual_instance)
 
-    def to_dict(self) -> Optional[Union[Dict[str, Any], ChatGPTSubscriptionFinancialDetailsResponse, XaiSubscriptionFinancialDetailsResponse]]:
+    def to_dict(self) -> Optional[Union[Dict[str, Any], ChatGPTSubscriptionFinancialDetailsResponse, OpenRouterSubscriptionFinancialDetailsResponse, XaiSubscriptionFinancialDetailsResponse]]:
         """Returns the dict representation of the actual instance"""
         if self.actual_instance is None:
             return None

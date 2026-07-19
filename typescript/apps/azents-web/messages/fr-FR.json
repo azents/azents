@@ -331,7 +331,8 @@
           "rate_limited": "Le fournisseur limite les requêtes d’utilisation.",
           "temporarily_unavailable": "Le fournisseur est temporairement indisponible.",
           "invalid_provider_response": "La réponse d’utilisation du fournisseur a changé ou est invalide.",
-          "unsupported_account": "L’utilisation est indisponible pour ce compte fournisseur."
+          "unsupported_account": "L’utilisation est indisponible pour ce compte fournisseur.",
+          "no_credit_limit": "Cette clé API n’a pas de limite de crédit affichable."
         },
         "financial": {
           "plan": "Offre",
@@ -351,7 +352,20 @@
           "paygUsed": "Montant utilisé à l’usage",
           "autoTopUp": "Recharge automatique",
           "autoTopUpAmount": "Montant de la recharge",
-          "autoTopUpMaximum": "Plafond mensuel de recharge"
+          "autoTopUpMaximum": "Plafond mensuel de recharge",
+          "creditLimit": "Limite de crédits",
+          "creditRemaining": "Crédits restants",
+          "usageAllTime": "Utilisation totale",
+          "usageDaily": "Utilisation quotidienne",
+          "usageWeekly": "Utilisation hebdomadaire",
+          "usageMonthly": "Utilisation mensuelle",
+          "limitReset": "Cycle de réinitialisation",
+          "byokIncluded": "Utilisation BYOK incluse",
+          "resetValues": {
+            "daily": "Quotidien",
+            "weekly": "Hebdomadaire",
+            "monthly": "Mensuel"
+          }
         }
       },
       "createTitle": "Ajouter une intégration LLM",

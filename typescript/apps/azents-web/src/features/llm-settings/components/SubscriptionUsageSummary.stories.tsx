@@ -85,6 +85,39 @@ const xaiAvailable: SubscriptionUsageState = {
   },
 };
 
+const openRouterAvailable: SubscriptionUsageState = {
+  type: "AVAILABLE",
+  refreshing: false,
+  snapshot: {
+    type: "available",
+    integration_id: "openrouter-integration",
+    provider: "openrouter",
+    fetched_at: "2026-07-19T09:30:00Z",
+    plan_label: null,
+    limits: [
+      {
+        id: "api-key-credit",
+        label: "Monthly credit limit",
+        used_percent: 27.5,
+        window_minutes: null,
+        resets_at: null,
+        primary: true,
+      },
+    ],
+    financial_details: {
+      type: "openrouter",
+      credit_limit: 100,
+      credit_remaining: 72.5,
+      usage: 40,
+      usage_daily: 1,
+      usage_weekly: 7.5,
+      usage_monthly: 27.5,
+      limit_reset: "monthly",
+      include_byok_in_limit: false,
+    },
+  },
+};
+
 const meta = {
   component: SubscriptionUsageSummary,
   decorators: [
@@ -148,6 +181,29 @@ export const XaiFinancialDetails = {
     );
     await expect(canvas.getByText("$25.40")).toBeVisible();
     await expect(canvas.getByText("Auto top-up")).toBeVisible();
+  },
+} satisfies Story;
+
+export const OpenRouterCreditLimit = {
+  args: { state: openRouterAvailable },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByText("27.5%")).toBeVisible();
+    await userEvent.click(
+      canvas.getByRole("button", { name: "Financial details" }),
+    );
+    await expect(canvas.getByText("$72.50")).toBeVisible();
+    await expect(canvas.getByText("Monthly usage")).toBeVisible();
+  },
+} satisfies Story;
+
+export const OpenRouterUnlimitedHidden = {
+  args: { state: { type: "IDLE" } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.queryByRole("region", { name: "Subscription usage" }),
+    ).not.toBeInTheDocument();
   },
 } satisfies Story;
 

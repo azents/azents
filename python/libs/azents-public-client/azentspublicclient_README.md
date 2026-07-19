@@ -402,6 +402,7 @@ Class | Method | HTTP request | Description
  - [MySystemRolesResponse](azentspublicclient/docs/MySystemRolesResponse.md)
  - [OAuthAuthorizeResponse](azentspublicclient/docs/OAuthAuthorizeResponse.md)
  - [OAuthExchangeRequest](azentspublicclient/docs/OAuthExchangeRequest.md)
+ - [OpenRouterSubscriptionFinancialDetailsResponse](azentspublicclient/docs/OpenRouterSubscriptionFinancialDetailsResponse.md)
  - [PartialHistoryResponse](azentspublicclient/docs/PartialHistoryResponse.md)
  - [PasswordLoginRequest](azentspublicclient/docs/PasswordLoginRequest.md)
  - [PasswordLoginResponse](azentspublicclient/docs/PasswordLoginResponse.md)

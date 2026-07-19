@@ -16,7 +16,7 @@ Design documents are accumulated records and are not listed individually in this
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
 | [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-07-18 | 50 |
-| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-19 | 112 |
+| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-19 | 113 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-16 | 9 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-17 | 5 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-07-19 | 15 |
@@ -36,7 +36,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-07-19 | 28 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-07-19 | 18 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
-| [OpenRouter API Key Provider Flow](spec/flow/openrouter-api-key.md) | @Hardtack | 2026-07-19 | 2 |
+| [OpenRouter API Key Provider Flow](spec/flow/openrouter-api-key.md) | @Hardtack | 2026-07-19 | 3 |
 | [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-07-18 | 3 |
 | [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-07-18 | 21 |
 | [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-07-19 | 17 |

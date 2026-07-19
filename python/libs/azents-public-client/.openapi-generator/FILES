@@ -204,6 +204,7 @@ azentspublicclient/docs/MyJoinRequestResponse.md
 azentspublicclient/docs/MySystemRolesResponse.md
 azentspublicclient/docs/OAuthAuthorizeResponse.md
 azentspublicclient/docs/OAuthExchangeRequest.md
+azentspublicclient/docs/OpenRouterSubscriptionFinancialDetailsResponse.md
 azentspublicclient/docs/PartialHistoryResponse.md
 azentspublicclient/docs/PasswordLoginRequest.md
 azentspublicclient/docs/PasswordLoginResponse.md
@@ -493,6 +494,7 @@ azentspublicclient/models/my_join_request_response.py
 azentspublicclient/models/my_system_roles_response.py
 azentspublicclient/models/o_auth_authorize_response.py
 azentspublicclient/models/o_auth_exchange_request.py
+azentspublicclient/models/open_router_subscription_financial_details_response.py
 azentspublicclient/models/partial_history_response.py
 azentspublicclient/models/password_login_request.py
 azentspublicclient/models/password_login_response.py
@@ -783,6 +785,7 @@ azentspublicclient/test/test_my_join_request_response.py
 azentspublicclient/test/test_my_system_roles_response.py
 azentspublicclient/test/test_o_auth_authorize_response.py
 azentspublicclient/test/test_o_auth_exchange_request.py
+azentspublicclient/test/test_open_router_subscription_financial_details_response.py
 azentspublicclient/test/test_partial_history_response.py
 azentspublicclient/test/test_password_login_request.py
 azentspublicclient/test/test_password_login_response.py

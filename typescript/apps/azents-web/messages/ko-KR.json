@@ -331,7 +331,8 @@
           "rate_limited": "제공자가 사용량 요청을 제한하고 있습니다.",
           "temporarily_unavailable": "제공자를 일시적으로 사용할 수 없습니다.",
           "invalid_provider_response": "제공자의 사용량 응답이 변경되었거나 올바르지 않습니다.",
-          "unsupported_account": "이 제공자 계정에서는 사용량을 확인할 수 없습니다."
+          "unsupported_account": "이 제공자 계정에서는 사용량을 확인할 수 없습니다.",
+          "no_credit_limit": "이 API 키에는 표시할 크레딧 한도가 없습니다."
         },
         "financial": {
           "plan": "요금제",
@@ -351,7 +352,20 @@
           "paygUsed": "종량제 사용액",
           "autoTopUp": "자동 충전",
           "autoTopUpAmount": "충전 금액",
-          "autoTopUpMaximum": "월간 자동 충전 한도"
+          "autoTopUpMaximum": "월간 자동 충전 한도",
+          "creditLimit": "크레딧 한도",
+          "creditRemaining": "남은 크레딧",
+          "usageAllTime": "누적 사용량",
+          "usageDaily": "일간 사용량",
+          "usageWeekly": "주간 사용량",
+          "usageMonthly": "월간 사용량",
+          "limitReset": "한도 초기화 주기",
+          "byokIncluded": "BYOK 사용량 포함",
+          "resetValues": {
+            "daily": "매일",
+            "weekly": "매주",
+            "monthly": "매월"
+          }
         }
       },
       "createTitle": "LLM 연동 추가",
