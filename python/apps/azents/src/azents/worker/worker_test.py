@@ -406,6 +406,13 @@ class _PendingInputBufferService:
         """Return pending buffer existence specified by test."""
         return session_id in self.host.pending_input_session_ids
 
+    async def has_pending_wake_session_input_buffers(
+        self,
+        session_id: str,
+    ) -> bool:
+        """Return wake-producing pending buffer existence specified by test."""
+        return session_id in self.host.pending_input_session_ids
+
 
 class _IdleContinuationService:
     """IdleContinuationService test double."""
