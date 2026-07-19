@@ -10,7 +10,7 @@ tags: [backend, frontend, api, llm, oauth, billing, security, testing, testenv]
 
 This report validates the implementation described by
 [`subscription-provider-usage.md`](./subscription-provider-usage.md), ADR-0168, and the phased
-[`subscription-provider-usage-implementation-plan.md`](./subscription-provider-usage-implementation-plan.md).
+delivery requirements recorded during implementation.
 
 The validation covers:
 
