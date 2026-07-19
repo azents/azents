@@ -1,11 +1,13 @@
 """Subagent product E2E tests."""
 
+import json
 import time
 from dataclasses import dataclass
 from typing import cast
 
 import azentsadminclient
 import azentspublicclient
+import pytest
 import requests
 from azentspublicclient.api.agent_v1_api import AgentV1Api
 from azentspublicclient.api.llm_provider_integration_v1_api import (
@@ -25,6 +27,7 @@ from azentspublicclient.models.llm_provider_integration_create_request import (
 )
 from azentspublicclient.models.secrets import Secrets
 from pydantic import TypeAdapter, ValidationError
+from testcontainers.core.container import DockerContainer
 
 from support.utils import (
     authenticate_user,
@@ -38,6 +41,36 @@ _CHILD_TASK = "Subagent E2E child task"
 _CHILD_RESPONSE = "Subagent child completed."
 _WAIT_MESSAGE = "Subagent E2E wait child"
 _WAIT_CALL_ID = "call_subagent_wait_child"
+_WAIT_RESPONSE = "Subagent wait observed child result."
+_MAILBOX_MESSAGE = "Subagent E2E mailbox any sender"
+_MAILBOX_WAIT_CALL_ID = "call_subagent_mailbox_wait"
+_MAILBOX_SENDER_CALL_ID = "call_subagent_mailbox_sender_message"
+_MAILBOX_RESPONSE = "Subagent mailbox wait observed an intermediate message."
+_MAILBOX_PROMOTION_MESSAGE = "Subagent E2E promote mailbox messages"
+_MAILBOX_PROMOTION_RESPONSE = "Subagent mailbox messages were promoted."
+_MAILBOX_IDLE_RELEASE_FILE = "/tmp/azents-subagent-mailbox-idle-release"
+_MAILBOX_SENDER_RELEASE_FILE = "/tmp/azents-subagent-mailbox-sender-release"
+_POST_OBSERVATION_MESSAGE = "Subagent E2E post-observation turn"
+_POST_OBSERVATION_RESPONSE = "Subagent post-observation turn completed."
+_NO_DESCENDANTS_MESSAGE = "Subagent E2E wait with no descendants"
+_NO_DESCENDANTS_CALL_ID = "call_subagent_wait_no_descendants"
+_NO_DESCENDANTS_RESPONSE = "Subagent no-descendant wait completed."
+_ACTIVE_TIMEOUT_MESSAGE = "Subagent E2E active descendant timeout"
+_ACTIVE_TIMEOUT_CALL_ID = "call_subagent_timeout_wait"
+_ACTIVE_TIMEOUT_RESPONSE = "Subagent active-descendant timeout observed."
+_ACTIVE_TIMEOUT_RELEASE_FILE = "/tmp/azents-subagent-timeout-release"
+_INTERRUPT_SPAWN_MESSAGE = "Subagent E2E spawn interrupt child"
+_INTERRUPT_SPAWN_RESPONSE = "Subagent interrupt child was spawned."
+_INTERRUPT_MESSAGE = "Subagent E2E interrupt child"
+_INTERRUPT_CALL_ID = "call_subagent_interrupt_child"
+_INTERRUPT_RESPONSE = "Subagent interrupt request completed."
+_INTERRUPT_OBSERVE_MESSAGE = "Subagent E2E observe interrupted result"
+_INTERRUPT_OBSERVE_RESPONSE = "Subagent interrupted result was observed."
+_FAILED_SPAWN_MESSAGE = "Subagent E2E spawn failed child"
+_FAILED_SPAWN_RESPONSE = "Subagent failed child was spawned."
+_FAILED_OBSERVE_MESSAGE = "Subagent E2E observe failed result"
+_FAILED_OBSERVE_RESPONSE = "Subagent failed result was observed."
+_FAILED_INTERNAL_MARKER = "SUBAGENT_INTERNAL_PROVIDER_FAILURE_MARKER"
 _JSON_OBJECT = TypeAdapter(dict[str, object])
 _JSON_OBJECT_LIST = TypeAdapter(list[dict[str, object]])
 
@@ -248,6 +281,125 @@ def _history_contents(
     return contents
 
 
+def _agent_message_payloads(
+    *,
+    public_url: str,
+    token: str,
+    session_id: str,
+) -> list[dict[str, object]]:
+    """Return durable agent-message payloads from session history."""
+    return [
+        _event_payload(event)
+        for event in _history(
+            public_url=public_url,
+            token=token,
+            session_id=session_id,
+        )
+        if event.get("kind") == "agent_message"
+    ]
+
+
+def _wait_for_agent_result(
+    *,
+    public_url: str,
+    token: str,
+    session_id: str,
+    source_path: str,
+    run_status: str,
+    timeout: float = 120,
+) -> dict[str, object]:
+    """Wait for one terminal result from the expected source and status."""
+    deadline = time.monotonic() + timeout
+    last_payloads: list[dict[str, object]] = []
+    while time.monotonic() < deadline:
+        last_payloads = _agent_message_payloads(
+            public_url=public_url,
+            token=token,
+            session_id=session_id,
+        )
+        matches = [
+            payload
+            for payload in last_payloads
+            if payload.get("message_kind") == "agent_result"
+            and payload.get("source_path") == source_path
+            and payload.get("run_status") == run_status
+        ]
+        if len(matches) == 1:
+            return matches[0]
+        if len(matches) > 1:
+            raise AssertionError(
+                f"duplicate terminal results for {source_path}: {matches!r}"
+            )
+        time.sleep(0.5)
+    raise TimeoutError(
+        f"terminal result not observed: {source_path}, {run_status}, {last_payloads!r}"
+    )
+
+
+def _set_release_file(
+    container: DockerContainer,
+    release_file_path: str,
+    *,
+    present: bool,
+) -> None:
+    """Create or remove a child-tool release file in the worker container."""
+    command = (
+        ["touch", release_file_path] if present else ["rm", "-f", release_file_path]
+    )
+    result = container.get_wrapped_container().exec_run(command)
+    if result.exit_code != 0:
+        output = result.output.decode(errors="replace")
+        raise AssertionError(
+            f"failed to update child release file {release_file_path}: {output}"
+        )
+
+
+def _block_child_until_release(
+    request: pytest.FixtureRequest,
+    container: DockerContainer,
+    release_file_path: str,
+) -> None:
+    """Remove a release file and guarantee cleanup after the E2E."""
+    _set_release_file(container, release_file_path, present=False)
+
+    def release() -> None:
+        _set_release_file(container, release_file_path, present=True)
+
+    request.addfinalizer(release)
+
+
+def _reset_mock_openai(mock_openai_url: str) -> None:
+    """Clear the deterministic provider request journal."""
+    requests.delete(f"{mock_openai_url}/v1/_requests", timeout=10).raise_for_status()
+
+
+def _mock_openai_journal_text(mock_openai_url: str) -> str:
+    """Return the deterministic provider journal as serialized JSON."""
+    response = requests.get(f"{mock_openai_url}/v1/_requests", timeout=10)
+    response.raise_for_status()
+    return json.dumps(response.json(), ensure_ascii=False)
+
+
+def _wait_for_mock_openai_journal_content(
+    mock_openai_url: str,
+    content: str,
+    *,
+    timeout: float = 30,
+) -> None:
+    """Wait until one provider request contains the exact multiline content."""
+    deadline = time.monotonic() + timeout
+    needle = json.dumps(content, ensure_ascii=False)[1:-1]
+    last_journal = ""
+    while time.monotonic() < deadline:
+        last_journal = _mock_openai_journal_text(mock_openai_url)
+        if needle in last_journal:
+            return
+        time.sleep(0.25)
+    raise TimeoutError(
+        f"mock provider journal did not include {content!r}: {last_journal}"
+    )
+
+
 def _tool_result_output_text(event: dict[str, object]) -> str | None:
     """Return persisted client tool result text for a history event."""
     if event.get("kind") != "client_tool_result":
@@ -429,11 +581,12 @@ def _wait_for_child_node(
     token: str,
     agent_id: str,
     session_id: str,
+    name: str,
     expected_status: str | None,
     expected_unread: bool | None,
     timeout: float = 120,
 ) -> tuple[dict[str, object], _TreeNode]:
-    """Wait until child_qa appears with the expected projected state."""
+    """Wait until a named child appears with the expected projected state."""
     deadline = time.monotonic() + timeout
     last_tree: dict[str, object] | None = None
     while time.monotonic() < deadline:
@@ -444,7 +597,7 @@ def _wait_for_child_node(
             session_id=session_id,
         )
         last_tree = tree
-        child = _find_node(_tree_nodes(tree), "child_qa")
+        child = _find_node(_tree_nodes(tree), name)
         if child is not None:
             status_ok = expected_status is None or child.status == expected_status
             unread_ok = (
@@ -563,6 +716,7 @@ class TestSubagents:
             token=workspace.token,
             agent_id=agent_id,
             session_id=root_session_id,
+            name="child_qa",
             expected_status="completed",
             expected_unread=True,
         )
@@ -624,6 +778,12 @@ class TestSubagents:
             session_id=root_session_id,
             message=_WAIT_MESSAGE,
         )
+        _wait_for_content(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=root_session_id,
+            expected=_CHILD_RESPONSE,
+        )
         _wait_for_tool_result_content(
             public_url=azents_public_server_url,
             token=workspace.token,
@@ -636,7 +796,568 @@ class TestSubagents:
             token=workspace.token,
             agent_id=agent_id,
             session_id=root_session_id,
+            name="child_qa",
             expected_status="completed",
             expected_unread=False,
         )
         assert observed_child.terminal_result_message == _CHILD_RESPONSE
+        completed_result = _wait_for_agent_result(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=root_session_id,
+            source_path="/root/child_qa",
+            run_status="completed",
+        )
+        assert completed_result.get("content") == _CHILD_RESPONSE
+        _wait_for_content(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=root_session_id,
+            expected=_WAIT_RESPONSE,
+        )
+        _wait_for_session_run_state(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            session_id=root_session_id,
+            expected="idle",
+        )
+
+        _run_message(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            session_id=root_session_id,
+            message=_POST_OBSERVATION_MESSAGE,
+        )
+        _wait_for_content(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=root_session_id,
+            expected=_POST_OBSERVATION_RESPONSE,
+        )
+        _wait_for_session_run_state(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            session_id=root_session_id,
+            expected="idle",
+        )
+        completed_results = [
+            payload
+            for payload in _agent_message_payloads(
+                public_url=azents_public_server_url,
+                token=workspace.token,
+                session_id=root_session_id,
+            )
+            if payload.get("message_kind") == "agent_result"
+            and payload.get("source_path") == "/root/child_qa"
+            and payload.get("run_status") == "completed"
+        ]
+        assert len(completed_results) == 1
+
+    def test_targetless_wait_observes_any_child_mailbox_message(
+        self,
+        request: pytest.FixtureRequest,
+        public_api_client: azentspublicclient.ApiClient,
+        admin_api_client: azentsadminclient.ApiClient,
+        azents_public_server_url: str,
+        azents_engine_worker_container: DockerContainer,
+        mock_openai_url: str,
+    ) -> None:
+        """Observe one child message while every descendant remains active."""
+        _reset_mock_openai(mock_openai_url)
+        _block_child_until_release(
+            request,
+            azents_engine_worker_container,
+            _MAILBOX_IDLE_RELEASE_FILE,
+        )
+        _block_child_until_release(
+            request,
+            azents_engine_worker_container,
+            _MAILBOX_SENDER_RELEASE_FILE,
+        )
+        workspace = _setup_workspace(
+            public_api_client,
+            admin_api_client,
+            azents_public_server_url,
+        )
+        agent_id = _create_agent(public_api_client, workspace)
+        root_session_id = _team_primary_session(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+        )
+
+        _run_message(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            session_id=root_session_id,
+            message=_MAILBOX_MESSAGE,
+        )
+        _, sender = _wait_for_child_node(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            session_id=root_session_id,
+            name="sender_child",
+            expected_status="running",
+            expected_unread=False,
+        )
+        _wait_for_tool_result_content(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=sender.agent_session_id,
+            call_id=_MAILBOX_SENDER_CALL_ID,
+            expected="queued",
+        )
+        _wait_for_tool_result_content(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=root_session_id,
+            call_id=_MAILBOX_WAIT_CALL_ID,
+            expected="Mailbox updated.",
+        )
+        _wait_for_child_node(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            session_id=root_session_id,
+            name="sender_child",
+            expected_status="running",
+            expected_unread=False,
+        )
+        _wait_for_child_node(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            session_id=root_session_id,
+            name="idle_child",
+            expected_status="running",
+            expected_unread=False,
+        )
+        _wait_for_content(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=root_session_id,
+            expected=_MAILBOX_RESPONSE,
+        )
+        _set_release_file(
+            azents_engine_worker_container,
+            _MAILBOX_SENDER_RELEASE_FILE,
+            present=True,
+        )
+        _set_release_file(
+            azents_engine_worker_container,
+            _MAILBOX_IDLE_RELEASE_FILE,
+            present=True,
+        )
+        _wait_for_child_node(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            session_id=root_session_id,
+            name="sender_child",
+            expected_status="completed",
+            expected_unread=True,
+        )
+        _wait_for_child_node(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            session_id=root_session_id,
+            name="idle_child",
+            expected_status="completed",
+            expected_unread=True,
+        )
+        _wait_for_session_run_state(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            session_id=root_session_id,
+            expected="idle",
+        )
+
+        _run_message(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            session_id=root_session_id,
+            message=_MAILBOX_PROMOTION_MESSAGE,
+        )
+        _wait_for_content(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=root_session_id,
+            expected=_MAILBOX_PROMOTION_RESPONSE,
+        )
+        _wait_for_mock_openai_journal_content(
+            mock_openai_url,
+            "\n".join(
+                [
+                    "Message Type: MESSAGE",
+                    "Task name: /root",
+                    "Sender: /root/sender_child",
+                    "Payload:",
+                    "Subagent intermediate mailbox message.",
+                ]
+            ),
+        )
+        _wait_for_agent_result(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=root_session_id,
+            source_path="/root/sender_child",
+            run_status="completed",
+        )
+        _wait_for_agent_result(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=root_session_id,
+            source_path="/root/idle_child",
+            run_status="completed",
+        )
+        _wait_for_child_node(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            session_id=root_session_id,
+            name="sender_child",
+            expected_status="completed",
+            expected_unread=False,
+        )
+        _wait_for_child_node(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            session_id=root_session_id,
+            name="idle_child",
+            expected_status="completed",
+            expected_unread=False,
+        )
+
+    def test_targetless_wait_without_descendants_returns_immediately(
+        self,
+        public_api_client: azentspublicclient.ApiClient,
+        admin_api_client: azentsadminclient.ApiClient,
+        azents_public_server_url: str,
+        azents_engine_worker_container: object,
+    ) -> None:
+        """Return a no-descendants result without creating a child."""
+        del azents_engine_worker_container
+        workspace = _setup_workspace(
+            public_api_client,
+            admin_api_client,
+            azents_public_server_url,
+        )
+        agent_id = _create_agent(public_api_client, workspace)
+        root_session_id = _team_primary_session(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+        )
+
+        _run_message(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            session_id=root_session_id,
+            message=_NO_DESCENDANTS_MESSAGE,
+        )
+        _wait_for_tool_result_content(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=root_session_id,
+            call_id=_NO_DESCENDANTS_CALL_ID,
+            expected="No descendant agents to wait for.",
+        )
+        _wait_for_content(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=root_session_id,
+            expected=_NO_DESCENDANTS_RESPONSE,
+        )
+        assert (
+            _tree_nodes(
+                _subagent_tree(
+                    public_url=azents_public_server_url,
+                    token=workspace.token,
+                    agent_id=agent_id,
+                    session_id=root_session_id,
+                )
+            )
+            == []
+        )
+        _wait_for_session_run_state(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            session_id=root_session_id,
+            expected="idle",
+        )
+
+    def test_targetless_wait_timeout_reports_active_descendant(
+        self,
+        request: pytest.FixtureRequest,
+        public_api_client: azentspublicclient.ApiClient,
+        admin_api_client: azentsadminclient.ApiClient,
+        azents_public_server_url: str,
+        azents_engine_worker_container: DockerContainer,
+    ) -> None:
+        """Report an active descendant when a zero-duration wait expires."""
+        _block_child_until_release(
+            request,
+            azents_engine_worker_container,
+            _ACTIVE_TIMEOUT_RELEASE_FILE,
+        )
+        workspace = _setup_workspace(
+            public_api_client,
+            admin_api_client,
+            azents_public_server_url,
+        )
+        agent_id = _create_agent(public_api_client, workspace)
+        root_session_id = _team_primary_session(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+        )
+
+        _run_message(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            session_id=root_session_id,
+            message=_ACTIVE_TIMEOUT_MESSAGE,
+        )
+        _wait_for_tool_result_content(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=root_session_id,
+            call_id=_ACTIVE_TIMEOUT_CALL_ID,
+            expected="Wait timed out; active descendants: /root/timeout_child",
+        )
+        _wait_for_content(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=root_session_id,
+            expected=_ACTIVE_TIMEOUT_RESPONSE,
+        )
+        _set_release_file(
+            azents_engine_worker_container,
+            _ACTIVE_TIMEOUT_RELEASE_FILE,
+            present=True,
+        )
+        _wait_for_child_node(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            session_id=root_session_id,
+            name="timeout_child",
+            expected_status="completed",
+            expected_unread=True,
+        )
+        _wait_for_session_run_state(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            session_id=root_session_id,
+            expected="idle",
+        )
+
+    def test_interrupted_child_result_is_delivered_safely(
+        self,
+        public_api_client: azentspublicclient.ApiClient,
+        admin_api_client: azentsadminclient.ApiClient,
+        azents_public_server_url: str,
+        azents_engine_worker_container: object,
+    ) -> None:
+        """Interrupt a running child and promote its safe terminal result."""
+        del azents_engine_worker_container
+        workspace = _setup_workspace(
+            public_api_client,
+            admin_api_client,
+            azents_public_server_url,
+        )
+        agent_id = _create_agent(public_api_client, workspace)
+        root_session_id = _team_primary_session(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+        )
+
+        _run_message(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            session_id=root_session_id,
+            message=_INTERRUPT_SPAWN_MESSAGE,
+        )
+        _wait_for_content(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=root_session_id,
+            expected=_INTERRUPT_SPAWN_RESPONSE,
+        )
+        _wait_for_child_node(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            session_id=root_session_id,
+            name="interrupt_child",
+            expected_status="running",
+            expected_unread=False,
+        )
+
+        _run_message(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            session_id=root_session_id,
+            message=_INTERRUPT_MESSAGE,
+        )
+        _wait_for_tool_result_content(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=root_session_id,
+            call_id=_INTERRUPT_CALL_ID,
+            expected="running",
+        )
+        _wait_for_content(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=root_session_id,
+            expected=_INTERRUPT_RESPONSE,
+        )
+        _wait_for_child_node(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            session_id=root_session_id,
+            name="interrupt_child",
+            expected_status="interrupted",
+            expected_unread=True,
+        )
+        _wait_for_session_run_state(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            session_id=root_session_id,
+            expected="idle",
+        )
+
+        _run_message(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            session_id=root_session_id,
+            message=_INTERRUPT_OBSERVE_MESSAGE,
+        )
+        _wait_for_content(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=root_session_id,
+            expected=_INTERRUPT_OBSERVE_RESPONSE,
+        )
+        interrupted_result = _wait_for_agent_result(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=root_session_id,
+            source_path="/root/interrupt_child",
+            run_status="interrupted",
+        )
+        assert interrupted_result.get("content") == "The agent run was interrupted."
+        _wait_for_child_node(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            session_id=root_session_id,
+            name="interrupt_child",
+            expected_status="interrupted",
+            expected_unread=False,
+        )
+
+    def test_failed_child_result_excludes_internal_provider_failure(
+        self,
+        public_api_client: azentspublicclient.ApiClient,
+        admin_api_client: azentsadminclient.ApiClient,
+        azents_public_server_url: str,
+        azents_engine_worker_container: object,
+    ) -> None:
+        """Promote a failed child result without internal provider text."""
+        del azents_engine_worker_container
+        workspace = _setup_workspace(
+            public_api_client,
+            admin_api_client,
+            azents_public_server_url,
+        )
+        agent_id = _create_agent(public_api_client, workspace)
+        root_session_id = _team_primary_session(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+        )
+
+        _run_message(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            session_id=root_session_id,
+            message=_FAILED_SPAWN_MESSAGE,
+        )
+        _wait_for_content(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=root_session_id,
+            expected=_FAILED_SPAWN_RESPONSE,
+        )
+        _wait_for_child_node(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            session_id=root_session_id,
+            name="failed_child",
+            expected_status="errored",
+            expected_unread=True,
+        )
+        _wait_for_session_run_state(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            session_id=root_session_id,
+            expected="idle",
+        )
+
+        _run_message(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            session_id=root_session_id,
+            message=_FAILED_OBSERVE_MESSAGE,
+        )
+        _wait_for_content(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=root_session_id,
+            expected=_FAILED_OBSERVE_RESPONSE,
+        )
+        failed_result = _wait_for_agent_result(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=root_session_id,
+            source_path="/root/failed_child",
+            run_status="failed",
+        )
+        failed_content = failed_result.get("content")
+        assert isinstance(failed_content, str)
+        assert failed_content
+        assert _FAILED_INTERNAL_MARKER not in failed_content
+        _wait_for_child_node(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            session_id=root_session_id,
+            name="failed_child",
+            expected_status="errored",
+            expected_unread=False,
+        )
