@@ -6,10 +6,10 @@ System role assignment response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**user_id** | **str** | Assigned User ID |
-**role** | [**SystemUserRole**](SystemUserRole.md) | System role |
-**granted_by_user_id** | **str** |  |
-**granted_at** | **datetime** | Grant time |
+**user_id** | **str** | Assigned User ID | 
+**role** | [**SystemUserRole**](SystemUserRole.md) | System role | 
+**granted_by_user_id** | **str** |  | 
+**granted_at** | **datetime** | Grant time | 
 
 ## Example
 
@@ -29,3 +29,5 @@ system_user_role_assignment_response_dict = system_user_role_assignment_response
 system_user_role_assignment_response_from_dict = SystemUserRoleAssignmentResponse.from_dict(system_user_role_assignment_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

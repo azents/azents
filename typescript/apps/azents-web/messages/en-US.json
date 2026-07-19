@@ -699,7 +699,18 @@
           "archive": "Archive",
           "archiveConfirmTitle": "Archive session?",
           "archiveConfirmDescription": "This session will be removed from the active session list. Conversation data is kept.",
-          "archiveCancel": "Cancel"
+          "archiveCancel": "Cancel",
+          "archivePolicyUnlimited": "The current policy is Unlimited. This session remains restorable until an administrator applies a finite policy.",
+          "archivePolicyZero": "The current policy is 0 days. This session becomes eligible for asynchronous purge on the next scheduler pass.",
+          "archivePolicyDays": "The current policy keeps this session restorable for {days, plural, one {# day} other {# days}} after archiving.",
+          "archivedTitle": "Archived",
+          "archivedEmpty": "No archived sessions.",
+          "archivedAt": "Archived {date}",
+          "retentionSnapshotUnlimited": "Unlimited retention",
+          "retentionSnapshotDays": "{days, plural, =0 {0 days} one {# day} other {# days}} retention",
+          "purgeScheduled": "Deletes {date}",
+          "purgeUnscheduled": "No deletion scheduled",
+          "restore": "Restore"
         },
         "subagents": {
           "title": "Subagents",

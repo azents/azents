@@ -301,6 +301,19 @@ class ArchivedSessionRetentionRepository:
         )
         return None if row is None else self._build_application(row)
 
+    async def get_application(
+        self,
+        session: AsyncSession,
+        *,
+        application_id: str,
+    ) -> ArchivedSessionRetentionApplication | None:
+        """Fetch one durable retention application by ID."""
+        row = await session.get(
+            RDBArchivedSessionRetentionApplication,
+            application_id,
+        )
+        return None if row is None else self._build_application(row)
+
     async def create_application(
         self,
         session: AsyncSession,

@@ -6,8 +6,8 @@ Initial system administrator credentials.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**email** | **str** | Initial administrator email |
-**password** | **str** | Initial administrator password |
+**email** | **str** | Initial administrator email | 
+**password** | **str** | Initial administrator password | 
 
 ## Example
 
@@ -27,3 +27,5 @@ system_bootstrap_first_admin_request_dict = system_bootstrap_first_admin_request
 system_bootstrap_first_admin_request_from_dict = SystemBootstrapFirstAdminRequest.from_dict(system_bootstrap_first_admin_request_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

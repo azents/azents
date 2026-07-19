@@ -17,8 +17,8 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, Field
-from typing import Any, ClassVar, Dict, List
+from pydantic import BaseModel, ConfigDict, Field, StrictInt
+from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.agent_session_response import AgentSessionResponse
 from typing import Optional, Set
 from typing_extensions import Self
@@ -28,8 +28,9 @@ class AgentSessionListResponse(BaseModel):
     Conversation session list response.
     """ # noqa: E501
     items: List[AgentSessionResponse] = Field(description="Session list")
+    current_archive_retention_days: Optional[StrictInt]
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["items"]
+    __properties: ClassVar[List[str]] = ["items", "current_archive_retention_days"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -84,6 +85,11 @@ class AgentSessionListResponse(BaseModel):
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
 
+        # set to None if current_archive_retention_days (nullable) is None
+        # and model_fields_set contains the field
+        if self.current_archive_retention_days is None and "current_archive_retention_days" in self.model_fields_set:
+            _dict['current_archive_retention_days'] = None
+
         return _dict
 
     @classmethod
@@ -96,7 +102,8 @@ class AgentSessionListResponse(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "items": [AgentSessionResponse.from_dict(_item) for _item in obj["items"]] if obj.get("items") is not None else None
+            "items": [AgentSessionResponse.from_dict(_item) for _item in obj["items"]] if obj.get("items") is not None else None,
+            "current_archive_retention_days": obj.get("current_archive_retention_days")
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

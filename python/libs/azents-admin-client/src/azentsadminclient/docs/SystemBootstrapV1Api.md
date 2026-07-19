@@ -36,8 +36,8 @@ configuration = azentsadminclient.Configuration(
 with azentsadminclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentsadminclient.SystemBootstrapV1Api(api_client)
-    x_azents_setup_token = 'x_azents_setup_token_example' # str |
-    system_bootstrap_first_admin_request = azentsadminclient.SystemBootstrapFirstAdminRequest() # SystemBootstrapFirstAdminRequest |
+    x_azents_setup_token = 'x_azents_setup_token_example' # str | 
+    system_bootstrap_first_admin_request = azentsadminclient.SystemBootstrapFirstAdminRequest() # SystemBootstrapFirstAdminRequest | 
 
     try:
         # Bootstrap First System Admin
@@ -55,8 +55,8 @@ with azentsadminclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **x_azents_setup_token** | **str**|  |
- **system_bootstrap_first_admin_request** | [**SystemBootstrapFirstAdminRequest**](SystemBootstrapFirstAdminRequest.md)|  |
+ **x_azents_setup_token** | **str**|  | 
+ **system_bootstrap_first_admin_request** | [**SystemBootstrapFirstAdminRequest**](SystemBootstrapFirstAdminRequest.md)|  | 
 
 ### Return type
 
@@ -143,3 +143,4 @@ No authorization required
 **200** | Successful Response |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+

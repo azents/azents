@@ -45,7 +45,7 @@ configuration = azentsadminclient.Configuration(
 with azentsadminclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentsadminclient.UserV1Api(api_client)
-    user_id = 'user_id_example' # str |
+    user_id = 'user_id_example' # str | 
 
     try:
         # Delete User
@@ -61,7 +61,7 @@ with azentsadminclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **user_id** | **str**|  |
+ **user_id** | **str**|  | 
 
 ### Return type
 
@@ -122,7 +122,7 @@ configuration = azentsadminclient.Configuration(
 with azentsadminclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentsadminclient.UserV1Api(api_client)
-    user_id = 'user_id_example' # str |
+    user_id = 'user_id_example' # str | 
 
     try:
         # Get User
@@ -140,7 +140,7 @@ with azentsadminclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **user_id** | **str**|  |
+ **user_id** | **str**|  | 
 
 ### Return type
 
@@ -244,3 +244,4 @@ Name | Type | Description  | Notes
 **422** | Validation Error |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+

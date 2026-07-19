@@ -6,6 +6,7 @@ import { router } from "../init";
 import { bootstrapRouter } from "./bootstrap";
 import { debugRouter } from "./debug";
 import { modelCatalogRouter } from "./modelCatalog";
+import { retentionRouter } from "./retention";
 import { signupTokenRouter } from "./signupToken";
 import { systemRoleRouter } from "./systemRole";
 import { userRouter } from "./user";
@@ -24,6 +25,7 @@ export const appRouter = router({
   verification: verificationRouter,
   signupToken: signupTokenRouter,
   modelCatalog: modelCatalogRouter,
+  retention: retentionRouter,
   systemRole: systemRoleRouter,
 });
 

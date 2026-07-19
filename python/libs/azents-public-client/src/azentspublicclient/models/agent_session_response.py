@@ -18,7 +18,7 @@ import re  # noqa: F401
 import json
 
 from datetime import datetime
-from pydantic import BaseModel, ConfigDict, Field, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.agent_session_primary_kind import AgentSessionPrimaryKind
 from azentspublicclient.models.agent_session_run_state import AgentSessionRunState
@@ -41,10 +41,13 @@ class AgentSessionResponse(BaseModel):
     status: AgentSessionStatus = Field(description="Session status")
     primary_kind: Optional[AgentSessionPrimaryKind] = None
     run_state: AgentSessionRunState = Field(description="Session execution state")
+    archived_at: Optional[datetime]
+    purge_after: Optional[datetime]
+    archive_retention_days_snapshot: Optional[StrictInt]
     created_at: datetime = Field(description="Created time")
     updated_at: datetime = Field(description="Updated time")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "agent_id", "current_model_target_label", "current_reasoning_effort", "title", "title_source", "status", "primary_kind", "run_state", "created_at", "updated_at"]
+    __properties: ClassVar[List[str]] = ["id", "agent_id", "current_model_target_label", "current_reasoning_effort", "title", "title_source", "status", "primary_kind", "run_state", "archived_at", "purge_after", "archive_retention_days_snapshot", "created_at", "updated_at"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -117,6 +120,21 @@ class AgentSessionResponse(BaseModel):
         if self.primary_kind is None and "primary_kind" in self.model_fields_set:
             _dict['primary_kind'] = None
 
+        # set to None if archived_at (nullable) is None
+        # and model_fields_set contains the field
+        if self.archived_at is None and "archived_at" in self.model_fields_set:
+            _dict['archived_at'] = None
+
+        # set to None if purge_after (nullable) is None
+        # and model_fields_set contains the field
+        if self.purge_after is None and "purge_after" in self.model_fields_set:
+            _dict['purge_after'] = None
+
+        # set to None if archive_retention_days_snapshot (nullable) is None
+        # and model_fields_set contains the field
+        if self.archive_retention_days_snapshot is None and "archive_retention_days_snapshot" in self.model_fields_set:
+            _dict['archive_retention_days_snapshot'] = None
+
         return _dict
 
     @classmethod
@@ -138,6 +156,9 @@ class AgentSessionResponse(BaseModel):
             "status": obj.get("status"),
             "primary_kind": obj.get("primary_kind"),
             "run_state": obj.get("run_state"),
+            "archived_at": obj.get("archived_at"),
+            "purge_after": obj.get("purge_after"),
+            "archive_retention_days_snapshot": obj.get("archive_retention_days_snapshot"),
             "created_at": obj.get("created_at"),
             "updated_at": obj.get("updated_at")
         })

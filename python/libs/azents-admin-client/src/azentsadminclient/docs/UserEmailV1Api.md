@@ -48,8 +48,8 @@ configuration = azentsadminclient.Configuration(
 with azentsadminclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentsadminclient.UserEmailV1Api(api_client)
-    user_id = 'user_id_example' # str |
-    user_email_create_request = azentsadminclient.UserEmailCreateRequest() # UserEmailCreateRequest |
+    user_id = 'user_id_example' # str | 
+    user_email_create_request = azentsadminclient.UserEmailCreateRequest() # UserEmailCreateRequest | 
 
     try:
         # Create Email
@@ -67,8 +67,8 @@ with azentsadminclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **user_id** | **str**|  |
- **user_email_create_request** | [**UserEmailCreateRequest**](UserEmailCreateRequest.md)|  |
+ **user_id** | **str**|  | 
+ **user_email_create_request** | [**UserEmailCreateRequest**](UserEmailCreateRequest.md)|  | 
 
 ### Return type
 
@@ -128,7 +128,7 @@ configuration = azentsadminclient.Configuration(
 with azentsadminclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentsadminclient.UserEmailV1Api(api_client)
-    email_id = 'email_id_example' # str |
+    email_id = 'email_id_example' # str | 
 
     try:
         # Delete Email
@@ -144,7 +144,7 @@ with azentsadminclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **email_id** | **str**|  |
+ **email_id** | **str**|  | 
 
 ### Return type
 
@@ -286,7 +286,7 @@ configuration = azentsadminclient.Configuration(
 with azentsadminclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentsadminclient.UserEmailV1Api(api_client)
-    user_id = 'user_id_example' # str |
+    user_id = 'user_id_example' # str | 
 
     try:
         # List Emails By User
@@ -304,7 +304,7 @@ with azentsadminclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **user_id** | **str**|  |
+ **user_id** | **str**|  | 
 
 ### Return type
 
@@ -327,3 +327,4 @@ Name | Type | Description  | Notes
 **422** | Validation Error |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+

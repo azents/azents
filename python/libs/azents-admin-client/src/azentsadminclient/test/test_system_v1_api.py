@@ -26,6 +26,20 @@ class TestSystemV1Api(unittest.TestCase):
     def tearDown(self) -> None:
         pass
 
+    def test_system_v1_get_archive_retention_application(self) -> None:
+        """Test case for system_v1_get_archive_retention_application
+
+        Get Archive Retention Application
+        """
+        pass
+
+    def test_system_v1_get_file_lifecycle_settings(self) -> None:
+        """Test case for system_v1_get_file_lifecycle_settings
+
+        Get File Lifecycle Settings
+        """
+        pass
+
     def test_system_v1_get_system_admin_me(self) -> None:
         """Test case for system_v1_get_system_admin_me
 
@@ -47,10 +61,24 @@ class TestSystemV1Api(unittest.TestCase):
         """
         pass
 
+    def test_system_v1_preview_archive_retention_update(self) -> None:
+        """Test case for system_v1_preview_archive_retention_update
+
+        Preview Archive Retention Update
+        """
+        pass
+
     def test_system_v1_revoke_system_admin(self) -> None:
         """Test case for system_v1_revoke_system_admin
 
         Revoke System Admin
+        """
+        pass
+
+    def test_system_v1_update_file_lifecycle_settings(self) -> None:
+        """Test case for system_v1_update_file_lifecycle_settings
+
+        Update File Lifecycle Settings
         """
         pass
 

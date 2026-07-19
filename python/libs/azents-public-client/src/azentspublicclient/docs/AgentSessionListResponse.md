@@ -7,6 +7,7 @@ Conversation session list response.
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **items** | [**List[AgentSessionResponse]**](AgentSessionResponse.md) | Session list | 
+**current_archive_retention_days** | **int** |  | 
 
 ## Example
 

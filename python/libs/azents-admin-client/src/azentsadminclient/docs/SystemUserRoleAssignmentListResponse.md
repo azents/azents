@@ -6,8 +6,8 @@ System role assignment list response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**items** | [**List[SystemUserRoleAssignmentResponse]**](SystemUserRoleAssignmentResponse.md) | System role assignments |
-**total** | **int** | Total assignment count |
+**items** | [**List[SystemUserRoleAssignmentResponse]**](SystemUserRoleAssignmentResponse.md) | System role assignments | 
+**total** | **int** | Total assignment count | 
 
 ## Example
 
@@ -27,3 +27,5 @@ system_user_role_assignment_list_response_dict = system_user_role_assignment_lis
 system_user_role_assignment_list_response_from_dict = SystemUserRoleAssignmentListResponse.from_dict(system_user_role_assignment_list_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

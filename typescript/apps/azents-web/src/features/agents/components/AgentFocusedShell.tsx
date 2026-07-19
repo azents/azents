@@ -73,6 +73,10 @@ export function AgentFocusedShell({
       staleTime: 0,
     },
   );
+  const archivedSessionsQuery = trpc.chat.listArchivedAgentSessions.useQuery(
+    { agentId: agent.id },
+    { staleTime: 5_000 },
+  );
   const meQuery = trpc.user.me.useQuery(void 0, { retry: false });
   const profileQuery = trpc.memberProfile.getMyProfile.useQuery(
     { handle },
@@ -89,10 +93,29 @@ export function AgentFocusedShell({
   const archiveSessionMutation = trpc.chat.archiveAgentSession.useMutation({
     onSuccess: (_result, variables) => {
       void utils.chat.listAgentSessions.invalidate({ agentId: agent.id });
+      void utils.chat.listArchivedAgentSessions.invalidate({
+        agentId: agent.id,
+      });
       closeDrawer();
       if (activeSessionId === variables.sessionId) {
         router.replace(`/w/${handle}/agents/${agent.id}/sessions/new`);
       }
+    },
+  });
+  const restoreSessionMutation = trpc.chat.restoreAgentSession.useMutation({
+    onSuccess: (_result, variables) => {
+      void utils.chat.listAgentSessions.invalidate({ agentId: agent.id });
+      void utils.chat.listArchivedAgentSessions.invalidate({
+        agentId: agent.id,
+      });
+      void utils.chat.getAgentSession.invalidate({
+        agentId: agent.id,
+        sessionId: variables.sessionId,
+      });
+      closeDrawer();
+      router.push(
+        `/w/${handle}/agents/${agent.id}/sessions/${variables.sessionId}`,
+      );
     },
   });
 
@@ -124,9 +147,18 @@ export function AgentFocusedShell({
 
   const handleArchiveSession = useCallback(
     (sessionId: string): void => {
+      archiveSessionMutation.reset();
       archiveSessionMutation.mutate({ agentId: agent.id, sessionId });
     },
     [archiveSessionMutation, agent.id],
+  );
+
+  const handleRestoreSession = useCallback(
+    (sessionId: string): void => {
+      restoreSessionMutation.reset();
+      restoreSessionMutation.mutate({ agentId: agent.id, sessionId });
+    },
+    [restoreSessionMutation, agent.id],
   );
 
   const handleLogout = useCallback((): void => {
@@ -168,7 +200,21 @@ export function AgentFocusedShell({
           onLogout={handleLogout}
           sessions={sessionsQuery.data?.items ?? []}
           sessionsLoading={sessionsQuery.isPending}
-          sessionsError={sessionsQuery.error?.message ?? null}
+          sessionsError={
+            sessionsQuery.error?.message ??
+            archiveSessionMutation.error?.message ??
+            null
+          }
+          archivedSessions={archivedSessionsQuery.data?.items ?? []}
+          archivedSessionsLoading={archivedSessionsQuery.isPending}
+          archivedSessionsError={
+            archivedSessionsQuery.error?.message ??
+            restoreSessionMutation.error?.message ??
+            null
+          }
+          currentArchiveRetentionDays={
+            sessionsQuery.data?.current_archive_retention_days
+          }
           activeSessionId={activeSessionId}
           creatingSession={false}
           renamingSessionId={
@@ -177,11 +223,19 @@ export function AgentFocusedShell({
               : null
           }
           archivingSessionId={
-            archiveSessionMutation.variables?.sessionId ?? null
+            archiveSessionMutation.isPending
+              ? archiveSessionMutation.variables.sessionId
+              : null
+          }
+          restoringSessionId={
+            restoreSessionMutation.isPending
+              ? restoreSessionMutation.variables.sessionId
+              : null
           }
           onCreateSession={handleCreateSession}
           onRenameSession={handleRenameSession}
           onArchiveSession={handleArchiveSession}
+          onRestoreSession={handleRestoreSession}
           onNavigate={closeDrawer}
         />
       </Drawer>
@@ -204,7 +258,21 @@ export function AgentFocusedShell({
             onLogout={handleLogout}
             sessions={sessionsQuery.data?.items ?? []}
             sessionsLoading={sessionsQuery.isPending}
-            sessionsError={sessionsQuery.error?.message ?? null}
+            sessionsError={
+              sessionsQuery.error?.message ??
+              archiveSessionMutation.error?.message ??
+              null
+            }
+            archivedSessions={archivedSessionsQuery.data?.items ?? []}
+            archivedSessionsLoading={archivedSessionsQuery.isPending}
+            archivedSessionsError={
+              archivedSessionsQuery.error?.message ??
+              restoreSessionMutation.error?.message ??
+              null
+            }
+            currentArchiveRetentionDays={
+              sessionsQuery.data?.current_archive_retention_days
+            }
             activeSessionId={activeSessionId}
             creatingSession={false}
             renamingSessionId={
@@ -213,11 +281,19 @@ export function AgentFocusedShell({
                 : null
             }
             archivingSessionId={
-              archiveSessionMutation.variables?.sessionId ?? null
+              archiveSessionMutation.isPending
+                ? archiveSessionMutation.variables.sessionId
+                : null
+            }
+            restoringSessionId={
+              restoreSessionMutation.isPending
+                ? restoreSessionMutation.variables.sessionId
+                : null
             }
             onCreateSession={handleCreateSession}
             onRenameSession={handleRenameSession}
             onArchiveSession={handleArchiveSession}
+            onRestoreSession={handleRestoreSession}
           />
         </Box>
         <Box

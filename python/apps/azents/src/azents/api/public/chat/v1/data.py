@@ -1991,6 +1991,9 @@ class AgentSessionListResponse(BaseModel):
     """Conversation session list response."""
 
     items: list[AgentSessionResponse] = Field(description="Session list")
+    current_archive_retention_days: int | None = Field(
+        description="Current whole-day archive retention, or null for Unlimited",
+    )
 
 
 class WsTicketResponse(BaseModel):

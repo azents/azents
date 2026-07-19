@@ -110,13 +110,6 @@ class TestChatV1Api(unittest.TestCase):
         """
         pass
 
-    def test_chat_v1_delete_session(self) -> None:
-        """Test case for chat_v1_delete_session
-
-        Delete Session
-        """
-        pass
-
     def test_chat_v1_download_agent_workspace_file(self) -> None:
         """Test case for chat_v1_download_agent_workspace_file
 
@@ -215,6 +208,13 @@ class TestChatV1Api(unittest.TestCase):
         """
         pass
 
+    def test_chat_v1_list_archived_agent_sessions(self) -> None:
+        """Test case for chat_v1_list_archived_agent_sessions
+
+        List Archived Agent Sessions
+        """
+        pass
+
     def test_chat_v1_list_history_events(self) -> None:
         """Test case for chat_v1_list_history_events
 
@@ -275,6 +275,13 @@ class TestChatV1Api(unittest.TestCase):
         """Test case for chat_v1_register_agent_project
 
         Register Agent Project
+        """
+        pass
+
+    def test_chat_v1_restore_agent_session(self) -> None:
+        """Test case for chat_v1_restore_agent_session
+
+        Restore Agent Session
         """
         pass
 

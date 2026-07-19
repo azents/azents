@@ -6,9 +6,9 @@ Current live Run operation response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**kind** | **str** | Operation kind |
-**operation_id** | **str** | Stable operation identity |
-**status** | **str** | Current operation status |
+**kind** | **str** | Operation kind | 
+**operation_id** | **str** | Stable operation identity | 
+**status** | **str** | Current operation status | 
 
 ## Example
 

@@ -13,10 +13,21 @@ from azents.repos.system_user_role.data import (
     SystemRoleAssignmentNotFound,
     SystemUserNotFound,
 )
+from azents.services.archived_session_retention import (
+    ArchivedSessionRetentionService,
+    RetentionApplicationInProgress,
+    RetentionRevisionConflict,
+)
 from azents.services.system_user_role.service import SystemUserRoleService
 from azents.utils.fastapi.route import RouteMounter
 
 from .data import (
+    ArchiveRetentionApplicationResponse,
+    ArchiveRetentionPreviewRequest,
+    ArchiveRetentionPreviewResponse,
+    FileLifecycleSettingsResponse,
+    FileLifecycleSettingsUpdateRequest,
+    FileLifecycleSettingsUpdateResponse,
     SystemAdminMeResponse,
     SystemUserRoleAssignmentListResponse,
     SystemUserRoleAssignmentResponse,
@@ -34,6 +45,76 @@ async def get_system_admin_me(
         user_id=system_admin.user_id,
         roles=[SystemUserRole.SYSTEM_ADMIN],
     )
+
+
+@router.get("/settings/file-lifecycle")
+async def get_file_lifecycle_settings(
+    _system_admin: Annotated[SystemAdmin, Depends(get_system_admin)],
+    retention_service: Annotated[ArchivedSessionRetentionService, Depends()],
+) -> FileLifecycleSettingsResponse:
+    """Return instance-wide archive retention settings."""
+    state = await retention_service.get_settings_state()
+    return FileLifecycleSettingsResponse.from_domain(state)
+
+
+@router.post("/settings/file-lifecycle/archive-retention/preview")
+async def preview_archive_retention_update(
+    request: ArchiveRetentionPreviewRequest,
+    _system_admin: Annotated[SystemAdmin, Depends(get_system_admin)],
+    retention_service: Annotated[ArchivedSessionRetentionService, Depends()],
+) -> ArchiveRetentionPreviewResponse:
+    """Preview applying one retention value to existing archives."""
+    preview = await retention_service.preview(request.archived_session_retention_days)
+    return ArchiveRetentionPreviewResponse.from_domain(preview)
+
+
+@router.patch("/settings/file-lifecycle")
+async def update_file_lifecycle_settings(
+    request: FileLifecycleSettingsUpdateRequest,
+    system_admin: Annotated[SystemAdmin, Depends(get_system_admin)],
+    retention_service: Annotated[ArchivedSessionRetentionService, Depends()],
+) -> FileLifecycleSettingsUpdateResponse:
+    """Update archive retention settings with optimistic concurrency."""
+    try:
+        result = await retention_service.update_settings(
+            expected_revision=request.expected_revision,
+            retention_days=request.archived_session_retention_days,
+            application_scope=request.application_scope,
+            user_id=system_admin.user_id,
+        )
+    except RetentionRevisionConflict as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "retention_revision_conflict",
+                "message": "File lifecycle settings changed. Reload and try again.",
+            },
+        ) from error
+    except RetentionApplicationInProgress as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "retention_application_in_progress",
+                "message": "An archive retention recalculation is already running.",
+            },
+        ) from error
+    return FileLifecycleSettingsUpdateResponse.from_domain(result)
+
+
+@router.get("/settings/file-lifecycle/retention-applications/{application_id}")
+async def get_archive_retention_application(
+    application_id: str,
+    _system_admin: Annotated[SystemAdmin, Depends(get_system_admin)],
+    retention_service: Annotated[ArchivedSessionRetentionService, Depends()],
+) -> ArchiveRetentionApplicationResponse:
+    """Return durable existing-archive recalculation progress."""
+    application = await retention_service.get_application(application_id=application_id)
+    if application is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Retention application not found.",
+        )
+    return ArchiveRetentionApplicationResponse.from_domain(application)
 
 
 @router.get("/role-assignments")

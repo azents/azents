@@ -6,8 +6,8 @@ Current system administrator response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**user_id** | **str** | Current User ID |
-**roles** | [**List[SystemUserRole]**](SystemUserRole.md) | Current system roles |
+**user_id** | **str** | Current User ID | 
+**roles** | [**List[SystemUserRole]**](SystemUserRole.md) | Current system roles | 
 
 ## Example
 
@@ -27,3 +27,5 @@ system_admin_me_response_dict = system_admin_me_response_instance.to_dict()
 system_admin_me_response_from_dict = SystemAdminMeResponse.from_dict(system_admin_me_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

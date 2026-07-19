@@ -6,12 +6,12 @@ System model catalog response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**provider** | [**SystemCatalogProvider**](SystemCatalogProvider.md) |  |
-**catalog_id** | **str** |  |
-**snapshot_id** | **str** |  |
-**visible_count** | **int** |  |
-**hidden_count** | **int** |  |
-**latest_attempt** | [**SystemModelCatalogSyncAttemptResponse**](SystemModelCatalogSyncAttemptResponse.md) |  |
+**provider** | [**SystemCatalogProvider**](SystemCatalogProvider.md) |  | 
+**catalog_id** | **str** |  | 
+**snapshot_id** | **str** |  | 
+**visible_count** | **int** |  | 
+**hidden_count** | **int** |  | 
+**latest_attempt** | [**SystemModelCatalogSyncAttemptResponse**](SystemModelCatalogSyncAttemptResponse.md) |  | 
 
 ## Example
 
@@ -31,3 +31,5 @@ system_model_catalog_response_dict = system_model_catalog_response_instance.to_d
 system_model_catalog_response_from_dict = SystemModelCatalogResponse.from_dict(system_model_catalog_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

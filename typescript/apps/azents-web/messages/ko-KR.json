@@ -699,7 +699,18 @@
           "archive": "보관",
           "archiveConfirmTitle": "세션을 보관할까요?",
           "archiveConfirmDescription": "이 세션은 활성 세션 목록에서 제거됩니다. 대화 데이터는 보존됩니다.",
-          "archiveCancel": "취소"
+          "archiveCancel": "취소",
+          "archivePolicyUnlimited": "현재 정책은 무기한 보관입니다. 관리자가 유한한 보관 기간을 적용하기 전까지 이 세션을 복원할 수 있습니다.",
+          "archivePolicyZero": "현재 정책은 0일입니다. 이 세션은 다음 스케줄러 실행부터 비동기 삭제 대상이 됩니다.",
+          "archivePolicyDays": "현재 정책에 따라 보관 후 {days}일 동안 이 세션을 복원할 수 있습니다.",
+          "archivedTitle": "보관됨",
+          "archivedEmpty": "보관된 세션이 없습니다.",
+          "archivedAt": "{date}에 보관",
+          "retentionSnapshotUnlimited": "무기한 보관",
+          "retentionSnapshotDays": "{days}일 보관",
+          "purgeScheduled": "{date}에 삭제 예정",
+          "purgeUnscheduled": "삭제 예정 없음",
+          "restore": "복원"
         },
         "subagents": {
           "title": "서브에이전트",

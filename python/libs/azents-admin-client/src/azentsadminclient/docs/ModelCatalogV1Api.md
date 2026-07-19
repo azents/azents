@@ -121,7 +121,7 @@ configuration = azentsadminclient.Configuration(
 with azentsadminclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentsadminclient.ModelCatalogV1Api(api_client)
-    provider = azentsadminclient.SystemCatalogProvider() # SystemCatalogProvider |
+    provider = azentsadminclient.SystemCatalogProvider() # SystemCatalogProvider | 
 
     try:
         # Refresh System Model Catalog
@@ -139,7 +139,7 @@ with azentsadminclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **provider** | [**SystemCatalogProvider**](.md)|  |
+ **provider** | [**SystemCatalogProvider**](.md)|  | 
 
 ### Return type
 
@@ -236,3 +236,4 @@ This endpoint does not need any parameter.
 **200** | Successful Response |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+

@@ -65,3 +65,14 @@
   align-self: center;
   flex-shrink: 0;
 }
+
+.archivedSectionToggle {
+  display: block;
+  width: 100%;
+  text-align: left;
+}
+
+.archivedSectionToggle:hover,
+.archivedSessionItem:hover {
+  background: var(--mantine-color-default-hover);
+}

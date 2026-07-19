@@ -55,8 +55,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.AgentRuntimeV1Api(api_client)
-    agent_id = 'agent_id_example' # str |
-    handle = 'handle_example' # str |
+    agent_id = 'agent_id_example' # str | 
+    handle = 'handle_example' # str | 
 
     try:
         # Get Agent Runtime
@@ -123,7 +123,6 @@ Class | Method | HTTP request | Description
 *ChatV1Api* | [**chat_v1_delete_agent_workspace_path**](azentspublicclient/docs/ChatV1Api.md#chat_v1_delete_agent_workspace_path) | **DELETE** /chat/v1/agents/{agent_id}/workspace/files | Delete Agent Workspace Path
 *ChatV1Api* | [**chat_v1_delete_exchange_file**](azentspublicclient/docs/ChatV1Api.md#chat_v1_delete_exchange_file) | **DELETE** /chat/v1/exchange-files/{file_id} | Delete Exchange File
 *ChatV1Api* | [**chat_v1_delete_input_buffer**](azentspublicclient/docs/ChatV1Api.md#chat_v1_delete_input_buffer) | **DELETE** /chat/v1/sessions/{session_id}/input-buffers/{buffer_id} | Delete Input Buffer
-*ChatV1Api* | [**chat_v1_delete_session**](azentspublicclient/docs/ChatV1Api.md#chat_v1_delete_session) | **DELETE** /chat/v1/sessions/{session_id} | Delete Session
 *ChatV1Api* | [**chat_v1_download_agent_workspace_file**](azentspublicclient/docs/ChatV1Api.md#chat_v1_download_agent_workspace_file) | **GET** /chat/v1/agents/{agent_id}/workspace/download | Download Agent Workspace File
 *ChatV1Api* | [**chat_v1_download_exchange_file**](azentspublicclient/docs/ChatV1Api.md#chat_v1_download_exchange_file) | **GET** /chat/v1/exchange-files/{file_id}/download | Download Exchange File
 *ChatV1Api* | [**chat_v1_edit_message**](azentspublicclient/docs/ChatV1Api.md#chat_v1_edit_message) | **POST** /chat/v1/sessions/{session_id}/edit-message | Edit Message
@@ -138,6 +137,7 @@ Class | Method | HTTP request | Description
 *ChatV1Api* | [**chat_v1_list_agent_project_presets**](azentspublicclient/docs/ChatV1Api.md#chat_v1_list_agent_project_presets) | **GET** /chat/v1/agents/{agent_id}/project-presets | List Agent Project Presets
 *ChatV1Api* | [**chat_v1_list_agent_projects**](azentspublicclient/docs/ChatV1Api.md#chat_v1_list_agent_projects) | **GET** /chat/v1/agents/{agent_id}/sessions/{session_id}/projects | List Agent Projects
 *ChatV1Api* | [**chat_v1_list_agent_sessions**](azentspublicclient/docs/ChatV1Api.md#chat_v1_list_agent_sessions) | **GET** /chat/v1/agents/{agent_id}/sessions | List Agent Sessions
+*ChatV1Api* | [**chat_v1_list_archived_agent_sessions**](azentspublicclient/docs/ChatV1Api.md#chat_v1_list_archived_agent_sessions) | **GET** /chat/v1/agents/{agent_id}/sessions/archived | List Archived Agent Sessions
 *ChatV1Api* | [**chat_v1_list_history_events**](azentspublicclient/docs/ChatV1Api.md#chat_v1_list_history_events) | **GET** /chat/v1/sessions/{session_id}/history | List History Events
 *ChatV1Api* | [**chat_v1_list_input_actions**](azentspublicclient/docs/ChatV1Api.md#chat_v1_list_input_actions) | **GET** /chat/v1/sessions/{session_id}/actions | List Input Actions
 *ChatV1Api* | [**chat_v1_list_live_events**](azentspublicclient/docs/ChatV1Api.md#chat_v1_list_live_events) | **GET** /chat/v1/sessions/{session_id}/live | List Live Events
@@ -147,6 +147,7 @@ Class | Method | HTTP request | Description
 *ChatV1Api* | [**chat_v1_preview_project_browser_manifest**](azentspublicclient/docs/ChatV1Api.md#chat_v1_preview_project_browser_manifest) | **POST** /chat/v1/agents/{agent_id}/workspace/project-browser-manifest/preview | Preview Project Browser Manifest
 *ChatV1Api* | [**chat_v1_read_agent_workspace_path**](azentspublicclient/docs/ChatV1Api.md#chat_v1_read_agent_workspace_path) | **GET** /chat/v1/agents/{agent_id}/workspace/files | Read Agent Workspace Path
 *ChatV1Api* | [**chat_v1_register_agent_project**](azentspublicclient/docs/ChatV1Api.md#chat_v1_register_agent_project) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/register | Register Agent Project
+*ChatV1Api* | [**chat_v1_restore_agent_session**](azentspublicclient/docs/ChatV1Api.md#chat_v1_restore_agent_session) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/restore | Restore Agent Session
 *ChatV1Api* | [**chat_v1_retry_failed_run**](azentspublicclient/docs/ChatV1Api.md#chat_v1_retry_failed_run) | **POST** /chat/v1/sessions/{session_id}/retry-failed-run | Retry Failed Run
 *ChatV1Api* | [**chat_v1_stat_agent_workspace_path**](azentspublicclient/docs/ChatV1Api.md#chat_v1_stat_agent_workspace_path) | **GET** /chat/v1/agents/{agent_id}/workspace/stat | Stat Agent Workspace Path
 *ChatV1Api* | [**chat_v1_stop_session_run**](azentspublicclient/docs/ChatV1Api.md#chat_v1_stop_session_run) | **POST** /chat/v1/sessions/{session_id}/stop | Stop Session Run
