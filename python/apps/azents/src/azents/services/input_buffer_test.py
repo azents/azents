@@ -18,6 +18,7 @@ from azents.core.enums import (
     ExchangeFileOrigin,
     ExchangeFileStatus,
     InputBufferKind,
+    InputBufferSchedulingMode,
     LLMProvider,
 )
 from azents.core.inference_profile import (
@@ -185,6 +186,7 @@ async def _create_buffer(
             InputBufferCreate(
                 session_id=session_id,
                 kind=InputBufferKind.USER_MESSAGE,
+                scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
                 requested_model_target_label=model_target_label,
                 requested_reasoning_effort=reasoning_effort,
                 actor_user_id=user_id,
@@ -214,6 +216,7 @@ async def _create_action_buffer(
             InputBufferCreate(
                 session_id=session_id,
                 kind=InputBufferKind.ACTION_MESSAGE,
+                scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
                 requested_model_target_label="Fast",
                 requested_reasoning_effort=ModelReasoningEffort.HIGH,
                 actor_user_id=user_id,
@@ -234,6 +237,7 @@ async def _create_agent_message_buffer(
     session_id: str,
     user_id: str,
     content: str,
+    scheduling_mode: InputBufferSchedulingMode,
 ) -> str:
     """Create agent_message InputBuffer for tests."""
     async with rdb_session_manager() as session:
@@ -242,6 +246,7 @@ async def _create_agent_message_buffer(
             InputBufferCreate(
                 session_id=session_id,
                 kind=InputBufferKind.AGENT_MESSAGE,
+                scheduling_mode=scheduling_mode,
                 requested_model_target_label=None,
                 requested_reasoning_effort=None,
                 actor_user_id=user_id,
@@ -464,6 +469,7 @@ class TestInputBufferService:
                 InputBufferEnqueue(
                     session_id=session_id,
                     kind=InputBufferKind.USER_MESSAGE,
+                    scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
                     requested_model_target_label=None,
                     requested_reasoning_effort=None,
                     actor_user_id=user_id,
@@ -486,6 +492,37 @@ class TestInputBufferService:
         assert after is not None
         assert after.run_state == AgentSessionRunState.IDLE
 
+    async def test_pending_queries_separate_mailbox_from_wake_intent(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Queue-only mailbox input is pending without requesting a wake."""
+        session_id, user_id = await _create_fixture(
+            rdb_session_manager,
+            "input-buffer-pending-query",
+        )
+        await _create_agent_message_buffer(
+            rdb_session_manager,
+            session_id=session_id,
+            user_id=user_id,
+            content="queued note",
+            scheduling_mode=InputBufferSchedulingMode.QUEUE_ONLY,
+        )
+        service = _input_buffer_service(rdb_session_manager)
+
+        assert await service.has_pending_session_input_buffers(session_id)
+        assert await service.has_pending_agent_messages(session_id)
+        assert not await service.has_pending_wake_session_input_buffers(session_id)
+
+        await _create_buffer(
+            rdb_session_manager,
+            session_id=session_id,
+            user_id=user_id,
+            content="wake now",
+        )
+
+        assert await service.has_pending_wake_session_input_buffers(session_id)
+
     async def test_enqueue_deduplicates_only_the_same_inference_profile(
         self,
         rdb_session_manager: SessionManager[AsyncSession],
@@ -499,6 +536,7 @@ class TestInputBufferService:
         enqueue = InputBufferEnqueue(
             session_id=session_id,
             kind=InputBufferKind.USER_MESSAGE,
+            scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
             requested_model_target_label="Quality",
             requested_reasoning_effort=ModelReasoningEffort.HIGH,
             actor_user_id=user_id,
@@ -517,6 +555,18 @@ class TestInputBufferService:
             assert created.created is True
             assert deduplicated.created is False
             assert deduplicated.input_buffer.id == created.input_buffer.id
+
+            with pytest.raises(
+                ValueError,
+                match="idempotency key already used for another scheduling mode",
+            ):
+                await service.enqueue(
+                    session,
+                    dataclasses.replace(
+                        enqueue,
+                        scheduling_mode=InputBufferSchedulingMode.QUEUE_ONLY,
+                    ),
+                )
 
             with pytest.raises(
                 ValueError,
@@ -553,6 +603,7 @@ class TestInputBufferService:
             id="buffer-winner",
             session_id="session-001",
             kind=InputBufferKind.USER_MESSAGE,
+            scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
             requested_model_target_label="Fast",
             requested_reasoning_effort=ModelReasoningEffort.LOW,
             actor_user_id="user-001",
@@ -576,6 +627,7 @@ class TestInputBufferService:
         enqueue = InputBufferEnqueue(
             session_id="session-001",
             kind=InputBufferKind.USER_MESSAGE,
+            scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
             requested_model_target_label="Quality",
             requested_reasoning_effort=ModelReasoningEffort.HIGH,
             actor_user_id="user-001",
@@ -997,6 +1049,7 @@ class TestInputBufferService:
             session_id=session_id,
             user_id=user_id,
             content="continue with the next step",
+            scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
         )
         service = _input_buffer_service(rdb_session_manager)
 

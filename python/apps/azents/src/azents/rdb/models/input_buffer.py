@@ -8,7 +8,7 @@ from azcommon.uuid import uuid7
 from sqlalchemy.dialects.postgresql import ENUM, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from azents.core.enums import InputBufferKind
+from azents.core.enums import InputBufferKind, InputBufferSchedulingMode
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.rdb.models.base import RDBModel
 from azents.rdb.models.inference_profile_types import model_reasoning_effort_enum
@@ -23,6 +23,13 @@ def _enum_values(enum_cls: type[enum.StrEnum]) -> list[str]:
 input_buffer_kind_enum = ENUM(
     InputBufferKind,
     name="input_buffer_kind",
+    create_type=False,
+    values_callable=_enum_values,
+)
+
+input_buffer_scheduling_mode_enum = ENUM(
+    InputBufferSchedulingMode,
+    name="input_buffer_scheduling_mode",
     create_type=False,
     values_callable=_enum_values,
 )
@@ -46,6 +53,10 @@ class RDBInputBuffer(RDBModel):
     )
     kind: Mapped[InputBufferKind] = mapped_column(
         input_buffer_kind_enum,
+        nullable=False,
+    )
+    scheduling_mode: Mapped[InputBufferSchedulingMode] = mapped_column(
+        input_buffer_scheduling_mode_enum,
         nullable=False,
     )
     requested_model_target_label: Mapped[str | None] = mapped_column(
@@ -91,6 +102,11 @@ class RDBInputBuffer(RDBModel):
     )
     IX_SESSION_ID = sa.Index("ix_input_buffers_session_id", "session_id")
     IX_SESSION_ID_ID = sa.Index("ix_input_buffers_session_id_id", "session_id", "id")
+    IX_SESSION_ID_SCHEDULING_MODE = sa.Index(
+        "ix_input_buffers_session_id_scheduling_mode",
+        "session_id",
+        "scheduling_mode",
+    )
     IX_KIND = sa.Index("ix_input_buffers_kind", "kind")
     UQ_SESSION_KIND_IDEMPOTENCY = sa.Index(
         "uq_input_buffers_session_kind_idempotency",
@@ -105,6 +121,7 @@ class RDBInputBuffer(RDBModel):
         CK_REQUESTED_PROFILE,
         IX_SESSION_ID,
         IX_SESSION_ID_ID,
+        IX_SESSION_ID_SCHEDULING_MODE,
         IX_KIND,
         UQ_SESSION_KIND_IDEMPOTENCY,
     )

@@ -20,6 +20,7 @@ from azents.core.enums import (
     AgentSessionRunState,
     EventKind,
     InputBufferKind,
+    InputBufferSchedulingMode,
     SessionAgentKind,
 )
 from azents.core.inference_profile import SessionInferenceState
@@ -993,6 +994,11 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
             InputBufferEnqueue(
                 session_id=target.agent_session_id,
                 kind=InputBufferKind.AGENT_MESSAGE,
+                scheduling_mode=(
+                    InputBufferSchedulingMode.WAKE_SESSION
+                    if wake
+                    else InputBufferSchedulingMode.QUEUE_ONLY
+                ),
                 requested_model_target_label=None,
                 requested_reasoning_effort=None,
                 actor_user_id=self.user_id,

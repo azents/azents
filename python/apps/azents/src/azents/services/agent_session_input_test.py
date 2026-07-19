@@ -15,6 +15,7 @@ from azents.core.enums import (
     AgentSessionRunState,
     AgentSessionStartReason,
     AgentSessionStatus,
+    InputBufferSchedulingMode,
     LLMProvider,
     WorkspaceUserRole,
 )
@@ -171,6 +172,7 @@ class _InputBufferServiceDouble(InputBufferService):
             id="buffer-1",
             session_id=input.session_id,
             kind=input.kind,
+            scheduling_mode=input.scheduling_mode,
             requested_model_target_label=None,
             requested_reasoning_effort=None,
             actor_user_id=input.actor_user_id,
@@ -371,6 +373,10 @@ class TestAgentSessionInputService:
         ]
         assert input_buffer_service.enqueued is not None
         assert input_buffer_service.enqueued.session_id == "session-1"
+        assert (
+            input_buffer_service.enqueued.scheduling_mode
+            == InputBufferSchedulingMode.WAKE_SESSION
+        )
         assert input_buffer_service.enqueued.content == "restore me"
 
     async def test_attachment_claim_failure_rolls_back_buffer_acceptance(self) -> None:

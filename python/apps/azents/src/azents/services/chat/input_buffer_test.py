@@ -14,6 +14,7 @@ from azents.core.enums import (
     AgentRunStatus,
     AgentSessionRunState,
     InputBufferKind,
+    InputBufferSchedulingMode,
     LLMProvider,
     WorkspaceUserRole,
 )
@@ -222,6 +223,7 @@ async def _create_session_with_buffer(
         InputBufferCreate(
             session_id=agent_session.id,
             kind=InputBufferKind.USER_MESSAGE,
+            scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
             requested_model_target_label="main",
             requested_reasoning_effort=ModelReasoningEffort.HIGH,
             actor_user_id=user_id,

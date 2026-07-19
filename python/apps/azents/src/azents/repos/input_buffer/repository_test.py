@@ -4,7 +4,11 @@ import sqlalchemy as sa
 from azcommon.result import Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import InputBufferKind, LLMProvider
+from azents.core.enums import (
+    InputBufferKind,
+    InputBufferSchedulingMode,
+    LLMProvider,
+)
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_session import RDBAgentSession
@@ -99,6 +103,7 @@ def _create_payload(
     return InputBufferCreate(
         session_id=session_id,
         kind=InputBufferKind.USER_MESSAGE,
+        scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
         requested_model_target_label="Quality",
         requested_reasoning_effort=ModelReasoningEffort.HIGH,
         actor_user_id=user_id,
@@ -138,6 +143,7 @@ class TestInputBufferRepository:
         assert len(created.id) == 32
         assert created.session_id == session_id
         assert created.kind == InputBufferKind.USER_MESSAGE
+        assert created.scheduling_mode == InputBufferSchedulingMode.WAKE_SESSION
         assert created.requested_model_target_label == "Quality"
         assert created.requested_reasoning_effort == ModelReasoningEffort.HIGH
         assert created.actor_user_id == user_id
@@ -149,6 +155,52 @@ class TestInputBufferRepository:
         }
         assert created.attachments == ["exchange://file-1"]
         assert created.created_at is not None
+
+    async def test_pending_queries_use_scheduling_mode_and_kind(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Query scheduling intent independently from the payload kind."""
+        session_id, user_id, _ = await _create_agent_session(
+            rdb_session,
+            handle="input-buffer-pending-query",
+            slug="input-buffer-pending-query",
+        )
+        repo = InputBufferRepository()
+        wake_payload = _create_payload(
+            session_id=session_id,
+            user_id=user_id,
+            content="wake",
+        )
+        queue_only_payload = wake_payload.model_copy(
+            update={
+                "kind": InputBufferKind.AGENT_MESSAGE,
+                "scheduling_mode": InputBufferSchedulingMode.QUEUE_ONLY,
+                "content": "queue only",
+            }
+        )
+        await repo.create(rdb_session, queue_only_payload)
+
+        assert await repo.has_by_session_id_and_scheduling_mode(
+            rdb_session,
+            session_id=session_id,
+            scheduling_mode=InputBufferSchedulingMode.QUEUE_ONLY,
+        )
+        assert not await repo.has_by_session_id_and_scheduling_mode(
+            rdb_session,
+            session_id=session_id,
+            scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
+        )
+        assert await repo.has_by_session_id_and_kind(
+            rdb_session,
+            session_id=session_id,
+            kind=InputBufferKind.AGENT_MESSAGE,
+        )
+        assert not await repo.has_by_session_id_and_kind(
+            rdb_session,
+            session_id=session_id,
+            kind=InputBufferKind.USER_MESSAGE,
+        )
 
     async def test_list_and_flush_order_by_buffer_id(
         self,

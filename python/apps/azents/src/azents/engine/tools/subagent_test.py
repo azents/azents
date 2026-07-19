@@ -24,6 +24,7 @@ from azents.core.enums import (
     AgentSessionStatus,
     EventKind,
     InputBufferKind,
+    InputBufferSchedulingMode,
     SessionAgentKind,
 )
 from azents.core.inference_profile import SessionInferenceState
@@ -1341,6 +1342,10 @@ async def test_spawn_agent_creates_and_wakes_child_within_limits() -> None:
     assert repo.inference_states == [
         (child.agent_session_id, repo.sessions["root-session"].inference_state)
     ]
+    assert (
+        input_service.enqueued[0].scheduling_mode
+        == InputBufferSchedulingMode.WAKE_SESSION
+    )
     assert input_service.enqueued[0].metadata["message_kind"] == "spawn_agent"
     assert input_service.enqueued[0].content == "Review it"
     assert repo.locked_session_agents == ["root-agent"]

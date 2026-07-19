@@ -8,7 +8,7 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.types import SessionBroker, SessionWakeUp
-from azents.core.enums import InputBufferKind
+from azents.core.enums import InputBufferKind, InputBufferSchedulingMode
 from azents.engine.hooks.dispatcher import (
     RuntimeHookDispatcher,
     RuntimeHookProviderRef,
@@ -108,6 +108,7 @@ class IdleContinuationService:
         return InputBufferEnqueue(
             session_id=message.session_id,
             kind=InputBufferKind.GOAL_CONTINUATION,
+            scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
             requested_model_target_label=None,
             requested_reasoning_effort=None,
             actor_user_id=None,
