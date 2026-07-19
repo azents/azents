@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from azents.core.enums import LLMProvider
 from azents.engine.events.provider_output import generated_image_output
 from azents.engine.run.errors import ModelCallError
+from azents.engine.run.provider_failure import sanitize_provider_message
 from azents.engine.run.types import FunctionTool, FunctionToolError, FunctionToolResult
 from azents.engine.tooling.make_tool import make_tool
 from azents.services.xai_imagine import (
@@ -19,6 +20,7 @@ from azents.services.xai_imagine import (
     XaiImaginePermissionError,
     XaiImagineRateLimitError,
     XaiImagineRequest,
+    XaiImagineRequestError,
 )
 
 XaiImagineClientFactory = Callable[
@@ -123,6 +125,22 @@ class XaiImageGenerationExecutor:
                 except XaiImagineRateLimitError as exc:
                     raise FunctionToolError(
                         "xAI Imagine rate limit was exceeded. Try again later."
+                    ) from exc
+                except XaiImagineRequestError as exc:
+                    reason = sanitize_provider_message(exc.provider_message)
+                    message = f"xAI Imagine returned HTTP {exc.status_code}."
+                    if reason is not None:
+                        message = (
+                            f"xAI Imagine returned HTTP {exc.status_code}: {reason}"
+                        )
+                    raise FunctionToolError(
+                        message,
+                        metadata={
+                            "provider": "xai",
+                            "operation": "image_generation",
+                            "code": "http_failure",
+                            "status": exc.status_code,
+                        },
                     ) from exc
                 except XaiImagineError as exc:
                     raise FunctionToolError(str(exc)) from exc

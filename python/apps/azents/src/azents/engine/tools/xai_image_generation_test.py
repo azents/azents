@@ -191,6 +191,45 @@ async def test_oauth_tool_classifies_error_after_refresh(
     assert tokens == ["Bearer old-access-token", "Bearer new-access-token"]
 
 
+async def test_api_key_tool_surfaces_bad_request_reason_and_metadata() -> None:
+    """Expose one safe provider reason on the failed image-generation result."""
+
+    def respond(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            400,
+            json={
+                "error": {
+                    "message": (
+                        "Request blocked. api_key=sk-abcdefghijk "
+                        "Authorization: Bearer secret-value"
+                    )
+                }
+            },
+        )
+
+    tool = XaiImageGenerationExecutor(
+        provider=LLMProvider.XAI,
+        access_token="api-key-secret",
+        client_factory=_factory(httpx.MockTransport(respond)),
+        refresh_access_token=None,
+    ).make_tool()
+
+    with pytest.raises(FunctionToolError) as raised:
+        await tool.handler('{"prompt":"A rejected image"}')
+
+    message = str(raised.value)
+    assert message.startswith("xAI Imagine returned HTTP 400: Request blocked.")
+    assert "sk-abcdefghijk" not in message
+    assert "secret-value" not in message
+    assert message.count("[REDACTED]") >= 1
+    assert raised.value.metadata == {
+        "provider": "xai",
+        "operation": "image_generation",
+        "code": "http_failure",
+        "status": 400,
+    }
+
+
 async def test_api_key_tool_does_not_refresh_unauthorized() -> None:
     """Classify an API-key 401 without invoking OAuth behavior."""
 

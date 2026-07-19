@@ -173,6 +173,16 @@ class FunctionToolError(Exception):
     a normal exception instead (engine replaces it with a generic message).
     """
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        metadata: JSONObject | None = None,
+    ) -> None:
+        """Create one model-visible failed tool result."""
+        super().__init__(message)
+        self.metadata = {} if metadata is None else dict(metadata)
+
 
 class ShutdownInterruptError(Exception):
     """Raised when tool detects shutdown to prevent output storage.

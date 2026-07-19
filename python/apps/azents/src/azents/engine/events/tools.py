@@ -251,6 +251,7 @@ class ToolCatalogClientToolExecutor(ClientToolExecutor):
                 output=enforce_tool_output_text_hard_cap(
                     [OutputTextPart(text=str(exc))]
                 ),
+                metadata=dict(exc.metadata),
             )
 
         return _tool_result_payload(call, result)
