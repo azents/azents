@@ -721,6 +721,10 @@ class AgentEngineAdapter:
                     agent_id=request.agent_id,
                     session_id=request.session_id,
                 )
+                prepared_tool_executor = _PreparedToolAllowlistExecutor(
+                    inner=prepared_tool_executor,
+                    allowed_tool_names=frozenset(provider_visible_tool_names),
+                )
 
             async def on_turn_end(reason: TurnEndReason) -> None:
                 await hook_dispatcher.dispatch_observation(
@@ -1007,6 +1011,35 @@ def _runtime_hook_provider_refs(
     for binding in toolkits:
         refs.append(RuntimeHookProviderRef(slug=binding.slug, toolkit=binding.toolkit))
     return refs
+
+
+class _PreparedToolAllowlistExecutor:
+    """Reject client tool calls outside one prepared provider projection."""
+
+    def __init__(
+        self,
+        *,
+        inner: ClientToolExecutor,
+        allowed_tool_names: frozenset[str],
+    ) -> None:
+        self.inner = inner
+        self.allowed_tool_names = allowed_tool_names
+
+    def request_cancel(self, call: ClientToolCallPayload) -> None:
+        """Forward cancellation only for tools admitted to this prepared call."""
+        if call.name in self.allowed_tool_names:
+            self.inner.request_cancel(call)
+
+    async def execute(self, call: ClientToolCallPayload) -> ClientToolResultPayload:
+        """Execute only tools whose schemas were sent to the provider."""
+        if call.name not in self.allowed_tool_names:
+            return ClientToolResultPayload(
+                call_id=call.call_id,
+                name=call.name,
+                status="failed",
+                output=[OutputTextPart(text=f"Tool not found: {call.name}")],
+            )
+        return await self.inner.execute(call)
 
 
 class _WorkingSetClientToolExecutor:

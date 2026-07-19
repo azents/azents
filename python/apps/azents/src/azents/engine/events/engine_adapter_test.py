@@ -986,6 +986,17 @@ async def test_tool_search_activation_updates_the_next_prepared_call() -> None:
     assert isinstance(first_request, OpenAIResponsesRequest)
     assert [tool["name"] for tool in first_request.tools] == ["tool_search"]
 
+    hidden_result = await first_prepared.tool_executor.execute(
+        ClientToolCallPayload(
+            call_id="hidden-1",
+            name="service__probe",
+            arguments="{}",
+            native_artifact=_artifact({"type": "function_call"}),
+        )
+    )
+    assert hidden_result.status == "failed"
+    assert (await store.load("agent-1", "session-1")).tool_names == []
+
     search_result = await first_prepared.tool_executor.execute(
         ClientToolCallPayload(
             call_id="search-1",
