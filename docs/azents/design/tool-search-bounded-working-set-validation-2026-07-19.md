@@ -46,10 +46,10 @@ The product-path fixture requires the existing Docker-composed Azents public ser
 cd python/apps/azents
 uv run alembic -c db-schemas/rdb/alembic.ini heads
 uv run alembic -c db-schemas/rdb/alembic.ini history \
-  -r e95f7e9143c5:f81c4d3b1f17
+  -r 7e9b625b4c81:f81c4d3b1f17
 ```
 
-Result: `f81c4d3b1f17` is the single head and directly follows `e95f7e9143c5`. The migration adds the non-null `agents.tool_search_enabled` column with a `false` server default and the checked revision file points at the new head.
+Result: `f81c4d3b1f17` is the single head and directly follows `7e9b625b4c81`. The migration adds the non-null `agents.tool_search_enabled` column with a `false` server default and the checked revision file points at the new head.
 
 ### Focused Backend Regression Set
 
