@@ -12,6 +12,8 @@ LLM hosting provider.
 
 * `XAI_OAUTH` (value: `'xai_oauth'`)
 
+* `OPENROUTER` (value: `'openrouter'`)
+
 * `ANTHROPIC` (value: `'anthropic'`)
 
 * `GOOGLE_GEMINI` (value: `'google_gemini'`)

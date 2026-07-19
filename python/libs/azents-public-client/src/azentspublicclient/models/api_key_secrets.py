@@ -24,7 +24,7 @@ from typing_extensions import Self
 
 class ApiKeySecrets(BaseModel):
     """
-    API key based secrets for OpenAI, Anthropic, and Google Gemini.
+    API key based secrets for supported developer API providers.
     """ # noqa: E501
     type: Optional[StrictStr] = 'api_key'
     api_key: StrictStr = Field(description="API key")

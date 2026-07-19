@@ -1,6 +1,6 @@
 # ApiKeySecrets
 
-API key based secrets for OpenAI, Anthropic, and Google Gemini.
+API key based secrets for supported developer API providers.
 
 ## Properties
 

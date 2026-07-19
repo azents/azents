@@ -78,6 +78,12 @@ def test_xai_api_key_provider_mappings() -> None:
     assert LLMProvider.XAI not in PROVIDERS_WITH_CONFIG
 
 
+def test_openrouter_provider_mappings() -> None:
+    """Provider mapping uses generic API key secrets for OpenRouter."""
+    assert PROVIDER_SECRET_TYPES[LLMProvider.OPENROUTER] == "api_key"
+    assert LLMProvider.OPENROUTER not in PROVIDERS_WITH_CONFIG
+
+
 def test_xai_api_key_secrets_parse_from_provider_union() -> None:
     """ProviderSecrets union parses the generic API key secret used by xAI."""
     adapter = TypeAdapter(ProviderSecrets)

@@ -36,6 +36,7 @@ PROVIDER_LITELLM_PREFIX: dict[LLMProvider, str] = {
     LLMProvider.CHATGPT_OAUTH: "",
     LLMProvider.XAI: "xai/",
     LLMProvider.XAI_OAUTH: "xai/",
+    LLMProvider.OPENROUTER: "openrouter/",
 }
 
 

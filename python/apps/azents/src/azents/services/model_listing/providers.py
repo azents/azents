@@ -35,6 +35,7 @@ from azents.core.chatgpt_oauth import (
     build_chatgpt_oauth_headers,
 )
 from azents.core.credentials import (
+    ApiKeySecrets,
     AwsConfig,
     AwsSecrets,
     ChatGPTOAuthConfig,
@@ -50,6 +51,7 @@ from azents.core.llm_catalog import (
     ModelContextWindow,
     ModelModalities,
     ModelModality,
+    ModelParameterCapabilities,
     ModelReasoningCapabilities,
     ModelReasoningEffort,
     ModelToolCallingCapabilities,
@@ -70,9 +72,19 @@ VERTEX_PUBLISHERS: dict[str, LLMModelDeveloper] = {
     "google": LLMModelDeveloper.GOOGLE,
     "anthropic": LLMModelDeveloper.ANTHROPIC,
 }
+OPENROUTER_API_BASE_URL = "https://openrouter.ai/api/v1"
+OPENROUTER_PUBLISHERS: dict[str, LLMModelDeveloper] = {
+    "openai": LLMModelDeveloper.OPENAI,
+    "anthropic": LLMModelDeveloper.ANTHROPIC,
+    "google": LLMModelDeveloper.GOOGLE,
+    "x-ai": LLMModelDeveloper.XAI,
+    "meta-llama": LLMModelDeveloper.META,
+    "mistralai": LLMModelDeveloper.MISTRAL,
+}
 
 _BEDROCK_MODEL_SUMMARY_ADAPTER = TypeAdapter[dict[str, object]](dict[str, object])
 _CHATGPT_MODEL_ADAPTER = TypeAdapter[dict[str, object]](dict[str, object])
+_OPENROUTER_MODEL_ADAPTER = TypeAdapter[dict[str, object]](dict[str, object])
 _VERTEX_MODEL_ADAPTER = TypeAdapter[dict[str, object]](dict[str, object])
 
 
@@ -123,6 +135,19 @@ async def list_chatgpt_models_for_integration(
     except (httpx.HTTPError, json.JSONDecodeError, ValueError) as exc:
         raise ListingProviderError(
             "ChatGPT model listing failed.",
+            automatic_retry_blocked=automatic_retry_blocked_for_listing_error(exc),
+        ) from exc
+
+
+async def list_openrouter_models_for_integration(
+    integration: LLMProviderIntegrationWithSecrets,
+) -> ModelListingOutput:
+    """Fetch account-visible text-output models from OpenRouter."""
+    try:
+        return await _list_openrouter_models(integration)
+    except (httpx.HTTPError, json.JSONDecodeError, ValueError) as exc:
+        raise ListingProviderError(
+            "OpenRouter model listing failed.",
             automatic_retry_blocked=automatic_retry_blocked_for_listing_error(exc),
         ) from exc
 
@@ -410,6 +435,182 @@ def _chatgpt_source_metadata(model: dict[str, object]) -> dict[str, object]:
     return {key: model[key] for key in keys if key in model}
 
 
+async def _list_openrouter_models(
+    integration: LLMProviderIntegrationWithSecrets,
+) -> ModelListingOutput:
+    """Fetch candidates from the OpenRouter account model endpoint."""
+    secrets = _require_api_key_secrets(integration.secrets)
+    fetched_at = datetime.now(timezone.utc)
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        response = await client.get(
+            f"{OPENROUTER_API_BASE_URL}/models/user",
+            params={"output_modalities": "text"},
+            headers={"Authorization": f"Bearer {secrets.api_key}"},
+        )
+        response.raise_for_status()
+        payload = response.json()
+    raw_models = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(raw_models, list):
+        raise InvalidProviderResponseError(
+            "OpenRouter model listing response must contain data."
+        )
+    models: list[NormalizedModelCandidate] = []
+    skipped = 0
+    for raw_model in raw_models:
+        try:
+            model = _OPENROUTER_MODEL_ADAPTER.validate_python(raw_model)
+        except ValidationError:
+            skipped += 1
+            continue
+        candidate = _candidate_from_openrouter_model(model, fetched_at=fetched_at)
+        if candidate is None:
+            skipped += 1
+            continue
+        models.append(candidate)
+    return _output(
+        source="openrouter:account_models",
+        fetched_at=fetched_at,
+        models=models,
+        skips=_skip_summary("invalid_openrouter_model", skipped),
+    )
+
+
+def _candidate_from_openrouter_model(
+    model: dict[str, object],
+    *,
+    fetched_at: datetime,
+) -> NormalizedModelCandidate | None:
+    """Normalize one OpenRouter account-visible model."""
+    model_id = _str_value(model, "id")
+    if model_id is None or not _openrouter_supports_text_output(model):
+        return None
+    display_name = _str_value(model, "name") or model_id
+    developer = _openrouter_developer(model_id)
+    supported_parameters = _string_values(model.get("supported_parameters"))
+    context_length = _positive_int(model.get("context_length"))
+    top_provider = model.get("top_provider")
+    max_completion_tokens = (
+        _positive_int(top_provider.get("max_completion_tokens"))
+        if isinstance(top_provider, dict)
+        else None
+    )
+    reasoning_supported = bool(
+        {"include_reasoning", "reasoning", "reasoning_effort"} & supported_parameters
+    )
+    capabilities = ModelCapabilities(
+        context_window=ModelContextWindow(
+            max_input_tokens=context_length,
+            max_output_tokens=max_completion_tokens,
+        ),
+        modalities=ModelModalities(
+            input=_openrouter_input_modalities(model),
+            output=[ModelModality.TEXT],
+        ),
+        tool_calling=ModelToolCallingCapabilities(
+            supported="tools" in supported_parameters,
+            parallel_tool_calls=(
+                True if "parallel_tool_calls" in supported_parameters else None
+            ),
+        ),
+        reasoning=ModelReasoningCapabilities(
+            supported=reasoning_supported,
+            effort_levels=(
+                [
+                    ModelReasoningEffort.LOW,
+                    ModelReasoningEffort.MEDIUM,
+                    ModelReasoningEffort.HIGH,
+                ]
+                if "reasoning_effort" in supported_parameters
+                else []
+            ),
+        ),
+        built_in_tools=ModelBuiltInToolCapabilities(supported=["web_search"]),
+        parameters=ModelParameterCapabilities(
+            temperature="temperature" in supported_parameters,
+            max_output_tokens=bool(
+                {"max_completion_tokens", "max_tokens"} & supported_parameters
+            ),
+            top_p="top_p" in supported_parameters,
+            top_k="top_k" in supported_parameters,
+            stop_sequences="stop" in supported_parameters,
+        ),
+        compatibility=ModelCompatibilityCapabilities(
+            provider_family="openrouter",
+            responses_api=True,
+        ),
+    )
+    return NormalizedModelCandidate(
+        provider=LLMProvider.OPENROUTER,
+        model_identifier=model_id,
+        model_display_name=display_name,
+        model_developer=developer,
+        model_family=_openrouter_family(model_id),
+        normalized_capabilities=capabilities,
+        model_snapshot={
+            "source": "openrouter:account_models",
+            "provider": LLMProvider.OPENROUTER.value,
+            "model_identifier": model_id,
+            "model_display_name": display_name,
+            "model_developer": developer.value,
+        },
+        source_metadata=_openrouter_source_metadata(model),
+        last_refreshed_at=fetched_at,
+    )
+
+
+def _openrouter_supports_text_output(model: dict[str, object]) -> bool:
+    """Return whether OpenRouter metadata permits text output."""
+    architecture = model.get("architecture")
+    if not isinstance(architecture, dict):
+        return True
+    output_modalities = architecture.get("output_modalities")
+    if output_modalities is None:
+        return True
+    return "text" in _string_values(output_modalities)
+
+
+def _openrouter_input_modalities(model: dict[str, object]) -> list[ModelModality]:
+    """Project only verified OpenRouter input modalities."""
+    architecture = model.get("architecture")
+    if not isinstance(architecture, dict) or "input_modalities" not in architecture:
+        return [ModelModality.TEXT]
+    raw_modalities = _string_values(architecture.get("input_modalities"))
+    modalities: list[ModelModality] = []
+    for modality in (ModelModality.TEXT, ModelModality.IMAGE):
+        if modality.value in raw_modalities:
+            modalities.append(modality)
+    return modalities
+
+
+def _openrouter_developer(model_id: str) -> LLMModelDeveloper:
+    """Map the OpenRouter publisher segment to a safe developer value."""
+    publisher = model_id.split("/", maxsplit=1)[0].lower()
+    return OPENROUTER_PUBLISHERS.get(publisher, LLMModelDeveloper.OTHER)
+
+
+def _openrouter_family(model_id: str) -> str | None:
+    """Derive a diagnostic model family from the OpenRouter model id."""
+    model_name = model_id.split("/", maxsplit=1)[-1]
+    family = model_name.split("-", maxsplit=1)[0]
+    return family or None
+
+
+def _openrouter_source_metadata(model: dict[str, object]) -> dict[str, object]:
+    """Keep bounded catalog-relevant OpenRouter metadata."""
+    keys = (
+        "architecture",
+        "canonical_slug",
+        "context_length",
+        "created",
+        "expiration_date",
+        "pricing",
+        "reasoning",
+        "supported_parameters",
+        "top_provider",
+    )
+    return {key: model[key] for key in keys if key in model}
+
+
 async def _list_vertex_models(
     integration: LLMProviderIntegrationWithSecrets,
 ) -> ModelListingOutput:
@@ -538,6 +739,13 @@ def _skip_summary(reason: str, count: int) -> list[ModelListingSkipSummary]:
     return [ModelListingSkipSummary(reason=reason, count=count)]
 
 
+def _require_api_key_secrets(secrets: object) -> ApiKeySecrets:
+    """Validate generic API-key integration secrets."""
+    if not isinstance(secrets, ApiKeySecrets):
+        raise ValueError("API-key integration secrets are required.")
+    return secrets
+
+
 def _require_aws_config(config: object) -> AwsConfig:
     """Validate AWS config type."""
     if not isinstance(config, AwsConfig):
@@ -582,6 +790,20 @@ def _require_gcp_secrets(secrets: object) -> GcpSecrets:
         msg = "Google Vertex AI integration secrets are required."
         raise ValueError(msg)
     return secrets
+
+
+def _positive_int(value: object) -> int | None:
+    """Return a positive integer without accepting booleans."""
+    if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+        return value
+    return None
+
+
+def _string_values(value: object) -> set[str]:
+    """Return string members from a provider sequence."""
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        return set()
+    return {item for item in value if isinstance(item, str)}
 
 
 def _str_value(mapping: dict[str, object], key: str) -> str | None:

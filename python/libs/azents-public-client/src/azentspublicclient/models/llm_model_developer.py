@@ -32,6 +32,7 @@ class LLMModelDeveloper(str, Enum):
     XAI = 'xai'
     META = 'meta'
     MISTRAL = 'mistral'
+    OTHER = 'other'
 
     @classmethod
     def from_json(cls, json_str: str) -> Self:

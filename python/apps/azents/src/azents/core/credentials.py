@@ -17,7 +17,7 @@ from azents.core.enums import LLMProvider
 
 
 class ApiKeySecrets(BaseModel):
-    """API key based secrets for OpenAI, Anthropic, and Google Gemini."""
+    """API key based secrets for supported developer API providers."""
 
     type: Literal["api_key"] = "api_key"
     api_key: str = Field(description="API key")
@@ -171,6 +171,7 @@ PROVIDER_SECRET_TYPES: dict[LLMProvider, str] = {
     LLMProvider.CHATGPT_OAUTH: "chatgpt_oauth",
     LLMProvider.XAI: "api_key",
     LLMProvider.XAI_OAUTH: "xai_oauth",
+    LLMProvider.OPENROUTER: "api_key",
     LLMProvider.ANTHROPIC: "api_key",
     LLMProvider.GOOGLE_GEMINI: "api_key",
     LLMProvider.AWS_BEDROCK: "aws_credentials",

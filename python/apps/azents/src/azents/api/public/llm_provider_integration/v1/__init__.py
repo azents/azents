@@ -73,6 +73,7 @@ _PROVIDER_DISPLAY_NAMES: dict[LLMProvider, str] = {
     LLMProvider.CHATGPT_OAUTH: "ChatGPT OAuth",
     LLMProvider.XAI: "xAI API key",
     LLMProvider.XAI_OAUTH: "xAI Grok OAuth",
+    LLMProvider.OPENROUTER: "OpenRouter",
 }
 
 _BASE_AVAILABLE_PROVIDERS: tuple[LLMProvider, ...] = (
@@ -84,6 +85,7 @@ _BASE_AVAILABLE_PROVIDERS: tuple[LLMProvider, ...] = (
     LLMProvider.CHATGPT_OAUTH,
     LLMProvider.XAI,
     LLMProvider.XAI_OAUTH,
+    LLMProvider.OPENROUTER,
 )
 
 

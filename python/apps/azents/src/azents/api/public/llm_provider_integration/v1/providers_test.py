@@ -28,6 +28,18 @@ async def test_xai_api_key_is_available_as_stable_provider() -> None:
     assert xai.experimental is False
 
 
+async def test_openrouter_is_available_as_stable_api_key_provider() -> None:
+    """Expose OpenRouter through the generic API-key integration contract."""
+    response = await list_integration_providers(_member())
+
+    openrouter = next(
+        item for item in response.items if item.provider == LLMProvider.OPENROUTER
+    )
+    assert openrouter.display_name == "OpenRouter"
+    assert openrouter.credential_type == "api_key"
+    assert openrouter.experimental is False
+
+
 async def test_xai_oauth_is_available_without_operator_configuration() -> None:
     """Expose xAI OAuth through its built-in public client identity."""
     response = await list_integration_providers(_member())
