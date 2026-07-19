@@ -408,6 +408,39 @@ class AgentSessionRepository:
         await session.flush()
         return self._build_session_agent(rdb)
 
+    async def advance_session_agent_observation_cursor(
+        self,
+        session: AsyncSession,
+        *,
+        session_agent_id: str,
+        parent_session_agent_id: str,
+        parent_observed_run_index: int,
+        parent_observed_event_id: str | None,
+    ) -> SessionAgent | None:
+        """Advance a direct child's cursor without allowing regression."""
+        result = await session.execute(
+            sa.update(RDBSessionAgent)
+            .where(
+                RDBSessionAgent.id == session_agent_id,
+                RDBSessionAgent.parent_session_agent_id == parent_session_agent_id,
+                sa.or_(
+                    RDBSessionAgent.parent_observed_run_index.is_(None),
+                    RDBSessionAgent.parent_observed_run_index
+                    < parent_observed_run_index,
+                ),
+            )
+            .values(
+                parent_observed_run_index=parent_observed_run_index,
+                parent_observed_event_id=parent_observed_event_id,
+            )
+            .returning(RDBSessionAgent)
+        )
+        rdb = result.scalar_one_or_none()
+        if rdb is None:
+            return None
+        await session.flush()
+        return self._build_session_agent(rdb)
+
     async def list_by_workspace(
         self,
         session: AsyncSession,

@@ -164,6 +164,7 @@ class _InputBufferService:
                 events=[],
                 promoted_event_ids=[],
                 deleted_buffer_ids=[],
+                changed_session_agent_ids=[],
                 claimed_count=0,
                 inserted_count=0,
                 deduped_count=0,
@@ -1370,6 +1371,7 @@ async def test_boundary_poll_broadcasts_input_buffer_taxonomy_actions(
             user_messages=[user_message],
             events=[event],
             deleted_buffer_ids=["buffer-1"],
+            changed_session_agent_ids=[],
             claimed_count=1,
             inserted_count=1,
             deduped_count=0,
@@ -1400,6 +1402,9 @@ async def test_boundary_poll_broadcasts_input_buffer_taxonomy_actions(
         process_operation_actions,
     )
 
+    async def dispatch_event(session_id: str, event: PublishedEvent) -> None:
+        del session_id, event
+
     poll = executor.make_boundary_poll(
         message=_wake_up(session_id="session-1", agent_id="agent-1"),
         model="gpt-test",
@@ -1412,6 +1417,7 @@ async def test_boundary_poll_broadcasts_input_buffer_taxonomy_actions(
         owner_generation=1,
         tool_admission_barrier=ToolAdmissionBarrier(),
         mark_context_invalidated=lambda: None,
+        dispatch_event=dispatch_event,
     )
 
     poll_result = await poll()

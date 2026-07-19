@@ -274,6 +274,11 @@ async def _create_agent_result_buffer(
     *,
     session_id: str,
     content: str,
+    source_session_agent_id: str,
+    target_session_agent_id: str,
+    source_run_id: str,
+    source_run_index: int,
+    source_terminal_result_event_id: str,
 ) -> str:
     """Create terminal agent_result InputBuffer for tests."""
     async with rdb_session_manager() as session:
@@ -287,18 +292,18 @@ async def _create_agent_result_buffer(
                 requested_reasoning_effort=None,
                 actor_user_id=None,
                 content=content,
-                idempotency_key="agent_result:" + "1" * 32,
+                idempotency_key=f"agent_result:{source_run_id}",
                 metadata={
                     "source": "agent_mailbox",
                     "message_kind": "agent_result",
-                    "source_session_agent_id": "source-agent",
+                    "source_session_agent_id": source_session_agent_id,
                     "source_path": "/root/reviewer",
-                    "target_session_agent_id": "target-agent",
+                    "target_session_agent_id": target_session_agent_id,
                     "target_path": "/root",
-                    "source_run_id": "1" * 32,
-                    "source_run_index": "2",
+                    "source_run_id": source_run_id,
+                    "source_run_index": str(source_run_index),
                     "run_status": "completed",
-                    "source_terminal_result_event_id": "2" * 32,
+                    "source_terminal_result_event_id": source_terminal_result_event_id,
                 },
                 action=None,
                 attachments=[],
@@ -326,6 +331,62 @@ def _skill_item() -> SkillProjectionItem:
         source_label="app",
         relative_hint=".claude/skills/review",
     )
+
+
+async def _create_child_session_agent(
+    rdb_session_manager: SessionManager[AsyncSession],
+    *,
+    parent_session_id: str,
+    name: str = "reviewer",
+) -> tuple[str, str]:
+    """Create a direct child and return parent and child SessionAgent IDs."""
+    async with rdb_session_manager() as session:
+        repository = AgentSessionRepository()
+        parent = await repository.get_session_agent_by_session_id(
+            session,
+            parent_session_id,
+        )
+        assert parent is not None
+        child = await repository.create_child_session_agent(
+            session,
+            parent_session_agent_id=parent.id,
+            name=name,
+            agent_type="default",
+            title=None,
+            last_task_message=None,
+        )
+    return parent.id, child.id
+
+
+async def _create_terminal_child_run(
+    rdb_session_manager: SessionManager[AsyncSession],
+    *,
+    child_session_agent_id: str,
+    terminal_result_event_id: str,
+) -> tuple[str, int]:
+    """Create one completed Run owned by a child SessionAgent."""
+    async with rdb_session_manager() as session:
+        session_repository = AgentSessionRepository()
+        child = await session_repository.get_session_agent_by_id(
+            session,
+            child_session_agent_id,
+        )
+        assert child is not None
+        run_repository = AgentRunRepository()
+        run = await run_repository.create_pending(
+            session,
+            session_id=child.agent_session_id,
+            parent_agent_run_id=None,
+        )
+        completed = await run_repository.mark_terminal(
+            session,
+            run.id,
+            AgentRunStatus.COMPLETED,
+            ended_at=tznow(),
+            terminal_result_event_id=terminal_result_event_id,
+            terminal_result_message="Completed child result",
+        )
+    return completed.id, completed.run_index
 
 
 async def _agent_id_for_session(
@@ -1121,19 +1182,34 @@ class TestInputBufferService:
         assert event.payload.target_path == "/root/child"
         assert event.payload.content == "continue with the next step"
 
-    async def test_flush_promotes_agent_result_terminal_metadata(
+    async def test_flush_promotes_and_acknowledges_agent_result(
         self,
         rdb_session_manager: SessionManager[AsyncSession],
     ) -> None:
-        """Terminal mailbox input persists complete agent_result metadata."""
+        """Promotion persists metadata and advances the direct child cursor."""
         session_id, _user_id = await _create_fixture(
             rdb_session_manager,
             "input-buffer-agent-result",
+        )
+        parent_id, child_id = await _create_child_session_agent(
+            rdb_session_manager,
+            parent_session_id=session_id,
+        )
+        terminal_event_id = "terminal-event".rjust(32, "0")
+        source_run_id, source_run_index = await _create_terminal_child_run(
+            rdb_session_manager,
+            child_session_agent_id=child_id,
+            terminal_result_event_id=terminal_event_id,
         )
         buffer_id = await _create_agent_result_buffer(
             rdb_session_manager,
             session_id=session_id,
             content="No blocking issues.",
+            source_session_agent_id=child_id,
+            target_session_agent_id=parent_id,
+            source_run_id=source_run_id,
+            source_run_index=source_run_index,
+            source_terminal_result_event_id=terminal_event_id,
         )
 
         result = await _input_buffer_service(
@@ -1152,11 +1228,243 @@ class TestInputBufferService:
         assert event.kind == EventKind.AGENT_MESSAGE
         assert isinstance(event.payload, AgentMessagePayload)
         assert event.payload.message_kind == "agent_result"
-        assert event.payload.source_run_id == "1" * 32
-        assert event.payload.source_run_index == 2
+        assert event.payload.source_run_id == source_run_id
+        assert event.payload.source_run_index == source_run_index
         assert event.payload.run_status is AgentRunStatus.COMPLETED
-        assert event.payload.source_terminal_result_event_id == "2" * 32
+        assert event.payload.source_terminal_result_event_id == terminal_event_id
         assert event.payload.content == "No blocking issues."
+        assert result.changed_session_agent_ids == [child_id]
+        async with rdb_session_manager() as session:
+            child = await AgentSessionRepository().get_session_agent_by_id(
+                session,
+                child_id,
+            )
+        assert child is not None
+        assert child.parent_observed_run_index == source_run_index
+        assert child.parent_observed_event_id == terminal_event_id
+
+    async def test_agent_result_acknowledgment_is_monotonic(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Older terminal results cannot regress a consumed child cursor."""
+        session_id, _user_id = await _create_fixture(
+            rdb_session_manager,
+            "input-buffer-agent-result-monotonic",
+        )
+        parent_id, child_id = await _create_child_session_agent(
+            rdb_session_manager,
+            parent_session_id=session_id,
+        )
+        service = _input_buffer_service(rdb_session_manager)
+        runs: dict[int, tuple[str, str]] = {}
+        for expected_run_index in (1, 2, 3):
+            terminal_event_id = str(expected_run_index + 100).rjust(32, "0")
+            source_run_id, source_run_index = await _create_terminal_child_run(
+                rdb_session_manager,
+                child_session_agent_id=child_id,
+                terminal_result_event_id=terminal_event_id,
+            )
+            assert source_run_index == expected_run_index
+            runs[source_run_index] = (source_run_id, terminal_event_id)
+
+        async def promote(source_run_index: int) -> list[str]:
+            source_run_id, terminal_event_id = runs[source_run_index]
+            buffer_id = await _create_agent_result_buffer(
+                rdb_session_manager,
+                session_id=session_id,
+                content=f"Result {source_run_index}",
+                source_session_agent_id=child_id,
+                target_session_agent_id=parent_id,
+                source_run_id=source_run_id,
+                source_run_index=source_run_index,
+                source_terminal_result_event_id=terminal_event_id,
+            )
+            result = await service.flush_session_input_buffers(
+                session_id=session_id,
+                model="gpt-5.4",
+                required_inference_profile=None,
+                expected_buffer_id=buffer_id,
+                prepared_inference_state=None,
+                profile_resolution_failure=None,
+                active_run_id=None,
+            )
+            return result.changed_session_agent_ids
+
+        assert await promote(2) == [child_id]
+        assert await promote(1) == []
+        assert await promote(3) == [child_id]
+        async with rdb_session_manager() as session:
+            child = await AgentSessionRepository().get_session_agent_by_id(
+                session,
+                child_id,
+            )
+        assert child is not None
+        assert child.parent_observed_run_index == 3
+        assert child.parent_observed_event_id == str(103).rjust(32, "0")
+
+    async def test_agent_result_acknowledgment_requires_direct_parent(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """A payload cannot acknowledge a child outside its direct parent."""
+        session_id, _user_id = await _create_fixture(
+            rdb_session_manager,
+            "input-buffer-agent-result-parent-scope",
+        )
+        _parent_id, child_id = await _create_child_session_agent(
+            rdb_session_manager,
+            parent_session_id=session_id,
+        )
+        terminal_event_id = "misdirected-event".rjust(32, "0")
+        source_run_id, source_run_index = await _create_terminal_child_run(
+            rdb_session_manager,
+            child_session_agent_id=child_id,
+            terminal_result_event_id=terminal_event_id,
+        )
+        buffer_id = await _create_agent_result_buffer(
+            rdb_session_manager,
+            session_id=session_id,
+            content="Misdirected result",
+            source_session_agent_id=child_id,
+            target_session_agent_id="another-parent",
+            source_run_id=source_run_id,
+            source_run_index=source_run_index,
+            source_terminal_result_event_id=terminal_event_id,
+        )
+
+        result = await _input_buffer_service(
+            rdb_session_manager
+        ).flush_session_input_buffers(
+            session_id=session_id,
+            model="gpt-5.4",
+            required_inference_profile=None,
+            expected_buffer_id=buffer_id,
+            prepared_inference_state=None,
+            profile_resolution_failure=None,
+            active_run_id=None,
+        )
+
+        assert result.changed_session_agent_ids == []
+        async with rdb_session_manager() as session:
+            child = await AgentSessionRepository().get_session_agent_by_id(
+                session,
+                child_id,
+            )
+        assert child is not None
+        assert child.parent_observed_run_index is None
+        assert child.parent_observed_event_id is None
+
+    async def test_agent_result_acknowledgment_requires_matching_terminal_run(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Tampered terminal metadata cannot advance the child cursor."""
+        session_id, _user_id = await _create_fixture(
+            rdb_session_manager,
+            "input-buffer-agent-result-run-scope",
+        )
+        parent_id, child_id = await _create_child_session_agent(
+            rdb_session_manager,
+            parent_session_id=session_id,
+        )
+        terminal_event_id = "verified-event".rjust(32, "0")
+        source_run_id, source_run_index = await _create_terminal_child_run(
+            rdb_session_manager,
+            child_session_agent_id=child_id,
+            terminal_result_event_id=terminal_event_id,
+        )
+        buffer_id = await _create_agent_result_buffer(
+            rdb_session_manager,
+            session_id=session_id,
+            content="Tampered result",
+            source_session_agent_id=child_id,
+            target_session_agent_id=parent_id,
+            source_run_id=source_run_id,
+            source_run_index=source_run_index + 100,
+            source_terminal_result_event_id=terminal_event_id,
+        )
+
+        result = await _input_buffer_service(
+            rdb_session_manager
+        ).flush_session_input_buffers(
+            session_id=session_id,
+            model="gpt-5.4",
+            required_inference_profile=None,
+            expected_buffer_id=buffer_id,
+            prepared_inference_state=None,
+            profile_resolution_failure=None,
+            active_run_id=None,
+        )
+
+        assert result.changed_session_agent_ids == []
+        async with rdb_session_manager() as session:
+            child = await AgentSessionRepository().get_session_agent_by_id(
+                session,
+                child_id,
+            )
+        assert child is not None
+        assert child.parent_observed_run_index is None
+        assert child.parent_observed_event_id is None
+
+    async def test_agent_result_acknowledgment_rolls_back_with_promotion(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A failed promotion cannot commit its child observation cursor."""
+        session_id, _user_id = await _create_fixture(
+            rdb_session_manager,
+            "input-buffer-agent-result-rollback",
+        )
+        parent_id, child_id = await _create_child_session_agent(
+            rdb_session_manager,
+            parent_session_id=session_id,
+        )
+        terminal_event_id = "rollback-event".rjust(32, "0")
+        source_run_id, source_run_index = await _create_terminal_child_run(
+            rdb_session_manager,
+            child_session_agent_id=child_id,
+            terminal_result_event_id=terminal_event_id,
+        )
+        buffer_id = await _create_agent_result_buffer(
+            rdb_session_manager,
+            session_id=session_id,
+            content="Rollback result",
+            source_session_agent_id=child_id,
+            target_session_agent_id=parent_id,
+            source_run_id=source_run_id,
+            source_run_index=source_run_index,
+            source_terminal_result_event_id=terminal_event_id,
+        )
+        service = _input_buffer_service(rdb_session_manager)
+        monkeypatch.setattr(
+            service.input_buffer_repository,
+            "delete_claimed_by_ids",
+            AsyncMock(side_effect=RuntimeError("delete failed")),
+        )
+
+        with pytest.raises(RuntimeError, match="delete failed"):
+            await service.flush_session_input_buffers(
+                session_id=session_id,
+                model="gpt-5.4",
+                required_inference_profile=None,
+                expected_buffer_id=buffer_id,
+                prepared_inference_state=None,
+                profile_resolution_failure=None,
+                active_run_id=None,
+            )
+
+        async with rdb_session_manager() as session:
+            child = await AgentSessionRepository().get_session_agent_by_id(
+                session,
+                child_id,
+            )
+            remaining = await InputBufferRepository().get_by_id(session, buffer_id)
+        assert child is not None
+        assert child.parent_observed_run_index is None
+        assert child.parent_observed_event_id is None
+        assert remaining is not None
 
     async def test_flush_skill_action_loads_skill_before_user_message(
         self,

@@ -629,7 +629,7 @@ class TestSubagents:
             token=workspace.token,
             session_id=root_session_id,
             call_id=_WAIT_CALL_ID,
-            expected=_CHILD_RESPONSE,
+            expected="All descendant agents are idle.",
         )
         _, observed_child = _wait_for_child_node(
             public_url=azents_public_server_url,
