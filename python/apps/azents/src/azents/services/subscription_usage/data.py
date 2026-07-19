@@ -20,6 +20,7 @@ class SubscriptionUsageUnavailableReason(enum.StrEnum):
     TEMPORARILY_UNAVAILABLE = "temporarily_unavailable"
     INVALID_PROVIDER_RESPONSE = "invalid_provider_response"
     UNSUPPORTED_ACCOUNT = "unsupported_account"
+    NO_CREDIT_LIMIT = "no_credit_limit"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -60,8 +61,24 @@ class XaiSubscriptionFinancialDetails:
     auto_top_up_monthly_maximum_cents: int | None
 
 
+@dataclasses.dataclass(frozen=True)
+class OpenRouterSubscriptionFinancialDetails:
+    """OpenRouter API-key credit details for integration managers."""
+
+    credit_limit: float
+    credit_remaining: float
+    usage: float
+    usage_daily: float
+    usage_weekly: float
+    usage_monthly: float
+    limit_reset: str | None
+    include_byok_in_limit: bool
+
+
 SubscriptionUsageFinancialDetails: TypeAlias = (
-    ChatGPTSubscriptionFinancialDetails | XaiSubscriptionFinancialDetails
+    ChatGPTSubscriptionFinancialDetails
+    | XaiSubscriptionFinancialDetails
+    | OpenRouterSubscriptionFinancialDetails
 )
 
 
@@ -202,6 +219,34 @@ XaiUsageAdapterOutcome: TypeAlias = (
 )
 
 
+@dataclasses.dataclass(frozen=True)
+class OpenRouterUsageSnapshot:
+    """Normalized OpenRouter key-credit result before integration projection."""
+
+    plan_label: str | None
+    limits: tuple[SubscriptionUsageLimit, ...]
+    financial_details: OpenRouterSubscriptionFinancialDetails | None
+
+
+@dataclasses.dataclass(frozen=True)
+class OpenRouterUsageHidden:
+    """Successful OpenRouter read with no bounded credit limit."""
+
+
+@dataclasses.dataclass(frozen=True)
+class OpenRouterUsageUnavailable:
+    """Controlled unavailable result from the OpenRouter usage adapter."""
+
+    reason: SubscriptionUsageUnavailableReason
+    retryable: bool
+    http_status: int | None
+
+
+OpenRouterUsageAdapterOutcome: TypeAlias = (
+    OpenRouterUsageSnapshot | OpenRouterUsageHidden | OpenRouterUsageUnavailable
+)
+
+
 def unavailable_message(reason: SubscriptionUsageUnavailableReason) -> str:
     """Return fixed Azents copy for a controlled unavailable reason."""
     match reason:
@@ -225,3 +270,5 @@ def unavailable_message(reason: SubscriptionUsageUnavailableReason) -> str:
             return "Subscription usage response is unavailable."
         case SubscriptionUsageUnavailableReason.UNSUPPORTED_ACCOUNT:
             return "Subscription usage is unavailable for this account."
+        case SubscriptionUsageUnavailableReason.NO_CREDIT_LIMIT:
+            return "Credit usage is unavailable for keys without a credit limit."

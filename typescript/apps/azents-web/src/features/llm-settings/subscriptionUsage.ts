@@ -47,7 +47,11 @@ export interface SubscriptionUsageQueryProjection {
 }
 
 export function supportsSubscriptionUsage(provider: string): boolean {
-  return provider === "chatgpt_oauth" || provider === "xai_oauth";
+  return (
+    provider === "chatgpt_oauth" ||
+    provider === "xai_oauth" ||
+    provider === "openrouter"
+  );
 }
 
 export function projectSubscriptionUsageState(
@@ -84,6 +88,9 @@ export function projectSubscriptionUsageState(
     };
   }
   if (data?.type === "unavailable") {
+    if (data.reason === "no_credit_limit") {
+      return { type: "IDLE" };
+    }
     if (query.lastSuccessfulSnapshot !== null) {
       return { type: "STALE_ERROR", snapshot: query.lastSuccessfulSnapshot };
     }

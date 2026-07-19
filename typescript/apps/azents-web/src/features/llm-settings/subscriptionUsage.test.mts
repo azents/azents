@@ -11,6 +11,7 @@ import {
 import type {
   SubscriptionUsageAvailableResponse,
   SubscriptionUsageExternalResponse,
+  SubscriptionUsageUnavailableResponse,
 } from "@azents/public-client";
 
 const available: SubscriptionUsageAvailableResponse = {
@@ -48,9 +49,10 @@ const available: SubscriptionUsageAvailableResponse = {
   financial_details: null,
 };
 
-void test("only subscription OAuth providers are eligible", () => {
+void test("subscription and bounded-credit providers are eligible", () => {
   assert.equal(supportsSubscriptionUsage("chatgpt_oauth"), true);
   assert.equal(supportsSubscriptionUsage("xai_oauth"), true);
+  assert.equal(supportsSubscriptionUsage("openrouter"), true);
   assert.equal(supportsSubscriptionUsage("openai"), false);
   assert.equal(supportsSubscriptionUsage("xai"), false);
 });
@@ -69,6 +71,38 @@ void test("unsupported and disabled integrations do not load usage", () => {
   assert.deepEqual(
     projectSubscriptionUsageState("chatgpt_oauth", false, query),
     { type: "DISABLED" },
+  );
+});
+
+void test("OpenRouter null limits remain completely hidden", () => {
+  const hidden: SubscriptionUsageUnavailableResponse = {
+    type: "unavailable",
+    integration_id: "openrouter-unlimited",
+    provider: "openrouter",
+    fetched_at: "2026-07-19T00:00:00Z",
+    message: "Credit usage is unavailable for keys without a credit limit.",
+    reason: "no_credit_limit",
+    retryable: false,
+  };
+  assert.deepEqual(
+    projectSubscriptionUsageState("openrouter", true, {
+      data: hidden,
+      isError: false,
+      isFetching: false,
+      isLoading: false,
+      lastSuccessfulSnapshot: null,
+    }),
+    { type: "IDLE" },
+  );
+  assert.deepEqual(
+    projectSubscriptionUsageState("openrouter", true, {
+      data: hidden,
+      isError: true,
+      isFetching: false,
+      isLoading: false,
+      lastSuccessfulSnapshot: available,
+    }),
+    { type: "IDLE" },
   );
 });
 

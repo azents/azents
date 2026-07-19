@@ -14529,6 +14529,68 @@
         "title": "OAuthExchangeRequest",
         "description": "OAuth2 token exchange request."
       },
+      "OpenRouterSubscriptionFinancialDetailsResponse": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "openrouter",
+            "title": "Type"
+          },
+          "credit_limit": {
+            "type": "number",
+            "title": "Credit Limit"
+          },
+          "credit_remaining": {
+            "type": "number",
+            "title": "Credit Remaining"
+          },
+          "usage": {
+            "type": "number",
+            "title": "Usage"
+          },
+          "usage_daily": {
+            "type": "number",
+            "title": "Usage Daily"
+          },
+          "usage_weekly": {
+            "type": "number",
+            "title": "Usage Weekly"
+          },
+          "usage_monthly": {
+            "type": "number",
+            "title": "Usage Monthly"
+          },
+          "limit_reset": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limit Reset"
+          },
+          "include_byok_in_limit": {
+            "type": "boolean",
+            "title": "Include Byok In Limit"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "credit_limit",
+          "credit_remaining",
+          "usage",
+          "usage_daily",
+          "usage_weekly",
+          "usage_monthly",
+          "limit_reset",
+          "include_byok_in_limit"
+        ],
+        "title": "OpenRouterSubscriptionFinancialDetailsResponse",
+        "description": "Management-only OpenRouter API-key credit details."
+      },
       "PartialHistoryResponse": {
         "properties": {
           "items": {
@@ -16398,7 +16460,8 @@
             "type": "string",
             "enum": [
               "chatgpt_oauth",
-              "xai_oauth"
+              "xai_oauth",
+              "openrouter"
             ],
             "title": "Provider"
           },
@@ -16435,12 +16498,16 @@
                   },
                   {
                     "$ref": "#/components/schemas/XaiSubscriptionFinancialDetailsResponse"
+                  },
+                  {
+                    "$ref": "#/components/schemas/OpenRouterSubscriptionFinancialDetailsResponse"
                   }
                 ],
                 "discriminator": {
                   "propertyName": "type",
                   "mapping": {
                     "chatgpt": "#/components/schemas/ChatGPTSubscriptionFinancialDetailsResponse",
+                    "openrouter": "#/components/schemas/OpenRouterSubscriptionFinancialDetailsResponse",
                     "xai": "#/components/schemas/XaiSubscriptionFinancialDetailsResponse"
                   }
                 }
@@ -16480,7 +16547,8 @@
             "type": "string",
             "enum": [
               "chatgpt_oauth",
-              "xai_oauth"
+              "xai_oauth",
+              "openrouter"
             ],
             "title": "Provider"
           },
@@ -16578,7 +16646,8 @@
           "rate_limited",
           "temporarily_unavailable",
           "invalid_provider_response",
-          "unsupported_account"
+          "unsupported_account",
+          "no_credit_limit"
         ],
         "title": "SubscriptionUsageUnavailableReason",
         "description": "Controlled reasons a subscription usage read is unavailable."
@@ -16598,7 +16667,8 @@
             "type": "string",
             "enum": [
               "chatgpt_oauth",
-              "xai_oauth"
+              "xai_oauth",
+              "openrouter"
             ],
             "title": "Provider"
           },

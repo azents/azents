@@ -24,7 +24,7 @@ code_paths:
   - testenv/azents/e2e/src/tests/azents/public/test_llm_provider_integration.py
   - testenv/azents/e2e/src/tests/azents/public/test_model_selection.py
 last_verified_at: 2026-07-19
-spec_version: 2
+spec_version: 3
 ---
 
 # OpenRouter API Key Provider Flow
@@ -60,6 +60,19 @@ Rules:
 - Name-only updates and disable operations do not trigger catalog synchronization.
 - The provider API origin is fixed by Azents. No public API or frontend field accepts a custom base URL.
 - The PostgreSQL `llm_provider` enum additively includes `openrouter`. Downgrade leaves the enum value in place.
+
+## API-Key Credit Usage
+
+For an enabled OpenRouter integration, the shared subscription-usage route reads the current key at the fixed provider endpoint:
+
+```text
+GET https://openrouter.ai/api/v1/key
+Authorization: Bearer <integration API key>
+```
+
+A bounded key is normalized into one primary credit-limit window. Its consumed percentage is calculated from `limit` and `limit_remaining`; known daily and weekly reset policies retain their approximate window length, while the provider does not supply an exact reset timestamp. Workspace members with integration-write permission can expand financial details for the exact limit, remaining credits, cumulative usage, daily usage, weekly usage, monthly usage, reset policy, and whether BYOK usage counts toward the limit. Read-only members and composer surfaces receive only operational percentage data.
+
+When either `limit` or `limit_remaining` is `null`, Azents treats the key as having no displayable bounded limit. The route returns the controlled `no_credit_limit` outcome without limits or financial details, and both Workspace LLM Settings and composer surfaces render no usage affordance. Provider errors remain integration-local unavailable states and do not disable integration management, model selection, or message submission.
 
 ## Account-Scoped Model Catalog
 
@@ -121,6 +134,8 @@ OpenRouter execution uses the LiteLLM Responses adapter and the common canonical
 - The setup guide states that the catalog is account-scoped and that routing, data retention, and ZDR eligibility are controlled in OpenRouter.
 - The model picker uses the shared integration-catalog search, pagination, stale, sync, and failure states.
 - A manual catalog refresh is available after account policy or model availability changes, subject to the common synchronization policy.
+- Bounded API keys show credit-limit usage in LLM Settings and the selected-model composer affordance.
+- API keys with a `null` limit or remaining-limit value render no credit usage affordance.
 
 ## Snapshot Semantics
 
@@ -130,7 +145,7 @@ Later OpenRouter catalog changes do not mutate existing Agent or Workspace snaps
 
 ## Security and Verification
 
-- API keys are excluded from public responses, logs, catalog failure messages, source metadata, snapshots, and test evidence.
+- API keys are excluded from public responses, logs, catalog and credit-usage failure messages, source metadata, snapshots, and test evidence.
 - The fixed API origin prevents a workspace user from turning provider operations into arbitrary server-side requests.
 - Source metadata is bounded and does not retain the raw account catalog response.
 - Deterministic tests use fake keys and public product APIs; they do not call OpenRouter or write directly to the product database.
@@ -142,5 +157,6 @@ Later OpenRouter catalog changes do not mutate existing Agent or Workspace snaps
 
 | Date | Version | Change | Rationale |
 |---|---:|---|---|
+| 2026-07-19 | 3 | Added API-key credit usage with bounded-key percentage and manager financial details; unlimited keys remain hidden | Reuse the shared usage surface without presenting a meaningless limit for `null` OpenRouter key limits |
 | 2026-07-19 | 2 | Extended OpenRouter response-handle acquisition to 60 seconds while preserving common stream idle and absolute bounds | Prevent transient upstream routing and model preparation from crossing the common 15-second acquisition deadline |
 | 2026-07-19 | 1 | Documented the stable OpenRouter API-key integration, account catalog, runtime, UI, and security behavior | ADR-0169 and the verified OpenRouter implementation |

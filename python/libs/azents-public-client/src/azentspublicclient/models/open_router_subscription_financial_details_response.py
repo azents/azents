@@ -17,38 +17,32 @@ import pprint
 import re  # noqa: F401
 import json
 
-from datetime import datetime
-from pydantic import BaseModel, ConfigDict, Field, StrictStr, field_validator
-from typing import Any, ClassVar, Dict, List
-from typing_extensions import Annotated
+from pydantic import BaseModel, ConfigDict, StrictBool, StrictFloat, StrictInt, StrictStr, field_validator
+from typing import Any, ClassVar, Dict, List, Optional, Union
 from typing import Optional, Set
 from typing_extensions import Self
 
-class SubscriptionUsageExternalResponse(BaseModel):
+class OpenRouterSubscriptionFinancialDetailsResponse(BaseModel):
     """
-    Public provider-managed subscription usage response.
+    Management-only OpenRouter API-key credit details.
     """ # noqa: E501
     type: StrictStr
-    integration_id: StrictStr
-    provider: StrictStr
-    fetched_at: datetime
-    url: Annotated[str, Field(min_length=1, strict=True, max_length=2083)]
-    message: StrictStr
+    credit_limit: Union[StrictFloat, StrictInt]
+    credit_remaining: Union[StrictFloat, StrictInt]
+    usage: Union[StrictFloat, StrictInt]
+    usage_daily: Union[StrictFloat, StrictInt]
+    usage_weekly: Union[StrictFloat, StrictInt]
+    usage_monthly: Union[StrictFloat, StrictInt]
+    limit_reset: Optional[StrictStr]
+    include_byok_in_limit: StrictBool
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["type", "integration_id", "provider", "fetched_at", "url", "message"]
+    __properties: ClassVar[List[str]] = ["type", "credit_limit", "credit_remaining", "usage", "usage_daily", "usage_weekly", "usage_monthly", "limit_reset", "include_byok_in_limit"]
 
     @field_validator('type')
     def type_validate_enum(cls, value):
         """Validates the enum"""
-        if value not in set(['external']):
-            raise ValueError("must be one of enum values ('external')")
-        return value
-
-    @field_validator('provider')
-    def provider_validate_enum(cls, value):
-        """Validates the enum"""
-        if value not in set(['chatgpt_oauth', 'xai_oauth', 'openrouter']):
-            raise ValueError("must be one of enum values ('chatgpt_oauth', 'xai_oauth', 'openrouter')")
+        if value not in set(['openrouter']):
+            raise ValueError("must be one of enum values ('openrouter')")
         return value
 
     model_config = ConfigDict(
@@ -69,7 +63,7 @@ class SubscriptionUsageExternalResponse(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of SubscriptionUsageExternalResponse from a JSON string"""
+        """Create an instance of OpenRouterSubscriptionFinancialDetailsResponse from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -97,11 +91,16 @@ class SubscriptionUsageExternalResponse(BaseModel):
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
 
+        # set to None if limit_reset (nullable) is None
+        # and model_fields_set contains the field
+        if self.limit_reset is None and "limit_reset" in self.model_fields_set:
+            _dict['limit_reset'] = None
+
         return _dict
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of SubscriptionUsageExternalResponse from a dict"""
+        """Create an instance of OpenRouterSubscriptionFinancialDetailsResponse from a dict"""
         if obj is None:
             return None
 
@@ -110,11 +109,14 @@ class SubscriptionUsageExternalResponse(BaseModel):
 
         _obj = cls.model_validate({
             "type": obj.get("type"),
-            "integration_id": obj.get("integration_id"),
-            "provider": obj.get("provider"),
-            "fetched_at": obj.get("fetched_at"),
-            "url": obj.get("url"),
-            "message": obj.get("message")
+            "credit_limit": obj.get("credit_limit"),
+            "credit_remaining": obj.get("credit_remaining"),
+            "usage": obj.get("usage"),
+            "usage_daily": obj.get("usage_daily"),
+            "usage_weekly": obj.get("usage_weekly"),
+            "usage_monthly": obj.get("usage_monthly"),
+            "limit_reset": obj.get("limit_reset"),
+            "include_byok_in_limit": obj.get("include_byok_in_limit")
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

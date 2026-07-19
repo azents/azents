@@ -20,6 +20,14 @@ Name | Type | Description | Notes
 **auto_top_up_enabled** | **bool** |  |
 **auto_top_up_amount_cents** | **int** |  |
 **auto_top_up_monthly_maximum_cents** | **int** |  |
+**credit_limit** | **float** |  |
+**credit_remaining** | **float** |  |
+**usage** | **float** |  |
+**usage_daily** | **float** |  |
+**usage_weekly** | **float** |  |
+**usage_monthly** | **float** |  |
+**limit_reset** | **str** |  |
+**include_byok_in_limit** | **bool** |  |
 
 ## Example
 

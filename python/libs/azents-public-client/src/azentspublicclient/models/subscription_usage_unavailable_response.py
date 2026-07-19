@@ -48,8 +48,8 @@ class SubscriptionUsageUnavailableResponse(BaseModel):
     @field_validator('provider')
     def provider_validate_enum(cls, value):
         """Validates the enum"""
-        if value not in set(['chatgpt_oauth', 'xai_oauth']):
-            raise ValueError("must be one of enum values ('chatgpt_oauth', 'xai_oauth')")
+        if value not in set(['chatgpt_oauth', 'xai_oauth', 'openrouter']):
+            raise ValueError("must be one of enum values ('chatgpt_oauth', 'xai_oauth', 'openrouter')")
         return value
 
     model_config = ConfigDict(

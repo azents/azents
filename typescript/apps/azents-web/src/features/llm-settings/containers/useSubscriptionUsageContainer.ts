@@ -65,6 +65,14 @@ export function useSubscriptionUsageContainer(
   const successfulSnapshotCache = useRef<SuccessfulSnapshotCache | null>(null);
 
   useEffect(() => {
+    if (
+      query.data?.type === "unavailable" &&
+      query.data.reason === "no_credit_limit"
+    ) {
+      successfulSnapshotCache.current = null;
+      queryClient.removeQueries({ exact: true, queryKey: snapshotQueryKey });
+      return;
+    }
     if (query.data?.type === "available" || query.data?.type === "external") {
       successfulSnapshotCache.current = {
         handle,

@@ -476,6 +476,55 @@ function FinancialDetails({
     );
   }
 
+  if (details.type === "openrouter") {
+    return (
+      <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="xs" pt="xs">
+        <Detail
+          label={t("financial.creditLimit")}
+          value={formatUsdCredits(details.credit_limit, format)}
+        />
+        <Detail
+          label={t("financial.creditRemaining")}
+          value={formatUsdCredits(details.credit_remaining, format)}
+        />
+        <Detail
+          label={t("financial.usageAllTime")}
+          value={formatUsdCredits(details.usage, format)}
+        />
+        <Detail
+          label={t("financial.usageDaily")}
+          value={formatUsdCredits(details.usage_daily, format)}
+        />
+        <Detail
+          label={t("financial.usageWeekly")}
+          value={formatUsdCredits(details.usage_weekly, format)}
+        />
+        <Detail
+          label={t("financial.usageMonthly")}
+          value={formatUsdCredits(details.usage_monthly, format)}
+        />
+        {details.limit_reset !== null ? (
+          <Detail
+            label={t("financial.limitReset")}
+            value={
+              details.limit_reset === "daily"
+                ? t("financial.resetValues.daily")
+                : details.limit_reset === "weekly"
+                  ? t("financial.resetValues.weekly")
+                  : details.limit_reset === "monthly"
+                    ? t("financial.resetValues.monthly")
+                    : details.limit_reset
+            }
+          />
+        ) : null}
+        <Detail
+          label={t("financial.byokIncluded")}
+          value={t(details.include_byok_in_limit ? "yes" : "no")}
+        />
+      </SimpleGrid>
+    );
+  }
+
   return (
     <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="xs" pt="xs">
       {planLabel ? (
@@ -592,6 +641,17 @@ function formatDateTime(
   return format.dateTime(new Date(value), {
     dateStyle: "medium",
     timeStyle: "short",
+  });
+}
+
+function formatUsdCredits(
+  credits: number,
+  format: ReturnType<typeof useFormatter>,
+): string {
+  return format.number(credits, {
+    currency: "USD",
+    maximumFractionDigits: 4,
+    style: "currency",
   });
 }
 

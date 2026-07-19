@@ -18,12 +18,14 @@ from azents.core.chatgpt_oauth import (
     resolve_chatgpt_usage_base_url,
 )
 from azents.core.credentials import (
+    ApiKeySecrets,
     ChatGPTOAuthConfig,
     ChatGPTOAuthSecrets,
     XaiOAuthConfig,
     XaiOAuthSecrets,
 )
 from azents.core.enums import LLMProvider
+from azents.core.openrouter import OPENROUTER_API_BASE_URL
 from azents.core.xai_oauth import (
     XAI_USAGE_BASE_URL,
     XaiOAuthConnectionStatus,
@@ -61,6 +63,9 @@ from .data import (
     ChatGPTUsageSnapshot,
     ChatGPTUsageUnauthorized,
     ChatGPTUsageUnavailable,
+    OpenRouterUsageHidden,
+    OpenRouterUsageSnapshot,
+    OpenRouterUsageUnavailable,
     SubscriptionUsageAvailable,
     SubscriptionUsageExternal,
     SubscriptionUsageNotFound,
@@ -75,6 +80,10 @@ from .data import (
     XaiUsageUnauthorized,
     XaiUsageUnavailable,
     unavailable_message,
+)
+from .openrouter_client import (
+    OPENROUTER_USAGE_CONTRACT_VERSION,
+    OpenRouterSubscriptionUsageClient,
 )
 from .xai_client import (
     XAI_USAGE_CONTRACT_VERSION,
@@ -101,6 +110,11 @@ def get_xai_usage_base_url() -> str:
     return resolve_xai_usage_base_url()
 
 
+def get_openrouter_usage_base_url() -> str:
+    """Return the fixed OpenRouter API root used for key-credit reads."""
+    return OPENROUTER_API_BASE_URL
+
+
 @dataclasses.dataclass
 class SubscriptionUsageService:
     """Load, authorize, refresh, and normalize one subscription usage read."""
@@ -115,6 +129,7 @@ class SubscriptionUsageService:
     http_client: Annotated[httpx.AsyncClient, Depends(_get_http_client)]
     chatgpt_usage_base_url: Annotated[str, Depends(get_chatgpt_usage_base_url)]
     xai_usage_base_url: Annotated[str, Depends(get_xai_usage_base_url)]
+    openrouter_usage_base_url: Annotated[str, Depends(get_openrouter_usage_base_url)]
 
     async def read(
         self,
@@ -155,6 +170,11 @@ class SubscriptionUsageService:
                 )
             case LLMProvider.XAI_OAUTH:
                 result = await self._read_xai_usage(
+                    integration=integration,
+                    include_financial_details=include_financial_details,
+                )
+            case LLMProvider.OPENROUTER:
+                result = await self._read_openrouter_usage(
                     integration=integration,
                     include_financial_details=include_financial_details,
                 )
@@ -505,6 +525,47 @@ class SubscriptionUsageService:
             case _:
                 assert_never(refresh_result)
 
+    async def _read_openrouter_usage(
+        self,
+        *,
+        integration: LLMProviderIntegrationWithSecrets,
+        include_financial_details: bool,
+    ) -> "_UsageReadResult":
+        """Read the current OpenRouter API key's bounded credit usage."""
+        if not integration.enabled:
+            return self._unavailable(
+                integration=integration,
+                reason=SubscriptionUsageUnavailableReason.DISABLED,
+                retryable=False,
+                http_status=None,
+            )
+        if not isinstance(integration.secrets, ApiKeySecrets):
+            return self._unavailable(
+                integration=integration,
+                reason=SubscriptionUsageUnavailableReason.INVALID_PROVIDER_RESPONSE,
+                retryable=False,
+                http_status=None,
+            )
+        outcome = await self._openrouter_client().read_usage(
+            secrets=integration.secrets
+        )
+        match outcome:
+            case OpenRouterUsageSnapshot():
+                return self._available(
+                    integration=integration,
+                    snapshot=outcome,
+                    include_financial_details=include_financial_details,
+                )
+            case OpenRouterUsageHidden():
+                return self._hidden(integration=integration)
+            case OpenRouterUsageUnavailable():
+                return self._from_adapter_unavailable(
+                    integration=integration,
+                    outcome=outcome,
+                )
+            case _:
+                assert_never(outcome)
+
     def _chatgpt_client(self) -> ChatGPTSubscriptionUsageClient:
         """Create the ChatGPT adapter from request-scoped dependencies."""
         return ChatGPTSubscriptionUsageClient(
@@ -519,11 +580,18 @@ class SubscriptionUsageService:
             usage_base_url=self.xai_usage_base_url,
         )
 
+    def _openrouter_client(self) -> OpenRouterSubscriptionUsageClient:
+        """Create the OpenRouter adapter from request-scoped dependencies."""
+        return OpenRouterSubscriptionUsageClient(
+            http_client=self.http_client,
+            api_base_url=self.openrouter_usage_base_url,
+        )
+
     def _available(
         self,
         *,
         integration: LLMProviderIntegrationWithSecrets,
-        snapshot: ChatGPTUsageSnapshot | XaiUsageSnapshot,
+        snapshot: ChatGPTUsageSnapshot | XaiUsageSnapshot | OpenRouterUsageSnapshot,
         include_financial_details: bool,
     ) -> "_UsageReadResult":
         """Project a normalized adapter snapshot into an integration outcome."""
@@ -538,6 +606,19 @@ class SubscriptionUsageService:
                     snapshot.financial_details if include_financial_details else None
                 ),
             ),
+            http_status=None,
+        )
+
+    def _hidden(
+        self,
+        *,
+        integration: LLMProviderIntegrationWithSecrets,
+    ) -> "_UsageReadResult":
+        """Project a successful read with no displayable usage limit."""
+        return self._unavailable(
+            integration=integration,
+            reason=SubscriptionUsageUnavailableReason.NO_CREDIT_LIMIT,
+            retryable=False,
             http_status=None,
         )
 
@@ -563,7 +644,9 @@ class SubscriptionUsageService:
         self,
         *,
         integration: LLMProviderIntegrationWithSecrets,
-        outcome: ChatGPTUsageUnavailable | XaiUsageUnavailable,
+        outcome: ChatGPTUsageUnavailable
+        | XaiUsageUnavailable
+        | OpenRouterUsageUnavailable,
     ) -> "_UsageReadResult":
         """Project a controlled adapter failure without exposing HTTP details."""
         return self._unavailable(
@@ -682,11 +765,7 @@ class SubscriptionUsageService:
             "integration_id": integration.id,
             "operation": "subscription_usage_read",
             "outcome": outcome_category,
-            "adapter_contract_version": (
-                CHATGPT_USAGE_CONTRACT_VERSION
-                if integration.provider == LLMProvider.CHATGPT_OAUTH
-                else XAI_USAGE_CONTRACT_VERSION
-            ),
+            "adapter_contract_version": _adapter_contract_version(integration.provider),
             "duration_ms": round((time.perf_counter() - started_at) * 1000),
         }
         if http_status is not None:
@@ -746,6 +825,20 @@ def _xai_credentials(
     )
 
 
+def _adapter_contract_version(provider: LLMProvider) -> str:
+    """Return the provider-specific usage adapter contract version."""
+    match provider:
+        case LLMProvider.CHATGPT_OAUTH:
+            return CHATGPT_USAGE_CONTRACT_VERSION
+        case LLMProvider.XAI_OAUTH:
+            return XAI_USAGE_CONTRACT_VERSION
+        case LLMProvider.OPENROUTER:
+            return OPENROUTER_USAGE_CONTRACT_VERSION
+        case _:
+            msg = "Subscription usage adapter has an unsupported provider."
+            raise ValueError(msg)
+
+
 def _outcome_category(outcome: SubscriptionUsageOutcome) -> str:
     """Return the closed public outcome category for safe logging."""
     match outcome:
@@ -753,6 +846,10 @@ def _outcome_category(outcome: SubscriptionUsageOutcome) -> str:
             return "available"
         case SubscriptionUsageExternal():
             return "external"
+        case SubscriptionUsageUnavailable(
+            reason=SubscriptionUsageUnavailableReason.NO_CREDIT_LIMIT
+        ):
+            return "hidden"
         case SubscriptionUsageUnavailable():
             return "unavailable"
         case _:

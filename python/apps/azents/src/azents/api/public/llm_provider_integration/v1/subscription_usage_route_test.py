@@ -13,6 +13,7 @@ from azents.core.auth.permissions import Permission, Permissions
 from azents.core.enums import LLMProvider, WorkspaceUserRole
 from azents.services.subscription_usage.data import (
     ChatGPTSubscriptionFinancialDetails,
+    OpenRouterSubscriptionFinancialDetails,
     SubscriptionUsageAvailable,
     SubscriptionUsageExternal,
     SubscriptionUsageLimit,
@@ -27,6 +28,7 @@ from azents.services.subscription_usage.data import (
 from . import get_subscription_usage, list_integrations
 from .data import (
     ChatGPTSubscriptionFinancialDetailsResponse,
+    OpenRouterSubscriptionFinancialDetailsResponse,
     SubscriptionUsageAvailableResponse,
     SubscriptionUsageExternalResponse,
     SubscriptionUsageUnavailableResponse,
@@ -235,6 +237,7 @@ def test_all_public_union_discriminators_are_required() -> None:
     models = [
         ChatGPTSubscriptionFinancialDetailsResponse,
         XaiSubscriptionFinancialDetailsResponse,
+        OpenRouterSubscriptionFinancialDetailsResponse,
         SubscriptionUsageAvailableResponse,
         SubscriptionUsageExternalResponse,
         SubscriptionUsageUnavailableResponse,
@@ -283,3 +286,57 @@ def test_xai_available_financial_details_use_unchanged_public_contract() -> None
     assert response.financial_details.type == "xai"
     assert response.financial_details.prepaid_balance_cents == 1250
     assert response.financial_details.auto_top_up_enabled is True
+
+
+def test_openrouter_credit_details_and_no_limit_outcome_serialize() -> None:
+    """Expose bounded credit details and hide unlimited-key snapshots."""
+    now = datetime.datetime.now(datetime.UTC)
+    bounded = SubscriptionUsageAvailable(
+        integration_id="openrouter-integration-1",
+        provider=LLMProvider.OPENROUTER,
+        fetched_at=now,
+        plan_label=None,
+        limits=(
+            SubscriptionUsageLimit(
+                id="api-key-credit",
+                label="Monthly credit limit",
+                used_percent=25.0,
+                window_minutes=None,
+                resets_at=None,
+                primary=True,
+            ),
+        ),
+        financial_details=OpenRouterSubscriptionFinancialDetails(
+            credit_limit=50.0,
+            credit_remaining=37.5,
+            usage=20.0,
+            usage_daily=1.0,
+            usage_weekly=5.0,
+            usage_monthly=12.5,
+            limit_reset="monthly",
+            include_byok_in_limit=True,
+        ),
+    )
+    hidden = SubscriptionUsageUnavailable(
+        integration_id="openrouter-integration-1",
+        provider=LLMProvider.OPENROUTER,
+        fetched_at=now,
+        reason=SubscriptionUsageUnavailableReason.NO_CREDIT_LIMIT,
+        message="Credit usage is unavailable for keys without a credit limit.",
+        retryable=False,
+    )
+
+    bounded_response = convert_subscription_usage_response(bounded)
+    hidden_response = convert_subscription_usage_response(hidden)
+
+    assert isinstance(bounded_response, SubscriptionUsageAvailableResponse)
+    assert bounded_response.provider == LLMProvider.OPENROUTER
+    assert isinstance(
+        bounded_response.financial_details,
+        OpenRouterSubscriptionFinancialDetailsResponse,
+    )
+    assert bounded_response.financial_details.credit_remaining == 37.5
+    assert isinstance(hidden_response, SubscriptionUsageUnavailableResponse)
+    assert hidden_response.provider == LLMProvider.OPENROUTER
+    assert hidden_response.reason == SubscriptionUsageUnavailableReason.NO_CREDIT_LIMIT
+    assert hidden_response.retryable is False
