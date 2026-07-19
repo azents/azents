@@ -1369,8 +1369,6 @@ def _log_model_token_usage(
             "cached_token_ratio": (
                 round(cached_ratio, 4) if cached_ratio is not None else None
             ),
-            "raw_usage": usage.raw,
-            "raw_hidden_params": usage.raw_hidden_params,
         },
     )
 

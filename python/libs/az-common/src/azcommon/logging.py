@@ -1,6 +1,7 @@
 import datetime
 import enum
 import logging
+import re
 import sys
 from typing import TYPE_CHECKING, Any, MutableMapping, TypeVar, assert_never
 
@@ -123,6 +124,43 @@ class HealthCheckFilter(logging.Filter):
             if marker in message or marker_query in message:
                 return False
         return True
+
+
+_SENSITIVE_QUERY_PARAMETER_PATTERN = re.compile(
+    r"([?&]ticket=)[^&\s\"']+",
+    flags=re.IGNORECASE,
+)
+
+
+class SensitiveQueryParameterFilter(logging.Filter):
+    """Redact sensitive query parameter values before log handlers run."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        """Redact WebSocket ticket values in formatted and parameterized logs."""
+        if isinstance(record.msg, str):
+            record.msg = _redact_sensitive_query_parameters(record.msg)
+        if isinstance(record.args, tuple):
+            record.args = tuple(
+                _redact_sensitive_query_parameters(value)
+                if isinstance(value, str)
+                else value
+                for value in record.args
+            )
+        elif isinstance(record.args, dict):
+            record.args = {
+                key: (
+                    _redact_sensitive_query_parameters(value)
+                    if isinstance(value, str)
+                    else value
+                )
+                for key, value in record.args.items()
+            }
+        return True
+
+
+def _redact_sensitive_query_parameters(value: str) -> str:
+    """Replace sensitive query parameter values with a fixed placeholder."""
+    return _SENSITIVE_QUERY_PARAMETER_PATTERN.sub(r"\1<redacted>", value)
 
 
 class ConsoleFormatter(DefaultFormatter):
@@ -331,3 +369,7 @@ def configure_logging_for_runtime(
 
         # 헬스체크 요청을 access log에서 제외
         logging.getLogger("uvicorn.access").addFilter(HealthCheckFilter())
+
+        sensitive_query_filter = SensitiveQueryParameterFilter()
+        logging.getLogger("uvicorn.access").addFilter(sensitive_query_filter)
+        logging.getLogger("uvicorn.error").addFilter(sensitive_query_filter)

@@ -1643,8 +1643,8 @@ async def test_model_usage_is_appended_as_turn_marker(
     assert fields["cached_tokens"] == 75
     assert fields["cache_creation_tokens"] == 10
     assert fields["cached_token_ratio"] == 0.75
-    assert fields["raw_usage"] == usage.raw
-    assert fields["raw_hidden_params"] == usage.raw_hidden_params
+    assert "raw_usage" not in fields
+    assert "raw_hidden_params" not in fields
 
 
 async def test_model_input_uses_session_head_event_id() -> None:
