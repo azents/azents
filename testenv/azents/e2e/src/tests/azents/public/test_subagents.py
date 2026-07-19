@@ -1078,17 +1078,17 @@ class TestSubagents:
             session_id=root_session_id,
             expected=_NO_DESCENDANTS_RESPONSE,
         )
-        assert (
-            _tree_nodes(
-                _subagent_tree(
-                    public_url=azents_public_server_url,
-                    token=workspace.token,
-                    agent_id=agent_id,
-                    session_id=root_session_id,
-                )
+        nodes = _tree_nodes(
+            _subagent_tree(
+                public_url=azents_public_server_url,
+                token=workspace.token,
+                agent_id=agent_id,
+                session_id=root_session_id,
             )
-            == []
         )
+        assert len(nodes) == 1
+        assert nodes[0].name == "root"
+        assert nodes[0].children == []
         _wait_for_session_run_state(
             public_url=azents_public_server_url,
             token=workspace.token,

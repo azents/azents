@@ -937,7 +937,7 @@
     {
       "match": {
         "endpoint": "chat",
-        "toolCallId": "call_subagent_mailbox_wait"
+        "userMessage": "Subagent intermediate mailbox message."
       },
       "response": {
         "content": "Subagent mailbox wait observed an intermediate message."
@@ -1049,8 +1049,7 @@
     {
       "match": {
         "endpoint": "chat",
-        "userMessage": "Subagent E2E post-observation turn",
-        "hasToolResult": false
+        "userMessage": "Subagent E2E post-observation turn"
       },
       "response": {
         "content": "Subagent post-observation turn completed."
@@ -1059,8 +1058,7 @@
     {
       "match": {
         "endpoint": "chat",
-        "userMessage": "Subagent E2E promote mailbox messages",
-        "hasToolResult": false
+        "userMessage": "Subagent E2E promote mailbox messages"
       },
       "response": {
         "content": "Subagent mailbox messages were promoted."
@@ -1119,8 +1117,7 @@
     {
       "match": {
         "endpoint": "chat",
-        "userMessage": "Subagent E2E interrupt child",
-        "hasToolResult": false
+        "userMessage": "Subagent E2E interrupt child"
       },
       "response": {
         "toolCalls": [
@@ -1146,8 +1143,16 @@
     {
       "match": {
         "endpoint": "chat",
-        "userMessage": "Subagent E2E observe interrupted result",
-        "hasToolResult": false
+        "userMessage": "The agent run was interrupted."
+      },
+      "response": {
+        "content": "Subagent interrupt request completed."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Subagent E2E observe interrupted result"
       },
       "response": {
         "content": "Subagent interrupted result was observed."
@@ -1250,8 +1255,7 @@
     {
       "match": {
         "endpoint": "chat",
-        "userMessage": "Subagent E2E observe failed result",
-        "hasToolResult": false
+        "userMessage": "Subagent E2E observe failed result"
       },
       "response": {
         "content": "Subagent failed result was observed."
