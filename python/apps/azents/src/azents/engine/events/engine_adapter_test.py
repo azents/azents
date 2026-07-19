@@ -46,6 +46,7 @@ from azents.engine.events.engine_adapter import (
     EventEngineAdapterConfig,
     RunExecutionFactory,
     _HookedClientToolExecutor,  # pyright: ignore[reportPrivateUsage]  # Fix Hook wrapper cancellation contract.
+    _WorkingSetClientToolExecutor,  # pyright: ignore[reportPrivateUsage]  # Verify deferred recency wrapper.
     _xai_imagine_client_factory,  # pyright: ignore[reportPrivateUsage]  # Test-only default dependency.
 )
 from azents.engine.events.engine_events import RunComplete
@@ -84,11 +85,16 @@ from azents.engine.events.types import (
     SystemErrorPayload,
     UserMessagePayload,
 )
-from azents.engine.hooks.dispatcher import RuntimeHookDispatcher
+from azents.engine.hooks.dispatcher import (
+    RuntimeHookDispatcher,
+    RuntimeHookProviderRef,
+)
 from azents.engine.hooks.types import (
+    BeforeToolCallHookContext,
     CompactionSummaryHookContext,
     CompactionSummaryReplace,
     RuntimeHooks,
+    ToolCallDeny,
     TurnInjectedPrompt,
     TurnStartHookContext,
     TurnStartResult,
@@ -101,7 +107,13 @@ from azents.engine.run.types import (
     USER_STOP_CANCEL_MESSAGE,
     BuiltinToolSpec,
     CheckStop,
+    FunctionTool,
     FunctionToolError,
+    FunctionToolSpec,
+)
+from azents.engine.tooling.tool_search import (
+    ToolWorkingSetState,
+    ToolWorkingSetStore,
 )
 from azents.engine.tools.xai_image_generation import XaiImagineClientFactory
 from azents.repos.agent_execution.data import AgentRunCreate, EventCreate
@@ -159,6 +171,44 @@ class _Session(AsyncSession):
 
     async def commit(self) -> None:
         """No-op commit."""
+
+
+class _ToolWorkingSetStore(ToolWorkingSetStore):
+    """In-memory working-set store for adapter assembly tests."""
+
+    def __init__(self) -> None:
+        self.states: dict[tuple[str, str], ToolWorkingSetState] = {}
+
+    async def load(self, agent_id: str, session_id: str) -> ToolWorkingSetState:
+        """Return current in-memory state."""
+        return self.states.get((agent_id, session_id), ToolWorkingSetState())
+
+    async def activate(
+        self,
+        agent_id: str,
+        session_id: str,
+        tool_names: Sequence[str],
+    ) -> ToolWorkingSetState:
+        """Move activated names to the in-memory recency front."""
+        current = await self.load(agent_id, session_id)
+        activated = list(dict.fromkeys(tool_names))
+        state = ToolWorkingSetState(
+            tool_names=[
+                *activated,
+                *(name for name in current.tool_names if name not in activated),
+            ]
+        )
+        self.states[(agent_id, session_id)] = state
+        return state
+
+    async def touch(
+        self,
+        agent_id: str,
+        session_id: str,
+        tool_name: str,
+    ) -> ToolWorkingSetState:
+        """Move one invoked name to the in-memory recency front."""
+        return await self.activate(agent_id, session_id, [tool_name])
 
 
 class _ArtifactService(ArtifactService):
@@ -566,6 +616,54 @@ class _RecordingToolExecutor:
         self.cancelled.append(call)
 
 
+class _DeferredToolkit(Toolkit[BaseModel]):
+    """Registered service Toolkit used for Tool Search integration tests."""
+
+    display_name = "Deferred Service"
+
+    def __init__(self, tool_names: Sequence[str]) -> None:
+        self.tool_names = list(tool_names)
+
+    async def update_context(self, context: TurnContext) -> ToolkitState:
+        """Return the current deferred operation set."""
+        del context
+        tools: list[FunctionTool] = []
+        for name in self.tool_names:
+
+            async def handler(arguments: str, *, tool_name: str = name) -> str:
+                return f"{tool_name}:{arguments}"
+
+            tools.append(
+                FunctionTool(
+                    spec=FunctionToolSpec(
+                        name=name,
+                        description=f"Run the {name} deferred service operation.",
+                        input_schema={"type": "object", "properties": {}},
+                    ),
+                    handler=handler,
+                )
+            )
+        return ToolkitState(status=ToolkitStatus.ENABLED, tools=tools)
+
+
+class _DenyHookToolkit(Toolkit[BaseModel]):
+    """Runtime hook provider that denies every tool call."""
+
+    async def update_context(self, context: TurnContext) -> ToolkitState:
+        """Return no tools; only the hook behavior is needed."""
+        del context
+        return ToolkitState(status=ToolkitStatus.ENABLED, tools=[])
+
+    def hooks(self) -> RuntimeHooks:
+        """Return the deny hook mapping."""
+        return {"on_before_tool_call": self._deny}
+
+    async def _deny(self, context: BeforeToolCallHookContext) -> ToolCallDeny:
+        """Deny one tool call."""
+        del context
+        return ToolCallDeny(message="denied")
+
+
 class _PromptHookToolkit(Toolkit[BaseModel]):
     """Toolkit for turn start prompt injection tests."""
 
@@ -667,6 +765,41 @@ def test_hooked_tool_executor_forwards_request_cancel() -> None:
     assert inner.cancelled == [call]
 
 
+async def test_working_set_recency_refreshes_before_hook_denial() -> None:
+    """Treat a denied deferred invocation as current capability intent."""
+    store = _ToolWorkingSetStore()
+    await store.activate("agent-1", "session-1", ["service__other"])
+    hooked = _HookedClientToolExecutor(
+        inner=_RecordingToolExecutor(),
+        dispatcher=RuntimeHookDispatcher(),
+        providers=[RuntimeHookProviderRef(slug="deny", toolkit=_DenyHookToolkit())],
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        session_id="session-1",
+        run_id="run-1",
+    )
+    wrapper = _WorkingSetClientToolExecutor(
+        inner=hooked,
+        deferred_tool_names=frozenset({"service__probe"}),
+        store=store,
+        agent_id="agent-1",
+        session_id="session-1",
+    )
+
+    result = await wrapper.execute(
+        ClientToolCallPayload(
+            call_id="call-1",
+            name="service__probe",
+            arguments="{}",
+            native_artifact=_artifact({"type": "function_call"}),
+        )
+    )
+    state = await store.load("agent-1", "session-1")
+
+    assert result.status == "failed"
+    assert state.tool_names == ["service__probe", "service__other"]
+
+
 async def test_event_engine_adapter_runs_execution() -> None:
     """Adapter assembles AgentRunExecution and returns terminal emit."""
     run_repo = _RunRepo()
@@ -728,6 +861,113 @@ async def test_event_engine_adapter_runs_execution() -> None:
     )
     assert isinstance(prepared_request.options.get("prompt_cache_key"), str)
     assert isinstance(_events(emits)[0], RunComplete)
+
+
+async def test_tool_search_activation_updates_the_next_prepared_call() -> None:
+    """Hide deferred tools until search and retain immutable call snapshots."""
+    toolkit = _DeferredToolkit(["probe", "other"])
+    store = _ToolWorkingSetStore()
+    execution = _Execution()
+    adapter = _agent_engine_adapter(
+        tool_working_set_store=store,
+        execution_factory=lambda **kwargs: (
+            setattr(
+                execution,
+                "model_call_preparer",
+                kwargs["model_call_preparer"],
+            )
+            or execution
+        ),
+    )
+    request = RunRequest(
+        session_id="session-1",
+        user_messages=[],
+        agent_prompt=None,
+        toolkits=[
+            ToolkitBinding(
+                toolkit=toolkit,
+                slug="service",
+                use_prefix=True,
+                toolkit_type="github",
+            )
+        ],
+        model="gpt-5.1",
+        credential_kwargs={"api_key": "test"},
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        auto_compaction_threshold_tokens=None,
+        inference_state=None,
+        compaction_provider_integration_id=None,
+    )
+    _ = [
+        emit
+        async for emit in adapter.run(
+            request,
+            RunContext(
+                owner_generation=1,
+                tool_admission_barrier=_OpenToolAdmissionBarrier(),
+                model_transport_state=InMemoryModelTransportState(
+                    websocket_enabled=False
+                ),
+                user_id="user-1",
+                run_id="0" * 32,
+                publish_event=_noop_publish,
+            ),
+        )
+    ]
+
+    assert execution.prepared_model_call is not None
+    first_prepared = execution.prepared_model_call
+    first_request = first_prepared.native_request
+    assert isinstance(first_request, OpenAIResponsesRequest)
+    assert [tool["name"] for tool in first_request.tools] == ["tool_search"]
+
+    search_result = await first_prepared.tool_executor.execute(
+        ClientToolCallPayload(
+            call_id="search-1",
+            name="tool_search",
+            arguments='{"query":"probe operation","limit":1}',
+            native_artifact=_artifact({"type": "function_call"}),
+        )
+    )
+    assert search_result.status == "completed"
+
+    toolkit.tool_names.append("new_operation")
+    stale_result = await first_prepared.tool_executor.execute(
+        ClientToolCallPayload(
+            call_id="stale-1",
+            name="service__new_operation",
+            arguments="{}",
+            native_artifact=_artifact({"type": "function_call"}),
+        )
+    )
+    assert stale_result.status == "failed"
+
+    assert execution.model_call_preparer is not None
+    second_prepared = await execution.model_call_preparer(
+        transcript=[],
+        model="gpt-5.1",
+    )
+    second_request = second_prepared.native_request
+    assert isinstance(second_request, OpenAIResponsesRequest)
+    assert [tool["name"] for tool in second_request.tools] == [
+        "service__probe",
+        "tool_search",
+    ]
+
+    await store.activate("agent-1", "session-1", ["service__other"])
+    invoked = await second_prepared.tool_executor.execute(
+        ClientToolCallPayload(
+            call_id="probe-1",
+            name="service__probe",
+            arguments="{}",
+            native_artifact=_artifact({"type": "function_call"}),
+        )
+    )
+    state = await store.load("agent-1", "session-1")
+
+    assert invoked.status == "completed"
+    assert state.tool_names[:2] == ["service__probe", "service__other"]
 
 
 def _valid_png_base64() -> str:
@@ -1890,6 +2130,7 @@ def _session_context() -> _SessionContext:
 def _agent_engine_adapter(
     *,
     session_manager: Callable[[], _SessionContext] = _session_context,
+    tool_working_set_store: ToolWorkingSetStore | None = None,
     artifact_service: ArtifactService | None = None,
     exchange_file_service: ExchangeFileService | None = None,
     model_file_service: ModelFileService | None = None,
@@ -1908,6 +2149,7 @@ def _agent_engine_adapter(
     watchdog = make_test_model_stream_watchdog()
     return AgentEngineAdapter(
         session_manager=session_manager,
+        tool_working_set_store=(tool_working_set_store or _ToolWorkingSetStore()),
         artifact_service=artifact_service or _ArtifactService(),
         exchange_file_service=exchange_file_service or _ExchangeFileService(),
         model_file_service=model_file_service or _ModelFileService(),

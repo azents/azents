@@ -8,14 +8,24 @@ from contextlib import asynccontextmanager
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.enums import LLMProvider
+from azents.engine.run.tool_budget import (
+    ResolvedToolDeclarationBudget,
+    ToolCompatibilityRuleSource,
+    ToolDeclarationBudgetExceededError,
+    ToolDeclarationCountingScope,
+    ToolRequestCompatibilityRule,
+)
 from azents.engine.run.types import FunctionTool, FunctionToolSpec
 from azents.engine.tooling.tool_search import (
     CatalogTool,
     DeferredToolSearchIndex,
     ToolCatalogSource,
     ToolExposure,
+    ToolWorkingSetState,
     ToolWorkingSetStore,
     make_tool_search_tool,
+    project_tool_catalog,
 )
 from azents.rdb.session import SessionManager
 from azents.repos.toolkit_state import (
@@ -56,6 +66,34 @@ def _entry(
             routing_metadata=(("account", slug),),
         ),
         exposure=exposure,
+    )
+
+
+def _budget(client_capacity: int | None) -> ResolvedToolDeclarationBudget:
+    if client_capacity is None:
+        return ResolvedToolDeclarationBudget(
+            rule=None,
+            counted_provider_hosted_declarations=0,
+            client_function_capacity=None,
+        )
+    rule = ToolRequestCompatibilityRule(
+        rule_id="test-limit",
+        registry_version=1,
+        provider=LLMProvider.OPENAI,
+        adapter="openai",
+        native_format="responses",
+        maximum_declarations=client_capacity,
+        counting_scope=ToolDeclarationCountingScope.TOTAL_TOOLS,
+        source=ToolCompatibilityRuleSource(
+            urls=("https://example.com/tool-limit",),
+            verified_on=datetime.date(2026, 7, 19),
+            note=None,
+        ),
+    )
+    return ResolvedToolDeclarationBudget(
+        rule=rule,
+        counted_provider_hosted_declarations=0,
+        client_function_capacity=client_capacity,
     )
 
 
@@ -251,6 +289,115 @@ def test_catalog_hash_changes_with_searchable_metadata() -> None:
     assert original.catalog_hash != changed_schema.catalog_hash
 
 
+def test_projection_uses_mru_membership_and_canonical_provider_order() -> None:
+    entries = {
+        entry.tool.spec.name: entry
+        for entry in [
+            _entry(
+                "exec_command",
+                "Run a command.",
+                exposure=ToolExposure.DIRECT,
+                toolkit_type=None,
+            ),
+            _entry(
+                "tool_search",
+                "Search tools.",
+                exposure=ToolExposure.DIRECT,
+                toolkit_type=None,
+            ),
+            _entry("service__alpha", "Alpha operation."),
+            _entry("service__beta", "Beta operation."),
+            _entry("service__gamma", "Gamma operation."),
+        ]
+    }
+    state = ToolWorkingSetState(
+        tool_names=["service__gamma", "missing", "service__alpha", "service__beta"]
+    )
+
+    projection = project_tool_catalog(
+        entries=entries,
+        working_set=state,
+        budget=_budget(3),
+    )
+
+    assert projection.direct_tool_names == ("exec_command", "tool_search")
+    assert projection.active_deferred_tool_names == (
+        "service__gamma",
+        "service__alpha",
+        "service__beta",
+    )
+    assert projection.visible_deferred_tool_names == ("service__gamma",)
+    assert projection.provider_visible_tool_names == (
+        "exec_command",
+        "service__gamma",
+        "tool_search",
+    )
+    assert projection.deferred_capacity == 1
+    assert state.tool_names[1] == "missing"
+
+
+def test_unlimited_projection_exposes_all_available_active_tools() -> None:
+    entries = {
+        entry.tool.spec.name: entry
+        for entry in [
+            _entry(
+                "exec_command",
+                "Run a command.",
+                exposure=ToolExposure.DIRECT,
+                toolkit_type=None,
+            ),
+            _entry("service__alpha", "Alpha operation."),
+            _entry("service__beta", "Beta operation."),
+        ]
+    }
+
+    projection = project_tool_catalog(
+        entries=entries,
+        working_set=ToolWorkingSetState(
+            tool_names=["service__beta", "missing", "service__alpha"]
+        ),
+        budget=_budget(None),
+    )
+
+    assert projection.visible_deferred_tool_names == (
+        "service__beta",
+        "service__alpha",
+    )
+    assert projection.provider_visible_tool_names == (
+        "exec_command",
+        "service__alpha",
+        "service__beta",
+    )
+    assert projection.deferred_capacity is None
+
+
+def test_projection_rejects_direct_tool_overflow() -> None:
+    entries = {
+        entry.tool.spec.name: entry
+        for entry in [
+            _entry(
+                "exec_command",
+                "Run a command.",
+                exposure=ToolExposure.DIRECT,
+                toolkit_type=None,
+            ),
+            _entry(
+                "tool_search",
+                "Search tools.",
+                exposure=ToolExposure.DIRECT,
+                toolkit_type=None,
+            ),
+        ]
+    }
+
+    with pytest.raises(ToolDeclarationBudgetExceededError):
+        project_tool_catalog(
+            entries=entries,
+            working_set=ToolWorkingSetState(),
+            budget=_budget(1),
+        )
+
+
 async def test_working_set_activation_and_touch_preserve_mru_order() -> None:
     repository = _MemoryToolkitStateRepository()
     store = _working_set_store(repository)
@@ -278,6 +425,34 @@ async def test_working_set_retry_reapplies_touch_to_concurrent_state() -> None:
     assert touched.tool_names == ["target", "concurrent", "old"]
 
 
+async def test_tool_search_reports_explicit_capacity_reduction() -> None:
+    repository = _MemoryToolkitStateRepository()
+    store = _working_set_store(repository)
+    index = DeferredToolSearchIndex(
+        [
+            _entry("github__create_issue", "Create a repository issue."),
+            _entry("github__list_issues", "List repository issues."),
+        ]
+    )
+    tool = make_tool_search_tool(
+        index=index,
+        store=store,
+        agent_id="agent-1",
+        session_id="session-1",
+        activation_capacity=1,
+    )
+
+    output = await tool.handler('{"query":"repository issue","limit":5}')
+    state = await store.load("agent-1", "session-1")
+
+    assert isinstance(output, str)
+    payload = json.loads(output)
+    assert payload["limit_reduced"] is True
+    assert payload["activation_limit"] == 1
+    assert len(payload["activated_tools"]) == 1
+    assert len(state.tool_names) == 1
+
+
 async def test_tool_search_schema_and_handler_activate_ranked_results() -> None:
     repository = _MemoryToolkitStateRepository()
     store = _working_set_store(repository)
@@ -292,6 +467,7 @@ async def test_tool_search_schema_and_handler_activate_ranked_results() -> None:
         store=store,
         agent_id="agent-1",
         session_id="session-1",
+        activation_capacity=None,
     )
 
     output = await tool.handler('{"query":"create issue"}')

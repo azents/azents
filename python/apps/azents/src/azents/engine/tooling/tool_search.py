@@ -12,6 +12,10 @@ from collections.abc import Callable, Mapping, Sequence
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.engine.run.tool_budget import (
+    ResolvedToolDeclarationBudget,
+    ensure_pinned_direct_tools_fit,
+)
 from azents.engine.run.types import FunctionTool
 from azents.engine.tooling.make_tool import make_tool
 from azents.engine.tooling.toolkit_state import (
@@ -80,6 +84,17 @@ class ToolSearchMatch:
     description: str
     source_label: str
     score: float
+
+
+@dataclasses.dataclass(frozen=True)
+class ToolCatalogProjection:
+    """Model-visible membership selected from one immutable executable catalog."""
+
+    direct_tool_names: tuple[str, ...]
+    active_deferred_tool_names: tuple[str, ...]
+    visible_deferred_tool_names: tuple[str, ...]
+    provider_visible_tool_names: tuple[str, ...]
+    deferred_capacity: int | None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -288,23 +303,80 @@ class ToolSearchInput(BaseModel):
     )
 
 
+def project_tool_catalog(
+    *,
+    entries: Mapping[str, CatalogTool],
+    working_set: ToolWorkingSetState,
+    budget: ResolvedToolDeclarationBudget,
+) -> ToolCatalogProjection:
+    """Project shared session recency under one provider request budget."""
+    direct_tool_names = tuple(
+        sorted(
+            name
+            for name, entry in entries.items()
+            if entry.exposure == ToolExposure.DIRECT
+        )
+    )
+    ensure_pinned_direct_tools_fit(
+        budget=budget,
+        pinned_direct_function_declarations=len(direct_tool_names),
+    )
+    active_deferred_tool_names = tuple(
+        name
+        for name in working_set.tool_names
+        if name in entries and entries[name].exposure == ToolExposure.DEFERRED
+    )
+    if budget.client_function_capacity is None:
+        deferred_capacity = None
+        visible_deferred_tool_names = active_deferred_tool_names
+    else:
+        deferred_capacity = max(
+            0,
+            budget.client_function_capacity - len(direct_tool_names),
+        )
+        visible_deferred_tool_names = active_deferred_tool_names[:deferred_capacity]
+    provider_visible_tool_names = tuple(
+        sorted((*direct_tool_names, *visible_deferred_tool_names))
+    )
+    return ToolCatalogProjection(
+        direct_tool_names=direct_tool_names,
+        active_deferred_tool_names=active_deferred_tool_names,
+        visible_deferred_tool_names=visible_deferred_tool_names,
+        provider_visible_tool_names=provider_visible_tool_names,
+        deferred_capacity=deferred_capacity,
+    )
+
+
 def make_tool_search_tool(
     *,
     index: DeferredToolSearchIndex,
     store: ToolWorkingSetStore,
     agent_id: str,
     session_id: str,
+    activation_capacity: int | None,
 ) -> FunctionTool:
     """Create the stable Tool Search function for one prepared catalog."""
+    if activation_capacity is not None and activation_capacity < 0:
+        raise ValueError("Tool Search activation capacity cannot be negative")
 
     async def tool_search(input: ToolSearchInput) -> str:
         """Search and activate deferred tools for the next prepared call."""
-        matches = index.search(input.query, limit=input.limit)
-        await store.activate(
-            agent_id,
-            session_id,
-            [match.name for match in matches],
+        effective_limit = (
+            input.limit
+            if activation_capacity is None
+            else min(input.limit, activation_capacity)
         )
+        matches = (
+            index.search(input.query, limit=effective_limit)
+            if effective_limit > 0
+            else []
+        )
+        if matches:
+            await store.activate(
+                agent_id,
+                session_id,
+                [match.name for match in matches],
+            )
         return json.dumps(
             {
                 "activated_tools": [
@@ -314,7 +386,10 @@ def make_tool_search_tool(
                         "source": match.source_label,
                     }
                     for match in matches
-                ]
+                ],
+                "requested_limit": input.limit,
+                "activation_limit": activation_capacity,
+                "limit_reduced": effective_limit < input.limit,
             },
             ensure_ascii=False,
             sort_keys=True,

@@ -5,8 +5,9 @@ import contextlib
 import json
 import logging
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from types import MappingProxyType
 
 from pydantic import TypeAdapter
 
@@ -45,8 +46,8 @@ _SLOW_TOOLKIT_UPDATE_CONTEXT_SECONDS = 1.0
 class ToolCatalog:
     """Tool catalog used by one run/turn of event loop."""
 
-    tools: dict[str, FunctionTool]
-    entries: dict[str, CatalogTool]
+    tools: Mapping[str, FunctionTool]
+    entries: Mapping[str, CatalogTool]
     static_prompt_fragment_inputs: list[ToolkitPromptInput]
     dynamic_prompt_fragment_inputs: list[ToolkitPromptInput]
     active_toolkit_bindings: list[ToolkitBinding]
@@ -79,7 +80,20 @@ class ToolCatalog:
 
     @property
     def native_tools(self) -> list[dict[str, object]]:
-        """Return LiteLLM Responses function tool schema."""
+        """Return every executable tool schema in canonical order."""
+        return self.native_tools_for(tuple(self.tools))
+
+    def native_tools_for(
+        self,
+        tool_names: Sequence[str],
+    ) -> list[dict[str, object]]:
+        """Return selected function schemas in canonical final-name order."""
+        selected: list[FunctionTool] = []
+        for name in sorted(set(tool_names)):
+            tool = self.tools.get(name)
+            if tool is None:
+                raise ValueError(f"Tool name is not in the prepared catalog: {name}")
+            selected.append(tool)
         return [
             {
                 "type": "function",
@@ -88,7 +102,7 @@ class ToolCatalog:
                 "parameters": tool.spec.input_schema,
                 "strict": False,
             }
-            for tool in sorted(self.tools.values(), key=lambda item: item.spec.name)
+            for tool in selected
         ]
 
 
@@ -117,8 +131,8 @@ def extend_tool_catalog(
             exposure=ToolExposure.DIRECT,
         )
     return ToolCatalog(
-        tools=tools,
-        entries=entries,
+        tools=MappingProxyType(tools),
+        entries=MappingProxyType(entries),
         static_prompt_fragment_inputs=catalog.static_prompt_fragment_inputs,
         dynamic_prompt_fragment_inputs=catalog.dynamic_prompt_fragment_inputs,
         active_toolkit_bindings=catalog.active_toolkit_bindings,
@@ -195,8 +209,8 @@ async def build_tool_catalog(
                 ),
             )
     return ToolCatalog(
-        tools=tools,
-        entries=entries,
+        tools=MappingProxyType(tools),
+        entries=MappingProxyType(entries),
         static_prompt_fragment_inputs=static_prompt_fragment_inputs,
         dynamic_prompt_fragment_inputs=dynamic_prompt_fragment_inputs,
         active_toolkit_bindings=active_toolkit_bindings,
