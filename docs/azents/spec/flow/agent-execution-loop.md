@@ -27,6 +27,8 @@ code_paths:
   - python/apps/azents/src/azents/core/config.py
   - python/apps/azents/src/azents/core/inference_profile.py
   - python/apps/azents/src/azents/services/agent_session_input.py
+  - python/apps/azents/src/azents/services/chat_write.py
+  - python/apps/azents/src/azents/services/archived_session_purge.py
   - python/apps/azents/src/azents/services/session_git_worktree/**
   - python/apps/azents/src/azents/services/action_execution.py
   - python/apps/azents/src/azents/services/agent_runtime/**
@@ -36,6 +38,8 @@ code_paths:
   - python/apps/azents/src/azents/services/xai_oauth/runtime.py
   - python/apps/azents/src/azents/services/session_title.py
   - python/apps/azents/src/azents/repos/input_buffer/**
+  - python/apps/azents/src/azents/repos/agent_session/**
+  - python/apps/azents/src/azents/repos/archived_session_retention/**
   - python/apps/azents/src/azents/repos/action_execution/**
   - python/apps/azents/src/azents/repos/model_file/**
   - python/apps/azents/src/azents/services/model_listing/**
@@ -54,7 +58,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ChatView.tsx
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
 last_verified_at: 2026-07-19
-spec_version: 109
+spec_version: 110
 ---
 
 # Agent Execution Loop
@@ -228,6 +232,21 @@ not enter timeout retry. Failed non-Stop attempts follow the separate live-proje
 described below.
 
 ## 2. Run State
+
+### Archived-session execution fence
+
+Only `AgentSession.status = active` may admit new execution work. Archive marks the complete root
+`SessionAgent` tree archived in one transaction, so every descendant can reject work from its local
+session row without rediscovering the tree. Public message, command, edit, action, project, wake-up,
+and retry boundaries reject an archived session before InputBuffer, action-execution, run, or broker
+side effects. Worker claim and recovery queries select active sessions only, so restart and takeover
+cannot revive archived work.
+
+Durable purge adds an irreversible owner-generation fence to every archived subtree session before
+requesting stop and emitting broker stop signals. Any pending or running `AgentRun` causes purge to
+retain the tree and schedule retry; cleanup and database deletion proceed only after the active-run
+check is clear. Restore is permitted only before this purge fence starts. A restored tree returns every
+linked session to active state and may then admit work through the ordinary boundaries.
 
 `agent_runs` replaces SDK `RunState`. Run phase is also the UI activity source.
 
@@ -942,6 +961,7 @@ updated by the user.
 
 ## Changelog
 
+- **2026-07-19** — v110. Added archived-tree execution rejection, worker/recovery active-state filtering, irreversible purge owner fencing, stop signaling, and pre-fence restore semantics.
 - **2026-07-19** — v109. Added Agent-level default-disabled Tool Search; the enabled path applies provider-budgeted prepared-call projection, immutable catalog/search/executor snapshots, next-call activation, and deferred recency refresh.
 - **2026-07-19** — v108. Logged sanitized structured diagnostics for every provider-attributed error and recovered typed fields from bounded LiteLLM SDK serialization.
 - **2026-07-19** — v107. Extended OpenRouter response-handle acquisition to 60 seconds while preserving the common stream idle and absolute attempt bounds.

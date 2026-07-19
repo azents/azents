@@ -26,6 +26,7 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/action_execution.py
   - python/apps/azents/src/azents/services/agent_project_catalog/**
   - python/apps/azents/src/azents/services/session_git_worktree/**
+  - python/apps/azents/src/azents/services/archived_session_purge.py
   - python/apps/azents/src/azents/repos/session_git_worktree/**
   - python/apps/azents/src/azents/repos/action_execution/**
   - python/apps/azents/src/azents/api/public/chat/v1/**
@@ -54,8 +55,8 @@ api_routes:
   - /chat/v1/agents/{agent_id}/workspace/project-browser-manifest/preview
   - /chat/v1/agents/{agent_id}/git-refs
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
-last_verified_at: 2026-07-14
-spec_version: 40
+last_verified_at: 2026-07-19
+spec_version: 41
 ---
 
 # Workspace & Membership
@@ -194,7 +195,7 @@ Agent Workspace Project is a boundary registry explicitly registered by user for
 - `GET /chat/v1/agents/{agent_id}/sessions/{session_id}/workspace/project-browser-manifest` returns a backend-owned Project browser manifest for the selected session. It derives Project root entries from `session_workspace_projects`, joins catalog status projection by Agent/path, and returns backend-provided capabilities. Project root entries allow registry removal when tied to a session Project and disallow filesystem delete, move, and rename. Entries linked to `session_git_worktrees` expose `repository_type: "git"` so clients can render Git-specific Project root metadata without probing the filesystem. A non-cleaned Azents-owned worktree Project also exposes `delete_worktree: true`; ordinary Project registry rows and preview entries do not.
 - `POST /chat/v1/agents/{agent_id}/workspace/project-browser-manifest/preview` accepts explicit `project_paths` before a session exists and returns the same Project browser entry model. Preview entries do not expose session registry removal because no session Project row exists yet, and they do not expose repository metadata.
 - Project browser manifest reads do not call runtime runner file stat/list operations before responding. Missing or unchecked catalog projection is represented as stored/unchecked status and may be refreshed by separate boundary-triggered sync work.
-- `DELETE /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/{project_id}` removes only the selected session's registry row. Filesystem folder deletion is destructive and not included. Azents-owned worktree cleanup is a separate archive/delete lifecycle based on `session_git_worktrees` ownership metadata, not on the Project registry row alone.
+- `DELETE /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/{project_id}` removes only the selected session's registry row. Filesystem folder deletion is destructive and not included. Azents-owned worktree cleanup is a separate explicit cleanup or durable-purge lifecycle based on `session_git_worktrees` ownership metadata, not on the Project registry row alone. Archive itself preserves every allocation.
 - `POST /chat/v1/agents/{agent_id}/sessions/{session_id}/git-worktree/cleanup` requests destructive cleanup for Azents-owned worktree allocations. When `project_id` is supplied, cleanup is scoped to the allocation linked to that session Project; otherwise cleanup covers all non-cleaned allocations for the session. Cleanup validates session ownership, Azents worktree-root containment, branch name presence, and Azents-created branch ownership before calling Runner Git cleanup. Successful cleanup removes the Git worktree without force, deletes the Azents-created branch, removes the catalog entry, deletes the linked session Project row, and best-effort removes the empty session-scoped worktree parent directory.
 - Path policy follows: `/workspace/agent` root forbidden, path outside `/workspace/agent` forbidden, exact duplicate Project path per session forbidden. Nested Project paths are allowed.
 New-session azents-web UI shows a compact additive workspace item list above the draft first-message composer. It loads stored last-created-session defaults, shows recent agent-level presets, lets users add repository folders to the list, and lets each selected folder switch between repository and new worktree modes from the row-level type selector. The runtime-backed folder picker can select the current folder so a Git repository directory itself can be added without relying on an existing preset. Worktree branch selection in this draft UI uses the Git ref preview endpoint but exposes only local branches by default; remote branches and tags are not shown in the base branch selector. Concrete session azents-web UI exposes Project management inside the Workspace surface instead of a separate Projects tab. The Workspace browser opens in `Projects` mode by default, lists registered Project roots, and keeps `All files` as an explicit secondary mode rooted at the Agent Workspace root. Empty Project sets show an explicit empty Projects state and do not fall back to Agent Workspace root entries. Project browser root rows display the folder basename as the primary label and render the full absolute path as dimmed, truncated secondary text after the name. The secondary path truncates before the primary label; the primary label truncates only when it exceeds the available row width. Git-backed Project root rows use a Git folder icon; non-Git Project roots keep the normal folder icon.
@@ -281,7 +282,7 @@ A Git worktree-created Project is an Agent Workspace Project whose directory is 
 
 A non-primary session can own a Git worktree allocation created by a `create_git_worktree` setup action. The action is stored as an ordered `action_message` input before the first user message and is consumed without appending an `action_message` transcript event. Preparation durably claims execution by `input_buffer_id` before deleting the buffer. Successful action execution invalidates the prepared context until the worktree path is created, registered as the session Project, and the next processing boundary rebuilds context; failed action execution is terminal, appends durable result history, and FIFO input processing continues.
 
-Each created worktree is prompt-eligible only through its session-owned `SessionWorkspaceProject` row, just like manually selected Projects. The `SessionGitWorktree` row is retained for lifecycle and cleanup, and links to the registered Project row after registration succeeds. Archive/delete cleanup iterates every non-cleaned `SessionGitWorktree` allocation owned by the session, removes each worktree, removes each Azents-created branch, removes the session-scoped reserved worktree parent directory when it becomes empty, deletes catalog entries for the worktree paths, and marks allocations cleaned. Cleanup failure leaves the archive successful and records a cleanup summary for manual retry.
+Each created worktree is prompt-eligible only through its session-owned `SessionWorkspaceProject` row, just like manually selected Projects. The `SessionGitWorktree` row is retained for lifecycle and cleanup, and links to the registered Project row after registration succeeds. Archive preserves every allocation in the complete root tree. Explicit user-requested cleanup remains session-scoped, while durable purge iterates every non-cleaned subtree allocation before database deletion, removes each owned worktree and Azents-created branch, removes the session-scoped reserved worktree parent directory when it becomes empty, deletes catalog entries for the worktree paths, and marks allocations cleaned. Cleanup failure aborts purge finalization and retains ownership metadata and retry state.
 
 ## Business Rules
 
@@ -440,6 +441,7 @@ stateDiagram-v2
 
 ## Changelog
 
+- **2026-07-19** — v41. Replaced archive-time worktree cleanup with archive preservation and cleanup-before-cascade durable root-tree purge semantics.
 - **2026-07-14** — v40. Defined worktree operation ownership fencing, live-only execution rows, atomic durable terminal handover, cancelled outcomes, and no-reexecution takeover recovery.
 - **2026-07-13** — v39. Separated instance-wide system administration from Workspace roles and documented that Admin bootstrap creates no Workspace or membership.
 - **2026-07-12** — v38. Clarified buffer-keyed worktree claims, buffer-only action transport, same-run context rebuilding, and terminal result history.

@@ -31,6 +31,7 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/action_execution.py
   - python/apps/azents/src/azents/rdb/models/chat_write_request.py
   - python/apps/azents/src/azents/rdb/models/scheduled_task.py
+  - python/apps/azents/src/azents/rdb/models/archived_session_retention.py
   - python/apps/azents/src/azents/rdb/models/exchange_file.py
   - python/apps/azents/src/azents/repos/agent_session/**
   - python/apps/azents/src/azents/repos/agent_run/**
@@ -41,6 +42,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/action_execution/**
   - python/apps/azents/src/azents/repos/chat_write_request/**
   - python/apps/azents/src/azents/repos/scheduled_task/**
+  - python/apps/azents/src/azents/repos/archived_session_retention/**
   - python/apps/azents/src/azents/repos/exchange_file/**
   - python/apps/azents/src/azents/repos/session_workspace_project/**
   - python/apps/azents/src/azents/services/exchange_file/**
@@ -49,6 +51,8 @@ code_paths:
   - python/apps/azents/src/azents/services/input_buffer.py
   - python/apps/azents/src/azents/services/session_workspace_project/**
   - python/apps/azents/src/azents/services/session_git_worktree/**
+  - python/apps/azents/src/azents/services/archived_session_retention.py
+  - python/apps/azents/src/azents/services/archived_session_purge.py
   - python/apps/azents/src/azents/services/action_execution.py
   - python/apps/azents/src/azents/services/file_storage.py
   - python/apps/azents/src/azents/api/public/chat/**
@@ -75,6 +79,8 @@ api_routes:
   - /chat/v1/agents/{agent_id}/sessions/messages
   - /chat/v1/agents/{agent_id}/sessions/{session_id}
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/archive
+  - /chat/v1/agents/{agent_id}/sessions/archived
+  - /chat/v1/agents/{agent_id}/sessions/{session_id}/restore
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/git-worktree/cleanup
   - /chat/v1/agents/{agent_id}/git-refs
   - /chat/v1/sessions/{session_id}/title
@@ -235,26 +241,39 @@ primary" or "Session". Concrete session route top bars show this session title w
 Agent avatar/icon affordance, and expose an inline title edit action that calls the manual title update
 endpoint.
 
-`POST /chat/v1/agents/{agent_id}/sessions/{session_id}/archive` archives an active non-primary
-AgentSession. Archive is a soft lifecycle transition: durable transcript data, run rows, exchange
-files, and project registry rows remain, while the session is removed from active session lists.
-Team-primary AgentSessions cannot be archived because they are the stable default conversation anchor
-for an Agent. Running sessions cannot be archived; users must stop the run before archiving. Archived
-sessions are not part of the current active session UI/API surface.
+`POST /chat/v1/agents/{agent_id}/sessions/{session_id}/archive` archives the complete root
+`SessionAgent` tree for an active non-primary root session. The service locks the root and descendant
+sessions in stable order and rejects the request while any subtree session or `AgentRun` is active.
+Team-primary roots cannot be archived because they remain the stable default conversation anchor for
+an Agent.
 
-The Agent rail shows session actions in a row action menu. Rename remains available from that menu
-when the title mutation is wired. Archive appears in the same menu only for non-primary sessions that
-are not running and opens a confirmation dialog before calling the archive API. If the archived
-session is currently selected, the UI returns to the independent Agent settings page at
-`/w/{handle}/agents/{agent_id}/settings` instead of resolving a replacement session implicitly.
+Archive snapshots the current instance retention revision, whole-day value, `archived_at`, and finite
+`purge_after` deadline on the root. Unlimited retention stores a null deadline and snapshot value.
+Every linked descendant `AgentSession` is marked archived so direct worker, command, input, wake-up,
+and recovery boundaries can reject it without resolving the tree again. Zero-day retention completes
+the archive transaction and only makes the root eligible for the next asynchronous purge pass.
+Archive preserves durable transcript data, run rows, file metadata, project registry rows, and all
+Azents-owned worktree allocations.
 
-For sessions with an Azents-owned Git worktree allocation, archive requests mark cleanup pending and
-schedule best-effort cleanup after the archive response. Cleanup removes only the explicitly owned
-worktree path and Azents-created branch after validating the `session_git_worktrees` ownership row.
-Cleanup failure does not roll back archive; it records a user-safe cleanup summary and leaves manual
-retry available through `POST /chat/v1/agents/{agent_id}/sessions/{session_id}/git-worktree/cleanup`.
-Hard delete of a session must not erase the ownership metadata before cleanup reaches `cleaned` or
-`cleanup_failed`.
+`GET /chat/v1/agents/{agent_id}/sessions/archived` returns archived roots separately from the active
+session list. Each item includes `archived_at`, `purge_after`, and the immutable retention snapshot;
+the list response also includes the current instance retention value for archive confirmation copy.
+`POST /chat/v1/agents/{agent_id}/sessions/{session_id}/restore` restores the complete tree only while
+the root purge job has not started fencing. Restore cancels eligible unstarted purge work, clears the
+root archive snapshot, marks every linked session active, and returns the root session. A root that
+has crossed the purge fence returns a conflict and cannot become active again.
+
+The Agent rail keeps rename and archive in the existing session action menu. Archive is available
+only for inactive non-primary roots and opens policy-aware confirmation copy. If the selected session
+is archived, Main Web navigates to `/w/{handle}/agents/{agent_id}/sessions/new`. The collapsible
+Archived section shows title fallback, archive time, immutable retention snapshot, scheduled deletion
+or Unlimited state, and Restore. It exposes no permanent-delete action.
+
+The public `DELETE /chat/v1/sessions/{session_id}` route is absent. Permanent deletion is owned only
+by durable purge after fencing. Purge deletes subtree ModelFile, Artifact, bound ExchangeFile and
+preview blobs, broker state, and every owned worktree path/branch before the database subtree is
+removed. A cleanup failure retains ownership metadata and retry state rather than cascading database
+deletion.
 
 Direct session writes are session-scoped. When a route contains `session_id`, input buffers, live
 projections, broker wake-up, and the REST response use that same session id. Runtime current/active
@@ -807,6 +826,7 @@ Current verification:
 
 ## 11. Changelog
 
+- **2026-07-19** — v114. Added root-session archive and restore, immutable retention snapshots, scheduled durable purge state, archived-session listing, and public archived-session UI behavior.
 - **2026-07-19** — v113. Added selected-model OpenRouter bounded credit usage while keeping `null` key limits completely hidden from composer surfaces.
 - **2026-07-19** — v112. Added selected-model OAuth subscription usage to draft and concrete-session composers with provider-eligible query selection, compact desktop/mobile presentation, operational-only detail, and composer-local failure isolation.
 - **2026-07-18** — v109. Added xAI client-owned image-generation events with the shared Base64-free attachment and ModelFile output contract.
