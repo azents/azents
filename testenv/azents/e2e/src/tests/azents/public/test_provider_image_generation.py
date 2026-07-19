@@ -9,8 +9,17 @@ from typing import cast
 
 import azentsadminclient
 import azentspublicclient
+import pytest
 import requests
+from azentspublicclient.api.user_v1_api import UserV1Api
+from azentspublicclient.api.workspace_v1_api import WorkspaceV1Api
 from pydantic import TypeAdapter
+from selenium.common.exceptions import TimeoutException
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.remote.webdriver import WebDriver
+from selenium.webdriver.support import expected_conditions as ec
+from selenium.webdriver.support.ui import WebDriverWait
 
 from support.consts import REPOSITORY_ROOT
 from support.utils import unique
@@ -191,6 +200,95 @@ def _request_for_prompt(
         if _last_user_text(request) == prompt:
             return request
     raise AssertionError(f"proxy request was not captured for prompt: {prompt!r}")
+
+
+def _count_string_occurrences(value: object, needle: str) -> int:
+    """Count a bounded string across nested request values without serializing it."""
+    if isinstance(value, str):
+        return value.count(needle)
+    if isinstance(value, list):
+        items = cast(list[object], value)
+        return sum(_count_string_occurrences(item, needle) for item in items)
+    if isinstance(value, dict):
+        mapping = cast(dict[object, object], value)
+        return sum(_count_string_occurrences(item, needle) for item in mapping.values())
+    return 0
+
+
+def _count_typed_items(value: object, item_type: str) -> int:
+    """Count nested request objects with one exact Responses item type."""
+    if isinstance(value, list):
+        items = cast(list[object], value)
+        return sum(_count_typed_items(item, item_type) for item in items)
+    if not isinstance(value, dict):
+        return 0
+    mapping = cast(dict[object, object], value)
+    current = 1 if mapping.get("type") == item_type else 0
+    return current + sum(
+        _count_typed_items(item, item_type) for item in mapping.values()
+    )
+
+
+def _open_authenticated_session(
+    driver: WebDriver,
+    *,
+    public_api_client: azentspublicclient.ApiClient,
+    token: str,
+    main_web_url: str,
+    agent_id: str,
+    session_id: str,
+) -> None:
+    """Log in and open the real Main Web chat session."""
+    headers = auth_headers(token)
+    me = UserV1Api(public_api_client).user_v1_me(_headers=headers)
+    workspaces = WorkspaceV1Api(public_api_client).workspace_v1_list_workspaces(
+        _headers=headers
+    )
+    assert len(workspaces.items) == 1
+    workspace_handle = workspaces.items[0].handle
+
+    driver.delete_all_cookies()
+    driver.get(f"{main_web_url}/login")
+    wait = WebDriverWait(driver, 30)
+    email_input = wait.until(ec.element_to_be_clickable((By.NAME, "email")))
+    email_input.send_keys(me.email, Keys.ENTER)
+    wait.until(ec.url_contains("/login/password"))
+    password_input = wait.until(ec.element_to_be_clickable((By.NAME, "password")))
+    password_input.send_keys("TestPass123!", Keys.ENTER)
+    wait.until(ec.url_contains("/workspaces"))
+    driver.get(
+        f"{main_web_url}/w/{workspace_handle}/agents/{agent_id}/sessions/{session_id}"
+    )
+    wait.until(ec.url_contains(session_id))
+
+
+def _image_projection_counts(driver: WebDriver) -> tuple[int, int, int]:
+    """Return bounded card, completed-card, and image counts for diagnostics."""
+    card_selector = '[data-provider-tool-name="image_generation"]'
+    completed_selector = f'{card_selector}[data-provider-tool-status="completed"]'
+    attachment_selector = f'{card_selector} img[src*="/api/chat/exchange-files/"]'
+    cards = driver.find_elements(By.CSS_SELECTOR, card_selector)
+    completed_cards = driver.find_elements(By.CSS_SELECTOR, completed_selector)
+    attachments = driver.find_elements(By.CSS_SELECTOR, attachment_selector)
+    return len(cards), len(completed_cards), len(attachments)
+
+
+def _has_single_completed_image_projection(driver: WebDriver) -> bool:
+    """Return whether one completed image card owns one rendered attachment."""
+    return _image_projection_counts(driver) == (1, 1, 1)
+
+
+def _wait_for_single_completed_image_projection(driver: WebDriver) -> None:
+    """Wait for the strict card projection and report only bounded DOM counts."""
+    try:
+        WebDriverWait(driver, 30).until(_has_single_completed_image_projection)
+    except TimeoutException as exc:
+        cards, completed_cards, attachments = _image_projection_counts(driver)
+        raise AssertionError(
+            "expected one completed provider image card with one Exchange image; "
+            f"observed cards={cards}, completed_cards={completed_cards}, "
+            f"exchange_images={attachments}"
+        ) from exc
 
 
 class TestProviderImageGeneration:
@@ -380,6 +478,8 @@ class TestProviderImageGeneration:
             item for item in input_items if item.get("type") == "image_generation_call"
         ]
         assert len(image_items) == 1
+        assert _count_string_occurrences(input_items, cast(str, attachment["uri"])) == 1
+        assert _count_typed_items(input_items, "input_image") == 0
         replayed_result = image_items[0].get("result")
         assert isinstance(replayed_result, str)
         replayed_image = base64.b64decode(replayed_result, validate=True)
@@ -409,3 +509,50 @@ class TestProviderImageGeneration:
             )
             == 1
         )
+
+    @pytest.mark.web_surface
+    def test_renders_one_card_and_attachment_across_browser_refresh(
+        self,
+        public_api_client: azentspublicclient.ApiClient,
+        admin_api_client: azentsadminclient.ApiClient,
+        azents_public_server_url: str,
+        azents_engine_worker_container: object,
+        openai_proxy_url: str,
+        browser_driver: WebDriver,
+        azents_main_web_url: str,
+    ) -> None:
+        """Live projection and history reload keep one image card and attachment."""
+        del azents_engine_worker_container
+        requests.delete(
+            f"{openai_proxy_url}{_PROXY_JOURNAL_PATH}",
+            timeout=10,
+        ).raise_for_status()
+        token, agent_id, session_id = setup_profile_agent(
+            public_api_client,
+            admin_api_client,
+            azents_public_server_url,
+        )
+        _open_authenticated_session(
+            browser_driver,
+            public_api_client=public_api_client,
+            token=token,
+            main_web_url=azents_main_web_url,
+            agent_id=agent_id,
+            session_id=session_id,
+        )
+
+        browser_wait = WebDriverWait(browser_driver, 30)
+        composer = browser_wait.until(
+            ec.element_to_be_clickable((By.CSS_SELECTOR, "textarea:not([disabled])"))
+        )
+        composer.send_keys(_PROMPT, Keys.ENTER)
+        _wait_for_idle(
+            server_url=azents_public_server_url,
+            token=token,
+            agent_id=agent_id,
+            session_id=session_id,
+        )
+
+        _wait_for_single_completed_image_projection(browser_driver)
+        browser_driver.refresh()
+        _wait_for_single_completed_image_projection(browser_driver)

@@ -51,6 +51,13 @@ export const CompletedWithOutputAndAttachment = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
+    const card = canvasElement.querySelector(
+      '[data-provider-tool-name="image_generation"]',
+    );
+    await expect(card).toHaveAttribute(
+      "data-provider-tool-status",
+      "completed",
+    );
     await expect(canvas.getByText(imageAttachment.name ?? "")).toBeVisible();
     await userEvent.click(
       canvas.getByRole("button", { name: "Show tool details" }),
