@@ -459,6 +459,7 @@ def _create_agent_with_runtime_hook_toolkit(
     visible_prompt: str | None = None,
     hidden_prompt: str | None = None,
     shell_enabled: bool = False,
+    tool_search_enabled: bool = False,
 ) -> str:
     """runtime_hook_qa toolkit t t API t createt agent t t."""
     headers = {"Authorization": f"Bearer {workspace.token}"}
@@ -490,6 +491,7 @@ def _create_agent_with_runtime_hook_toolkit(
             type=AgentType.PUBLIC,
             runtime_provider_id=_RUNTIME_PROVIDER_ID,
             shell_enabled=shell_enabled,
+            tool_search_enabled=tool_search_enabled,
         ),
         _headers=headers,
     )
@@ -530,19 +532,33 @@ class TestRuntimeHooks:
             hidden_prompt=_HIDDEN_PROMPT,
             shell_enabled=True,
         )
+        observe_message = "Create AGENTS.md"
         _run_message(
             public_api_client=public_api_client,
             public_url=azents_public_server_url,
             access_token=workspace.token,
             agent_id=observe_agent_id,
-            message="Create AGENTS.md",
+            message=observe_message,
         )
+        observe_probe_name = "rtqa_observe__runtime_hook_qa_probe"
+        observe_snapshots = _wait_for_tool_request_snapshots(
+            mock_openai_url,
+            observe_message,
+            minimum_count=1,
+            required_tool=observe_probe_name,
+        )
+        if "tool_search" in observe_snapshots[0]:
+            raise AssertionError(
+                "Default-disabled Agent unexpectedly exposed tool_search: "
+                f"{observe_snapshots!r}"
+            )
 
         deny_agent_id = _create_agent_with_runtime_hook_toolkit(
             public_api_client,
             workspace,
             toolkit_slug="rtqa_deny",
             mode="deny",
+            tool_search_enabled=True,
         )
         _run_message(
             public_api_client=public_api_client,
@@ -557,6 +573,7 @@ class TestRuntimeHooks:
             workspace,
             toolkit_slug="rtqa_replace",
             mode="replace",
+            tool_search_enabled=True,
         )
         _run_message(
             public_api_client=public_api_client,
@@ -622,6 +639,7 @@ class TestRuntimeHooks:
             workspace,
             toolkit_slug="rtqa_tool_search",
             mode="observe",
+            tool_search_enabled=True,
         )
         probe_name = "rtqa_tool_search__runtime_hook_qa_probe"
         first_message = "Tool Search deferred probe first run"
