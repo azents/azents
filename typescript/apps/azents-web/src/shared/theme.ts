@@ -1,4 +1,5 @@
 import {
+  Checkbox,
   createTheme,
   defaultVariantColorsResolver,
   type MantineColorsTuple,
@@ -110,6 +111,14 @@ export const theme = createTheme({
   },
   fontFamilyMonospace: "var(--font-geist-mono), 'Menlo', 'Consolas', monospace",
   components: {
+    Checkbox: Checkbox.extend({
+      styles: {
+        icon: {
+          color:
+            "light-dark(var(--mantine-color-white), var(--mantine-color-black))",
+        },
+      },
+    }),
     Switch: Switch.extend({
       styles: {
         root: {
