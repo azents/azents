@@ -16,6 +16,8 @@ code_paths:
   - python/apps/azents/src/azents/engine/events/**
   - python/apps/azents/src/azents/engine/tools/**
   - python/apps/azents/src/azents/engine/run/resolve.py
+  - python/apps/azents/src/azents/engine/run/tool_budget.py
+  - python/apps/azents/src/azents/engine/tooling/tool_search.py
   - python/apps/azents/src/azents/engine/tooling/toolkit_state.py
   - python/apps/azents/src/azents/repos/toolkit_state/**
   - python/apps/azents/src/azents/worker/deps.py
@@ -33,7 +35,7 @@ api_routes:
   - /toolkit/v1
   - /shell-environment/v1
 last_verified_at: 2026-07-19
-spec_version: 56
+spec_version: 58
 ---
 
 # Toolkit
@@ -191,6 +193,22 @@ Snapshot payload stores only serializable tool metadata needed to rebuild model-
 GitHub multi-installation bindings must expose cached installation MCP tools even before the lazy concrete `McpToolkit` for that installation has finished preparing. A binding that already has target metadata, `agent_id`, `session_id`, and an installation-specific MCP snapshot state name has enough information to read a previous successful snapshot from Toolkit State. Reconstructing model-visible specs from that snapshot must not require installation token exchange.
 
 Snapshot-backed GitHub tool handlers resolve installation authorization at execution time. They call the installation token provider only when the model calls a tool, and they preserve the same auth-failure retry path as live MCP-backed tools. This keeps first-turn provider-facing schemas stable when an installation snapshot exists, while avoiding token issuance work during normal run preparation.
+
+### Model-Visible Tool Exposure and Search
+
+Each Agent stores a `tool_search_enabled` setting that defaults to `false` and is managed from the Agent Capabilities API/UI. When disabled, the complete executable client-tool catalog remains model-visible in canonical final-name order. The engine does not inject `tool_search`, defer attached service operations, apply compatibility-budget projection, or update Tool Search working-set recency.
+
+When `tool_search_enabled` is enabled, the executable Tool Catalog retains every currently available client function with its final model-visible name, current schema and handler, Toolkit source metadata, and an exposure class. The final name is both the executor routing key and the persisted working-set identity.
+
+Auto-bound core execution and session-control capabilities are direct and remain pinned in every prepared model call. DB-attached service Toolkit operations are deferred by default, including MCP, GitHub, GCP, AWS, Sentry, Notion, Kubernetes, and Google Analytics operations. A service control tool required to operate its integration may be explicitly direct; the current registered exception is GitHub `switch_installation`.
+
+When at least one deferred tool exists, the engine adds the unprefixed direct `tool_search` function. Its schema and description are stable rather than embedding the current Toolkit list. Input contains a non-empty capability `query` and an optional result `limit` with default 5 and maximum 10. Search uses deterministic in-memory BM25 over the current deferred catalog. Documents include final-name tokens, Toolkit slug/type/class/display name, description, parameter names and descriptions, and routing metadata. Positive-score results are ordered by relevance and then final name.
+
+Calling `tool_search` activates the returned names for the immediately following prepared model call. Search activation moves results to the front of shared recency in relevance order; searching for an already-active tool refreshes it. Invoking a deferred tool also moves it to the most-recent position before runtime-hook denial, handler execution, or tool-level failure, because invocation itself is the relevance signal.
+
+The working set is session-bound Toolkit State with identity `tool_search/working_set`. Its versioned payload stores only an ordered most-recent-first list of final tool names; it does not copy descriptions, schemas, handlers, or MCP snapshots. Updates use the existing optimistic-lock retry contract. A missing name is skipped while unavailable but remains in recency state. If that final name returns, or its schema/handler changes, the current executable catalog entry is used without losing activation. The state survives model turns, AgentRuns, worker handoff/restart, compaction, and archive/unarchive through the normal AgentSession Toolkit State lifecycle.
+
+Tool Search does not replace Toolkit attachment, credential validation, or MCP discovery. MCP-backed availability continues to come only from the latest successful session snapshot described above; Tool Search indexes the executable catalog produced from that snapshot and never performs `list_tools` on the model-call critical path.
 
 ### Credential Isolation
 
@@ -560,6 +578,8 @@ OpenAPI spec is authoritative for all endpoints. Major operations:
 
 ## Changelog
 
+- **2026-07-19** (spec_version 58) — Made Tool Search an Agent-level opt-in capability that defaults to the complete legacy model-visible catalog.
+- **2026-07-19** (spec_version 57) — Added direct/deferred tool exposure, deterministic Tool Search metadata and activation, and session-shared final-name recency through Toolkit State.
 - **2026-07-19** (spec_version 56) — Added Session-owned Runtime file storage snapshot reuse, structured file-tool and appendix diagnostics, five-second AGENTS.md/Claude Rules discovery caches, Session-local singleflight, pre-I/O dedupe, and compaction cache reset behavior.
 - **2026-07-17** (spec_version 55) — Filtered explicit subagent model targets by per-option availability and rendered bounded target-specific guidance while preserving inheritance.
 - **2026-07-10** (spec_version 54) — Aligned the root and child Subagent Toolkit prompts with the frozen Codex Multi-Agent V2 usage, workspace, concurrency, and explicit-delegation guidance.

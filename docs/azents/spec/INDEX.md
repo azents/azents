@@ -16,8 +16,8 @@ Details of all living specs. Synchronized from frontmatter.
 | conversation | [Conversation & Events](domain/conversation.md) | @Hardtack | 2026-07-19 | 112 |
 | goal | [Goal Domain Spec](domain/goal.md) | - | 2026-07-16 | 9 |
 | memory | [Memory](domain/memory.md) | @Hardtack | 2026-07-17 | 5 |
-| model-catalog | [Model Catalog Domain Spec](domain/model-catalog.md) | - | 2026-07-19 | 14 |
-| toolkit | [Toolkit](domain/toolkit.md) | @Hardtack | 2026-07-19 | 56 |
+| model-catalog | [Model Catalog Domain Spec](domain/model-catalog.md) | - | 2026-07-19 | 15 |
+| toolkit | [Toolkit](domain/toolkit.md) | @Hardtack | 2026-07-19 | 58 |
 | user-auth | [User & Authentication](domain/user-auth.md) | @Hardtack | 2026-07-13 | 7 |
 | workspace | [Workspace & Membership](domain/workspace.md) | @Hardtack | 2026-07-14 | 40 |
 
@@ -25,7 +25,7 @@ Details of all living specs. Synchronized from frontmatter.
 
 | Title | Owner | Last Verified | Version |
 |---|---|---|---|
-| [Agent Execution Loop](flow/agent-execution-loop.md) | @Hardtack | 2026-07-19 | 107 |
+| [Agent Execution Loop](flow/agent-execution-loop.md) | @Hardtack | 2026-07-19 | 108 |
 | [Agent Runtime Control](flow/agent-runtime-control.md) | @Hardtack | 2026-07-19 | 18 |
 | [Agent Runtime Persistence](flow/agent-runtime-persistence.md) | @Hardtack | 2026-07-03 | 3 |
 | [Chat Session Resync](flow/chat-session-resync.md) | @Hardtack | 2026-07-19 | 35 |
