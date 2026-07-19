@@ -49,6 +49,8 @@ code_paths:
   - python/apps/azents/src/azents/services/agent_session_input.py
   - python/apps/azents/src/azents/services/chat_write.py
   - python/apps/azents/src/azents/services/input_buffer.py
+  - python/apps/azents/src/azents/services/agent_mailbox.py
+  - python/apps/azents/src/azents/services/subagent_terminal_result.py
   - python/apps/azents/src/azents/services/session_workspace_project/**
   - python/apps/azents/src/azents/services/session_git_worktree/**
   - python/apps/azents/src/azents/services/archived_session_retention.py
@@ -99,7 +101,7 @@ api_routes:
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-07-19
-spec_version: 113
+spec_version: 115
 ---
 
 # Conversation & Events
@@ -306,7 +308,7 @@ participant, session, run, activity event, or broker wake-up.
 | `agent_type` | string | Spawned agent type snapshot. Current supported value is `default`. |
 | `parent_session_agent_id` | FK self \| null | Parent participant; null only for the root participant |
 | `last_task_message` | text \| null | Latest delegated task/message preview |
-| `parent_observed_run_index` / `parent_observed_event_id` | int / `str(32)` \| null | Cursor for terminal child run results observed by the parent |
+| `parent_observed_run_index` / `parent_observed_event_id` | int / `str(32)` \| null | Monotonic cursor advanced only when a terminal `agent_result` is promoted into the direct parent's durable transcript. |
 
 The tree enforces unique `(root_session_agent_id, path)` and `(parent_session_agent_id, name)`. The
 repository resolves absolute paths such as `/root/reviewer` and current-agent-relative child paths.
@@ -382,8 +384,11 @@ before destructive cleanup can remove a path or branch.
 | `retry_state` | JSONB \| null | Durable current-model-turn retry state; cleared on successful model output admission or terminal transition |
 | `parent_agent_run_id` | FK `agent_runs` \| null | Parent run lineage for a subagent's first run |
 | `last_completed_event_id` | `str(32)` \| null | Terminal run boundary event id when available |
-| `terminal_result_event_id` | `str(32)` \| null | Terminal assistant/error event used by parent subagent observation |
-| `terminal_result_message` | text \| null | User-safe terminal message returned by `wait_agent` and projected in the Subagent Tree |
+| `terminal_result_event_id` | `str(32)` \| null | Terminal assistant/error event used for the terminal mailbox result and Subagent Tree preview. |
+| `terminal_result_message` | text \| null | User-safe terminal message delivered through `agent_result` and projected in the Subagent Tree. |
+| `parent_result_delivery_state` | enum \| null | `suppressed` for historical results or `enqueued` after durable direct-parent mailbox delivery; null means a current eligible result has not been finalized. |
+| `parent_result_input_buffer_id` | `str(32)` \| null | Durable identity of the terminal result buffer even after promotion deletes the buffer row. |
+| `parent_result_enqueued_at` | timestamptz \| null | Time the terminal result and delivery marker committed atomically. |
 | `created_at` / `updated_at` | timestamptz | Durable lifecycle timestamps |
 
 Phase values are `idle`, `preparing_input`, `waiting_for_model`, `streaming_model`,
@@ -411,6 +416,14 @@ and completes the active run without retry. Only one pending run may exist for a
 running runs are active recovery state.
 
 The requested label is intent, while the Session-owned current inference snapshot is the execution authority at each turn boundary. `AgentRun` stores lifecycle, parentage, activity, retry, and terminal-result state; it does not own or restore model selection. A profile change arriving during an active run is prepared for the next boundary, and the same run rebuilds its physical request and effective limits from the new Session snapshot instead of creating a replacement run. Manual retry creates a new pending run, preserves the original ordered input-event associations, and re-resolves the Session's requested profile against current Agent routing before execution. A subagent's first run is precreated with `parent_agent_run_id`; child creation first stores either the exact parent Session snapshot or a statically validated spawn override on the child Session. Recovery activates the child from that Session snapshot without deriving model state from the parent run row.
+
+Every current subagent Run that reaches `completed`, `failed`, `stopped`, `interrupted`, or
+`cancelled` is eligible for one queue-only terminal result to its direct parent's mailbox. Delivery
+locks the Run, validates direct-parent ownership, creates an idempotent `agent_result:{run_id}` buffer,
+and updates the Run delivery marker in one transaction. Normal terminal handling attempts delivery;
+parent `wait_agent` polling and later source-session reuse repair a terminal Run that committed before
+the mailbox side effect. Delivery failure does not roll back terminal Run state or prevent the child
+session from becoming idle.
 
 ## 4. Event Transcript Events
 
@@ -440,7 +453,19 @@ Event kinds:
 - `system_error`
 - `unknown_adapter_output`
 
-`agent_message` records agent-to-agent mailbox delivery in the target child session. Its payload stores `message_kind` (`spawn_agent`, `send_message`, or `followup_task`), source/target `SessionAgent` ids, source/target canonical paths, and content. Model lowering renders it as explicitly sourced delegated user-role-compatible input for the target session; the parent transcript keeps only the ordinary collaboration tool call/result.
+`agent_message` records agent-to-agent mailbox delivery in the target session. Instruction payloads use
+`message_kind` `spawn_agent`, `send_message`, or `followup_task` and store source/target
+`SessionAgent` ids, canonical paths, and content. Terminal payloads use `message_kind = agent_result`
+and additionally store source Run id/index/status plus the nullable source terminal event id. Shared
+provider lowering renders instructions as `NEW_TASK` or `MESSAGE` envelopes and terminal payloads as
+`AGENT_RESULT` envelopes. Terminal content is the Run's user-safe result projection or a fixed status
+fallback; internal exception text and provider diagnostics are not mailbox content.
+
+A terminal `agent_result` remains unread while merely enqueued or observed by `wait_agent`. Promotion
+into the direct parent's durable transcript validates the actual source child and terminal Run metadata,
+then advances the child's observation cursor monotonically in the same transaction that appends or
+deduplicates the event and deletes the buffer. After commit, the execution layer publishes a
+`subagent_tree_changed` invalidation for every cursor that advanced.
 
 `action_message` is an InputBuffer kind for user-selected TurnActions, not a newly appended transcript
 event. `skill` actions load Skill context by appending `skill_loaded` and an optional normal
@@ -607,8 +632,8 @@ WebSocket chat clients receive subscription and event actions:
 - `live_run_cleared` with the exact terminal `run_id` when cleanup removes that current run projection;
 - `action_execution_updated` when an active operation TurnAction execution projection changes;
 - `action_execution_removed` after an operation's durable terminal snapshot replaces its live state;
-- `subagent_tree_changed` when subagent tool side effects or wait observation cursors change the
-  durable Subagent Tree projection. This event is an invalidation signal only; clients refetch the
+- `subagent_tree_changed` when subagent lifecycle/tool side effects or promotion-time terminal-result
+  acknowledgment changes the durable Subagent Tree projection. This event is an invalidation signal only; clients refetch the
   dedicated tree API instead of treating the live event as tree state.
 
 The server-to-client contract consists of canonical action envelopes plus the explicitly public
@@ -663,14 +688,18 @@ InputBuffer kinds are `user_message`, `goal_continuation`, `action_message`, and
 Broker wake-ups are payload-free signals and never carry model input.
 
 Input buffers are session-bound. The `input_buffers` table stores `session_id`, not
-`agent_runtime_id`. Inference-producing buffers store optional requested target label and nullable
+`agent_runtime_id`. Every row also stores required scheduling intent as `queue_only` or
+`wake_session`. Inference-producing buffers store optional requested target label and nullable
 reasoning effort. If the head has no explicit profile, preparation uses the current Session requested
 profile, then the Agent default when the Session has no snapshot.
 
 `InputBufferService` owns input-buffer reads and writes. Enqueue commits only the pending row;
-producers own wake-up and run-state transitions. Preparation handles exactly one FIFO head per
-transaction. The worker first reads the head's identity and inference requirement, resolves the
-profile and attachment metadata outside any database session when needed, then locks the Session and
+producers own wake-up and run-state transitions. User, Goal, action, spawn, and follow-up inputs use
+`wake_session`; ordinary `send_message` and terminal `agent_result` inputs use `queue_only` and do not
+mark or wake the target session. Queue-only rows remain in FIFO order and are promoted with a later
+wake-producing input, but they do not count as follow-up work and do not prevent a session with no
+active Run from becoming idle. Preparation handles exactly one FIFO head per transaction. The worker
+first reads the head's identity and inference requirement, resolves the profile and attachment metadata outside any database session when needed, then locks the Session and
 the same FIFO head. Attachment resolution is metadata-only during promotion: it never downloads the
 Exchange file or creates a replacement ModelFile, and model rich input comes only from FileParts
 stored on the buffer at its creation boundary. If the identity changed while external preparation
@@ -804,9 +833,10 @@ remain as an unbounded raw tail or storage JSON dump.
 - `SessionAgent` is the subagent tree source of truth; `AgentSession` remains the transcript/run/input boundary.
 - Child sessions are hidden from ordinary Agent session lists by `session_kind = subagent`, not by access-control bypass.
 - Child subagent sessions are human read-only: REST message/edit/command/failed-run retry writes reject them before side effects, while parent-agent collaboration tools may enqueue `agent_message` input.
-- `wait_agent` observes terminal child run projections once by advancing `parent_observed_run_index`; it must not infer results by scanning child transcript history.
-- Any service path that enqueues input buffers must mark `agent_sessions.run_state` as `running` in
-  the same transaction.
+- `wait_agent` observes the current agent's pending mailbox and descendant activity without consuming input or advancing observation cursors; it never scans child transcript history for result content.
+- Terminal child results enter the direct parent's mailbox exactly once through durable Run-level delivery markers and queue-only `agent_result` buffers.
+- A child result becomes observed only when its validated `agent_result` is promoted into the direct parent's durable transcript; cursor advancement is monotonic and transactional with promotion.
+- Every InputBuffer producer records explicit scheduling intent. Only `wake_session` input marks or wakes an idle session; `queue_only` input preserves FIFO delivery without blocking idle.
 
 ## 10. Verification
 
@@ -826,6 +856,7 @@ Current verification:
 
 ## 11. Changelog
 
+- **2026-07-19** — v115. Added explicit input scheduling intent, queue-only terminal `agent_result` delivery with durable Run idempotency, and promotion-time direct-parent observation acknowledgment.
 - **2026-07-19** — v114. Added root-session archive and restore, immutable retention snapshots, scheduled durable purge state, archived-session listing, and public archived-session UI behavior.
 - **2026-07-19** — v113. Added selected-model OpenRouter bounded credit usage while keeping `null` key limits completely hidden from composer surfaces.
 - **2026-07-19** — v112. Added selected-model OAuth subscription usage to draft and concrete-session composers with provider-eligible query selection, compact desktop/mobile presentation, operational-only detail, and composer-local failure isolation.

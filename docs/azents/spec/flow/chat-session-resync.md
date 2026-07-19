@@ -8,6 +8,8 @@ touches_domains: [conversation, agent]
 code_paths:
   - python/apps/azents/src/azents/api/public/chat/v1/**
   - python/apps/azents/src/azents/services/chat/**
+  - python/apps/azents/src/azents/services/input_buffer.py
+  - python/apps/azents/src/azents/repos/agent_session/**
   - python/apps/azents/src/azents/repos/message/**
   - python/apps/azents/src/azents/transport/chat.py
   - python/apps/azents/src/azents/engine/tools/skill.py
@@ -17,7 +19,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
 last_verified_at: 2026-07-19
-spec_version: 35
+spec_version: 36
 ---
 
 # Chat Session Resync
@@ -200,6 +202,9 @@ Each node contains the linked `agent_session_id` used for direct child detail ro
 projected status, latest task/message preview, unread terminal result flag, latest run metadata,
 terminal result source event id, terminal result message preview, and children. The unread terminal
 result flag applies only to non-root child nodes because root sessions do not have a parent observer.
+It remains true while a terminal result is only projected on the child Run, queued in the direct
+parent mailbox, or observed by `wait_agent`; it becomes false only after the validated `agent_result`
+is promoted into the direct parent's durable transcript and advances the monotonic observation cursor.
 Projected status treats a parent-interrupted subtree as interrupted for all descendants that do not
 have a newer terminal run. Siblings with message activity are sorted by their latest explicit
 agent-to-agent message sent or received time, or terminal-result message time, newest first. Siblings without message activity follow
@@ -209,10 +214,10 @@ fallback. The parent-child hierarchy is never flattened by this ordering.
 Refresh/reconnect must reconstruct tree state by refetching this endpoint from durable DB state.
 While the Subagents tab is visible, the frontend also polls the endpoint every five seconds; session
 detail views refetch on window focus. Full tree navigation lives in the Subagents tab; the chat top bar
-does not expose a separate Subagent Tree drawer. Agent-message and run-lifecycle tree changes publish
-`subagent_tree_changed` to every SessionAgent view in the same tree, and the frontend immediately
-invalidates cached tree queries. These events remain invalidation signals rather than source-of-truth
-state. Child detail views also use the tree projection to render a compact
+does not expose a separate Subagent Tree drawer. Agent-message, run-lifecycle, and promotion-time
+observation-cursor changes publish `subagent_tree_changed` to every SessionAgent view in the same tree,
+and the frontend immediately invalidates cached tree queries. These events remain invalidation signals
+rather than source-of-truth state. Child detail views also use the tree projection to render a compact
 back button to the parent SessionAgent and an overflow menu with parent/root navigation options, so
 users can move back up the session-agent tree directly from the child detail view. Child detail
 composers are read-only for humans and render a disabled direct-input placeholder while preserving
@@ -220,9 +225,11 @@ the stop control for running child sessions; new instructions to a subagent must
 the collaboration tools.
 
 Durable and live `agent_message` events render in the chat timeline as collapsed, left-aligned
-internal-agent rows labeled with the source SessionAgent name. Expanding a row reveals the delivered
-message body; it does not use the direct human user-message bubble treatment. Subagent navigation,
-tree, tab, and internal-message surfaces use a robot icon as their representative symbol.
+internal-agent rows labeled with the source SessionAgent name. Instruction and terminal `agent_result`
+payloads use the same timeline item family; terminal status may appear as secondary metadata rather
+than creating a separate result-card family. Expanding a row reveals the delivered safe message body;
+it does not use the direct human user-message bubble treatment. Subagent navigation, tree, tab, and
+internal-message surfaces use a robot icon as their representative symbol.
 
 ## 5.3 Composer Profile State
 
@@ -447,6 +454,7 @@ finite transaction periodically.
 
 ## 11. Changelog
 
+- **2026-07-19** — v36. Defined terminal `agent_result` timeline reuse, promotion-time unread clearing, and tree invalidation after observation cursor advancement.
 - **2026-07-19** — v35. Removed the duplicate chat top-bar Subagent Tree drawer and kept full tree navigation in the Subagents tab.
 - **2026-07-19** — v34. Replaced provider call/result merging with live-to-durable provider-call replacement and one-card canonical attachment projection.
 
