@@ -93,8 +93,8 @@ The generated clients produced by this phase become the typed dependency for lat
   `GET /llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations/{integration_id}/subscription-usage`.
 - Require `LLM_INTEGRATIONS_READ` for the endpoint and project financial fields only when the member
   also has `LLM_INTEGRATIONS_WRITE`.
-- Return 404 for missing or cross-workspace integrations and a typed unsupported/disabled outcome for
-  ineligible integrations without provider calls.
+- Return 404 for missing or cross-workspace integrations, 409 for unsupported providers, and a typed
+  disabled outcome for eligible disabled integrations without provider calls.
 - Keep list/detail integration responses free of usage fields and provider calls.
 
 ### Runtime and provider changes
