@@ -92,6 +92,7 @@ async def create_agent(
         runtime_provider_id=request_body.runtime_provider_id,
         shell_enabled=request_body.shell_enabled,
         memory_enabled=request_body.memory_enabled,
+        tool_search_enabled=request_body.tool_search_enabled,
         max_turns=request_body.max_turns,
         subagent_settings=request_body.subagent_settings,
     )
@@ -236,6 +237,8 @@ def _build_agent_update_input(
     # Memory
     if "memory_enabled" in request_body:
         result["memory_enabled"] = request_body["memory_enabled"]
+    if "tool_search_enabled" in request_body:
+        result["tool_search_enabled"] = request_body["tool_search_enabled"]
     if "max_turns" in request_body:
         result["max_turns"] = request_body["max_turns"]
     if "subagent_settings" in request_body:

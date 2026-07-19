@@ -611,6 +611,8 @@
       "shellEnabledLabel": "シェルを有効化",
       "memoryEnabledLabel": "メモリを有効化",
       "memoryEnabledDescription": "会話間で永続的なメモリの保存と活用を許可する",
+      "toolSearchEnabledLabel": "ツール検索を有効化",
+      "toolSearchEnabledDescription": "接続されたサービスツールを遅延表示し、必要に応じてモデルが検索できるようにする",
       "settingsHub": {
         "title": "Agent settings",
         "description": "Choose a settings area to review or update this agent.",

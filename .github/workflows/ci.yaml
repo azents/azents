@@ -25,6 +25,7 @@ jobs:
     outputs:
       python: ${{ github.event_name != 'pull_request' || steps.filter.outputs.python == 'true' }}
       python_e2e: ${{ github.event_name != 'pull_request' || steps.filter.outputs['python-e2e'] == 'true' }}
+      tool_search_runtime_provider_e2e: ${{ github.event_name != 'pull_request' || steps.filter.outputs['tool-search-runtime-provider-e2e'] == 'true' }}
       web_surface_e2e: ${{ github.event_name != 'pull_request' || steps.filter.outputs['web-surface-e2e'] == 'true' }}
       typescript: ${{ github.event_name != 'pull_request' || steps.filter.outputs.typescript == 'true' }}
       helm: ${{ github.event_name != 'pull_request' || steps.filter.outputs.helm == 'true' }}
@@ -63,6 +64,10 @@ jobs:
               - 'python/libs/azents-public-client/**'
               - 'python/libs/azents-runtime-control/**'
               - 'testenv/azents/**'
+            tool-search-runtime-provider-e2e:
+              - '.github/workflows/ci.yaml'
+              - 'testenv/azents/e2e/src/support/aimock_fixtures/agents_md_loader.json'
+              - 'testenv/azents/e2e/src/tests/azents/public/test_runtime_hooks.py'
             web-surface-e2e:
               - '.dockerignore'
               - '.github/workflows/**'
@@ -240,6 +245,34 @@ jobs:
             -m "not live_external and not runtime_provider and not web_surface" \
             ./src
 
+  ci_tool_search_runtime_provider_e2e_run:
+    name: ci-tool-search-runtime-provider-e2e-run
+    needs: changes
+    if: needs.changes.outputs.tool_search_runtime_provider_e2e == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+      - name: Setup Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.14"
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+      - name: Install dependencies
+        run: |
+          cd testenv/azents/e2e
+          uv sync
+      - name: Run Tool Search runtime-provider E2E
+        run: |
+          cd testenv/azents/e2e
+          uv run pytest -vv -s \
+            src/tests/azents/public/test_runtime_hooks.py::TestRuntimeHooks::test_runtime_hooks_execute_through_public_chat_path \
+            src/tests/azents/public/test_runtime_hooks.py::TestRuntimeHooks::test_tool_search_persists_deferred_probe_across_runs
+
   ci_web_surface_e2e_run:
     name: ci-web-surface-e2e-run
     needs: changes
@@ -272,6 +305,7 @@ jobs:
     needs:
       - changes
       - ci_python_e2e_run
+      - ci_tool_search_runtime_provider_e2e_run
       - ci_web_surface_e2e_run
     if: always()
     runs-on: ubuntu-latest
@@ -281,6 +315,8 @@ jobs:
           changes_result='${{ needs.changes.result }}'
           deterministic_changed='${{ needs.changes.outputs.python_e2e }}'
           deterministic_result='${{ needs.ci_python_e2e_run.result }}'
+          tool_search_runtime_provider_changed='${{ needs.changes.outputs.tool_search_runtime_provider_e2e }}'
+          tool_search_runtime_provider_result='${{ needs.ci_tool_search_runtime_provider_e2e_run.result }}'
           web_surface_changed='${{ needs.changes.outputs.web_surface_e2e }}'
           web_surface_result='${{ needs.ci_web_surface_e2e_run.result }}'
           if [ "$changes_result" != 'success' ]; then
@@ -290,6 +326,11 @@ jobs:
           if [ "$deterministic_changed" = 'true' ] \
             && [ "$deterministic_result" != 'success' ]; then
             echo "Deterministic E2E result was: $deterministic_result"
+            exit 1
+          fi
+          if [ "$tool_search_runtime_provider_changed" = 'true' ] \
+            && [ "$tool_search_runtime_provider_result" != 'success' ]; then
+            echo "Tool Search runtime-provider E2E result was: $tool_search_runtime_provider_result"
             exit 1
           fi
           if [ "$web_surface_changed" = 'true' ] \

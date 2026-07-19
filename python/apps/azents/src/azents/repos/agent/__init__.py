@@ -67,6 +67,7 @@ class AgentRepository:
             runtime_provider_id=create.runtime_provider_id,
             shell_enabled=create.shell_enabled,
             memory_enabled=create.memory_enabled,
+            tool_search_enabled=create.tool_search_enabled,
             max_turns=create.max_turns,
             subagent_settings=create.subagent_settings.model_dump(mode="json"),
         )
@@ -178,6 +179,8 @@ class AgentRepository:
             db_values["shell_enabled"] = update["shell_enabled"]
         if "memory_enabled" in update:
             db_values["memory_enabled"] = update["memory_enabled"]
+        if "tool_search_enabled" in update:
+            db_values["tool_search_enabled"] = update["tool_search_enabled"]
         if "max_turns" in update:
             db_values["max_turns"] = update["max_turns"]
         if "subagent_settings" in update:
@@ -237,6 +240,7 @@ class AgentRepository:
             runtime_provider_id=rdb.runtime_provider_id,
             shell_enabled=rdb.shell_enabled,
             memory_enabled=rdb.memory_enabled,
+            tool_search_enabled=rdb.tool_search_enabled,
             max_turns=rdb.max_turns,
             subagent_settings=subagent_settings,
             avatar=avatar,

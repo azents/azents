@@ -41,6 +41,7 @@ class AgentOutput(BaseModel):
     runtime_provider_id: str | None
     shell_enabled: bool
     memory_enabled: bool
+    tool_search_enabled: bool
     max_turns: int | None
     subagent_settings: SubagentSettings
     avatar: UploadedImage | None
@@ -78,6 +79,7 @@ class AgentOutput(BaseModel):
             runtime_provider_id=data.runtime_provider_id,
             shell_enabled=data.shell_enabled,
             memory_enabled=data.memory_enabled,
+            tool_search_enabled=data.tool_search_enabled,
             max_turns=data.max_turns,
             subagent_settings=data.subagent_settings,
             avatar=avatar,
@@ -129,6 +131,9 @@ class AgentCreateInput(BaseModel):
     )
     shell_enabled: bool = Field(default=True, description="Shell Enabled flag")
     memory_enabled: bool = Field(default=True, description="Memory enabled flag")
+    tool_search_enabled: bool = Field(
+        default=False, description="Tool Search enabled flag"
+    )
     max_turns: int | None = Field(default=None, description="Maximum agent turn count")
     subagent_settings: SubagentSettings = Field(
         default_factory=SubagentSettings, description="Subagent execution settings"
@@ -175,6 +180,7 @@ class AgentUpdateInput(TypedDict, total=False):
     ]
     shell_enabled: Annotated[bool, Field(description="Shell Enabled flag")]
     memory_enabled: Annotated[bool, Field(description="Memory enabled flag")]
+    tool_search_enabled: Annotated[bool, Field(description="Tool Search enabled flag")]
     max_turns: Annotated[int | None, Field(description="Maximum agent turn count")]
     subagent_settings: Annotated[
         SubagentSettings, Field(description="Subagent execution settings")

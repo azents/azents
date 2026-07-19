@@ -611,6 +611,8 @@
       "shellEnabledLabel": "Enable Shell",
       "memoryEnabledLabel": "Enable Memory",
       "memoryEnabledDescription": "Allow this agent to save and recall persistent memories across conversations",
+      "toolSearchEnabledLabel": "Enable Tool Search",
+      "toolSearchEnabledDescription": "Defer attached service tools and let the model search for them when needed",
       "settingsHub": {
         "title": "Agent settings",
         "description": "Choose a settings area to review or update this agent.",

@@ -73,6 +73,7 @@ def _make_agent(
     *,
     reasoning_supported: bool = False,
     effort_levels: list[ModelReasoningEffort] | None = None,
+    tool_search_enabled: bool = False,
 ) -> Agent:
     """Create Agent for tests."""
     selection = make_test_model_selection(integration_id="integ-1")
@@ -97,6 +98,7 @@ def _make_agent(
         runtime_provider_id=None,
         shell_enabled=True,
         memory_enabled=True,
+        tool_search_enabled=tool_search_enabled,
         max_turns=None,
         avatar=None,
         created_at=_NOW,
@@ -300,7 +302,7 @@ class TestResolveInvokeInput:
     async def test_resolves_run_request_from_agent_snapshot(self) -> None:
         """Build RunRequest from Agent snapshot and integration."""
         agent_repository = AsyncMock()
-        agent_repository.get_by_id.return_value = _make_agent()
+        agent_repository.get_by_id.return_value = _make_agent(tool_search_enabled=True)
         integration_repository = AsyncMock()
         integration_repository.get_by_id_with_secrets.return_value = _make_integration()
 
@@ -332,6 +334,7 @@ class TestResolveInvokeInput:
         assert isinstance(result, Success)
         run_request = result.value
         assert run_request.model == "gpt-4o"
+        assert run_request.tool_search_enabled is True
 
     async def test_applies_selected_model_settings_and_lightweight_cap(self) -> None:
         """Use option-owned output, tool, and context settings at runtime."""

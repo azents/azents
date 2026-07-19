@@ -48,6 +48,7 @@ class Agent(BaseModel):
     )
     shell_enabled: bool = Field(default=True, description="Shell Enabled flag")
     memory_enabled: bool = Field(default=True, description="Memory enabled flag")
+    tool_search_enabled: bool = Field(description="Tool Search enabled flag")
     max_turns: int | None = Field(default=None, description="Maximum agent turn count")
     subagent_settings: SubagentSettings = Field(
         default_factory=SubagentSettings,
@@ -96,6 +97,9 @@ class AgentCreate(BaseModel):
     )
     shell_enabled: bool = Field(default=True, description="Shell Enabled flag")
     memory_enabled: bool = Field(default=True, description="Memory enabled flag")
+    tool_search_enabled: bool = Field(
+        default=False, description="Tool Search enabled flag"
+    )
     max_turns: int | None = Field(default=None, description="Maximum agent turn count")
     subagent_settings: SubagentSettings = Field(
         default_factory=SubagentSettings, description="Subagent execution settings"
@@ -133,6 +137,7 @@ class AgentUpdate(TypedDict, total=False):
     ]
     shell_enabled: Annotated[bool, Field(description="Shell Enabled flag")]
     memory_enabled: Annotated[bool, Field(description="Memory enabled flag")]
+    tool_search_enabled: Annotated[bool, Field(description="Tool Search enabled flag")]
     max_turns: Annotated[int | None, Field(description="Maximum agent turn count")]
     subagent_settings: Annotated[
         SubagentSettings, Field(description="Subagent execution settings")

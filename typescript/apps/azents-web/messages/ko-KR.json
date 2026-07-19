@@ -611,6 +611,8 @@
       "shellEnabledLabel": "Shell 사용",
       "memoryEnabledLabel": "메모리 활성화",
       "memoryEnabledDescription": "대화 간 영속적인 메모리를 저장하고 활용할 수 있도록 허용",
+      "toolSearchEnabledLabel": "Tool Search 활성화",
+      "toolSearchEnabledDescription": "연결된 서비스 도구를 지연 노출하고 모델이 필요할 때 검색하도록 허용",
       "settingsHub": {
         "title": "에이전트 설정",
         "description": "확인하거나 수정할 설정 영역을 선택하세요.",
