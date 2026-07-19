@@ -263,6 +263,46 @@ def _assert_no_sensitive_source_values(value: object) -> None:
         assert forbidden not in serialized
 
 
+def _subscription_usage_log_records(logs: str) -> list[dict[str, object]]:
+    """Return structured log records emitted by subscription usage services."""
+    records: list[dict[str, object]] = []
+    for line in logs.splitlines():
+        try:
+            record = _JSON_OBJECT.validate_python(json.loads(line))
+        except ValueError:
+            continue
+        name = record.get("name")
+        if isinstance(name, str) and name.startswith(
+            "azents.services.subscription_usage"
+        ):
+            records.append(record)
+    assert records
+    return records
+
+
+def test_subscription_usage_log_records_ignore_unrelated_service_logs() -> None:
+    """Scope source-value checks to the subscription usage logging boundary."""
+    usage_record = {
+        "name": "azents.services.subscription_usage.service",
+        "operation": "subscription_usage_read",
+        "outcome": "available",
+    }
+    logs = "\n".join(
+        [
+            json.dumps(
+                {
+                    "name": "azents.core.email.service",
+                    "to_email": "unrelated@example.com",
+                }
+            ),
+            json.dumps(usage_record),
+            "non-json process output",
+        ]
+    )
+
+    assert _subscription_usage_log_records(logs) == [usage_record]
+
+
 def _assert_safe_subscription_usage_journal(journal: list[dict[str, object]]) -> None:
     """Verify the proxy journal contains classifications, not source values."""
     _assert_no_sensitive_source_values(journal)
@@ -328,7 +368,7 @@ class TestChatGPTSubscriptionUsage:
             "spend_limit": "500 credits",
             "spend_used": "180 credits",
             "spend_remaining_percent": 64.0,
-            "spend_resets_at": "2026-07-31T12:00:00Z",
+            "spend_resets_at": "2026-08-01T00:00:00Z",
             "reached_type": None,
         }
         assert member["type"] == "available"
@@ -377,7 +417,7 @@ class TestChatGPTSubscriptionUsage:
             ("/chatgpt/oauth/token", 200),
             ("/backend-api/wham/usage", 200),
         ]
-        assert all(entry["sequence"] == 1 for entry in journal)
+        assert [entry["sequence"] for entry in journal] == [1, 1, 2]
         _assert_no_sensitive_source_values(payload)
         _assert_safe_subscription_usage_journal(journal)
 
@@ -617,4 +657,4 @@ class TestSubscriptionUsageIsolation:
 
         stdout, stderr = azents_public_server_container.get_logs()
         logs = stdout.decode(errors="replace") + stderr.decode(errors="replace")
-        _assert_no_sensitive_source_values(logs)
+        _assert_no_sensitive_source_values(_subscription_usage_log_records(logs))

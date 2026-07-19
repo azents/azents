@@ -322,6 +322,13 @@ validation PR is recorded.
    with a mounted-card ref retaining the same value for the active card lifecycle. The state projector
    uses that snapshot when a later typed `unavailable` response arrives. A regression test covers the
    exact success-then-unavailable transition.
+7. The following deterministic CI run exposed three validation assertion defects rather than provider
+   adapter failures. The ChatGPT financial reset expectation now matches the fixture's UTC epoch, the
+   refresh journal expects the second request to the same usage path to have sequence `2`, and the
+   server-log safety assertion filters structured subscription-usage records before rejecting source
+   identifiers so unrelated email-service logs do not produce false positives. Static checks, two pure
+   helper tests, and all 13 direct proxy tests pass locally; Docker-backed product-path confirmation
+   remains required in CI.
 
 ## Required CI Evidence
 
