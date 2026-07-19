@@ -50,6 +50,7 @@ const meta = {
     modelOptions: [],
     catalogStates: new Map(),
     modelsLoading: false,
+    renderSubscriptionUsage: () => null,
     onOpenCreate: () => {},
     onOpenEdit: () => {},
     onCloseModal: () => {},

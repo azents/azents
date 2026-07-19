@@ -13,6 +13,7 @@ import {
   chatgptOauthV1StartDevice,
   llmProviderIntegrationV1CreateIntegration,
   llmProviderIntegrationV1DeleteIntegration,
+  llmProviderIntegrationV1GetSubscriptionUsage,
   llmProviderIntegrationV1ListIntegrationCatalogEntries,
   llmProviderIntegrationV1ListIntegrationProviders,
   llmProviderIntegrationV1ListIntegrations,
@@ -84,6 +85,36 @@ export const llmProviderIntegrationRouter = router({
         throw mapExpectedError(e, {
           401: "UNAUTHORIZED",
           403: "FORBIDDEN",
+        });
+      }
+    }),
+
+  /** Fetch one integration's live subscription usage. */
+  subscriptionUsage: publicProcedure
+    .input(
+      z.object({
+        handle: z.string().min(1),
+        integrationId: z.string().min(1),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      try {
+        const { data } = await llmProviderIntegrationV1GetSubscriptionUsage({
+          client: ctx.apiClient,
+          path: {
+            handle: input.handle,
+            integration_id: input.integrationId,
+          },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          401: "UNAUTHORIZED",
+          403: "FORBIDDEN",
+          404: "NOT_FOUND",
+          409: "CONFLICT",
+          422: "BAD_REQUEST",
         });
       }
     }),
