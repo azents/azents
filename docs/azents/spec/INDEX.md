@@ -16,7 +16,7 @@ Details of all living specs. Synchronized from frontmatter.
 | conversation | [Conversation & Events](domain/conversation.md) | @Hardtack | 2026-07-19 | 111 |
 | goal | [Goal Domain Spec](domain/goal.md) | - | 2026-07-16 | 9 |
 | memory | [Memory](domain/memory.md) | @Hardtack | 2026-07-17 | 5 |
-| model-catalog | [Model Catalog Domain Spec](domain/model-catalog.md) | - | 2026-07-18 | 13 |
+| model-catalog | [Model Catalog Domain Spec](domain/model-catalog.md) | - | 2026-07-19 | 14 |
 | toolkit | [Toolkit](domain/toolkit.md) | @Hardtack | 2026-07-19 | 56 |
 | user-auth | [User & Authentication](domain/user-auth.md) | @Hardtack | 2026-07-13 | 7 |
 | workspace | [Workspace & Membership](domain/workspace.md) | @Hardtack | 2026-07-14 | 40 |
@@ -33,6 +33,7 @@ Details of all living specs. Synchronized from frontmatter.
 | [Context Compaction](flow/context-compaction.md) | @Hardtack | 2026-07-19 | 28 |
 | [File Exchange Storage](flow/file-exchange-storage.md) | @Hardtack | 2026-07-19 | 18 |
 | [MCP OAuth Flow](flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
+| [OpenRouter API Key Provider Flow](flow/openrouter-api-key.md) | @Hardtack | 2026-07-19 | 1 |
 | [Periodic Execution Flow Spec](flow/periodic-execution.md) | - | 2026-07-18 | 3 |
 | [Run Resume](flow/run-resume.md) | @Hardtack | 2026-07-18 | 21 |
 | [Session Context Inspector](flow/session-context-inspector.md) | @Hardtack | 2026-07-19 | 17 |
