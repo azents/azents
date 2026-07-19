@@ -14,6 +14,7 @@ code_paths:
   - python/apps/azents/src/azents/api/public/llm_provider_integration/v1/__init__.py
   - python/apps/azents/src/azents/api/public/llm_provider_integration/v1/data.py
   - python/apps/azents/src/azents/services/xai_oauth/**
+  - python/apps/azents/src/azents/services/subscription_usage/**
   - python/apps/azents/src/azents/repos/xai_oauth_session/**
   - python/apps/azents/src/azents/rdb/models/xai_oauth_session.py
   - python/apps/azents/src/azents/engine/run/resolve.py
@@ -21,8 +22,8 @@ code_paths:
   - python/apps/azents/src/azents/engine/events/**
   - typescript/apps/azents-web/src/features/llm-settings/**
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
-last_verified_at: 2026-07-18
-spec_version: 5
+last_verified_at: 2026-07-19
+spec_version: 6
 ---
 
 # xAI OAuth Flow
@@ -182,6 +183,55 @@ Rules:
 - Token refresh 403 marks the integration `entitlement_denied`; it is treated as an account tier/allowlist failure, not an expired-token failure.
 - If refresh fails concurrently with another successful refresh, the runtime rereads the latest integration and uses the refreshed credential.
 
+## Subscription Usage
+
+An enabled `xai_oauth` integration exposes a live subscription-usage snapshot through the integration
+child endpoint. The read is integration-scoped and read-through: Azents does not persist usage
+snapshots, collect history, poll in the background, aggregate workspaces, or use usage to change Agent
+execution entitlement.
+
+The endpoint requires `LLM_INTEGRATIONS_READ`. It returns operational limit and reset metadata to
+readers. Prepaid balance, pay-as-you-go values, and auto top-up configuration are included only when the
+caller also has `LLM_INTEGRATIONS_WRITE`. A disabled integration returns the typed `disabled`
+unavailable outcome without calling xAI. Missing or cross-workspace integrations return 404, and a
+provider without a subscription-usage adapter returns 409.
+
+Before reading usage, the service reuses the existing OAuth freshness lifecycle. The adapter then uses
+the authenticated xAI CLI proxy control plane rather than the `api.x.ai/v1` inference endpoint:
+
+1. Read `/settings` as best-effort plan enrichment and redirect control.
+2. If settings contains a non-empty usage redirect, require an absolute HTTPS URL on `x.ai`,
+   `grok.com`, or their subdomains. A trusted URL returns the typed `external` outcome and skips billing.
+   A malformed or untrusted URL returns `invalid_provider_response` and also skips billing.
+3. Otherwise read required `/billing?format=credits` data.
+4. When the normalized prepaid balance is non-zero, read `/auto-topup-rule` as optional financial
+   enrichment. Its failure does not make an otherwise valid billing snapshot unavailable.
+
+The request uses the connected access token, `x-userid`, the Grok CLI token-auth marker, pinned client
+version, client identifier, and interactive client mode. A process-local `AZ_XAI_USAGE_BASE_URL`
+override is available for deterministic environments; the production default remains the CLI proxy.
+
+A required billing 401 triggers exactly one forced refresh through the existing persistence and
+concurrent-refresh recovery path, followed by one complete settings-and-billing retry. Only that shared
+OAuth refresh lifecycle may update integration connection status. Usage-specific billing 403 returns
+`entitlement_unavailable` without changing inference entitlement or enabled state. Rate limits,
+provider 5xx, transport failures, and malformed required billing data become typed unavailable outcomes.
+Settings and auto top-up failures remain best-effort observations with safe endpoint categories only.
+
+A successful response normalizes the current weekly, monthly, or generic subscription period into one
+used-percentage limit with optional duration and reset time. The public available outcome contains
+integration id, provider, `fetched_at`, optional plan label, limits, and optional permission-projected
+financial details. Expected failures return fixed Azents messages rather than provider bodies or
+exception text.
+
+Workspace LLM Settings loads usage independently inside each eligible integration card. The query does
+not gate the integration list or management actions, does not poll automatically, treats data as fresh
+for 60 seconds, revalidates on focus, and supports manual refresh. Initial failure replaces only the
+card's usage section. A failed refresh retains the last successful in-memory snapshot and marks it stale.
+Disabled cards issue no usage request. Financial details remain collapsed. A trusted external outcome
+renders a new-tab link with `noopener noreferrer`; unavailable outcomes never render a provider URL.
+Unexpected presentation failures remain inside a card-local error boundary.
+
 ## API Surface
 
 | Method | Path | Description |
@@ -190,6 +240,7 @@ Rules:
 | `POST` | `/llm-provider-integration/v1/workspaces/{handle}/xai-oauth/device/start` | create device session |
 | `GET` | `/llm-provider-integration/v1/workspaces/{handle}/xai-oauth/device/{session_id}` | device poll |
 | `DELETE` | `/llm-provider-integration/v1/workspaces/{handle}/xai-oauth/device/{session_id}` | device cancel |
+| `GET` | `/llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations/{integration_id}/subscription-usage` | read one live integration-scoped subscription-usage outcome |
 
 ## Model Catalog
 
@@ -208,11 +259,14 @@ Rules:
 - OAuth client id is the public Grok CLI native-app client identity and is not treated as a secret.
 - The provider remains marked experimental in provider capability responses and the UI.
 - Entitlement failures are quarantined as `entitlement_denied` to avoid repeated refresh storms.
+- Subscription-usage adapters and logs never expose OAuth tokens, account identifiers, emails, request headers, provider bodies, provider exception serialization, redirect values, or unauthorized financial values.
+- Operational usage requires integration read permission. Prepaid, pay-as-you-go, and auto top-up fields require integration write permission and are omitted otherwise.
 
 ## Changelog
 
 | Date | Version | Change | Rationale |
 |---|---|---|---|
+| 2026-07-19 | 6 | Added integration-scoped CLI-proxy subscription usage, trusted redirects, permission-projected financial details, and card-local presentation | ADR-0169 and validated subscription usage implementation |
 | 2026-07-18 | 5 | Routed unclassified provider outcomes to internal-error handling without provider retry state | Preserve actionable incident tracebacks instead of generic unknown-provider logs |
 | 2026-07-18 | 4 | Applied the bounded common provider-failure contract and complete Run retry budget | ADR-0165 coordinated provider-failure cutover |
 | 2026-07-10 | 3 | Clarified separation from the stable API-key provider and documented shared xAI transport/catalog behavior | `docs/azents/design/xai-api-key-provider.md` |
