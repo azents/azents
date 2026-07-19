@@ -515,8 +515,8 @@ def test_chatgpt_oauth_rehydrates_image_generation_with_store_false() -> None:
     ]
 
 
-def test_openai_sdk_rehydrates_image_generation_result() -> None:
-    """Replay only valid generated-image fields through the SDK lowerer."""
+def test_openai_sdk_rehydrates_image_generation_call() -> None:
+    """Replay a generated-image call through the SDK lowerer."""
     lowerer = OpenAIResponsesLowerer(
         provider="openai",
         model="gpt-5.1",
@@ -549,8 +549,8 @@ def test_openai_sdk_rehydrates_image_generation_result() -> None:
     event = Event(
         id="3" * 32,
         session_id="session-1",
-        kind=EventKind.PROVIDER_TOOL_RESULT,
-        payload=ProviderToolResultPayload(
+        kind=EventKind.PROVIDER_TOOL_CALL,
+        payload=ProviderToolCallPayload(
             call_id="image-call-1",
             name="image_generation",
             status="completed",

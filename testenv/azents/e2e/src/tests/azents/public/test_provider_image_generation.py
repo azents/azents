@@ -91,15 +91,18 @@ def _wait_for_idle(
     raise TimeoutError(f"image generation session did not become idle: {last_state!r}")
 
 
-def _provider_result(
+def _provider_call(
     events: list[dict[str, object]],
 ) -> dict[str, object] | None:
-    """Return the completed image-generation provider result."""
+    """Return the completed image-generation provider call."""
     for event in events:
-        if event.get("kind") != "provider_tool_result":
+        if event.get("kind") != "provider_tool_call":
             continue
-        payload = json_object_payload(event.get("payload"), label="provider result")
-        if payload.get("name") == "image_generation":
+        payload = json_object_payload(event.get("payload"), label="provider call")
+        if (
+            payload.get("name") == "image_generation"
+            and payload.get("status") == "completed"
+        ):
             return event
     return None
 
@@ -294,7 +297,7 @@ class TestProviderImageGeneration:
         results = [
             event
             for event in history_events(history)
-            if _provider_result([event]) is not None
+            if _provider_call([event]) is not None
         ]
         assert len(results) == 1, serialized_history
         result_payload = json_object_payload(
@@ -312,14 +315,15 @@ class TestProviderImageGeneration:
         )
         attachments = json_object_list_payload(
             result_payload.get("attachments"),
-            label="provider result attachments",
+            label="provider call attachments",
         )
-        assert len(output) == 1
+        assert len(output) == 2
         assert isinstance(output[0].get("model_file_id"), str)
         assert output[0].get("kind") == "image"
         assert output[0].get("media_type") == "image/jpeg"
-        assert len(attachments) == 1
-        attachment = attachments[0]
+        assert attachments == []
+        attachment = output[1]
+        assert attachment.get("type") == "attachment"
         assert attachment.get("availability") == "available"
         assert attachment.get("media_type") == "image/png"
         assert attachment.get("size") == len(_IMAGE_BYTES)
@@ -404,7 +408,7 @@ class TestProviderImageGeneration:
                 [
                     event
                     for event in history_events(final_history)
-                    if _provider_result([event]) is not None
+                    if _provider_call([event]) is not None
                 ]
             )
             == 1
