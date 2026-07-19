@@ -16,6 +16,7 @@ from azents.core.chatgpt_oauth import (
     ChatGPTOAuthConnectionMethod,
     ChatGPTOAuthConnectionStatus,
     ChatGPTOAuthSessionStatus,
+    resolve_chatgpt_oauth_token_url,
 )
 from azents.core.credentials import ChatGPTOAuthConfig, ChatGPTOAuthSecrets
 from azents.core.crypto import CredentialCipher
@@ -70,11 +71,17 @@ def _get_integration_repo(
     return LLMProviderIntegrationRepository(cipher)
 
 
+def _get_token_url() -> str:
+    """Resolve the ChatGPT OAuth token endpoint dependency."""
+    return resolve_chatgpt_oauth_token_url()
+
+
 def _get_client(
     http_client: Annotated[httpx.AsyncClient, Depends(_get_http_client)],
+    token_url: Annotated[str, Depends(_get_token_url)],
 ) -> ChatGPTOAuthClient:
     """Create ChatGPT OAuth client dependency."""
-    return ChatGPTOAuthClient(http_client)
+    return ChatGPTOAuthClient(http_client, token_url=token_url)
 
 
 class ChatGPTOAuthService:

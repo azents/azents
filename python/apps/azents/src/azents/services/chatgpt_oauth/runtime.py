@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.chatgpt_oauth import (
     ChatGPTOAuthConnectionMethod,
     ChatGPTOAuthConnectionStatus,
+    resolve_chatgpt_oauth_token_url,
 )
 from azents.core.credentials import ChatGPTOAuthConfig, ChatGPTOAuthSecrets
 from azents.core.enums import LLMProvider
@@ -68,7 +69,10 @@ async def refresh_runtime_tokens(
     ):
         return Failure(ProviderRejected(reason="ChatGPT OAuth integration is invalid"))
     async with httpx.AsyncClient(timeout=20.0) as http_client:
-        refresh_result = await ChatGPTOAuthClient(http_client).refresh_tokens(
+        refresh_result = await ChatGPTOAuthClient(
+            http_client,
+            token_url=resolve_chatgpt_oauth_token_url(),
+        ).refresh_tokens(
             refresh_token=integration.secrets.refresh_token,
             connection_method=ChatGPTOAuthConnectionMethod(
                 integration.config.connection_method

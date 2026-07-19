@@ -7,7 +7,10 @@ import json
 import httpx
 from azcommon.result import Failure, Success
 
-from azents.core.chatgpt_oauth import ChatGPTOAuthConnectionMethod
+from azents.core.chatgpt_oauth import (
+    CHATGPT_OAUTH_TOKEN_URL,
+    ChatGPTOAuthConnectionMethod,
+)
 
 from .client import ChatGPTOAuthClient
 from .data import ProviderPending, ProviderRejected, ProviderUnavailable
@@ -20,9 +23,16 @@ def _jwt_payload(payload: dict[str, object]) -> str:
     return f"{header}.{body}."
 
 
-def _make_client(transport: httpx.AsyncBaseTransport) -> ChatGPTOAuthClient:
+def _make_client(
+    transport: httpx.AsyncBaseTransport,
+    *,
+    token_url: str = CHATGPT_OAUTH_TOKEN_URL,
+) -> ChatGPTOAuthClient:
     """Create client using Mock transport."""
-    return ChatGPTOAuthClient(httpx.AsyncClient(transport=transport))
+    return ChatGPTOAuthClient(
+        httpx.AsyncClient(transport=transport),
+        token_url=token_url,
+    )
 
 
 class TestChatGPTOAuthClient:
@@ -180,6 +190,30 @@ class TestChatGPTOAuthClient:
 
         assert isinstance(result, Failure)
         assert isinstance(result.error, ProviderUnavailable)
+
+    async def test_refresh_tokens_uses_injected_token_url(self) -> None:
+        """Use the configured token endpoint without changing provider defaults."""
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            assert str(request.url) == "https://oauth.example.test/custom/token"
+            return httpx.Response(
+                200,
+                json={
+                    "access_token": "new-access-token",
+                    "refresh_token": "new-refresh-token",
+                    "expires_in": 3600,
+                },
+            )
+
+        result = await _make_client(
+            httpx.MockTransport(handler),
+            token_url="https://oauth.example.test/custom/token",
+        ).refresh_tokens(
+            refresh_token="refresh-token",
+            connection_method=ChatGPTOAuthConnectionMethod.DEVICE,
+        )
+
+        assert isinstance(result, Success)
 
     async def test_refresh_tokens_success(self) -> None:
         """Convert Refresh token grant response to token set."""

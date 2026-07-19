@@ -5,6 +5,32 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
+from .chatgpt_oauth import (
+    CHATGPT_OAUTH_TOKEN_URL,
+    resolve_chatgpt_oauth_token_url,
+)
+
+
+def test_resolve_oauth_token_url_defaults_to_production(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Use the production token endpoint when no override is configured."""
+    monkeypatch.delenv("AZ_CHATGPT_OAUTH_TOKEN_URL", raising=False)
+
+    assert resolve_chatgpt_oauth_token_url() == CHATGPT_OAUTH_TOKEN_URL
+
+
+def test_resolve_oauth_token_url_uses_process_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Use the process-local non-secret token endpoint override."""
+    override = "http://openai-proxy:8081/chatgpt/oauth/token"
+    monkeypatch.setenv("AZ_CHATGPT_OAUTH_TOKEN_URL", override)
+
+    assert resolve_chatgpt_oauth_token_url() == override
+
 
 def test_build_headers_without_installed_package_metadata() -> None:
     """Build headers when Azents is loaded directly from its source tree."""

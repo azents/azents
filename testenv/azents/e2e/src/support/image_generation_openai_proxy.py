@@ -12,7 +12,7 @@ from base64 import b64encode
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import ClassVar, cast
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlsplit
 
 _PROMPT = "Provider image generation handoff"
 _FOLLOW_UP_PROMPT = "Provider image generation follow-up"
@@ -56,6 +56,32 @@ _IMAGE_PATH = Path(
 _JOURNAL_PATH = "/v1/_image_generation_requests"
 _XAI_IMAGINE_JOURNAL_PATH = "/v1/_xai_imagine_requests"
 _XAI_OAUTH_JOURNAL_PATH = "/v1/_xai_oauth_requests"
+_SUBSCRIPTION_USAGE_JOURNAL_PATH = "/v1/_subscription_usage_requests"
+_CHATGPT_USAGE_PATH = "/backend-api/wham/usage"
+_CHATGPT_TOKEN_PATH = "/chatgpt/oauth/token"
+_XAI_SETTINGS_PATH = "/v1/settings"
+_XAI_BILLING_PATH = "/v1/billing"
+_XAI_AUTO_TOP_UP_PATH = "/v1/auto-topup-rule"
+_CHATGPT_SCENARIOS = {
+    "test-chatgpt-normal": "chatgpt_normal",
+    "test-chatgpt-exhausted": "chatgpt_exhausted",
+    "test-chatgpt-refresh": "chatgpt_refresh",
+    "test-chatgpt-transport": "chatgpt_transport",
+    "test-chatgpt-rate-limited": "chatgpt_rate_limited",
+    "test-chatgpt-unavailable": "chatgpt_unavailable",
+    "test-chatgpt-malformed": "chatgpt_malformed",
+    "test-chatgpt-stale": "chatgpt_stale",
+}
+_XAI_USAGE_SCENARIOS = {
+    "test-xai-normal": "xai_normal",
+    "test-xai-external": "xai_external",
+    "test-xai-invalid-redirect": "xai_invalid_redirect",
+    "test-xai-billing-denied": "xai_billing_denied",
+    "test-xai-settings-failure": "xai_settings_failure",
+    "test-xai-transport": "xai_transport",
+    "test-xai-unavailable": "xai_unavailable",
+    "test-xai-malformed": "xai_malformed",
+}
 _XAI_API_KEY_IMAGE_PROMPT = "A deterministic xAI API-key aurora"
 _XAI_OAUTH_IMAGE_PROMPT = "A deterministic xAI OAuth aurora"
 _XAI_OAUTH_REFRESH_IMAGE_PROMPT = "A deterministic xAI OAuth refresh aurora"
@@ -120,6 +146,8 @@ class _State:
     requests: ClassVar[list[dict[str, object]]] = []
     imagine_requests: ClassVar[list[dict[str, object]]] = []
     oauth_requests: ClassVar[list[dict[str, object]]] = []
+    subscription_usage_requests: ClassVar[list[dict[str, object]]] = []
+    subscription_usage_sequences: ClassVar[dict[tuple[str, str], int]] = {}
     lock: ClassVar[threading.Lock] = threading.Lock()
 
 
@@ -127,12 +155,14 @@ class _Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
     def do_GET(self) -> None:
-        """Return a local journal or proxy the request."""
+        """Return a local journal, deterministic usage, or proxied response."""
         journal = self._journal_for_path()
         if journal is not None:
             with _State.lock:
                 payload = list(journal)
             self._write_json(200, payload)
+            return
+        if self._write_subscription_usage_get():
             return
         self._proxy()
 
@@ -142,6 +172,8 @@ class _Handler(BaseHTTPRequestHandler):
         if journal is not None:
             with _State.lock:
                 journal.clear()
+                if journal is _State.subscription_usage_requests:
+                    _State.subscription_usage_sequences.clear()
             self._write_json(200, {"cleared": True})
             return
         self._proxy()
@@ -149,6 +181,9 @@ class _Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         """Handle deterministic image, hosted-tool, and OAuth boundaries."""
         body = self._read_body()
+        if self.path == _CHATGPT_TOKEN_PATH:
+            self._write_chatgpt_oauth_token_response(body)
+            return
         if self.path == "/v1/images/generations":
             self._write_xai_imagine_response(body)
             return
@@ -202,7 +237,283 @@ class _Handler(BaseHTTPRequestHandler):
             return _State.imagine_requests
         if self.path == _XAI_OAUTH_JOURNAL_PATH:
             return _State.oauth_requests
+        if self.path == _SUBSCRIPTION_USAGE_JOURNAL_PATH:
+            return _State.subscription_usage_requests
         return None
+
+    def _write_subscription_usage_get(self) -> bool:
+        """Handle deterministic subscription-usage provider reads."""
+        path = urlsplit(self.path).path
+        if path == _CHATGPT_USAGE_PATH:
+            self._write_chatgpt_usage(path=path)
+            return True
+        if path in {_XAI_SETTINGS_PATH, _XAI_BILLING_PATH, _XAI_AUTO_TOP_UP_PATH}:
+            self._write_xai_usage(path=path)
+            return True
+        return False
+
+    def _write_chatgpt_usage(self, *, path: str) -> None:
+        """Return one deterministic ChatGPT usage outcome."""
+        account_id = self.headers.get("ChatGPT-Account-Id")
+        scenario = _CHATGPT_SCENARIOS.get(account_id or "", "unknown")
+        sequence = self._next_subscription_sequence(scenario=scenario, path=path)
+        authorization = self.headers.get("Authorization")
+        headers = {
+            "authorization": authorization is not None,
+            "account": account_id is not None,
+            "originator": self.headers.get("originator") is not None,
+            "user_agent": self.headers.get("user-agent") is not None,
+        }
+
+        status: int | str
+        payload: object
+        if scenario == "chatgpt_normal":
+            status, payload = 200, self._chatgpt_usage_payload(used_percent=42)
+        elif scenario == "chatgpt_exhausted":
+            status, payload = 200, self._chatgpt_usage_payload(used_percent=100)
+        elif scenario == "chatgpt_refresh":
+            if authorization == "Bearer test-chatgpt-refresh-initial":
+                status, payload = 401, {"error": "expired"}
+            elif authorization == "Bearer test-chatgpt-refreshed":
+                status, payload = 200, self._chatgpt_usage_payload(used_percent=35)
+            else:
+                status, payload = 401, {"error": "invalid"}
+        elif scenario == "chatgpt_transport":
+            status, payload = "transport_close", None
+        elif scenario == "chatgpt_rate_limited":
+            status, payload = 429, {"error": "rate_limited"}
+        elif scenario == "chatgpt_unavailable":
+            status, payload = 503, {"error": "unavailable"}
+        elif scenario == "chatgpt_malformed":
+            status, payload = 200, {"rate_limit": [None]}
+        elif scenario == "chatgpt_stale":
+            status, payload = (
+                (200, self._chatgpt_usage_payload(used_percent=58))
+                if sequence == 1
+                else (503, {"error": "unavailable"})
+            )
+        else:
+            status, payload = 400, {"error": "unknown deterministic scenario"}
+
+        self._append_subscription_request(
+            scenario=scenario,
+            path=path,
+            sequence=sequence,
+            status=status,
+            required_headers=headers,
+        )
+        if status == "transport_close":
+            self.close_connection = True
+            self.connection.close()
+            return
+        self._write_json(status, payload)
+
+    def _write_xai_usage(self, *, path: str) -> None:
+        """Return one deterministic xAI settings or billing outcome."""
+        account_id = self.headers.get("x-userid")
+        scenario = _XAI_USAGE_SCENARIOS.get(account_id or "", "unknown")
+        sequence = self._next_subscription_sequence(scenario=scenario, path=path)
+        headers = {
+            "authorization": self.headers.get("Authorization") is not None,
+            "token_auth": self.headers.get("X-XAI-Token-Auth") is not None,
+            "account": account_id is not None,
+            "client_version": self.headers.get("x-grok-client-version") is not None,
+            "client_identifier": self.headers.get("x-grok-client-identifier")
+            is not None,
+            "client_mode": self.headers.get("x-grok-client-mode") is not None,
+        }
+
+        status: int | str
+        payload: object
+        if path == _XAI_SETTINGS_PATH:
+            if scenario == "xai_external":
+                status, payload = (
+                    200,
+                    {
+                        "usage_billing_redirect_url": "https://grok.com/usage",
+                    },
+                )
+            elif scenario == "xai_invalid_redirect":
+                status, payload = (
+                    200,
+                    {
+                        "usage_billing_redirect_url": "https://example.com/rejected",
+                    },
+                )
+            elif scenario == "xai_settings_failure":
+                status, payload = 503, {"error": "unavailable"}
+            else:
+                status, payload = (
+                    200,
+                    {
+                        "subscription_tier": "supergrok",
+                        "subscription_tier_display": "SuperGrok",
+                    },
+                )
+        elif path == _XAI_BILLING_PATH:
+            query = parse_qs(urlsplit(self.path).query)
+            if query.get("format") != ["credits"]:
+                status, payload = 400, {"error": "format is required"}
+            elif scenario == "xai_billing_denied":
+                status, payload = 403, {"error": "denied"}
+            elif scenario == "xai_transport":
+                status, payload = "transport_close", None
+            elif scenario == "xai_unavailable":
+                status, payload = 503, {"error": "unavailable"}
+            elif scenario == "xai_malformed":
+                status, payload = 200, {"config": [None]}
+            elif scenario in {"xai_external", "xai_invalid_redirect"}:
+                status, payload = 500, {"error": "billing must be short-circuited"}
+            else:
+                status, payload = 200, self._xai_billing_payload()
+        else:
+            status, payload = 200, self._xai_auto_top_up_payload()
+
+        self._append_subscription_request(
+            scenario=scenario,
+            path=path,
+            sequence=sequence,
+            status=status,
+            required_headers=headers,
+        )
+        if status == "transport_close":
+            self.close_connection = True
+            self.connection.close()
+            return
+        self._write_json(status, payload)
+
+    def _write_chatgpt_oauth_token_response(self, body: bytes) -> None:
+        """Return a deterministic ChatGPT refresh token without journaling it."""
+        form = parse_qs(body.decode())
+        refresh_token = form.get("refresh_token", [None])[0]
+        scenario = (
+            "chatgpt_refresh"
+            if refresh_token == "test-chatgpt-refresh-success"
+            else "unknown"
+        )
+        status = 200 if scenario == "chatgpt_refresh" else 400
+        sequence = self._next_subscription_sequence(
+            scenario=scenario,
+            path=_CHATGPT_TOKEN_PATH,
+        )
+        self._append_subscription_request(
+            scenario=scenario,
+            path=_CHATGPT_TOKEN_PATH,
+            sequence=sequence,
+            status=status,
+            required_headers={
+                "content_type": self.headers.get("Content-Type")
+                == "application/x-www-form-urlencoded",
+            },
+        )
+        if status != 200:
+            self._write_json(status, {"error": "invalid_grant"})
+            return
+        self._write_json(
+            200,
+            {
+                "access_token": "test-chatgpt-refreshed",
+                "refresh_token": "test-chatgpt-refresh-success",
+                "expires_in": 3600,
+                "token_type": "Bearer",
+            },
+        )
+
+    @staticmethod
+    def _chatgpt_usage_payload(*, used_percent: int) -> dict[str, object]:
+        """Build a valid deterministic ChatGPT usage response."""
+        return {
+            "plan_type": "Pro",
+            "rate_limit": {
+                "primary_window": {
+                    "used_percent": used_percent,
+                    "limit_window_seconds": 18_000,
+                    "reset_at": 1_784_460_000,
+                },
+                "secondary_window": {
+                    "used_percent": 81,
+                    "limit_window_seconds": 604_800,
+                    "reset_at": 1_784_894_400,
+                },
+            },
+            "additional_rate_limits": [],
+            "credits": {
+                "has_credits": True,
+                "unlimited": False,
+                "balance": "120 credits",
+            },
+            "spend_control": {
+                "reached": False,
+                "individual_limit": {
+                    "limit": "500 credits",
+                    "used": "180 credits",
+                    "remaining_percent": 64,
+                    "reset_at": 1_785_542_400,
+                },
+            },
+        }
+
+    @staticmethod
+    def _xai_billing_payload() -> dict[str, object]:
+        """Build a valid deterministic xAI billing response."""
+        return {
+            "subscriptionTier": "SuperGrok",
+            "onDemandEnabled": True,
+            "config": {
+                "creditUsagePercent": 42,
+                "currentPeriod": {
+                    "type": "USAGE_PERIOD_TYPE_WEEKLY",
+                    "start": "2026-07-13T00:00:00+00:00",
+                    "end": "2026-07-20T00:00:00+00:00",
+                },
+                "prepaidBalance": {"val": 2540},
+                "onDemandCap": {"val": 10000},
+                "onDemandUsed": {"val": 1275},
+                "isUnifiedBillingUser": True,
+            },
+        }
+
+    @staticmethod
+    def _xai_auto_top_up_payload() -> dict[str, object]:
+        """Build a valid deterministic xAI auto top-up response."""
+        return {
+            "rule": {
+                "enabled": True,
+                "minBeforeHittingSl": {"val": 500},
+                "topupAmount": {"val": 2000},
+                "maxAmountPerMonth": {"val": 10000},
+            }
+        }
+
+    @staticmethod
+    def _next_subscription_sequence(*, scenario: str, path: str) -> int:
+        """Return a monotonic request sequence for one safe scenario/path key."""
+        key = (scenario, path)
+        with _State.lock:
+            sequence = _State.subscription_usage_sequences.get(key, 0) + 1
+            _State.subscription_usage_sequences[key] = sequence
+        return sequence
+
+    @staticmethod
+    def _append_subscription_request(
+        *,
+        scenario: str,
+        path: str,
+        sequence: int,
+        status: int | str,
+        required_headers: dict[str, bool],
+    ) -> None:
+        """Append one sanitized subscription-usage journal entry."""
+        with _State.lock:
+            _State.subscription_usage_requests.append(
+                {
+                    "scenario": scenario,
+                    "path": path,
+                    "sequence": sequence,
+                    "status": status,
+                    "required_headers": required_headers,
+                }
+            )
 
     def _write_xai_imagine_response(self, body: bytes) -> None:
         """Return deterministic Imagine output and bounded auth failures."""
