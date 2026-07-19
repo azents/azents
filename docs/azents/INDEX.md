@@ -199,6 +199,7 @@ Design documents are accumulated records and are not listed individually in this
 - [ADR-0145: Scope Failed-run Retry to One Model Turn](adr/0145-scope-failed-run-retry-to-model-turn.md)
 - [ADR-0146: Bound Model Streams by Parsed-Event Idle and Absolute Attempt Time](adr/0146-model-stream-parsed-event-idle-and-attempt-bounds.md)
 - [ADR-0147: Use an OpenAI-Native Responses Transport Family](adr/0147-openai-native-responses-transport-family.md)
+- [ADR-0147: Tool Search and a Bounded Model-Visible Tool Working Set](adr/0147-tool-search-bounded-working-set.md)
 - [ADR-0148: Define the OpenAI HTTP Migration by Semantic Parity](adr/0148-define-openai-http-migration-by-semantic-parity.md)
 - [ADR-0149: Use LiteLLM Only as the OpenAI Cost Calculator](adr/0149-use-litellm-only-as-openai-cost-calculator.md)
 - [ADR-0150: Define the OpenAI Responses WebSocket Lifecycle](adr/0150-openai-responses-websocket-lifecycle.md)
