@@ -33,7 +33,7 @@ The validation preserves ADR-0085 deterministic provider-facing ordering and sna
 - Backend validation: local deterministic unit and integration fixtures
 - Frontend validation: generated TypeScript client plus azents-web static and unit checks
 - Product-path fixture: AIMock plus the registered test-only `runtime_hook_qa` Toolkit
-- Docker-backed E2E: unavailable because the local environment has no Docker Unix socket
+- Docker-backed E2E: unavailable locally because the environment has no Docker Unix socket; a dedicated pull-request CI job runs the focused runtime-provider tests on `ubuntu-latest`
 - External provider credentials: none
 
 The product-path fixture requires the existing Docker-composed Azents public server, engine worker, PostgreSQL, Redis, AIMock, and runtime-hook QA provider. No external MCP server, cloud account, or live LLM is required.
@@ -154,9 +154,11 @@ uv run pytest -vv -s \
   src/tests/azents/public/test_runtime_hooks.py::TestRuntimeHooks::test_tool_search_persists_deferred_probe_across_runs
 ```
 
-Result: both tests were blocked during shared fixture setup before Azents product code executed.
+Local result: both tests were blocked during shared fixture setup before Azents product code executed.
 
-The Docker SDK could not fetch the server API version because the local Unix socket did not exist. The root exception was `FileNotFoundError: [Errno 2] No such file or directory`, surfaced as `docker.errors.DockerException`. This is an execution-environment blocker rather than a product assertion failure. Both tests remain required in Docker-capable CI.
+The Docker SDK could not fetch the server API version because the local Unix socket did not exist. The root exception was `FileNotFoundError: [Errno 2] No such file or directory`, surfaced as `docker.errors.DockerException`. This is an execution-environment blocker rather than a product assertion failure.
+
+Pull-request CI includes a dedicated `ci-tool-search-runtime-provider-e2e-run` job on `ubuntu-latest`. It runs exactly these two tests when the runtime-hook test, AIMock fixture, or CI workflow changes, and its result gates the aggregate `ci-python-e2e` check.
 
 ## Product-path Fixture Coverage
 
@@ -192,7 +194,7 @@ The E2E reads AIMock request journals rather than inferring membership only from
 | Disabled mode injects no `tool_search` and does not mutate state | Engine adapter request and execution assertions | Passed |
 | Enabled first call hides inactive deferred tools | Engine adapter integration tests | Passed |
 | Tool Search activation affects the next prepared call | Prepared-call integration tests | Passed |
-| Activated tools persist across AgentRuns in one Session | Toolkit State tests and AIMock journal E2E | Locally blocked before Docker setup; required in CI |
+| Activated tools persist across AgentRuns in one Session | Toolkit State tests and AIMock journal E2E | Deterministic tests passed locally; focused Docker path gates pull-request CI |
 | Unknown request-path limit remains unlimited | Compatibility registry and projection tests | Passed |
 | xAI uses the verified 200 total-declaration rule | Rule matching and hosted-declaration accounting tests | Passed |
 | Vertex Google/Gemini uses the conservative 128 declaration rule | Endpoint/family matching and counting-scope tests | Passed |
@@ -260,4 +262,4 @@ No current spec removes ADR-0085 deterministic ordering or snapshot-backed MCP d
 
 ## Validation Conclusion
 
-All deterministic backend, generated-client, frontend, and static E2E validation sets pass. The implementation matches ADR-0147 including D10 and preserves ADR-0085 behavior. The only unavailable local evidence is Docker-backed product-path execution, blocked before setup by the absent Docker socket. The two focused E2E tests are ready for Docker-capable CI and must pass before the stack is merge-ready.
+All deterministic backend, generated-client, frontend, and static E2E validation sets pass. The implementation matches ADR-0147 including D10 and preserves ADR-0085 behavior. Docker-backed product-path execution remains unavailable locally because the Docker socket is absent. The two focused runtime-provider tests run in a dedicated Docker-capable pull-request CI job and gate `ci-python-e2e`; that job must pass before the stack is merge-ready.
