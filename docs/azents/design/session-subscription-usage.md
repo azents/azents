@@ -2,6 +2,7 @@
 title: "Session Subscription Usage Design"
 created: 2026-07-19
 updated: 2026-07-19
+implemented: 2026-07-19
 tags: [frontend, llm, oauth, billing, security, ux, testing]
 ---
 
