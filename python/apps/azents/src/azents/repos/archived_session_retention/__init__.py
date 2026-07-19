@@ -149,6 +149,59 @@ class ArchivedSessionRetentionRepository:
         )
         return result.scalar_one_or_none() is not None
 
+    async def cancel_invalid_unstarted_purge_jobs(
+        self,
+        session: AsyncSession,
+        *,
+        now: datetime.datetime,
+        limit: int,
+    ) -> int:
+        """Cancel bounded unstarted jobs whose root schedule no longer matches."""
+        valid_root_schedule = sa.exists(
+            sa.select(RDBAgentSession.id).where(
+                RDBAgentSession.id == RDBArchivedSessionPurgeJob.root_session_id,
+                RDBAgentSession.status == AgentSessionStatus.ARCHIVED,
+                RDBAgentSession.session_kind == AgentSessionKind.ROOT,
+                RDBAgentSession.purge_after.is_not(None),
+                RDBAgentSession.purge_after == RDBArchivedSessionPurgeJob.eligible_at,
+                RDBAgentSession.archive_policy_revision
+                == RDBArchivedSessionPurgeJob.policy_revision,
+            )
+        )
+        candidates = (
+            sa.select(RDBArchivedSessionPurgeJob.id)
+            .where(
+                RDBArchivedSessionPurgeJob.status.in_(
+                    (
+                        ArchivedSessionPurgeStatus.PENDING,
+                        ArchivedSessionPurgeStatus.RETRY_WAIT,
+                    )
+                ),
+                RDBArchivedSessionPurgeJob.fencing_started_at.is_(None),
+                ~valid_root_schedule,
+            )
+            .order_by(RDBArchivedSessionPurgeJob.updated_at)
+            .limit(limit)
+        )
+        result = await session.execute(
+            sa.update(RDBArchivedSessionPurgeJob)
+            .where(RDBArchivedSessionPurgeJob.id.in_(candidates))
+            .values(
+                status=ArchivedSessionPurgeStatus.CANCELLED,
+                cancelled_at=now,
+                lease_owner=None,
+                lease_until=None,
+                next_attempt_at=None,
+                last_error_kind="InvalidRootSchedule",
+                last_error_summary=(
+                    "Archived root schedule no longer matches this purge job."
+                ),
+                updated_at=now,
+            )
+            .returning(RDBArchivedSessionPurgeJob.id)
+        )
+        return len(result.scalars().all())
+
     async def purge_fencing_started(
         self,
         session: AsyncSession,
@@ -564,6 +617,7 @@ class ArchivedSessionRetentionRepository:
                 RDBAgentSession.status == AgentSessionStatus.ARCHIVED,
                 RDBAgentSession.session_kind == AgentSessionKind.ROOT,
                 RDBAgentSession.purge_after.is_not(None),
+                RDBAgentSession.purge_after == RDBArchivedSessionPurgeJob.eligible_at,
                 RDBAgentSession.purge_after <= now,
                 RDBAgentSession.archive_policy_revision
                 == RDBArchivedSessionPurgeJob.policy_revision,

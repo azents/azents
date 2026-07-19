@@ -47,11 +47,27 @@ async def _session_manager() -> AsyncGenerator[AsyncSession, None]:
 class _RetentionRepository:
     """Durable purge job repository double."""
 
-    def __init__(self, job: ArchivedSessionPurgeJob, events: list[str]) -> None:
+    def __init__(
+        self,
+        job: ArchivedSessionPurgeJob | None,
+        events: list[str],
+    ) -> None:
         self.job = job
         self.events = events
         self.retry: dict[str, object] | None = None
         self.completed = False
+        self.stale_job_count = 0
+
+    async def cancel_invalid_unstarted_purge_jobs(
+        self,
+        session: AsyncSession,
+        *,
+        now: datetime.datetime,
+        limit: int,
+    ) -> int:
+        del session, now, limit
+        self.events.append("reconcile")
+        return self.stale_job_count
 
     async def claim_due_purge_job(
         self,
@@ -79,6 +95,7 @@ class _RetentionRepository:
     ) -> bool:
         del session, job_id, lease_owner, now
         self.events.append("mark_cleaning")
+        assert self.job is not None
         self.job.model_file_count = model_file_count
         self.job.artifact_count = artifact_count
         self.job.exchange_file_count = exchange_file_count
@@ -627,6 +644,23 @@ def _build_service(
         broker,
         s3_service,
     )
+
+
+async def test_purge_reconciles_stale_unstarted_jobs_before_claiming() -> None:
+    """Scheduler passes cancel stale unstarted work even when nothing is due."""
+    events: list[str] = []
+    service, retention_repository, *_ = _build_service(
+        events=events,
+        active_checks=[],
+    )
+    retention_repository.job = None
+    retention_repository.stale_job_count = 2
+
+    summary = await service.purge_once(lease_owner="worker-1")
+
+    assert summary.claimed is False
+    assert summary.stale_job_count == 2
+    assert events[:2] == ["reconcile", "claim"]
 
 
 async def test_purge_deletes_external_resources_before_session_tree() -> None:

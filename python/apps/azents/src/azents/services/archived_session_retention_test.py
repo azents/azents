@@ -256,6 +256,70 @@ async def test_recalculation_to_unlimited_cancels_pending_job(
         assert job.cancelled_at is not None
 
 
+async def test_invalid_unstarted_purge_jobs_are_cancelled_in_bounded_batches(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """Stale schedule identities become observable cancelled tombstones."""
+    repository = ArchivedSessionRetentionRepository()
+    now = datetime.datetime.now(datetime.UTC)
+    async with rdb_session_manager() as session:
+        stale_root_id = await _create_archived_root(
+            session,
+            suffix="stale-purge-job",
+            archived_at=now - datetime.timedelta(days=1),
+        )
+        valid_root_id = await _create_archived_root(
+            session,
+            suffix="valid-purge-job",
+            archived_at=now - datetime.timedelta(days=1),
+        )
+        stale_root = await session.get(RDBAgentSession, stale_root_id)
+        valid_root = await session.get(RDBAgentSession, valid_root_id)
+        assert stale_root is not None
+        assert stale_root.purge_after is not None
+        assert valid_root is not None
+        assert valid_root.purge_after is not None
+        session.add_all(
+            [
+                RDBArchivedSessionPurgeJob(
+                    root_session_id=stale_root_id,
+                    eligible_at=stale_root.purge_after,
+                    policy_revision=2,
+                ),
+                RDBArchivedSessionPurgeJob(
+                    root_session_id=valid_root_id,
+                    eligible_at=valid_root.purge_after,
+                    policy_revision=1,
+                ),
+            ]
+        )
+
+    async with rdb_session_manager() as session:
+        cancelled_count = await repository.cancel_invalid_unstarted_purge_jobs(
+            session,
+            now=now,
+            limit=100,
+        )
+
+    assert cancelled_count == 1
+    async with rdb_session_manager() as session:
+        jobs = list(
+            (
+                await session.scalars(
+                    sa.select(RDBArchivedSessionPurgeJob).where(
+                        RDBArchivedSessionPurgeJob.root_session_id.in_(
+                            (stale_root_id, valid_root_id)
+                        )
+                    )
+                )
+            ).all()
+        )
+    jobs_by_root = {job.root_session_id: job for job in jobs}
+    assert jobs_by_root[stale_root_id].status is ArchivedSessionPurgeStatus.CANCELLED
+    assert jobs_by_root[stale_root_id].last_error_kind == "InvalidRootSchedule"
+    assert jobs_by_root[valid_root_id].status is ArchivedSessionPurgeStatus.PENDING
+
+
 async def test_purge_job_claim_respects_lease_and_reclaims_after_expiry(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> None:

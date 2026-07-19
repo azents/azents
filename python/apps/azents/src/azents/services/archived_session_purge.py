@@ -37,6 +37,7 @@ from azents.services.session_git_worktree import SessionGitWorktreeService
 
 _LEASE_DURATION = datetime.timedelta(minutes=15)
 _MAX_RETRY_DELAY = datetime.timedelta(minutes=30)
+_STALE_JOB_RECONCILIATION_LIMIT = 100
 
 
 @dataclasses.dataclass(frozen=True)
@@ -51,6 +52,7 @@ class ArchivedSessionPurgeSummary:
     artifact_count: int
     exchange_file_count: int
     worktree_count: int
+    stale_job_count: int = 0
 
 
 @dataclasses.dataclass
@@ -84,6 +86,13 @@ class ArchivedSessionPurgeService:
         """Claim and advance one durable purge job."""
         now = datetime.datetime.now(datetime.UTC)
         async with self.session_manager() as session:
+            stale_job_count = (
+                await self.retention_repository.cancel_invalid_unstarted_purge_jobs(
+                    session,
+                    now=now,
+                    limit=_STALE_JOB_RECONCILIATION_LIMIT,
+                )
+            )
             job = await self.retention_repository.claim_due_purge_job(
                 session,
                 now=now,
@@ -91,10 +100,21 @@ class ArchivedSessionPurgeService:
                 lease_until=now + _LEASE_DURATION,
             )
         if job is None:
-            return ArchivedSessionPurgeSummary(False, False, False, None, 0, 0, 0, 0)
+            return ArchivedSessionPurgeSummary(
+                claimed=False,
+                completed=False,
+                retry_scheduled=False,
+                root_session_id=None,
+                model_file_count=0,
+                artifact_count=0,
+                exchange_file_count=0,
+                worktree_count=0,
+                stale_job_count=stale_job_count,
+            )
 
         try:
-            return await self._purge_claimed(job=job, lease_owner=lease_owner)
+            summary = await self._purge_claimed(job=job, lease_owner=lease_owner)
+            return dataclasses.replace(summary, stale_job_count=stale_job_count)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
