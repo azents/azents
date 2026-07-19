@@ -42,14 +42,15 @@ Azents also needs to preserve provider prompt-cache locality. Changing the model
 
 ## Goal
 
-Define a provider-independent Tool Search mechanism that:
+Define an Agent-level, opt-in, provider-independent Tool Search mechanism that:
 
-1. never sends more model-visible tool declarations than the selected provider request path permits;
-2. keeps essential tools directly visible;
-3. makes the remaining executable catalog searchable;
-4. retains a stable session-scoped working set across model turns and AgentRuns;
-5. changes the visible tool prefix only at explicit capability boundaries, primarily Tool Search activation, catalog invalidation, or model change;
-6. evicts old deferred tools deterministically when newly activated tools would exceed the model budget.
+1. preserves the existing complete model-visible tool catalog unless an Agent administrator explicitly enables Tool Search;
+2. when enabled, never sends more model-visible tool declarations than the selected provider request path permits;
+3. keeps essential tools directly visible;
+4. makes the remaining executable catalog searchable;
+5. retains a stable session-scoped working set across model turns and AgentRuns;
+6. changes the visible tool prefix only at explicit capability boundaries, primarily Tool Search activation, catalog invalidation, or model change;
+7. evicts old deferred tools deterministically when newly activated tools would exceed the model budget.
 
 ## Non-Goals
 
@@ -69,7 +70,8 @@ The following topics were discussed and are recorded in the accepted decisions b
 4. LRU recency semantics and deterministic eviction behavior.
 5. Behavior when direct tools alone exceed the provider request path's tool budget.
 6. Search result activation size, ranking, and handling of removed or schema-changed tools.
-7. Provider cache boundaries, observability, and rollout policy.
+7. Provider cache boundaries and observability.
+8. Agent-level opt-in configuration and disabled-mode compatibility behavior.
 
 ## Decisions
 
@@ -228,10 +230,29 @@ Rationale:
 - A code-owned registry makes documentation provenance, review, rollout, and rollback explicit.
 - Runtime scraping or mutable configuration would add availability and safety risks to every model call.
 
+### ADR-0147-D10. Make Tool Search an Agent-level opt-in setting that defaults to disabled
+
+Each Agent stores a `tool_search_enabled` boolean setting. New and existing Agents default to `false`. Agent administrators can enable or disable the setting through the Agent settings API and UI.
+
+When `tool_search_enabled` is `false`, Azents preserves the pre-ADR-0147 runtime behavior: the complete executable client-tool catalog is model-visible in canonical final-name order, no `tool_search` function is injected, attached service tools are not deferred, and the compatibility registry does not truncate or reject the catalog. Existing session working-set state may remain stored but is ignored while the feature is disabled.
+
+When `tool_search_enabled` is `true`, the direct/deferred classification, pinned Tool Search function, compatibility-budget projection, search activation, and session-shared recency rules in this ADR apply. Toggling the setting takes effect when the next Agent run resolves its immutable Agent snapshot. Re-enabling the feature may reuse valid session working-set names retained by the normal Toolkit State lifecycle.
+
+The setting belongs to the Agent rather than an individual selectable model because the working set is shared by the Agent session across model changes. It is not a workspace-wide or provider-wide rollout switch.
+
+Rationale:
+
+- Tool Search changes which capabilities are initially visible to the model and therefore requires explicit administrator intent during rollout.
+- Default-disabled persistence preserves existing Agent behavior and avoids silently changing established workflows.
+- Agent scope matches the existing session-shared working-set decision; model-scoped toggles would create conflicting behavior inside one session.
+- Keeping disabled mode as a true legacy path makes the rollout reversible without deleting session state.
+
 ## Current Direction
 
-The design now uses a session-scoped bounded working set with prepared-call provider-request projection limits:
+The design now uses an Agent-level opt-in setting and, when enabled, a session-scoped bounded working set with prepared-call provider-request projection limits:
 
+- `tool_search_enabled` defaults to `false`; disabled Agents keep the complete legacy model-visible catalog and do not receive `tool_search` or budget projection.
+- Enabled Agents apply the remaining Tool Search decisions below.
 - Direct tools are pinned and always consume the model-visible budget.
 - `tool_search` is a pinned direct tool.
 - Deferred tools remain executable catalog entries but are not model-visible until activated.
