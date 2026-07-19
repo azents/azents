@@ -92,8 +92,8 @@ api_routes:
   - /chat/v1/exchange-files/{file_id}/download
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
-last_verified_at: 2026-07-18
-spec_version: 110
+last_verified_at: 2026-07-19
+spec_version: 111
 ---
 
 # Conversation & Events
@@ -392,7 +392,6 @@ Event kinds:
 - `client_tool_call`
 - `client_tool_result`
 - `provider_tool_call`
-- `provider_tool_result`
 - `turn_marker`
 - `run_marker`
 - `interrupted`
@@ -432,8 +431,11 @@ bounding and secret-redaction boundary. Stack traces, credentials, headers, cook
 output, arbitrary raw provider bodies, raw stream frames, and SDK serialization are not stored in
 durable transcript payloads.
 
-Attachments are payload-specific, not event-common. Tool result output is always a part array using
-`output_text`, `output_image`, `output_file`, `output_audio`, or `output_video`.
+Attachments are payload-specific, not event-common. Client and provider tool delivery attachments are
+canonical `AttachmentOutputPart` values inside semantic/result output; tool payloads do not own a
+parallel top-level attachments field. Tool output is either a plain string or an ordered typed-part
+array containing `OutputTextPart`, `AttachmentOutputPart`, `ArtifactOutputPart`, or `FileOutputPart`;
+the serialized discriminators are `text`/`output_text`, `attachment`, `artifact`, and `file`.
 
 events have both physical append identity and model-visible order. Physical ids keep the
 durable append/audit sequence. `model_order` is scoped to a session and is the ordering/filtering key
@@ -442,20 +444,20 @@ compaction can insert model-visible system events without renumbering the whole 
 Compaction keeps append-only storage while presenting future model input from a single
 `compaction_summary` head event.
 
-Both `provider_tool_call` and `provider_tool_result` store required provider-neutral semantic
-content under `payload.semantic`: nullable readable `input`, model-visible `output`, and typed
-`references`. References carry kind `url | file | other`, nullable URI/title/excerpt, and stable
-string metadata. Both event kinds also own attachments because a provider may expose result content
-or generated files in either native item shape. Adapters normalize provider-exposed semantic content
+Every `provider_tool_call` stores required provider-neutral semantic content under
+`payload.semantic`: nullable readable `input`, model-visible `output`, and typed `references`.
+References carry kind `url | file | other`, nullable URI/title/excerpt, and stable string metadata.
+Tool-created delivery files are `AttachmentOutputPart` values in `semantic.output`; model replay files
+are `FileOutputPart` values in the same output. Adapters normalize provider-exposed semantic content
 before persistence, apply canonical field and collection bounds, and keep provider-only fields inside
-the opaque native artifact. The persisted contract does not use top-level provider-tool `arguments`
-or `output` fields.
+the opaque native artifact. The persisted contract does not use top-level provider-tool `arguments`,
+`output`, or `attachments` fields.
 
-`ProviderToolCallPayload.status` is the nullable provider-neutral lifecycle state `running`,
-`completed`, or `failed`. Live provider-tool calls carry the latest observed canonical state. Durable
-calls carry a terminal state when the adapter can normalize one, while historical or final-only
-provider events may omit the field. Provider-native stage strings remain confined to the adapter's
-native artifact. Provider result status remains a separate result-item status.
+`ProviderToolCallPayload.status` is the provider-neutral lifecycle state `running`, `completed`,
+`failed`, `cancelled`, or `interrupted` when known. Live provider-tool calls carry the latest observed
+canonical state. Durable calls carry the terminal status normalized from the one provider-native item;
+historical events may omit it. Provider-native stage strings remain confined to the adapter native
+artifact.
 
 `NativeArtifact.item` is adapter-native opaque payload. Event core does not interpret it.
 Same-native pass-through is allowed only when the compat key matches exactly:
@@ -471,17 +473,17 @@ and stable metadata rather than inspecting native artifacts. This includes forwa
 LiteLLM artifacts and a code-version rollback that reads newer OpenAI-native artifacts;
 cross-adapter objects are never replayed as though they shared schema ownership.
 
-Completed `image_generation` results use a provider-neutral durable shape. The result
-`semantic.output` contains a ModelFile-backed `FileOutputPart`, and `attachments` contains the
-independently stored Exchange original. Provider Base64, decoded bytes, and native `result` fields are transient only and
-are excluded from event payloads, native artifacts, REST/WebSocket projections, and frontend state.
-Provider-hosted generation retains provider tool call/result event ownership. xAI Imagine generation
-retains client tool call/result ownership while using the same durable output and attachment fields;
-credentials and transient generated-file bytes are excluded from both event forms. The same-native
-lowerer may reconstruct a provider-hosted native image result from the ModelFile in request-local
-memory. An incompatible adapter or model, and every later-model use of a client-generated result,
-lowers the FilePart through the normal rich-image path or an explicit bounded unavailable-image
-placeholder.
+A completed provider-hosted `image_generation` item uses one durable provider-call shape. Its
+`semantic.output` contains both a ModelFile-backed `FileOutputPart` and the independently stored
+Exchange original as an `AttachmentOutputPart`. Provider Base64, decoded bytes, and native `result`
+fields are transient only and are excluded from event payloads, native artifacts, REST/WebSocket
+projections, and frontend state. xAI Imagine retains client tool call/result ownership while storing
+the same two output-part kinds in the durable client result; credentials and transient bytes remain
+excluded. Same-native lowering reconstructs the provider-native image result from the ModelFile in
+request-local memory and emits the bounded Exchange URI context separately. An incompatible adapter
+or model, and every later-model use of a client-generated result, lowers the file through the normal
+rich-image path or an explicit bounded unavailable-image placeholder while retaining attachment URI
+metadata.
 
 ## 5. History And Live Event APIs
 
@@ -522,18 +524,16 @@ in the public marker payload.
 The frontend retains raw durable events and raw live partial events separately from rendered
 `ChatMessage` view models. Projection identity is semantic rather than event-kind-global: assistant
 output uses native output identity or response/content indices, reasoning uses native identity or its
-projection root, and client/provider tool pairs use `call_id`. Selectors merge call and result events
-across raw page boundaries. Provider-tool calls render provider-neutral `running`, `completed`, and
-`failed` states from their canonical status; a missing live status is treated as running, while a
-missing durable status uses the neutral historical fallback. Semantic tool names such as `web_search`
-and `image_generation` select presentation labels without branching on provider identity or execution
-ownership. Provider-tool call and result projections preserve their canonical semantic input, output,
-references, status, attachments, and output-part files. Client-tool results preserve their own
-completion or failure status, output, and attachments. Cards render typed references with URI/title,
-optional excerpt, and stable metadata without reading the native artifact. An available
-`image_generation` attachment renders directly in the owning provider-tool or client-tool card without
-requiring the user to expand diagnostic details; preview and download continue through the Exchange
-attachment surface.
+projection root, client tool call/result pairs use `call_id`, and each provider tool call uses its own
+`call_id`. A durable provider call replaces the matching live call without result-merge state.
+Provider-tool calls render provider-neutral running, completed, failed, or historical fallback states
+from canonical status. Semantic names such as `web_search` and `image_generation` select presentation
+labels without branching on provider identity or execution ownership. Provider projection reads text
+and references from `semantic.output` and projects only `AttachmentOutputPart` values as UI files;
+`FileOutputPart` remains model-only. Client-tool results preserve their own completion/failure status
+and canonical output parts. An available `image_generation` attachment renders directly in the owning
+provider-tool or client-tool card without requiring diagnostic details to expand; preview and download
+continue through the Exchange attachment surface.
 Live `agent_message` events use the same source-labeled internal-agent row as their durable form. When
 a live entity and durable event describe the same semantic output, the durable projection replaces
 the live projection without a duplicate or disappearance.
@@ -721,11 +721,11 @@ but that model-visible rendering is not stored by mutating the event content tex
 
 ## 7. Exchange Files And Attachments
 
-Exchange files remain the durable user-visible file/artifact surface. Provider-hosted generated images
-are represented by provider tool call/result events whose terminal result references both an Exchange
-attachment for the original user-visible bytes and a ModelFile/FilePart for later model input. The two
+Exchange files remain the durable user-visible file/artifact surface. One provider-hosted generated-image
+`provider_tool_call` references both the original user-visible Exchange file through an
+`AttachmentOutputPart` and the later-model input through a ModelFile-backed `FileOutputPart`. The two
 resources keep independent storage keys, media type, size, hash, authorization, and lifecycle metadata.
-A result is not admitted when only one resource succeeds, and retry-safe deterministic admission must
+The call is not admitted when only one resource succeeds, and retry-safe deterministic admission must
 not duplicate metadata or delete objects already referenced by an earlier committed attempt.
 
 ## 8. Compaction
@@ -745,9 +745,9 @@ summary hooks may enrich the generated summary before continuity is appended. Th
 content also includes bounded `Recent User Messages` and `Recent Transcript` sections. The
 user-message section keeps the last five user messages visible even when a long tool-heavy run leaves
 no user messages in the recent turn window. The transcript section uses readable model-visible
-excerpts from the last five completed model turns. Provider-tool call and result excerpts use the same
+excerpts from the last five completed model turns. Provider-tool call excerpts use the same
 deterministic semantic renderer as cross-native lowering, so input, output, typed references, and
-bounded reference metadata survive compaction without exposing opaque artifacts. Each excerpt is
+bounded file/attachment/reference metadata survive compaction without exposing opaque artifacts. Each excerpt is
 truncated independently before it is embedded in the summary payload, so oversized tool output cannot
 remain as an unbounded raw tail or storage JSON dump.
 
@@ -756,7 +756,7 @@ remain as an unbounded raw tail or storage JSON dump.
 - `AgentSession` is the conversation boundary; interface type is not a session partition.
 - Event transcript is the durable model/tool source of truth.
 - Native artifacts are opaque same-native replay optimizations, never canonical event state.
-- Every durable provider-tool call/result carries bounded provider-neutral semantic input, output, and references; model-visible consumers do not parse native artifacts.
+- Every durable provider-tool call carries bounded provider-neutral semantic input, output, and references; model-visible consumers do not parse native artifacts.
 - `agent_runs.phase` and `active_tool_calls` are the durable UI activity source.
 - Classified provider failures retain only bounded redacted diagnostics through retry state and terminal failed-run history; every classified category receives the complete configured retry budget, while unclassified provider outcomes are internal errors and do not enter provider retry state.
 - User Stop is terminal, clears retry and live-operation state, and never creates a stopped-Run recovery or replay source.

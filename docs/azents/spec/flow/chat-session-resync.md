@@ -16,8 +16,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/agents/**
   - typescript/apps/azents-web/src/features/chat/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
-last_verified_at: 2026-07-18
-spec_version: 33
+last_verified_at: 2026-07-19
+spec_version: 34
 ---
 
 # Chat Session Resync
@@ -125,8 +125,9 @@ Each response is a raw event page and owns both cursor values. The client stores
 projecting view models, advances the direction cursor through render-hidden/control-only pages, and
 stops only when a visible timeline item is added or that direction is exhausted. Selector identity is
 stable across pages: assistant output uses native output identity or response/content indices,
-reasoning uses native identity or its projection root, and client/provider tool calls and results use
-`call_id`. This lets call/result pairs merge even when they land on different raw pages.
+reasoning uses native identity or its projection root, client tool call/result pairs use `call_id`, and
+each provider tool call uses its own `call_id`. Client call/result pairs may merge across raw page
+boundaries; provider calls require no result counterpart.
 
 ## 5.1 REST Live Contract
 
@@ -183,7 +184,8 @@ durable history append replaces its live counterpart without duplicate frames or
 disappearance. Provider-tool live Events are keyed by stable `call_id`, restore the same deterministic
 Event identity through `/live`, and carry provider-neutral status `running`, `completed`, or `failed`.
 A missing live status is treated as running; a missing durable status remains the neutral historical
-fallback. Provider results preserve completion/failure status, output text, and attachments. Live
+fallback. Durable provider calls preserve canonical status, semantic text/references, and only
+`AttachmentOutputPart` files from semantic output; `FileOutputPart` remains model-only. Live
 `agent_message` uses the same collapsed, source-labeled internal-agent row as the durable event.
 Durable action execution results take precedence over any competing live projection.
 
@@ -387,7 +389,7 @@ finite transaction periodically.
 
 **TC-11: Raw page advancement and cross-page identity**
 
-- Given: one raw page contains only render-hidden control events and a tool call/result pair crosses the next page boundary.
+- Given: one raw page contains only render-hidden control events and a client tool call/result pair crosses the next page boundary.
 - When: client loads in either direction.
 - Then: it advances the page-owned cursor through the hidden page and renders one merged tool row after the counterpart arrives.
 
@@ -395,7 +397,7 @@ finite transaction periodically.
 
 - Given: live assistant, reasoning, provider-tool, or internal-agent output is visible.
 - When: the matching durable history append arrives before live removal.
-- Then: durable projection replaces the semantic live counterpart without duplicate/disappearing rows, and provider result status, output, and attachments remain visible.
+- Then: durable projection replaces the semantic live counterpart without duplicate/disappearing rows, and provider-call status, semantic output, and canonical attachments remain visible.
 
 **TC-13: Operation live-to-durable handover**
 
@@ -436,12 +438,14 @@ finite transaction periodically.
 - Terminal worktree action execution results are chat history events of kind `action_execution_result`; clients reconcile in-progress action logs through `/live.action_executions` and `action_execution_updated`.
 - Durable semantic projections override matching live assistant, reasoning, provider-tool, client-tool, internal-agent, and action-execution projections without duplicate rows.
 - Provider-tool live projection identity is deterministic by `call_id`; canonical status updates do not create a second card, and durable history is published before live removal.
-- Provider result rendering preserves status, text output, and attachments.
+- Provider-call rendering preserves canonical status and semantic text/references, projects only canonical attachment output parts, and never renders model-only file output parts.
 - The “new message” control is a semantic keyboard-accessible button.
 - Subagent Tree state is restored from the dedicated tree endpoint; `subagent_tree_changed` only invalidates/refetches cached tree queries.
 - Child subagent detail views are human read-only for input but retain stop controls for running child sessions.
 
 ## 11. Changelog
+
+- **2026-07-19** — v34. Replaced provider call/result merging with live-to-durable provider-call replacement and one-card canonical attachment projection.
 
 - **2026-07-18** — v32. Added reconnect-safe context-preparation operation replacement and provider/runtime retry presentation discrimination.
 - **2026-07-16** — v31. Added deterministic provider-tool live identity, canonical lifecycle status

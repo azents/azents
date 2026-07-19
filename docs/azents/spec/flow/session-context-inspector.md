@@ -5,8 +5,8 @@ created: 2026-05-30
 spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, conversation]
-last_verified_at: 2026-07-18
-spec_version: 16
+last_verified_at: 2026-07-19
+spec_version: 17
 code_paths:
   - python/apps/azents/src/azents/services/agent/**
   - python/apps/azents/src/azents/api/public/agent/**
@@ -83,7 +83,7 @@ Categories:
 - `system`: final system prompt stored in latest `TurnMarkerPayload.system_prompt`. If final prompt is absent, sum character counts of agent/toolkit/injected prompt fragments.
 - `user`: `UserMessagePayload.content`
 - `assistant`: `AssistantMessagePayload.content` and `ReasoningPayload`
-- `tool`: client tool call arguments/result text plus the deterministic provider-tool semantic transcript from both call and result events, including input, textual output, and typed references
+- `tool`: client tool call arguments/result text plus the deterministic provider-call semantic transcript, including input, textual output, typed references, and bounded canonical output-part metadata
 - `other`: not shown in normal case because only prompt components with known source are calculated
 
 Frontend explains that breakdown is character-count based. Input token count itself is displayed as provider usage value in Usage summary.
@@ -114,11 +114,12 @@ Ready state includes this UI:
 
 ## Verification
 
-As of 2026-07-18, verified through the chat Run state checks, context inspector checks, official
+As of 2026-07-19, verified through the chat Run state checks, context inspector checks, official
 OpenAI SDK usage-normalization coverage, and provider-tool semantic transcript breakdown tests.
-Version 16 measures provider-tool call and result events through the same deterministic semantic
-renderer used by model-visible consumers while retaining SDK usage provenance, immutable per-turn
-profile and effective-limit snapshots, and unsynthesized unavailable historical fields.
+Version 17 measures each provider tool call through the same deterministic semantic renderer used by
+model-visible consumers, including bounded canonical output-part metadata, while retaining SDK usage
+provenance, immutable per-turn profile/effective-limit snapshots, and unsynthesized unavailable
+historical fields.
 
 ```bash
 cd python/apps/azents && uv run ruff check src/azents/services/chat/context.py
