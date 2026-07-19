@@ -26,7 +26,6 @@ import {
 } from "../hooks/liveRetryVisibility";
 import {
   applyProviderToolCallItem,
-  applyProviderToolCallOutput,
   providerToolCallStatusFromPayload,
 } from "../hooks/providerToolCallProjection";
 import {
@@ -941,12 +940,6 @@ function eventRenderKey(event: ChatEventResponse): string {
         ? `tool-result:event:${event.external_id ?? event.id}`
         : `tool-result:${callId}`;
     }
-    case "provider_tool_result": {
-      const callId = stringField(event.payload, "call_id");
-      return callId === null
-        ? `provider-tool-result:event:${event.external_id ?? event.id}`
-        : `provider-tool-result:${callId}`;
-    }
     default:
       return `event:${event.external_id ?? event.id}`;
   }
@@ -1144,27 +1137,6 @@ function mapEvents(
             ...eventAttachments(payload),
             ...contentAttachments(payload.output),
           ],
-        });
-      }
-      case "provider_tool_result": {
-        const callId = stringField(payload, "call_id");
-        const semantic = providerToolSemanticFromValue(payload.semantic);
-        if (callId === null || semantic === null) {
-          return messages;
-        }
-        const semanticOutput = semantic.output;
-        return applyProviderToolCallOutput(messages, {
-          callId,
-          name: stringField(payload, "name") ?? "Provider tool",
-          output: providerToolSemanticOutputText(semantic),
-          status: payload.status === "completed" ? "completed" : "failed",
-          attachments: [
-            ...eventAttachments(payload),
-            ...contentAttachments(semanticOutput),
-          ],
-          fallbackMessageId: event.id,
-          createdAt: event.created_at,
-          messageStatus,
         });
       }
       case "turn_marker": {
@@ -1634,7 +1606,6 @@ function isPartialHistoryEvent(event: ChatEventResponse): boolean {
     case "reasoning":
     case "client_tool_call":
     case "provider_tool_call":
-    case "provider_tool_result":
     case "agent_message":
     case "goal_continuation":
     case "interrupted":
