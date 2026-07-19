@@ -16,8 +16,8 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_session.py
   - python/apps/azents/src/azents/rdb/models/agent_run.py
   - python/apps/azents/src/azents/rdb/models/agent.py
-last_verified_at: 2026-07-18
-spec_version: 27
+last_verified_at: 2026-07-19
+spec_version: 28
 ---
 
 # Context Compaction
@@ -123,9 +123,9 @@ delta after that marker. The estimator computes model-visible byte cost first an
 `ceil(bytes / 4)`. It excludes storage metadata, native artifacts, event IDs, timestamps, and schema
 fields, and counts only user/assistant text, client tool call name/arguments, client tool result text,
 provider-tool semantic transcripts, compaction summary text, and bounded file/attachment/artifact
-metadata that can reach model input. Provider call and result events use the same deterministic
-semantic renderer as model lowering, including input, textual output, typed references, optional
-excerpts, and stable sorted metadata; native artifact JSON is never counted.
+metadata that can reach model input. Provider call events use the same deterministic semantic renderer
+as model lowering, including input, textual output, typed references, optional excerpts, canonical
+file/attachment metadata, and stable sorted metadata; native artifact JSON is never counted.
 
 Before lowering model input, event pre-lower filters may update attachment/file availability projections and
 run automatic compaction. They do not run Artifact, ExchangeFile, or ModelFile cleanup; file cleanup is
@@ -168,9 +168,9 @@ fewer completed turns exist, or if no turn marker exists, it falls back to all s
 excerpt is rendered as concise, readable model-visible transcript text rather than event storage JSON.
 Transcript labels stay short (`User`, `Assistant`, `Tool call`, `Tool result`), and client tool
 results render only their model-visible output rather than wrapper fields such as
-`function_call_output`, `call_id`, or `output`. Provider-tool calls and results render their canonical
-semantic input, output, and typed references through the shared deterministic renderer; output
-parts contribute bounded file/attachment/artifact metadata through that rendering. The projection family matches token
+`function_call_output`, `call_id`, or `output`. Provider-tool calls render their canonical semantic input, output, and typed references through the
+shared deterministic renderer; output parts contribute bounded file/attachment/artifact metadata
+through that rendering. The projection family matches token
 estimation: user/assistant text, client tool call name/arguments, client tool result text,
 provider-tool semantic transcripts, compaction summary reminders, system reminders, and bounded
 file/attachment/artifact metadata. Event IDs, timestamps, native artifacts, event kind, model order,
@@ -202,7 +202,7 @@ the immediate shape of the recent interaction.
   five completed model turns, using `turn_marker` boundaries.
 - Continuity sections are always the last sections in the stored compaction summary content.
 - Each continuity excerpt is rendered as readable model-visible transcript text, not event storage JSON.
-- Provider-tool call/result continuity and token estimates use the same canonical semantic renderer and never parse native artifacts.
+- Provider-tool call continuity and token estimates use the same canonical semantic renderer and never parse native artifacts.
 - Each continuity excerpt is independently truncated before it is embedded in the summary.
 - Auto, manual, and fallback compaction share the same summary prompt and budget policy.
 - Manual compaction uses the command run context when dispatching session compaction and summary enrichment hooks.
@@ -216,6 +216,8 @@ the immediate shape of the recent interaction.
 - Legacy SDK compaction packages are not part of production compaction.
 
 ## Changelog
+
+- **2026-07-19** (spec_version 28) — Updated compaction rendering and token estimation for one durable provider call with canonical output-part metadata.
 
 - **2026-07-18** (spec_version 27) — Added provider-tool semantic input, output, and reference rendering
   to summary input, bounded continuity, and model-visible token estimation without native-artifact

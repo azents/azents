@@ -354,7 +354,6 @@ Durable event kinds:
 - `client_tool_call`
 - `client_tool_result`
 - `provider_tool_call`
-- `provider_tool_result`
 - `turn_marker`
 - `run_marker`
 - `interrupted`
@@ -373,10 +372,10 @@ optimizations. Each adapter lowerer replays a native artifact item only when thi
 matches exactly. OpenAI SDK artifacts use adapter identity `openai`; LiteLLM artifacts use `litellm`.
 Canonical fallback lowering is used across an adapter, provider, model, format, or schema mismatch,
 including a code-version rollback from a new OpenAI artifact to the preceding LiteLLM implementation.
-Provider-tool call and result events both carry required bounded `semantic` content with readable
-input, model-visible output, and typed URL/file/other references. The shared deterministic renderer
-is the canonical textual fallback; event-core consumers never recover semantics by parsing opaque
-native artifacts.
+Every provider-hosted native item is represented by one durable `provider_tool_call` carrying required
+bounded `semantic` content with readable input, model-visible output, and typed URL/file/other
+references. The shared deterministic renderer is the canonical textual fallback; event-core consumers
+never recover semantics by parsing opaque native artifacts.
 
 ```text
 adapter:native_format:provider:model:schema_version
@@ -444,21 +443,21 @@ Both `xai` and `xai_oauth` use the xAI transport target in this lowerer. For eit
 
 For xAI image generation, the auto-bound unprefixed `image_generation` client tool receives only `prompt`, optional `aspect_ratio`, and optional `resolution`; credential material is not part of its schema, arguments, events, runtime workspace, or metadata. The prompt is limited to 1,024 characters, one call generates one image, supported aspect ratios are `auto`, `1:1`, `16:9`, `9:16`, `4:3`, `3:4`, `3:2`, and `2:3`, and resolution is `1k` or `2k`. The backend calls `POST /v1/images/generations` with model `grok-imagine-image-quality`, requests one Base64 result, bounds the response to 30 MiB, and performs at most one transport retry for HTTP/network failures eligible for that retry.
 
-xAI API-key execution uses the selected integration key. xAI OAuth execution starts with the proactively refreshed selected integration token. The first Imagine `401` forces one refresh through the existing persistence service and retries once with the new token; a second `401` returns reconnect-required failure. API-key `401`, `403`, `429`, malformed/oversized output, and exhausted transport failures become sanitized client tool failures. Other non-success Imagine responses remain failed tool results and retain structured `http_failure` status metadata plus the provider-authored scalar `error.message`, `error`, `message`, or `detail` when available. The reason is bounded, credential-redacted, and excludes the raw response body. Cancellation propagates immediately. Successful bytes enter the normal generated-file admission path, so the durable `client_tool_result` contains an available Exchange attachment plus a ModelFile-backed file output and never contains Base64 or credentials.
+xAI API-key execution uses the selected integration key. xAI OAuth execution starts with the proactively refreshed selected integration token. The first Imagine `401` forces one refresh through the existing persistence service and retries once with the new token; a second `401` returns reconnect-required failure. API-key `401`, `403`, `429`, malformed/oversized output, and exhausted transport failures become sanitized client tool failures. Other non-success Imagine responses remain failed tool results and retain structured `http_failure` status metadata plus the provider-authored scalar `error.message`, `error`, `message`, or `detail` when available. The reason is bounded, credential-redacted, and excludes the raw response body. Cancellation propagates immediately. Successful bytes enter the normal generated-file admission path, so the durable `client_tool_result.output` contains an available `AttachmentOutputPart` plus a ModelFile-backed `FileOutputPart` and never contains Base64, credentials, or a parallel top-level attachments field.
 
-Provider-hosted tool output is normalized through the recognized Responses item registry as provider
-tool call/result events and does not enter the client tool execution loop or by itself continue the
-model turn. Every recognized durable item extractor produces bounded provider-neutral semantic input,
-output, and references plus attachments when exposed; lifecycle-only native stages remain live
-activity rather than incomplete durable output. A completed `image_generation` item first becomes an
-excluded transient pending-file output. The shared materializer strictly decodes and
-verifies the image, enforces encoded and 20 MiB decoded bounds, stores the original as an Exchange
-attachment, stores a normalized copy as a ModelFile, and replaces the result skeleton with both
-references before durable output admission. Base64 and raw bytes never enter event JSON or native
+Provider-hosted tool output is normalized through the recognized Responses item registry as one
+`provider_tool_call` per provider-native item. It does not enter the client tool execution loop or by
+itself continue the model turn. Every recognized durable extractor produces bounded provider-neutral
+semantic input, output, and references; lifecycle-only native stages remain live activity rather than
+incomplete durable output. A completed `image_generation` item first becomes an excluded transient
+pending-file output. The shared materializer strictly decodes and verifies the image, enforces encoded
+and 20 MiB decoded bounds, stores the original as an Exchange file, stores a normalized copy as a
+ModelFile, and replaces the pending output with `AttachmentOutputPart` and `FileOutputPart` values on
+the same provider call before durable admission. Base64 and raw bytes never enter event JSON or native
 artifacts.
 
 Object uploads occur outside a database transaction. Session, Agent, Workspace, and authenticated
-actor ownership are checked before upload and revalidated while file metadata, provider result events,
+actor ownership are checked before upload and revalidated while file metadata, the provider call event,
 the turn marker, and retry-state clear are committed together. Partial storage or metadata admission
 fails the model output and compensation-deletes unowned prepared keys. Deterministic run/call/output
 identities make repeated admission idempotent; cleanup protects keys already referenced by committed
@@ -466,11 +465,12 @@ metadata and identity reuse with different bytes fails explicitly.
 
 On a later request, an exactly compatible native Responses artifact reconstructs the sanitized
 `image_generation_call.result` from ModelFile bytes in request-local memory only. ChatGPT OAuth sends
-that reconstructed result without the prior provider item ID in the full `store=false` request.
-For generic provider-tool calls and results, cross-adapter or incompatible replay emits the shared
-semantic transcript as model-visible text. Image generation retains its richer fallback: a bounded
-provider-result marker plus the FilePart lowered as rich image input when supported, or the normal
-explicit unavailable-image placeholder otherwise.
+that reconstructed result without the prior provider item ID in the full `store=false` request. The
+same-native lowerer emits a second bounded semantic context item for the canonical Exchange attachment
+URI and consumes the FileOutputPart only through the native image item. Cross-adapter or incompatible
+replay emits the shared semantic transcript as model-visible text. Image generation retains its richer
+fallback: the FileOutputPart lowers as rich image input when supported, or the normal unavailable-image
+placeholder otherwise, while Exchange URI metadata remains present once.
 
 Each output stream owns one shared provider-tool activity accumulator. OpenAI SDK and LiteLLM
 normalizers extract adapter-native observations locally, normalize stable call identity and semantic
@@ -482,9 +482,9 @@ produce guessed running activity.
 The same semantic renderer feeds summary generation, bounded continuity excerpts, token estimation,
 context accounting, cross-native lowering, REST message projection, and final Run result collection.
 It renders the provider-tool name and status followed by present input, textual output, and typed
-references in stable order with sorted metadata JSON. Output-part files and event attachments are
-collected from both provider-tool call and result events; opaque native fields never appear in this
-textual path.
+references in stable order with sorted metadata JSON. `FileOutputPart` and `AttachmentOutputPart`
+metadata are collected from the provider call semantic output; opaque native fields never appear in
+this textual path.
 
 Synthetic model-visible reminders are durable events or control events whose model lowering role is
 `user`, even though they are not user-authored chat messages. The lowerer renders most
@@ -907,6 +907,8 @@ way. `goal_updated` lowers to a user-role compatible prompt that tells the model
 updated by the user.
 
 ## Changelog
+
+- **2026-07-19** — v106. Replaced provider call/result durability with one provider-call event, canonical output-part attachments, and same-/cross-native replay without duplicated rich input.
 
 - **2026-07-18** (spec_version 105) — Promoted bounded provider-tool semantic input, output, references,
   generic cross-native rendering, compaction/continuity visibility, context accounting, and consumer
