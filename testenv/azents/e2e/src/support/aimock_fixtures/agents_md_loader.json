@@ -865,6 +865,25 @@
         "toolCallId": "call_subagent_mailbox_idle_delay"
       },
       "response": {
+        "toolCalls": [
+          {
+            "id": "call_subagent_mailbox_idle_hold",
+            "name": "exec_command",
+            "arguments": {
+              "command": "while [ ! -f /tmp/azents-subagent-mailbox-idle-release ]; do sleep 0.1; done",
+              "yield_time_ms": 30000,
+              "max_output_bytes": 1000
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_subagent_mailbox_idle_hold"
+      },
+      "response": {
         "content": "Subagent idle child completed."
       }
     },
@@ -929,6 +948,25 @@
       "match": {
         "endpoint": "chat",
         "toolCallId": "call_subagent_mailbox_sender_hold"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_subagent_mailbox_sender_hold_again",
+            "name": "exec_command",
+            "arguments": {
+              "command": "while [ ! -f /tmp/azents-subagent-mailbox-sender-release ]; do sleep 0.1; done",
+              "yield_time_ms": 30000,
+              "max_output_bytes": 1000
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_subagent_mailbox_sender_hold_again"
       },
       "response": {
         "content": "Subagent sender child completed."

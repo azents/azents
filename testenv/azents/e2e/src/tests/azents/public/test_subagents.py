@@ -1165,14 +1165,14 @@ class TestSubagents:
             expected="idle",
         )
 
-    def test_interrupted_child_result_is_delivered_safely(
+    def test_interrupt_agent_delivers_stopped_child_result_safely(
         self,
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
         azents_engine_worker_container: object,
     ) -> None:
-        """Interrupt a running child and promote its safe terminal result."""
+        """Stop an interrupted child and promote its safe terminal result."""
         del azents_engine_worker_container
         workspace = _setup_workspace(
             public_api_client,
@@ -1259,14 +1259,14 @@ class TestSubagents:
             session_id=root_session_id,
             expected=_INTERRUPT_OBSERVE_RESPONSE,
         )
-        interrupted_result = _wait_for_agent_result(
+        stopped_result = _wait_for_agent_result(
             public_url=azents_public_server_url,
             token=workspace.token,
             session_id=root_session_id,
             source_path="/root/interrupt_child",
-            run_status="interrupted",
+            run_status="stopped",
         )
-        assert interrupted_result.get("content") == "The agent run was interrupted."
+        assert stopped_result.get("content") == "The agent run was stopped."
         _wait_for_child_node(
             public_url=azents_public_server_url,
             token=workspace.token,
