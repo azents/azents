@@ -36,6 +36,14 @@ class RetentionApplicationLeaseLost(Exception):
 
 
 @dataclasses.dataclass(frozen=True)
+class RetentionSettingsReadResult:
+    """Current settings and recoverable recalculation progress."""
+
+    settings: SystemFileLifecycleSettings
+    active_application: ArchivedSessionRetentionApplication | None
+
+
+@dataclasses.dataclass(frozen=True)
 class RetentionSettingsUpdateResult:
     """Result of updating archive-retention settings."""
 
@@ -74,6 +82,16 @@ class ArchivedSessionRetentionService:
         async with self.session_manager() as session:
             return await self.repository.get_settings(session)
 
+    async def get_settings_state(self) -> RetentionSettingsReadResult:
+        """Return settings with any active recalculation application."""
+        async with self.session_manager() as session:
+            settings = await self.repository.get_settings(session)
+            active_application = await self.repository.get_active_application(session)
+            return RetentionSettingsReadResult(
+                settings=settings,
+                active_application=active_application,
+            )
+
     async def preview(self, retention_days: int | None) -> RetentionImpactPreview:
         """Preview applying retention to existing archives."""
         self._validate_retention_days(retention_days)
@@ -82,6 +100,18 @@ class ArchivedSessionRetentionService:
                 session,
                 retention_days=retention_days,
                 now=datetime.datetime.now(datetime.UTC),
+            )
+
+    async def get_application(
+        self,
+        *,
+        application_id: str,
+    ) -> ArchivedSessionRetentionApplication | None:
+        """Return durable existing-archive recalculation progress."""
+        async with self.session_manager() as session:
+            return await self.repository.get_application(
+                session,
+                application_id=application_id,
             )
 
     async def update_settings(

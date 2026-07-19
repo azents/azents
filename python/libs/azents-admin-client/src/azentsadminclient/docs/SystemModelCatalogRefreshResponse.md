@@ -6,15 +6,15 @@ System model catalog refresh response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**provider** | [**SystemCatalogProvider**](SystemCatalogProvider.md) |  |
-**catalog_id** | **str** |  |
-**snapshot_id** | **str** |  |
-**visible_count** | **int** |  |
-**hidden_count** | **int** |  |
-**status** | **str** |  |
-**failure_code** | **str** |  |
-**failure_message** | **str** |  |
-**action_hint** | **str** |  |
+**provider** | [**SystemCatalogProvider**](SystemCatalogProvider.md) |  | 
+**catalog_id** | **str** |  | 
+**snapshot_id** | **str** |  | 
+**visible_count** | **int** |  | 
+**hidden_count** | **int** |  | 
+**status** | **str** |  | 
+**failure_code** | **str** |  | 
+**failure_message** | **str** |  | 
+**action_hint** | **str** |  | 
 
 ## Example
 
@@ -34,3 +34,5 @@ system_model_catalog_refresh_response_dict = system_model_catalog_refresh_respon
 system_model_catalog_refresh_response_from_dict = SystemModelCatalogRefreshResponse.from_dict(system_model_catalog_refresh_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

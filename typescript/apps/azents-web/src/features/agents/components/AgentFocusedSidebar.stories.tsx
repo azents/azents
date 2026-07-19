@@ -49,6 +49,9 @@ const sessions: AgentSessionResponse[] = [
     archive_retention_days_snapshot: null,
     primary_kind: "team_primary",
     run_state: "idle",
+    archived_at: null,
+    purge_after: null,
+    archive_retention_days_snapshot: null,
     created_at: "2026-06-24T08:00:00Z",
     updated_at: "2026-06-26T04:30:00Z",
   },
@@ -65,6 +68,9 @@ const sessions: AgentSessionResponse[] = [
     archive_retention_days_snapshot: null,
     primary_kind: null,
     run_state: "running",
+    archived_at: null,
+    purge_after: null,
+    archive_retention_days_snapshot: null,
     created_at: "2026-06-25T09:00:00Z",
     updated_at: "2026-06-25T11:45:00Z",
   },
@@ -81,8 +87,46 @@ const sessions: AgentSessionResponse[] = [
     archive_retention_days_snapshot: null,
     primary_kind: null,
     run_state: "idle",
+    archived_at: null,
+    purge_after: null,
+    archive_retention_days_snapshot: null,
     created_at: "2026-06-25T01:00:00Z",
     updated_at: "2026-06-25T03:10:00Z",
+  },
+];
+
+const archivedSessions: AgentSessionResponse[] = [
+  {
+    id: "sess_archived",
+    agent_id: "agent_01",
+    current_model_target_label: null,
+    current_reasoning_effort: null,
+    title: "Investigate flaky deployment",
+    title_source: "manual",
+    status: "archived",
+    primary_kind: null,
+    run_state: "idle",
+    archived_at: "2026-07-18T04:30:00Z",
+    purge_after: "2026-08-17T04:30:00Z",
+    archive_retention_days_snapshot: 30,
+    created_at: "2026-07-12T08:00:00Z",
+    updated_at: "2026-07-18T04:30:00Z",
+  },
+  {
+    id: "sess_archived_unlimited",
+    agent_id: "agent_01",
+    current_model_target_label: null,
+    current_reasoning_effort: null,
+    title: null,
+    title_source: null,
+    status: "archived",
+    primary_kind: null,
+    run_state: "idle",
+    archived_at: "2026-07-10T01:00:00Z",
+    purge_after: null,
+    archive_retention_days_snapshot: null,
+    created_at: "2026-07-09T01:00:00Z",
+    updated_at: "2026-07-10T01:00:00Z",
   },
 ];
 
@@ -108,10 +152,13 @@ const meta = {
     loggingOut: false,
     onLogout: () => {},
     sessions,
+    archivedSessions,
+    currentArchiveRetentionDays: 30,
     activeSessionId: "sess_primary",
     onCreateSession: () => {},
     onRenameSession: async () => {},
     onArchiveSession: () => {},
+    onRestoreSession: () => {},
   },
 } satisfies Meta<typeof AgentFocusedSidebar>;
 
@@ -145,5 +192,12 @@ export const SessionLoadError = {
 export const EmptySessions = {
   args: {
     sessions: [],
+  },
+} satisfies Story;
+
+export const ArchivedSessionsExpanded = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(canvas.getByRole("button", { name: /Archived/i }));
   },
 } satisfies Story;

@@ -81,6 +81,9 @@ from azents.services.agent_session_input import (
     BufferedAgentSessionInputResult,
     CreatedAgentSessionInputResult,
 )
+from azents.services.archived_session_retention import (
+    ArchivedSessionRetentionService,
+)
 from azents.services.chat import ChatSessionService
 from azents.services.chat.context import SessionContextService
 from azents.services.chat.data import (
@@ -520,14 +523,17 @@ async def issue_ws_ticket(
 async def list_sessions(
     member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
     chat_service: Annotated[ChatSessionService, Depends()],
+    retention_service: Annotated[ArchivedSessionRetentionService, Depends()],
 ) -> AgentSessionListResponse:
     """List the current user's conversation sessions in a workspace."""
     sessions = await chat_service.list_sessions(
         user_id=member.user_id,
         workspace_id=member.workspace_id,
     )
+    settings = await retention_service.get_settings()
     return AgentSessionListResponse(
-        items=[AgentSessionResponse.from_domain(s) for s in sessions]
+        items=[AgentSessionResponse.from_domain(s) for s in sessions],
+        current_archive_retention_days=settings.archived_session_retention_days,
     )
 
 
@@ -1574,6 +1580,7 @@ async def list_agent_sessions(
     agent_id: str,
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
     chat_service: Annotated[ChatSessionService, Depends()],
+    retention_service: Annotated[ArchivedSessionRetentionService, Depends()],
 ) -> AgentSessionListResponse:
     """List active team sessions for an Agent with team primary first."""
     result = await chat_service.list_agent_sessions(
@@ -1582,10 +1589,14 @@ async def list_agent_sessions(
     )
     match result:
         case Success(sessions):
+            settings = await retention_service.get_settings()
             return AgentSessionListResponse(
                 items=[
                     AgentSessionResponse.from_domain(session) for session in sessions
-                ]
+                ],
+                current_archive_retention_days=(
+                    settings.archived_session_retention_days
+                ),
             )
         case Failure(error):
             match error:
@@ -1846,6 +1857,7 @@ async def list_archived_agent_sessions(
     agent_id: str,
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
     chat_service: Annotated[ChatSessionService, Depends()],
+    retention_service: Annotated[ArchivedSessionRetentionService, Depends()],
 ) -> AgentSessionListResponse:
     """List archived root sessions for an accessible Agent."""
     _validate_uuid7_hex(agent_id, label="agent ID")
@@ -1855,8 +1867,12 @@ async def list_archived_agent_sessions(
     )
     match result:
         case Success(items):
+            settings = await retention_service.get_settings()
             return AgentSessionListResponse(
-                items=[AgentSessionResponse.from_domain(item) for item in items]
+                items=[AgentSessionResponse.from_domain(item) for item in items],
+                current_archive_retention_days=(
+                    settings.archived_session_retention_days
+                ),
             )
         case Failure(SessionNotFound()):
             raise HTTPException(status_code=404, detail="Agent not found.")

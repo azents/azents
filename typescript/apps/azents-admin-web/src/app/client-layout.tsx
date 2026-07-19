@@ -23,6 +23,7 @@ import {
 } from "@refinedev/core";
 import routerProvider from "@refinedev/nextjs-router";
 import {
+  IconArchive,
   IconBrightnessAuto,
   IconBug,
   IconBuilding,
@@ -98,6 +99,12 @@ const RESOURCES: ResourceItem[] = [
     list: "/model-catalog",
     icon: <IconRefresh size={20} />,
     label: "Model Catalog",
+  },
+  {
+    name: "retention",
+    list: "/retention",
+    icon: <IconArchive size={20} />,
+    label: "Retention",
   },
   {
     name: "debug",

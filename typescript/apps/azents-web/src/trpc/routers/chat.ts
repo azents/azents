@@ -30,6 +30,7 @@ import {
   chatV1ListAgentProjectPresets,
   chatV1ListAgentProjects,
   chatV1ListAgentSessions,
+  chatV1ListArchivedAgentSessions,
   chatV1ListHistoryEvents,
   chatV1ListInputActions,
   chatV1ListLiveEvents,
@@ -38,6 +39,7 @@ import {
   chatV1PreviewProjectBrowserManifest,
   chatV1ReadAgentWorkspacePath,
   chatV1RegisterAgentProject,
+  chatV1RestoreAgentSession,
   chatV1RetryFailedRun,
   chatV1StatAgentWorkspacePath,
   chatV1StopSessionRun,
@@ -129,6 +131,48 @@ export const chatRouter = router({
         throw mapExpectedError(e, {
           401: "UNAUTHORIZED",
           404: "NOT_FOUND",
+        });
+      }
+    }),
+
+  listArchivedAgentSessions: publicProcedure
+    .input(z.object({ agentId: z.string().min(1) }))
+    .query(async ({ ctx, input }) => {
+      try {
+        const { data } = await chatV1ListArchivedAgentSessions({
+          client: ctx.apiClient,
+          path: { agent_id: input.agentId },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          401: "UNAUTHORIZED",
+          404: "NOT_FOUND",
+        });
+      }
+    }),
+
+  restoreAgentSession: publicProcedure
+    .input(
+      z.object({
+        agentId: z.string().min(1),
+        sessionId: z.string().min(1),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { data } = await chatV1RestoreAgentSession({
+          client: ctx.apiClient,
+          path: { agent_id: input.agentId, session_id: input.sessionId },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          401: "UNAUTHORIZED",
+          404: "NOT_FOUND",
+          409: "CONFLICT",
         });
       }
     }),

@@ -977,6 +977,173 @@
         ]
       }
     },
+    "/system/v1/settings/file-lifecycle": {
+      "get": {
+        "tags": [
+          "System v1"
+        ],
+        "summary": "Get File Lifecycle Settings",
+        "description": "Return instance-wide archive retention settings.",
+        "operationId": "system_v1_get_file_lifecycle_settings",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileLifecycleSettingsResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "System v1"
+        ],
+        "summary": "Update File Lifecycle Settings",
+        "description": "Update archive retention settings with optimistic concurrency.",
+        "operationId": "system_v1_update_file_lifecycle_settings",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FileLifecycleSettingsUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileLifecycleSettingsUpdateResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/system/v1/settings/file-lifecycle/archive-retention/preview": {
+      "post": {
+        "tags": [
+          "System v1"
+        ],
+        "summary": "Preview Archive Retention Update",
+        "description": "Preview applying one retention value to existing archives.",
+        "operationId": "system_v1_preview_archive_retention_update",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArchiveRetentionPreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveRetentionPreviewResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/system/v1/settings/file-lifecycle/retention-applications/{application_id}": {
+      "get": {
+        "tags": [
+          "System v1"
+        ],
+        "summary": "Get Archive Retention Application",
+        "description": "Return durable existing-archive recalculation progress.",
+        "operationId": "system_v1_get_archive_retention_application",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "application_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Application Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveRetentionApplicationResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/system/v1/role-assignments": {
       "get": {
         "tags": [
@@ -1987,6 +2154,268 @@
   },
   "components": {
     "schemas": {
+      "ArchiveRetentionApplicationResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "target_revision": {
+            "type": "integer",
+            "title": "Target Revision"
+          },
+          "target_retention_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Retention Days"
+          },
+          "requested_by_user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested By User Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ArchivedSessionRetentionApplicationStatus"
+          },
+          "cursor_session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cursor Session Id"
+          },
+          "affected_count": {
+            "type": "integer",
+            "title": "Affected Count"
+          },
+          "immediately_eligible_count": {
+            "type": "integer",
+            "title": "Immediately Eligible Count"
+          },
+          "cancelled_count": {
+            "type": "integer",
+            "title": "Cancelled Count"
+          },
+          "scheduled_count": {
+            "type": "integer",
+            "title": "Scheduled Count"
+          },
+          "skipped_count": {
+            "type": "integer",
+            "title": "Skipped Count"
+          },
+          "attempt_count": {
+            "type": "integer",
+            "title": "Attempt Count"
+          },
+          "lease_owner": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lease Owner"
+          },
+          "lease_until": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lease Until"
+          },
+          "next_attempt_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Attempt At"
+          },
+          "last_error_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error Kind"
+          },
+          "last_error_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error Summary"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "target_revision",
+          "target_retention_days",
+          "requested_by_user_id",
+          "status",
+          "cursor_session_id",
+          "affected_count",
+          "immediately_eligible_count",
+          "cancelled_count",
+          "scheduled_count",
+          "skipped_count",
+          "attempt_count",
+          "lease_owner",
+          "lease_until",
+          "next_attempt_at",
+          "last_error_kind",
+          "last_error_summary",
+          "started_at",
+          "completed_at",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ArchiveRetentionApplicationResponse",
+        "description": "Durable existing-archive recalculation progress response."
+      },
+      "ArchiveRetentionPreviewRequest": {
+        "properties": {
+          "archived_session_retention_days": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived Session Retention Days",
+            "description": "Whole-day archive retention; null means Unlimited"
+          }
+        },
+        "type": "object",
+        "required": [
+          "archived_session_retention_days"
+        ],
+        "title": "ArchiveRetentionPreviewRequest",
+        "description": "Proposed archive retention value for impact preview."
+      },
+      "ArchiveRetentionPreviewResponse": {
+        "properties": {
+          "affected_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Affected Count"
+          },
+          "immediately_eligible_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Immediately Eligible Count"
+          },
+          "cancelled_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Cancelled Count"
+          },
+          "scheduled_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Scheduled Count"
+          },
+          "excluded_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Excluded Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "affected_count",
+          "immediately_eligible_count",
+          "cancelled_count",
+          "scheduled_count",
+          "excluded_count"
+        ],
+        "title": "ArchiveRetentionPreviewResponse",
+        "description": "Existing archive impact preview response."
+      },
+      "ArchivedSessionRetentionApplicationStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "running",
+          "retry_wait",
+          "completed"
+        ],
+        "title": "ArchivedSessionRetentionApplicationStatus",
+        "description": "Durable existing-archive retention application status."
+      },
       "CreatePasswordResetTokenRequest": {
         "properties": {
           "user_id": {
@@ -2231,6 +2660,136 @@
         ],
         "title": "ErrorLevel",
         "description": "Test error level."
+      },
+      "FileLifecycleSettingsResponse": {
+        "properties": {
+          "archived_session_retention_days": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived Session Retention Days",
+            "description": "Whole-day archive retention; null means Unlimited"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Revision",
+            "description": "Optimistic settings revision"
+          },
+          "updated_by_user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated By User Id",
+            "description": "Latest administrator ID"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "Created timestamp"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At",
+            "description": "Updated timestamp"
+          },
+          "active_application": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ArchiveRetentionApplicationResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "archived_session_retention_days",
+          "revision",
+          "updated_by_user_id",
+          "created_at",
+          "updated_at",
+          "active_application"
+        ],
+        "title": "FileLifecycleSettingsResponse",
+        "description": "Instance-wide file lifecycle settings response."
+      },
+      "FileLifecycleSettingsUpdateRequest": {
+        "properties": {
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Revision"
+          },
+          "archived_session_retention_days": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived Session Retention Days",
+            "description": "Whole-day archive retention; null means Unlimited"
+          },
+          "application_scope": {
+            "type": "string",
+            "enum": [
+              "new_archives_only",
+              "recalculate_existing"
+            ],
+            "title": "Application Scope"
+          }
+        },
+        "type": "object",
+        "required": [
+          "expected_revision",
+          "archived_session_retention_days",
+          "application_scope"
+        ],
+        "title": "FileLifecycleSettingsUpdateRequest",
+        "description": "Optimistic archive retention settings update."
+      },
+      "FileLifecycleSettingsUpdateResponse": {
+        "properties": {
+          "settings": {
+            "$ref": "#/components/schemas/FileLifecycleSettingsResponse"
+          },
+          "application": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ArchiveRetentionApplicationResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "settings",
+          "application"
+        ],
+        "title": "FileLifecycleSettingsUpdateResponse",
+        "description": "Updated settings and optional durable recalculation application."
       },
       "HTTPValidationError": {
         "properties": {

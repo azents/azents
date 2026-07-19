@@ -37,9 +37,9 @@ class TestSystemUserRoleAssignmentListResponse(unittest.TestCase):
             return SystemUserRoleAssignmentListResponse(
                 items = [
                     azentsadminclient.models.system_user_role_assignment_response.SystemUserRoleAssignmentResponse(
-                        user_id = '',
-                        role = 'system_admin',
-                        granted_by_user_id = '',
+                        user_id = '', 
+                        role = 'system_admin', 
+                        granted_by_user_id = '', 
                         granted_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
                     ],
                 total = 56
@@ -48,9 +48,9 @@ class TestSystemUserRoleAssignmentListResponse(unittest.TestCase):
             return SystemUserRoleAssignmentListResponse(
                 items = [
                     azentsadminclient.models.system_user_role_assignment_response.SystemUserRoleAssignmentResponse(
-                        user_id = '',
-                        role = 'system_admin',
-                        granted_by_user_id = '',
+                        user_id = '', 
+                        role = 'system_admin', 
+                        granted_by_user_id = '', 
                         granted_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
                     ],
                 total = 56,

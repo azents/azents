@@ -3,7 +3,7 @@
 import asyncio
 import datetime
 from typing import Any, cast
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 from zoneinfo import ZoneInfo
 
 from azcommon.result import Failure, Result, Success
@@ -27,9 +27,11 @@ from azents.api.public.chat.v1 import (
     get_subagent_tree,
     get_team_primary_agent_session,
     list_agent_sessions,
+    list_archived_agent_sessions,
     list_history_events,
     list_input_actions,
     list_live_events,
+    restore_agent_session,
     stop_session_run,
     update_agent_session_title,
     update_session_goal_status,
@@ -916,6 +918,15 @@ class _AgentSessionRouteChatService:
             created_at=datetime.datetime(2026, 6, 25, tzinfo=datetime.UTC),
             updated_at=datetime.datetime(2026, 6, 25, tzinfo=datetime.UTC),
         )
+        self.archived_session = self.secondary_session.model_copy(
+            update={
+                "status": AgentSessionStatus.ARCHIVED,
+                "run_state": AgentSessionRunState.IDLE,
+                "archived_at": datetime.datetime(2026, 7, 18, tzinfo=datetime.UTC),
+                "purge_after": datetime.datetime(2026, 8, 17, tzinfo=datetime.UTC),
+                "archive_retention_days_snapshot": 30,
+            }
+        )
         self.title: str | None = None
         self.result: Result[AgentSession, SessionNotFound] = Success(
             self.primary_session
@@ -953,6 +964,39 @@ class _AgentSessionRouteChatService:
         del user_id
         self.agent_id = agent_id
         return Success([self.primary_session, self.secondary_session])
+
+    async def list_archived_agent_sessions(
+        self,
+        *,
+        agent_id: str,
+        user_id: str,
+    ) -> Result[list[AgentSession], SessionNotFound]:
+        """Return archived agent session list result."""
+        del user_id
+        self.agent_id = agent_id
+        return Success([self.archived_session])
+
+    async def restore_agent_session(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        user_id: str,
+    ) -> Result[AgentSession, SessionNotFound]:
+        """Return restored agent session result."""
+        del user_id
+        self.agent_id = agent_id
+        self.session_id = session_id
+        return Success(
+            self.archived_session.model_copy(
+                update={
+                    "status": AgentSessionStatus.ACTIVE,
+                    "archived_at": None,
+                    "purge_after": None,
+                    "archive_retention_days_snapshot": None,
+                }
+            )
+        )
 
     async def create_team_session(
         self,
@@ -1070,13 +1114,19 @@ class TestAgentSessionRoutes:
     async def test_list_agent_sessions_returns_primary_metadata(self) -> None:
         """Agent session list preserves primary metadata for the UI contract."""
         chat_service = _AgentSessionRouteChatService()
+        retention_service = cast(Any, Mock())
+        retention_service.get_settings = AsyncMock(
+            return_value=Mock(archived_session_retention_days=30)
+        )
 
         response = await list_agent_sessions(
             agent_id="agent-1",
             current_user=CurrentUser(user_id="user-1", session_id="auth-session"),
             chat_service=chat_service,  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
+            retention_service=retention_service,
         )
 
+        assert response.current_archive_retention_days == 30
         assert [item.id for item in response.items] == [
             "1123456789abcdef0123456789abcdef",
             "2123456789abcdef0123456789abcdef",
@@ -1085,6 +1135,45 @@ class TestAgentSessionRoutes:
         assert response.items[0].run_state == AgentSessionRunState.IDLE
         assert response.items[1].primary_kind is None
         assert response.items[1].run_state == AgentSessionRunState.RUNNING
+
+    async def test_list_archived_agent_sessions_returns_deadline_snapshot(self) -> None:
+        """Archived list exposes immutable retention snapshot and deadline metadata."""
+        chat_service = _AgentSessionRouteChatService()
+        retention_service = cast(Any, Mock())
+        retention_service.get_settings = AsyncMock(
+            return_value=Mock(archived_session_retention_days=14)
+        )
+
+        response = await list_archived_agent_sessions(
+            agent_id="3123456789abcdef0123456789abcdef",
+            current_user=CurrentUser(user_id="user-1", session_id="auth-session"),
+            chat_service=chat_service,  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
+            retention_service=retention_service,
+        )
+
+        assert response.current_archive_retention_days == 14
+        assert len(response.items) == 1
+        assert response.items[0].status == AgentSessionStatus.ARCHIVED
+        assert response.items[0].archive_retention_days_snapshot == 30
+        assert response.items[0].purge_after == datetime.datetime(
+            2026, 8, 17, tzinfo=datetime.UTC
+        )
+
+    async def test_restore_agent_session_returns_active_session(self) -> None:
+        """Restore route returns the root session after clearing archive metadata."""
+        chat_service = _AgentSessionRouteChatService()
+
+        response = await restore_agent_session(
+            agent_id="3123456789abcdef0123456789abcdef",
+            session_id="2123456789abcdef0123456789abcdef",
+            current_user=CurrentUser(user_id="user-1", session_id="auth-session"),
+            chat_service=chat_service,  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
+        )
+
+        assert response.status == AgentSessionStatus.ACTIVE
+        assert response.archived_at is None
+        assert response.purge_after is None
+        assert response.archive_retention_days_snapshot is None
 
     async def test_create_team_agent_session_returns_non_primary_session(self) -> None:
         """Team session creation route returns the created non-primary session."""

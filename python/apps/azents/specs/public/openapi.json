@@ -9182,11 +9182,24 @@
             "type": "array",
             "title": "Items",
             "description": "Session list"
+          },
+          "current_archive_retention_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Archive Retention Days",
+            "description": "Current whole-day archive retention, or null for Unlimited"
           }
         },
         "type": "object",
         "required": [
-          "items"
+          "items",
+          "current_archive_retention_days"
         ],
         "title": "AgentSessionListResponse",
         "description": "Conversation session list response."

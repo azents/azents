@@ -38,6 +38,10 @@ __all__ = [
     "ApiKeyError",
     "ApiAttributeError",
     "ApiException",
+    "ArchiveRetentionApplicationResponse",
+    "ArchiveRetentionPreviewRequest",
+    "ArchiveRetentionPreviewResponse",
+    "ArchivedSessionRetentionApplicationStatus",
     "CreatePasswordResetTokenRequest",
     "CreatePasswordResetTokenResponse",
     "CreateSignupTokenRequest",
@@ -47,6 +51,9 @@ __all__ = [
     "EmailVerificationListResponse",
     "EmailVerificationResponse",
     "ErrorLevel",
+    "FileLifecycleSettingsResponse",
+    "FileLifecycleSettingsUpdateRequest",
+    "FileLifecycleSettingsUpdateResponse",
     "HTTPValidationError",
     "HealthStatus",
     "InvitationListResponse",
@@ -115,6 +122,10 @@ from azentsadminclient.exceptions import ApiAttributeError as ApiAttributeError
 from azentsadminclient.exceptions import ApiException as ApiException
 
 # import models into sdk package
+from azentsadminclient.models.archive_retention_application_response import ArchiveRetentionApplicationResponse as ArchiveRetentionApplicationResponse
+from azentsadminclient.models.archive_retention_preview_request import ArchiveRetentionPreviewRequest as ArchiveRetentionPreviewRequest
+from azentsadminclient.models.archive_retention_preview_response import ArchiveRetentionPreviewResponse as ArchiveRetentionPreviewResponse
+from azentsadminclient.models.archived_session_retention_application_status import ArchivedSessionRetentionApplicationStatus as ArchivedSessionRetentionApplicationStatus
 from azentsadminclient.models.create_password_reset_token_request import CreatePasswordResetTokenRequest as CreatePasswordResetTokenRequest
 from azentsadminclient.models.create_password_reset_token_response import CreatePasswordResetTokenResponse as CreatePasswordResetTokenResponse
 from azentsadminclient.models.create_signup_token_request import CreateSignupTokenRequest as CreateSignupTokenRequest
@@ -124,6 +135,9 @@ from azentsadminclient.models.debug_exception_response import DebugExceptionResp
 from azentsadminclient.models.email_verification_list_response import EmailVerificationListResponse as EmailVerificationListResponse
 from azentsadminclient.models.email_verification_response import EmailVerificationResponse as EmailVerificationResponse
 from azentsadminclient.models.error_level import ErrorLevel as ErrorLevel
+from azentsadminclient.models.file_lifecycle_settings_response import FileLifecycleSettingsResponse as FileLifecycleSettingsResponse
+from azentsadminclient.models.file_lifecycle_settings_update_request import FileLifecycleSettingsUpdateRequest as FileLifecycleSettingsUpdateRequest
+from azentsadminclient.models.file_lifecycle_settings_update_response import FileLifecycleSettingsUpdateResponse as FileLifecycleSettingsUpdateResponse
 from azentsadminclient.models.http_validation_error import HTTPValidationError as HTTPValidationError
 from azentsadminclient.models.health_status import HealthStatus as HealthStatus
 from azentsadminclient.models.invitation_list_response import InvitationListResponse as InvitationListResponse
@@ -165,3 +179,4 @@ from azentsadminclient.models.workspace_user_list_response import WorkspaceUserL
 from azentsadminclient.models.workspace_user_response import WorkspaceUserResponse as WorkspaceUserResponse
 from azentsadminclient.models.workspace_user_role import WorkspaceUserRole as WorkspaceUserRole
 from azentsadminclient.models.workspace_user_update_request import WorkspaceUserUpdateRequest as WorkspaceUserUpdateRequest
+

@@ -6,9 +6,9 @@ Initial system administrator session response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**access_token** | **str** | JWT access token |
-**refresh_token** | **str** | Refresh token |
-**expires_in** | **int** | Access token expiration time in seconds |
+**access_token** | **str** | JWT access token | 
+**refresh_token** | **str** | Refresh token | 
+**expires_in** | **int** | Access token expiration time in seconds | 
 
 ## Example
 
@@ -28,3 +28,5 @@ system_bootstrap_first_admin_response_dict = system_bootstrap_first_admin_respon
 system_bootstrap_first_admin_response_from_dict = SystemBootstrapFirstAdminResponse.from_dict(system_bootstrap_first_admin_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

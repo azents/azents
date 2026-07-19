@@ -6,14 +6,14 @@ Current live failed-run retry state response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**error_kind** | **str** | Provider or runtime presentation kind |
-**status** | **str** | Current retry status |
-**last_error_message** | **str** | Latest user-safe error message |
-**failed_attempt_count** | **int** | Failed attempt count |
-**max_retries** | **int** | Maximum retry count |
-**backoff_seconds** | **int** | Current backoff duration in seconds |
-**next_retry_at** | **str** | Absolute next retry timestamp |
-**attempts** | [**List[ChatLiveRunRetryAttemptResponse]**](ChatLiveRunRetryAttemptResponse.md) | User-safe retry attempt history |
+**error_kind** | **str** | Provider or runtime presentation kind | 
+**status** | **str** | Current retry status | 
+**last_error_message** | **str** | Latest user-safe error message | 
+**failed_attempt_count** | **int** | Failed attempt count | 
+**max_retries** | **int** | Maximum retry count | 
+**backoff_seconds** | **int** | Current backoff duration in seconds | 
+**next_retry_at** | **str** | Absolute next retry timestamp | 
+**attempts** | [**List[ChatLiveRunRetryAttemptResponse]**](ChatLiveRunRetryAttemptResponse.md) | User-safe retry attempt history | 
 
 ## Example
 

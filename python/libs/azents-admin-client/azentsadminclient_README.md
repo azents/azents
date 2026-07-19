@@ -55,7 +55,7 @@ configuration = azentsadminclient.Configuration(
 with azentsadminclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentsadminclient.AuthV1Api(api_client)
-    create_password_reset_token_request = azentsadminclient.CreatePasswordResetTokenRequest() # CreatePasswordResetTokenRequest |
+    create_password_reset_token_request = azentsadminclient.CreatePasswordResetTokenRequest() # CreatePasswordResetTokenRequest | 
 
     try:
         # Create Password Reset Token
@@ -94,10 +94,14 @@ Class | Method | HTTP request | Description
 *ModelCatalogV1Api* | [**model_catalog_v1_refresh_system_model_catalogs**](azentsadminclient/docs/ModelCatalogV1Api.md#model_catalog_v1_refresh_system_model_catalogs) | **POST** /model-catalog/v1/system-catalogs/refresh | Refresh System Model Catalogs
 *SystemBootstrapV1Api* | [**system_bootstrap_v1_bootstrap_first_system_admin**](azentsadminclient/docs/SystemBootstrapV1Api.md#system_bootstrap_v1_bootstrap_first_system_admin) | **POST** /system/v1/bootstrap/first-admin | Bootstrap First System Admin
 *SystemBootstrapV1Api* | [**system_bootstrap_v1_get_system_bootstrap_status**](azentsadminclient/docs/SystemBootstrapV1Api.md#system_bootstrap_v1_get_system_bootstrap_status) | **GET** /system/v1/bootstrap/status | Get System Bootstrap Status
+*SystemV1Api* | [**system_v1_get_archive_retention_application**](azentsadminclient/docs/SystemV1Api.md#system_v1_get_archive_retention_application) | **GET** /system/v1/settings/file-lifecycle/retention-applications/{application_id} | Get Archive Retention Application
+*SystemV1Api* | [**system_v1_get_file_lifecycle_settings**](azentsadminclient/docs/SystemV1Api.md#system_v1_get_file_lifecycle_settings) | **GET** /system/v1/settings/file-lifecycle | Get File Lifecycle Settings
 *SystemV1Api* | [**system_v1_get_system_admin_me**](azentsadminclient/docs/SystemV1Api.md#system_v1_get_system_admin_me) | **GET** /system/v1/me | Get System Admin Me
 *SystemV1Api* | [**system_v1_grant_system_admin**](azentsadminclient/docs/SystemV1Api.md#system_v1_grant_system_admin) | **PUT** /system/v1/users/{user_id}/roles/system_admin | Grant System Admin
 *SystemV1Api* | [**system_v1_list_system_role_assignments**](azentsadminclient/docs/SystemV1Api.md#system_v1_list_system_role_assignments) | **GET** /system/v1/role-assignments | List System Role Assignments
+*SystemV1Api* | [**system_v1_preview_archive_retention_update**](azentsadminclient/docs/SystemV1Api.md#system_v1_preview_archive_retention_update) | **POST** /system/v1/settings/file-lifecycle/archive-retention/preview | Preview Archive Retention Update
 *SystemV1Api* | [**system_v1_revoke_system_admin**](azentsadminclient/docs/SystemV1Api.md#system_v1_revoke_system_admin) | **DELETE** /system/v1/users/{user_id}/roles/system_admin | Revoke System Admin
+*SystemV1Api* | [**system_v1_update_file_lifecycle_settings**](azentsadminclient/docs/SystemV1Api.md#system_v1_update_file_lifecycle_settings) | **PATCH** /system/v1/settings/file-lifecycle | Update File Lifecycle Settings
 *UserEmailV1Api* | [**useremail_v1_create_email**](azentsadminclient/docs/UserEmailV1Api.md#useremail_v1_create_email) | **POST** /user-email/v1/users/{user_id}/emails | Create Email
 *UserEmailV1Api* | [**useremail_v1_delete_email**](azentsadminclient/docs/UserEmailV1Api.md#useremail_v1_delete_email) | **DELETE** /user-email/v1/emails/{email_id} | Delete Email
 *UserEmailV1Api* | [**useremail_v1_list_emails**](azentsadminclient/docs/UserEmailV1Api.md#useremail_v1_list_emails) | **GET** /user-email/v1/emails | List Emails
@@ -120,6 +124,10 @@ Class | Method | HTTP request | Description
 
 ## Documentation For Models
 
+ - [ArchiveRetentionApplicationResponse](azentsadminclient/docs/ArchiveRetentionApplicationResponse.md)
+ - [ArchiveRetentionPreviewRequest](azentsadminclient/docs/ArchiveRetentionPreviewRequest.md)
+ - [ArchiveRetentionPreviewResponse](azentsadminclient/docs/ArchiveRetentionPreviewResponse.md)
+ - [ArchivedSessionRetentionApplicationStatus](azentsadminclient/docs/ArchivedSessionRetentionApplicationStatus.md)
  - [CreatePasswordResetTokenRequest](azentsadminclient/docs/CreatePasswordResetTokenRequest.md)
  - [CreatePasswordResetTokenResponse](azentsadminclient/docs/CreatePasswordResetTokenResponse.md)
  - [CreateSignupTokenRequest](azentsadminclient/docs/CreateSignupTokenRequest.md)
@@ -129,6 +137,9 @@ Class | Method | HTTP request | Description
  - [EmailVerificationListResponse](azentsadminclient/docs/EmailVerificationListResponse.md)
  - [EmailVerificationResponse](azentsadminclient/docs/EmailVerificationResponse.md)
  - [ErrorLevel](azentsadminclient/docs/ErrorLevel.md)
+ - [FileLifecycleSettingsResponse](azentsadminclient/docs/FileLifecycleSettingsResponse.md)
+ - [FileLifecycleSettingsUpdateRequest](azentsadminclient/docs/FileLifecycleSettingsUpdateRequest.md)
+ - [FileLifecycleSettingsUpdateResponse](azentsadminclient/docs/FileLifecycleSettingsUpdateResponse.md)
  - [HTTPValidationError](azentsadminclient/docs/HTTPValidationError.md)
  - [HealthStatus](azentsadminclient/docs/HealthStatus.md)
  - [InvitationListResponse](azentsadminclient/docs/InvitationListResponse.md)
@@ -184,3 +195,7 @@ Authentication schemes defined for the API:
 
 
 ## Author
+
+
+
+

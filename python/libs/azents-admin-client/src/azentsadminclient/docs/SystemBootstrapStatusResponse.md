@@ -6,7 +6,7 @@ Initial system bootstrap availability response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**available** | **bool** | Whether initial bootstrap is available |
+**available** | **bool** | Whether initial bootstrap is available | 
 
 ## Example
 
@@ -26,3 +26,5 @@ system_bootstrap_status_response_dict = system_bootstrap_status_response_instanc
 system_bootstrap_status_response_from_dict = SystemBootstrapStatusResponse.from_dict(system_bootstrap_status_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

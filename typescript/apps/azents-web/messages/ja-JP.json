@@ -699,7 +699,18 @@
           "archive": "アーカイブ",
           "archiveConfirmTitle": "セッションをアーカイブしますか？",
           "archiveConfirmDescription": "このセッションはアクティブなセッション一覧から削除されます。会話データは保持されます。",
-          "archiveCancel": "キャンセル"
+          "archiveCancel": "キャンセル",
+          "archivePolicyUnlimited": "現在のポリシーは無期限です。管理者が有限の保持期間を適用するまで、このセッションは復元できます。",
+          "archivePolicyZero": "現在のポリシーは0日です。このセッションは次回のスケジューラー実行時から非同期削除の対象になります。",
+          "archivePolicyDays": "現在のポリシーでは、アーカイブ後{days}日間このセッションを復元できます。",
+          "archivedTitle": "アーカイブ済み",
+          "archivedEmpty": "アーカイブ済みのセッションはありません。",
+          "archivedAt": "{date}にアーカイブ",
+          "retentionSnapshotUnlimited": "無期限保持",
+          "retentionSnapshotDays": "保持期間{days}日",
+          "purgeScheduled": "{date}に削除予定",
+          "purgeUnscheduled": "削除予定なし",
+          "restore": "復元"
         },
         "subagents": {
           "title": "サブエージェント",
