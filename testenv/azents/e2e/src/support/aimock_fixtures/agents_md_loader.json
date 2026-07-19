@@ -808,6 +808,16 @@
         "toolCallId": "call_subagent_mailbox_spawn_idle"
       },
       "response": {
+        "content": "Subagent mailbox idle child was spawned."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Subagent E2E wait for mailbox sender",
+        "hasToolResult": false
+      },
+      "response": {
         "toolCalls": [
           {
             "id": "call_subagent_mailbox_spawn_sender",
@@ -851,8 +861,8 @@
             "id": "call_subagent_mailbox_idle_delay",
             "name": "exec_command",
             "arguments": {
-              "command": "while [ ! -f /tmp/azents-subagent-mailbox-idle-release ]; do sleep 0.1; done",
-              "yield_time_ms": 30000,
+              "command": "sleep 60",
+              "yield_time_ms": 1000,
               "max_output_bytes": 1000
             }
           }
@@ -870,7 +880,7 @@
             "id": "call_subagent_mailbox_idle_hold",
             "name": "exec_command",
             "arguments": {
-              "command": "while [ ! -f /tmp/azents-subagent-mailbox-idle-release ]; do sleep 0.1; done",
+              "command": "sleep 25",
               "yield_time_ms": 30000,
               "max_output_bytes": 1000
             }
@@ -936,8 +946,8 @@
             "id": "call_subagent_mailbox_sender_hold",
             "name": "exec_command",
             "arguments": {
-              "command": "while [ ! -f /tmp/azents-subagent-mailbox-sender-release ]; do sleep 0.1; done",
-              "yield_time_ms": 30000,
+              "command": "sleep 60",
+              "yield_time_ms": 1000,
               "max_output_bytes": 1000
             }
           }
@@ -955,7 +965,7 @@
             "id": "call_subagent_mailbox_sender_hold_again",
             "name": "exec_command",
             "arguments": {
-              "command": "while [ ! -f /tmp/azents-subagent-mailbox-sender-release ]; do sleep 0.1; done",
+              "command": "sleep 25",
               "yield_time_ms": 30000,
               "max_output_bytes": 1000
             }
@@ -1035,6 +1045,16 @@
         "toolCallId": "call_subagent_timeout_spawn"
       },
       "response": {
+        "content": "Subagent timeout child was spawned."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Subagent E2E wait for active descendant timeout",
+        "hasToolResult": false
+      },
+      "response": {
         "toolCalls": [
           {
             "id": "call_subagent_timeout_wait",
@@ -1058,8 +1078,8 @@
             "id": "call_subagent_timeout_child_delay",
             "name": "exec_command",
             "arguments": {
-              "command": "while [ ! -f /tmp/azents-subagent-timeout-release ]; do sleep 0.1; done",
-              "yield_time_ms": 30000,
+              "command": "sleep 60",
+              "yield_time_ms": 1000,
               "max_output_bytes": 1000
             }
           }
@@ -1070,6 +1090,25 @@
       "match": {
         "endpoint": "chat",
         "toolCallId": "call_subagent_timeout_child_delay"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_subagent_timeout_child_hold",
+            "name": "exec_command",
+            "arguments": {
+              "command": "sleep 25",
+              "yield_time_ms": 30000,
+              "max_output_bytes": 1000
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_subagent_timeout_child_hold"
       },
       "response": {
         "content": "Subagent timeout child completed."
