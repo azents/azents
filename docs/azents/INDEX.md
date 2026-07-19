@@ -32,7 +32,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-07-19 | 18 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-07-03 | 3 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-19 | 35 |
-| [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-07-19 | 16 |
+| [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-07-19 | 17 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-07-19 | 28 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-07-19 | 18 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
@@ -41,7 +41,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-07-19 | 17 |
 | [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-07-17 | 8 |
 | [xAI API Key Provider Flow](spec/flow/xai-api-key.md) | @Hardtack | 2026-07-18 | 3 |
-| [xAI OAuth Flow](spec/flow/xai-oauth.md) | @Hardtack | 2026-07-18 | 5 |
+| [xAI OAuth Flow](spec/flow/xai-oauth.md) | @Hardtack | 2026-07-19 | 6 |
 
 ## Architecture Decision Records (ADR)
 

@@ -2,6 +2,7 @@
 title: "Subscription Provider Usage Design"
 created: 2026-07-19
 updated: 2026-07-19
+implemented: 2026-07-19
 tags: [backend, frontend, api, llm, oauth, billing, security, testing]
 ---
 

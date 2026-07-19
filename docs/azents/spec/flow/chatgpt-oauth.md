@@ -9,7 +9,9 @@ code_paths:
   - python/apps/azents/src/azents/core/chatgpt_oauth.py
   - python/apps/azents/src/azents/core/credentials.py
   - python/apps/azents/src/azents/api/public/chatgpt_oauth/**
+  - python/apps/azents/src/azents/api/public/llm_provider_integration/v1/**
   - python/apps/azents/src/azents/services/chatgpt_oauth/**
+  - python/apps/azents/src/azents/services/subscription_usage/**
   - python/apps/azents/src/azents/repos/chatgpt_oauth_session/**
   - python/apps/azents/src/azents/rdb/models/chatgpt_oauth_session.py
   - python/apps/azents/src/azents/engine/run/resolve.py
@@ -23,7 +25,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/llm-settings/**
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
 last_verified_at: 2026-07-19
-spec_version: 16
+spec_version: 17
 ---
 
 # ChatGPT OAuth Flow
@@ -218,6 +220,51 @@ Rules:
   price-map estimate based only on content-free usage metadata and represents API pricing rather than
   ChatGPT subscription billing; missing or invalid pricing leaves the estimate unset.
 
+## Subscription Usage
+
+An enabled `chatgpt_oauth` integration exposes a live subscription-usage snapshot through the
+integration child endpoint. The read is integration-scoped and read-through: Azents does not persist
+usage snapshots, collect history, poll in the background, aggregate workspaces, or use usage to change
+Agent execution entitlement.
+
+The endpoint requires `LLM_INTEGRATIONS_READ`. It returns operational limits and reset metadata to
+readers. ChatGPT credit and spend-control details are included only when the caller also has
+`LLM_INTEGRATIONS_WRITE`. A disabled integration returns the typed `disabled` unavailable outcome
+without calling ChatGPT. Missing or cross-workspace integrations return 404, and a provider without a
+subscription-usage adapter returns 409.
+
+Before reading usage, the service reuses the existing OAuth freshness lifecycle. It then requests:
+
+```text
+GET https://chatgpt.com/backend-api/wham/usage
+```
+
+The request uses the connected access token, `ChatGPT-Account-Id`, `originator: azents`, and the Azents
+User-Agent. The usage base URL is independent from the Responses runtime `/codex` URL. A process-local
+`AZ_CHATGPT_USAGE_BASE_URL` override is available for deterministic environments. The OAuth token
+endpoint likewise retains the production default and can be replaced process-locally with
+`AZ_CHATGPT_OAUTH_TOKEN_URL` for deterministic refresh testing.
+
+A usage 401 triggers exactly one forced refresh through the existing persistence and concurrent-refresh
+recovery path, followed by exactly one usage retry. Only that shared OAuth refresh lifecycle may update
+integration connection status. Usage-specific 403, 429, provider 5xx, transport failure, or malformed
+payload never disables the integration or changes inference entitlement.
+
+A successful response normalizes primary, secondary, and additional provider windows into stable limit
+identifiers, used percentages clamped to 0 through 100 for presentation, optional window duration, reset
+time, and primary-window status. The public available outcome contains integration id, provider,
+`fetched_at`, optional plan label, limits, and optional permission-projected financial details. Expected
+failures return a typed unavailable reason and fixed Azents message rather than provider bodies or
+exception text.
+
+Workspace LLM Settings loads usage independently inside each eligible integration card. The query does
+not gate the integration list or management actions, does not poll automatically, treats data as fresh
+for 60 seconds, revalidates on focus, and supports manual refresh. Initial failure replaces only the
+card's usage section. A failed refresh retains the last successful in-memory snapshot and marks it stale.
+Disabled cards issue no usage request. The card renders at most two primary limits before expanded
+details, keeps financial details collapsed, and contains unexpected presentation failures in a local
+error boundary.
+
 ## API Surface
 
 | Method | Path | Description |
@@ -225,6 +272,7 @@ Rules:
 | `POST` | `/llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/start` | create device session |
 | `GET` | `/llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/{session_id}` | device poll |
 | `DELETE` | `/llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/{session_id}` | device cancel |
+| `GET` | `/llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations/{integration_id}/subscription-usage` | read one live integration-scoped subscription-usage outcome |
 
 ## Security Rules
 
@@ -232,6 +280,8 @@ Rules:
 - OAuth session has workspace/user binding and expiry.
 - Device poll/cancel verifies current member has same workspace/user as session owner.
 - ChatGPT OAuth integration is not modified through generic API key edit form. Secrets are replaced only through reconnect flow.
+- Subscription-usage adapters and logs never expose OAuth tokens, account identifiers, emails, request headers, provider bodies, provider exception serialization, or unauthorized financial values.
+- Operational usage requires integration read permission. Credit and spend-control fields require integration write permission and are omitted otherwise.
 
 ## Testenv Coverage
 
@@ -253,6 +303,7 @@ Rules:
 
 | Date | Version | Change | Rationale |
 |---|---|---|---|
+| 2026-07-19 | 17 | Added integration-scoped live subscription usage, permission-projected financial details, one-refresh retry, and card-local presentation | ADR-0169 and validated subscription usage implementation |
 | 2026-07-19 | 16 | Added one bounded Exchange attachment context item after same-native generated-image replay | Preserve local attachment discoverability without duplicating rich image input |
 | 2026-07-18 | 15 | Routed unclassified provider outcomes to internal-error handling without provider retry state | Preserve actionable incident tracebacks instead of generic unknown-provider logs |
 | 2026-07-18 | 14 | Unified provider failures under the bounded common contract and full Run retry budget | ADR-0165 coordinated provider-failure cutover |
