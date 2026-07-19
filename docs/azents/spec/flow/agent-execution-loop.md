@@ -52,7 +52,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ChatView.tsx
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
 last_verified_at: 2026-07-19
-spec_version: 107
+spec_version: 108
 ---
 
 # Agent Execution Loop
@@ -101,12 +101,16 @@ terminal event, raise before durable model events or markers are appended. Provi
 exceptions, transport failures, and typed terminal events enter the `ModelProviderFailure` contract
 only when their status or typed identifiers map to a known category. That contract retains only a
 bounded redacted provider-authored scalar message and validated safe diagnostics; raw bodies,
-credentials, headers, request/model output, stream frames, and SDK serialization never cross the
-adapter boundary. Every classified provider failure receives the complete configured Run retry budget
-regardless of category or diagnostic retryability. An unclassified SDK exception is re-raised unchanged
-through the ordinary internal-error traceback path, bypassing provider retry state and user-visible
-provider failure presentation. When a typed terminal event has no source exception to re-raise, it
-becomes an internal error containing bounded scalar diagnostics instead.
+credentials, headers, request/model output, and stream frames never cross the adapter boundary. When
+LiteLLM exposes an error only through its bounded SDK serialization, the adapter parses that wrapper
+and retains only the provider's scalar `message`, `code`, and `type`. Every provider-attributed error
+emits the common structured provider fields, including the sanitized message and stable fingerprint,
+at the boundary that handles it. Every classified provider failure receives the complete configured
+Run retry budget regardless of category or diagnostic retryability. An unclassified SDK exception is
+normalized into a credential-safe `UnclassifiedModelProviderError` and follows the ordinary internal-
+error traceback path, bypassing provider retry state and user-visible provider failure presentation;
+the internal-error boundary enriches its single traceback log with the same safe provider fields. A
+typed terminal event with an unknown provider code follows the same internal-error contract.
 Completed output items may reconstruct a successfully completed response but
 do not independently prove response completion. When the
 completed response includes the optional provider extension `end_turn` with the exact boolean value
@@ -908,6 +912,7 @@ updated by the user.
 
 ## Changelog
 
+- **2026-07-19** — v108. Logged sanitized structured diagnostics for every provider-attributed error and recovered typed fields from bounded LiteLLM SDK serialization.
 - **2026-07-19** — v107. Extended OpenRouter response-handle acquisition to 60 seconds while preserving the common stream idle and absolute attempt bounds.
 - **2026-07-19** — v106. Replaced provider call/result durability with one provider-call event, canonical output-part attachments, and same-/cross-native replay without duplicated rich input.
 

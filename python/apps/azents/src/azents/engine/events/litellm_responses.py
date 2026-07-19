@@ -1,7 +1,9 @@
 """LiteLLM Responses adapter."""
 
+import ast
 import asyncio
 import dataclasses
+import json
 import logging
 from collections.abc import AsyncIterable, AsyncIterator, Sequence
 from typing import Any, Protocol, runtime_checkable
@@ -38,7 +40,6 @@ from azents.engine.model_stream import (
 )
 from azents.engine.run.provider_failure import (
     ModelProviderFailure,
-    ModelProviderFailureCategory,
     classify_model_provider_failure,
     extract_provider_message_text,
     model_provider_failure,
@@ -216,12 +217,10 @@ class LiteLLMResponsesModelAdapter:
         except asyncio.CancelledError:
             raise
         except (LiteLLMOpenAIError, OpenAIBaseError) as exc:
-            # LiteLLM retry finishes inside aresponses, then only a classified
-            # provider failure crosses the Engine boundary. Unknown SDK errors
-            # retain their original traceback through internal-error handling.
+            # LiteLLM retry finishes inside aresponses, then one sanitized
+            # provider error crosses the Engine boundary. Unclassified outcomes
+            # remain internal errors without retaining the raw SDK serialization.
             failure = map_litellm_provider_error(exc, call_context=call_context)
-            if failure is None:
-                raise
             raise failure from None
         finally:
             await close_stream_response(response)
@@ -492,17 +491,9 @@ def map_litellm_provider_error(
     exc: LiteLLMOpenAIError | OpenAIBaseError,
     *,
     call_context: ModelStreamCallContext,
-) -> ModelProviderFailure | None:
-    """Map one classified SDK exception or return None for bare re-raise."""
-    body = getattr(exc, "body", None)
-    nested_error = body.get("error") if isinstance(body, dict) else None
-    error_body = (
-        nested_error
-        if isinstance(nested_error, dict)
-        else body
-        if isinstance(body, dict)
-        else {}
-    )
+) -> ModelProviderFailure:
+    """Map one SDK exception into a sanitized classified or internal error."""
+    error_body = _litellm_error_body(exc)
     status_value = getattr(exc, "status_code", None)
     status_code = status_value if isinstance(status_value, int) else None
     provider_code = sanitize_provider_identifier(
@@ -516,8 +507,6 @@ def map_litellm_provider_error(
         provider_code=provider_code,
         provider_error_type=provider_error_type,
     )
-    if category is ModelProviderFailureCategory.UNKNOWN:
-        return None
     return model_provider_failure(
         operation=call_context.call_kind,
         provider=call_context.provider,
@@ -535,8 +524,42 @@ def map_litellm_provider_error(
     )
 
 
+def _litellm_error_body(exc: Exception) -> dict[str, object]:
+    """Return typed provider fields from LiteLLM body or bounded serialization."""
+    body = getattr(exc, "body", None)
+    if isinstance(body, dict):
+        nested_error = body.get("error")
+        return nested_error if isinstance(nested_error, dict) else body
+
+    message = _strip_litellm_exception_prefix(exc)
+    if message is None or not message.lower().startswith("error code:"):
+        return {}
+    _, separator, serialized = message.partition(" - ")
+    if not separator or not serialized or len(serialized) > 8 * 1024:
+        return {}
+    try:
+        decoded = json.loads(serialized)
+    except json.JSONDecodeError:
+        try:
+            decoded = ast.literal_eval(serialized)
+        except MemoryError, RecursionError, SyntaxError, ValueError:
+            return {}
+    if not isinstance(decoded, dict):
+        return {}
+    nested_error = decoded.get("error")
+    return nested_error if isinstance(nested_error, dict) else decoded
+
+
 def _litellm_provider_message(exc: Exception) -> str | None:
     """Remove LiteLLM's exception-class prefix from typed provider text."""
+    message = _strip_litellm_exception_prefix(exc)
+    return extract_provider_message_text(message) or extract_provider_message_text(
+        str(exc)
+    )
+
+
+def _strip_litellm_exception_prefix(exc: Exception) -> str | None:
+    """Return LiteLLM exception text without the SDK class prefix."""
     message = getattr(exc, "message", None)
     if not isinstance(message, str):
         return None
@@ -546,9 +569,8 @@ def _litellm_provider_message(exc: Exception) -> str | None:
     )
     for prefix in prefixes:
         if message.startswith(prefix):
-            message = message[len(prefix) :]
-            break
-    return extract_provider_message_text(message)
+            return message[len(prefix) :]
+    return message
 
 
 def _retry_after_seconds(exc: Exception) -> float | None:

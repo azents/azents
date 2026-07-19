@@ -9,6 +9,7 @@ from azents.engine.run.provider_failure import (
     UnclassifiedModelProviderError,
     classify_model_provider_failure,
     extract_provider_message_text,
+    model_provider_error_log_fields,
     model_provider_failure,
     sanitize_provider_message,
 )
@@ -164,3 +165,34 @@ def test_unknown_failure_redacts_internal_diagnostics() -> None:
 
     assert "sk-abcdefghijk" not in str(raised.value)
     assert "provider_message=Rejected api_key=[REDACTED]" in str(raised.value)
+
+
+def test_provider_error_log_fields_cover_unclassified_safe_diagnostics() -> None:
+    """Every provider error exposes the same safe structured logging contract."""
+    with pytest.raises(UnclassifiedModelProviderError) as raised:
+        model_provider_failure(
+            operation="sampling",
+            provider="custom",
+            model="model",
+            integration="integration-001",
+            provider_message="Rejected api_key=sk-abcdefghijk",
+            status_code=None,
+            provider_code="future_failure",
+            provider_error_type="future_error",
+        )
+
+    fields = model_provider_error_log_fields(raised.value)
+
+    assert fields == {
+        "provider_failure_operation": "sampling",
+        "provider_failure_provider": "custom",
+        "provider_failure_integration": "integration-001",
+        "provider_failure_model": "model",
+        "provider_failure_status_code": None,
+        "provider_failure_code": "future_failure",
+        "provider_failure_error_type": "future_error",
+        "provider_failure_message": "Rejected api_key=[REDACTED]",
+        "provider_failure_fingerprint": raised.value.fingerprint,
+        "provider_failure_category": "unknown",
+        "provider_failure_retryability": "unknown",
+    }

@@ -61,6 +61,7 @@ class UnclassifiedModelProviderError(RuntimeError):
     provider: str
     integration: str | None
     model: str
+    fingerprint: str
 
     def __init__(
         self,
@@ -87,6 +88,7 @@ class UnclassifiedModelProviderError(RuntimeError):
         self.provider = sanitize_provider_identifier(provider) or "unknown"
         self.integration = sanitize_provider_identifier(integration)
         self.model = sanitize_provider_identifier(model) or "unknown"
+        self.fingerprint = model_provider_error_fingerprint(self)
         diagnostics = [
             f"operation={self.operation}",
             f"provider={self.provider}",
@@ -409,20 +411,61 @@ def provider_failure_retryability(
     return ModelProviderFailureRetryability.UNKNOWN
 
 
-def model_provider_failure_fingerprint(failure: ModelProviderFailure) -> str:
+def model_provider_error_log_fields(
+    error: ModelProviderFailure | UnclassifiedModelProviderError,
+) -> dict[str, object]:
+    """Return safe structured log fields shared by all provider errors."""
+    fields: dict[str, object] = {
+        "provider_failure_operation": error.operation,
+        "provider_failure_provider": error.provider,
+        "provider_failure_integration": error.integration,
+        "provider_failure_model": error.model,
+        "provider_failure_status_code": error.status_code,
+        "provider_failure_code": error.provider_code,
+        "provider_failure_error_type": error.provider_error_type,
+        "provider_failure_message": error.provider_message,
+        "provider_failure_fingerprint": error.fingerprint,
+    }
+    if isinstance(error, ModelProviderFailure):
+        fields.update(
+            {
+                "provider_failure_category": error.category.value,
+                "provider_failure_retryability": error.retryability.value,
+            }
+        )
+    else:
+        fields.update(
+            {
+                "provider_failure_category": ModelProviderFailureCategory.UNKNOWN.value,
+                "provider_failure_retryability": (
+                    ModelProviderFailureRetryability.UNKNOWN.value
+                ),
+            }
+        )
+    return fields
+
+
+def model_provider_error_fingerprint(
+    error: ModelProviderFailure | UnclassifiedModelProviderError,
+) -> str:
     """Return a safe stable hash for structured logging and grouping."""
-    message_shape = _provider_message_shape(failure.provider_message)
+    message_shape = _provider_message_shape(error.provider_message)
     raw = "|".join(
         [
-            failure.provider,
-            failure.operation,
-            str(failure.status_code or ""),
-            failure.provider_code or "",
-            failure.provider_error_type or "",
+            error.provider,
+            error.operation,
+            str(error.status_code or ""),
+            error.provider_code or "",
+            error.provider_error_type or "",
             message_shape,
         ]
     )
     return hashlib.sha256(raw.encode()).hexdigest()[:24]
+
+
+def model_provider_failure_fingerprint(failure: ModelProviderFailure) -> str:
+    """Return the safe stable fingerprint for a classified provider failure."""
+    return model_provider_error_fingerprint(failure)
 
 
 def _provider_message_shape(message: str | None) -> str:

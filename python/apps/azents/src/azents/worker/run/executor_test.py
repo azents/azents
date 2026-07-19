@@ -3302,6 +3302,9 @@ async def test_record_provider_failure_logs_safe_structured_attempt(
     assert log_fields["provider_failure_status_code"] == 503
     assert log_fields["provider_failure_code"] == "server_error"
     assert log_fields["provider_failure_error_type"] == "api_error"
+    assert log_fields["provider_failure_message"] == (
+        "The provider is temporarily unavailable."
+    )
     assert log_fields["provider_failure_fingerprint"] == failure.fingerprint
     assert log_fields["provider_failure_retry_outcome"] == "scheduled"
     assert record.getMessage() == "Model provider attempt failed"

@@ -2619,11 +2619,11 @@ class TestLiteLLMResponsesModelAdapter:
         assert raised.value.status_code == 400
         assert raised.value.integration == "integration-001"
 
-    async def test_unclassified_sdk_error_is_reraised(
+    async def test_unclassified_sdk_error_is_safely_normalized(
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Preserve the original SDK exception and traceback for incidents."""
+        """Preserve safe provider diagnostics without raw SDK serialization."""
         original = OpenAIBaseError("synthetic unclassified SDK failure")
 
         async def fail_call(**kwargs: object) -> object:
@@ -2636,7 +2636,7 @@ class TestLiteLLMResponsesModelAdapter:
         )
         adapter = _TestLiteLLMResponsesModelAdapter()
 
-        with pytest.raises(OpenAIBaseError) as raised:
+        with pytest.raises(UnclassifiedModelProviderError) as raised:
             _ = [
                 event
                 async for event in adapter.stream(
@@ -2644,7 +2644,9 @@ class TestLiteLLMResponsesModelAdapter:
                 )
             ]
 
-        assert raised.value is original
+        assert raised.value.provider_message == "synthetic unclassified SDK failure"
+        assert raised.value.provider_error_type == "OpenAIError"
+        assert raised.value.fingerprint
 
     def test_direct_litellm_error_body_ignores_sdk_serialization(self) -> None:
         """Direct typed body fields win over LiteLLM's serialized message."""
@@ -2678,6 +2680,38 @@ class TestLiteLLMResponsesModelAdapter:
         assert failure.provider_code == "invalid_request"
         assert failure.provider_error_type == "invalid_request_error"
         assert "Error code" not in failure.user_message
+
+    def test_serialized_litellm_error_extracts_only_typed_provider_fields(
+        self,
+    ) -> None:
+        """Recover bounded diagnostics when LiteLLM omits its typed body."""
+        failure = map_litellm_provider_error(
+            BadRequestError(
+                message=(
+                    "Error code: 400 - {'error': {'message': "
+                    "'Request rejected api_key=sk-abcdefghijk', "
+                    "'type': 'invalid_request_error', "
+                    "'code': 'invalid_request'}}"
+                ),
+                model="openrouter/google/gemini-3.5-flash",
+                llm_provider="openrouter",
+            ),
+            call_context=ModelStreamCallContext(
+                call_kind="sampling",
+                provider="openrouter",
+                provider_integration_id="integration-001",
+                model="openrouter/google/gemini-3.5-flash",
+                session_id="session-1",
+                run_id="run-1",
+                attempt_number=1,
+                check_stop=None,
+            ),
+        )
+
+        assert failure is not None
+        assert failure.provider_message == "Request rejected api_key=[REDACTED]"
+        assert failure.provider_code == "invalid_request"
+        assert failure.provider_error_type == "invalid_request_error"
 
     async def test_auth_error_is_user_visible(
         self,
