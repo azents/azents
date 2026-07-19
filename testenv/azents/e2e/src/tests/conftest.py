@@ -1082,7 +1082,7 @@ def azents_main_web_container(
         .with_name(f"azents-web-{random_secret(4)}")
         .with_network(container_network)
         .with_network_aliases("azents-web")
-        .with_env("PUBLIC_API_URL", "http://azents-public-server:8010")
+        .with_env("PUBLIC_API_URL", _MAIN_WEB_BROWSER_URL)
         .with_env("INTERNAL_API_URL", "http://azents-public-server:8010")
         .with_env("ADMIN_WEB_URL", _ADMIN_WEB_GATEWAY_URL)
         .with_exposed_ports(3000)
@@ -1184,6 +1184,16 @@ server {
     listen 8443 ssl;
     ssl_certificate /etc/nginx/tls/tls.crt;
     ssl_certificate_key /etc/nginx/tls/tls.key;
+
+    location /chat/ {
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Forwarded-Host $http_host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_pass http://azents-public-server:8010;
+    }
 
     location / {
         proxy_set_header Host $http_host;
