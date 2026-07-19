@@ -8,6 +8,9 @@ import httpx
 import pytest
 from openai import APITimeoutError
 
+from azents.core.config import ModelStreamTimeoutConfig
+from azents.core.enums import LLMProvider
+from azents.core.openrouter import OPENROUTER_RESPONSE_HANDLE_TIMEOUT_SECONDS
 from azents.engine.model_stream import (
     ModelStreamCallContext,
     ModelStreamCleanupRegistry,
@@ -18,6 +21,7 @@ from azents.engine.model_stream import (
     ModelStreamWatchdog,
     close_stream_response,
     connect_only_http_timeout,
+    model_stream_timeout_policy_resolver,
 )
 from azents.engine.run.errors import ModelStreamTimeoutError
 from azents.engine.run.types import USER_STOP_CANCEL_MESSAGE
@@ -262,6 +266,35 @@ def test_policy_resolver_prefers_specific_then_provider_then_default() -> None:
         )
         is default
     )
+
+
+def test_production_policy_resolver_relaxes_openrouter_response_acquisition() -> None:
+    timeout_config = ModelStreamTimeoutConfig(
+        connect_timeout_seconds=15,
+        parsed_event_idle_timeout_seconds=300,
+        absolute_attempt_timeout_seconds=1_800,
+        close_grace_seconds=5,
+    )
+    resolver = model_stream_timeout_policy_resolver(timeout_config)
+
+    openrouter_policy = resolver.resolve(
+        provider=LLMProvider.OPENROUTER.value,
+        model="openrouter/moonshotai/kimi-k3",
+        inference_profile=None,
+    )
+    default_policy = resolver.resolve(
+        provider="other-provider",
+        model="other-model",
+        inference_profile=None,
+    )
+
+    assert openrouter_policy.connect_timeout_seconds == (
+        OPENROUTER_RESPONSE_HANDLE_TIMEOUT_SECONDS
+    )
+    assert openrouter_policy.parsed_event_idle_timeout_seconds == 300
+    assert openrouter_policy.absolute_attempt_timeout_seconds == 1_800
+    assert default_policy.connect_timeout_seconds == 15
+    assert default_policy is resolver.default
 
 
 def test_connect_only_http_timeout_does_not_add_transport_idle_deadlines() -> None:

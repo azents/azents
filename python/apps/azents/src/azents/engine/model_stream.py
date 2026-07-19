@@ -12,8 +12,10 @@ from fastapi import Depends
 from litellm.exceptions import Timeout as LiteLLMTimeout
 from openai import APITimeoutError
 
-from azents.core.config import Config
+from azents.core.config import Config, ModelStreamTimeoutConfig
 from azents.core.deps import get_appctx
+from azents.core.enums import LLMProvider
+from azents.core.openrouter import OPENROUTER_RESPONSE_HANDLE_TIMEOUT_SECONDS
 from azents.engine.run.errors import (
     ModelStreamCallKind,
     ModelStreamTimeoutError,
@@ -816,6 +818,35 @@ def _is_user_stop_cancellation(exc: asyncio.CancelledError) -> bool:
     return any(arg == USER_STOP_CANCEL_MESSAGE for arg in exc.args)
 
 
+def model_stream_timeout_policy_resolver(
+    timeout_config: ModelStreamTimeoutConfig,
+) -> ModelStreamTimeoutPolicyResolver:
+    """Build the production timeout resolver from process configuration."""
+    default_policy = ModelStreamTimeoutPolicy(
+        connect_timeout_seconds=timeout_config.connect_timeout_seconds,
+        parsed_event_idle_timeout_seconds=(
+            timeout_config.parsed_event_idle_timeout_seconds
+        ),
+        absolute_attempt_timeout_seconds=(
+            timeout_config.absolute_attempt_timeout_seconds
+        ),
+    )
+    openrouter_policy = dataclasses.replace(
+        default_policy,
+        connect_timeout_seconds=OPENROUTER_RESPONSE_HANDLE_TIMEOUT_SECONDS,
+    )
+    return ModelStreamTimeoutPolicyResolver(
+        default=default_policy,
+        provider_overrides=(
+            ModelStreamProviderPolicyOverride(
+                provider=LLMProvider.OPENROUTER.value,
+                policy=openrouter_policy,
+            ),
+        ),
+        specific_overrides=(),
+    )
+
+
 async def get_model_stream_watchdog(
     appctx: Annotated[AppContext[Config], Depends(get_appctx)],
 ) -> ModelStreamWatchdog:
@@ -824,23 +855,10 @@ async def get_model_stream_watchdog(
     async def create() -> AsyncIterator[ModelStreamWatchdog]:
         clock = AsyncioModelStreamClock()
         timeout_config = appctx.config.model_stream_timeout
-        policy = ModelStreamTimeoutPolicy(
-            connect_timeout_seconds=timeout_config.connect_timeout_seconds,
-            parsed_event_idle_timeout_seconds=(
-                timeout_config.parsed_event_idle_timeout_seconds
-            ),
-            absolute_attempt_timeout_seconds=(
-                timeout_config.absolute_attempt_timeout_seconds
-            ),
-        )
         close_grace_seconds = timeout_config.close_grace_seconds
         registry = ModelStreamCleanupRegistry(clock=clock)
         watchdog = ModelStreamWatchdog(
-            resolver=ModelStreamTimeoutPolicyResolver(
-                default=policy,
-                provider_overrides=(),
-                specific_overrides=(),
-            ),
+            resolver=model_stream_timeout_policy_resolver(timeout_config),
             cleanup_registry=registry,
             close_grace_seconds=close_grace_seconds,
             clock=clock,

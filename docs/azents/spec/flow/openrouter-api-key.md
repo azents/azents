@@ -18,12 +18,13 @@ code_paths:
   - python/apps/azents/src/azents/services/llm_catalog/**
   - python/apps/azents/src/azents/engine/events/litellm_responses.py
   - python/apps/azents/src/azents/engine/events/responses_lowering.py
+  - python/apps/azents/src/azents/engine/model_stream.py
   - typescript/apps/azents-web/src/features/llm-settings/**
   - typescript/apps/azents-web/src/features/agents/components/ModelCatalogPicker.tsx
   - testenv/azents/e2e/src/tests/azents/public/test_llm_provider_integration.py
   - testenv/azents/e2e/src/tests/azents/public/test_model_selection.py
 last_verified_at: 2026-07-19
-spec_version: 1
+spec_version: 2
 ---
 
 # OpenRouter API Key Provider Flow
@@ -106,7 +107,7 @@ Run resolution maps an OpenRouter integration to:
 
 Azents does not send `HTTP-Referer` by default and does not add request-level upstream routing or privacy overrides. OpenRouter account and API-key settings remain authoritative for upstream selection and data policy.
 
-OpenRouter execution uses the LiteLLM Responses adapter and the common canonical transcript, streaming, usage, cost, and provider-failure paths. Provider-first lowering applies these dialect rules:
+OpenRouter execution uses the LiteLLM Responses adapter and the common canonical transcript, streaming, usage, cost, and provider-failure paths. Response-handle acquisition has a provider-specific 60-second deadline instead of the common 15-second deadline so transient upstream routing and model preparation do not prematurely fail the attempt. Parsed-event idle and absolute-attempt deadlines remain on the common policy. Provider-first lowering applies these dialect rules:
 
 - semantic `web_search` lowers to the OpenRouter Responses tool type `openrouter:web_search`;
 - Anthropic cache-control hints are disabled even when the model publisher is Anthropic;
@@ -141,4 +142,5 @@ Later OpenRouter catalog changes do not mutate existing Agent or Workspace snaps
 
 | Date | Version | Change | Rationale |
 |---|---:|---|---|
+| 2026-07-19 | 2 | Extended OpenRouter response-handle acquisition to 60 seconds while preserving common stream idle and absolute bounds | Prevent transient upstream routing and model preparation from crossing the common 15-second acquisition deadline |
 | 2026-07-19 | 1 | Documented the stable OpenRouter API-key integration, account catalog, runtime, UI, and security behavior | ADR-0169 and the verified OpenRouter implementation |
