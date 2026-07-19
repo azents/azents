@@ -331,7 +331,7 @@ export const WithPreparingContext = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(
-      canvas.getByText("Preparing conversation context…"),
+      canvas.getByText("Summarizing previous conversation…"),
     ).toBeVisible();
   },
 } satisfies Story;
