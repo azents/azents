@@ -52,7 +52,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ChatView.tsx
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
 last_verified_at: 2026-07-18
-spec_version: 104
+spec_version: 105
 ---
 
 # Agent Execution Loop
@@ -373,6 +373,10 @@ optimizations. Each adapter lowerer replays a native artifact item only when thi
 matches exactly. OpenAI SDK artifacts use adapter identity `openai`; LiteLLM artifacts use `litellm`.
 Canonical fallback lowering is used across an adapter, provider, model, format, or schema mismatch,
 including a code-version rollback from a new OpenAI artifact to the preceding LiteLLM implementation.
+Provider-tool call and result events both carry required bounded `semantic` content with readable
+input, model-visible output, and typed URL/file/other references. The shared deterministic renderer
+is the canonical textual fallback; event-core consumers never recover semantics by parsing opaque
+native artifacts.
 
 ```text
 adapter:native_format:provider:model:schema_version
@@ -442,9 +446,12 @@ For xAI image generation, the auto-bound unprefixed `image_generation` client to
 
 xAI API-key execution uses the selected integration key. xAI OAuth execution starts with the proactively refreshed selected integration token. The first Imagine `401` forces one refresh through the existing persistence service and retries once with the new token; a second `401` returns reconnect-required failure. API-key `401`, `403`, `429`, malformed/oversized output, and exhausted transport failures become sanitized client tool failures. Cancellation propagates immediately. Successful bytes enter the normal generated-file admission path, so the durable `client_tool_result` contains an available Exchange attachment plus a ModelFile-backed file output and never contains Base64 or credentials.
 
-Provider-hosted tool output is normalized as provider tool call/result events and does not enter the
-client tool execution loop or by itself continue the model turn. A completed `image_generation` item
-first becomes an excluded transient pending-file output. The shared materializer strictly decodes and
+Provider-hosted tool output is normalized through the recognized Responses item registry as provider
+tool call/result events and does not enter the client tool execution loop or by itself continue the
+model turn. Every recognized durable item extractor produces bounded provider-neutral semantic input,
+output, and references plus attachments when exposed; lifecycle-only native stages remain live
+activity rather than incomplete durable output. A completed `image_generation` item first becomes an
+excluded transient pending-file output. The shared materializer strictly decodes and
 verifies the image, enforces encoded and 20 MiB decoded bounds, stores the original as an Exchange
 attachment, stores a normalized copy as a ModelFile, and replaces the result skeleton with both
 references before durable output admission. Base64 and raw bytes never enter event JSON or native
@@ -460,9 +467,10 @@ metadata and identity reuse with different bytes fails explicitly.
 On a later request, an exactly compatible native Responses artifact reconstructs the sanitized
 `image_generation_call.result` from ModelFile bytes in request-local memory only. ChatGPT OAuth sends
 that reconstructed result without the prior provider item ID in the full `store=false` request.
-Cross-adapter or incompatible replay
-emits a bounded provider-result marker plus the FilePart lowered as rich image input when supported, or
-the normal explicit unavailable-image placeholder otherwise.
+For generic provider-tool calls and results, cross-adapter or incompatible replay emits the shared
+semantic transcript as model-visible text. Image generation retains its richer fallback: a bounded
+provider-result marker plus the FilePart lowered as rich image input when supported, or the normal
+explicit unavailable-image placeholder otherwise.
 
 Each output stream owns one shared provider-tool activity accumulator. OpenAI SDK and LiteLLM
 normalizers extract adapter-native observations locally, normalize stable call identity and semantic
@@ -470,6 +478,13 @@ hosted-tool names, and submit them to the accumulator. The accumulator suppresse
 snapshots, enriches later arguments, supports multiple calls, and prevents `completed` or `failed`
 state from regressing to `running`. Providers or transports that expose only final output do not
 produce guessed running activity.
+
+The same semantic renderer feeds summary generation, bounded continuity excerpts, token estimation,
+context accounting, cross-native lowering, REST message projection, and final Run result collection.
+It renders the provider-tool name and status followed by present input, textual output, and typed
+references in stable order with sorted metadata JSON. Output-part files and event attachments are
+collected from both provider-tool call and result events; opaque native fields never appear in this
+textual path.
 
 Synthetic model-visible reminders are durable events or control events whose model lowering role is
 `user`, even though they are not user-authored chat messages. The lowerer renders most
@@ -893,6 +908,9 @@ updated by the user.
 
 ## Changelog
 
+- **2026-07-18** (spec_version 105) — Promoted bounded provider-tool semantic input, output, references,
+  generic cross-native rendering, compaction/continuity visibility, context accounting, and consumer
+  file collection across provider call and result events.
 - **2026-07-18** (spec_version 104) — Resolved model-scoped built-ins to provider-hosted or client-executed ownership and added xAI Imagine execution, OAuth refresh, sanitized failure, and generated-file admission semantics.
 - **2026-07-18** (spec_version 103) — Bounded incoming OpenAI Responses WebSocket messages at 32 MiB.
 - **2026-07-18** (spec_version 102) — Routed unclassified provider outcomes through the ordinary
