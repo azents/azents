@@ -75,6 +75,7 @@ function createAgent(input: AgentFixtureInput): EnrichedAgent {
     runtime_provider_id: null,
     shell_enabled: true,
     memory_enabled: true,
+    tool_search_enabled: false,
     max_turns: null,
     subagent_settings: { max_subagents: 3, max_depth: 1 },
     avatar: null,

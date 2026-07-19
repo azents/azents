@@ -312,6 +312,7 @@ def _make_agent() -> Agent:
         runtime_provider_id=None,
         shell_enabled=True,
         memory_enabled=True,
+        tool_search_enabled=False,
         max_turns=None,
         avatar=None,
         created_at=_NOW,

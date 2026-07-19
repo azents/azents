@@ -53,6 +53,7 @@ def _make_agent(agent_id: str = "agent-1") -> Agent:
         runtime_provider_id=None,
         shell_enabled=True,
         memory_enabled=True,
+        tool_search_enabled=False,
         max_turns=None,
         avatar=None,
         created_at=_NOW,
@@ -149,3 +150,5 @@ class TestAgentServiceModelSelection:
 
         assert isinstance(result, Success)
         settings_repo.set_default_model_if_empty.assert_awaited_once()
+        repository_create = agent_repo.create.await_args.args[1]
+        assert repository_create.tool_search_enabled is False

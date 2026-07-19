@@ -45,6 +45,7 @@ class AgentResponse(BaseModel):
     runtime_provider_id: str | None
     shell_enabled: bool
     memory_enabled: bool
+    tool_search_enabled: bool
     max_turns: int | None
     subagent_settings: SubagentSettings
     avatar: UploadedImage | None = None
@@ -74,6 +75,7 @@ class AgentResponse(BaseModel):
             runtime_provider_id=data.runtime_provider_id,
             shell_enabled=data.shell_enabled,
             memory_enabled=data.memory_enabled,
+            tool_search_enabled=data.tool_search_enabled,
             max_turns=data.max_turns,
             subagent_settings=data.subagent_settings,
             avatar=data.avatar,
@@ -121,6 +123,9 @@ class AgentCreateRequest(BaseModel):
     )
     shell_enabled: bool = Field(default=True, description="Shell enabled state")
     memory_enabled: bool = Field(default=True, description="Memory enabled state")
+    tool_search_enabled: bool = Field(
+        default=False, description="Tool Search enabled state"
+    )
     max_turns: int | None = Field(
         default=None, gt=0, description="Maximum agent turn count"
     )
@@ -163,6 +168,7 @@ class AgentUpdateRequest(TypedDict, total=False):
     ]
     shell_enabled: Annotated[bool, Field(description="Shell enabled state")]
     memory_enabled: Annotated[bool, Field(description="Memory enabled state")]
+    tool_search_enabled: Annotated[bool, Field(description="Tool Search enabled state")]
     max_turns: Annotated[
         int | None, Field(gt=0, description="Maximum agent turn count")
     ]

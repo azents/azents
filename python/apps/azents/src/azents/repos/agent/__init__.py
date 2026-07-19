@@ -237,6 +237,7 @@ class AgentRepository:
             runtime_provider_id=rdb.runtime_provider_id,
             shell_enabled=rdb.shell_enabled,
             memory_enabled=rdb.memory_enabled,
+            tool_search_enabled=rdb.tool_search_enabled,
             max_turns=rdb.max_turns,
             subagent_settings=subagent_settings,
             avatar=avatar,

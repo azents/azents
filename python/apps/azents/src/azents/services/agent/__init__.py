@@ -371,6 +371,7 @@ class AgentService:
             ),
             shell_enabled=create.shell_enabled,
             memory_enabled=create.memory_enabled,
+            tool_search_enabled=create.tool_search_enabled,
             max_turns=create.max_turns,
             subagent_settings=create.subagent_settings,
         )
@@ -586,6 +587,7 @@ class AgentService:
             "runtime_provider_id",
             "shell_enabled",
             "memory_enabled",
+            "tool_search_enabled",
             "max_turns",
             "subagent_settings",
         ):

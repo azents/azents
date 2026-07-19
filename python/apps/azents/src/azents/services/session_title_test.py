@@ -499,6 +499,7 @@ class _AgentRepository:
             ],
             main_model_label=DEFAULT_MAIN_MODEL_OPTION_LABEL,
             lightweight_model_label=DEFAULT_MAIN_MODEL_OPTION_LABEL,
+            tool_search_enabled=False,
             enabled=True,
             type=AgentType.PUBLIC,
             created_at=now,
