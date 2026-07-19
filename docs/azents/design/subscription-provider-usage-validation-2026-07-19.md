@@ -130,10 +130,14 @@ docker.errors.DockerException: Error while fetching server API version:
 ('Connection aborted.', FileNotFoundError(2, 'No such file or directory'))
 ```
 
-This is a local environment prerequisite failure, not a product assertion failure. The tests remain
-required in deterministic pull-request CI, where Docker is available.
+This is a local environment prerequisite failure, not a product assertion failure.
 
-The authored API cases cover:
+Required pull-request CI run `29691843411` subsequently executed the full deterministic lane with Docker.
+The lane completed with 205 passed, 11 skipped, 10 deselected, and 2 dependency deprecation warnings in
+371.75 seconds. All 17 cases from `test_subscription_usage.py`, including the product API, refresh,
+isolation, serialization, journal, and structured server-log assertions, passed.
+
+The API cases cover:
 
 - Owner and Member operational/financial projection;
 - exhausted ChatGPT limits without remaining-request synthesis;
@@ -162,7 +166,11 @@ Pytest collected the single browser scenario. It was blocked at the same session
 network setup because Docker is unavailable, before the browser, gateway, or worktree-built Main Web
 could start. No browser assertion ran locally.
 
-The authored browser scenario covers:
+Required pull-request CI run `29691843411` executed the Web Surface lane with Docker and the real browser.
+The lane completed with 3 passed, 223 deselected, and 3 dependency warnings in 368.64 seconds. The target
+`test_subscription_usage_cards_are_live_local_safe_and_responsive` scenario passed.
+
+The browser scenario covers:
 
 - independently loaded ChatGPT and xAI card usage regions;
 - management controls remaining available during usage failure;
@@ -238,35 +246,36 @@ financial source values, provider plan values, trusted and rejected redirect val
 The journal never records provider request bodies or response payloads.
 
 Product API tests additionally reject deterministic credentials and account metadata from normalized API
-responses and server logs. Those assertions require Docker and are pending required CI execution.
+responses and subscription-usage service logs. Required Docker-backed CI executed and passed those
+assertions.
 
 ## Behavior Validation Matrix
 
 | Behavior | Static/unit evidence | Product API E2E | Browser E2E | Result |
 | --- | --- | --- | --- | --- |
-| ChatGPT normal and exhausted limits | Backend and proxy passed | Authored; Docker-blocked locally | Normal/stale cards authored | Passed below product-container boundary |
-| ChatGPT 401 refresh and one retry | Backend and proxy passed | Authored; Docker-blocked locally | Not separately rendered | Passed below product-container boundary |
-| ChatGPT 429/503/malformed/transport | Backend and proxy passed | Authored; Docker-blocked locally | Malformed card authored | Passed below product-container boundary |
-| xAI billing and auto top-up | Backend and proxy passed | Authored; Docker-blocked locally | Financial disclosure authored | Passed below product-container boundary |
-| xAI trusted/rejected redirect | Backend and proxy passed | Authored; Docker-blocked locally | Link safety authored | Passed below product-container boundary |
-| Reader/writer financial split | Route/service tests passed | Authored; Docker-blocked locally | Owner disclosure authored | Passed below product-container boundary |
-| Disabled provider suppression | Service/query tests passed | Authored; Docker-blocked locally | Authored | Passed below product-container boundary |
-| Two-card failure isolation | Query/projection tests passed | Authored; Docker-blocked locally | Authored | Passed below product-container boundary |
-| Failed-refresh stale snapshot | Frontend tests and Storybook passed | Fixture passed | Authored; Docker-blocked locally | Passed below browser boundary |
-| Narrow responsive layout | Storybook build passed | Not applicable | Authored; Docker-blocked locally | Pending browser CI |
-| Secret-safe journal | Proxy assertions passed | Authored; Docker-blocked locally | Journal assertion authored | Proxy boundary passed; product logs pending CI |
+| ChatGPT normal and exhausted limits | Backend and proxy passed | Passed in deterministic CI | Normal and stale cards passed | Passed |
+| ChatGPT 401 refresh and one retry | Backend and proxy passed | Passed in deterministic CI | Not separately rendered | Passed |
+| ChatGPT 429/503/malformed/transport | Backend and proxy passed | Passed in deterministic CI | Malformed card passed | Passed |
+| xAI billing and auto top-up | Backend and proxy passed | Passed in deterministic CI | Financial disclosure passed | Passed |
+| xAI trusted/rejected redirect | Backend and proxy passed | Passed in deterministic CI | Link safety passed | Passed |
+| Reader/writer financial split | Route/service tests passed | Passed in deterministic CI | Owner disclosure passed | Passed |
+| Disabled provider suppression | Service/query tests passed | Passed in deterministic CI | Passed | Passed |
+| Two-card failure isolation | Query/projection tests passed | Passed in deterministic CI | Passed | Passed |
+| Failed-refresh stale snapshot | Frontend tests and Storybook passed | Fixture passed | Passed in Web Surface CI | Passed |
+| Narrow responsive layout | Storybook build passed | Not applicable | Passed at 390 pixels | Passed |
+| Secret-safe journal and service logs | Proxy assertions passed | Passed in deterministic CI | Journal assertions passed | Passed |
 
 ## ADR-0168 and Approved Design Comparison
 
 | Decision | Implemented behavior | Validation | Drift |
 | --- | --- | --- | --- |
-| D1 — Integration-scoped live snapshot | One child endpoint reads one integration and returns `fetched_at` without attributing usage to Azents | Backend tests passed; API E2E authored | None |
+| D1 — Integration-scoped live snapshot | One child endpoint reads one integration and returns `fetched_at` without attributing usage to Azents | Backend tests and deterministic API E2E passed | None |
 | D2 — OAuth subscription providers only | Only `chatgpt_oauth` and `xai_oauth` are eligible; API-key providers do not request usage | Backend/frontend tests passed | None |
 | D3 — Adapter-owned provider contracts | Paths, headers, parsing, compatibility identity, and failures remain in provider adapters | Adapter and proxy suites passed | None |
 | D4 — Read-through and non-durable | No usage table, history, scheduler, polling, or server cache; frontend keeps only card-local query and last-successful snapshot state | Code review and frontend tests passed | None |
-| D5 — Operational/financial permission split | Readers receive quota state; writers additionally receive financial details | Service/route tests passed; product E2E authored | None |
-| D6 — Card-local canonical UI | Usage renders inside each eligible LLM Settings card with manual refresh and freshness | Frontend tests/build/Storybook passed; browser E2E authored | None |
-| D7 — Typed expected outcomes and isolation | Expected provider outcomes normalize to `available`, `external`, or `unavailable`; unexpected UI defects are card-contained | Backend/frontend tests passed; isolation E2E authored | None |
+| D5 — Operational/financial permission split | Readers receive quota state; writers additionally receive financial details | Service/route tests and product E2E passed | None |
+| D6 — Card-local canonical UI | Usage renders inside each eligible LLM Settings card with manual refresh and freshness | Frontend tests/build/Storybook and browser E2E passed | None |
+| D7 — Typed expected outcomes and isolation | Expected provider outcomes normalize to `available`, `external`, or `unavailable`; unexpected UI defects are card-contained | Backend/frontend and isolation E2E passed | None |
 | D8 — Provider-specific control planes | ChatGPT uses backend `/wham/usage`; xAI uses CLI proxy settings before billing; redirects require trusted HTTPS domains | Adapter and proxy suites passed | None |
 | D9 — No remaining-request inference | UI and API expose provider-reported used percentages and resets only | Backend/frontend tests passed | None |
 
@@ -279,13 +288,13 @@ billing mutation was added.
 | Invariant | Evidence | Result |
 | --- | --- | --- |
 | One integration read owns one endpoint request and one card-local query | Route and frontend container structure reviewed; tests passed | Match |
-| Usage never gates integration list or management controls | Independent query/container structure and browser assertion authored | Match; browser CI pending |
-| One integration failure does not invalidate another | Frontend projection tests passed; API/browser isolation authored | Match below product E2E boundary |
+| Usage never gates integration list or management controls | Independent query/container structure and browser assertion passed | Match |
+| One integration failure does not invalidate another | Frontend projection and API/browser isolation tests passed | Match |
 | Provider failures never expose raw payloads or exception serialization | Adapter tests and safe journal assertions passed | Match |
-| Initial failure is local; failed refresh preserves stale success | Frontend tests and Storybook passed; browser scenario authored | Match below browser boundary |
-| Usage failures do not change entitlement or enabled state | Service/adapter tests passed; xAI 403 product assertion authored | Match below product E2E boundary |
+| Initial failure is local; failed refresh preserves stale success | Frontend tests, Storybook, and browser scenario passed | Match |
+| Usage failures do not change entitlement or enabled state | Service/adapter tests and xAI 403 product assertion passed | Match |
 | Existing OAuth refresh lifecycle remains authoritative | ChatGPT/xAI runtime tests passed; deterministic token endpoints preserve production defaults | Match |
-| No credentials, account identifiers, provider bodies, redirects, or unauthorized financial values enter logs | Unit/proxy assertions passed; product server-log assertion authored | Product log assertion pending CI |
+| No credentials, account identifiers, provider bodies, redirects, or unauthorized financial values enter logs | Unit/proxy and product structured-log assertions passed | Match |
 
 ## Current Living Spec Comparison Before Promotion
 
@@ -327,8 +336,8 @@ validation PR is recorded.
    refresh journal expects the second request to the same usage path to have sequence `2`, and the
    server-log safety assertion filters structured subscription-usage records before rejecting source
    identifiers so unrelated email-service logs do not produce false positives. Static checks, two pure
-   helper tests, and all 13 direct proxy tests pass locally; Docker-backed product-path confirmation
-   remains required in CI.
+   helper tests, and all 13 direct proxy tests passed locally. Docker-backed product-path confirmation
+   was then completed by the final CI run recorded below.
 8. The next deterministic run passed those three boundaries and exposed an overbroad exhausted-usage
    assertion. The no-inference invariant applies to normalized usage-limit fields, while the provider's
    financial `spend_remaining_percent` value is intentionally preserved for writers. The assertion now
@@ -336,17 +345,26 @@ validation PR is recorded.
 
 ## Required CI Evidence
 
-Before the stack is considered fully validated, the validation PR must pass the repository's Docker-backed
-credential-free lanes:
+The repository's Docker-backed credential-free lanes passed on validation head `08433ab6` in CI run
+`29691843411`:
 
 ```console
 uv run pytest -vv -m "not live_external and not runtime_provider and not web_surface" ./src
 uv run pytest -vv -m "web_surface and not live_external and not runtime_provider" ./src
 ```
 
-The focused subscription API and browser tests must execute rather than fail at fixture setup. CI must
-confirm the product-path assertions, server-log secret checks, real browser interaction, and narrow-width
-layout. Any feature-related CI failure must be fixed before spec promotion is treated as complete.
+Results:
+
+- deterministic E2E job `88205869226`: 205 passed, 11 skipped, 10 deselected, and 2 dependency
+  deprecation warnings in 371.75 seconds;
+- Web Surface E2E job `88205869230`: 3 passed, 223 deselected, and 3 dependency warnings in 368.64
+  seconds;
+- all 17 subscription-usage API/helper cases passed in the deterministic lane;
+- the real-browser subscription usage scenario passed, including provider journals, card isolation,
+  stale-state retention, safe external links, management-control availability, and 390-pixel overflow
+  assertions;
+- the aggregate `ci-python-e2e` gate and all other required Python, TypeScript, Docker, Helm, and
+  pre-commit checks passed.
 
 ## Optional Live Verification
 
