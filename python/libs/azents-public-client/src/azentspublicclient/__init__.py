@@ -125,6 +125,7 @@ __all__ = [
     "ChatGPTOAuthDeviceStatusResponse",
     "ChatGPTOAuthSecrets",
     "ChatGPTOAuthSessionStatus",
+    "ChatGPTSubscriptionFinancialDetailsResponse",
     "ChatInputWriteRequest",
     "ChatInputWriteRequestAction",
     "ChatLiveRunOperationResponse",
@@ -246,6 +247,7 @@ __all__ = [
     "RequestedInferenceProfile",
     "ResetAgentRuntimeRequest",
     "ResponseChatV1ReadAgentWorkspacePath",
+    "ResponseLlmProviderIntegrationV1GetSubscriptionUsage",
     "RuntimeDesiredState",
     "RuntimeLifecycleCommandType",
     "RuntimeProviderConnectionState",
@@ -277,6 +279,12 @@ __all__ = [
     "SubagentSettings",
     "SubagentTreeNodeResponse",
     "SubagentTreeResponse",
+    "SubscriptionUsageAvailableResponse",
+    "SubscriptionUsageAvailableResponseFinancialDetails",
+    "SubscriptionUsageExternalResponse",
+    "SubscriptionUsageLimitResponse",
+    "SubscriptionUsageUnavailableReason",
+    "SubscriptionUsageUnavailableResponse",
     "SystemUserRole",
     "TestConnectionRequest",
     "TestConnectionResponse",
@@ -314,6 +322,7 @@ __all__ = [
     "XaiOAuthDeviceStatusResponse",
     "XaiOAuthSecrets",
     "XaiOAuthSessionStatus",
+    "XaiSubscriptionFinancialDetailsResponse",
 ]
 
 # import apis into sdk package
@@ -428,6 +437,7 @@ from azentspublicclient.models.chat_gpto_auth_device_start_response import ChatG
 from azentspublicclient.models.chat_gpto_auth_device_status_response import ChatGPTOAuthDeviceStatusResponse as ChatGPTOAuthDeviceStatusResponse
 from azentspublicclient.models.chat_gpto_auth_secrets import ChatGPTOAuthSecrets as ChatGPTOAuthSecrets
 from azentspublicclient.models.chat_gpto_auth_session_status import ChatGPTOAuthSessionStatus as ChatGPTOAuthSessionStatus
+from azentspublicclient.models.chat_gpt_subscription_financial_details_response import ChatGPTSubscriptionFinancialDetailsResponse as ChatGPTSubscriptionFinancialDetailsResponse
 from azentspublicclient.models.chat_input_write_request import ChatInputWriteRequest as ChatInputWriteRequest
 from azentspublicclient.models.chat_input_write_request_action import ChatInputWriteRequestAction as ChatInputWriteRequestAction
 from azentspublicclient.models.chat_live_run_operation_response import ChatLiveRunOperationResponse as ChatLiveRunOperationResponse
@@ -549,6 +559,7 @@ from azentspublicclient.models.request_signup_email_response import RequestSignu
 from azentspublicclient.models.requested_inference_profile import RequestedInferenceProfile as RequestedInferenceProfile
 from azentspublicclient.models.reset_agent_runtime_request import ResetAgentRuntimeRequest as ResetAgentRuntimeRequest
 from azentspublicclient.models.response_chat_v1_read_agent_workspace_path import ResponseChatV1ReadAgentWorkspacePath as ResponseChatV1ReadAgentWorkspacePath
+from azentspublicclient.models.response_llm_provider_integration_v1_get_subscription_usage import ResponseLlmProviderIntegrationV1GetSubscriptionUsage as ResponseLlmProviderIntegrationV1GetSubscriptionUsage
 from azentspublicclient.models.runtime_desired_state import RuntimeDesiredState as RuntimeDesiredState
 from azentspublicclient.models.runtime_lifecycle_command_type import RuntimeLifecycleCommandType as RuntimeLifecycleCommandType
 from azentspublicclient.models.runtime_provider_connection_state import RuntimeProviderConnectionState as RuntimeProviderConnectionState
@@ -580,6 +591,12 @@ from azentspublicclient.models.skill_action import SkillAction as SkillAction
 from azentspublicclient.models.subagent_settings import SubagentSettings as SubagentSettings
 from azentspublicclient.models.subagent_tree_node_response import SubagentTreeNodeResponse as SubagentTreeNodeResponse
 from azentspublicclient.models.subagent_tree_response import SubagentTreeResponse as SubagentTreeResponse
+from azentspublicclient.models.subscription_usage_available_response import SubscriptionUsageAvailableResponse as SubscriptionUsageAvailableResponse
+from azentspublicclient.models.subscription_usage_available_response_financial_details import SubscriptionUsageAvailableResponseFinancialDetails as SubscriptionUsageAvailableResponseFinancialDetails
+from azentspublicclient.models.subscription_usage_external_response import SubscriptionUsageExternalResponse as SubscriptionUsageExternalResponse
+from azentspublicclient.models.subscription_usage_limit_response import SubscriptionUsageLimitResponse as SubscriptionUsageLimitResponse
+from azentspublicclient.models.subscription_usage_unavailable_reason import SubscriptionUsageUnavailableReason as SubscriptionUsageUnavailableReason
+from azentspublicclient.models.subscription_usage_unavailable_response import SubscriptionUsageUnavailableResponse as SubscriptionUsageUnavailableResponse
 from azentspublicclient.models.system_user_role import SystemUserRole as SystemUserRole
 from azentspublicclient.models.test_connection_request import TestConnectionRequest as TestConnectionRequest
 from azentspublicclient.models.test_connection_response import TestConnectionResponse as TestConnectionResponse
@@ -617,4 +634,4 @@ from azentspublicclient.models.xai_o_auth_device_start_response import XaiOAuthD
 from azentspublicclient.models.xai_o_auth_device_status_response import XaiOAuthDeviceStatusResponse as XaiOAuthDeviceStatusResponse
 from azentspublicclient.models.xai_o_auth_secrets import XaiOAuthSecrets as XaiOAuthSecrets
 from azentspublicclient.models.xai_o_auth_session_status import XaiOAuthSessionStatus as XaiOAuthSessionStatus
-
+from azentspublicclient.models.xai_subscription_financial_details_response import XaiSubscriptionFinancialDetailsResponse as XaiSubscriptionFinancialDetailsResponse

@@ -47,7 +47,26 @@ async def ensure_runtime_tokens(
     refresh_threshold = datetime.datetime.now(datetime.UTC) + _REFRESH_WINDOW
     if integration.secrets.expires_at > refresh_threshold:
         return Success(integration)
+    return await refresh_runtime_tokens(
+        integration=integration,
+        integration_repository=integration_repository,
+        session_manager=session_manager,
+    )
 
+
+async def refresh_runtime_tokens(
+    *,
+    integration: LLMProviderIntegrationWithSecrets,
+    integration_repository: LLMProviderIntegrationRepository,
+    session_manager: SessionManager[AsyncSession],
+) -> Result[LLMProviderIntegrationWithSecrets, ProviderRejected | ProviderUnavailable]:
+    """Force one ChatGPT OAuth refresh for a rejected runtime credential."""
+    if integration.provider != LLMProvider.CHATGPT_OAUTH:
+        return Failure(ProviderRejected(reason="ChatGPT OAuth integration is invalid"))
+    if not isinstance(integration.secrets, ChatGPTOAuthSecrets) or not isinstance(
+        integration.config, ChatGPTOAuthConfig
+    ):
+        return Failure(ProviderRejected(reason="ChatGPT OAuth integration is invalid"))
     async with httpx.AsyncClient(timeout=20.0) as http_client:
         refresh_result = await ChatGPTOAuthClient(http_client).refresh_tokens(
             refresh_token=integration.secrets.refresh_token,

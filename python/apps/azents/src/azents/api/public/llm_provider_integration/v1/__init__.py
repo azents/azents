@@ -36,6 +36,12 @@ from azents.services.llm_provider_integration.data import (
     LLMProviderIntegrationCreateInput,
     NotBelongToWorkspace,
 )
+from azents.services.subscription_usage.data import (
+    SubscriptionUsageNotFound,
+    SubscriptionUsageNotInWorkspace,
+    SubscriptionUsageUnsupportedProvider,
+)
+from azents.services.subscription_usage.service import SubscriptionUsageService
 from azents.testing.deterministic_model_listing import (
     parse_deterministic_fixture_variant,
 )
@@ -50,6 +56,8 @@ from .data import (
     LLMProviderIntegrationUpdateRequest,
     ModelCatalogEntryListResponse,
     ModelCatalogSyncResponse,
+    SubscriptionUsageResponse,
+    convert_subscription_usage_response,
 )
 
 router = APIRouter()
@@ -196,6 +204,53 @@ async def get_integration(
                     raise HTTPException(
                         status_code=status.HTTP_404_NOT_FOUND,
                         detail="LLM Provider Integration not found.",
+                    )
+                case _:
+                    assert_never(error)
+        case _:
+            assert_never(result)
+
+
+@router.get(
+    "/workspaces/{handle}/llm-provider-integrations/{integration_id}/subscription-usage",
+    response_model=SubscriptionUsageResponse,
+)
+async def get_subscription_usage(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[SubscriptionUsageService, Depends()],
+    *,
+    integration_id: str,
+) -> SubscriptionUsageResponse:
+    """Read live subscription usage for one LLM provider integration."""
+    if not member.has_permission(Permissions.LLM_INTEGRATIONS_READ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No LLM integration read permission.",
+        )
+
+    result = await service.read(
+        integration_id=integration_id,
+        workspace_id=member.workspace_id,
+        include_financial_details=member.has_permission(
+            Permissions.LLM_INTEGRATIONS_WRITE
+        ),
+    )
+    match result:
+        case Success(value):
+            return convert_subscription_usage_response(value)
+        case Failure(error):
+            match error:
+                case SubscriptionUsageNotFound() | SubscriptionUsageNotInWorkspace():
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail="LLM Provider Integration not found.",
+                    )
+                case SubscriptionUsageUnsupportedProvider():
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=(
+                            "Integration provider does not support subscription usage."
+                        ),
                     )
                 case _:
                     assert_never(error)

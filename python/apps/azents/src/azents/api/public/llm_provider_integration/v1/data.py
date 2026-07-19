@@ -1,9 +1,9 @@
 """LLM Provider Integration v1 Public API data models."""
 
 import datetime
-from typing import Any
+from typing import Annotated, Any, Literal, assert_never
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, HttpUrl, model_validator
 from typing_extensions import Self
 
 from azents.core.credentials import (
@@ -23,6 +23,17 @@ from azents.services.llm_catalog import (
 )
 from azents.services.llm_provider_integration.data import (
     LLMProviderIntegrationUpdateInput,
+)
+from azents.services.subscription_usage.data import (
+    ChatGPTSubscriptionFinancialDetails,
+    SubscriptionUsageAvailable,
+    SubscriptionUsageExternal,
+    SubscriptionUsageFinancialDetails,
+    SubscriptionUsageLimit,
+    SubscriptionUsageOutcome,
+    SubscriptionUsageUnavailable,
+    SubscriptionUsageUnavailableReason,
+    XaiSubscriptionFinancialDetails,
 )
 
 
@@ -261,3 +272,228 @@ class LLMProviderIntegrationUpdateRequest(LLMProviderIntegrationUpdateInput):
     """LLM Provider Integration update request for partial updates."""
 
     pass
+
+
+SubscriptionUsageProvider = Literal["chatgpt_oauth", "xai_oauth"]
+
+
+class SubscriptionUsageLimitResponse(BaseModel):
+    """Normalized public subscription usage window."""
+
+    id: str
+    label: str
+    used_percent: float
+    window_minutes: int | None
+    resets_at: datetime.datetime | None
+    primary: bool
+
+    @classmethod
+    def convert_from(
+        cls, data: SubscriptionUsageLimit
+    ) -> "SubscriptionUsageLimitResponse":
+        """Convert a normalized domain limit to its public response."""
+        return cls(
+            id=data.id,
+            label=data.label,
+            used_percent=data.used_percent,
+            window_minutes=data.window_minutes,
+            resets_at=data.resets_at,
+            primary=data.primary,
+        )
+
+
+class ChatGPTSubscriptionFinancialDetailsResponse(BaseModel):
+    """Management-only ChatGPT subscription financial details."""
+
+    type: Literal["chatgpt"]
+    has_credits: bool | None
+    unlimited: bool | None
+    balance: str | None
+    spend_limit: str | None
+    spend_used: str | None
+    spend_remaining_percent: float | None
+    spend_resets_at: datetime.datetime | None
+    reached_type: str | None
+
+    @classmethod
+    def convert_from(
+        cls, data: ChatGPTSubscriptionFinancialDetails
+    ) -> "ChatGPTSubscriptionFinancialDetailsResponse":
+        """Convert ChatGPT financial detail without provider wire metadata."""
+        return cls(
+            type="chatgpt",
+            has_credits=data.has_credits,
+            unlimited=data.unlimited,
+            balance=data.balance,
+            spend_limit=data.spend_limit,
+            spend_used=data.spend_used,
+            spend_remaining_percent=data.spend_remaining_percent,
+            spend_resets_at=data.spend_resets_at,
+            reached_type=data.reached_type,
+        )
+
+
+class XaiSubscriptionFinancialDetailsResponse(BaseModel):
+    """Management-only xAI subscription financial details."""
+
+    type: Literal["xai"]
+    prepaid_balance_cents: int | None
+    payg_cap_cents: int | None
+    payg_used_cents: int | None
+    auto_top_up_enabled: bool | None
+    auto_top_up_amount_cents: int | None
+    auto_top_up_monthly_maximum_cents: int | None
+
+    @classmethod
+    def convert_from(
+        cls, data: XaiSubscriptionFinancialDetails
+    ) -> "XaiSubscriptionFinancialDetailsResponse":
+        """Convert xAI financial detail reserved for the Phase 2 producer."""
+        return cls(
+            type="xai",
+            prepaid_balance_cents=data.prepaid_balance_cents,
+            payg_cap_cents=data.payg_cap_cents,
+            payg_used_cents=data.payg_used_cents,
+            auto_top_up_enabled=data.auto_top_up_enabled,
+            auto_top_up_amount_cents=data.auto_top_up_amount_cents,
+            auto_top_up_monthly_maximum_cents=data.auto_top_up_monthly_maximum_cents,
+        )
+
+
+SubscriptionUsageFinancialDetailsResponse = Annotated[
+    ChatGPTSubscriptionFinancialDetailsResponse
+    | XaiSubscriptionFinancialDetailsResponse,
+    Field(discriminator="type"),
+]
+
+
+class SubscriptionUsageAvailableResponse(BaseModel):
+    """Public available subscription usage response."""
+
+    type: Literal["available"]
+    integration_id: str
+    provider: SubscriptionUsageProvider
+    fetched_at: datetime.datetime
+    plan_label: str | None
+    limits: Annotated[list[SubscriptionUsageLimitResponse], Field(min_length=1)]
+    financial_details: SubscriptionUsageFinancialDetailsResponse | None
+
+    @classmethod
+    def convert_from(
+        cls, data: SubscriptionUsageAvailable
+    ) -> "SubscriptionUsageAvailableResponse":
+        """Convert a normalized available outcome to a public response."""
+        return cls(
+            type="available",
+            integration_id=data.integration_id,
+            provider=_subscription_usage_provider(data.provider),
+            fetched_at=data.fetched_at,
+            plan_label=data.plan_label,
+            limits=[
+                SubscriptionUsageLimitResponse.convert_from(limit)
+                for limit in data.limits
+            ],
+            financial_details=(
+                convert_subscription_usage_financial_details(data.financial_details)
+                if data.financial_details is not None
+                else None
+            ),
+        )
+
+
+class SubscriptionUsageExternalResponse(BaseModel):
+    """Public provider-managed subscription usage response."""
+
+    type: Literal["external"]
+    integration_id: str
+    provider: SubscriptionUsageProvider
+    fetched_at: datetime.datetime
+    url: HttpUrl
+    message: str
+
+    @classmethod
+    def convert_from(
+        cls, data: SubscriptionUsageExternal
+    ) -> "SubscriptionUsageExternalResponse":
+        """Convert a validated external outcome to a public response."""
+        return cls(
+            type="external",
+            integration_id=data.integration_id,
+            provider=_subscription_usage_provider(data.provider),
+            fetched_at=data.fetched_at,
+            url=HttpUrl(data.url),
+            message=data.message,
+        )
+
+
+class SubscriptionUsageUnavailableResponse(BaseModel):
+    """Public controlled unavailable subscription usage response."""
+
+    type: Literal["unavailable"]
+    integration_id: str
+    provider: SubscriptionUsageProvider
+    fetched_at: datetime.datetime
+    reason: SubscriptionUsageUnavailableReason
+    message: str
+    retryable: bool
+
+    @classmethod
+    def convert_from(
+        cls, data: SubscriptionUsageUnavailable
+    ) -> "SubscriptionUsageUnavailableResponse":
+        """Convert a controlled unavailable outcome to a public response."""
+        return cls(
+            type="unavailable",
+            integration_id=data.integration_id,
+            provider=_subscription_usage_provider(data.provider),
+            fetched_at=data.fetched_at,
+            reason=data.reason,
+            message=data.message,
+            retryable=data.retryable,
+        )
+
+
+SubscriptionUsageResponse = Annotated[
+    SubscriptionUsageAvailableResponse
+    | SubscriptionUsageExternalResponse
+    | SubscriptionUsageUnavailableResponse,
+    Field(discriminator="type"),
+]
+
+
+def convert_subscription_usage_financial_details(
+    data: SubscriptionUsageFinancialDetails,
+) -> SubscriptionUsageFinancialDetailsResponse:
+    """Convert a closed provider financial detail union to public data."""
+    match data:
+        case ChatGPTSubscriptionFinancialDetails():
+            return ChatGPTSubscriptionFinancialDetailsResponse.convert_from(data)
+        case XaiSubscriptionFinancialDetails():
+            return XaiSubscriptionFinancialDetailsResponse.convert_from(data)
+        case _:
+            assert_never(data)
+
+
+def convert_subscription_usage_response(
+    data: SubscriptionUsageOutcome,
+) -> SubscriptionUsageResponse:
+    """Convert a closed subscription usage outcome union to public data."""
+    match data:
+        case SubscriptionUsageAvailable():
+            return SubscriptionUsageAvailableResponse.convert_from(data)
+        case SubscriptionUsageExternal():
+            return SubscriptionUsageExternalResponse.convert_from(data)
+        case SubscriptionUsageUnavailable():
+            return SubscriptionUsageUnavailableResponse.convert_from(data)
+        case _:
+            assert_never(data)
+
+
+def _subscription_usage_provider(provider: LLMProvider) -> SubscriptionUsageProvider:
+    """Restrict the public usage provider contract to subscription OAuth providers."""
+    if provider == LLMProvider.CHATGPT_OAUTH:
+        return "chatgpt_oauth"
+    if provider == LLMProvider.XAI_OAUTH:
+        return "xai_oauth"
+    msg = "Subscription usage response has an unsupported provider."
+    raise ValueError(msg)

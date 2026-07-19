@@ -105,6 +105,7 @@ azentspublicclient/docs/ChatGPTOAuthDeviceStatusResponse.md
 azentspublicclient/docs/ChatGPTOAuthSecrets.md
 azentspublicclient/docs/ChatGPTOAuthSessionStatus.md
 azentspublicclient/docs/ChatGPTOAuthV1Api.md
+azentspublicclient/docs/ChatGPTSubscriptionFinancialDetailsResponse.md
 azentspublicclient/docs/ChatInputWriteRequest.md
 azentspublicclient/docs/ChatInputWriteRequestAction.md
 azentspublicclient/docs/ChatLiveRunOperationResponse.md
@@ -231,6 +232,7 @@ azentspublicclient/docs/RequestSignupEmailResponse.md
 azentspublicclient/docs/RequestedInferenceProfile.md
 azentspublicclient/docs/ResetAgentRuntimeRequest.md
 azentspublicclient/docs/ResponseChatV1ReadAgentWorkspacePath.md
+azentspublicclient/docs/ResponseLlmProviderIntegrationV1GetSubscriptionUsage.md
 azentspublicclient/docs/RuntimeDesiredState.md
 azentspublicclient/docs/RuntimeLifecycleCommandType.md
 azentspublicclient/docs/RuntimeProviderConnectionState.md
@@ -263,6 +265,12 @@ azentspublicclient/docs/SkillAction.md
 azentspublicclient/docs/SubagentSettings.md
 azentspublicclient/docs/SubagentTreeNodeResponse.md
 azentspublicclient/docs/SubagentTreeResponse.md
+azentspublicclient/docs/SubscriptionUsageAvailableResponse.md
+azentspublicclient/docs/SubscriptionUsageAvailableResponseFinancialDetails.md
+azentspublicclient/docs/SubscriptionUsageExternalResponse.md
+azentspublicclient/docs/SubscriptionUsageLimitResponse.md
+azentspublicclient/docs/SubscriptionUsageUnavailableReason.md
+azentspublicclient/docs/SubscriptionUsageUnavailableResponse.md
 azentspublicclient/docs/SystemUserRole.md
 azentspublicclient/docs/TestConnectionRequest.md
 azentspublicclient/docs/TestConnectionResponse.md
@@ -307,6 +315,7 @@ azentspublicclient/docs/XaiOAuthDeviceStartResponse.md
 azentspublicclient/docs/XaiOAuthDeviceStatusResponse.md
 azentspublicclient/docs/XaiOAuthSecrets.md
 azentspublicclient/docs/XaiOAuthSessionStatus.md
+azentspublicclient/docs/XaiSubscriptionFinancialDetailsResponse.md
 azentspublicclient/exceptions.py
 azentspublicclient/models/__init__.py
 azentspublicclient/models/accept_decline_response.py
@@ -385,6 +394,7 @@ azentspublicclient/models/chat_edit_message_write_request.py
 azentspublicclient/models/chat_event_page_response.py
 azentspublicclient/models/chat_event_response.py
 azentspublicclient/models/chat_failed_run_retry_request.py
+azentspublicclient/models/chat_gpt_subscription_financial_details_response.py
 azentspublicclient/models/chat_gpto_auth_config.py
 azentspublicclient/models/chat_gpto_auth_device_start_response.py
 azentspublicclient/models/chat_gpto_auth_device_status_response.py
@@ -511,6 +521,7 @@ azentspublicclient/models/request_signup_email_response.py
 azentspublicclient/models/requested_inference_profile.py
 azentspublicclient/models/reset_agent_runtime_request.py
 azentspublicclient/models/response_chat_v1_read_agent_workspace_path.py
+azentspublicclient/models/response_llm_provider_integration_v1_get_subscription_usage.py
 azentspublicclient/models/runtime_desired_state.py
 azentspublicclient/models/runtime_lifecycle_command_type.py
 azentspublicclient/models/runtime_provider_connection_state.py
@@ -542,6 +553,12 @@ azentspublicclient/models/skill_action.py
 azentspublicclient/models/subagent_settings.py
 azentspublicclient/models/subagent_tree_node_response.py
 azentspublicclient/models/subagent_tree_response.py
+azentspublicclient/models/subscription_usage_available_response.py
+azentspublicclient/models/subscription_usage_available_response_financial_details.py
+azentspublicclient/models/subscription_usage_external_response.py
+azentspublicclient/models/subscription_usage_limit_response.py
+azentspublicclient/models/subscription_usage_unavailable_reason.py
+azentspublicclient/models/subscription_usage_unavailable_response.py
 azentspublicclient/models/system_user_role.py
 azentspublicclient/models/test_connection_request.py
 azentspublicclient/models/test_connection_response.py
@@ -579,6 +596,7 @@ azentspublicclient/models/xai_o_auth_device_start_response.py
 azentspublicclient/models/xai_o_auth_device_status_response.py
 azentspublicclient/models/xai_o_auth_secrets.py
 azentspublicclient/models/xai_o_auth_session_status.py
+azentspublicclient/models/xai_subscription_financial_details_response.py
 azentspublicclient/rest.py
 azentspublicclient/test/__init__.py
 azentspublicclient/test/test_accept_decline_response.py
@@ -660,6 +678,7 @@ azentspublicclient/test/test_chat_edit_message_write_request.py
 azentspublicclient/test/test_chat_event_page_response.py
 azentspublicclient/test/test_chat_event_response.py
 azentspublicclient/test/test_chat_failed_run_retry_request.py
+azentspublicclient/test/test_chat_gpt_subscription_financial_details_response.py
 azentspublicclient/test/test_chat_gpto_auth_config.py
 azentspublicclient/test/test_chat_gpto_auth_device_start_response.py
 azentspublicclient/test/test_chat_gpto_auth_device_status_response.py
@@ -792,6 +811,7 @@ azentspublicclient/test/test_request_signup_email_response.py
 azentspublicclient/test/test_requested_inference_profile.py
 azentspublicclient/test/test_reset_agent_runtime_request.py
 azentspublicclient/test/test_response_chat_v1_read_agent_workspace_path.py
+azentspublicclient/test/test_response_llm_provider_integration_v1_get_subscription_usage.py
 azentspublicclient/test/test_runtime_desired_state.py
 azentspublicclient/test/test_runtime_lifecycle_command_type.py
 azentspublicclient/test/test_runtime_provider_connection_state.py
@@ -824,6 +844,12 @@ azentspublicclient/test/test_skill_action.py
 azentspublicclient/test/test_subagent_settings.py
 azentspublicclient/test/test_subagent_tree_node_response.py
 azentspublicclient/test/test_subagent_tree_response.py
+azentspublicclient/test/test_subscription_usage_available_response.py
+azentspublicclient/test/test_subscription_usage_available_response_financial_details.py
+azentspublicclient/test/test_subscription_usage_external_response.py
+azentspublicclient/test/test_subscription_usage_limit_response.py
+azentspublicclient/test/test_subscription_usage_unavailable_reason.py
+azentspublicclient/test/test_subscription_usage_unavailable_response.py
 azentspublicclient/test/test_system_user_role.py
 azentspublicclient/test/test_test_connection_request.py
 azentspublicclient/test/test_test_connection_response.py
@@ -867,5 +893,6 @@ azentspublicclient/test/test_xai_o_auth_device_start_response.py
 azentspublicclient/test/test_xai_o_auth_device_status_response.py
 azentspublicclient/test/test_xai_o_auth_secrets.py
 azentspublicclient/test/test_xai_o_auth_session_status.py
+azentspublicclient/test/test_xai_subscription_financial_details_response.py
 azentspublicclient/test/test_xaio_auth_v1_api.py
 azentspublicclient_README.md
