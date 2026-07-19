@@ -1,17 +1,25 @@
 import { rem } from "@mantine/core";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { observable } from "@trpc/server/observable";
+import { useState } from "react";
 import { expect, userEvent, waitFor, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
+import { trpc } from "@/trpc/client";
 import { pendingFiles } from "../story-fixtures";
 import { ChatInput } from "./ChatInput";
 import type { UploadedFile } from "../hooks/useFileUpload";
 import type { InputActionDefinition, TodoStateSnapshot } from "../types";
+import type { AppRouter } from "@/trpc/routers/_app";
 import type {
   AgentModelSelection,
   AgentResponse,
   RequestedInferenceProfile,
   SelectableModelSettings,
+  SubscriptionUsageAvailableResponse,
 } from "@azents/public-client";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
+import type { TRPCLink } from "@trpc/client";
+import type { ReactElement, ReactNode } from "react";
 
 const reasoningModel: AgentModelSelection = {
   llm_provider_integration_id: "integration-main",
@@ -33,6 +41,76 @@ const reasoningModel: AgentModelSelection = {
   source_metadata: null,
   last_refreshed_at: "2026-05-14T00:00:00Z",
 };
+
+const subscriptionModel: AgentModelSelection = {
+  ...reasoningModel,
+  llm_provider_integration_id: "integration-chatgpt",
+  provider: "chatgpt_oauth",
+  model_identifier: "gpt-5",
+  model_display_name: "GPT-5",
+};
+
+const subscriptionUsageSnapshot: SubscriptionUsageAvailableResponse = {
+  type: "available",
+  integration_id: "integration-chatgpt",
+  provider: "chatgpt_oauth",
+  fetched_at: "2026-07-19T12:00:00Z",
+  plan_label: "Plus",
+  limits: [
+    {
+      id: "primary",
+      label: "5 hour limit",
+      used_percent: 73,
+      window_minutes: 300,
+      resets_at: "2026-07-19T14:00:00Z",
+      primary: true,
+    },
+  ],
+  financial_details: {
+    type: "chatgpt",
+    has_credits: true,
+    unlimited: false,
+    balance: "must-not-render",
+    spend_limit: "must-not-render",
+    spend_used: null,
+    spend_remaining_percent: null,
+    spend_resets_at: null,
+    reached_type: null,
+  },
+};
+
+const subscriptionUsageMockLink: TRPCLink<AppRouter> = () => {
+  return ({ op }) =>
+    observable((observer) => {
+      if (op.path !== "llmProviderIntegration.subscriptionUsage") {
+        throw new Error(`Unexpected Storybook tRPC operation: ${op.path}`);
+      }
+      observer.next({ result: { data: subscriptionUsageSnapshot } });
+      observer.complete();
+      return () => {};
+    });
+};
+
+function SubscriptionUsageStoryProvider({
+  children,
+}: {
+  children: ReactNode;
+}): ReactElement {
+  const [queryClient] = useState(
+    () =>
+      new QueryClient({
+        defaultOptions: { queries: { retry: false } },
+      }),
+  );
+  const [trpcClient] = useState(() =>
+    trpc.createClient({ links: [subscriptionUsageMockLink] }),
+  );
+  return (
+    <trpc.Provider client={trpcClient} queryClient={queryClient}>
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    </trpc.Provider>
+  );
+}
 
 const fullReasoningModel: AgentModelSelection = {
   ...reasoningModel,
@@ -569,6 +647,46 @@ export const Mobile = {
       </StorybookCanvas>
     ),
   ],
+} satisfies Story;
+
+export const MobileSubscriptionUsage = {
+  args: {
+    ...baseArgs,
+    sessionId: "story-session-mobile-subscription-usage",
+    isMobile: true,
+    selectableModelOptions: [
+      {
+        label: "ChatGPT",
+        model_selection: subscriptionModel,
+        settings: settingsForModel(subscriptionModel),
+      },
+    ],
+    defaultInferenceProfile: {
+      model_target_label: "ChatGPT",
+      reasoning_effort: null,
+    },
+  },
+  decorators: [
+    (Story) => (
+      <SubscriptionUsageStoryProvider>
+        <StorybookCanvas maxWidth={rem(390)}>
+          <Story />
+        </StorybookCanvas>
+      </SubscriptionUsageStoryProvider>
+    ),
+  ],
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement.ownerDocument.body);
+    await waitFor(() =>
+      expect(
+        page.getByRole("button", { name: /Subscription usage:.*73%/ }),
+      ).toBeVisible(),
+    );
+    await userEvent.click(page.getByRole("button", { name: /^Model$/ }));
+    await waitFor(() => expect(page.getByText("5 hour limit")).toBeVisible());
+    await expect(page.getByText("73%")).toBeVisible();
+    await expect(page.queryByText("must-not-render")).not.toBeInTheDocument();
+  },
 } satisfies Story;
 
 export const MobileWithPendingFiles = {
