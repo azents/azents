@@ -9,6 +9,8 @@ from typing import cast
 import azentsadminclient
 import azentspublicclient
 import requests
+from azentsadminclient.api.model_catalog_v1_api import ModelCatalogV1Api
+from azentsadminclient.models.system_catalog_provider import SystemCatalogProvider
 from azentspublicclient.api.llm_provider_integration_v1_api import (
     LLMProviderIntegrationV1Api,
 )
@@ -135,6 +137,9 @@ def _setup_xai_agent(
             name=integration_name,
             enabled=True,
         )
+        ModelCatalogV1Api(
+            admin_api_client
+        ).model_catalog_v1_refresh_system_model_catalog(SystemCatalogProvider.XAI_OAUTH)
     entries_url = (
         f"{server_url}/llm-provider-integration/v1/workspaces/{handle}/"
         f"llm-provider-integrations/{integration_id}/catalog-entries"
