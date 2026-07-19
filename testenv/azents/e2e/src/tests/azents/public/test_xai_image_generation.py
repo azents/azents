@@ -1,6 +1,5 @@
 """xAI client-executed image generation product-path E2E coverage."""
 
-import datetime
 import hashlib
 import json
 import time
@@ -20,15 +19,11 @@ from azentspublicclient.models.llm_provider import LLMProvider
 from azentspublicclient.models.llm_provider_integration_create_request import (
     LLMProviderIntegrationCreateRequest,
 )
-from azentspublicclient.models.llm_provider_integration_create_request_config import (
-    LLMProviderIntegrationCreateRequestConfig,
-)
 from azentspublicclient.models.secrets import Secrets
-from azentspublicclient.models.xai_o_auth_config import XaiOAuthConfig
-from azentspublicclient.models.xai_o_auth_secrets import XaiOAuthSecrets
 from pydantic import TypeAdapter
 
 from support.consts import REPOSITORY_ROOT
+from support.oauth_connections import connect_xai_oauth
 from support.utils import authenticate_user, unique, wait_until
 from tests.azents.public.test_agent_execution_persistence import (
     auth_headers,
@@ -89,6 +84,7 @@ def _setup_xai_agent(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
     server_url: str,
+    proxy_url: str,
     provider: LLMProvider,
     enabled: bool,
     access_token: str,
@@ -110,42 +106,38 @@ def _setup_xai_agent(
         ),
         _headers=_headers(token),
     )
+    integration_name = "__testenv_model_listing:deterministic-model-settings"
     if provider == LLMProvider.XAI:
-        secrets = Secrets(ApiKeySecrets(api_key=access_token))
-        config = None
+        integration = LLMProviderIntegrationV1Api(
+            public_api_client
+        ).llm_provider_integration_v1_create_integration(
+            handle=handle,
+            llm_provider_integration_create_request=LLMProviderIntegrationCreateRequest(
+                provider=provider,
+                name=integration_name,
+                secrets=Secrets(ApiKeySecrets(api_key=access_token)),
+                config=None,
+            ),
+            _headers=_headers(token),
+        )
+        integration_id = integration.id
     else:
         if refresh_token is None:
             raise ValueError("xAI OAuth refresh token is required")
-        secrets = Secrets(
-            XaiOAuthSecrets(
-                access_token=access_token,
-                refresh_token=refresh_token,
-                expires_at=datetime.datetime.now(datetime.UTC)
-                + datetime.timedelta(hours=2),
-            )
+        integration_id = connect_xai_oauth(
+            public_api_client=public_api_client,
+            proxy_url=proxy_url,
+            handle=handle,
+            token=token,
+            scenario=f"test-xai-image-{uniq}",
+            access_token=access_token,
+            refresh_token=refresh_token,
+            name=integration_name,
+            enabled=True,
         )
-        config = LLMProviderIntegrationCreateRequestConfig(
-            XaiOAuthConfig(
-                connection_method="device",
-                status="connected",
-                connected_at=datetime.datetime.now(datetime.UTC),
-            )
-        )
-    integration = LLMProviderIntegrationV1Api(
-        public_api_client
-    ).llm_provider_integration_v1_create_integration(
-        handle=handle,
-        llm_provider_integration_create_request=LLMProviderIntegrationCreateRequest(
-            provider=provider,
-            name="__testenv_model_listing:deterministic-model-settings",
-            secrets=secrets,
-            config=config,
-        ),
-        _headers=_headers(token),
-    )
     entries_url = (
         f"{server_url}/llm-provider-integration/v1/workspaces/{handle}/"
-        f"llm-provider-integrations/{integration.id}/catalog-entries"
+        f"llm-provider-integrations/{integration_id}/catalog-entries"
     )
 
     def populated_entries() -> list[dict[str, object]] | None:
@@ -175,7 +167,7 @@ def _setup_xai_agent(
 
     def selection(identifier: str) -> dict[str, str]:
         return {
-            "llm_provider_integration_id": integration.id,
+            "llm_provider_integration_id": integration_id,
             "model_identifier": cast(
                 str,
                 by_identifier[identifier]["provider_model_identifier"],
@@ -426,6 +418,7 @@ def _run_success_scenario(
         public_api_client=public_api_client,
         admin_api_client=admin_api_client,
         server_url=server_url,
+        proxy_url=proxy_url,
         provider=provider,
         enabled=True,
         access_token=access_token,
@@ -580,6 +573,7 @@ class TestXaiImageGeneration:
             public_api_client=public_api_client,
             admin_api_client=admin_api_client,
             server_url=azents_public_server_url,
+            proxy_url=openai_proxy_url,
             provider=LLMProvider.XAI_OAUTH,
             enabled=True,
             access_token="test-xai-oauth-rejected-initial",
@@ -661,6 +655,7 @@ class TestXaiImageGeneration:
             public_api_client=public_api_client,
             admin_api_client=admin_api_client,
             server_url=azents_public_server_url,
+            proxy_url=openai_proxy_url,
             provider=LLMProvider.XAI,
             enabled=False,
             access_token="test-xai-api-key",

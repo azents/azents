@@ -13,29 +13,18 @@ from azentspublicclient.api.llm_provider_integration_v1_api import (
     LLMProviderIntegrationV1Api,
 )
 from azentspublicclient.api.workspace_v1_api import WorkspaceV1Api
-from azentspublicclient.models.chat_gpto_auth_config import ChatGPTOAuthConfig
-from azentspublicclient.models.chat_gpto_auth_secrets import ChatGPTOAuthSecrets
 from azentspublicclient.models.create_invitation_request import CreateInvitationRequest
 from azentspublicclient.models.create_workspace_request import CreateWorkspaceRequest
-from azentspublicclient.models.llm_provider import LLMProvider
-from azentspublicclient.models.llm_provider_integration_create_request import (
-    LLMProviderIntegrationCreateRequest,
-)
-from azentspublicclient.models.llm_provider_integration_create_request_config import (
-    LLMProviderIntegrationCreateRequestConfig,
-)
-from azentspublicclient.models.secrets import Secrets
 from azentspublicclient.models.subscription_usage_unavailable_reason import (
     SubscriptionUsageUnavailableReason,
 )
 from azentspublicclient.models.subscription_usage_unavailable_response import (
     SubscriptionUsageUnavailableResponse,
 )
-from azentspublicclient.models.xai_o_auth_config import XaiOAuthConfig
-from azentspublicclient.models.xai_o_auth_secrets import XaiOAuthSecrets
 from pydantic import TypeAdapter
 from testcontainers.core.container import DockerContainer
 
+from support.oauth_connections import connect_chatgpt_oauth, connect_xai_oauth
 from support.utils import authenticate_user, unique
 
 _SUBSCRIPTION_USAGE_JOURNAL_PATH = "/v1/_subscription_usage_requests"
@@ -131,82 +120,49 @@ def setup_subscription_workspace(
 
 
 def create_chatgpt_subscription_integration(
-    api: LLMProviderIntegrationV1Api,
+    public_api_client: azentspublicclient.ApiClient,
     workspace: SubscriptionWorkspace,
     *,
+    proxy_url: str,
     scenario: str,
     enabled: bool = True,
     access_token: str = "test-chatgpt-access-token",
     refresh_token: str = "test-chatgpt-refresh-token",
 ) -> str:
     """Create one deterministic ChatGPT OAuth integration."""
-    now = datetime.datetime.now(datetime.UTC)
-    integration = api.llm_provider_integration_v1_create_integration(
+    return connect_chatgpt_oauth(
+        public_api_client=public_api_client,
+        proxy_url=proxy_url,
         handle=workspace.handle,
-        llm_provider_integration_create_request=LLMProviderIntegrationCreateRequest(
-            provider=LLMProvider.CHATGPT_OAUTH,
-            name=f"ChatGPT {scenario}",
-            enabled=enabled,
-            secrets=Secrets(
-                ChatGPTOAuthSecrets(
-                    access_token=access_token,
-                    refresh_token=refresh_token,
-                    expires_at=now + datetime.timedelta(hours=2),
-                )
-            ),
-            config=LLMProviderIntegrationCreateRequestConfig(
-                ChatGPTOAuthConfig(
-                    account_id=scenario,
-                    email=f"{scenario}@example.com",
-                    plan_type="Pro",
-                    connection_method="device",
-                    status="connected",
-                    connected_at=now,
-                    last_refreshed_at=now,
-                )
-            ),
-        ),
-        _headers=_headers(workspace.owner_token),
+        token=workspace.owner_token,
+        scenario=scenario,
+        access_token=access_token,
+        refresh_token=refresh_token,
+        name=f"ChatGPT {scenario}",
+        enabled=enabled,
     )
-    return integration.id
 
 
 def create_xai_subscription_integration(
-    api: LLMProviderIntegrationV1Api,
+    public_api_client: azentspublicclient.ApiClient,
     workspace: SubscriptionWorkspace,
     *,
+    proxy_url: str,
     scenario: str,
     enabled: bool = True,
 ) -> str:
     """Create one deterministic xAI OAuth integration."""
-    now = datetime.datetime.now(datetime.UTC)
-    integration = api.llm_provider_integration_v1_create_integration(
+    return connect_xai_oauth(
+        public_api_client=public_api_client,
+        proxy_url=proxy_url,
         handle=workspace.handle,
-        llm_provider_integration_create_request=LLMProviderIntegrationCreateRequest(
-            provider=LLMProvider.XAI_OAUTH,
-            name=f"xAI {scenario}",
-            enabled=enabled,
-            secrets=Secrets(
-                XaiOAuthSecrets(
-                    access_token="test-xai-subscription-access-token",
-                    refresh_token="test-xai-subscription-refresh-token",
-                    expires_at=now + datetime.timedelta(hours=2),
-                )
-            ),
-            config=LLMProviderIntegrationCreateRequestConfig(
-                XaiOAuthConfig(
-                    account_id=scenario,
-                    email=f"{scenario}@example.com",
-                    connection_method="device",
-                    status="connected",
-                    connected_at=now,
-                    last_refreshed_at=now,
-                )
-            ),
-        ),
-        _headers=_headers(workspace.owner_token),
+        token=workspace.owner_token,
+        scenario=scenario,
+        access_token="test-xai-subscription-access-token",
+        refresh_token="test-xai-subscription-refresh-token",
+        name=f"xAI {scenario}",
+        enabled=enabled,
     )
-    return integration.id
 
 
 def _usage(
@@ -342,13 +298,15 @@ class TestChatGPTSubscriptionUsage:
         workspace = setup_subscription_workspace(public_api_client, admin_api_client)
         api = LLMProviderIntegrationV1Api(public_api_client)
         normal_id = create_chatgpt_subscription_integration(
-            api,
+            public_api_client,
             workspace,
+            proxy_url=openai_proxy_url,
             scenario="test-chatgpt-normal",
         )
         exhausted_id = create_chatgpt_subscription_integration(
-            api,
+            public_api_client,
             workspace,
+            proxy_url=openai_proxy_url,
             scenario="test-chatgpt-exhausted",
         )
 
@@ -395,8 +353,9 @@ class TestChatGPTSubscriptionUsage:
         workspace = setup_subscription_workspace(public_api_client, admin_api_client)
         api = LLMProviderIntegrationV1Api(public_api_client)
         integration_id = create_chatgpt_subscription_integration(
-            api,
+            public_api_client,
             workspace,
+            proxy_url=openai_proxy_url,
             scenario="test-chatgpt-refresh",
             access_token="test-chatgpt-refresh-initial",
             refresh_token="test-chatgpt-refresh-success",
@@ -444,7 +403,7 @@ class TestChatGPTSubscriptionUsage:
         workspace = setup_subscription_workspace(public_api_client, admin_api_client)
         api = LLMProviderIntegrationV1Api(public_api_client)
         integration_id = create_chatgpt_subscription_integration(
-            api, workspace, scenario=scenario
+            public_api_client, workspace, proxy_url=openai_proxy_url, scenario=scenario
         )
 
         payload = _usage(
@@ -478,7 +437,10 @@ class TestXaiSubscriptionUsage:
         workspace = setup_subscription_workspace(public_api_client, admin_api_client)
         api = LLMProviderIntegrationV1Api(public_api_client)
         integration_id = create_xai_subscription_integration(
-            api, workspace, scenario="test-xai-normal"
+            public_api_client,
+            workspace,
+            proxy_url=openai_proxy_url,
+            scenario="test-xai-normal",
         )
 
         owner = _usage(api, workspace, integration_id, token=workspace.owner_token)
@@ -570,7 +532,7 @@ class TestXaiSubscriptionUsage:
         workspace = setup_subscription_workspace(public_api_client, admin_api_client)
         api = LLMProviderIntegrationV1Api(public_api_client)
         integration_id = create_xai_subscription_integration(
-            api, workspace, scenario=scenario
+            public_api_client, workspace, proxy_url=openai_proxy_url, scenario=scenario
         )
 
         payload = _usage(
@@ -617,18 +579,23 @@ class TestSubscriptionUsageIsolation:
         workspace = setup_subscription_workspace(public_api_client, admin_api_client)
         api = LLMProviderIntegrationV1Api(public_api_client)
         disabled_id = create_chatgpt_subscription_integration(
-            api,
+            public_api_client,
             workspace,
+            proxy_url=openai_proxy_url,
             scenario="test-chatgpt-normal",
             enabled=False,
         )
         broken_id = create_chatgpt_subscription_integration(
-            api,
+            public_api_client,
             workspace,
+            proxy_url=openai_proxy_url,
             scenario="test-chatgpt-malformed",
         )
         healthy_id = create_xai_subscription_integration(
-            api, workspace, scenario="test-xai-normal"
+            public_api_client,
+            workspace,
+            proxy_url=openai_proxy_url,
+            scenario="test-xai-normal",
         )
 
         disabled = _usage(

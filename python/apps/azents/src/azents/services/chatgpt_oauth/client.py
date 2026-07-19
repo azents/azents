@@ -11,9 +11,9 @@ from pydantic import ValidationError
 
 from azents.core.chatgpt_oauth import (
     CHATGPT_OAUTH_CLIENT_ID,
-    CHATGPT_OAUTH_DEVICE_TOKEN_URL,
-    CHATGPT_OAUTH_DEVICE_USER_CODE_URL,
     ChatGPTOAuthConnectionMethod,
+    resolve_chatgpt_oauth_device_token_url,
+    resolve_chatgpt_oauth_device_user_code_url,
 )
 
 from .data import (
@@ -40,7 +40,7 @@ class ChatGPTOAuthClient:
         """Request Device user-code."""
         try:
             response = await self._http_client.post(
-                CHATGPT_OAUTH_DEVICE_USER_CODE_URL,
+                resolve_chatgpt_oauth_device_user_code_url(),
                 json={"client_id": CHATGPT_OAUTH_CLIENT_ID},
             )
         except httpx.HTTPError as exc:
@@ -77,7 +77,7 @@ class ChatGPTOAuthClient:
         """Poll Device authentication completion once."""
         try:
             response = await self._http_client.post(
-                CHATGPT_OAUTH_DEVICE_TOKEN_URL,
+                resolve_chatgpt_oauth_device_token_url(),
                 json={"device_auth_id": device_auth_id, "user_code": user_code},
             )
         except httpx.HTTPError as exc:

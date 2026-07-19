@@ -8,7 +8,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from base64 import b64encode
+from base64 import b64encode, urlsafe_b64encode
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import ClassVar, cast
@@ -57,8 +57,12 @@ _JOURNAL_PATH = "/v1/_image_generation_requests"
 _XAI_IMAGINE_JOURNAL_PATH = "/v1/_xai_imagine_requests"
 _XAI_OAUTH_JOURNAL_PATH = "/v1/_xai_oauth_requests"
 _SUBSCRIPTION_USAGE_JOURNAL_PATH = "/v1/_subscription_usage_requests"
+_OAUTH_CONNECTION_SCENARIO_PATH = "/v1/_oauth_connection_scenarios"
+_CHATGPT_DEVICE_USER_CODE_PATH = "/chatgpt/device/usercode"
+_CHATGPT_DEVICE_TOKEN_PATH = "/chatgpt/device/token"
 _CHATGPT_USAGE_PATH = "/backend-api/wham/usage"
 _CHATGPT_TOKEN_PATH = "/chatgpt/oauth/token"
+_XAI_DEVICE_CODE_PATH = "/oauth2/device/code"
 _XAI_SETTINGS_PATH = "/v1/settings"
 _XAI_BILLING_PATH = "/v1/billing"
 _XAI_AUTO_TOP_UP_PATH = "/v1/auto-topup-rule"
@@ -148,6 +152,12 @@ class _State:
     oauth_requests: ClassVar[list[dict[str, object]]] = []
     subscription_usage_requests: ClassVar[list[dict[str, object]]] = []
     subscription_usage_sequences: ClassVar[dict[tuple[str, str], int]] = {}
+    oauth_connection_queues: ClassVar[dict[str, list[dict[str, str]]]] = {
+        "chatgpt": [],
+        "xai": [],
+    }
+    oauth_connection_sessions: ClassVar[dict[str, dict[str, str]]] = {}
+    oauth_connection_sequence: ClassVar[int] = 0
     lock: ClassVar[threading.Lock] = threading.Lock()
 
 
@@ -181,8 +191,20 @@ class _Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         """Handle deterministic image, hosted-tool, and OAuth boundaries."""
         body = self._read_body()
+        if self.path == _OAUTH_CONNECTION_SCENARIO_PATH:
+            self._queue_oauth_connection_scenario(body)
+            return
+        if self.path == _CHATGPT_DEVICE_USER_CODE_PATH:
+            self._write_chatgpt_device_user_code()
+            return
+        if self.path == _CHATGPT_DEVICE_TOKEN_PATH:
+            self._write_chatgpt_device_authorization(body)
+            return
         if self.path == _CHATGPT_TOKEN_PATH:
             self._write_chatgpt_oauth_token_response(body)
+            return
+        if self.path == _XAI_DEVICE_CODE_PATH:
+            self._write_xai_device_code()
             return
         if self.path == "/v1/images/generations":
             self._write_xai_imagine_response(body)
@@ -240,6 +262,129 @@ class _Handler(BaseHTTPRequestHandler):
         if self.path == _SUBSCRIPTION_USAGE_JOURNAL_PATH:
             return _State.subscription_usage_requests
         return None
+
+    def _queue_oauth_connection_scenario(self, body: bytes) -> None:
+        """Queue one fake account for the next provider device flow."""
+        try:
+            payload: object = json.loads(body)
+        except json.JSONDecodeError:
+            self._write_json(400, {"error": "invalid request"})
+            return
+        if not isinstance(payload, dict):
+            self._write_json(400, {"error": "invalid request"})
+            return
+        request = cast(dict[str, object], payload)
+        provider = request.get("provider")
+        scenario = request.get("scenario")
+        access_token = request.get("access_token")
+        refresh_token = request.get("refresh_token")
+        if (
+            not isinstance(provider, str)
+            or provider not in _State.oauth_connection_queues
+            or not isinstance(scenario, str)
+            or not isinstance(access_token, str)
+            or not isinstance(refresh_token, str)
+        ):
+            self._write_json(400, {"error": "invalid request"})
+            return
+        with _State.lock:
+            _State.oauth_connection_queues[provider].append(
+                {
+                    "scenario": scenario,
+                    "access_token": access_token,
+                    "refresh_token": refresh_token,
+                }
+            )
+        self._write_json(201, {"queued": True, "provider": provider})
+
+    @staticmethod
+    def _start_oauth_connection(provider: str) -> str | None:
+        """Consume the next queued provider account and return its opaque ID."""
+        with _State.lock:
+            queue = _State.oauth_connection_queues[provider]
+            if not queue:
+                return None
+            _State.oauth_connection_sequence += 1
+            connection_id = f"{provider}-{_State.oauth_connection_sequence}"
+            _State.oauth_connection_sessions[connection_id] = queue.pop(0)
+            return connection_id
+
+    @staticmethod
+    def _oauth_connection(connection_id: str) -> dict[str, str] | None:
+        """Return one configured fake provider account."""
+        with _State.lock:
+            return _State.oauth_connection_sessions.get(connection_id)
+
+    def _write_chatgpt_device_user_code(self) -> None:
+        """Start one deterministic ChatGPT device flow."""
+        connection_id = self._start_oauth_connection("chatgpt")
+        if connection_id is None:
+            self._write_json(409, {"error": "no queued ChatGPT scenario"})
+            return
+        self._write_json(
+            200,
+            {
+                "device_auth_id": connection_id,
+                "user_code": "TEST-CHATGPT",
+                "interval": 0,
+            },
+        )
+
+    def _write_chatgpt_device_authorization(self, body: bytes) -> None:
+        """Complete one deterministic ChatGPT device authorization."""
+        try:
+            payload: object = json.loads(body)
+        except json.JSONDecodeError:
+            self._write_json(400, {"error": "invalid request"})
+            return
+        if not isinstance(payload, dict):
+            self._write_json(400, {"error": "invalid request"})
+            return
+        request = cast(dict[str, object], payload)
+        connection_id = request.get("device_auth_id")
+        if (
+            not isinstance(connection_id, str)
+            or self._oauth_connection(connection_id) is None
+        ):
+            self._write_json(404, {"error": "unknown device authorization"})
+            return
+        self._write_json(
+            200,
+            {
+                "authorization_code": connection_id,
+                "code_verifier": "deterministic-code-verifier",
+            },
+        )
+
+    def _write_xai_device_code(self) -> None:
+        """Start one deterministic xAI device flow."""
+        connection_id = self._start_oauth_connection("xai")
+        if connection_id is None:
+            self._write_json(409, {"error": "no queued xAI scenario"})
+            return
+        self._write_json(
+            200,
+            {
+                "device_code": connection_id,
+                "user_code": "TEST-XAI",
+                "verification_uri": "https://accounts.x.ai/oauth2/device",
+                "verification_uri_complete": (
+                    "https://accounts.x.ai/oauth2/device?user_code=TEST-XAI"
+                ),
+                "interval": 0,
+                "expires_in": 900,
+            },
+        )
+
+    @staticmethod
+    def _fake_id_token(claims: dict[str, str]) -> str:
+        """Encode unsigned deterministic claims for clients that inspect metadata."""
+
+        def encoded(value: dict[str, str]) -> str:
+            raw = json.dumps(value, separators=(",", ":")).encode()
+            return urlsafe_b64encode(raw).decode().rstrip("=")
+
+        return f"{encoded({'alg': 'none'})}.{encoded(claims)}.signature"
 
     def _write_subscription_usage_get(self) -> bool:
         """Handle deterministic subscription-usage provider reads."""
@@ -383,8 +528,37 @@ class _Handler(BaseHTTPRequestHandler):
         self._write_json(status, payload)
 
     def _write_chatgpt_oauth_token_response(self, body: bytes) -> None:
-        """Return a deterministic ChatGPT refresh token without journaling it."""
+        """Return deterministic ChatGPT connection or refresh tokens."""
         form = parse_qs(body.decode())
+        if form.get("grant_type") == ["authorization_code"]:
+            connection_id = form.get("code", [None])[0]
+            connection = (
+                self._oauth_connection(connection_id)
+                if isinstance(connection_id, str)
+                else None
+            )
+            if connection is None:
+                self._write_json(400, {"error": "invalid_grant"})
+                return
+            scenario = connection["scenario"]
+            self._write_json(
+                200,
+                {
+                    "access_token": connection["access_token"],
+                    "refresh_token": connection["refresh_token"],
+                    "expires_in": 3600,
+                    "token_type": "Bearer",
+                    "id_token": self._fake_id_token(
+                        {
+                            "sub": scenario,
+                            "email": f"{scenario}@example.com",
+                            "plan_type": "Pro",
+                        }
+                    ),
+                },
+            )
+            return
+
         refresh_token = form.get("refresh_token", [None])[0]
         scenario = (
             "chatgpt_refresh"
@@ -560,8 +734,36 @@ class _Handler(BaseHTTPRequestHandler):
         )
 
     def _write_xai_oauth_token_response(self, body: bytes) -> None:
-        """Return a deterministic replacement token without journaling secrets."""
+        """Return deterministic xAI connection or refresh tokens."""
         form = parse_qs(body.decode())
+        if form.get("grant_type") == ["urn:ietf:params:oauth:grant-type:device_code"]:
+            connection_id = form.get("device_code", [None])[0]
+            connection = (
+                self._oauth_connection(connection_id)
+                if isinstance(connection_id, str)
+                else None
+            )
+            if connection is None:
+                self._write_json(400, {"error": "invalid_grant"})
+                return
+            scenario = connection["scenario"]
+            self._write_json(
+                200,
+                {
+                    "access_token": connection["access_token"],
+                    "refresh_token": connection["refresh_token"],
+                    "expires_in": 3600,
+                    "token_type": "Bearer",
+                    "id_token": self._fake_id_token(
+                        {
+                            "sub": scenario,
+                            "email": f"{scenario}@example.com",
+                        }
+                    ),
+                },
+            )
+            return
+
         refresh_token = form.get("refresh_token", [None])[0]
         if refresh_token == "test-xai-refresh-success":
             refresh_case = "success"

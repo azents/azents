@@ -27,6 +27,22 @@ def resolve_chatgpt_usage_base_url() -> str:
     )
 
 
+def resolve_chatgpt_oauth_device_user_code_url() -> str:
+    """Resolve the non-secret ChatGPT device user-code endpoint."""
+    return os.environ.get(
+        "AZ_CHATGPT_OAUTH_DEVICE_USER_CODE_URL",
+        CHATGPT_OAUTH_DEVICE_USER_CODE_URL,
+    )
+
+
+def resolve_chatgpt_oauth_device_token_url() -> str:
+    """Resolve the non-secret ChatGPT device authorization endpoint."""
+    return os.environ.get(
+        "AZ_CHATGPT_OAUTH_DEVICE_TOKEN_URL",
+        CHATGPT_OAUTH_DEVICE_TOKEN_URL,
+    )
+
+
 def resolve_chatgpt_oauth_token_url() -> str:
     """Resolve the non-secret ChatGPT OAuth token endpoint."""
     return os.environ.get("AZ_CHATGPT_OAUTH_TOKEN_URL", CHATGPT_OAUTH_TOKEN_URL)

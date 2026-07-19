@@ -36,6 +36,10 @@ def _running_proxy() -> Generator[str, None, None]:
     with proxy._State.lock:
         proxy._State.subscription_usage_requests.clear()
         proxy._State.subscription_usage_sequences.clear()
+        for queue in proxy._State.oauth_connection_queues.values():
+            queue.clear()
+        proxy._State.oauth_connection_sessions.clear()
+        proxy._State.oauth_connection_sequence = 0
     server = proxy.ThreadingHTTPServer(("127.0.0.1", 0), proxy._Handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -237,3 +241,80 @@ def test_xai_transport_and_required_billing_query() -> None:
         missing_format = _xai(base_url, "/v1/billing", "test-xai-normal")
         assert missing_format.status_code == 400
         _assert_safe(_journal(base_url))
+
+
+def _queue_oauth_connection(base_url: str, *, provider: str) -> None:
+    """Queue one deterministic OAuth account for a provider device flow."""
+    response = requests.post(
+        f"{base_url}/v1/_oauth_connection_scenarios",
+        json={
+            "provider": provider,
+            "scenario": f"test-{provider}-account",
+            "access_token": f"test-{provider}-access",
+            "refresh_token": f"test-{provider}-refresh",
+        },
+        timeout=2,
+    )
+    response.raise_for_status()
+    assert "access" not in response.text
+    assert "refresh" not in response.text
+
+
+def test_chatgpt_device_flow_returns_queued_account_tokens() -> None:
+    """Complete ChatGPT device authorization through provider-shaped endpoints."""
+    with _running_proxy() as base_url:
+        _queue_oauth_connection(base_url, provider="chatgpt")
+        started = requests.post(
+            f"{base_url}/chatgpt/device/usercode",
+            json={"client_id": "test-client"},
+            timeout=2,
+        )
+        started.raise_for_status()
+        device_auth_id = started.json()["device_auth_id"]
+        authorized = requests.post(
+            f"{base_url}/chatgpt/device/token",
+            json={
+                "device_auth_id": device_auth_id,
+                "user_code": started.json()["user_code"],
+            },
+            timeout=2,
+        )
+        authorized.raise_for_status()
+        token = requests.post(
+            f"{base_url}/chatgpt/oauth/token",
+            data={
+                "grant_type": "authorization_code",
+                "code": authorized.json()["authorization_code"],
+            },
+            timeout=2,
+        )
+        token.raise_for_status()
+        assert token.json()["access_token"] == "test-chatgpt-access"
+        assert token.json()["refresh_token"] == "test-chatgpt-refresh"
+        assert isinstance(token.json()["id_token"], str)
+        assert _journal(base_url) == []
+
+
+def test_xai_device_flow_returns_queued_account_tokens() -> None:
+    """Complete xAI device authorization through provider-shaped endpoints."""
+    with _running_proxy() as base_url:
+        _queue_oauth_connection(base_url, provider="xai")
+        started = requests.post(
+            f"{base_url}/oauth2/device/code",
+            data={"client_id": "test-client"},
+            timeout=2,
+        )
+        started.raise_for_status()
+        token = requests.post(
+            f"{base_url}/oauth2/token",
+            data={
+                "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+                "device_code": started.json()["device_code"],
+            },
+            timeout=2,
+        )
+        token.raise_for_status()
+        assert token.json()["access_token"] == "test-xai-access"
+        assert token.json()["refresh_token"] == "test-xai-refresh"
+        assert isinstance(token.json()["id_token"], str)
+        assert _journal(base_url) == []
