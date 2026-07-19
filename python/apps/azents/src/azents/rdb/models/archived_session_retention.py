@@ -113,7 +113,7 @@ class RDBArchivedSessionRetentionApplication(RDBModel):
     )
     UQ_ACTIVE = sa.Index(
         "uq_archived_session_retention_applications_active",
-        sa.literal_column("1"),
+        sa.literal_column("(1)"),
         unique=True,
         postgresql_where=sa.text("status IN ('pending', 'running', 'retry_wait')"),
     )

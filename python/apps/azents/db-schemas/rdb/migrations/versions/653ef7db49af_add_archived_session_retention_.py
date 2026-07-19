@@ -13,7 +13,7 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision: str = "653ef7db49af"
-down_revision: str | Sequence[str] | None = "7e9b625b4c81"
+down_revision: str | Sequence[str] | None = "f81c4d3b1f17"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -186,7 +186,7 @@ def upgrade() -> None:
     op.create_index(
         "uq_archived_session_retention_applications_active",
         "archived_session_retention_applications",
-        [sa.literal_column("1")],
+        [sa.literal_column("(1)")],
         unique=True,
         postgresql_where=sa.text("status IN ('pending', 'running', 'retry_wait')"),
     )
