@@ -10,6 +10,10 @@ import azentspublicclient
 import docker as docker_py
 import pytest
 import requests
+from azentsadminclient.api.system_v1_api import SystemV1Api
+from azentsadminclient.models.file_lifecycle_settings_update_request import (
+    FileLifecycleSettingsUpdateRequest,
+)
 from azentspublicclient.api.agent_runtime_v1_api import AgentRuntimeV1Api
 from azentspublicclient.api.agent_v1_api import AgentV1Api
 from azentspublicclient.api.llm_provider_integration_v1_api import (
@@ -27,6 +31,7 @@ from azentspublicclient.models.llm_provider_integration_create_request import (
 from azentspublicclient.models.secrets import Secrets
 from docker.models.containers import Container
 from pydantic import TypeAdapter, ValidationError
+from testcontainers.core.container import DockerContainer
 
 from support.utils import (
     authenticate_user,
@@ -452,9 +457,28 @@ def _branch_name_from_worktree_path(worktree_path: str) -> str:
     return f"azents/{session_handle}"
 
 
+def _assert_path_present(container: Container, path: str) -> None:
+    """Assert a Runtime path remains present."""
+    _exec(container, f"test -e {shlex.quote(path)}")
+
+
 def _assert_path_absent(container: Container, path: str) -> None:
     """Assert a Runtime path is absent."""
     _exec(container, f"test ! -e {shlex.quote(path)}")
+
+
+def _assert_branch_present(
+    container: Container,
+    *,
+    source_path: str,
+    branch_name: str,
+) -> None:
+    """Assert an Azents-owned branch remains present."""
+    _exec(
+        container,
+        f"cd {shlex.quote(source_path)} && "
+        f'test -n "$(git branch --list {shlex.quote(branch_name)})"',
+    )
 
 
 def _assert_branch_absent(
@@ -471,17 +495,60 @@ def _assert_branch_absent(
     )
 
 
+def _set_retention(system_api: SystemV1Api, retention_days: int | None) -> None:
+    """Apply a future-archive retention revision."""
+    current = system_api.system_v1_get_file_lifecycle_settings()
+    if current.archived_session_retention_days == retention_days:
+        return
+    system_api.system_v1_update_file_lifecycle_settings(
+        FileLifecycleSettingsUpdateRequest(
+            expected_revision=current.revision,
+            archived_session_retention_days=retention_days,
+            application_scope="new_archives_only",
+        )
+    )
+
+
+def _run_purge_scheduler(container: DockerContainer) -> None:
+    """Trigger and execute one archived-session purge scheduler pass."""
+    script = """
+import asyncio
+from azents.app import run_with_container
+from azents.core.config import Config
+from azents.scheduler.service import SchedulerService
+
+async def main():
+    config = Config.from_env()
+    async with run_with_container(config) as dependency_container:
+        scheduler = await dependency_container.solve(SchedulerService)
+        state = await scheduler.trigger("archived_session_purge")
+        if state is None:
+            raise RuntimeError("unknown scheduler task")
+        await scheduler.run_once()
+
+asyncio.run(main())
+"""
+    result = container.get_wrapped_container().exec_run(["python", "-c", script])
+    exit_code = cast(Any, result).exit_code
+    if exit_code != 0:
+        output = cast(Any, result).output.decode(errors="replace")
+        raise AssertionError(
+            f"archived-session purge failed with exit {exit_code}:\n{output}"
+        )
+
+
 class TestSessionGitWorktreeLifecycle:
     """Session Git worktree product behavior."""
 
-    def test_git_ref_preview_worktree_creation_and_dirty_archive_cleanup(
+    def test_git_ref_preview_worktree_archive_preservation_and_purge_cleanup(
         self,
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
+        azents_admin_server_container: DockerContainer,
         azents_engine_worker_container: object,
     ) -> None:
-        """A Runtime-backed session creates and cleans an owned dirty worktree."""
+        """Archive preserves an owned worktree until durable purge deletes it."""
         del azents_engine_worker_container
         token, workspace_handle, agent_id = _create_runtime_agent(
             public_api_client=public_api_client,
@@ -599,24 +666,39 @@ class TestSessionGitWorktreeLifecycle:
             container,
             f"printf 'dirty cleanup e2e\\n' > {shlex.quote(worktree_path)}/dirty.txt",
         )
-        _post_empty(
-            server_url=azents_public_server_url,
-            token=token,
-            path=f"/chat/v1/agents/{agent_id}/sessions/{session_id}/archive",
-        )
+        system_api = SystemV1Api(admin_api_client)
+        _set_retention(system_api, 0)
+        try:
+            _post_empty(
+                server_url=azents_public_server_url,
+                token=token,
+                path=f"/chat/v1/agents/{agent_id}/sessions/{session_id}/archive",
+            )
+            _assert_path_present(container, worktree_path)
+            _assert_branch_present(
+                container,
+                source_path=source_path,
+                branch_name=branch_name,
+            )
 
-        deadline = time.monotonic() + 60
-        last_error: AssertionError | None = None
-        while time.monotonic() < deadline:
-            try:
-                _assert_path_absent(container, worktree_path)
-                _assert_branch_absent(
-                    container,
-                    source_path=source_path,
-                    branch_name=branch_name,
-                )
-                return
-            except AssertionError as exc:
-                last_error = exc
-                time.sleep(0.5)
-        raise AssertionError("worktree cleanup did not finish") from last_error
+            _run_purge_scheduler(azents_admin_server_container)
+
+            deadline = time.monotonic() + 60
+            last_error: AssertionError | None = None
+            while time.monotonic() < deadline:
+                try:
+                    _assert_path_absent(container, worktree_path)
+                    _assert_branch_absent(
+                        container,
+                        source_path=source_path,
+                        branch_name=branch_name,
+                    )
+                    return
+                except AssertionError as exc:
+                    last_error = exc
+                    time.sleep(0.5)
+            raise AssertionError(
+                "worktree purge cleanup did not finish"
+            ) from last_error
+        finally:
+            _set_retention(system_api, 30)
