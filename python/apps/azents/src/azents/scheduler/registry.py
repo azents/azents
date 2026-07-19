@@ -1,5 +1,6 @@
 """Scheduled task registry."""
 
+import dataclasses
 import datetime
 import logging
 
@@ -8,6 +9,9 @@ from azents.scheduler.types import (
     ScheduledTaskDefinition,
     TaskContext,
     TaskResult,
+)
+from azents.services.archived_session_retention import (
+    ArchivedSessionRetentionService,
 )
 from azents.services.file_lifecycle_cleanup import FileLifecycleCleanupService
 from azents.services.llm_catalog import SystemCatalogProjectionService
@@ -45,6 +49,22 @@ async def system_catalog_projection_handler(context: TaskContext) -> TaskResult:
                 }
                 for summary in summaries
             ],
+        }
+    )
+
+
+async def archived_session_retention_recalculation_handler(
+    context: TaskContext,
+) -> TaskResult:
+    """Apply one bounded existing-archive retention recalculation batch."""
+    service = await context.container.solve(ArchivedSessionRetentionService)
+    summary = await service.recalculate_once(lease_owner=context.lease_owner)
+    return TaskResult(
+        summary={
+            "task_key": context.task_key,
+            "attempt_started_at": context.attempt_started_at.isoformat(),
+            "manual_triggered": context.manual_triggered,
+            **dataclasses.asdict(summary),
         }
     )
 
@@ -95,6 +115,20 @@ SYSTEM_CATALOG_PROJECTION_TASK = ScheduledTaskDefinition(
     enabled_by_default=True,
 )
 
+ARCHIVED_SESSION_RETENTION_RECALCULATION_TASK = ScheduledTaskDefinition(
+    key="archived_session_retention_recalculation",
+    description="Apply retention revisions to existing archived sessions.",
+    interval=datetime.timedelta(minutes=1),
+    timeout=datetime.timedelta(minutes=2),
+    retry_policy=RetryPolicy(
+        kind="bounded_backoff",
+        min_delay=datetime.timedelta(minutes=1),
+        max_delay=datetime.timedelta(minutes=30),
+    ),
+    handler=archived_session_retention_recalculation_handler,
+    enabled_by_default=True,
+)
+
 FILE_LIFECYCLE_CLEANUP_TASK = ScheduledTaskDefinition(
     key="file_lifecycle_cleanup",
     description="Expire TTL-owned files and collect head-pruned ModelFiles.",
@@ -112,6 +146,7 @@ FILE_LIFECYCLE_CLEANUP_TASK = ScheduledTaskDefinition(
 SCHEDULED_TASK_DEFINITIONS: tuple[ScheduledTaskDefinition, ...] = (
     HEARTBEAT_TASK,
     SYSTEM_CATALOG_PROJECTION_TASK,
+    ARCHIVED_SESSION_RETENTION_RECALCULATION_TASK,
     FILE_LIFECYCLE_CLEANUP_TASK,
 )
 
