@@ -10,16 +10,6 @@ Name | Type | Description | Notes
 **region** | **str** | GCP region | 
 **role_arn** | **str** |  | [optional] 
 **project_id** | **str** | GCP project ID | 
-**account_id** | **str** |  | [optional] 
-**email** | **str** |  | [optional] 
-**plan_type** | **str** |  | [optional] 
-**connection_method** | **str** | Connection method | 
-**status** | **str** | Connection status | 
-**connected_at** | **datetime** |  | [optional] 
-**last_refreshed_at** | **datetime** |  | [optional] 
-**last_failed_at** | **datetime** |  | [optional] 
-**last_failure_reason** | **str** |  | [optional] 
-**entitlement_status** | **str** |  | [optional] 
 
 ## Example
 

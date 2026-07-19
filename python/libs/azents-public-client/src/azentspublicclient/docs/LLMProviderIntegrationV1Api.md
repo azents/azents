@@ -55,8 +55,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.LLMProviderIntegrationV1Api(api_client)
-    handle = 'handle_example' # str |
-    llm_provider_integration_create_request = azentspublicclient.LLMProviderIntegrationCreateRequest() # LLMProviderIntegrationCreateRequest |
+    handle = 'handle_example' # str | 
+    llm_provider_integration_create_request = azentspublicclient.LLMProviderIntegrationCreateRequest() # LLMProviderIntegrationCreateRequest | 
 
     try:
         # Create Integration
@@ -74,8 +74,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **handle** | **str**|  |
- **llm_provider_integration_create_request** | [**LLMProviderIntegrationCreateRequest**](LLMProviderIntegrationCreateRequest.md)|  |
+ **handle** | **str**|  | 
+ **llm_provider_integration_create_request** | [**LLMProviderIntegrationCreateRequest**](LLMProviderIntegrationCreateRequest.md)|  | 
 
 ### Return type
 
@@ -137,8 +137,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.LLMProviderIntegrationV1Api(api_client)
-    integration_id = 'integration_id_example' # str |
-    handle = 'handle_example' # str |
+    integration_id = 'integration_id_example' # str | 
+    handle = 'handle_example' # str | 
 
     try:
         # Delete Integration
@@ -154,8 +154,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **integration_id** | **str**|  |
- **handle** | **str**|  |
+ **integration_id** | **str**|  | 
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -218,8 +218,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.LLMProviderIntegrationV1Api(api_client)
-    integration_id = 'integration_id_example' # str |
-    handle = 'handle_example' # str |
+    integration_id = 'integration_id_example' # str | 
+    handle = 'handle_example' # str | 
 
     try:
         # Get Integration
@@ -237,8 +237,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **integration_id** | **str**|  |
- **handle** | **str**|  |
+ **integration_id** | **str**|  | 
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -299,8 +299,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.LLMProviderIntegrationV1Api(api_client)
-    integration_id = 'integration_id_example' # str |
-    handle = 'handle_example' # str |
+    integration_id = 'integration_id_example' # str | 
+    handle = 'handle_example' # str | 
 
     try:
         # Get Subscription Usage
@@ -318,8 +318,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **integration_id** | **str**|  |
- **handle** | **str**|  |
+ **integration_id** | **str**|  | 
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -383,8 +383,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.LLMProviderIntegrationV1Api(api_client)
-    integration_id = 'integration_id_example' # str |
-    handle = 'handle_example' # str |
+    integration_id = 'integration_id_example' # str | 
+    handle = 'handle_example' # str | 
     search = 'search_example' # str |  (optional)
     limit = 50 # int |  (optional) (default to 50)
     offset = 0 # int |  (optional) (default to 0)
@@ -405,9 +405,9 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **integration_id** | **str**|  |
- **handle** | **str**|  |
- **search** | **str**|  | [optional]
+ **integration_id** | **str**|  | 
+ **handle** | **str**|  | 
+ **search** | **str**|  | [optional] 
  **limit** | **int**|  | [optional] [default to 50]
  **offset** | **int**|  | [optional] [default to 0]
 
@@ -470,7 +470,7 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.LLMProviderIntegrationV1Api(api_client)
-    handle = 'handle_example' # str |
+    handle = 'handle_example' # str | 
 
     try:
         # List Integration Providers
@@ -488,7 +488,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **handle** | **str**|  |
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -551,7 +551,7 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.LLMProviderIntegrationV1Api(api_client)
-    handle = 'handle_example' # str |
+    handle = 'handle_example' # str | 
 
     try:
         # List Integrations
@@ -569,7 +569,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **handle** | **str**|  |
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -632,8 +632,8 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.LLMProviderIntegrationV1Api(api_client)
-    integration_id = 'integration_id_example' # str |
-    handle = 'handle_example' # str |
+    integration_id = 'integration_id_example' # str | 
+    handle = 'handle_example' # str | 
 
     try:
         # Sync Integration Catalog
@@ -651,8 +651,8 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **integration_id** | **str**|  |
- **handle** | **str**|  |
+ **integration_id** | **str**|  | 
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -716,9 +716,9 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.LLMProviderIntegrationV1Api(api_client)
-    integration_id = 'integration_id_example' # str |
-    handle = 'handle_example' # str |
-    llm_provider_integration_update_request = azentspublicclient.LLMProviderIntegrationUpdateRequest() # LLMProviderIntegrationUpdateRequest |
+    integration_id = 'integration_id_example' # str | 
+    handle = 'handle_example' # str | 
+    llm_provider_integration_update_request = azentspublicclient.LLMProviderIntegrationUpdateRequest() # LLMProviderIntegrationUpdateRequest | 
 
     try:
         # Update Integration
@@ -736,9 +736,9 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **integration_id** | **str**|  |
- **handle** | **str**|  |
- **llm_provider_integration_update_request** | [**LLMProviderIntegrationUpdateRequest**](LLMProviderIntegrationUpdateRequest.md)|  |
+ **integration_id** | **str**|  | 
+ **handle** | **str**|  | 
+ **llm_provider_integration_update_request** | [**LLMProviderIntegrationUpdateRequest**](LLMProviderIntegrationUpdateRequest.md)|  | 
 
 ### Return type
 
@@ -761,3 +761,4 @@ Name | Type | Description  | Notes
 **422** | Validation Error |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+

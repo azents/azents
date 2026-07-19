@@ -18,26 +18,23 @@ from enum import Enum
 from typing_extensions import Self
 
 
-class LLMModelDeveloper(str, Enum):
+class KimiOAuthSessionStatus(str, Enum):
     """
-    LLM model developer.
+    Kimi OAuth session status.
     """
 
     """
     allowed enum values
     """
-    OPENAI = 'openai'
-    ANTHROPIC = 'anthropic'
-    GOOGLE = 'google'
-    XAI = 'xai'
-    MOONSHOT = 'moonshot'
-    META = 'meta'
-    MISTRAL = 'mistral'
-    OTHER = 'other'
+    PENDING = 'pending'
+    CONNECTED = 'connected'
+    CANCELLED = 'cancelled'
+    EXPIRED = 'expired'
+    FAILED = 'failed'
 
     @classmethod
     def from_json(cls, json_str: str) -> Self:
-        """Create an instance of LLMModelDeveloper from a JSON string"""
+        """Create an instance of KimiOAuthSessionStatus from a JSON string"""
         return cls(json.loads(json_str))
 
 

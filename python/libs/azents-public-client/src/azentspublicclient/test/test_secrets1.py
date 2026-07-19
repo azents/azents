@@ -38,20 +38,13 @@ class TestSecrets1(unittest.TestCase):
                 type = 'api_key',
                 api_key = '',
                 secret_access_key = '',
-                service_account_json = '',
-                access_token = '',
-                refresh_token = '',
-                id_token = '',
-                expires_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f')
+                service_account_json = ''
             )
         else:
             return Secrets1(
                 api_key = '',
                 secret_access_key = '',
                 service_account_json = '',
-                access_token = '',
-                refresh_token = '',
-                expires_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
         )
         """
 

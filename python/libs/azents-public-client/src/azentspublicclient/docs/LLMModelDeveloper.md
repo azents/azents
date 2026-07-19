@@ -12,6 +12,8 @@ LLM model developer.
 
 * `XAI` (value: `'xai'`)
 
+* `MOONSHOT` (value: `'moonshot'`)
+
 * `META` (value: `'meta'`)
 
 * `MISTRAL` (value: `'mistral'`)

@@ -17,31 +17,23 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictStr, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
-from azentspublicclient.models.llm_provider_integration_create_request_config import LLMProviderIntegrationCreateRequestConfig
-from azentspublicclient.models.secrets import Secrets
+from azentspublicclient.models.kimi_o_auth_session_status import KimiOAuthSessionStatus
+from azentspublicclient.models.llm_provider_integration_response import LLMProviderIntegrationResponse
 from typing import Optional, Set
 from typing_extensions import Self
 
-class LLMProviderIntegrationCreateRequest(BaseModel):
+class KimiOAuthDeviceStatusResponse(BaseModel):
     """
-    LLM Provider Integration creation request.
+    Device OAuth status response.
     """ # noqa: E501
-    provider: StrictStr = Field(description="LLM Hosting provider")
-    name: Optional[StrictStr] = None
-    secrets: Secrets
-    config: Optional[LLMProviderIntegrationCreateRequestConfig] = None
-    enabled: Optional[StrictBool] = Field(default=True, description="Enabled state")
+    session_id: StrictStr = Field(description="OAuth session ID")
+    status: KimiOAuthSessionStatus = Field(description="Session status")
+    interval_seconds: StrictInt = Field(description="Current provider polling interval")
+    integration: Optional[LLMProviderIntegrationResponse] = None
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["provider", "name", "secrets", "config", "enabled"]
-
-    @field_validator('provider')
-    def provider_validate_enum(cls, value):
-        """Validates the enum"""
-        if value not in set(['openai', 'xai', 'openrouter', 'anthropic', 'google_gemini', 'aws_bedrock', 'google_vertex_ai']):
-            raise ValueError("must be one of enum values ('openai', 'xai', 'openrouter', 'anthropic', 'google_gemini', 'aws_bedrock', 'google_vertex_ai')")
-        return value
+    __properties: ClassVar[List[str]] = ["session_id", "status", "interval_seconds", "integration"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -61,7 +53,7 @@ class LLMProviderIntegrationCreateRequest(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of LLMProviderIntegrationCreateRequest from a JSON string"""
+        """Create an instance of KimiOAuthDeviceStatusResponse from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -84,32 +76,24 @@ class LLMProviderIntegrationCreateRequest(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
-        # override the default output from pydantic by calling `to_dict()` of secrets
-        if self.secrets:
-            _dict['secrets'] = self.secrets.to_dict()
-        # override the default output from pydantic by calling `to_dict()` of config
-        if self.config:
-            _dict['config'] = self.config.to_dict()
+        # override the default output from pydantic by calling `to_dict()` of integration
+        if self.integration:
+            _dict['integration'] = self.integration.to_dict()
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
 
-        # set to None if name (nullable) is None
+        # set to None if integration (nullable) is None
         # and model_fields_set contains the field
-        if self.name is None and "name" in self.model_fields_set:
-            _dict['name'] = None
-
-        # set to None if config (nullable) is None
-        # and model_fields_set contains the field
-        if self.config is None and "config" in self.model_fields_set:
-            _dict['config'] = None
+        if self.integration is None and "integration" in self.model_fields_set:
+            _dict['integration'] = None
 
         return _dict
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of LLMProviderIntegrationCreateRequest from a dict"""
+        """Create an instance of KimiOAuthDeviceStatusResponse from a dict"""
         if obj is None:
             return None
 
@@ -117,11 +101,10 @@ class LLMProviderIntegrationCreateRequest(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "provider": obj.get("provider"),
-            "name": obj.get("name"),
-            "secrets": Secrets.from_dict(obj["secrets"]) if obj.get("secrets") is not None else None,
-            "config": LLMProviderIntegrationCreateRequestConfig.from_dict(obj["config"]) if obj.get("config") is not None else None,
-            "enabled": obj.get("enabled") if obj.get("enabled") is not None else True
+            "session_id": obj.get("session_id"),
+            "status": obj.get("status"),
+            "interval_seconds": obj.get("interval_seconds"),
+            "integration": LLMProviderIntegrationResponse.from_dict(obj["integration"]) if obj.get("integration") is not None else None
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

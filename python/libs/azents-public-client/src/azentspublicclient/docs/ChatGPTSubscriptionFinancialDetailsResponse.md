@@ -6,15 +6,15 @@ Management-only ChatGPT subscription financial details.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**type** | **str** |  |
-**has_credits** | **bool** |  |
-**unlimited** | **bool** |  |
-**balance** | **str** |  |
-**spend_limit** | **str** |  |
-**spend_used** | **str** |  |
-**spend_remaining_percent** | **float** |  |
-**spend_resets_at** | **datetime** |  |
-**reached_type** | **str** |  |
+**type** | **str** |  | 
+**has_credits** | **bool** |  | 
+**unlimited** | **bool** |  | 
+**balance** | **str** |  | 
+**spend_limit** | **str** |  | 
+**spend_used** | **str** |  | 
+**spend_remaining_percent** | **float** |  | 
+**spend_resets_at** | **datetime** |  | 
+**reached_type** | **str** |  | 
 
 ## Example
 
@@ -34,3 +34,5 @@ chat_gpt_subscription_financial_details_response_dict = chat_gpt_subscription_fi
 chat_gpt_subscription_financial_details_response_from_dict = ChatGPTSubscriptionFinancialDetailsResponse.from_dict(chat_gpt_subscription_financial_details_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

@@ -20,7 +20,7 @@ Name | Type | Description | Notes
 **runtime_provider_id** | **str** |  | [optional] 
 **shell_enabled** | **bool** | Shell enabled state | [optional] 
 **memory_enabled** | **bool** | Memory enabled state | [optional] 
-**tool_search_enabled** | **bool** | Tool Search enabled state | [optional]
+**tool_search_enabled** | **bool** | Tool Search enabled state | [optional] 
 **max_turns** | **int** |  | [optional] 
 **subagent_settings** | [**SubagentSettings**](SubagentSettings.md) | Subagent execution settings | [optional] 
 

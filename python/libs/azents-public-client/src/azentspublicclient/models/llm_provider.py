@@ -27,14 +27,15 @@ class LLMProvider(str, Enum):
     allowed enum values
     """
     OPENAI = 'openai'
-    CHATGPT_OAUTH = 'chatgpt_oauth'
-    XAI = 'xai'
-    XAI_OAUTH = 'xai_oauth'
-    OPENROUTER = 'openrouter'
     ANTHROPIC = 'anthropic'
     GOOGLE_GEMINI = 'google_gemini'
     AWS_BEDROCK = 'aws_bedrock'
     GOOGLE_VERTEX_AI = 'google_vertex_ai'
+    CHATGPT_OAUTH = 'chatgpt_oauth'
+    XAI_OAUTH = 'xai_oauth'
+    XAI = 'xai'
+    OPENROUTER = 'openrouter'
+    KIMI_OAUTH = 'kimi_oauth'
 
     @classmethod
     def from_json(cls, json_str: str) -> Self:

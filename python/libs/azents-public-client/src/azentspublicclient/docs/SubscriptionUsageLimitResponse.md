@@ -6,12 +6,12 @@ Normalized public subscription usage window.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**id** | **str** |  |
-**label** | **str** |  |
-**used_percent** | **float** |  |
-**window_minutes** | **int** |  |
-**resets_at** | **datetime** |  |
-**primary** | **bool** |  |
+**id** | **str** |  | 
+**label** | **str** |  | 
+**used_percent** | **float** |  | 
+**window_minutes** | **int** |  | 
+**resets_at** | **datetime** |  | 
+**primary** | **bool** |  | 
 
 ## Example
 
@@ -31,3 +31,5 @@ subscription_usage_limit_response_dict = subscription_usage_limit_response_insta
 subscription_usage_limit_response_from_dict = SubscriptionUsageLimitResponse.from_dict(subscription_usage_limit_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

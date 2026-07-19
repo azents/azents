@@ -6,13 +6,13 @@ Public available subscription usage response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**type** | **str** |  |
-**integration_id** | **str** |  |
-**provider** | **str** |  |
-**fetched_at** | **datetime** |  |
-**plan_label** | **str** |  |
-**limits** | [**List[SubscriptionUsageLimitResponse]**](SubscriptionUsageLimitResponse.md) |  |
-**financial_details** | [**SubscriptionUsageAvailableResponseFinancialDetails**](SubscriptionUsageAvailableResponseFinancialDetails.md) |  |
+**type** | **str** |  | 
+**integration_id** | **str** |  | 
+**provider** | **str** |  | 
+**fetched_at** | **datetime** |  | 
+**plan_label** | **str** |  | 
+**limits** | [**List[SubscriptionUsageLimitResponse]**](SubscriptionUsageLimitResponse.md) |  | 
+**financial_details** | [**SubscriptionUsageAvailableResponseFinancialDetails**](SubscriptionUsageAvailableResponseFinancialDetails.md) |  | 
 
 ## Example
 
@@ -32,3 +32,5 @@ subscription_usage_available_response_dict = subscription_usage_available_respon
 subscription_usage_available_response_from_dict = SubscriptionUsageAvailableResponse.from_dict(subscription_usage_available_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

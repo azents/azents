@@ -5,17 +5,17 @@
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**type** | **str** |  |
-**integration_id** | **str** |  |
-**provider** | **str** |  |
-**fetched_at** | **datetime** |  |
-**plan_label** | **str** |  |
-**limits** | [**List[SubscriptionUsageLimitResponse]**](SubscriptionUsageLimitResponse.md) |  |
-**financial_details** | [**SubscriptionUsageAvailableResponseFinancialDetails**](SubscriptionUsageAvailableResponseFinancialDetails.md) |  |
-**url** | **str** |  |
-**message** | **str** |  |
-**reason** | [**SubscriptionUsageUnavailableReason**](SubscriptionUsageUnavailableReason.md) |  |
-**retryable** | **bool** |  |
+**type** | **str** |  | 
+**integration_id** | **str** |  | 
+**provider** | **str** |  | 
+**fetched_at** | **datetime** |  | 
+**plan_label** | **str** |  | 
+**limits** | [**List[SubscriptionUsageLimitResponse]**](SubscriptionUsageLimitResponse.md) |  | 
+**financial_details** | [**SubscriptionUsageAvailableResponseFinancialDetails**](SubscriptionUsageAvailableResponseFinancialDetails.md) |  | 
+**url** | **str** |  | 
+**message** | **str** |  | 
+**reason** | [**SubscriptionUsageUnavailableReason**](SubscriptionUsageUnavailableReason.md) |  | 
+**retryable** | **bool** |  | 
 
 ## Example
 
@@ -35,3 +35,5 @@ response_llm_provider_integration_v1_get_subscription_usage_dict = response_llm_
 response_llm_provider_integration_v1_get_subscription_usage_from_dict = ResponseLlmProviderIntegrationV1GetSubscriptionUsage.from_dict(response_llm_provider_integration_v1_get_subscription_usage_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

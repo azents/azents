@@ -1,6 +1,6 @@
 # Secrets1
 
-Secrets before encryption
+Generic integration secrets before encryption
 
 ## Properties
 
@@ -10,10 +10,6 @@ Name | Type | Description | Notes
 **api_key** | **str** | API key | 
 **secret_access_key** | **str** | AWS Secret Access Key | 
 **service_account_json** | **str** | Service account JSON | 
-**access_token** | **str** | xAI access token | 
-**refresh_token** | **str** | xAI refresh token | 
-**id_token** | **str** |  | [optional] 
-**expires_at** | **datetime** | Access token expiration time | 
 
 ## Example
 

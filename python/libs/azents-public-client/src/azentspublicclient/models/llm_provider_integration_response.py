@@ -21,7 +21,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, StrictBool, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.llm_provider import LLMProvider
-from azentspublicclient.models.llm_provider_integration_create_request_config import LLMProviderIntegrationCreateRequestConfig
+from azentspublicclient.models.llm_provider_integration_response_config import LLMProviderIntegrationResponseConfig
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -32,7 +32,7 @@ class LLMProviderIntegrationResponse(BaseModel):
     id: StrictStr
     provider: LLMProvider
     name: StrictStr
-    config: Optional[LLMProviderIntegrationCreateRequestConfig]
+    config: Optional[LLMProviderIntegrationResponseConfig]
     enabled: StrictBool
     created_at: datetime
     updated_at: datetime
@@ -108,7 +108,7 @@ class LLMProviderIntegrationResponse(BaseModel):
             "id": obj.get("id"),
             "provider": obj.get("provider"),
             "name": obj.get("name"),
-            "config": LLMProviderIntegrationCreateRequestConfig.from_dict(obj["config"]) if obj.get("config") is not None else None,
+            "config": LLMProviderIntegrationResponseConfig.from_dict(obj["config"]) if obj.get("config") is not None else None,
             "enabled": obj.get("enabled"),
             "created_at": obj.get("created_at"),
             "updated_at": obj.get("updated_at")

@@ -6,7 +6,7 @@ LLM Provider Integration creation request.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**provider** | [**LLMProvider**](LLMProvider.md) | LLM Hosting provider | 
+**provider** | **str** | LLM Hosting provider | 
 **name** | **str** |  | [optional] 
 **secrets** | [**Secrets**](Secrets.md) |  | 
 **config** | [**LLMProviderIntegrationCreateRequestConfig**](LLMProviderIntegrationCreateRequestConfig.md) |  | [optional] 

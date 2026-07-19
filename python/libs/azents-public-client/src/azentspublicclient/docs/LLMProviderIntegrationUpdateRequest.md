@@ -1,6 +1,6 @@
 # LLMProviderIntegrationUpdateRequest
 
-LLM Provider Integration update request for partial updates.
+Public partial update without server-owned OAuth credentials.
 
 ## Properties
 
