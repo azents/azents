@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -210,6 +211,7 @@ class _FakeRunnerOperations:
         self.process_start_calls: list[dict[str, object]] = []
         self.process_write_calls: list[dict[str, object]] = []
         self.process_terminate_session_calls: list[dict[str, object]] = []
+        self.file_operation_calls: list[tuple[str, str | None]] = []
         self.read_calls: list[str] = []
         self.stat_calls: list[str] = []
         self.stat_started_count = 0
@@ -252,6 +254,7 @@ class _FakeRunnerOperations:
         *,
         runtime_id: str,
         runner_generation: int,
+        owner_session_id: str | None,
         command: str,
         timeout_seconds: int,
         env: dict[str, str] | None,
@@ -259,6 +262,7 @@ class _FakeRunnerOperations:
         cancel_check: object | None = None,
     ) -> RuntimeBashResult:
         del runtime_id, runner_generation, timeout_seconds, deadline_at, cancel_check
+        self.file_operation_calls.append(("run_bash", owner_session_id))
         self.bash_calls.append({"command": command, "env": env})
         if self.bash_unavailable_message is not None:
             raise RuntimeRunnerOperationUnavailable(self.bash_unavailable_message)
@@ -375,7 +379,8 @@ class _FakeRunnerOperations:
         max_bytes: int | None,
         deadline_at: datetime,
     ) -> RuntimeFileReadResult:
-        del runtime_id, runner_generation, owner_session_id, deadline_at
+        del runtime_id, runner_generation, deadline_at
+        self.file_operation_calls.append(("read", owner_session_id))
         self.read_calls.append(path)
         data = self.files[path]
         chunk = (
@@ -392,7 +397,8 @@ class _FakeRunnerOperations:
         path: str,
         deadline_at: datetime,
     ) -> RuntimeFileStatResult:
-        del runtime_id, runner_generation, owner_session_id, deadline_at
+        del runtime_id, runner_generation, deadline_at
+        self.file_operation_calls.append(("stat", owner_session_id))
         self.stat_started_count += 1
         if self.stat_started_event is not None:
             self.stat_started_event.set()
@@ -442,6 +448,7 @@ class _FakeRunnerOperations:
         deadline_at: datetime,
     ) -> RuntimeFileWriteResult:
         del runtime_id, runner_generation, deadline_at
+        self.file_operation_calls.append(("write", owner_session_id))
         self.files[path] = data
         return RuntimeFileWriteResult(bytes_written=len(data), final_cursor="0-1")
 
@@ -457,6 +464,7 @@ class _FakeRunnerOperations:
         deadline_at: datetime,
     ) -> RuntimeFileListResult:
         del runtime_id, runner_generation, recursive, exclude_patterns, deadline_at
+        self.file_operation_calls.append(("list", owner_session_id))
         prefix = path.rstrip("/") + "/"
         children: dict[str, RuntimeFileListEntry] = {}
         for file_path, data in self.files.items():
@@ -502,6 +510,7 @@ class _FakeRunnerOperations:
             max_scanned_bytes,
             deadline_at,
         )
+        self.file_operation_calls.append(("grep", owner_session_id))
         matches: list[RuntimeGrepFileMatch] = []
         for file_path, data in self.files.items():
             if not file_path.startswith(path.rstrip("/") + "/"):
@@ -747,6 +756,155 @@ class TestRuntimeToolkitUpdateContext:
             "/workspace/agent/zeta",
         ]
         assert hasattr(instruction_context.file_storage, "get")
+
+    @pytest.mark.asyncio
+    async def test_file_storage_propagates_owner_and_reuses_runtime_snapshot(
+        self,
+    ) -> None:
+        """Every FileStorage operation uses one owner and Runtime snapshot."""
+        toolkit = _make_toolkit(
+            storage_files={
+                "/workspace/agent/file.txt": b"root",
+                "/workspace/agent/dir/item.txt": b"needle",
+            }
+        )
+        await toolkit.update_context(_make_context())
+        storage = cast(Any, toolkit)._agents_context.file_storage
+        runner_operations = cast(
+            _FakeRunnerOperations,
+            cast(Any, toolkit)._test_runner_operations,
+        )
+        runtime_repo = cast(Any, toolkit)._test_agent_runtime_repo
+
+        await storage.get("/workspace/agent/file.txt", agent_id="agent-1")
+        await storage.stat("/workspace/agent/file.txt", agent_id="agent-1")
+        await storage.put(
+            "/workspace/agent/new.txt",
+            b"new",
+            agent_id="agent-1",
+        )
+        assert await storage.exists(
+            "/workspace/agent/file.txt",
+            agent_id="agent-1",
+        )
+        await storage.list("/workspace/agent", agent_id="agent-1")
+        await storage.list_dirs("/workspace/agent", agent_id="agent-1")
+        await storage.grep(
+            "/workspace/agent/dir",
+            agent_id="agent-1",
+            pattern="needle",
+        )
+        await storage.delete("/workspace/agent/new.txt", agent_id="agent-1")
+
+        assert runner_operations.file_operation_calls == [
+            ("read", "session-1"),
+            ("stat", "session-1"),
+            ("write", "session-1"),
+            ("stat", "session-1"),
+            ("list", "session-1"),
+            ("list", "session-1"),
+            ("grep", "session-1"),
+            ("run_bash", "session-1"),
+        ]
+        runtime_repo.get_by_agent_id.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_subagent_read_and_appendix_share_parent_runtime_with_child_owner(
+        self,
+    ) -> None:
+        """Subagent file work uses its Session owner and parent Runtime snapshot."""
+        toolkit = _make_toolkit(
+            agent_id="child-agent",
+            session_id="child-session",
+            storage_files={
+                "/workspace/agent/AGENTS.md": b"ROOT_RULE",
+                "/workspace/agent/file.txt": b"child",
+            },
+        )
+        toolkit.set_runtime_agent_id("parent-agent")
+        state = await toolkit.update_context(_make_context())
+        read_tool = _find_tool(state.tools, "read")
+        runner_operations = cast(
+            _FakeRunnerOperations,
+            cast(Any, toolkit)._test_runner_operations,
+        )
+        runtime_repo = cast(Any, toolkit)._test_agent_runtime_repo
+
+        output = await read_tool.handler(
+            json.dumps({"path": "/workspace/agent/file.txt"})
+        )
+        decision = await toolkit.append_agents_after_read(
+            MagicMock(
+                tool_name="read",
+                args_json='{"path": "/workspace/agent/file.txt"}',
+            ),
+            ToolCallHookOutcome(output=output, error=None),
+        )
+
+        assert decision is not None
+        assert runner_operations.file_operation_calls == [
+            ("read", "child-session"),
+            ("stat", "child-session"),
+            ("read", "child-session"),
+        ]
+        runtime_repo.get_by_agent_id.assert_awaited_once()
+        assert runtime_repo.get_by_agent_id.await_args.args[1] == "parent-agent"
+
+    @pytest.mark.asyncio
+    async def test_read_and_agents_appendix_share_runtime_and_log_diagnostics(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Visible read and AGENTS appendix share Runtime and emit phase metrics."""
+        caplog.set_level(logging.INFO)
+        toolkit = _make_toolkit(
+            storage_files={
+                "/workspace/agent/AGENTS.md": b"ROOT_RULE",
+                "/workspace/agent/file.txt": b"body",
+            }
+        )
+        state = await toolkit.update_context(_make_context())
+        read_tool = _find_tool(state.tools, "read")
+        runtime_repo = cast(Any, toolkit)._test_agent_runtime_repo
+
+        output = await read_tool.handler(
+            json.dumps({"path": "/workspace/agent/file.txt"})
+        )
+        decision = await toolkit.append_agents_after_read(
+            MagicMock(
+                tool_name="read",
+                args_json='{"path": "/workspace/agent/file.txt"}',
+            ),
+            ToolCallHookOutcome(output=output, error=None),
+        )
+
+        assert decision is not None
+        runtime_repo.get_by_agent_id.assert_awaited_once()
+        tool_record = next(
+            record
+            for record in caplog.records
+            if record.getMessage() == "Processed Runtime file tool"
+        )
+        tool_fields = vars(tool_record)
+        assert tool_fields["tool_name"] == "read"
+        assert tool_fields["tool_status"] == "completed"
+        assert tool_fields["runtime_operation_count"] == 1
+        assert tool_fields["session_id"] == "session-1"
+        assert tool_fields["tool_duration_ms"] >= 0
+        appendix_record = next(
+            record
+            for record in caplog.records
+            if record.getMessage() == "Processed AGENTS.md read appendix"
+        )
+        appendix_fields = vars(appendix_record)
+        assert appendix_fields["candidate_path_count"] == 1
+        assert appendix_fields["discovery_cache_hit_count"] == 0
+        assert appendix_fields["discovery_cache_miss_count"] == 1
+        assert appendix_fields["dedupe_skipped_path_count"] == 0
+        assert appendix_fields["internal_stat_operation_count"] == 1
+        assert appendix_fields["internal_read_operation_count"] == 1
+        assert appendix_fields["appended_path_count"] == 1
+        assert appendix_fields["appendix_duration_ms"] >= 0
 
     @pytest.mark.asyncio
     async def test_prompt_includes_runtime_files(self) -> None:

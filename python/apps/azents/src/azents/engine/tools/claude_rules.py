@@ -181,6 +181,40 @@ class _ClaudeRulePathCacheEntry:
     expires_at: float
 
 
+@dataclasses.dataclass(frozen=True)
+class _ClaudeRuleReadResult:
+    """One Claude rule candidate read and its internal operation counts."""
+
+    rule: ClaudeRuleFile | None
+    stat_count: int
+    read_count: int
+
+
+@dataclasses.dataclass(frozen=True)
+class _ClaudeRuleDiscoveryResult:
+    """Claude rule path discovery and its internal operation counts."""
+
+    candidates: list[_ClaudeRuleCandidate]
+    root_list_count: int
+    discovered_path_count: int
+    cache_hit_count: int
+    cache_miss_count: int
+
+
+@dataclasses.dataclass(frozen=True)
+class _ClaudeRulesMatchResult:
+    """Matching Claude rules and aggregate appendix diagnostics."""
+
+    files: list[ClaudeRuleFile]
+    root_list_count: int
+    discovered_path_count: int
+    cache_hit_count: int
+    cache_miss_count: int
+    dedupe_skipped_count: int
+    stat_count: int
+    read_count: int
+
+
 class ClaudeRulesToolkitConfig(BaseModel):
     """Claude rules Toolkit settings model."""
 
@@ -275,8 +309,9 @@ class ClaudeRulesToolkit(Toolkit[ClaudeRulesToolkitConfig]):
         output_text: str,
     ) -> ToolOutputReplace | None:
         """Discover and append Claude rules while holding the Session lock."""
+        started_at = time.perf_counter()
         try:
-            files = await self._matching_not_yet_appended_rules(
+            result = await self._matching_not_yet_appended_rules(
                 instruction_context,
                 target_path,
             )
@@ -289,25 +324,35 @@ class ClaudeRulesToolkit(Toolkit[ClaudeRulesToolkitConfig]):
                 },
             )
             return None
-        if not files:
-            return None
-        await self._update_appendix_dedupe_state(
-            lambda state: state.model_copy(
-                update={
-                    "appended_paths": sorted(
-                        set(state.appended_paths) | {rule.path for rule in files}
-                    )
-                }
+        files = result.files
+        if files:
+            await self._update_appendix_dedupe_state(
+                lambda state: state.model_copy(
+                    update={
+                        "appended_paths": sorted(
+                            set(state.appended_paths) | {rule.path for rule in files}
+                        )
+                    }
+                )
             )
-        )
         logger.info(
-            "Appended Claude rules to read result",
+            "Processed Claude rules read appendix",
             extra={
                 "agent_id": self._runtime_agent_id,
                 "session_id": self._runtime_session_id,
+                "appendix_duration_ms": (time.perf_counter() - started_at) * 1000,
+                "root_list_operation_count": result.root_list_count,
+                "discovered_path_count": result.discovered_path_count,
+                "discovery_cache_hit_count": result.cache_hit_count,
+                "discovery_cache_miss_count": result.cache_miss_count,
+                "dedupe_skipped_path_count": result.dedupe_skipped_count,
+                "internal_stat_operation_count": result.stat_count,
+                "internal_read_operation_count": result.read_count,
                 "appended_path_count": len(files),
             },
         )
+        if not files:
+            return None
         return ToolOutputReplace(
             output_text=f"{output_text}\n\n{render_claude_rules_appendix(files)}"
         )
@@ -333,43 +378,66 @@ class ClaudeRulesToolkit(Toolkit[ClaudeRulesToolkitConfig]):
         self,
         instruction_context: RuntimeInstructionContext,
         target_path: str,
-    ) -> list[ClaudeRuleFile]:
+    ) -> _ClaudeRulesMatchResult:
         dedupe = await self._load_appendix_dedupe_state()
         already_appended = set(dedupe.appended_paths)
         roots = claude_rule_roots_for_path(target_path, instruction_context.projects)
-        candidates = await self._discover_rule_candidates(
+        discovery = await self._discover_rule_candidates(
             instruction_context.file_storage,
             roots,
         )
         files: list[ClaudeRuleFile] = []
         seen_real_paths: set[str] = set()
-        for candidate in candidates:
-            if candidate.path == target_path or candidate.path in already_appended:
+        dedupe_skipped_count = 0
+        stat_count = 0
+        read_count = 0
+        for candidate in discovery.candidates:
+            if candidate.path == target_path:
                 continue
-            rule = await _read_rule_file(
+            if candidate.path in already_appended:
+                dedupe_skipped_count += 1
+                continue
+            read_result = await _read_rule_file_with_counts(
                 instruction_context.file_storage,
                 candidate.root,
                 candidate.path,
                 agent_id=self._runtime_agent_id,
             )
+            stat_count += read_result.stat_count
+            read_count += read_result.read_count
+            rule = read_result.rule
             if rule is None or rule.real_path in seen_real_paths:
                 continue
             seen_real_paths.add(rule.real_path)
             if rule_matches_target(rule.content, rule.path, roots, target_path):
                 files.append(rule)
-        return files
+        return _ClaudeRulesMatchResult(
+            files=files,
+            root_list_count=discovery.root_list_count,
+            discovered_path_count=discovery.discovered_path_count,
+            cache_hit_count=discovery.cache_hit_count,
+            cache_miss_count=discovery.cache_miss_count,
+            dedupe_skipped_count=dedupe_skipped_count,
+            stat_count=stat_count,
+            read_count=read_count,
+        )
 
     async def _discover_rule_candidates(
         self,
         file_storage: FileStorage,
         roots: Sequence[ClaudeRuleRoot],
-    ) -> list[_ClaudeRuleCandidate]:
+    ) -> _ClaudeRuleDiscoveryResult:
         """Return cached sorted rule paths for supported roots."""
         now = time.monotonic()
         candidates: list[_ClaudeRuleCandidate] = []
+        root_list_count = 0
+        cache_hit_count = 0
+        cache_miss_count = 0
         for root in roots:
             cache_entry = self._rule_path_cache.get(root.rules_root)
             if cache_entry is None or cache_entry.expires_at <= now:
+                root_list_count += 1
+                cache_miss_count += 1
                 paths = await _list_rule_paths(
                     file_storage,
                     root,
@@ -380,10 +448,18 @@ class ClaudeRulesToolkit(Toolkit[ClaudeRulesToolkitConfig]):
                     expires_at=now + CLAUDE_RULE_PATH_CACHE_TTL_SECONDS,
                 )
                 self._rule_path_cache[root.rules_root] = cache_entry
+            else:
+                cache_hit_count += 1
             candidates.extend(
                 _ClaudeRuleCandidate(root=root, path=path) for path in cache_entry.paths
             )
-        return candidates
+        return _ClaudeRuleDiscoveryResult(
+            candidates=candidates,
+            root_list_count=root_list_count,
+            discovered_path_count=len(candidates),
+            cache_hit_count=cache_hit_count,
+            cache_miss_count=cache_miss_count,
+        )
 
     async def _load_appendix_dedupe_state(self) -> ClaudeRulesAppendixDedupeState:
         """Fetch persistent Claude rules appendix dedupe state."""
@@ -512,21 +588,48 @@ async def _read_rule_file(
     *,
     agent_id: str,
 ) -> ClaudeRuleFile | None:
+    result = await _read_rule_file_with_counts(
+        file_storage,
+        root,
+        path,
+        agent_id=agent_id,
+    )
+    return result.rule
+
+
+async def _read_rule_file_with_counts(
+    file_storage: FileStorage,
+    root: ClaudeRuleRoot,
+    path: str,
+    *,
+    agent_id: str,
+) -> _ClaudeRuleReadResult:
+    """Read one Claude rule and report attempted Runtime operations."""
+    read_count = 0
     try:
         metadata = await file_storage.stat(path, agent_id=agent_id)
         if metadata.get("is_file") is not True:
-            return None
+            return _ClaudeRuleReadResult(rule=None, stat_count=1, read_count=0)
         real_path = _metadata_real_path(metadata, path)
         if not _is_under_root(real_path, root.owner_root):
-            return None
+            return _ClaudeRuleReadResult(rule=None, stat_count=1, read_count=0)
+        read_count = 1
         content = await file_storage.get(path, agent_id=agent_id)
     except FileNotFoundError:
-        return None
+        return _ClaudeRuleReadResult(
+            rule=None,
+            stat_count=1,
+            read_count=read_count,
+        )
     try:
         rendered = truncate_claude_rule_content(content)
     except UnicodeDecodeError:
-        return None
-    return ClaudeRuleFile(path=path, real_path=real_path, content=rendered)
+        return _ClaudeRuleReadResult(rule=None, stat_count=1, read_count=1)
+    return _ClaudeRuleReadResult(
+        rule=ClaudeRuleFile(path=path, real_path=real_path, content=rendered),
+        stat_count=1,
+        read_count=1,
+    )
 
 
 def _metadata_real_path(metadata: dict[str, object], path: str) -> str:
