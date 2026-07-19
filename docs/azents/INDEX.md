@@ -219,6 +219,7 @@ Design documents are accumulated records and are not listed individually in this
 - [ADR-0166: Resolve built-in capabilities to model-specific executors](adr/0166-resolve-builtin-capabilities-to-model-specific-executors.md)
 - [ADR-0166: Model-Scoped Subagent Override Policy](adr/0166-subagent-model-override-policy.md)
 - [ADR-0167: Normalize Provider Tool Semantic Transcript Content](adr/0167-normalize-provider-tool-semantic-transcript.md)
+- [ADR-0168: Use Single Durable Events for Provider Tool Items](adr/0168-use-single-provider-tool-events.md)
 
 ## Issues (Bug Tracking)
 
