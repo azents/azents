@@ -30,6 +30,37 @@ export default meta;
 
 type Story = StoryObj<typeof meta>;
 
+export const OpenRouterEditPreservesOmittedApiKey = {
+  args: {
+    availableProviderValues: ["openrouter"],
+    formModal: {
+      type: "EDIT",
+      integration: {
+        id: "integration-openrouter",
+        provider: "openrouter",
+        name: "OpenRouter workspace",
+        config: null,
+        enabled: true,
+        created_at: "2026-07-19T00:00:00Z",
+        updated_at: "2026-07-19T00:00:00Z",
+      },
+    },
+  },
+  play: async ({ args, canvasElement }) => {
+    const page = within(canvasElement.ownerDocument.body);
+    await expect(page.getByDisplayValue("OpenRouter workspace")).toBeVisible();
+    await expect(
+      page.getByPlaceholderText("Leave empty to keep current value"),
+    ).toHaveValue("");
+
+    await userEvent.click(page.getByRole("button", { name: "Save" }));
+
+    await expect(args.onUpdate).toHaveBeenCalledWith({
+      name: "OpenRouter workspace",
+    });
+  },
+} satisfies Story;
+
 export const XaiEditPreservesOmittedApiKey = {
   play: async ({ args, canvasElement }) => {
     const page = within(canvasElement.ownerDocument.body);

@@ -35,6 +35,24 @@ export const GenericApiKey = {
   },
 } satisfies Story;
 
+export const OpenRouterApiKey = {
+  args: {
+    provider: "openrouter",
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(canvas.getByRole("button", { name: "Setup guide" }));
+    await expect(canvas.getByText("OpenRouter setup")).toBeVisible();
+    await expect(
+      canvas.getByText(/account and API-key settings/i),
+    ).toBeVisible();
+    await expect(canvas.getByText(/upstream model providers/i)).toBeVisible();
+    await expect(
+      canvas.getByText(/does not independently claim or enforce ZDR/i),
+    ).toBeVisible();
+  },
+} satisfies Story;
+
 export const XaiApiKey = {
   args: {
     provider: "xai",
