@@ -84,9 +84,9 @@ uv run pytest -q
 Results:
 
 - Ruff: passed
-- Format check: 984 files already formatted
+- Format check: 986 files already formatted
 - Pyright: 0 errors
-- Pytest: 1,695 passed, 400 skipped, 5 existing dependency warnings
+- Pytest: 1,712 passed, 400 skipped, 5 existing dependency warnings
 
 ### Public OpenAPI and Generated Clients
 
@@ -124,7 +124,7 @@ Results:
 - Prettier check: passed
 - ESLint: passed
 - TypeScript typecheck: passed
-- Unit tests: 41 passed
+- Unit tests: 45 passed
 - All four modified locale JSON files parsed successfully.
 
 ### E2E Project Static Validation
@@ -141,7 +141,7 @@ python -m json.tool \
 Results:
 
 - Ruff: passed
-- Format check: 49 files already formatted
+- Format check: 48 files already formatted
 - Pyright: 0 errors
 - AIMock fixture JSON validation: passed
 
@@ -203,7 +203,7 @@ The E2E reads AIMock request journals rather than inferring membership only from
 | Working-set state stores final names only | Toolkit State codec and recency tests | Passed |
 | Provider-facing order remains canonical | Projection and lowerer regression tests | Passed |
 | Direct overflow fails before provider I/O | Typed preparation-failure tests | Passed |
-| Prepared catalog and executor boundaries are immutable | In-flight catalog-change and routing tests | Passed |
+| Prepared catalog and executor boundaries are immutable | In-flight catalog-change test plus rejection of a catalog-present tool omitted from the prepared projection before hooks, recency, or handler execution | Passed |
 | MCP discovery remains snapshot-backed | Existing MCP snapshot regression set | Passed |
 | Agent settings UI defaults off and submits the value | Form schema/container/component, stories, generated client typecheck | Passed |
 
@@ -212,6 +212,14 @@ The E2E reads AIMock request journals rather than inferring membership only from
 ### Disabled compatibility behavior needed a separate runtime branch
 
 Simply leaving the working set empty would still have injected `tool_search`, hidden service tools, and applied provider budgets. The adapter now branches before budget resolution and state loading. Disabled Agents use the complete canonical executable catalog and the unwrapped client-tool executor.
+
+### Prepared executors initially retained routes outside the visible projection
+
+The provider request used the bounded projection, but the prepared executor initially retained the complete catalog. A model-emitted known final name could therefore reach a hidden deferred tool. Enabled prepared calls now use an outer allowlist that rejects names omitted from that request before runtime hooks, working-set recency, cancellation, or handler execution. The regression test invokes a catalog-present deferred tool from the first search-only request and verifies both failure and unchanged Toolkit State.
+
+### The web router initially dropped the submitted Agent setting
+
+The Agent form submitted `tool_search_enabled`, but the tRPC create and update handlers initially omitted it from the generated public-client request body. Both paths now forward the optional value. Generated-client type checking, ESLint, Prettier, and all 45 azents-web unit tests pass with the corrected routing.
 
 ### Existing runtime-hook fixtures called newly deferred tools directly
 
