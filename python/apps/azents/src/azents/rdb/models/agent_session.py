@@ -181,6 +181,13 @@ class RDBAgentSession(RDBModel):
         "run_heartbeat_at",
         postgresql_where=sa.text("run_state = 'running'"),
     )
+    IX_ARCHIVED_PURGE_AFTER = sa.Index(
+        "ix_agent_sessions_archived_purge_after",
+        "purge_after",
+        postgresql_where=sa.text(
+            "status = 'archived' AND session_kind = 'root' AND purge_after IS NOT NULL"
+        ),
+    )
     UQ_AGENT_ACTIVE_TEAM_PRIMARY = sa.Index(
         "uq_agent_sessions_agent_active_team_primary",
         "agent_id",
@@ -394,6 +401,30 @@ class RDBAgentSession(RDBModel):
         nullable=True,
         default=None,
     )
+    archived_at: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime,
+        init=False,
+        nullable=True,
+        default=None,
+    )
+    purge_after: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime,
+        init=False,
+        nullable=True,
+        default=None,
+    )
+    archive_policy_revision: Mapped[int | None] = mapped_column(
+        sa.BigInteger,
+        init=False,
+        nullable=True,
+        default=None,
+    )
+    archive_retention_days_snapshot: Mapped[int | None] = mapped_column(
+        sa.Integer,
+        init=False,
+        nullable=True,
+        default=None,
+    )
     ended_at: Mapped[datetime.datetime | None] = mapped_column(
         TimeZoneDateTime,
         init=False,
@@ -426,5 +457,6 @@ class RDBAgentSession(RDBModel):
         IX_PENDING_COMMAND,
         IX_STOP_REQUESTED_AT,
         IX_RUN_STATE_RUNNING,
+        IX_ARCHIVED_PURGE_AFTER,
         UQ_AGENT_ACTIVE_TEAM_PRIMARY,
     )

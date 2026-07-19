@@ -202,6 +202,26 @@ class ScheduledTaskStatus(enum.StrEnum):
     FAILED = "failed"
 
 
+class ArchivedSessionRetentionApplicationStatus(enum.StrEnum):
+    """Durable existing-archive retention application status."""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    RETRY_WAIT = "retry_wait"
+    COMPLETED = "completed"
+
+
+class ArchivedSessionPurgeStatus(enum.StrEnum):
+    """Durable archived-session purge status."""
+
+    PENDING = "pending"
+    FENCING = "fencing"
+    CLEANING = "cleaning"
+    RETRY_WAIT = "retry_wait"
+    COMPLETED = "completed"
+    CANCELLED = "cancelled"
+
+
 class InputBufferKind(enum.StrEnum):
     """InputBuffer payload kind."""
 

@@ -109,6 +109,18 @@ class AgentSession(BaseModel):
     stop_request_id: str | None = Field(
         default=None, description="Stop request correlation ID"
     )
+    archived_at: datetime.datetime | None = Field(
+        default=None, description="Archive boundary timestamp"
+    )
+    purge_after: datetime.datetime | None = Field(
+        default=None, description="Scheduled purge eligibility timestamp"
+    )
+    archive_policy_revision: int | None = Field(
+        default=None, description="Retention policy revision snapshot"
+    )
+    archive_retention_days_snapshot: int | None = Field(
+        default=None, description="Retention days snapshot; null means Unlimited"
+    )
     ended_at: datetime.datetime | None = Field(default=None, description="End time")
     created_at: datetime.datetime = Field(description="Created time")
     updated_at: datetime.datetime = Field(description="Updated time")
