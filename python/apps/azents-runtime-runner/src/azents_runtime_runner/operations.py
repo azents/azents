@@ -4,17 +4,20 @@ import asyncio
 import base64
 import contextlib
 import fnmatch
+import logging
 import os
 import re
 import shutil
 import stat as stat_module
+import threading
 import time
 import uuid
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal, Protocol
+from typing import Literal, Protocol, TypeVar
 
 from azents_runtime_control.runner import (
     JsonValue,
@@ -25,8 +28,11 @@ from azents_runtime_control.runner import (
 
 from azents_runtime_runner.workspace import Workspace
 
+logger = logging.getLogger(__name__)
+
 _DEFAULT_BASH_TIMEOUT_SECONDS = 120
 _MAX_FILE_READ_BYTES = 8 * 1024 * 1024
+_DEFAULT_MAX_FILE_OPERATION_WORKERS = 8
 _DEFAULT_MAX_GREP_SEARCHED_FILES = 10_000
 _DEFAULT_MAX_GREP_SCANNED_BYTES = 128 * 1024 * 1024
 _DEFAULT_PROCESS_YIELD_TIME_MS = 1_000
@@ -41,6 +47,8 @@ _PROCESS_READ_CHUNK_BYTES = 4096
 _PROCESS_DRAIN_AFTER_EXIT_TIMEOUT_SECONDS = 1.0
 _PROCESS_TERMINATE_TIMEOUT_SECONDS = 2.0
 _MAX_MISSING_PROCESS_RECORDS = 128
+
+_T = TypeVar("_T")
 
 
 @dataclass
@@ -68,6 +76,15 @@ class _GitCommandResult:
     exit_code: int
     stdout: str
     stderr: str
+
+
+class _FileOperationSemanticError(Exception):
+    """Typed filesystem failure rendered as a Runner final error."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
 
 
 class _ProcessOutputBuffer:
@@ -162,6 +179,7 @@ class RunnerOperations:
         ),
         max_runtime_process_count: int = _DEFAULT_MAX_RUNTIME_PROCESS_COUNT,
         max_session_process_count: int = _DEFAULT_MAX_SESSION_PROCESS_COUNT,
+        max_file_operation_workers: int = _DEFAULT_MAX_FILE_OPERATION_WORKERS,
     ) -> None:
         """Initialize operation handlers."""
         self._client = client
@@ -176,6 +194,11 @@ class RunnerOperations:
         )
         self._max_runtime_process_count = max(max_runtime_process_count, 1)
         self._max_session_process_count = max(max_session_process_count, 1)
+        self._max_file_operation_workers = max(max_file_operation_workers, 1)
+        self._file_operation_executor = ThreadPoolExecutor(
+            max_workers=self._max_file_operation_workers,
+            thread_name_prefix="azents-runtime-file",
+        )
 
     async def handle(self, operation: RunnerOperationEnvelope) -> None:
         """Run one operation and publish progress/final events."""
@@ -250,7 +273,8 @@ class RunnerOperations:
             await self._final_error(operation, "RUNNER_OPERATION_ERROR", str(exc))
 
     async def close(self) -> None:
-        """Terminate Runner-owned processes during Runner shutdown."""
+        """Terminate Runner-owned processes and stop accepting filesystem work."""
+        self._file_operation_executor.shutdown(wait=False, cancel_futures=True)
         for process_id in tuple(self._processes):
             record = self._processes.get(process_id)
             if record is not None:
@@ -259,6 +283,80 @@ class RunnerOperations:
                     status="terminated",
                     reason="runner_shutdown",
                 )
+
+    async def _run_file_operation(
+        self,
+        operation: RunnerOperationEnvelope,
+        func: Callable[[threading.Event], _T],
+    ) -> _T:
+        """Run blocking filesystem work outside the Runner event loop."""
+        cancellation = threading.Event()
+        submitted_at = time.perf_counter()
+        started_at: list[float] = []
+
+        def run() -> _T:
+            started_at.append(time.perf_counter())
+            return func(cancellation)
+
+        future = asyncio.get_running_loop().run_in_executor(
+            self._file_operation_executor,
+            run,
+        )
+        try:
+            result = await future
+        except asyncio.CancelledError:
+            cancellation.set()
+            self._log_file_operation(
+                operation,
+                submitted_at=submitted_at,
+                started_at=started_at[0] if started_at else None,
+                status="cancelled",
+            )
+            raise
+        except Exception:
+            self._log_file_operation(
+                operation,
+                submitted_at=submitted_at,
+                started_at=started_at[0] if started_at else None,
+                status="failed",
+            )
+            raise
+        self._log_file_operation(
+            operation,
+            submitted_at=submitted_at,
+            started_at=started_at[0] if started_at else None,
+            status="completed",
+        )
+        return result
+
+    def _log_file_operation(
+        self,
+        operation: RunnerOperationEnvelope,
+        *,
+        submitted_at: float,
+        started_at: float | None,
+        status: str,
+    ) -> None:
+        """Log filesystem executor queue and blocking durations."""
+        finished_at = time.perf_counter()
+        queue_wait_ms = (
+            None if started_at is None else (started_at - submitted_at) * 1000
+        )
+        execution_ms = None if started_at is None else (finished_at - started_at) * 1000
+        logger.info(
+            "Runtime Runner filesystem operation finished",
+            extra={
+                "request_id": operation.request_id,
+                "runtime_id": operation.runtime_id,
+                "runner_generation": operation.runner_generation,
+                "operation_type": operation.operation_type,
+                "owner_session_id": operation.owner_session_id,
+                "filesystem_status": status,
+                "filesystem_queue_wait_ms": queue_wait_ms,
+                "filesystem_execution_ms": execution_ms,
+                "filesystem_max_workers": self._max_file_operation_workers,
+            },
+        )
 
     async def _bash(self, operation: RunnerOperationEnvelope) -> None:
         command = _str_payload(operation.payload, "command")
@@ -313,7 +411,15 @@ class RunnerOperations:
         max_bytes = _optional_int_payload(operation.payload, "max_bytes")
         if max_bytes is None:
             max_bytes = _MAX_FILE_READ_BYTES
-        data = path.read_bytes()[offset : offset + max_bytes]
+        data = await self._run_file_operation(
+            operation,
+            lambda cancellation: _read_file_bytes(
+                path,
+                offset=offset,
+                max_bytes=max_bytes,
+                cancellation=cancellation,
+            ),
+        )
         await self._event(
             operation,
             RuntimeRunnerEventType.FILE_CHUNK,
@@ -327,10 +433,16 @@ class RunnerOperations:
         except ValueError as exc:
             await self._final_error(operation, "INVALID_PATH", str(exc))
             return
-        path.parent.mkdir(parents=True, exist_ok=True)
-        data = b"".join(chunk.data for chunk in operation.body_chunks)
-        path.write_bytes(data)
-        await self._final_success(operation, {"bytes_written": len(data)})
+        chunks = tuple(chunk.data for chunk in operation.body_chunks)
+        bytes_written = await self._run_file_operation(
+            operation,
+            lambda cancellation: _write_file_bytes(
+                path,
+                chunks=chunks,
+                cancellation=cancellation,
+            ),
+        )
+        await self._final_success(operation, {"bytes_written": bytes_written})
 
     async def _file_list(self, operation: RunnerOperationEnvelope) -> None:
         try:
@@ -340,21 +452,16 @@ class RunnerOperations:
             return
         recursive = _bool_payload(operation.payload, "recursive", default=False)
         exclude_patterns = _str_list_payload(operation.payload, "exclude_patterns")
-        entries = []
-        for child in _iter_list_entries(
-            path,
-            workspace=self._workspace,
-            recursive=recursive,
-            exclude_patterns=exclude_patterns,
-        ):
-            entries.append(
-                {
-                    "path": self._workspace.display_path(child),
-                    "type": _entry_type(child),
-                    "size_bytes": _file_size(child),
-                    "modified_at": _modified_at(child),
-                }
-            )
+        entries = await self._run_file_operation(
+            operation,
+            lambda cancellation: _list_file_entries(
+                path,
+                workspace=self._workspace,
+                recursive=recursive,
+                exclude_patterns=exclude_patterns,
+                cancellation=cancellation,
+            ),
+        )
         await self._final_success(operation, {"entries": entries})
 
     async def _file_stat(self, operation: RunnerOperationEnvelope) -> None:
@@ -367,14 +474,21 @@ class RunnerOperations:
             await self._final_error(operation, "INVALID_PATH", str(exc))
             return
         try:
-            path.lstat()
+            payload = await self._run_file_operation(
+                operation,
+                lambda cancellation: _read_stat_payload(
+                    path,
+                    workspace=self._workspace,
+                    cancellation=cancellation,
+                ),
+            )
         except FileNotFoundError:
             await self._final_error(operation, "NOT_FOUND", f"No such file: {path}")
             return
         except OSError as exc:
             await self._final_error(operation, "STAT_FAILED", str(exc))
             return
-        await self._final_success(operation, _stat_payload(path, self._workspace))
+        await self._final_success(operation, payload)
 
     async def _file_delete(self, operation: RunnerOperationEnvelope) -> None:
         try:
@@ -387,37 +501,19 @@ class RunnerOperations:
             return
         recursive = _bool_payload(operation.payload, "recursive", default=False)
         try:
-            stat_result = path.lstat()
-        except FileNotFoundError:
-            await self._final_error(operation, "NOT_FOUND", f"No such file: {path}")
+            payload = await self._run_file_operation(
+                operation,
+                lambda cancellation: _delete_path(
+                    path,
+                    workspace=self._workspace,
+                    recursive=recursive,
+                    cancellation=cancellation,
+                ),
+            )
+        except _FileOperationSemanticError as exc:
+            await self._final_error(operation, exc.code, exc.message)
             return
-        except OSError as exc:
-            await self._final_error(operation, "DELETE_FAILED", str(exc))
-            return
-        try:
-            if stat_module.S_ISDIR(stat_result.st_mode) and not stat_module.S_ISLNK(
-                stat_result.st_mode
-            ):
-                if not recursive:
-                    await self._final_error(
-                        operation,
-                        "DIRECTORY_RECURSIVE_REQUIRED",
-                        f"Directory delete requires recursive=true: {path}",
-                    )
-                    return
-                shutil.rmtree(path)
-            else:
-                path.unlink()
-        except FileNotFoundError:
-            await self._final_error(operation, "NOT_FOUND", f"No such file: {path}")
-            return
-        except OSError as exc:
-            await self._final_error(operation, "DELETE_FAILED", str(exc))
-            return
-        await self._final_success(
-            operation,
-            {"deleted_path": self._workspace.display_path(path)},
-        )
+        await self._final_success(operation, payload)
 
     async def _file_mkdir(self, operation: RunnerOperationEnvelope) -> None:
         try:
@@ -430,24 +526,19 @@ class RunnerOperations:
             return
         parents = _bool_payload(operation.payload, "parents", default=False)
         try:
-            path.mkdir(parents=parents, exist_ok=False)
-        except FileExistsError:
-            await self._final_error(operation, "ALREADY_EXISTS", f"Path exists: {path}")
-            return
-        except FileNotFoundError:
-            await self._final_error(
+            payload = await self._run_file_operation(
                 operation,
-                "PARENT_NOT_FOUND",
-                f"Parent directory does not exist: {path.parent}",
+                lambda cancellation: _make_directory(
+                    path,
+                    workspace=self._workspace,
+                    parents=parents,
+                    cancellation=cancellation,
+                ),
             )
+        except _FileOperationSemanticError as exc:
+            await self._final_error(operation, exc.code, exc.message)
             return
-        except OSError as exc:
-            await self._final_error(operation, "MKDIR_FAILED", str(exc))
-            return
-        await self._final_success(
-            operation,
-            {"created_path": self._workspace.display_path(path)},
-        )
+        await self._final_success(operation, payload)
 
     async def _file_move(self, operation: RunnerOperationEnvelope) -> None:
         try:
@@ -463,55 +554,21 @@ class RunnerOperations:
             await self._final_error(operation, "INVALID_PATH", str(exc))
             return
         overwrite = _bool_payload(operation.payload, "overwrite", default=False)
-        if not source_path.exists() and not source_path.is_symlink():
-            await self._final_error(
-                operation, "NOT_FOUND", f"No such file: {source_path}"
-            )
-            return
-        if destination_path.exists() or destination_path.is_symlink():
-            if not overwrite:
-                await self._final_error(
-                    operation,
-                    "DESTINATION_EXISTS",
-                    f"Destination already exists: {destination_path}",
-                )
-                return
-            try:
-                if destination_path.is_dir() and not destination_path.is_symlink():
-                    shutil.rmtree(destination_path)
-                else:
-                    destination_path.unlink()
-            except OSError as exc:
-                await self._final_error(operation, "MOVE_FAILED", str(exc))
-                return
-        if not destination_path.parent.exists():
-            await self._final_error(
-                operation,
-                "PARENT_NOT_FOUND",
-                f"Parent directory does not exist: {destination_path.parent}",
-            )
-            return
-        if not destination_path.parent.is_dir():
-            await self._final_error(
-                operation,
-                "PARENT_NOT_DIRECTORY",
-                f"Parent path is not a directory: {destination_path.parent}",
-            )
-            return
         try:
-            shutil.move(str(source_path), str(destination_path))
-        except OSError as exc:
-            await self._final_error(operation, "MOVE_FAILED", str(exc))
-            return
-        await self._final_success(
-            operation,
-            {
-                "moved_source_path": self._workspace.display_path(source_path),
-                "moved_destination_path": self._workspace.display_path(
-                    destination_path
+            payload = await self._run_file_operation(
+                operation,
+                lambda cancellation: _move_path(
+                    source_path,
+                    destination_path,
+                    workspace=self._workspace,
+                    overwrite=overwrite,
+                    cancellation=cancellation,
                 ),
-            },
-        )
+            )
+        except _FileOperationSemanticError as exc:
+            await self._final_error(operation, exc.code, exc.message)
+            return
+        await self._final_success(operation, payload)
 
     async def _file_bulk_delete(self, operation: RunnerOperationEnvelope) -> None:
         paths: list[Path] = []
@@ -525,45 +582,20 @@ class RunnerOperations:
             await self._final_error(operation, "INVALID_PAYLOAD", "paths is required")
             return
         recursive = _bool_payload(operation.payload, "recursive", default=False)
-        stats: list[tuple[Path, os.stat_result]] = []
         try:
-            for path in paths:
-                stats.append((path, path.lstat()))
-        except FileNotFoundError as exc:
-            await self._final_error(operation, "NOT_FOUND", str(exc))
+            payload = await self._run_file_operation(
+                operation,
+                lambda cancellation: _delete_paths(
+                    paths,
+                    workspace=self._workspace,
+                    recursive=recursive,
+                    cancellation=cancellation,
+                ),
+            )
+        except _FileOperationSemanticError as exc:
+            await self._final_error(operation, exc.code, exc.message)
             return
-        except OSError as exc:
-            await self._final_error(operation, "DELETE_FAILED", str(exc))
-            return
-        for path, stat_result in stats:
-            if (
-                stat_module.S_ISDIR(stat_result.st_mode)
-                and not stat_module.S_ISLNK(stat_result.st_mode)
-                and not recursive
-            ):
-                await self._final_error(
-                    operation,
-                    "DIRECTORY_RECURSIVE_REQUIRED",
-                    f"Directory delete requires recursive=true: {path}",
-                )
-                return
-        deleted_paths: list[JsonValue] = []
-        try:
-            for path, stat_result in stats:
-                if stat_module.S_ISDIR(stat_result.st_mode) and not stat_module.S_ISLNK(
-                    stat_result.st_mode
-                ):
-                    shutil.rmtree(path)
-                else:
-                    path.unlink()
-                deleted_paths.append(self._workspace.display_path(path))
-        except FileNotFoundError as exc:
-            await self._final_error(operation, "NOT_FOUND", str(exc))
-            return
-        except OSError as exc:
-            await self._final_error(operation, "DELETE_FAILED", str(exc))
-            return
-        await self._final_success(operation, {"deleted_paths": deleted_paths})
+        await self._final_success(operation, payload)
 
     async def _file_bulk_move(self, operation: RunnerOperationEnvelope) -> None:
         source_paths: list[Path] = []
@@ -589,67 +621,21 @@ class RunnerOperations:
             await self._final_error(operation, "INVALID_PATH", str(exc))
             return
         overwrite = _bool_payload(operation.payload, "overwrite", default=False)
-        if not destination_directory.exists():
-            await self._final_error(
-                operation,
-                "PARENT_NOT_FOUND",
-                f"Destination directory does not exist: {destination_directory}",
-            )
-            return
-        if not destination_directory.is_dir():
-            await self._final_error(
-                operation,
-                "PARENT_NOT_DIRECTORY",
-                f"Destination path is not a directory: {destination_directory}",
-            )
-            return
-        seen_destinations: set[Path] = set()
-        moves: list[tuple[Path, Path]] = []
-        for source_path in source_paths:
-            if not source_path.exists() and not source_path.is_symlink():
-                await self._final_error(
-                    operation, "NOT_FOUND", f"No such file: {source_path}"
-                )
-                return
-            destination_path = destination_directory / source_path.name
-            if destination_path in seen_destinations:
-                await self._final_error(
-                    operation,
-                    "DESTINATION_EXISTS",
-                    f"Duplicate destination: {destination_path}",
-                )
-                return
-            seen_destinations.add(destination_path)
-            if destination_path.exists() or destination_path.is_symlink():
-                if not overwrite:
-                    await self._final_error(
-                        operation,
-                        "DESTINATION_EXISTS",
-                        f"Destination already exists: {destination_path}",
-                    )
-                    return
-            moves.append((source_path, destination_path))
-        moved_entries: list[JsonValue] = []
         try:
-            for source_path, destination_path in moves:
-                if destination_path.exists() or destination_path.is_symlink():
-                    if destination_path.is_dir() and not destination_path.is_symlink():
-                        shutil.rmtree(destination_path)
-                    else:
-                        destination_path.unlink()
-                shutil.move(str(source_path), str(destination_path))
-                moved_entries.append(
-                    {
-                        "source_path": self._workspace.display_path(source_path),
-                        "destination_path": self._workspace.display_path(
-                            destination_path
-                        ),
-                    }
-                )
-        except OSError as exc:
-            await self._final_error(operation, "MOVE_FAILED", str(exc))
+            payload = await self._run_file_operation(
+                operation,
+                lambda cancellation: _move_paths(
+                    source_paths,
+                    destination_directory,
+                    workspace=self._workspace,
+                    overwrite=overwrite,
+                    cancellation=cancellation,
+                ),
+            )
+        except _FileOperationSemanticError as exc:
+            await self._final_error(operation, exc.code, exc.message)
             return
-        await self._final_success(operation, {"moved_entries": moved_entries})
+        await self._final_success(operation, payload)
 
     async def _file_grep(self, operation: RunnerOperationEnvelope) -> None:
         try:
@@ -688,42 +674,22 @@ class RunnerOperations:
             "max_scanned_bytes",
             default=_DEFAULT_MAX_GREP_SCANNED_BYTES,
         )
-        state = _GrepScanState()
-        matches: list[JsonValue] = []
-        for file_path in _iter_grep_files(
-            path,
-            workspace=self._workspace,
-            recursive=recursive,
-            exclude_patterns=exclude_patterns,
-        ):
-            if len(matches) >= max_matching_files:
-                state.stopped_reason = "matching_file_limit"
-                break
-            if state.searched_file_count >= max_searched_files:
-                state.stopped_reason = "searched_file_limit"
-                break
-            match = _grep_file(
-                file_path,
+        payload = await self._run_file_operation(
+            operation,
+            lambda cancellation: _grep_files(
+                path,
                 workspace=self._workspace,
                 regex=regex,
+                recursive=recursive,
+                exclude_patterns=exclude_patterns,
+                max_matching_files=max_matching_files,
                 max_lines_per_file=max_lines_per_file,
+                max_searched_files=max_searched_files,
                 max_scanned_bytes=max_scanned_bytes,
-                state=state,
-            )
-            if match is not None:
-                matches.append(match)
-            if state.stopped_reason is not None:
-                break
-        await self._final_success(
-            operation,
-            {
-                "files": matches,
-                "searched_file_count": state.searched_file_count,
-                "matched_file_count": len(matches),
-                "truncated": state.stopped_reason is not None,
-                "stopped_reason": state.stopped_reason,
-            },
+                cancellation=cancellation,
+            ),
         )
+        await self._final_success(operation, payload)
 
     async def _git_list_refs(self, operation: RunnerOperationEnvelope) -> None:
         source_path = await self._git_source_path(operation)
@@ -1752,12 +1718,360 @@ def _str_list_payload(payload: Mapping[str, JsonValue], key: str) -> list[str]:
     return [item for item in value if isinstance(item, str)]
 
 
+def _delete_path(
+    path: Path,
+    *,
+    workspace: Workspace,
+    recursive: bool,
+    cancellation: threading.Event,
+) -> dict[str, JsonValue]:
+    """Delete one path in a filesystem worker."""
+    if cancellation.is_set():
+        return {"deleted_path": workspace.display_path(path)}
+    try:
+        stat_result = path.lstat()
+    except FileNotFoundError as exc:
+        raise _FileOperationSemanticError("NOT_FOUND", f"No such file: {path}") from exc
+    except OSError as exc:
+        raise _FileOperationSemanticError("DELETE_FAILED", str(exc)) from exc
+    if (
+        stat_module.S_ISDIR(stat_result.st_mode)
+        and not stat_module.S_ISLNK(stat_result.st_mode)
+        and not recursive
+    ):
+        raise _FileOperationSemanticError(
+            "DIRECTORY_RECURSIVE_REQUIRED",
+            f"Directory delete requires recursive=true: {path}",
+        )
+    try:
+        if stat_module.S_ISDIR(stat_result.st_mode) and not stat_module.S_ISLNK(
+            stat_result.st_mode
+        ):
+            shutil.rmtree(path)
+        else:
+            path.unlink()
+    except FileNotFoundError as exc:
+        raise _FileOperationSemanticError("NOT_FOUND", f"No such file: {path}") from exc
+    except OSError as exc:
+        raise _FileOperationSemanticError("DELETE_FAILED", str(exc)) from exc
+    return {"deleted_path": workspace.display_path(path)}
+
+
+def _make_directory(
+    path: Path,
+    *,
+    workspace: Workspace,
+    parents: bool,
+    cancellation: threading.Event,
+) -> dict[str, JsonValue]:
+    """Create one directory in a filesystem worker."""
+    if cancellation.is_set():
+        return {"created_path": workspace.display_path(path)}
+    try:
+        path.mkdir(parents=parents, exist_ok=False)
+    except FileExistsError as exc:
+        raise _FileOperationSemanticError(
+            "ALREADY_EXISTS", f"Path exists: {path}"
+        ) from exc
+    except FileNotFoundError as exc:
+        raise _FileOperationSemanticError(
+            "PARENT_NOT_FOUND",
+            f"Parent directory does not exist: {path.parent}",
+        ) from exc
+    except OSError as exc:
+        raise _FileOperationSemanticError("MKDIR_FAILED", str(exc)) from exc
+    return {"created_path": workspace.display_path(path)}
+
+
+def _move_path(
+    source_path: Path,
+    destination_path: Path,
+    *,
+    workspace: Workspace,
+    overwrite: bool,
+    cancellation: threading.Event,
+) -> dict[str, JsonValue]:
+    """Move one path in a filesystem worker."""
+    if cancellation.is_set():
+        return {
+            "moved_source_path": workspace.display_path(source_path),
+            "moved_destination_path": workspace.display_path(destination_path),
+        }
+    if not source_path.exists() and not source_path.is_symlink():
+        raise _FileOperationSemanticError("NOT_FOUND", f"No such file: {source_path}")
+    if destination_path.exists() or destination_path.is_symlink():
+        if not overwrite:
+            raise _FileOperationSemanticError(
+                "DESTINATION_EXISTS",
+                f"Destination already exists: {destination_path}",
+            )
+        try:
+            if destination_path.is_dir() and not destination_path.is_symlink():
+                shutil.rmtree(destination_path)
+            else:
+                destination_path.unlink()
+        except OSError as exc:
+            raise _FileOperationSemanticError("MOVE_FAILED", str(exc)) from exc
+    if not destination_path.parent.exists():
+        raise _FileOperationSemanticError(
+            "PARENT_NOT_FOUND",
+            f"Parent directory does not exist: {destination_path.parent}",
+        )
+    if not destination_path.parent.is_dir():
+        raise _FileOperationSemanticError(
+            "PARENT_NOT_DIRECTORY",
+            f"Parent path is not a directory: {destination_path.parent}",
+        )
+    try:
+        shutil.move(str(source_path), str(destination_path))
+    except OSError as exc:
+        raise _FileOperationSemanticError("MOVE_FAILED", str(exc)) from exc
+    return {
+        "moved_source_path": workspace.display_path(source_path),
+        "moved_destination_path": workspace.display_path(destination_path),
+    }
+
+
+def _delete_paths(
+    paths: list[Path],
+    *,
+    workspace: Workspace,
+    recursive: bool,
+    cancellation: threading.Event,
+) -> dict[str, JsonValue]:
+    """Delete multiple paths in a filesystem worker."""
+    stats: list[tuple[Path, os.stat_result]] = []
+    try:
+        for path in paths:
+            if cancellation.is_set():
+                return {"deleted_paths": []}
+            stats.append((path, path.lstat()))
+    except FileNotFoundError as exc:
+        raise _FileOperationSemanticError("NOT_FOUND", str(exc)) from exc
+    except OSError as exc:
+        raise _FileOperationSemanticError("DELETE_FAILED", str(exc)) from exc
+    for path, stat_result in stats:
+        if (
+            stat_module.S_ISDIR(stat_result.st_mode)
+            and not stat_module.S_ISLNK(stat_result.st_mode)
+            and not recursive
+        ):
+            raise _FileOperationSemanticError(
+                "DIRECTORY_RECURSIVE_REQUIRED",
+                f"Directory delete requires recursive=true: {path}",
+            )
+    deleted_paths: list[JsonValue] = []
+    try:
+        for path, stat_result in stats:
+            if stat_module.S_ISDIR(stat_result.st_mode) and not stat_module.S_ISLNK(
+                stat_result.st_mode
+            ):
+                shutil.rmtree(path)
+            else:
+                path.unlink()
+            deleted_paths.append(workspace.display_path(path))
+    except FileNotFoundError as exc:
+        raise _FileOperationSemanticError("NOT_FOUND", str(exc)) from exc
+    except OSError as exc:
+        raise _FileOperationSemanticError("DELETE_FAILED", str(exc)) from exc
+    return {"deleted_paths": deleted_paths}
+
+
+def _move_paths(
+    source_paths: list[Path],
+    destination_directory: Path,
+    *,
+    workspace: Workspace,
+    overwrite: bool,
+    cancellation: threading.Event,
+) -> dict[str, JsonValue]:
+    """Move multiple paths into one directory in a filesystem worker."""
+    if cancellation.is_set():
+        return {"moved_entries": []}
+    if not destination_directory.exists():
+        raise _FileOperationSemanticError(
+            "PARENT_NOT_FOUND",
+            f"Destination directory does not exist: {destination_directory}",
+        )
+    if not destination_directory.is_dir():
+        raise _FileOperationSemanticError(
+            "PARENT_NOT_DIRECTORY",
+            f"Destination path is not a directory: {destination_directory}",
+        )
+    seen_destinations: set[Path] = set()
+    moves: list[tuple[Path, Path]] = []
+    for source_path in source_paths:
+        if not source_path.exists() and not source_path.is_symlink():
+            raise _FileOperationSemanticError(
+                "NOT_FOUND", f"No such file: {source_path}"
+            )
+        destination_path = destination_directory / source_path.name
+        if destination_path in seen_destinations:
+            raise _FileOperationSemanticError(
+                "DESTINATION_EXISTS",
+                f"Duplicate destination: {destination_path}",
+            )
+        seen_destinations.add(destination_path)
+        if (
+            destination_path.exists() or destination_path.is_symlink()
+        ) and not overwrite:
+            raise _FileOperationSemanticError(
+                "DESTINATION_EXISTS",
+                f"Destination already exists: {destination_path}",
+            )
+        moves.append((source_path, destination_path))
+    moved_entries: list[JsonValue] = []
+    try:
+        for source_path, destination_path in moves:
+            if destination_path.exists() or destination_path.is_symlink():
+                if destination_path.is_dir() and not destination_path.is_symlink():
+                    shutil.rmtree(destination_path)
+                else:
+                    destination_path.unlink()
+            shutil.move(str(source_path), str(destination_path))
+            moved_entries.append(
+                {
+                    "source_path": workspace.display_path(source_path),
+                    "destination_path": workspace.display_path(destination_path),
+                }
+            )
+    except OSError as exc:
+        raise _FileOperationSemanticError("MOVE_FAILED", str(exc)) from exc
+    return {"moved_entries": moved_entries}
+
+
+def _read_file_bytes(
+    path: Path,
+    *,
+    offset: int,
+    max_bytes: int,
+    cancellation: threading.Event,
+) -> bytes:
+    """Read bounded file bytes in a filesystem worker."""
+    if cancellation.is_set():
+        return b""
+    return path.read_bytes()[offset : offset + max_bytes]
+
+
+def _write_file_bytes(
+    path: Path,
+    *,
+    chunks: tuple[bytes, ...],
+    cancellation: threading.Event,
+) -> int:
+    """Write file bytes in a filesystem worker."""
+    if cancellation.is_set():
+        return 0
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = b"".join(chunks)
+    if cancellation.is_set():
+        return 0
+    path.write_bytes(data)
+    return len(data)
+
+
+def _read_stat_payload(
+    path: Path,
+    *,
+    workspace: Workspace,
+    cancellation: threading.Event,
+) -> dict[str, JsonValue]:
+    """Read file metadata in a filesystem worker."""
+    if cancellation.is_set():
+        return {}
+    return _stat_payload(path, workspace)
+
+
+def _list_file_entries(
+    path: Path,
+    *,
+    workspace: Workspace,
+    recursive: bool,
+    exclude_patterns: list[str],
+    cancellation: threading.Event,
+) -> list[JsonValue]:
+    """Build a file.list response in a filesystem worker."""
+    entries: list[JsonValue] = []
+    for child in _iter_list_entries(
+        path,
+        workspace=workspace,
+        recursive=recursive,
+        exclude_patterns=exclude_patterns,
+        cancellation=cancellation,
+    ):
+        if cancellation.is_set():
+            break
+        entries.append(
+            {
+                "path": workspace.display_path(child),
+                "type": _entry_type(child),
+                "size_bytes": _file_size(child),
+                "modified_at": _modified_at(child),
+            }
+        )
+    return entries
+
+
+def _grep_files(
+    path: Path,
+    *,
+    workspace: Workspace,
+    regex: re.Pattern[str],
+    recursive: bool,
+    exclude_patterns: list[str],
+    max_matching_files: int,
+    max_lines_per_file: int,
+    max_searched_files: int,
+    max_scanned_bytes: int,
+    cancellation: threading.Event,
+) -> dict[str, JsonValue]:
+    """Build a file.grep response in a filesystem worker."""
+    state = _GrepScanState()
+    matches: list[JsonValue] = []
+    for file_path in _iter_grep_files(
+        path,
+        workspace=workspace,
+        recursive=recursive,
+        exclude_patterns=exclude_patterns,
+        cancellation=cancellation,
+    ):
+        if cancellation.is_set():
+            break
+        if len(matches) >= max_matching_files:
+            state.stopped_reason = "matching_file_limit"
+            break
+        if state.searched_file_count >= max_searched_files:
+            state.stopped_reason = "searched_file_limit"
+            break
+        match = _grep_file(
+            file_path,
+            workspace=workspace,
+            regex=regex,
+            max_lines_per_file=max_lines_per_file,
+            max_scanned_bytes=max_scanned_bytes,
+            state=state,
+            cancellation=cancellation,
+        )
+        if match is not None:
+            matches.append(match)
+        if state.stopped_reason is not None:
+            break
+    return {
+        "files": matches,
+        "searched_file_count": state.searched_file_count,
+        "matched_file_count": len(matches),
+        "truncated": state.stopped_reason is not None,
+        "stopped_reason": state.stopped_reason,
+    }
+
+
 def _iter_grep_files(
     path: Path,
     *,
     workspace: Workspace,
     recursive: bool,
     exclude_patterns: list[str],
+    cancellation: threading.Event,
 ) -> Iterator[Path]:
     """Yield regular file paths searched by file.grep in sorted order."""
     for entry in _iter_list_entries(
@@ -1765,7 +2079,10 @@ def _iter_grep_files(
         workspace=workspace,
         recursive=recursive,
         exclude_patterns=exclude_patterns,
+        cancellation=cancellation,
     ):
+        if cancellation.is_set():
+            return
         if entry.is_file() and not entry.is_symlink():
             yield entry
 
@@ -1778,6 +2095,7 @@ def _grep_file(
     max_lines_per_file: int,
     max_scanned_bytes: int,
     state: _GrepScanState,
+    cancellation: threading.Event,
 ) -> dict[str, JsonValue] | None:
     """Find regex-matching lines in one file."""
     state.searched_file_count += 1
@@ -1786,6 +2104,8 @@ def _grep_file(
     try:
         with path.open("rb") as file:
             for line_number, raw_line in enumerate(file, start=1):
+                if cancellation.is_set():
+                    return None
                 state.scanned_bytes += len(raw_line)
                 if state.scanned_bytes > max_scanned_bytes:
                     state.stopped_reason = "scanned_byte_limit"
@@ -1822,8 +2142,11 @@ def _iter_list_entries(
     workspace: Workspace,
     recursive: bool,
     exclude_patterns: list[str],
+    cancellation: threading.Event,
 ) -> Iterator[Path]:
     """Yield paths included in file.list responses in sorted order."""
+    if cancellation.is_set():
+        return
     if path.is_file() or path.is_symlink():
         yield path
         return
@@ -1832,6 +2155,8 @@ def _iter_list_entries(
     except OSError:
         return
     for child in children:
+        if cancellation.is_set():
+            return
         if _excluded(child, base=path, workspace=workspace, patterns=exclude_patterns):
             continue
         yield child
@@ -1841,6 +2166,7 @@ def _iter_list_entries(
                 workspace=workspace,
                 recursive=True,
                 exclude_patterns=exclude_patterns,
+                cancellation=cancellation,
             )
 
 
