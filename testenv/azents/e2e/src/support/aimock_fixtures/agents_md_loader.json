@@ -775,7 +775,6 @@
             "id": "call_subagent_wait_child",
             "name": "wait_agent",
             "arguments": {
-              "agent_name": "child_qa",
               "timeout_seconds": 0
             }
           }
