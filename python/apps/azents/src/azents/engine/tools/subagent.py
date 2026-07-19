@@ -19,8 +19,6 @@ from azents.core.enums import (
     AgentRunStatus,
     AgentSessionRunState,
     EventKind,
-    InputBufferKind,
-    InputBufferSchedulingMode,
     SessionAgentKind,
 )
 from azents.core.inference_profile import SessionInferenceState
@@ -59,7 +57,8 @@ from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepo
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession, SessionAgent
-from azents.services.input_buffer import InputBufferEnqueue, InputBufferService
+from azents.services.agent_mailbox import AgentMailboxService
+from azents.services.input_buffer import InputBufferService
 
 _ROOT_AGENT_USAGE_HINT_TEXT = """You are `/root`, the primary agent in a team of agents collaborating to fulfill the user's goals.
 
@@ -221,7 +220,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
         agent_session_repository: AgentSessionRepository,
         agent_run_repository: AgentRunRepository,
         event_transcript_repository: EventTranscriptRepository,
-        input_buffer_service: InputBufferService,
+        agent_mailbox_service: AgentMailboxService,
         broker: SessionBroker,
         agent_repository: AgentRepository,
         agent: Agent,
@@ -231,7 +230,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
         self.agent_session_repository = agent_session_repository
         self.agent_run_repository = agent_run_repository
         self.event_transcript_repository = event_transcript_repository
-        self.input_buffer_service = input_buffer_service
+        self.agent_mailbox_service = agent_mailbox_service
         self.broker = broker
         self.agent_repository = agent_repository
         self.agent = agent
@@ -423,13 +422,12 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                         session,
                         child,
                     )
-                await self._enqueue_agent_message(
+                await self.agent_mailbox_service.enqueue_spawn_assignment(
                     session,
                     source=current,
                     target=child,
-                    message_kind="spawn_agent",
                     content=input.task,
-                    wake=True,
+                    actor_user_id=self.user_id,
                 )
 
             await self._wake_session(child_session)
@@ -583,13 +581,12 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                     return _json(
                         {"status": "not_found", "agent_name": input.agent_name}
                     )
-                await self._enqueue_agent_message(
+                await self.agent_mailbox_service.enqueue_message(
                     session,
                     source=resolution.current,
                     target=resolution.target,
-                    message_kind="send_message",
                     content=input.message,
-                    wake=False,
+                    actor_user_id=self.user_id,
                 )
                 session_agent_repo = self.agent_session_repository
                 await session_agent_repo.update_session_agent_last_task_message(
@@ -627,13 +624,12 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                     session,
                     resolution.target.agent_session_id,
                 )
-                await self._enqueue_agent_message(
+                await self.agent_mailbox_service.enqueue_followup_task(
                     session,
                     source=resolution.current,
                     target=resolution.target,
-                    message_kind="followup_task",
                     content=input.task,
-                    wake=True,
+                    actor_user_id=self.user_id,
                 )
                 session_agent_repo = self.agent_session_repository
                 await session_agent_repo.update_session_agent_last_task_message(
@@ -973,62 +969,6 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
             ),
         )
 
-    async def _enqueue_agent_message(
-        self,
-        session: AsyncSession,
-        *,
-        source: SessionAgent,
-        target: SessionAgent,
-        message_kind: Literal["spawn_agent", "send_message", "followup_task"],
-        content: str,
-        wake: bool,
-    ) -> None:
-        locked_target = await self.agent_session_repository.lock_by_id(
-            session,
-            target.agent_session_id,
-        )
-        if locked_target is None:
-            raise ValueError("Target AgentSession not found")
-        await self.input_buffer_service.enqueue(
-            session,
-            InputBufferEnqueue(
-                session_id=target.agent_session_id,
-                kind=InputBufferKind.AGENT_MESSAGE,
-                scheduling_mode=(
-                    InputBufferSchedulingMode.WAKE_SESSION
-                    if wake
-                    else InputBufferSchedulingMode.QUEUE_ONLY
-                ),
-                requested_model_target_label=None,
-                requested_reasoning_effort=None,
-                actor_user_id=self.user_id,
-                content=content,
-                idempotency_key=None,
-                metadata={
-                    "source": "agent_mailbox",
-                    "message_kind": message_kind,
-                    "source_session_agent_id": source.id,
-                    "source_path": source.path,
-                    "target_session_agent_id": target.id,
-                    "target_path": target.path,
-                },
-                action=None,
-                attachments=[],
-                file_parts=[],
-            ),
-        )
-        mark_message_activity = (
-            self.agent_session_repository.mark_session_agent_message_activity
-        )
-        await mark_message_activity(session, session_agent_id=source.id)
-        if target.id != source.id:
-            await mark_message_activity(session, session_agent_id=target.id)
-        if wake:
-            await self.agent_session_repository.mark_running_for_input_wakeup(
-                session,
-                target.agent_session_id,
-            )
-
     async def _publish_tree_changed(self, changed: SessionAgent) -> None:
         """Publish a non-durable Subagent Tree invalidation event."""
         if self.publish_event is None:
@@ -1153,12 +1093,16 @@ class SubagentToolkitProvider(ToolkitProvider[SubagentToolkitConfig]):
         if agent is None:
             raise ValueError("Agent not found while resolving subagent Toolkit")
         subagent_settings = agent.subagent_settings
+        agent_session_repository = AgentSessionRepository()
         toolkit = SubagentToolkit(
             session_manager=self.session_manager,
-            agent_session_repository=AgentSessionRepository(),
+            agent_session_repository=agent_session_repository,
             agent_run_repository=AgentRunRepository(),
             event_transcript_repository=EventTranscriptRepository(),
-            input_buffer_service=self.input_buffer_service,
+            agent_mailbox_service=AgentMailboxService(
+                input_buffer_service=self.input_buffer_service,
+                agent_session_repository=agent_session_repository,
+            ),
             broker=self.broker,
             agent_repository=self.agent_repository,
             agent=agent,

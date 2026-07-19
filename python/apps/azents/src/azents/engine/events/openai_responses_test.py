@@ -41,7 +41,7 @@ from websockets.exceptions import InvalidStatus
 from websockets.http11 import Response as WebSocketHTTPResponse
 
 from azents.core.chatgpt_oauth import CHATGPT_OAUTH_BACKEND_BASE_URL
-from azents.core.enums import EventKind, LLMProvider
+from azents.core.enums import AgentRunStatus, EventKind, LLMProvider
 from azents.core.llm_catalog import ModelCapabilities
 from azents.engine.events.file_parts import ModelFileLoweringContent
 from azents.engine.events.litellm_responses import LiteLLMResponsesLowerer
@@ -63,6 +63,7 @@ from azents.engine.events.protocols import (
 )
 from azents.engine.events.responses_continuation import ResponsesContinuationPlanner
 from azents.engine.events.types import (
+    AgentMessagePayload,
     AssistantMessagePayload,
     Event,
     FileOutputPart,
@@ -342,6 +343,50 @@ def test_openai_lowerer_omits_endpoint_credentials_and_store() -> None:
     assert "base_url" not in request.options
     assert request.options.get("instructions") == "You are a helpful assistant."
     assert request.options.get("prompt_cache_key") != "session-1"
+
+
+def test_openai_lowerer_renders_agent_result_terminal_envelope() -> None:
+    """Official SDK lowering shares terminal mailbox envelope semantics."""
+    lowerer = OpenAIResponsesLowerer(
+        provider="openai",
+        model="gpt-5.1-codex",
+        provider_id=LLMProvider.OPENAI,
+        credential_kwargs={},
+    )
+    event = Event(
+        id="3" * 32,
+        session_id="session-1",
+        kind=EventKind.AGENT_MESSAGE,
+        payload=AgentMessagePayload(
+            message_kind="agent_result",
+            source_session_agent_id="source-agent",
+            source_path="/root/reviewer",
+            target_session_agent_id="target-agent",
+            target_path="/root",
+            source_run_id="1" * 32,
+            source_run_index=2,
+            run_status=AgentRunStatus.FAILED,
+            source_terminal_result_event_id=None,
+            content="Review failed safely.",
+        ),
+        created_at=datetime.datetime.now(datetime.UTC),
+    )
+
+    request = lowerer.lower([event], model="gpt-5.1-codex")
+
+    assert request.input == [
+        {
+            "role": "user",
+            "content": (
+                "Message Type: AGENT_RESULT\n"
+                "Task name: /root\n"
+                "Sender: /root/reviewer\n"
+                "Run status: failed\n"
+                "Payload:\n"
+                "Review failed safely."
+            ),
+        }
+    ]
 
 
 def test_chatgpt_lowerer_uses_standard_full_context_request() -> None:

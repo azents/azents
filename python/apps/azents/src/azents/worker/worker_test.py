@@ -57,6 +57,7 @@ from azents.services.input_buffer import (
     PromotedInputBuffers,
     TurnEffect,
 )
+from azents.services.subagent_terminal_result import SubagentTerminalResultService
 from azents.worker.events.publisher import WorkerEventPublisher
 from azents.worker.live.event_projector import LiveEventProjector
 from azents.worker.run.executor import OperationActionProcessResult, RunExecutor
@@ -414,6 +415,24 @@ class _PendingInputBufferService:
         return session_id in self.host.pending_input_session_ids
 
 
+class _SubagentTerminalResultService:
+    """SubagentTerminalResultService test double."""
+
+    def __init__(self, host: "_Host") -> None:
+        self.host = host
+
+    async def deliver_pending_for_source_session(
+        self,
+        source_session_id: str,
+        *,
+        repair_source: str,
+    ) -> None:
+        """Record terminal delivery repair requests."""
+        self.host.terminal_result_delivery_calls.append(
+            (source_session_id, repair_source)
+        )
+
+
 class _IdleContinuationService:
     """IdleContinuationService test double."""
 
@@ -476,6 +495,7 @@ class _Host:
         self.heartbeat_session_ids: list[str] = []
         self.owner_heartbeat_session_ids: list[str] = []
         self.pending_input_session_ids: set[str] = set()
+        self.terminal_result_delivery_calls: list[tuple[str, str]] = []
         self.stop_request_session_ids: set[str] = set()
         self.processed_messages: list[SessionWakeUp] = []
         self.handover_messages: list[SessionWakeUp] = []
@@ -668,6 +688,10 @@ def _make_session_runner(host: _Host) -> SessionRunner:
         input_buffer_service=cast(
             InputBufferService,
             _PendingInputBufferService(host),
+        ),
+        subagent_terminal_result_service=cast(
+            SubagentTerminalResultService,
+            _SubagentTerminalResultService(host),
         ),
         idle_continuation_service=cast(
             IdleContinuationService,
@@ -879,6 +903,10 @@ async def test_terminal_run_marks_idle_before_idle_continuation() -> None:
 
     assert host.idle_session_ids == ["session-001"]
     assert host.idle_continuation_calls == [(message, [])]
+    assert host.terminal_result_delivery_calls == [
+        ("session-001", "source_session_reuse"),
+        ("session-001", "terminal_boundary"),
+    ]
     assert host.lifecycle_events == [
         "mark_session_idle",
         "clear_session_activity",

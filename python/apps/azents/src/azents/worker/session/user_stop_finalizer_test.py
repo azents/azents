@@ -307,6 +307,9 @@ def _running_run(session_id: str) -> AgentRunState:
             )
         ],
         last_completed_event_id=None,
+        parent_result_delivery_state=None,
+        parent_result_input_buffer_id=None,
+        parent_result_enqueued_at=None,
         stop_requested_at=None,
         created_at=now,
         started_at=now,

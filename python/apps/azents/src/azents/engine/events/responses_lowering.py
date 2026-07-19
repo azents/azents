@@ -87,6 +87,18 @@ def _format_goal_updated_event_reminder(payload: UserMessagePayload) -> str:
 
 def _format_agent_message(payload: AgentMessagePayload) -> str:
     """Render agent_message as an explicitly sourced model-visible task."""
+    if payload.message_kind == "agent_result":
+        assert payload.run_status is not None
+        return "\n".join(
+            [
+                "Message Type: AGENT_RESULT",
+                f"Task name: {payload.target_path}",
+                f"Sender: {payload.source_path}",
+                f"Run status: {payload.run_status.value}",
+                "Payload:",
+                payload.content,
+            ]
+        )
     message_type = _agent_message_type(payload.message_kind)
     return "\n".join(
         [

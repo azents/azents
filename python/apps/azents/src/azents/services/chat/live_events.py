@@ -291,20 +291,24 @@ def input_buffer_to_live_event(input_buffer: InputBuffer) -> Event:
             requested_inference_profile=_input_buffer_requested_profile(input_buffer),
         )
     elif input_buffer.kind == InputBufferKind.AGENT_MESSAGE:
-        payload = _agent_message_adapter.validate_python(
-            {
-                "message_kind": input_buffer.metadata["message_kind"],
-                "source_session_agent_id": input_buffer.metadata[
-                    "source_session_agent_id"
-                ],
-                "source_path": input_buffer.metadata["source_path"],
-                "target_session_agent_id": input_buffer.metadata[
-                    "target_session_agent_id"
-                ],
-                "target_path": input_buffer.metadata["target_path"],
-                "content": input_buffer.content,
-            }
-        )
+        message_payload: dict[str, object] = {
+            "message_kind": input_buffer.metadata["message_kind"],
+            "source_session_agent_id": input_buffer.metadata["source_session_agent_id"],
+            "source_path": input_buffer.metadata["source_path"],
+            "target_session_agent_id": input_buffer.metadata["target_session_agent_id"],
+            "target_path": input_buffer.metadata["target_path"],
+            "content": input_buffer.content,
+        }
+        for key in (
+            "source_run_id",
+            "source_run_index",
+            "run_status",
+            "source_terminal_result_event_id",
+        ):
+            value = input_buffer.metadata.get(key)
+            if value is not None:
+                message_payload[key] = value
+        payload = _agent_message_adapter.validate_python(message_payload)
     else:
         content: str | list[UserContentPart]
         if input_buffer.file_parts:

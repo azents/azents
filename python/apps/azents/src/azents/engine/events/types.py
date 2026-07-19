@@ -15,7 +15,12 @@ from pydantic import (
     model_validator,
 )
 
-from azents.core.enums import AgentRunPhase, AgentRunStatus, EventKind
+from azents.core.enums import (
+    AgentRunParentResultDeliveryState,
+    AgentRunPhase,
+    AgentRunStatus,
+    EventKind,
+)
 from azents.core.inference_profile import (
     AppliedInferenceProfile,
     RequestedInferenceProfile,
@@ -273,14 +278,57 @@ class AgentMessagePayload(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    message_kind: Literal["spawn_agent", "send_message", "followup_task"] = Field(
-        description="Mailbox message kind",
-    )
+    message_kind: Literal[
+        "spawn_agent",
+        "send_message",
+        "followup_task",
+        "agent_result",
+    ] = Field(description="Mailbox message kind")
     source_session_agent_id: str = Field(description="Source SessionAgent ID")
     source_path: str = Field(description="Source SessionAgent path")
     target_session_agent_id: str = Field(description="Target SessionAgent ID")
     target_path: str = Field(description="Target SessionAgent path")
+    source_run_id: str | None = Field(default=None, description="Source AgentRun ID")
+    source_run_index: int | None = Field(
+        default=None,
+        ge=1,
+        description="Source session Run index",
+    )
+    run_status: AgentRunStatus | None = Field(
+        default=None,
+        description="Source terminal Run status",
+    )
+    source_terminal_result_event_id: str | None = Field(
+        default=None,
+        description="Source terminal result Event ID",
+    )
     content: str = Field(description="Message content")
+
+    @model_validator(mode="after")
+    def validate_message_kind_fields(self) -> "AgentMessagePayload":
+        """Require terminal metadata only for agent_result messages."""
+        terminal_fields = (
+            self.source_run_id,
+            self.source_run_index,
+            self.run_status,
+        )
+        if self.message_kind == "agent_result":
+            if any(value is None for value in terminal_fields):
+                raise ValueError("agent_result requires source Run metadata")
+            if self.run_status not in {
+                AgentRunStatus.COMPLETED,
+                AgentRunStatus.FAILED,
+                AgentRunStatus.STOPPED,
+                AgentRunStatus.INTERRUPTED,
+                AgentRunStatus.CANCELLED,
+            }:
+                raise ValueError("agent_result requires a terminal Run status")
+            return self
+        if any(value is not None for value in terminal_fields) or (
+            self.source_terminal_result_event_id is not None
+        ):
+            raise ValueError("instruction messages cannot include result metadata")
+        return self
 
 
 class AssistantMessagePayload(BaseModel):
@@ -679,6 +727,9 @@ class AgentRunState(BaseModel):
     last_completed_event_id: str | None = Field(default=None)
     terminal_result_event_id: str | None = Field(default=None)
     terminal_result_message: str | None = Field(default=None)
+    parent_result_delivery_state: AgentRunParentResultDeliveryState | None
+    parent_result_input_buffer_id: str | None
+    parent_result_enqueued_at: datetime.datetime | None
     stop_requested_at: datetime.datetime | None = Field(default=None)
     created_at: datetime.datetime
     started_at: datetime.datetime | None

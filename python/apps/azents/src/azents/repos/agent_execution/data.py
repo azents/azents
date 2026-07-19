@@ -4,7 +4,12 @@ import datetime
 
 from pydantic import BaseModel, Field
 
-from azents.core.enums import AgentRunPhase, AgentRunStatus, EventKind
+from azents.core.enums import (
+    AgentRunParentResultDeliveryState,
+    AgentRunPhase,
+    AgentRunStatus,
+    EventKind,
+)
 from azents.engine.events.types import ActiveToolCall
 from azents.engine.run.failure import FailedRunRetryState
 from azents.rdb.models.event import JSONValue
@@ -78,6 +83,18 @@ class AgentRunPatch(BaseModel):
     terminal_result_message: str | None = Field(
         default=None,
         description="Terminal result message projected for parent observation",
+    )
+    parent_result_delivery_state: AgentRunParentResultDeliveryState | None = Field(
+        default=None,
+        description="Finalized parent mailbox delivery state",
+    )
+    parent_result_input_buffer_id: str | None = Field(
+        default=None,
+        description="Delivered parent mailbox InputBuffer ID",
+    )
+    parent_result_enqueued_at: datetime.datetime | None = Field(
+        default=None,
+        description="Parent mailbox enqueue time",
     )
     stop_requested_at: datetime.datetime | None = Field(
         default=None,
