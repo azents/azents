@@ -9,9 +9,13 @@ code_paths:
   - python/apps/azents/src/azents/scheduler/executor.py
   - python/apps/azents/src/azents/scheduler/service.py
   - python/apps/azents/src/azents/services/file_lifecycle_cleanup.py
+  - python/apps/azents/src/azents/services/archived_session_retention.py
+  - python/apps/azents/src/azents/services/archived_session_purge.py
+  - python/apps/azents/src/azents/repos/archived_session_retention/**
   - python/apps/azents/src/azents/repos/scheduled_task_state/__init__.py
   - python/apps/azents/src/azents/repos/scheduled_task_state/data.py
   - python/apps/azents/src/azents/rdb/models/scheduled_task_state.py
+  - python/apps/azents/src/azents/rdb/models/archived_session_retention.py
   - python/apps/azents/src/cli/scheduler.py
   - python/apps/azents/src/cli/devserver.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/c7b64368f3a1_add_scheduled_task_states.py
@@ -20,8 +24,8 @@ code_paths:
   - infra/argocd/azents-server/base/scheduler-pdb.yaml
   - infra/charts/azents/templates/server/scheduler-deployment.yaml.tpl
   - infra/charts/azents/templates/server/scheduler-pdb.yaml.tpl
-last_verified_at: 2026-07-18
-spec_version: 3
+last_verified_at: 2026-07-19
+spec_version: 4
 ---
 
 # Periodic Execution Flow Spec
@@ -52,7 +56,10 @@ A definition includes:
 
 The database does not store task definitions or schedule overrides. It stores current runtime state only.
 
-Registered tasks include `scheduler_heartbeat`, model catalog projection, and `file_lifecycle_cleanup`. `scheduler_heartbeat` is a no-op heartbeat that returns a small execution summary and has no external network dependency.
+Registered tasks include `scheduler_heartbeat`, `model_catalog_system_projection`,
+`archived_session_retention_recalculation`, `archived_session_purge`, and
+`file_lifecycle_cleanup`. `scheduler_heartbeat` is a no-op heartbeat that returns a small execution
+summary and has no external network dependency.
 
 ## Execution backend
 
@@ -173,6 +180,39 @@ The successful task result and completion log include these lifecycle counters:
 
 The pending snapshot is used only for observability. The actual object-store batch remains bounded at 100 Artifact rows, 100 ExchangeFile rows, and 200 ModelFile rows, with terminal rows selected after the metadata work so existing retry ordering is preserved.
 
+## Archived-session retention recalculation task
+
+`archived_session_retention_recalculation` runs every minute with a two-minute task timeout and
+bounded one-to-thirty-minute scheduler retry. It claims at most one durable retention application
+whose own lease is absent or expired, then recalculates at most 100 archived roots in stable ID order.
+The application records its target settings revision, target whole-day value, cursor, cumulative
+impact counters, attempt count, lease, next retry time, bounded user-safe error summary, and terminal
+timestamps.
+
+For each root that has not entered purge fencing, the handler replaces the immutable archive snapshot
+with the application revision, derives the deadline from the original `archived_at`, and creates,
+reschedules, or cancels unstarted purge work. A null target means Unlimited and clears the deadline.
+A finite target schedules every affected root; an already-past deadline becomes eligible for the
+separate purge task without being deleted in this handler. Roots whose purge fence already started are
+skipped and remain irreversible. Batch failure releases the durable application into exponential retry
+wait capped at 30 minutes; successful batches advance the cursor until the application is completed.
+
+## Archived-session purge task
+
+`archived_session_purge` runs every five minutes with a ten-minute task timeout and bounded
+one-to-thirty-minute scheduler retry. Before claiming work it cancels at most 100 stale unstarted jobs
+whose root status, deadline, or policy revision no longer matches the job. It then claims at most one
+due purge job with a 15-minute durable lease. Claiming starts the irreversible purge fence; restore is
+rejected from that point even if cleanup later retries.
+
+The handler locks the complete root tree, increments owner generations, records stop intent, emits
+broker stop signals, and waits for active runs through durable retry rather than deleting around them.
+After no active run remains, it removes broker state, deletes every Azents-owned subtree worktree and
+branch, marks subtree file resources terminal, deletes their external blobs, revalidates the tree and
+cleanup state, deletes file metadata, and finally deletes the root database subtree. Only then does the
+content-free purge job tombstone become completed. External cleanup failure or lost ownership keeps
+metadata and durable retry state instead of allowing a cascade to hide unfinished work.
+
 ## CLI operations
 
 The scheduler CLI exposes:
@@ -196,3 +236,7 @@ The periodic execution flow does not provide:
 - external model catalog source sync by itself.
 
 Model catalog source sync is a later consumer of this scheduler.
+
+## Changelog
+
+- **2026-07-19** — v4. Added the durable archived-session retention recalculation and purge tasks, including intervals, leases, bounded batching, stale-job reconciliation, fencing, retry, and cleanup ordering.

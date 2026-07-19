@@ -17,24 +17,25 @@ Details of all living specs. Synchronized from frontmatter.
 | goal | [Goal Domain Spec](domain/goal.md) | - | 2026-07-16 | 9 |
 | memory | [Memory](domain/memory.md) | @Hardtack | 2026-07-17 | 5 |
 | model-catalog | [Model Catalog Domain Spec](domain/model-catalog.md) | - | 2026-07-19 | 15 |
+| system-settings | [System Settings](domain/system-settings.md) | @Hardtack | 2026-07-19 | 1 |
 | toolkit | [Toolkit](domain/toolkit.md) | @Hardtack | 2026-07-19 | 58 |
 | user-auth | [User & Authentication](domain/user-auth.md) | @Hardtack | 2026-07-13 | 7 |
-| workspace | [Workspace & Membership](domain/workspace.md) | @Hardtack | 2026-07-14 | 40 |
+| workspace | [Workspace & Membership](domain/workspace.md) | @Hardtack | 2026-07-19 | 41 |
 
 ## Flow Specs
 
 | Title | Owner | Last Verified | Version |
 |---|---|---|---|
-| [Agent Execution Loop](flow/agent-execution-loop.md) | @Hardtack | 2026-07-19 | 109 |
+| [Agent Execution Loop](flow/agent-execution-loop.md) | @Hardtack | 2026-07-19 | 110 |
 | [Agent Runtime Control](flow/agent-runtime-control.md) | @Hardtack | 2026-07-19 | 18 |
 | [Agent Runtime Persistence](flow/agent-runtime-persistence.md) | @Hardtack | 2026-07-03 | 3 |
 | [Chat Session Resync](flow/chat-session-resync.md) | @Hardtack | 2026-07-19 | 35 |
 | [ChatGPT OAuth Flow](flow/chatgpt-oauth.md) | @Hardtack | 2026-07-19 | 17 |
 | [Context Compaction](flow/context-compaction.md) | @Hardtack | 2026-07-19 | 28 |
-| [File Exchange Storage](flow/file-exchange-storage.md) | @Hardtack | 2026-07-19 | 18 |
+| [File Exchange Storage](flow/file-exchange-storage.md) | @Hardtack | 2026-07-19 | 19 |
 | [MCP OAuth Flow](flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
 | [OpenRouter API Key Provider Flow](flow/openrouter-api-key.md) | @Hardtack | 2026-07-19 | 3 |
-| [Periodic Execution Flow Spec](flow/periodic-execution.md) | - | 2026-07-18 | 3 |
+| [Periodic Execution Flow Spec](flow/periodic-execution.md) | - | 2026-07-19 | 4 |
 | [Run Resume](flow/run-resume.md) | @Hardtack | 2026-07-18 | 21 |
 | [Session Context Inspector](flow/session-context-inspector.md) | @Hardtack | 2026-07-19 | 17 |
 | [E2E Primary Test Strategy](flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-07-17 | 8 |

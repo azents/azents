@@ -12,9 +12,13 @@ code_paths:
   - python/apps/azents/src/azents/services/input_buffer.py
   - python/apps/azents/src/azents/repos/artifact/**
   - python/apps/azents/src/azents/repos/model_file/**
+  - python/apps/azents/src/azents/repos/agent_session/**
+  - python/apps/azents/src/azents/repos/archived_session_retention/**
   - python/apps/azents/src/azents/rdb/models/artifact.py
   - python/apps/azents/src/azents/rdb/models/model_file.py
+  - python/apps/azents/src/azents/rdb/models/exchange_file.py
   - python/apps/azents/src/azents/services/session_storage.py
+  - python/apps/azents/src/azents/services/archived_session_purge.py
   - python/apps/azents/src/azents/services/uploads/**
   - python/apps/azents/src/azents/services/chat/workspace.py
   - python/apps/azents/src/azents/engine/events/file_parts.py
@@ -35,7 +39,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/AttachmentPreviewViewer.tsx
   - typescript/apps/azents-web/src/features/chat/components/ProviderToolCallCard.tsx
 last_verified_at: 2026-07-19
-spec_version: 18
+spec_version: 19
 ---
 
 # File Exchange Storage
@@ -54,6 +58,16 @@ File Exchange Storage is the flow that separately stores and retrieves user-faci
 4. File body is stored in each store, and attachment URI snapshot and FilePart snapshot remain as independent fields in event/input buffer. Do not reverse-infer FilePart by reading attachment URI.
 5. Agent execution loop does not automatically convert attachment to rich file input when transforming user input event to LLM input. Model rich input is delivered only as FilePart content of user input.
 6. Exchange attachment has `status`, `expires_at`, and `expired_at` metadata. Scheduler-owned cleanup marks Exchange files past expiration time as `expired` and attempts blob deletion. Resolver, download API, lowerer, and UI treat expired/unavailable as normal history state based on DB availability.
+
+An ExchangeFile created for a concrete session is bound immediately to that session's root
+`SessionAgent` retention unit. Files uploaded before a new root exists remain unbound until the first
+input is accepted. Input acceptance atomically claims every referenced source and generated preview
+row for the resolved root in the same transaction as the InputBuffer write. Claim rejects missing,
+expired, unavailable, cross-workspace, cross-Agent, and already-owned-by-another-root files; a failed
+claim rolls back the input. Once bound, metadata resolution, download, `import_file`, and model-input
+preparation require the requesting session to resolve to the same root retention unit. Descendant
+sessions in that root tree may therefore use the file, while another root under the same Agent may
+not.
 
 ### Agent imports user or internal file
 
@@ -91,6 +105,23 @@ The Engine validates Session, Agent, Workspace, and authenticated actor ownershi
 
 Compatible Responses replay of a provider-hosted call resolves the ModelFile and reconstructs provider-native Base64 only inside the outbound request, while a separate bounded item carries canonical Exchange URI context. Cross-adapter provider replay and later-model use of an xAI client result lower the FileOutputPart through normal rich-image input or the explicit unavailable-image placeholder and retain attachment URI metadata. Request-local bytes are never copied back into durable history.
 
+### Archived root purge
+
+Archive does not delete or unbind file resources. Durable purge is an earlier terminal lifecycle
+boundary than ordinary file TTL or ModelFile head-cursor GC for every session in the archived root
+tree. After purge fencing and run shutdown, the purge workflow:
+
+1. marks subtree ModelFiles deleted, subtree Artifacts expired, and every source/preview ExchangeFile
+   bound to the root expired;
+2. deletes each external blob and durably records `blob_deleted_at`;
+3. verifies that every selected resource reached its terminal metadata and blob state; and
+4. deletes file metadata before the root Session cascade.
+
+Any worktree or blob cleanup failure aborts database subtree deletion and leaves ownership, terminal
+metadata, durable purge progress, and retry information available for a later pass. Purge never relies
+on an Exchange URI to infer the owner and never lets a database cascade erase the last cleanup
+reference before external deletion succeeds.
+
 ### Agent presents sandbox file
 
 `present_file` tool publishes only files under Provider-reported Agent Workspace as public Exchange attachment to user. Files outside allowed path are rejected. Published attachment appears in chat UI attachment list and can be retrieved through download endpoint.
@@ -100,7 +131,8 @@ Compatible Responses replay of a provider-hosted call resolves the ModelFile and
 - Event store does not store file body. Event has only attachment/artifact metadata and URI reference, or FilePart `model_file_id`.
 - Durable event, REST/WS projection, and frontend state do not store raw bytes, inline base64, data URL, or provider-specific file payload.
 - There is no implicit conversion among Attachment, Artifact, and ModelFile/FilePart. URI is storage location, not entity reference, so do not add logic extracting entity id from URI string. A `model_file_id` is single-event scoped; reusing the same source bytes later requires materializing a new ModelFile/FilePart.
-- Attachment Exchange file and Artifact have time-based retention/TTL lifecycle. ModelFile has context-owned lifecycle based on model-input head cursor reachability and active run pins.
+- Attachment ExchangeFile and Artifact have ordinary time-based retention/TTL lifecycle. ModelFile has context-owned lifecycle based on model-input head cursor reachability and active run pins. Archived-root durable purge may terminate any of these resources earlier after purge fencing.
+- ExchangeFile archive ownership is explicit `retention_root_session_id` metadata. Source and generated preview rows are claimed together, access is limited to sessions in the same root tree, and ordinary Agent-level namespace membership alone is insufficient.
 - User upload, agent-presented file, and internal artifact must pass session/workspace ownership verification.
 - ExchangeFile, Artifact, and ModelFile creation preallocates the entity ID and storage key. It
   validates ownership in a short DB session, closes that session before object-storage upload, and
@@ -131,6 +163,7 @@ Compatible Responses replay of a provider-hosted call resolves the ModelFile and
 
 ## Changelog
 
+- **2026-07-19** — v19. Added atomic root-retention claims for ExchangeFile source/preview rows, same-tree access, archive preservation, and cleanup-before-cascade file purge semantics.
 - **2026-07-19** — v18. Moved provider-generated Exchange attachments into canonical provider-call semantic output alongside ModelFile-backed replay parts.
 
 - **2026-07-18** — v17. Reused generated-image dual materialization for xAI client tool results while preserving provider/client event ownership and Base64-free durable storage.
