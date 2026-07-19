@@ -23,6 +23,7 @@ from . import (
     workspace_user,
     xai_oauth,
 )
+from .kimi_oauth.v1 import route as kimi_oauth
 
 modules = [
     agent,
@@ -33,6 +34,7 @@ modules = [
     health,
     invitation,
     join_request,
+    kimi_oauth,
     llm_provider_integration,
     security,
     workspace_model_settings,

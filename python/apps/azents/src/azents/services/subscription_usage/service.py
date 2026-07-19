@@ -21,10 +21,16 @@ from azents.core.credentials import (
     ApiKeySecrets,
     ChatGPTOAuthConfig,
     ChatGPTOAuthSecrets,
+    KimiOAuthConfig,
+    KimiOAuthSecrets,
     XaiOAuthConfig,
     XaiOAuthSecrets,
 )
 from azents.core.enums import LLMProvider
+from azents.core.kimi_oauth import (
+    KimiOAuthConnectionStatus,
+    resolve_kimi_code_api_base_url,
+)
 from azents.core.openrouter import OPENROUTER_API_BASE_URL
 from azents.core.xai_oauth import (
     XAI_USAGE_BASE_URL,
@@ -42,6 +48,16 @@ from azents.services.chatgpt_oauth.data import ProviderRejected, ProviderUnavail
 from azents.services.chatgpt_oauth.runtime import (
     ensure_runtime_tokens,
     refresh_runtime_tokens,
+)
+from azents.services.kimi_oauth.data import ProviderRejected as KimiProviderRejected
+from azents.services.kimi_oauth.data import (
+    ProviderUnavailable as KimiProviderUnavailable,
+)
+from azents.services.kimi_oauth.runtime import (
+    ensure_runtime_tokens as ensure_kimi_runtime_tokens,
+)
+from azents.services.kimi_oauth.runtime import (
+    refresh_runtime_tokens as refresh_kimi_runtime_tokens,
 )
 from azents.services.xai_oauth.data import (
     ProviderEntitlementDenied as XaiProviderEntitlementDenied,
@@ -63,6 +79,9 @@ from .data import (
     ChatGPTUsageSnapshot,
     ChatGPTUsageUnauthorized,
     ChatGPTUsageUnavailable,
+    KimiUsageSnapshot,
+    KimiUsageUnauthorized,
+    KimiUsageUnavailable,
     OpenRouterUsageHidden,
     OpenRouterUsageSnapshot,
     OpenRouterUsageUnavailable,
@@ -81,6 +100,7 @@ from .data import (
     XaiUsageUnavailable,
     unavailable_message,
 )
+from .kimi_client import KIMI_USAGE_CONTRACT_VERSION, KimiSubscriptionUsageClient
 from .openrouter_client import (
     OPENROUTER_USAGE_CONTRACT_VERSION,
     OpenRouterSubscriptionUsageClient,
@@ -115,6 +135,11 @@ def get_openrouter_usage_base_url() -> str:
     return OPENROUTER_API_BASE_URL
 
 
+def get_kimi_usage_base_url() -> str:
+    """Resolve the non-secret Kimi Code API root."""
+    return resolve_kimi_code_api_base_url()
+
+
 @dataclasses.dataclass
 class SubscriptionUsageService:
     """Load, authorize, refresh, and normalize one subscription usage read."""
@@ -130,6 +155,7 @@ class SubscriptionUsageService:
     chatgpt_usage_base_url: Annotated[str, Depends(get_chatgpt_usage_base_url)]
     xai_usage_base_url: Annotated[str, Depends(get_xai_usage_base_url)]
     openrouter_usage_base_url: Annotated[str, Depends(get_openrouter_usage_base_url)]
+    kimi_usage_base_url: Annotated[str, Depends(get_kimi_usage_base_url)]
 
     async def read(
         self,
@@ -178,6 +204,9 @@ class SubscriptionUsageService:
                     integration=integration,
                     include_financial_details=include_financial_details,
                 )
+            case LLMProvider.KIMI_OAUTH:
+                result = await self._read_kimi_usage(integration=integration)
+
             case _:
                 failure = SubscriptionUsageUnsupportedProvider(
                     provider=integration.provider
@@ -566,6 +595,152 @@ class SubscriptionUsageService:
             case _:
                 assert_never(outcome)
 
+    async def _read_kimi_usage(
+        self,
+        *,
+        integration: LLMProviderIntegrationWithSecrets,
+    ) -> "_UsageReadResult":
+        """Execute the Kimi-specific freshness and one-retry flow."""
+        if not integration.enabled:
+            return self._unavailable(
+                integration=integration,
+                reason=SubscriptionUsageUnavailableReason.DISABLED,
+                retryable=False,
+                http_status=None,
+            )
+        credentials = _kimi_credentials(integration)
+        if credentials is None:
+            return self._unavailable(
+                integration=integration,
+                reason=SubscriptionUsageUnavailableReason.INVALID_PROVIDER_RESPONSE,
+                retryable=False,
+                http_status=None,
+            )
+        if credentials.config.status == KimiOAuthConnectionStatus.DISABLED.value:
+            return self._unavailable(
+                integration=integration,
+                reason=SubscriptionUsageUnavailableReason.DISABLED,
+                retryable=False,
+                http_status=None,
+            )
+        if (
+            credentials.config.status
+            == KimiOAuthConnectionStatus.REFRESH_REQUIRED.value
+        ):
+            return self._unavailable(
+                integration=integration,
+                reason=SubscriptionUsageUnavailableReason.RECONNECT_REQUIRED,
+                retryable=False,
+                http_status=None,
+            )
+        fresh_result = await ensure_kimi_runtime_tokens(
+            integration=integration,
+            integration_repository=self.repository,
+            session_manager=self.session_manager,
+        )
+        match fresh_result:
+            case Success(fresh_integration):
+                return await self._read_kimi_with_retry(integration=fresh_integration)
+            case Failure(error):
+                return self._kimi_refresh_failure(
+                    integration=integration,
+                    error=error,
+                )
+            case _:
+                assert_never(fresh_result)
+
+    async def _read_kimi_with_retry(
+        self,
+        *,
+        integration: LLMProviderIntegrationWithSecrets,
+    ) -> "_UsageReadResult":
+        """Read Kimi usage and force one refresh after an adapter 401."""
+        credentials = _kimi_credentials(integration)
+        if credentials is None:
+            return self._unavailable(
+                integration=integration,
+                reason=SubscriptionUsageUnavailableReason.INVALID_PROVIDER_RESPONSE,
+                retryable=False,
+                http_status=None,
+            )
+        first = await self._kimi_client().read_usage(secrets=credentials.secrets)
+        match first:
+            case KimiUsageSnapshot():
+                return self._available(
+                    integration=integration,
+                    snapshot=first,
+                    include_financial_details=False,
+                )
+            case KimiUsageUnavailable():
+                return self._from_adapter_unavailable(
+                    integration=integration,
+                    outcome=first,
+                )
+            case KimiUsageUnauthorized():
+                return await self._retry_kimi_after_unauthorized(
+                    integration=integration,
+                    first_unauthorized=first,
+                )
+            case _:
+                assert_never(first)
+
+    async def _retry_kimi_after_unauthorized(
+        self,
+        *,
+        integration: LLMProviderIntegrationWithSecrets,
+        first_unauthorized: KimiUsageUnauthorized,
+    ) -> "_UsageReadResult":
+        """Force one Kimi token refresh and retry one usage request."""
+        refresh_result = await refresh_kimi_runtime_tokens(
+            integration=integration,
+            integration_repository=self.repository,
+            session_manager=self.session_manager,
+        )
+        match refresh_result:
+            case Failure(error):
+                return self._kimi_refresh_failure(
+                    integration=integration,
+                    error=error,
+                    http_status=first_unauthorized.http_status,
+                )
+            case Success(refreshed_integration):
+                credentials = _kimi_credentials(refreshed_integration)
+                if credentials is None:
+                    return self._unavailable(
+                        integration=refreshed_integration,
+                        reason=(
+                            SubscriptionUsageUnavailableReason.INVALID_PROVIDER_RESPONSE
+                        ),
+                        retryable=False,
+                        http_status=first_unauthorized.http_status,
+                    )
+                retry = await self._kimi_client().read_usage(
+                    secrets=credentials.secrets
+                )
+                match retry:
+                    case KimiUsageSnapshot():
+                        return self._available(
+                            integration=refreshed_integration,
+                            snapshot=retry,
+                            include_financial_details=False,
+                        )
+                    case KimiUsageUnavailable():
+                        return self._from_adapter_unavailable(
+                            integration=refreshed_integration,
+                            outcome=retry,
+                        )
+                    case KimiUsageUnauthorized():
+                        return self._unavailable(
+                            integration=refreshed_integration,
+                            reason=SubscriptionUsageUnavailableReason.RECONNECT_REQUIRED,
+                            retryable=False,
+                            http_status=retry.http_status,
+                        )
+                    case _:
+                        assert_never(retry)
+            case _:
+                assert_never(refresh_result)
+
     def _chatgpt_client(self) -> ChatGPTSubscriptionUsageClient:
         """Create the ChatGPT adapter from request-scoped dependencies."""
         return ChatGPTSubscriptionUsageClient(
@@ -591,7 +766,10 @@ class SubscriptionUsageService:
         self,
         *,
         integration: LLMProviderIntegrationWithSecrets,
-        snapshot: ChatGPTUsageSnapshot | XaiUsageSnapshot | OpenRouterUsageSnapshot,
+        snapshot: ChatGPTUsageSnapshot
+        | XaiUsageSnapshot
+        | OpenRouterUsageSnapshot
+        | KimiUsageSnapshot,
         include_financial_details: bool,
     ) -> "_UsageReadResult":
         """Project a normalized adapter snapshot into an integration outcome."""
@@ -622,6 +800,13 @@ class SubscriptionUsageService:
             http_status=None,
         )
 
+    def _kimi_client(self) -> KimiSubscriptionUsageClient:
+        """Create the Kimi adapter from request-scoped dependencies."""
+        return KimiSubscriptionUsageClient(
+            http_client=self.http_client,
+            usage_base_url=self.kimi_usage_base_url,
+        )
+
     def _external(
         self,
         *,
@@ -646,7 +831,8 @@ class SubscriptionUsageService:
         integration: LLMProviderIntegrationWithSecrets,
         outcome: ChatGPTUsageUnavailable
         | XaiUsageUnavailable
-        | OpenRouterUsageUnavailable,
+        | OpenRouterUsageUnavailable
+        | KimiUsageUnavailable,
     ) -> "_UsageReadResult":
         """Project a controlled adapter failure without exposing HTTP details."""
         return self._unavailable(
@@ -696,6 +882,28 @@ class SubscriptionUsageService:
                 http_status=http_status,
             )
         if isinstance(error, XaiProviderRejected):
+            return self._unavailable(
+                integration=integration,
+                reason=SubscriptionUsageUnavailableReason.RECONNECT_REQUIRED,
+                retryable=False,
+                http_status=http_status,
+            )
+        return self._unavailable(
+            integration=integration,
+            reason=SubscriptionUsageUnavailableReason.TEMPORARILY_UNAVAILABLE,
+            retryable=True,
+            http_status=http_status,
+        )
+
+    def _kimi_refresh_failure(
+        self,
+        *,
+        integration: LLMProviderIntegrationWithSecrets,
+        error: KimiProviderRejected | KimiProviderUnavailable,
+        http_status: int | None = None,
+    ) -> "_UsageReadResult":
+        """Map the shared Kimi OAuth lifecycle to usage availability."""
+        if isinstance(error, KimiProviderRejected):
             return self._unavailable(
                 integration=integration,
                 reason=SubscriptionUsageUnavailableReason.RECONNECT_REQUIRED,
@@ -825,8 +1033,31 @@ def _xai_credentials(
     )
 
 
+@dataclasses.dataclass(frozen=True)
+class _KimiUsageCredentials:
+    """Validated Kimi credentials required by the private usage adapter."""
+
+    secrets: KimiOAuthSecrets
+    config: KimiOAuthConfig
+
+
+def _kimi_credentials(
+    integration: LLMProviderIntegrationWithSecrets,
+) -> _KimiUsageCredentials | None:
+    """Narrow encrypted integration data before passing it to the Kimi adapter."""
+    if not isinstance(integration.secrets, KimiOAuthSecrets) or not isinstance(
+        integration.config, KimiOAuthConfig
+    ):
+        return None
+    return _KimiUsageCredentials(
+        secrets=integration.secrets,
+        config=integration.config,
+    )
+
+
 def _adapter_contract_version(provider: LLMProvider) -> str:
-    """Return the provider-specific usage adapter contract version."""
+    """Return the adapter contract version used for safe telemetry."""
+
     match provider:
         case LLMProvider.CHATGPT_OAUTH:
             return CHATGPT_USAGE_CONTRACT_VERSION
@@ -834,6 +1065,8 @@ def _adapter_contract_version(provider: LLMProvider) -> str:
             return XAI_USAGE_CONTRACT_VERSION
         case LLMProvider.OPENROUTER:
             return OPENROUTER_USAGE_CONTRACT_VERSION
+        case LLMProvider.KIMI_OAUTH:
+            return KIMI_USAGE_CONTRACT_VERSION
         case _:
             msg = "Subscription usage adapter has an unsupported provider."
             raise ValueError(msg)

@@ -16,6 +16,8 @@ from azents.core.credentials import (
     ApiKeySecrets,
     ChatGPTOAuthConfig,
     ChatGPTOAuthSecrets,
+    KimiOAuthConfig,
+    KimiOAuthSecrets,
 )
 from azents.core.enums import LLMModelDeveloper, LLMProvider
 from azents.core.llm_catalog import ModelModality, ModelReasoningEffort
@@ -59,6 +61,34 @@ def _chatgpt_integration() -> LLMProviderIntegrationWithSecrets:
             access_token="access-token",
             refresh_token="refresh-token",
             expires_at=now + datetime.timedelta(hours=1),
+        ),
+    )
+
+
+def _kimi_integration() -> LLMProviderIntegrationWithSecrets:
+    """Build one connected Kimi integration for listing tests."""
+    now = datetime.datetime.now(datetime.UTC)
+    return LLMProviderIntegrationWithSecrets(
+        id="kimi-integration-id",
+        workspace_id="workspace-id",
+        provider=LLMProvider.KIMI_OAUTH,
+        name="Kimi subscription",
+        config=KimiOAuthConfig(
+            connection_method="device",
+            status="connected",
+            connected_at=now,
+            last_refreshed_at=now,
+            last_failed_at=None,
+            last_failure_reason=None,
+        ),
+        enabled=True,
+        created_at=now,
+        updated_at=now,
+        secrets=KimiOAuthSecrets(
+            access_token="kimi-access-token",
+            refresh_token="kimi-refresh-token",
+            expires_at=now + datetime.timedelta(hours=1),
+            device_id="kimi-device-id",
         ),
     )
 
@@ -260,6 +290,92 @@ async def test_list_chatgpt_models_uses_backend_capability_metadata(
         == 128000
     )
     assert empty_modalities_candidate.normalized_capabilities.modalities.input == []
+
+
+class _FakeKimiAsyncClient:
+    """Return one deterministic Kimi account model listing."""
+
+    def __init__(self, *, timeout: float) -> None:
+        assert timeout == 20.0
+
+    async def __aenter__(self) -> "_FakeKimiAsyncClient":
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        del args
+
+    async def get(
+        self,
+        url: str,
+        *,
+        headers: dict[str, str],
+    ) -> httpx.Response:
+        assert url == f"{providers.resolve_kimi_code_api_base_url()}/models"
+        assert headers["Authorization"] == "Bearer kimi-access-token"
+        assert headers["X-Msh-Platform"] == "kimi_cli"
+        assert headers["X-Msh-Device-Id"] == "kimi-device-id"
+        return httpx.Response(
+            status_code=200,
+            request=httpx.Request("GET", url),
+            json={
+                "data": [
+                    {
+                        "id": "kimi-k2.5",
+                        "context_length": 262144,
+                        "supports_reasoning": True,
+                        "supports_image_in": True,
+                        "supports_video_in": False,
+                    },
+                    {
+                        "id": "kimi-for-coding",
+                        "display_name": "Kimi for Coding",
+                        "context_length": 131072,
+                        "supports_reasoning": False,
+                        "supports_image_in": False,
+                        "supports_video_in": True,
+                    },
+                    ["invalid"],
+                    {"context_length": 1},
+                ]
+            },
+        )
+
+
+@pytest.mark.asyncio
+async def test_list_kimi_models_projects_authenticated_account_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Kimi listing projects account-visible models without LiteLLM gating."""
+    monkeypatch.setattr(httpx, "AsyncClient", _FakeKimiAsyncClient)
+
+    result = await providers.list_kimi_models_for_integration(_kimi_integration())
+
+    assert result.summary.source == "kimi:code_models"
+    assert result.summary.returned_count == 2
+    assert result.summary.skipped_count == 2
+    reasoning, coding = result.models
+    assert reasoning.model_identifier == "kimi-k2.5"
+    assert reasoning.model_developer == LLMModelDeveloper.MOONSHOT
+    assert reasoning.model_family == "kimi-k2.5"
+    assert reasoning.normalized_capabilities.context_window.max_input_tokens == 262144
+    assert reasoning.normalized_capabilities.modalities.input == [
+        ModelModality.TEXT,
+        ModelModality.IMAGE,
+    ]
+    assert reasoning.normalized_capabilities.reasoning.supported is True
+    assert reasoning.normalized_capabilities.tool_calling.supported is True
+    assert reasoning.normalized_capabilities.compatibility.provider_family == "moonshot"
+    assert reasoning.normalized_capabilities.compatibility.responses_api is True
+    assert coding.normalized_capabilities.modalities.input == [
+        ModelModality.TEXT,
+        ModelModality.VIDEO,
+    ]
+    assert coding.source_metadata == {
+        "context_length": 131072,
+        "supports_reasoning": False,
+        "supports_image_in": False,
+        "supports_video_in": True,
+    }
 
 
 class _FakeOpenRouterAsyncClient:

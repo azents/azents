@@ -55,3 +55,10 @@ class NotBelongToWorkspace:
     """Resource does not belong to requested workspace."""
 
     integration_id: str
+
+
+@dataclasses.dataclass(frozen=True)
+class InvalidProviderUpdate:
+    """Public update credentials or config do not match the stored provider."""
+
+    reason: str

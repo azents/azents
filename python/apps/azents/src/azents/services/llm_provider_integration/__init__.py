@@ -7,9 +7,10 @@ from azcommon.result import Failure, Result, Success
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.credentials import PROVIDER_SECRET_TYPES, PROVIDERS_WITH_CONFIG
 from azents.core.crypto import CredentialCipher
 from azents.core.deps import get_credential_cipher
-from azents.core.enums import LLMCatalogLowererTarget
+from azents.core.enums import LLMCatalogLowererTarget, LLMProvider
 from azents.core.llm_catalog import INTEGRATION_SCOPED_CATALOG_PROVIDERS
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
@@ -21,6 +22,7 @@ from azents.repos.llm_provider_integration.data import (
 )
 
 from .data import (
+    InvalidProviderUpdate,
     LLMProviderIntegrationCreateInput,
     LLMProviderIntegrationListOutput,
     LLMProviderIntegrationOutput,
@@ -48,6 +50,37 @@ def catalog_sync_required_for_update(
         or "config" in update
         or (update.get("enabled") is True and not previously_enabled)
     )
+
+
+def validate_provider_update(
+    provider: LLMProvider,
+    update: LLMProviderIntegrationUpdateInput,
+) -> InvalidProviderUpdate | None:
+    """Return an error when credentials or config do not match the provider."""
+    expected_type = PROVIDER_SECRET_TYPES[provider]
+    secrets = update.get("secrets")
+    if secrets is not None and secrets.type != expected_type:
+        return InvalidProviderUpdate(
+            reason=(
+                f"Provider '{provider.value}' requires '{expected_type}' secret type."
+            )
+        )
+    if "config" not in update:
+        return None
+    config = update["config"]
+    if provider in PROVIDERS_WITH_CONFIG:
+        if config is None or config.type != expected_type:
+            return InvalidProviderUpdate(
+                reason=(
+                    f"Provider '{provider.value}' requires "
+                    f"'{expected_type}' config type."
+                )
+            )
+    elif config is not None:
+        return InvalidProviderUpdate(
+            reason=f"Provider '{provider.value}' does not accept config settings."
+        )
+    return None
 
 
 @dataclasses.dataclass
@@ -111,7 +144,10 @@ class LLMProviderIntegrationService:
         update: LLMProviderIntegrationUpdateInput,
         *,
         workspace_id: str,
-    ) -> Result[LLMProviderIntegrationUpdateOutput, NotFound | NotBelongToWorkspace]:
+    ) -> Result[
+        LLMProviderIntegrationUpdateOutput,
+        NotFound | NotBelongToWorkspace | InvalidProviderUpdate,
+    ]:
         """Update LLM Provider Integration by ID."""
         async with self.session_manager() as session:
             existing = await self.repository.get_by_id(session, integration_id)
@@ -119,6 +155,9 @@ class LLMProviderIntegrationService:
             return Failure(NotFound(integration_id=integration_id))
         if existing.workspace_id != workspace_id:
             return Failure(NotBelongToWorkspace(integration_id=integration_id))
+        invalid_update = validate_provider_update(existing.provider, update)
+        if invalid_update is not None:
+            return Failure(invalid_update)
         catalog_sync_required = catalog_sync_required_for_update(
             update,
             previously_enabled=existing.enabled,

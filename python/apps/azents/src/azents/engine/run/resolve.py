@@ -79,6 +79,15 @@ from azents.services.chatgpt_oauth.runtime import (
     ensure_runtime_tokens as ensure_chatgpt_oauth_runtime_tokens,
 )
 from azents.services.exchange_file import ExchangeFileService
+from azents.services.kimi_oauth.data import (
+    ProviderRejected as KimiOAuthProviderRejected,
+)
+from azents.services.kimi_oauth.data import (
+    ProviderUnavailable as KimiOAuthProviderUnavailable,
+)
+from azents.services.kimi_oauth.runtime import (
+    ensure_runtime_tokens as ensure_kimi_oauth_runtime_tokens,
+)
 from azents.services.model_file import (
     ModelFileInvalidImage,
     ModelFileOversized,
@@ -250,6 +259,8 @@ RuntimeTokenRefreshError = (
     | XaiOAuthProviderRejected
     | XaiOAuthProviderEntitlementDenied
     | XaiOAuthProviderUnavailable
+    | KimiOAuthProviderRejected
+    | KimiOAuthProviderUnavailable
 )
 
 
@@ -270,6 +281,12 @@ async def _ensure_provider_runtime_tokens(
     """Refresh provider OAuth credentials before Runtime execution."""
     if integration.provider == LLMProvider.XAI_OAUTH:
         result = await ensure_xai_oauth_runtime_tokens(
+            integration=integration,
+            integration_repository=integration_repository,
+            session_manager=session_manager,
+        )
+    elif integration.provider == LLMProvider.KIMI_OAUTH:
+        result = await ensure_kimi_oauth_runtime_tokens(
             integration=integration,
             integration_repository=integration_repository,
             session_manager=session_manager,

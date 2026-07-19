@@ -57,8 +57,23 @@ class XaiOAuthSecrets(BaseModel):
     expires_at: datetime.datetime = Field(description="Access token expiration time")
 
 
+class KimiOAuthSecrets(BaseModel):
+    """Kimi OAuth token and stable device secrets."""
+
+    type: Literal["kimi_oauth"] = "kimi_oauth"
+    access_token: str = Field(description="Kimi access token")
+    refresh_token: str = Field(description="Kimi refresh token")
+    expires_at: datetime.datetime = Field(description="Access token expiration time")
+    device_id: str = Field(description="Stable Kimi device identity")
+
+
 ProviderSecrets = Annotated[
-    ApiKeySecrets | AwsSecrets | GcpSecrets | ChatGPTOAuthSecrets | XaiOAuthSecrets,
+    ApiKeySecrets
+    | AwsSecrets
+    | GcpSecrets
+    | ChatGPTOAuthSecrets
+    | XaiOAuthSecrets
+    | KimiOAuthSecrets,
     Field(discriminator="type"),
 ]
 
@@ -156,8 +171,25 @@ class XaiOAuthConfig(BaseModel):
     )
 
 
+class KimiOAuthConfig(BaseModel):
+    """Kimi OAuth display and status settings."""
+
+    type: Literal["kimi_oauth"] = "kimi_oauth"
+    connection_method: Literal["device"] = Field(description="Connection method")
+    status: Literal[
+        "connected",
+        "refresh_required",
+        "temporarily_unavailable",
+        "disabled",
+    ] = Field(description="Connection status")
+    connected_at: datetime.datetime | None = Field(description="Connected time")
+    last_refreshed_at: datetime.datetime | None = Field(description="Last refresh time")
+    last_failed_at: datetime.datetime | None = Field(description="Last failure time")
+    last_failure_reason: str | None = Field(description="Last failure reason")
+
+
 ProviderConfig = Annotated[
-    AwsConfig | GcpConfig | ChatGPTOAuthConfig | XaiOAuthConfig,
+    AwsConfig | GcpConfig | ChatGPTOAuthConfig | XaiOAuthConfig | KimiOAuthConfig,
     Field(discriminator="type"),
 ]
 
@@ -171,6 +203,7 @@ PROVIDER_SECRET_TYPES: dict[LLMProvider, str] = {
     LLMProvider.CHATGPT_OAUTH: "chatgpt_oauth",
     LLMProvider.XAI: "api_key",
     LLMProvider.XAI_OAUTH: "xai_oauth",
+    LLMProvider.KIMI_OAUTH: "kimi_oauth",
     LLMProvider.OPENROUTER: "api_key",
     LLMProvider.ANTHROPIC: "api_key",
     LLMProvider.GOOGLE_GEMINI: "api_key",
@@ -183,5 +216,6 @@ PROVIDERS_WITH_CONFIG: set[LLMProvider] = {
     LLMProvider.AWS_BEDROCK,
     LLMProvider.CHATGPT_OAUTH,
     LLMProvider.XAI_OAUTH,
+    LLMProvider.KIMI_OAUTH,
     LLMProvider.GOOGLE_VERTEX_AI,
 }

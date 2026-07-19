@@ -13,11 +13,14 @@ from azents.core.credentials import (
     ChatGPTOAuthSecrets,
     GcpConfig,
     GcpSecrets,
+    KimiOAuthConfig,
+    KimiOAuthSecrets,
     ProviderConfig,
     ProviderSecrets,
     XaiOAuthSecrets,
 )
 from azents.core.enums import LLMProvider
+from azents.core.kimi_oauth import KIMI_CODE_API_BASE_URL
 from azents.core.llm_mapping import (
     build_credential_kwargs,
     to_litellm_model,
@@ -116,6 +119,12 @@ class TestToLitellmModel:
 
         assert result == "xai/grok-4.5"
 
+    def test_kimi_oauth(self) -> None:
+        """Kimi OAuth models use LiteLLM Moonshot routing."""
+        result = to_litellm_model(LLMProvider.KIMI_OAUTH, "kimi-k2.5")
+
+        assert result == "moonshot/kimi-k2.5"
+
     def test_openrouter(self) -> None:
         """OpenRouter keeps its publisher-qualified model identifier."""
         result = to_litellm_model(
@@ -156,6 +165,12 @@ class TestToRuntimeModel:
         result = to_runtime_model(provider, "grok-4.5")
 
         assert result == "xai/grok-4.5"
+
+    def test_kimi_oauth_uses_litellm_routing_id(self) -> None:
+        """Kimi OAuth runtime uses the LiteLLM Moonshot routing prefix."""
+        result = to_runtime_model(LLMProvider.KIMI_OAUTH, "kimi-k2.5")
+
+        assert result == "moonshot/kimi-k2.5"
 
     def test_openrouter_uses_litellm_routing_id(self) -> None:
         """OpenRouter runtime uses the LiteLLM OpenRouter routing prefix."""
@@ -311,3 +326,35 @@ class TestBuildCredentialKwargs:
             "api_base": XAI_API_BASE_URL,
             "custom_llm_provider": "xai",
         }
+
+    def test_kimi_oauth_secrets(self) -> None:
+        """Convert Kimi OAuth secrets to Moonshot LiteLLM kwargs."""
+        now = datetime.datetime.now(datetime.UTC)
+        integration = _make_integration(
+            provider=LLMProvider.KIMI_OAUTH,
+            secrets=KimiOAuthSecrets(
+                access_token="kimi-access-token",
+                refresh_token="kimi-refresh-token",
+                expires_at=now + datetime.timedelta(hours=1),
+                device_id="kimi-device-id",
+            ),
+            config=KimiOAuthConfig(
+                connection_method="device",
+                status="connected",
+                connected_at=now,
+                last_refreshed_at=now,
+                last_failed_at=None,
+                last_failure_reason=None,
+            ),
+        )
+
+        result = build_credential_kwargs(integration)
+
+        assert result["api_key"] == "kimi-access-token"
+        assert result["base_url"] == KIMI_CODE_API_BASE_URL
+        assert result["api_base"] == KIMI_CODE_API_BASE_URL
+        assert result["custom_llm_provider"] == "moonshot"
+        headers = result["extra_headers"]
+        assert isinstance(headers, dict)
+        assert headers["X-Msh-Platform"] == "kimi_cli"
+        assert headers["X-Msh-Device-Id"] == "kimi-device-id"

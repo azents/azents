@@ -18,9 +18,15 @@ from azents.core.credentials import (
     ChatGPTOAuthSecrets,
     GcpConfig,
     GcpSecrets,
+    KimiOAuthConfig,
+    KimiOAuthSecrets,
     XaiOAuthSecrets,
 )
 from azents.core.enums import LLMProvider
+from azents.core.kimi_oauth import (
+    build_kimi_compatibility_headers,
+    resolve_kimi_code_api_base_url,
+)
 from azents.core.openrouter import OPENROUTER_API_BASE_URL, OPENROUTER_APP_TITLE
 from azents.core.xai import resolve_xai_api_base_url
 from azents.repos.llm_provider_integration.data import (
@@ -37,6 +43,7 @@ PROVIDER_LITELLM_PREFIX: dict[LLMProvider, str] = {
     LLMProvider.CHATGPT_OAUTH: "",
     LLMProvider.XAI: "xai/",
     LLMProvider.XAI_OAUTH: "xai/",
+    LLMProvider.KIMI_OAUTH: "moonshot/",
     LLMProvider.OPENROUTER: "openrouter/",
 }
 
@@ -113,6 +120,17 @@ def build_credential_kwargs(
                 "base_url": resolve_xai_api_base_url(),
                 "api_base": resolve_xai_api_base_url(),
                 "custom_llm_provider": "xai",
+            }
+        case KimiOAuthSecrets(access_token=token, device_id=device_id):
+            if not isinstance(integration.config, KimiOAuthConfig):
+                raise ValueError("Kimi OAuth integration config is required")
+            base_url = resolve_kimi_code_api_base_url()
+            return {
+                "api_key": token,
+                "base_url": base_url,
+                "api_base": base_url,
+                "custom_llm_provider": "moonshot",
+                "extra_headers": build_kimi_compatibility_headers(device_id=device_id),
             }
         case AwsSecrets(secret_access_key=secret):
             config = cast(AwsConfig, integration.config)

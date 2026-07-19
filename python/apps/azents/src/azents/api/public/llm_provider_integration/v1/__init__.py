@@ -33,6 +33,7 @@ from azents.services.llm_catalog import (
 )
 from azents.services.llm_provider_integration import LLMProviderIntegrationService
 from azents.services.llm_provider_integration.data import (
+    InvalidProviderUpdate,
     LLMProviderIntegrationCreateInput,
     NotBelongToWorkspace,
 )
@@ -57,6 +58,7 @@ from .data import (
     ModelCatalogEntryListResponse,
     ModelCatalogSyncResponse,
     SubscriptionUsageResponse,
+    convert_integration_update_request,
     convert_subscription_usage_response,
 )
 
@@ -73,6 +75,7 @@ _PROVIDER_DISPLAY_NAMES: dict[LLMProvider, str] = {
     LLMProvider.CHATGPT_OAUTH: "ChatGPT OAuth",
     LLMProvider.XAI: "xAI API key",
     LLMProvider.XAI_OAUTH: "xAI Grok OAuth",
+    LLMProvider.KIMI_OAUTH: "Kimi subscription",
     LLMProvider.OPENROUTER: "OpenRouter",
 }
 
@@ -85,6 +88,7 @@ _BASE_AVAILABLE_PROVIDERS: tuple[LLMProvider, ...] = (
     LLMProvider.CHATGPT_OAUTH,
     LLMProvider.XAI,
     LLMProvider.XAI_OAUTH,
+    LLMProvider.KIMI_OAUTH,
     LLMProvider.OPENROUTER,
 )
 
@@ -105,7 +109,11 @@ async def list_integration_providers(
                 provider=provider,
                 display_name=_PROVIDER_DISPLAY_NAMES[provider],
                 credential_type=PROVIDER_SECRET_TYPES[provider],
-                experimental=provider == LLMProvider.XAI_OAUTH,
+                experimental=provider
+                in {
+                    LLMProvider.XAI_OAUTH,
+                    LLMProvider.KIMI_OAUTH,
+                },
             )
             for provider in _BASE_AVAILABLE_PROVIDERS
         ]
@@ -423,7 +431,9 @@ async def update_integration(
         )
 
     result = await service.update_by_id(
-        integration_id, request_body, workspace_id=member.workspace_id
+        integration_id,
+        convert_integration_update_request(request_body),
+        workspace_id=member.workspace_id,
     )
     match result:
         case Success(value):
@@ -445,6 +455,11 @@ async def update_integration(
                     raise HTTPException(
                         status_code=status.HTTP_404_NOT_FOUND,
                         detail="LLM Provider Integration not found.",
+                    )
+                case InvalidProviderUpdate():
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                        detail=error.reason,
                     )
                 case _:
                     assert_never(error)
