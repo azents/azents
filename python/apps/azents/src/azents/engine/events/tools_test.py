@@ -27,6 +27,7 @@ from azents.engine.run.contracts import ToolkitBinding
 from azents.engine.run.types import (
     FunctionTool,
     FunctionToolCancelRequest,
+    FunctionToolError,
     FunctionToolResult,
     FunctionToolSpec,
 )
@@ -270,6 +271,59 @@ async def test_client_tool_executor_returns_event_result() -> None:
     parts = list(iter_output_parts(result.output))
     assert isinstance(parts[0], OutputTextPart)
     assert parts[0].text == '{"text":"hello"}'
+
+
+async def test_client_tool_executor_preserves_failed_result_metadata() -> None:
+    """Preserve structured diagnostics from one model-visible tool failure."""
+
+    async def handler(arguments: str) -> str:
+        del arguments
+        raise FunctionToolError(
+            "Provider rejected the request.",
+            metadata={"code": "http_failure", "status": 400},
+        )
+
+    catalog = await build_tool_catalog(
+        toolkit_bindings=[
+            ToolkitBinding(
+                toolkit=_InlineToolkit(
+                    FunctionTool(
+                        spec=FunctionToolSpec(
+                            name="failing_tool",
+                            description="Return one structured failure.",
+                            input_schema={"type": "object"},
+                        ),
+                        handler=handler,
+                    )
+                ),
+                slug="",
+                use_prefix=False,
+            )
+        ],
+        context=TurnContext(
+            user_id=None,
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id="run-1",
+            publish_event=_noop_publish,
+        ),
+    )
+
+    result = await ToolCatalogClientToolExecutor(catalog).execute(
+        ClientToolCallPayload(
+            call_id="call-1",
+            name="failing_tool",
+            arguments="{}",
+            native_artifact=_artifact(),
+        )
+    )
+
+    assert result.status == "failed"
+    parts = list(iter_output_parts(result.output))
+    assert len(parts) == 1
+    assert isinstance(parts[0], OutputTextPart)
+    assert parts[0].text == "Provider rejected the request."
+    assert result.metadata == {"code": "http_failure", "status": 400}
 
 
 async def test_client_tool_executor_applies_global_text_output_cap() -> None:

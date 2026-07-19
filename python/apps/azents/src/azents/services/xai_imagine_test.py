@@ -16,6 +16,7 @@ from azents.services.xai_imagine import (
     XaiImaginePermissionError,
     XaiImagineRateLimitError,
     XaiImagineRequest,
+    XaiImagineRequestError,
     XaiImagineUnavailableError,
 )
 
@@ -88,6 +89,55 @@ async def test_generate_classifies_provider_errors(
 
     assert "sensitive provider detail" not in str(raised.value)
     assert "secret-token" not in str(raised.value)
+
+
+async def test_generate_retains_bounded_bad_request_message() -> None:
+    """Keep one scalar provider reason for the failed tool result boundary."""
+
+    def respond(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            400,
+            json={
+                "error": {
+                    "message": "This request was blocked by the content filter.",
+                    "code": "content_policy",
+                }
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http_client:
+        with pytest.raises(XaiImagineRequestError) as raised:
+            await XaiImagineClient(
+                http_client, base_url="https://api.x.ai/v1"
+            ).generate(
+                _request(),
+                access_token="secret-token",
+            )
+
+    assert raised.value.status_code == 400
+    assert raised.value.provider_message == (
+        "This request was blocked by the content filter."
+    )
+    assert str(raised.value) == "xAI Imagine returned HTTP 400."
+
+
+async def test_generate_bounds_plain_text_bad_request_message() -> None:
+    """Match GrokBuild's bounded provider-response preview behavior."""
+    message = "rejected " + "x" * 500
+
+    def respond(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(400, text=message)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http_client:
+        with pytest.raises(XaiImagineRequestError) as raised:
+            await XaiImagineClient(
+                http_client, base_url="https://api.x.ai/v1"
+            ).generate(
+                _request(),
+                access_token="secret-token",
+            )
+
+    assert raised.value.provider_message == message[:200]
 
 
 async def test_generate_retries_one_server_failure() -> None:

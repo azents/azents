@@ -9,6 +9,8 @@ import httpx
 
 XAI_IMAGINE_MODEL = "grok-imagine-image-quality"
 _MAX_RESPONSE_BYTES = 30 * 1024 * 1024
+_MAX_ERROR_RESPONSE_BYTES = 8 * 1024
+_MAX_ERROR_MESSAGE_CHARS = 200
 _MAX_TRANSPORT_ATTEMPTS = 2
 
 
@@ -34,6 +36,21 @@ class XaiImagineUnavailableError(XaiImagineError):
 
 class XaiImagineInvalidResponseError(XaiImagineError):
     """Imagine returned an unusable response."""
+
+
+class XaiImagineRequestError(XaiImagineError):
+    """Imagine rejected a request with a non-success HTTP response."""
+
+    def __init__(
+        self,
+        *,
+        status_code: int,
+        provider_message: str | None,
+    ) -> None:
+        """Retain bounded provider diagnostics for the tool error boundary."""
+        super().__init__(f"xAI Imagine returned HTTP {status_code}.")
+        self.status_code = status_code
+        self.provider_message = provider_message
 
 
 @dataclasses.dataclass(frozen=True)
@@ -105,8 +122,9 @@ class XaiImagineClient:
                             "xAI Imagine is temporarily unavailable."
                         )
                     if not response.is_success:
-                        raise XaiImagineInvalidResponseError(
-                            f"xAI Imagine returned HTTP {response.status_code}."
+                        raise XaiImagineRequestError(
+                            status_code=response.status_code,
+                            provider_message=await _provider_error_message(response),
                         )
                     return _image_base64(await _read_response_body(response))
             except asyncio.CancelledError:
@@ -128,6 +146,49 @@ class XaiImagineClient:
             await asyncio.sleep(delay)
             return
         await self.sleep(delay)
+
+
+async def _provider_error_message(response: httpx.Response) -> str | None:
+    """Extract one bounded scalar explanation from an Imagine error response."""
+    body = bytearray()
+    async for chunk in response.aiter_bytes():
+        remaining = _MAX_ERROR_RESPONSE_BYTES - len(body)
+        if remaining <= 0:
+            break
+        body.extend(chunk[:remaining])
+        if len(chunk) > remaining:
+            break
+    try:
+        text = body.decode().strip()
+    except UnicodeDecodeError:
+        return None
+    if not text:
+        return None
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        message = None if text[:1] in {"{", "["} else text
+    else:
+        message = _error_message_from_payload(payload)
+    if message is None:
+        return None
+    return message.strip()[:_MAX_ERROR_MESSAGE_CHARS] or None
+
+
+def _error_message_from_payload(payload: object) -> str | None:
+    """Return the provider-authored scalar message from one JSON error payload."""
+    if not isinstance(payload, dict):
+        return None
+    error = payload.get("error")
+    if isinstance(error, str):
+        return error
+    candidates = [error, payload] if isinstance(error, dict) else [payload]
+    for candidate in candidates:
+        for key in ("message", "detail"):
+            value = candidate.get(key)
+            if isinstance(value, str):
+                return value
+    return None
 
 
 async def _read_response_body(response: httpx.Response) -> bytes:

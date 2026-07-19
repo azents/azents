@@ -51,8 +51,8 @@ code_paths:
   - python/apps/azents/src/azents/worker/session/**
   - typescript/apps/azents-web/src/features/chat/components/ChatView.tsx
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
-last_verified_at: 2026-07-18
-spec_version: 105
+last_verified_at: 2026-07-19
+spec_version: 106
 ---
 
 # Agent Execution Loop
@@ -444,7 +444,7 @@ Both `xai` and `xai_oauth` use the xAI transport target in this lowerer. For eit
 
 For xAI image generation, the auto-bound unprefixed `image_generation` client tool receives only `prompt`, optional `aspect_ratio`, and optional `resolution`; credential material is not part of its schema, arguments, events, runtime workspace, or metadata. The prompt is limited to 1,024 characters, one call generates one image, supported aspect ratios are `auto`, `1:1`, `16:9`, `9:16`, `4:3`, `3:4`, `3:2`, and `2:3`, and resolution is `1k` or `2k`. The backend calls `POST /v1/images/generations` with model `grok-imagine-image-quality`, requests one Base64 result, bounds the response to 30 MiB, and performs at most one transport retry for HTTP/network failures eligible for that retry.
 
-xAI API-key execution uses the selected integration key. xAI OAuth execution starts with the proactively refreshed selected integration token. The first Imagine `401` forces one refresh through the existing persistence service and retries once with the new token; a second `401` returns reconnect-required failure. API-key `401`, `403`, `429`, malformed/oversized output, and exhausted transport failures become sanitized client tool failures. Cancellation propagates immediately. Successful bytes enter the normal generated-file admission path, so the durable `client_tool_result` contains an available Exchange attachment plus a ModelFile-backed file output and never contains Base64 or credentials.
+xAI API-key execution uses the selected integration key. xAI OAuth execution starts with the proactively refreshed selected integration token. The first Imagine `401` forces one refresh through the existing persistence service and retries once with the new token; a second `401` returns reconnect-required failure. API-key `401`, `403`, `429`, malformed/oversized output, and exhausted transport failures become sanitized client tool failures. Other non-success Imagine responses remain failed tool results and retain structured `http_failure` status metadata plus the provider-authored scalar `error.message`, `error`, `message`, or `detail` when available. The reason is bounded, credential-redacted, and excludes the raw response body. Cancellation propagates immediately. Successful bytes enter the normal generated-file admission path, so the durable `client_tool_result` contains an available Exchange attachment plus a ModelFile-backed file output and never contains Base64 or credentials.
 
 Provider-hosted tool output is normalized through the recognized Responses item registry as provider
 tool call/result events and does not enter the client tool execution loop or by itself continue the
