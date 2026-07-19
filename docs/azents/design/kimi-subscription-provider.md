@@ -2,6 +2,7 @@
 title: "Kimi Subscription Provider Design"
 created: 2026-07-19
 updated: 2026-07-19
+implemented: 2026-07-19
 tags: [backend, frontend, engine, llm, oauth, billing, security]
 ---
 
