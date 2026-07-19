@@ -45,10 +45,11 @@ class AgentCreateRequest(BaseModel):
     runtime_provider_id: Optional[StrictStr] = None
     shell_enabled: Optional[StrictBool] = Field(default=True, description="Shell enabled state")
     memory_enabled: Optional[StrictBool] = Field(default=True, description="Memory enabled state")
+    tool_search_enabled: Optional[StrictBool] = Field(default=False, description="Tool Search enabled state")
     max_turns: Optional[StrictInt] = None
     subagent_settings: Optional[SubagentSettings] = Field(default=None, description="Subagent execution settings")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["name", "model_selection", "lightweight_model_selection", "selectable_model_options", "main_model_label", "lightweight_model_label", "description", "model_parameters", "system_prompt", "enabled", "type", "runtime_provider_id", "shell_enabled", "memory_enabled", "max_turns", "subagent_settings"]
+    __properties: ClassVar[List[str]] = ["name", "model_selection", "lightweight_model_selection", "selectable_model_options", "main_model_label", "lightweight_model_label", "description", "model_parameters", "system_prompt", "enabled", "type", "runtime_provider_id", "shell_enabled", "memory_enabled", "tool_search_enabled", "max_turns", "subagent_settings"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -191,6 +192,7 @@ class AgentCreateRequest(BaseModel):
             "runtime_provider_id": obj.get("runtime_provider_id"),
             "shell_enabled": obj.get("shell_enabled") if obj.get("shell_enabled") is not None else True,
             "memory_enabled": obj.get("memory_enabled") if obj.get("memory_enabled") is not None else True,
+            "tool_search_enabled": obj.get("tool_search_enabled") if obj.get("tool_search_enabled") is not None else False,
             "max_turns": obj.get("max_turns"),
             "subagent_settings": SubagentSettings.from_dict(obj["subagent_settings"]) if obj.get("subagent_settings") is not None else None
         })

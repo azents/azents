@@ -12,6 +12,7 @@ def test_agent_constructor_materializes_complete_selectable_model_settings() -> 
         lightweight_model_selection={"model_identifier": "lightweight"},
     )
 
+    assert agent.tool_search_enabled is False
     assert agent.selectable_model_options is not None
     assert [option["settings"] for option in agent.selectable_model_options] == [
         {

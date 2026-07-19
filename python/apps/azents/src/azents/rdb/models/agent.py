@@ -135,6 +135,13 @@ class RDBAgent(RDBModel):
     memory_enabled: Mapped[bool] = mapped_column(
         sa.Boolean, nullable=False, default=True
     )
+    # Enable deferred Tool Search and bounded model-visible tool projection.
+    tool_search_enabled: Mapped[bool] = mapped_column(
+        sa.Boolean,
+        nullable=False,
+        default=False,
+        server_default=sa.false(),
+    )
     max_turns: Mapped[int | None] = mapped_column(
         sa.Integer, nullable=True, default=None
     )

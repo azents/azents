@@ -23,6 +23,7 @@ const agent: AgentResponse = {
   runtime_provider_id: null,
   shell_enabled: true,
   memory_enabled: true,
+  tool_search_enabled: false,
   max_turns: null,
   subagent_settings: { max_subagents: 3, max_depth: 1 },
   created_at: "2026-06-25T08:00:00Z",

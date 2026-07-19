@@ -8345,6 +8345,12 @@
             "description": "Memory enabled state",
             "default": true
           },
+          "tool_search_enabled": {
+            "type": "boolean",
+            "title": "Tool Search Enabled",
+            "description": "Tool Search enabled state",
+            "default": false
+          },
           "max_turns": {
             "anyOf": [
               {
@@ -8675,6 +8681,10 @@
             "type": "boolean",
             "title": "Memory Enabled"
           },
+          "tool_search_enabled": {
+            "type": "boolean",
+            "title": "Tool Search Enabled"
+          },
           "max_turns": {
             "anyOf": [
               {
@@ -8729,6 +8739,7 @@
           "runtime_provider_id",
           "shell_enabled",
           "memory_enabled",
+          "tool_search_enabled",
           "max_turns",
           "subagent_settings",
           "created_at",
@@ -9559,6 +9570,11 @@
             "type": "boolean",
             "title": "Memory Enabled",
             "description": "Memory enabled state"
+          },
+          "tool_search_enabled": {
+            "type": "boolean",
+            "title": "Tool Search Enabled",
+            "description": "Tool Search enabled state"
           },
           "max_turns": {
             "anyOf": [
