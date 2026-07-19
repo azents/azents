@@ -25,6 +25,7 @@ DETERMINISTIC_FIXTURE_NAME_PREFIX = "__testenv_model_listing:"
 DeterministicFixtureVariant = Literal[
     "deterministic-success",
     "deterministic-model-settings",
+    "deterministic-openrouter",
     "deterministic-main-only",
     "deterministic-no-candidates",
     "deterministic-two-integrations",
@@ -33,6 +34,7 @@ DeterministicFixtureVariant = Literal[
 DETERMINISTIC_FIXTURE_VARIANTS: tuple[DeterministicFixtureVariant, ...] = (
     "deterministic-success",
     "deterministic-model-settings",
+    "deterministic-openrouter",
     "deterministic-main-only",
     "deterministic-no-candidates",
     "deterministic-two-integrations",
@@ -62,6 +64,38 @@ def build_deterministic_listing(
     fetched_at = datetime.now(timezone.utc)
     source = f"testenv_fixture:{variant}"
     match variant:
+        case "deterministic-openrouter":
+            if provider != LLMProvider.OPENROUTER:
+                msg = "The OpenRouter fixture requires provider=openrouter."
+                raise ValueError(msg)
+            models = [
+                _candidate(
+                    provider=provider,
+                    identifier="anthropic/claude-sonnet-4.6",
+                    display_name="Claude Sonnet 4.6 via OpenRouter",
+                    family="claude-sonnet-4.6",
+                    integration_id=integration_id,
+                    source=source,
+                    fetched_at=fetched_at,
+                    lightweight=False,
+                ),
+                _candidate(
+                    provider=provider,
+                    identifier="new-publisher/frontier-text",
+                    display_name="Frontier Text via OpenRouter",
+                    family="frontier-text",
+                    integration_id=integration_id,
+                    source=source,
+                    fetched_at=fetched_at,
+                    lightweight=True,
+                ),
+            ]
+            skips = [
+                ModelListingSkipSummary(
+                    reason="invalid_model_identifier",
+                    count=1,
+                )
+            ]
         case (
             "deterministic-success"
             | "deterministic-model-settings"
@@ -156,6 +190,12 @@ def _candidate(
         )
         family = "grok-4-fast" if lightweight else "grok-4"
         developer = LLMModelDeveloper.XAI
+    elif provider == LLMProvider.OPENROUTER:
+        developer = (
+            LLMModelDeveloper.ANTHROPIC
+            if identifier.startswith("anthropic/")
+            else LLMModelDeveloper.OTHER
+        )
     else:
         developer = LLMModelDeveloper.OPENAI
     max_input_tokens = 64_000 if lightweight else 128_000
@@ -171,7 +211,11 @@ def _candidate(
                 max_output_tokens=16_000,
             ),
             modalities=ModelModalities(
-                input=[ModelModality.TEXT, ModelModality.IMAGE, ModelModality.PDF],
+                input=(
+                    [ModelModality.TEXT, ModelModality.IMAGE]
+                    if provider == LLMProvider.OPENROUTER
+                    else [ModelModality.TEXT, ModelModality.IMAGE, ModelModality.PDF]
+                ),
                 output=[ModelModality.TEXT],
             ),
             tool_calling=ModelToolCallingCapabilities(supported=True),
@@ -193,10 +237,14 @@ def _candidate(
             ),
             built_in_tools=ModelBuiltInToolCapabilities(
                 supported=(
-                    ["web_search", "image_generation"]
-                    if source == "testenv_fixture:deterministic-model-settings"
-                    and not lightweight
-                    else []
+                    ["web_search"]
+                    if provider == LLMProvider.OPENROUTER
+                    else (
+                        ["web_search", "image_generation"]
+                        if source == "testenv_fixture:deterministic-model-settings"
+                        and not lightweight
+                        else []
+                    )
                 )
             ),
         ),

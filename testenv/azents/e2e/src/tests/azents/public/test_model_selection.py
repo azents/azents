@@ -27,6 +27,7 @@ def _workspace_with_deterministic_integration(
     admin_api_client: azentsadminclient.ApiClient,
     *,
     variant: str,
+    provider: LLMProvider = LLMProvider.OPENAI,
 ) -> tuple[str, str, str]:
     """Deterministic listing integration t t workspace t createt."""
     uniq = unique()
@@ -49,7 +50,7 @@ def _workspace_with_deterministic_integration(
     ).llm_provider_integration_v1_create_integration(
         handle=handle,
         llm_provider_integration_create_request=LLMProviderIntegrationCreateRequest(
-            provider=LLMProvider.OPENAI,
+            provider=provider,
             name=f"__testenv_model_listing:{variant}",
             secrets=Secrets(ApiKeySecrets(api_key="sk-test-key")),
         ),
@@ -241,6 +242,99 @@ class TestModelSelectionReadiness:
         ]
         assert body["latest_attempt"]["status"] == "succeeded"
         assert body["latest_attempt"]["skipped_count"] == 1
+
+    def test_openrouter_catalog_and_unknown_publisher_selection(
+        self,
+        public_api_client: azentspublicclient.ApiClient,
+        admin_api_client: azentsadminclient.ApiClient,
+        azents_public_server_url: str,
+    ) -> None:
+        """OpenRouter exposes exact account model ids without publisher allowlists."""
+        token, handle, integration_id = _workspace_with_deterministic_integration(
+            public_api_client,
+            admin_api_client,
+            variant="deterministic-openrouter",
+            provider=LLMProvider.OPENROUTER,
+        )
+        _wait_for_initial_catalog_sync(
+            azents_public_server_url, token, handle, integration_id
+        )
+        catalog_url = (
+            f"{azents_public_server_url}/llm-provider-integration/v1/workspaces/"
+            f"{handle}/llm-provider-integrations/{integration_id}/catalog-entries"
+        )
+
+        listing = requests.get(catalog_url, headers=_headers(token), timeout=10)
+        listing.raise_for_status()
+        body = listing.json()
+        entries = {
+            entry["provider_model_identifier"]: entry for entry in body["entries"]
+        }
+
+        assert body["catalog_scope"] == "integration"
+        assert body["latest_attempt"]["status"] == "succeeded"
+        assert body["latest_attempt"]["skipped_count"] == 1
+        assert set(entries) == {
+            "anthropic/claude-sonnet-4.6",
+            "new-publisher/frontier-text",
+        }
+        assert entries["anthropic/claude-sonnet-4.6"]["publisher"] == "anthropic"
+        unknown = entries["new-publisher/frontier-text"]
+        assert unknown["provider"] == "openrouter"
+        assert unknown["publisher"] == "other"
+        assert unknown["runtime_model_identifier"] == (
+            "openrouter/new-publisher/frontier-text"
+        )
+        assert unknown["normalized_capabilities"]["modalities"] == {
+            "input": ["text", "image"],
+            "output": ["text"],
+        }
+        assert unknown["normalized_capabilities"]["built_in_tools"]["supported"] == [
+            "web_search"
+        ]
+
+        searched = requests.get(
+            catalog_url,
+            headers=_headers(token),
+            params={"search": "new-publisher", "limit": 1, "offset": 0},
+            timeout=10,
+        )
+        searched.raise_for_status()
+        assert searched.json()["total"] == 1
+        assert searched.json()["entries"][0]["provider_model_identifier"] == (
+            "new-publisher/frontier-text"
+        )
+
+        selection = {
+            "llm_provider_integration_id": integration_id,
+            "model_identifier": "new-publisher/frontier-text",
+        }
+        workspace_update = requests.put(
+            f"{azents_public_server_url}/workspace-model-settings/v1/workspaces/{handle}",
+            headers=_headers(token),
+            json={
+                "default_model_selection": selection,
+                "default_lightweight_model_selection": selection,
+            },
+            timeout=10,
+        )
+        assert workspace_update.status_code == 200
+        workspace_selection = workspace_update.json()["default_model_selection"]
+        assert workspace_selection["provider"] == "openrouter"
+        assert workspace_selection["model_identifier"] == "new-publisher/frontier-text"
+        assert workspace_selection["model_developer"] == "other"
+
+        created = requests.post(
+            f"{azents_public_server_url}/agent/v1/workspaces/{handle}/agents",
+            headers=_headers(token),
+            json={"name": "OpenRouter Unknown Publisher Agent", "type": "public"},
+            timeout=10,
+        )
+        assert created.status_code == 201
+        agent_selection = created.json()["model_selection"]
+        assert agent_selection["provider"] == "openrouter"
+        assert agent_selection["model_identifier"] == "new-publisher/frontier-text"
+        assert agent_selection["model_developer"] == "other"
 
     def test_user_catalog_failure_is_visible_without_snapshot(
         self,
