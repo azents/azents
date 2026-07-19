@@ -7,6 +7,7 @@ import {
 } from "../components/providerToolCallPresentation.ts";
 import {
   applyProviderToolCallItem,
+  providerToolCallFromPayload,
   providerToolCallStatusFromPayload,
 } from "./providerToolCallProjection.ts";
 import type { ProviderToolCall } from "../types.ts";
@@ -22,9 +23,94 @@ void test("canonical status wins over live provenance", () => {
   );
   assert.equal(providerToolCallStatusFromPayload(null, "partial"), "running");
   assert.equal(
+    providerToolCallStatusFromPayload("cancelled", "complete"),
+    "failed",
+  );
+  assert.equal(
+    providerToolCallStatusFromPayload("interrupted", "complete"),
+    "failed",
+  );
+  assert.equal(
     providerToolCallStatusFromPayload("in_progress", "complete"),
     "unknown",
   );
+});
+
+void test("provider call projects text and one attachment while hiding file parts", () => {
+  const payload = {
+    call_id: "image-1",
+    name: "image_generation",
+    status: "completed",
+    semantic: {
+      input: '{"prompt":"A reliable timeline"}',
+      output: [
+        { type: "text", text: "Generated one image." },
+        {
+          type: "file",
+          model_file_id: "model-file-1",
+          media_type: "image/jpeg",
+          name: "generated.jpg",
+          size: 123,
+          kind: "image",
+        },
+        {
+          type: "attachment",
+          attachment_id: "attachment-1",
+          uri: "exchange://generated-image",
+          media_type: "image/png",
+          name: "generated.png",
+          size: 68,
+          availability: "available",
+        },
+        {
+          type: "attachment",
+          attachment_id: "attachment-1",
+          uri: "exchange://generated-image",
+          media_type: "image/png",
+          name: "generated.png",
+          size: 68,
+          availability: "available",
+        },
+      ],
+      references: [
+        {
+          kind: "url",
+          uri: "https://example.com/source",
+          title: "Source",
+          excerpt: null,
+          metadata: {},
+        },
+      ],
+    },
+  };
+
+  const projected = providerToolCallFromPayload(payload, "complete");
+
+  assert.ok(projected);
+  assert.equal(projected.arguments, payload.semantic.input);
+  assert.equal(
+    projected.output,
+    "Generated one image.\nReferences:\n" +
+      "- url: https://example.com/source\n  Title: Source",
+  );
+  assert.equal(projected.output.includes("model-file-1"), false);
+  assert.deepEqual(projected.attachments, [
+    {
+      attachmentId: "attachment-1",
+      uri: "exchange://generated-image",
+      mediaType: "image/png",
+      name: "generated.png",
+      size: 68,
+      textPreview: null,
+      availability: "available",
+      previewTitle: null,
+      previewThumbnailUri: null,
+      previewThumbnailMediaType: null,
+      previewThumbnailWidth: null,
+      previewThumbnailHeight: null,
+      previewGeneratedAt: null,
+    },
+  ]);
 });
 
 void test("durable provider call replaces its live semantic identity", () => {

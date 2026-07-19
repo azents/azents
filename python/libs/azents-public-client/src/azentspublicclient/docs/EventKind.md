@@ -30,8 +30,6 @@ Event transcript event kind.
 
 * `PROVIDER_TOOL_CALL` (value: `'provider_tool_call'`)
 
-* `PROVIDER_TOOL_RESULT` (value: `'provider_tool_result'`)
-
 * `TURN_MARKER` (value: `'turn_marker'`)
 
 * `RUN_MARKER` (value: `'run_marker'`)
