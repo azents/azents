@@ -9,7 +9,7 @@ Name | Type | Description | Notes
 **id** | **str** |  | 
 **provider** | [**LLMProvider**](LLMProvider.md) |  | 
 **name** | **str** |  | 
-**config** | [**LLMProviderIntegrationCreateRequestConfig**](LLMProviderIntegrationCreateRequestConfig.md) |  | 
+**config** | [**LLMProviderIntegrationResponseConfig**](LLMProviderIntegrationResponseConfig.md) |  | 
 **enabled** | **bool** |  | 
 **created_at** | **datetime** |  | 
 **updated_at** | **datetime** |  | 

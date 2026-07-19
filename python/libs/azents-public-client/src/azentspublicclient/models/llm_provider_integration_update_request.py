@@ -26,7 +26,7 @@ from typing_extensions import Self
 
 class LLMProviderIntegrationUpdateRequest(BaseModel):
     """
-    LLM Provider Integration update request for partial updates.
+    Public partial update without server-owned OAuth credentials.
     """ # noqa: E501
     name: Optional[StrictStr] = Field(default=None, description="Display name")
     secrets: Optional[Secrets1] = None

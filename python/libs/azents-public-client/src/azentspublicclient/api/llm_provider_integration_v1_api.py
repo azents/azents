@@ -1456,17 +1456,17 @@ class LLMProviderIntegrationV1Api:
             _path_params['handle'] = handle
         # process the query parameters
         if search is not None:
-
+            
             _query_params.append(('search', search))
-
+            
         if limit is not None:
-
+            
             _query_params.append(('limit', limit))
-
+            
         if offset is not None:
-
+            
             _query_params.append(('offset', offset))
-
+            
         # process the header parameters
         # process the form parameters
         # process the body parameter
@@ -2614,3 +2614,5 @@ class LLMProviderIntegrationV1Api:
             _host=_host,
             _request_auth=_request_auth
         )
+
+

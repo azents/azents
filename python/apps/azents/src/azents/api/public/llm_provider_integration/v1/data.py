@@ -4,13 +4,17 @@ import datetime
 from typing import Annotated, Any, Literal, assert_never
 
 from pydantic import BaseModel, Field, HttpUrl, model_validator
-from typing_extensions import Self
+from typing_extensions import Self, TypedDict
 
 from azents.core.credentials import (
     PROVIDER_SECRET_TYPES,
     PROVIDERS_WITH_CONFIG,
+    ApiKeySecrets,
+    AwsConfig,
+    AwsSecrets,
+    GcpConfig,
+    GcpSecrets,
     ProviderConfig,
-    ProviderSecrets,
 )
 from azents.core.enums import LLMCatalogScope, LLMProvider
 from azents.core.llm_catalog import ModelCapabilities
@@ -226,15 +230,34 @@ class LLMProviderCapabilityListResponse(BaseModel):
     items: list[LLMProviderCapabilityResponse]
 
 
+GenericIntegrationProvider = Literal[
+    LLMProvider.OPENAI,
+    LLMProvider.XAI,
+    LLMProvider.OPENROUTER,
+    LLMProvider.ANTHROPIC,
+    LLMProvider.GOOGLE_GEMINI,
+    LLMProvider.AWS_BEDROCK,
+    LLMProvider.GOOGLE_VERTEX_AI,
+]
+GenericIntegrationSecrets = Annotated[
+    ApiKeySecrets | AwsSecrets | GcpSecrets,
+    Field(discriminator="type"),
+]
+GenericIntegrationConfig = Annotated[
+    AwsConfig | GcpConfig,
+    Field(discriminator="type"),
+]
+
+
 class LLMProviderIntegrationCreateRequest(BaseModel):
     """LLM Provider Integration creation request."""
 
-    provider: LLMProvider = Field(description="LLM Hosting provider")
+    provider: GenericIntegrationProvider = Field(description="LLM Hosting provider")
     name: str | None = Field(
         default=None, description="Alias; uses provider name when omitted"
     )
-    secrets: ProviderSecrets = Field(description="Secrets such as API keys")
-    config: ProviderConfig | None = Field(
+    secrets: GenericIntegrationSecrets = Field(description="Secrets such as API keys")
+    config: GenericIntegrationConfig | None = Field(
         default=None, description="Provider configuration such as AWS or GCP"
     )
     enabled: bool = Field(default=True, description="Enabled state")
@@ -269,13 +292,40 @@ class LLMProviderIntegrationCreateRequest(BaseModel):
         return self
 
 
-class LLMProviderIntegrationUpdateRequest(LLMProviderIntegrationUpdateInput):
-    """LLM Provider Integration update request for partial updates."""
+class LLMProviderIntegrationUpdateRequest(TypedDict, total=False):
+    """Public partial update without server-owned OAuth credentials."""
 
-    pass
+    name: Annotated[str, Field(description="Display name")]
+    secrets: Annotated[
+        GenericIntegrationSecrets,
+        Field(description="Generic integration secrets before encryption"),
+    ]
+    config: Annotated[
+        GenericIntegrationConfig | None,
+        Field(description="Generic integration plaintext config"),
+    ]
+    enabled: Annotated[bool, Field(description="Enabled flag")]
 
 
-SubscriptionUsageProvider = Literal["chatgpt_oauth", "xai_oauth", "openrouter"]
+def convert_integration_update_request(
+    request: LLMProviderIntegrationUpdateRequest,
+) -> LLMProviderIntegrationUpdateInput:
+    """Widen a public generic-credential patch to the service update contract."""
+    update: LLMProviderIntegrationUpdateInput = {}
+    if "name" in request:
+        update["name"] = request["name"]
+    if "secrets" in request:
+        update["secrets"] = request["secrets"]
+    if "config" in request:
+        update["config"] = request["config"]
+    if "enabled" in request:
+        update["enabled"] = request["enabled"]
+    return update
+
+
+SubscriptionUsageProvider = Literal[
+    "chatgpt_oauth", "xai_oauth", "openrouter", "kimi_oauth"
+]
 
 
 class SubscriptionUsageLimitResponse(BaseModel):
@@ -532,5 +582,8 @@ def _subscription_usage_provider(provider: LLMProvider) -> SubscriptionUsageProv
         return "xai_oauth"
     if provider == LLMProvider.OPENROUTER:
         return "openrouter"
+    if provider == LLMProvider.KIMI_OAUTH:
+        return "kimi_oauth"
+
     msg = "Subscription usage response has an unsupported provider."
     raise ValueError(msg)

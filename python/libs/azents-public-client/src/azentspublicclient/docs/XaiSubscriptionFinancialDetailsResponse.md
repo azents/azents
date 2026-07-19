@@ -6,13 +6,13 @@ Management-only xAI subscription financial details.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**type** | **str** |  |
-**prepaid_balance_cents** | **int** |  |
-**payg_cap_cents** | **int** |  |
-**payg_used_cents** | **int** |  |
-**auto_top_up_enabled** | **bool** |  |
-**auto_top_up_amount_cents** | **int** |  |
-**auto_top_up_monthly_maximum_cents** | **int** |  |
+**type** | **str** |  | 
+**prepaid_balance_cents** | **int** |  | 
+**payg_cap_cents** | **int** |  | 
+**payg_used_cents** | **int** |  | 
+**auto_top_up_enabled** | **bool** |  | 
+**auto_top_up_amount_cents** | **int** |  | 
+**auto_top_up_monthly_maximum_cents** | **int** |  | 
 
 ## Example
 
@@ -32,3 +32,5 @@ xai_subscription_financial_details_response_dict = xai_subscription_financial_de
 xai_subscription_financial_details_response_from_dict = XaiSubscriptionFinancialDetailsResponse.from_dict(xai_subscription_financial_details_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

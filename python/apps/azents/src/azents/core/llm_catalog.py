@@ -13,6 +13,7 @@ INTEGRATION_SCOPED_CATALOG_PROVIDERS: frozenset[LLMProvider] = frozenset(
     {
         LLMProvider.AWS_BEDROCK,
         LLMProvider.CHATGPT_OAUTH,
+        LLMProvider.KIMI_OAUTH,
         LLMProvider.GOOGLE_VERTEX_AI,
         LLMProvider.OPENROUTER,
     }

@@ -13,6 +13,8 @@ from azents.core.credentials import (
     ChatGPTOAuthSecrets,
     GcpConfig,
     GcpSecrets,
+    KimiOAuthConfig,
+    KimiOAuthSecrets,
     XaiOAuthConfig,
     XaiOAuthSecrets,
 )
@@ -29,11 +31,18 @@ from .data import (
 )
 
 _SecretsUnion = (
-    ApiKeySecrets | AwsSecrets | GcpSecrets | ChatGPTOAuthSecrets | XaiOAuthSecrets
+    ApiKeySecrets
+    | AwsSecrets
+    | GcpSecrets
+    | ChatGPTOAuthSecrets
+    | XaiOAuthSecrets
+    | KimiOAuthSecrets
 )
 _secrets_adapter = TypeAdapter[_SecretsUnion](_SecretsUnion)
 
-_ConfigUnion = AwsConfig | GcpConfig | ChatGPTOAuthConfig | XaiOAuthConfig
+_ConfigUnion = (
+    AwsConfig | GcpConfig | ChatGPTOAuthConfig | XaiOAuthConfig | KimiOAuthConfig
+)
 _config_adapter = TypeAdapter[_ConfigUnion](_ConfigUnion)
 
 
@@ -97,6 +106,26 @@ class LLMProviderIntegrationRepository:
         :return: LLMProviderIntegrationWithSecrets or None
         """
         rdb = await session.get(RDBLLMProviderIntegration, integration_id)
+        if rdb is None:
+            return None
+        return self._build_with_secrets(rdb)
+
+    async def get_by_id_with_secrets_for_update(
+        self, session: AsyncSession, integration_id: str
+    ) -> LLMProviderIntegrationWithSecrets | None:
+        """Lock and fetch an integration by ID, including secrets.
+
+        :param session: Database session
+        :param integration_id: Integration ID
+        :return: Locked LLMProviderIntegrationWithSecrets or None
+        """
+        result = await session.execute(
+            sa.select(RDBLLMProviderIntegration)
+            .where(RDBLLMProviderIntegration.id == integration_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        rdb = result.scalar_one_or_none()
         if rdb is None:
             return None
         return self._build_with_secrets(rdb)

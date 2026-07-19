@@ -65,11 +65,19 @@ from azents.repos.llm_provider_integration.data import LLMProviderIntegrationWit
 from azents.services.builtin_capabilities import supported_builtin_capabilities
 from azents.services.chatgpt_oauth.data import ProviderRejected, ProviderUnavailable
 from azents.services.chatgpt_oauth.runtime import ensure_runtime_tokens
+from azents.services.kimi_oauth.data import ProviderRejected as KimiProviderRejected
+from azents.services.kimi_oauth.data import (
+    ProviderUnavailable as KimiProviderUnavailable,
+)
+from azents.services.kimi_oauth.runtime import (
+    ensure_runtime_tokens as ensure_kimi_runtime_tokens,
+)
 from azents.services.model_listing.data import ModelListingOutput
 from azents.services.model_listing.providers import (
     ListingProviderError,
     list_bedrock_models_for_integration,
     list_chatgpt_models_for_integration,
+    list_kimi_models_for_integration,
     list_openrouter_models_for_integration,
     list_vertex_models_for_integration,
 )
@@ -106,6 +114,7 @@ _PROVIDER_TO_DEVELOPER: dict[LLMProvider, LLMModelDeveloper] = {
     LLMProvider.CHATGPT_OAUTH: LLMModelDeveloper.OPENAI,
     LLMProvider.XAI: LLMModelDeveloper.XAI,
     LLMProvider.XAI_OAUTH: LLMModelDeveloper.XAI,
+    LLMProvider.KIMI_OAUTH: LLMModelDeveloper.MOONSHOT,
     LLMProvider.OPENROUTER: LLMModelDeveloper.OTHER,
     LLMProvider.ANTHROPIC: LLMModelDeveloper.ANTHROPIC,
     LLMProvider.GOOGLE_GEMINI: LLMModelDeveloper.GOOGLE,
@@ -789,6 +798,29 @@ class IntegrationCatalogProjectionService:
                                 )
                             case _:
                                 assert_never(error)
+            elif integration.provider == LLMProvider.KIMI_OAUTH:
+                kimi_token_result = await ensure_kimi_runtime_tokens(
+                    integration=integration,
+                    integration_repository=self.integration_repository,
+                    session_manager=self.session_manager,
+                )
+                match kimi_token_result:
+                    case Success(refreshed_integration):
+                        integration = refreshed_integration
+                    case Failure(error):
+                        match error:
+                            case KimiProviderRejected(reason=reason):
+                                raise ListingProviderError(
+                                    reason,
+                                    automatic_retry_blocked=True,
+                                )
+                            case KimiProviderUnavailable(reason=reason):
+                                raise ListingProviderError(
+                                    reason,
+                                    automatic_retry_blocked=False,
+                                )
+                            case _:
+                                assert_never(error)
             listing = deterministic_listing or await _list_provider_visible_models(
                 integration
             )
@@ -801,6 +833,12 @@ class IntegrationCatalogProjectionService:
                 )
             elif integration.provider == LLMProvider.CHATGPT_OAUTH:
                 entries = project_chatgpt_integration_entries(
+                    integration_id=integration.id,
+                    listing=listing,
+                    source_hash=source_snapshot.source_hash,
+                )
+            elif integration.provider == LLMProvider.KIMI_OAUTH:
+                entries = project_kimi_integration_entries(
                     integration_id=integration.id,
                     listing=listing,
                     source_hash=source_snapshot.source_hash,
@@ -1005,6 +1043,8 @@ async def _list_provider_visible_models(
         return await list_bedrock_models_for_integration(integration)
     if integration.provider == LLMProvider.CHATGPT_OAUTH:
         return await list_chatgpt_models_for_integration(integration)
+    if integration.provider == LLMProvider.KIMI_OAUTH:
+        return await list_kimi_models_for_integration(integration)
     if integration.provider == LLMProvider.OPENROUTER:
         return await list_openrouter_models_for_integration(integration)
     if integration.provider == LLMProvider.GOOGLE_VERTEX_AI:
@@ -1085,6 +1125,49 @@ def project_chatgpt_integration_entries(
                 },
                 projection_metadata={
                     "lowerer_target": LLMCatalogLowererTarget.LITELLM.value,
+                    "freshness_rank": model_freshness_rank(candidate.model_identifier),
+                },
+                hidden_reason=None,
+            )
+        )
+    return entries
+
+
+def project_kimi_integration_entries(
+    *,
+    integration_id: str,
+    listing: ModelListingOutput,
+    source_hash: str,
+) -> list[LLMCatalogEntryCreate]:
+    """Project Kimi account models without a LiteLLM metadata gate."""
+    entries: list[LLMCatalogEntryCreate] = []
+    for candidate in listing.models:
+        entries.append(
+            LLMCatalogEntryCreate(
+                provider=LLMProvider.KIMI_OAUTH,
+                provider_model_identifier=candidate.model_identifier,
+                lowerer_target=LLMCatalogLowererTarget.LITELLM,
+                runtime_model_identifier=to_runtime_model(
+                    LLMProvider.KIMI_OAUTH,
+                    candidate.model_identifier,
+                ),
+                display_name=candidate.model_display_name,
+                normalized_capabilities=candidate.normalized_capabilities.model_dump(
+                    mode="json"
+                ),
+                lifecycle_status=LLMModelLifecycleStatus.ACTIVE,
+                visibility_status=LLMCatalogEntryVisibility.SELECTABLE,
+                provider_integration_id=integration_id,
+                publisher=candidate.model_developer.value,
+                family=candidate.model_family,
+                source_metadata={
+                    "provider_listing_source": listing.summary.source,
+                    "provider_metadata": candidate.source_metadata,
+                    "source_hash": source_hash,
+                },
+                projection_metadata={
+                    "lowerer_target": LLMCatalogLowererTarget.LITELLM.value,
+                    "target_metadata_match_required": False,
                     "freshness_rank": model_freshness_rank(candidate.model_identifier),
                 },
                 hidden_reason=None,

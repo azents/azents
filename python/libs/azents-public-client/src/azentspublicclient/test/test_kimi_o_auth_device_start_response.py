@@ -14,10 +14,10 @@
 
 import unittest
 
-from azentspublicclient.models.xai_o_auth_secrets import XaiOAuthSecrets
+from azentspublicclient.models.kimi_o_auth_device_start_response import KimiOAuthDeviceStartResponse
 
-class TestXaiOAuthSecrets(unittest.TestCase):
-    """XaiOAuthSecrets unit test stubs"""
+class TestKimiOAuthDeviceStartResponse(unittest.TestCase):
+    """KimiOAuthDeviceStartResponse unit test stubs"""
 
     def setUp(self):
         pass
@@ -25,32 +25,34 @@ class TestXaiOAuthSecrets(unittest.TestCase):
     def tearDown(self):
         pass
 
-    def make_instance(self, include_optional) -> XaiOAuthSecrets:
-        """Test XaiOAuthSecrets
+    def make_instance(self, include_optional) -> KimiOAuthDeviceStartResponse:
+        """Test KimiOAuthDeviceStartResponse
             include_optional is a boolean, when False only required
             params are included, when True both required and
             optional params are included """
-        # uncomment below to create an instance of `XaiOAuthSecrets`
+        # uncomment below to create an instance of `KimiOAuthDeviceStartResponse`
         """
-        model = XaiOAuthSecrets()
+        model = KimiOAuthDeviceStartResponse()
         if include_optional:
-            return XaiOAuthSecrets(
-                type = 'xai_oauth',
-                access_token = '',
-                refresh_token = '',
-                id_token = '',
+            return KimiOAuthDeviceStartResponse(
+                session_id = '',
+                user_code = '',
+                verification_uri = '',
+                interval_seconds = 56,
                 expires_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f')
             )
         else:
-            return XaiOAuthSecrets(
-                access_token = '',
-                refresh_token = '',
+            return KimiOAuthDeviceStartResponse(
+                session_id = '',
+                user_code = '',
+                verification_uri = '',
+                interval_seconds = 56,
                 expires_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
         )
         """
 
-    def testXaiOAuthSecrets(self):
-        """Test XaiOAuthSecrets"""
+    def testKimiOAuthDeviceStartResponse(self):
+        """Test KimiOAuthDeviceStartResponse"""
         # inst_req_only = self.make_instance(include_optional=False)
         # inst_req_and_optional = self.make_instance(include_optional=True)
 

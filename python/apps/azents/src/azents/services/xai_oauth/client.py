@@ -11,9 +11,9 @@ from pydantic import ValidationError
 
 from azents.core.xai_oauth import (
     XAI_OAUTH_CLIENT_ID,
-    XAI_OAUTH_DEVICE_CODE_URL,
     XAI_OAUTH_SCOPE,
     XaiOAuthConnectionMethod,
+    resolve_xai_oauth_device_code_url,
     resolve_xai_oauth_token_url,
 )
 
@@ -46,7 +46,7 @@ class XaiOAuthClient:
         """Request Device user-code."""
         try:
             response = await self._http_client.post(
-                XAI_OAUTH_DEVICE_CODE_URL,
+                resolve_xai_oauth_device_code_url(),
                 data={"client_id": XAI_OAUTH_CLIENT_ID, "scope": XAI_OAUTH_SCOPE},
                 headers={
                     "Content-Type": "application/x-www-form-urlencoded",

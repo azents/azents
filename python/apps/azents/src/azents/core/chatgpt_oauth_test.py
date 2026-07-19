@@ -3,14 +3,73 @@
 import os
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
 from .chatgpt_oauth import (
+    CHATGPT_OAUTH_DEVICE_TOKEN_URL,
+    CHATGPT_OAUTH_DEVICE_USER_CODE_URL,
     CHATGPT_OAUTH_TOKEN_URL,
+    resolve_chatgpt_oauth_device_token_url,
+    resolve_chatgpt_oauth_device_user_code_url,
     resolve_chatgpt_oauth_token_url,
 )
+
+
+@pytest.mark.parametrize(
+    ("environment_name", "resolver", "production_url"),
+    [
+        (
+            "AZ_CHATGPT_OAUTH_DEVICE_USER_CODE_URL",
+            resolve_chatgpt_oauth_device_user_code_url,
+            CHATGPT_OAUTH_DEVICE_USER_CODE_URL,
+        ),
+        (
+            "AZ_CHATGPT_OAUTH_DEVICE_TOKEN_URL",
+            resolve_chatgpt_oauth_device_token_url,
+            CHATGPT_OAUTH_DEVICE_TOKEN_URL,
+        ),
+    ],
+)
+def test_resolve_oauth_device_url_defaults_to_production(
+    monkeypatch: pytest.MonkeyPatch,
+    environment_name: str,
+    resolver: Callable[[], str],
+    production_url: str,
+) -> None:
+    """Use production device endpoints when no override is configured."""
+    monkeypatch.delenv(environment_name, raising=False)
+
+    assert resolver() == production_url
+
+
+@pytest.mark.parametrize(
+    ("environment_name", "resolver", "override"),
+    [
+        (
+            "AZ_CHATGPT_OAUTH_DEVICE_USER_CODE_URL",
+            resolve_chatgpt_oauth_device_user_code_url,
+            "http://openai-proxy:8081/chatgpt/device/usercode",
+        ),
+        (
+            "AZ_CHATGPT_OAUTH_DEVICE_TOKEN_URL",
+            resolve_chatgpt_oauth_device_token_url,
+            "http://openai-proxy:8081/chatgpt/device/token",
+        ),
+    ],
+)
+def test_resolve_oauth_device_url_uses_process_override(
+    monkeypatch: pytest.MonkeyPatch,
+    environment_name: str,
+    resolver: Callable[[], str],
+    override: str,
+) -> None:
+    """Use process-local non-secret device endpoint overrides."""
+    monkeypatch.setenv(environment_name, override)
+
+    assert resolver() == override
 
 
 def test_resolve_oauth_token_url_defaults_to_production(

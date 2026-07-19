@@ -18,32 +18,22 @@ import re  # noqa: F401
 import json
 
 from datetime import datetime
-from pydantic import BaseModel, ConfigDict, Field, StrictStr, field_validator
-from typing import Any, ClassVar, Dict, List, Optional
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr
+from typing import Any, ClassVar, Dict, List
 from typing import Optional, Set
 from typing_extensions import Self
 
-class XaiOAuthSecrets(BaseModel):
+class KimiOAuthDeviceStartResponse(BaseModel):
     """
-    xAI OAuth token secrets.
+    Device OAuth start response.
     """ # noqa: E501
-    type: Optional[StrictStr] = 'xai_oauth'
-    access_token: StrictStr = Field(description="xAI access token")
-    refresh_token: StrictStr = Field(description="xAI refresh token")
-    id_token: Optional[StrictStr] = None
-    expires_at: datetime = Field(description="Access token expiration time")
+    session_id: StrictStr = Field(description="OAuth session ID")
+    user_code: StrictStr = Field(description="Device user code")
+    verification_uri: StrictStr = Field(description="Device verification URI")
+    interval_seconds: StrictInt = Field(description="Provider polling interval")
+    expires_at: datetime = Field(description="Session expiry")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["type", "access_token", "refresh_token", "id_token", "expires_at"]
-
-    @field_validator('type')
-    def type_validate_enum(cls, value):
-        """Validates the enum"""
-        if value is None:
-            return value
-
-        if value not in set(['xai_oauth']):
-            raise ValueError("must be one of enum values ('xai_oauth')")
-        return value
+    __properties: ClassVar[List[str]] = ["session_id", "user_code", "verification_uri", "interval_seconds", "expires_at"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -63,7 +53,7 @@ class XaiOAuthSecrets(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of XaiOAuthSecrets from a JSON string"""
+        """Create an instance of KimiOAuthDeviceStartResponse from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -91,16 +81,11 @@ class XaiOAuthSecrets(BaseModel):
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
 
-        # set to None if id_token (nullable) is None
-        # and model_fields_set contains the field
-        if self.id_token is None and "id_token" in self.model_fields_set:
-            _dict['id_token'] = None
-
         return _dict
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of XaiOAuthSecrets from a dict"""
+        """Create an instance of KimiOAuthDeviceStartResponse from a dict"""
         if obj is None:
             return None
 
@@ -108,10 +93,10 @@ class XaiOAuthSecrets(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "type": obj.get("type") if obj.get("type") is not None else 'xai_oauth',
-            "access_token": obj.get("access_token"),
-            "refresh_token": obj.get("refresh_token"),
-            "id_token": obj.get("id_token"),
+            "session_id": obj.get("session_id"),
+            "user_code": obj.get("user_code"),
+            "verification_uri": obj.get("verification_uri"),
+            "interval_seconds": obj.get("interval_seconds"),
             "expires_at": obj.get("expires_at")
         })
         # store additional fields in additional_properties

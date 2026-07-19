@@ -17,13 +17,20 @@ from azents.core.credentials import (
     ApiKeySecrets,
     ChatGPTOAuthConfig,
     ChatGPTOAuthSecrets,
+    KimiOAuthConfig,
+    KimiOAuthSecrets,
     XaiOAuthConfig,
     XaiOAuthSecrets,
 )
 from azents.core.enums import LLMProvider
+from azents.core.kimi_oauth import KimiOAuthConnectionMethod
 from azents.core.xai_oauth import XaiOAuthConnectionMethod, XaiOAuthConnectionStatus
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationWithSecrets
 from azents.services.chatgpt_oauth.data import ProviderRejected, ProviderUnavailable
+from azents.services.kimi_oauth.data import ProviderRejected as KimiProviderRejected
+from azents.services.kimi_oauth.data import (
+    ProviderUnavailable as KimiProviderUnavailable,
+)
 from azents.services.xai_oauth.data import (
     ProviderEntitlementDenied as XaiProviderEntitlementDenied,
 )
@@ -149,6 +156,41 @@ def _openrouter_integration(
     )
 
 
+def _kimi_integration(
+    *,
+    enabled: bool = True,
+    status: Literal[
+        "connected", "refresh_required", "temporarily_unavailable", "disabled"
+    ] = "connected",
+    access_token: str = "kimi-access-1",
+) -> LLMProviderIntegrationWithSecrets:
+    """Build one Kimi OAuth integration for service tests."""
+    now = datetime.datetime.now(datetime.UTC)
+    return LLMProviderIntegrationWithSecrets(
+        id="kimi-integration-1",
+        workspace_id="workspace-1",
+        provider=LLMProvider.KIMI_OAUTH,
+        name="Kimi subscription",
+        config=KimiOAuthConfig(
+            connection_method=KimiOAuthConnectionMethod.DEVICE.value,
+            status=status,
+            connected_at=now,
+            last_refreshed_at=now,
+            last_failed_at=None,
+            last_failure_reason=None,
+        ),
+        enabled=enabled,
+        created_at=now,
+        updated_at=now,
+        secrets=KimiOAuthSecrets(
+            access_token=access_token,
+            refresh_token="kimi-refresh-1",
+            expires_at=now + datetime.timedelta(hours=1),
+            device_id="kimi-device-1",
+        ),
+    )
+
+
 def _xai_payload(*, prepaid_balance: int = 0) -> dict[str, object]:
     """Return one valid xAI credits response."""
     return {
@@ -198,6 +240,7 @@ async def _service(
             chatgpt_usage_base_url="https://usage.example.test/backend-api",
             xai_usage_base_url="https://xai-usage.example.test/v1",
             openrouter_usage_base_url="https://openrouter.example.test/api/v1",
+            kimi_usage_base_url="https://kimi-usage.example.test/coding/v1",
         ),
         repository,
     )
@@ -921,3 +964,128 @@ async def test_xai_trusted_redirect_returns_external_without_billing(
     assert result.value.url == "https://grok.com/usage"
     assert result.value.message == "Usage is managed on xAI."
     assert calls == 1
+
+
+async def test_kimi_usage_unauthorized_forces_one_refresh_and_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Retry one Kimi usage request with the forced-refreshed credential."""
+    integration = _kimi_integration()
+    refreshed = _kimi_integration(access_token="kimi-refreshed-access")
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        authorization = request.headers["authorization"]
+        calls.append(authorization)
+        assert request.headers["X-Msh-Device-Id"] == "kimi-device-1"
+        if len(calls) == 1:
+            return httpx.Response(401)
+        return httpx.Response(
+            200,
+            json={"usage": {"used": 2, "limit": 10}},
+        )
+
+    refresh = AsyncMock(return_value=Success(refreshed))
+    monkeypatch.setattr(
+        f"{_SERVICE_MODULE}.ensure_kimi_runtime_tokens",
+        AsyncMock(return_value=Success(integration)),
+    )
+    monkeypatch.setattr(f"{_SERVICE_MODULE}.refresh_kimi_runtime_tokens", refresh)
+    service, _ = await _service(handler, integration=integration)
+    try:
+        result = await service.read(
+            integration_id=integration.id,
+            workspace_id=integration.workspace_id,
+            include_financial_details=True,
+        )
+    finally:
+        await service.http_client.aclose()
+
+    assert isinstance(result, Success)
+    assert isinstance(result.value, SubscriptionUsageAvailable)
+    assert result.value.provider == LLMProvider.KIMI_OAUTH
+    assert result.value.financial_details is None
+    assert result.value.limits[0].used_percent == 20
+    assert calls == ["Bearer kimi-access-1", "Bearer kimi-refreshed-access"]
+    refresh.assert_awaited_once()
+
+
+async def test_kimi_repeated_unauthorized_stops_after_one_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Do not issue a third Kimi request or a second forced refresh."""
+    integration = _kimi_integration()
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(401)
+
+    refresh = AsyncMock(return_value=Success(integration))
+    monkeypatch.setattr(
+        f"{_SERVICE_MODULE}.ensure_kimi_runtime_tokens",
+        AsyncMock(return_value=Success(integration)),
+    )
+    monkeypatch.setattr(f"{_SERVICE_MODULE}.refresh_kimi_runtime_tokens", refresh)
+    service, _ = await _service(handler, integration=integration)
+    try:
+        result = await service.read(
+            integration_id=integration.id,
+            workspace_id=integration.workspace_id,
+            include_financial_details=False,
+        )
+    finally:
+        await service.http_client.aclose()
+
+    assert isinstance(result, Success)
+    assert isinstance(result.value, SubscriptionUsageUnavailable)
+    assert result.value.reason == SubscriptionUsageUnavailableReason.RECONNECT_REQUIRED
+    assert calls == 2
+    refresh.assert_awaited_once()
+
+
+@pytest.mark.parametrize(
+    ("error", "reason", "retryable"),
+    [
+        (
+            KimiProviderRejected(reason="credentials rejected"),
+            SubscriptionUsageUnavailableReason.RECONNECT_REQUIRED,
+            False,
+        ),
+        (
+            KimiProviderUnavailable(reason="provider unavailable"),
+            SubscriptionUsageUnavailableReason.TEMPORARILY_UNAVAILABLE,
+            True,
+        ),
+    ],
+)
+async def test_kimi_refresh_failure_maps_to_controlled_usage_state(
+    monkeypatch: pytest.MonkeyPatch,
+    error: KimiProviderRejected | KimiProviderUnavailable,
+    reason: SubscriptionUsageUnavailableReason,
+    retryable: bool,
+) -> None:
+    """Map Kimi refresh lifecycle failures without leaking provider details."""
+    integration = _kimi_integration()
+    monkeypatch.setattr(
+        f"{_SERVICE_MODULE}.ensure_kimi_runtime_tokens",
+        AsyncMock(return_value=Failure(error)),
+    )
+    service, _ = await _service(
+        lambda _request: pytest.fail("usage endpoint must not be called"),
+        integration=integration,
+    )
+    try:
+        result = await service.read(
+            integration_id=integration.id,
+            workspace_id=integration.workspace_id,
+            include_financial_details=False,
+        )
+    finally:
+        await service.http_client.aclose()
+
+    assert isinstance(result, Success)
+    assert isinstance(result.value, SubscriptionUsageUnavailable)
+    assert result.value.reason == reason
+    assert result.value.retryable is retryable

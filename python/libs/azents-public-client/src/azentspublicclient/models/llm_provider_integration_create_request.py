@@ -17,9 +17,8 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictStr, field_validator
 from typing import Any, ClassVar, Dict, List, Optional
-from azentspublicclient.models.llm_provider import LLMProvider
 from azentspublicclient.models.llm_provider_integration_create_request_config import LLMProviderIntegrationCreateRequestConfig
 from azentspublicclient.models.secrets import Secrets
 from typing import Optional, Set
@@ -29,13 +28,20 @@ class LLMProviderIntegrationCreateRequest(BaseModel):
     """
     LLM Provider Integration creation request.
     """ # noqa: E501
-    provider: LLMProvider = Field(description="LLM Hosting provider")
+    provider: StrictStr = Field(description="LLM Hosting provider")
     name: Optional[StrictStr] = None
     secrets: Secrets
     config: Optional[LLMProviderIntegrationCreateRequestConfig] = None
     enabled: Optional[StrictBool] = Field(default=True, description="Enabled state")
     additional_properties: Dict[str, Any] = {}
     __properties: ClassVar[List[str]] = ["provider", "name", "secrets", "config", "enabled"]
+
+    @field_validator('provider')
+    def provider_validate_enum(cls, value):
+        """Validates the enum"""
+        if value not in set(['openai', 'xai', 'openrouter', 'anthropic', 'google_gemini', 'aws_bedrock', 'google_vertex_ai']):
+            raise ValueError("must be one of enum values ('openai', 'xai', 'openrouter', 'anthropic', 'google_gemini', 'aws_bedrock', 'google_vertex_ai')")
+        return value
 
     model_config = ConfigDict(
         populate_by_name=True,

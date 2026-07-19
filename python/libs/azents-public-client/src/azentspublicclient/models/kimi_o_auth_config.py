@@ -23,17 +23,19 @@ from typing import Any, ClassVar, Dict, List, Optional
 from typing import Optional, Set
 from typing_extensions import Self
 
-class ChatGPTOAuthSecrets(BaseModel):
+class KimiOAuthConfig(BaseModel):
     """
-    ChatGPT OAuth token secrets.
+    Kimi OAuth display and status settings.
     """ # noqa: E501
-    type: Optional[StrictStr] = 'chatgpt_oauth'
-    access_token: StrictStr = Field(description="ChatGPT access token")
-    refresh_token: StrictStr = Field(description="ChatGPT refresh token")
-    id_token: Optional[StrictStr] = None
-    expires_at: datetime = Field(description="Access token expiration time")
+    type: Optional[StrictStr] = 'kimi_oauth'
+    connection_method: StrictStr = Field(description="Connection method")
+    status: StrictStr = Field(description="Connection status")
+    connected_at: Optional[datetime]
+    last_refreshed_at: Optional[datetime]
+    last_failed_at: Optional[datetime]
+    last_failure_reason: Optional[StrictStr]
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["type", "access_token", "refresh_token", "id_token", "expires_at"]
+    __properties: ClassVar[List[str]] = ["type", "connection_method", "status", "connected_at", "last_refreshed_at", "last_failed_at", "last_failure_reason"]
 
     @field_validator('type')
     def type_validate_enum(cls, value):
@@ -41,8 +43,22 @@ class ChatGPTOAuthSecrets(BaseModel):
         if value is None:
             return value
 
-        if value not in set(['chatgpt_oauth']):
-            raise ValueError("must be one of enum values ('chatgpt_oauth')")
+        if value not in set(['kimi_oauth']):
+            raise ValueError("must be one of enum values ('kimi_oauth')")
+        return value
+
+    @field_validator('connection_method')
+    def connection_method_validate_enum(cls, value):
+        """Validates the enum"""
+        if value not in set(['device']):
+            raise ValueError("must be one of enum values ('device')")
+        return value
+
+    @field_validator('status')
+    def status_validate_enum(cls, value):
+        """Validates the enum"""
+        if value not in set(['connected', 'refresh_required', 'temporarily_unavailable', 'disabled']):
+            raise ValueError("must be one of enum values ('connected', 'refresh_required', 'temporarily_unavailable', 'disabled')")
         return value
 
     model_config = ConfigDict(
@@ -63,7 +79,7 @@ class ChatGPTOAuthSecrets(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of ChatGPTOAuthSecrets from a JSON string"""
+        """Create an instance of KimiOAuthConfig from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -91,16 +107,31 @@ class ChatGPTOAuthSecrets(BaseModel):
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
 
-        # set to None if id_token (nullable) is None
+        # set to None if connected_at (nullable) is None
         # and model_fields_set contains the field
-        if self.id_token is None and "id_token" in self.model_fields_set:
-            _dict['id_token'] = None
+        if self.connected_at is None and "connected_at" in self.model_fields_set:
+            _dict['connected_at'] = None
+
+        # set to None if last_refreshed_at (nullable) is None
+        # and model_fields_set contains the field
+        if self.last_refreshed_at is None and "last_refreshed_at" in self.model_fields_set:
+            _dict['last_refreshed_at'] = None
+
+        # set to None if last_failed_at (nullable) is None
+        # and model_fields_set contains the field
+        if self.last_failed_at is None and "last_failed_at" in self.model_fields_set:
+            _dict['last_failed_at'] = None
+
+        # set to None if last_failure_reason (nullable) is None
+        # and model_fields_set contains the field
+        if self.last_failure_reason is None and "last_failure_reason" in self.model_fields_set:
+            _dict['last_failure_reason'] = None
 
         return _dict
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of ChatGPTOAuthSecrets from a dict"""
+        """Create an instance of KimiOAuthConfig from a dict"""
         if obj is None:
             return None
 
@@ -108,11 +139,13 @@ class ChatGPTOAuthSecrets(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "type": obj.get("type") if obj.get("type") is not None else 'chatgpt_oauth',
-            "access_token": obj.get("access_token"),
-            "refresh_token": obj.get("refresh_token"),
-            "id_token": obj.get("id_token"),
-            "expires_at": obj.get("expires_at")
+            "type": obj.get("type") if obj.get("type") is not None else 'kimi_oauth',
+            "connection_method": obj.get("connection_method"),
+            "status": obj.get("status"),
+            "connected_at": obj.get("connected_at"),
+            "last_refreshed_at": obj.get("last_refreshed_at"),
+            "last_failed_at": obj.get("last_failed_at"),
+            "last_failure_reason": obj.get("last_failure_reason")
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

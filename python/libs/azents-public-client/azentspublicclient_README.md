@@ -171,6 +171,9 @@ Class | Method | HTTP request | Description
 *JoinRequestV1Api* | [**join_request_v1_list_join_requests**](azentspublicclient/docs/JoinRequestV1Api.md#join_request_v1_list_join_requests) | **GET** /join-request/v1/workspaces/{handle}/join-requests | List Join Requests
 *JoinRequestV1Api* | [**join_request_v1_mute_join_request**](azentspublicclient/docs/JoinRequestV1Api.md#join_request_v1_mute_join_request) | **POST** /join-request/v1/workspaces/{handle}/join-requests/{join_request_id}/mute | Mute Join Request
 *JoinRequestV1Api* | [**join_request_v1_reject_join_request**](azentspublicclient/docs/JoinRequestV1Api.md#join_request_v1_reject_join_request) | **POST** /join-request/v1/workspaces/{handle}/join-requests/{join_request_id}/reject | Reject Join Request
+*KimiOAuthV1Api* | [**kimi_oauth_v1_cancel_device**](azentspublicclient/docs/KimiOAuthV1Api.md#kimi_oauth_v1_cancel_device) | **DELETE** /llm-provider-integration/v1/workspaces/{handle}/kimi-oauth/device/{session_id} | Cancel Device
+*KimiOAuthV1Api* | [**kimi_oauth_v1_poll_device**](azentspublicclient/docs/KimiOAuthV1Api.md#kimi_oauth_v1_poll_device) | **GET** /llm-provider-integration/v1/workspaces/{handle}/kimi-oauth/device/{session_id} | Poll Device
+*KimiOAuthV1Api* | [**kimi_oauth_v1_start_device**](azentspublicclient/docs/KimiOAuthV1Api.md#kimi_oauth_v1_start_device) | **POST** /llm-provider-integration/v1/workspaces/{handle}/kimi-oauth/device/start | Start Device
 *LLMProviderIntegrationV1Api* | [**llm_provider_integration_v1_create_integration**](azentspublicclient/docs/LLMProviderIntegrationV1Api.md#llm_provider_integration_v1_create_integration) | **POST** /llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations | Create Integration
 *LLMProviderIntegrationV1Api* | [**llm_provider_integration_v1_delete_integration**](azentspublicclient/docs/LLMProviderIntegrationV1Api.md#llm_provider_integration_v1_delete_integration) | **DELETE** /llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations/{integration_id} | Delete Integration
 *LLMProviderIntegrationV1Api* | [**llm_provider_integration_v1_get_integration**](azentspublicclient/docs/LLMProviderIntegrationV1Api.md#llm_provider_integration_v1_get_integration) | **GET** /llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations/{integration_id} | Get Integration
@@ -307,7 +310,6 @@ Class | Method | HTTP request | Description
  - [ChatGPTOAuthConfig](azentspublicclient/docs/ChatGPTOAuthConfig.md)
  - [ChatGPTOAuthDeviceStartResponse](azentspublicclient/docs/ChatGPTOAuthDeviceStartResponse.md)
  - [ChatGPTOAuthDeviceStatusResponse](azentspublicclient/docs/ChatGPTOAuthDeviceStatusResponse.md)
- - [ChatGPTOAuthSecrets](azentspublicclient/docs/ChatGPTOAuthSecrets.md)
  - [ChatGPTOAuthSessionStatus](azentspublicclient/docs/ChatGPTOAuthSessionStatus.md)
  - [ChatGPTSubscriptionFinancialDetailsResponse](azentspublicclient/docs/ChatGPTSubscriptionFinancialDetailsResponse.md)
  - [ChatInputWriteRequest](azentspublicclient/docs/ChatInputWriteRequest.md)
@@ -364,6 +366,10 @@ Class | Method | HTTP request | Description
  - [JoinRequestListResponse](azentspublicclient/docs/JoinRequestListResponse.md)
  - [JoinRequestResponse](azentspublicclient/docs/JoinRequestResponse.md)
  - [JoinRequestStatus](azentspublicclient/docs/JoinRequestStatus.md)
+ - [KimiOAuthConfig](azentspublicclient/docs/KimiOAuthConfig.md)
+ - [KimiOAuthDeviceStartResponse](azentspublicclient/docs/KimiOAuthDeviceStartResponse.md)
+ - [KimiOAuthDeviceStatusResponse](azentspublicclient/docs/KimiOAuthDeviceStatusResponse.md)
+ - [KimiOAuthSessionStatus](azentspublicclient/docs/KimiOAuthSessionStatus.md)
  - [LLMCatalogScope](azentspublicclient/docs/LLMCatalogScope.md)
  - [LLMModelDeveloper](azentspublicclient/docs/LLMModelDeveloper.md)
  - [LLMProvider](azentspublicclient/docs/LLMProvider.md)
@@ -373,6 +379,7 @@ Class | Method | HTTP request | Description
  - [LLMProviderIntegrationCreateRequestConfig](azentspublicclient/docs/LLMProviderIntegrationCreateRequestConfig.md)
  - [LLMProviderIntegrationListResponse](azentspublicclient/docs/LLMProviderIntegrationListResponse.md)
  - [LLMProviderIntegrationResponse](azentspublicclient/docs/LLMProviderIntegrationResponse.md)
+ - [LLMProviderIntegrationResponseConfig](azentspublicclient/docs/LLMProviderIntegrationResponseConfig.md)
  - [LLMProviderIntegrationUpdateRequest](azentspublicclient/docs/LLMProviderIntegrationUpdateRequest.md)
  - [LiveEventListResponse](azentspublicclient/docs/LiveEventListResponse.md)
  - [LoginMethodsResponse](azentspublicclient/docs/LoginMethodsResponse.md)
@@ -505,7 +512,6 @@ Class | Method | HTTP request | Description
  - [XaiOAuthConfig](azentspublicclient/docs/XaiOAuthConfig.md)
  - [XaiOAuthDeviceStartResponse](azentspublicclient/docs/XaiOAuthDeviceStartResponse.md)
  - [XaiOAuthDeviceStatusResponse](azentspublicclient/docs/XaiOAuthDeviceStatusResponse.md)
- - [XaiOAuthSecrets](azentspublicclient/docs/XaiOAuthSecrets.md)
  - [XaiOAuthSessionStatus](azentspublicclient/docs/XaiOAuthSessionStatus.md)
  - [XaiSubscriptionFinancialDetailsResponse](azentspublicclient/docs/XaiSubscriptionFinancialDetailsResponse.md)
 
@@ -522,3 +528,7 @@ Authentication schemes defined for the API:
 
 
 ## Author
+
+
+
+

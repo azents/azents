@@ -6,7 +6,11 @@ from azcommon.result import Success
 from cryptography.fernet import Fernet
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.credentials import ChatGPTOAuthConfig, ChatGPTOAuthSecrets
+from azents.core.credentials import (
+    ApiKeySecrets,
+    ChatGPTOAuthConfig,
+    ChatGPTOAuthSecrets,
+)
 from azents.core.crypto import CredentialCipher
 from azents.core.enums import LLMCatalogScope, LLMProvider
 from azents.rdb.session import SessionManager
@@ -17,8 +21,10 @@ from azents.repos.workspace.data import WorkspaceCreate
 from azents.services.llm_provider_integration import (
     LLMProviderIntegrationService,
     catalog_sync_required_for_update,
+    validate_provider_update,
 )
 from azents.services.llm_provider_integration.data import (
+    InvalidProviderUpdate,
     LLMProviderIntegrationCreateInput,
     LLMProviderIntegrationUpdateInput,
 )
@@ -57,6 +63,25 @@ def test_catalog_sync_not_required_for_non_affecting_update() -> None:
     assert not catalog_sync_required_for_update(
         LLMProviderIntegrationUpdateInput(enabled=True),
         previously_enabled=True,
+    )
+
+
+def test_validate_provider_update_rejects_generic_secrets_for_kimi() -> None:
+    result = validate_provider_update(
+        LLMProvider.KIMI_OAUTH,
+        LLMProviderIntegrationUpdateInput(
+            secrets=ApiKeySecrets(api_key="not-an-oauth-token")
+        ),
+    )
+
+    assert isinstance(result, InvalidProviderUpdate)
+    assert result.reason == ("Provider 'kimi_oauth' requires 'kimi_oauth' secret type.")
+    assert (
+        validate_provider_update(
+            LLMProvider.KIMI_OAUTH,
+            LLMProviderIntegrationUpdateInput(name="Renamed"),
+        )
+        is None
     )
 
 

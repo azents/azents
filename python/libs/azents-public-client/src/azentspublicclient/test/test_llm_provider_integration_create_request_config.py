@@ -39,25 +39,13 @@ class TestLLMProviderIntegrationCreateRequestConfig(unittest.TestCase):
                 access_key_id = '',
                 region = '',
                 role_arn = '',
-                project_id = '',
-                account_id = '',
-                email = '',
-                plan_type = '',
-                connection_method = 'device',
-                status = 'connected',
-                connected_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
-                last_refreshed_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
-                last_failed_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
-                last_failure_reason = '',
-                entitlement_status = 'denied'
+                project_id = ''
             )
         else:
             return LLMProviderIntegrationCreateRequestConfig(
                 access_key_id = '',
                 region = '',
                 project_id = '',
-                connection_method = 'device',
-                status = 'connected',
         )
         """
 

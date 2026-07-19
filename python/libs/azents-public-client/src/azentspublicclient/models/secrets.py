@@ -19,14 +19,12 @@ from pydantic import BaseModel, ConfigDict, Field, StrictStr, ValidationError, f
 from typing import Any, List, Optional
 from azentspublicclient.models.api_key_secrets import ApiKeySecrets
 from azentspublicclient.models.aws_secrets import AwsSecrets
-from azentspublicclient.models.chat_gpto_auth_secrets import ChatGPTOAuthSecrets
 from azentspublicclient.models.gcp_secrets import GcpSecrets
-from azentspublicclient.models.xai_o_auth_secrets import XaiOAuthSecrets
 from pydantic import StrictStr, Field
 from typing import Union, List, Set, Optional, Dict
 from typing_extensions import Literal, Self
 
-SECRETS_ONE_OF_SCHEMAS = ["ApiKeySecrets", "AwsSecrets", "ChatGPTOAuthSecrets", "GcpSecrets", "XaiOAuthSecrets"]
+SECRETS_ONE_OF_SCHEMAS = ["ApiKeySecrets", "AwsSecrets", "GcpSecrets"]
 
 class Secrets(BaseModel):
     """
@@ -38,12 +36,8 @@ class Secrets(BaseModel):
     oneof_schema_2_validator: Optional[AwsSecrets] = None
     # data type: GcpSecrets
     oneof_schema_3_validator: Optional[GcpSecrets] = None
-    # data type: ChatGPTOAuthSecrets
-    oneof_schema_4_validator: Optional[ChatGPTOAuthSecrets] = None
-    # data type: XaiOAuthSecrets
-    oneof_schema_5_validator: Optional[XaiOAuthSecrets] = None
-    actual_instance: Optional[Union[ApiKeySecrets, AwsSecrets, ChatGPTOAuthSecrets, GcpSecrets, XaiOAuthSecrets]] = None
-    one_of_schemas: Set[str] = { "ApiKeySecrets", "AwsSecrets", "ChatGPTOAuthSecrets", "GcpSecrets", "XaiOAuthSecrets" }
+    actual_instance: Optional[Union[ApiKeySecrets, AwsSecrets, GcpSecrets]] = None
+    one_of_schemas: Set[str] = { "ApiKeySecrets", "AwsSecrets", "GcpSecrets" }
 
     model_config = ConfigDict(
         validate_assignment=True,
@@ -84,22 +78,12 @@ class Secrets(BaseModel):
             error_messages.append(f"Error! Input type `{type(v)}` is not `GcpSecrets`")
         else:
             match += 1
-        # validate data type: ChatGPTOAuthSecrets
-        if not isinstance(v, ChatGPTOAuthSecrets):
-            error_messages.append(f"Error! Input type `{type(v)}` is not `ChatGPTOAuthSecrets`")
-        else:
-            match += 1
-        # validate data type: XaiOAuthSecrets
-        if not isinstance(v, XaiOAuthSecrets):
-            error_messages.append(f"Error! Input type `{type(v)}` is not `XaiOAuthSecrets`")
-        else:
-            match += 1
         if match > 1:
             # more than 1 match
-            raise ValueError("Multiple matches found when setting `actual_instance` in Secrets with oneOf schemas: ApiKeySecrets, AwsSecrets, ChatGPTOAuthSecrets, GcpSecrets, XaiOAuthSecrets. Details: " + ", ".join(error_messages))
+            raise ValueError("Multiple matches found when setting `actual_instance` in Secrets with oneOf schemas: ApiKeySecrets, AwsSecrets, GcpSecrets. Details: " + ", ".join(error_messages))
         elif match == 0:
             # no match
-            raise ValueError("No match found when setting `actual_instance` in Secrets with oneOf schemas: ApiKeySecrets, AwsSecrets, ChatGPTOAuthSecrets, GcpSecrets, XaiOAuthSecrets. Details: " + ", ".join(error_messages))
+            raise ValueError("No match found when setting `actual_instance` in Secrets with oneOf schemas: ApiKeySecrets, AwsSecrets, GcpSecrets. Details: " + ", ".join(error_messages))
         else:
             return v
 
@@ -132,25 +116,13 @@ class Secrets(BaseModel):
             match += 1
         except (ValidationError, ValueError) as e:
             error_messages.append(str(e))
-        # deserialize data into ChatGPTOAuthSecrets
-        try:
-            instance.actual_instance = ChatGPTOAuthSecrets.from_json(json_str)
-            match += 1
-        except (ValidationError, ValueError) as e:
-            error_messages.append(str(e))
-        # deserialize data into XaiOAuthSecrets
-        try:
-            instance.actual_instance = XaiOAuthSecrets.from_json(json_str)
-            match += 1
-        except (ValidationError, ValueError) as e:
-            error_messages.append(str(e))
 
         if match > 1:
             # more than 1 match
-            raise ValueError("Multiple matches found when deserializing the JSON string into Secrets with oneOf schemas: ApiKeySecrets, AwsSecrets, ChatGPTOAuthSecrets, GcpSecrets, XaiOAuthSecrets. Details: " + ", ".join(error_messages))
+            raise ValueError("Multiple matches found when deserializing the JSON string into Secrets with oneOf schemas: ApiKeySecrets, AwsSecrets, GcpSecrets. Details: " + ", ".join(error_messages))
         elif match == 0:
             # no match
-            raise ValueError("No match found when deserializing the JSON string into Secrets with oneOf schemas: ApiKeySecrets, AwsSecrets, ChatGPTOAuthSecrets, GcpSecrets, XaiOAuthSecrets. Details: " + ", ".join(error_messages))
+            raise ValueError("No match found when deserializing the JSON string into Secrets with oneOf schemas: ApiKeySecrets, AwsSecrets, GcpSecrets. Details: " + ", ".join(error_messages))
         else:
             return instance
 
@@ -164,7 +136,7 @@ class Secrets(BaseModel):
         else:
             return json.dumps(self.actual_instance)
 
-    def to_dict(self) -> Optional[Union[Dict[str, Any], ApiKeySecrets, AwsSecrets, ChatGPTOAuthSecrets, GcpSecrets, XaiOAuthSecrets]]:
+    def to_dict(self) -> Optional[Union[Dict[str, Any], ApiKeySecrets, AwsSecrets, GcpSecrets]]:
         """Returns the dict representation of the actual instance"""
         if self.actual_instance is None:
             return None

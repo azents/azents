@@ -242,8 +242,38 @@ class OpenRouterUsageUnavailable:
     http_status: int | None
 
 
+@dataclasses.dataclass(frozen=True)
+class KimiUsageSnapshot:
+    """Normalized Kimi adapter result before integration projection."""
+
+    plan_label: str | None
+    limits: tuple[SubscriptionUsageLimit, ...]
+    financial_details: None
+
+
+@dataclasses.dataclass(frozen=True)
+class KimiUsageUnavailable:
+    """Controlled unavailable result from the Kimi usage adapter."""
+
+    reason: SubscriptionUsageUnavailableReason
+    retryable: bool
+    http_status: int | None
+
+
 OpenRouterUsageAdapterOutcome: TypeAlias = (
     OpenRouterUsageSnapshot | OpenRouterUsageHidden | OpenRouterUsageUnavailable
+)
+
+
+@dataclasses.dataclass(frozen=True)
+class KimiUsageUnauthorized:
+    """Internal marker requesting one forced token-refresh retry."""
+
+    http_status: int
+
+
+KimiUsageAdapterOutcome: TypeAlias = (
+    KimiUsageSnapshot | KimiUsageUnavailable | KimiUsageUnauthorized
 )
 
 

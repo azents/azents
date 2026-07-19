@@ -60,6 +60,7 @@ class TestAgentListResponse(unittest.TestCase):
                         runtime_provider_id = '', 
                         shell_enabled = True, 
                         memory_enabled = True, 
+                        tool_search_enabled = True, 
                         max_turns = 56, 
                         subagent_settings = { }, 
                         avatar = azentspublicclient.models.uploaded_image.UploadedImage(
@@ -107,6 +108,7 @@ class TestAgentListResponse(unittest.TestCase):
                         runtime_provider_id = '', 
                         shell_enabled = True, 
                         memory_enabled = True, 
+                        tool_search_enabled = True, 
                         max_turns = 56, 
                         subagent_settings = { }, 
                         avatar = azentspublicclient.models.uploaded_image.UploadedImage(

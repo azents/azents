@@ -19,6 +19,11 @@ def resolve_xai_usage_base_url() -> str:
     return os.environ.get("AZ_XAI_USAGE_BASE_URL", XAI_USAGE_BASE_URL).rstrip("/")
 
 
+def resolve_xai_oauth_device_code_url() -> str:
+    """Return the configured xAI OAuth device-code endpoint."""
+    return os.environ.get("AZ_XAI_OAUTH_DEVICE_CODE_URL", XAI_OAUTH_DEVICE_CODE_URL)
+
+
 def resolve_xai_oauth_token_url() -> str:
     """Return the configured xAI OAuth token endpoint."""
     return os.environ.get("AZ_XAI_OAUTH_TOKEN_URL", XAI_OAUTH_TOKEN_URL)

@@ -30,6 +30,7 @@ class LLMModelDeveloper(str, Enum):
     ANTHROPIC = 'anthropic'
     GOOGLE = 'google'
     XAI = 'xai'
+    MOONSHOT = 'moonshot'
     META = 'meta'
     MISTRAL = 'mistral'
     OTHER = 'other'

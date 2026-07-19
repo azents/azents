@@ -6,13 +6,13 @@ Public controlled unavailable subscription usage response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**type** | **str** |  |
-**integration_id** | **str** |  |
-**provider** | **str** |  |
-**fetched_at** | **datetime** |  |
-**reason** | [**SubscriptionUsageUnavailableReason**](SubscriptionUsageUnavailableReason.md) |  |
-**message** | **str** |  |
-**retryable** | **bool** |  |
+**type** | **str** |  | 
+**integration_id** | **str** |  | 
+**provider** | **str** |  | 
+**fetched_at** | **datetime** |  | 
+**reason** | [**SubscriptionUsageUnavailableReason**](SubscriptionUsageUnavailableReason.md) |  | 
+**message** | **str** |  | 
+**retryable** | **bool** |  | 
 
 ## Example
 
@@ -32,3 +32,5 @@ subscription_usage_unavailable_response_dict = subscription_usage_unavailable_re
 subscription_usage_unavailable_response_from_dict = SubscriptionUsageUnavailableResponse.from_dict(subscription_usage_unavailable_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

@@ -42,11 +42,11 @@ class TestSubscriptionUsageAvailableResponse(unittest.TestCase):
                 plan_label = '',
                 limits = [
                     azentspublicclient.models.subscription_usage_limit_response.SubscriptionUsageLimitResponse(
-                        id = '',
-                        label = '',
-                        used_percent = 1.337,
-                        window_minutes = 56,
-                        resets_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
+                        id = '', 
+                        label = '', 
+                        used_percent = 1.337, 
+                        window_minutes = 56, 
+                        resets_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                         primary = True, )
                     ],
                 financial_details = None
@@ -60,11 +60,11 @@ class TestSubscriptionUsageAvailableResponse(unittest.TestCase):
                 plan_label = '',
                 limits = [
                     azentspublicclient.models.subscription_usage_limit_response.SubscriptionUsageLimitResponse(
-                        id = '',
-                        label = '',
-                        used_percent = 1.337,
-                        window_minutes = 56,
-                        resets_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
+                        id = '', 
+                        label = '', 
+                        used_percent = 1.337, 
+                        window_minutes = 56, 
+                        resets_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                         primary = True, )
                     ],
                 financial_details = None,

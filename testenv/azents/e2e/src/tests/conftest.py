@@ -484,11 +484,23 @@ def _configure_azents_server_container(
             "http://openai-proxy:8081/backend-api",
         )
         .with_env(
+            "AZ_CHATGPT_OAUTH_DEVICE_USER_CODE_URL",
+            "http://openai-proxy:8081/chatgpt/device/usercode",
+        )
+        .with_env(
+            "AZ_CHATGPT_OAUTH_DEVICE_TOKEN_URL",
+            "http://openai-proxy:8081/chatgpt/device/token",
+        )
+        .with_env(
             "AZ_CHATGPT_OAUTH_TOKEN_URL",
             "http://openai-proxy:8081/chatgpt/oauth/token",
         )
         .with_env("AZ_XAI_API_BASE_URL", "http://openai-proxy:8081/v1")
         .with_env("AZ_XAI_USAGE_BASE_URL", "http://openai-proxy:8081/v1")
+        .with_env(
+            "AZ_XAI_OAUTH_DEVICE_CODE_URL",
+            "http://openai-proxy:8081/oauth2/device/code",
+        )
         .with_env("AZ_XAI_OAUTH_TOKEN_URL", "http://openai-proxy:8081/oauth2/token")
         .with_env("AZ_TESTENV_RUNTIME_HOOK_QA_ENABLED", "true")
         .with_env("AZ_TOOL_INTERNAL_ERROR_DETAILS", "true")

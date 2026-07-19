@@ -26,6 +26,7 @@ __all__ = [
     "HealthV1Api",
     "InvitationV1Api",
     "JoinRequestV1Api",
+    "KimiOAuthV1Api",
     "LLMProviderIntegrationV1Api",
     "SecurityV1Api",
     "ToolkitOAuthV1Api",
@@ -123,7 +124,6 @@ __all__ = [
     "ChatGPTOAuthConfig",
     "ChatGPTOAuthDeviceStartResponse",
     "ChatGPTOAuthDeviceStatusResponse",
-    "ChatGPTOAuthSecrets",
     "ChatGPTOAuthSessionStatus",
     "ChatGPTSubscriptionFinancialDetailsResponse",
     "ChatInputWriteRequest",
@@ -180,6 +180,10 @@ __all__ = [
     "JoinRequestListResponse",
     "JoinRequestResponse",
     "JoinRequestStatus",
+    "KimiOAuthConfig",
+    "KimiOAuthDeviceStartResponse",
+    "KimiOAuthDeviceStatusResponse",
+    "KimiOAuthSessionStatus",
     "LLMCatalogScope",
     "LLMModelDeveloper",
     "LLMProvider",
@@ -189,6 +193,7 @@ __all__ = [
     "LLMProviderIntegrationCreateRequestConfig",
     "LLMProviderIntegrationListResponse",
     "LLMProviderIntegrationResponse",
+    "LLMProviderIntegrationResponseConfig",
     "LLMProviderIntegrationUpdateRequest",
     "LiveEventListResponse",
     "LoginMethodsResponse",
@@ -321,7 +326,6 @@ __all__ = [
     "XaiOAuthConfig",
     "XaiOAuthDeviceStartResponse",
     "XaiOAuthDeviceStatusResponse",
-    "XaiOAuthSecrets",
     "XaiOAuthSessionStatus",
     "XaiSubscriptionFinancialDetailsResponse",
 ]
@@ -335,6 +339,7 @@ from azentspublicclient.api.chat_v1_api import ChatV1Api as ChatV1Api
 from azentspublicclient.api.health_v1_api import HealthV1Api as HealthV1Api
 from azentspublicclient.api.invitation_v1_api import InvitationV1Api as InvitationV1Api
 from azentspublicclient.api.join_request_v1_api import JoinRequestV1Api as JoinRequestV1Api
+from azentspublicclient.api.kimi_o_auth_v1_api import KimiOAuthV1Api as KimiOAuthV1Api
 from azentspublicclient.api.llm_provider_integration_v1_api import LLMProviderIntegrationV1Api as LLMProviderIntegrationV1Api
 from azentspublicclient.api.security_v1_api import SecurityV1Api as SecurityV1Api
 from azentspublicclient.api.toolkit_o_auth_v1_api import ToolkitOAuthV1Api as ToolkitOAuthV1Api
@@ -436,7 +441,6 @@ from azentspublicclient.models.chat_failed_run_retry_request import ChatFailedRu
 from azentspublicclient.models.chat_gpto_auth_config import ChatGPTOAuthConfig as ChatGPTOAuthConfig
 from azentspublicclient.models.chat_gpto_auth_device_start_response import ChatGPTOAuthDeviceStartResponse as ChatGPTOAuthDeviceStartResponse
 from azentspublicclient.models.chat_gpto_auth_device_status_response import ChatGPTOAuthDeviceStatusResponse as ChatGPTOAuthDeviceStatusResponse
-from azentspublicclient.models.chat_gpto_auth_secrets import ChatGPTOAuthSecrets as ChatGPTOAuthSecrets
 from azentspublicclient.models.chat_gpto_auth_session_status import ChatGPTOAuthSessionStatus as ChatGPTOAuthSessionStatus
 from azentspublicclient.models.chat_gpt_subscription_financial_details_response import ChatGPTSubscriptionFinancialDetailsResponse as ChatGPTSubscriptionFinancialDetailsResponse
 from azentspublicclient.models.chat_input_write_request import ChatInputWriteRequest as ChatInputWriteRequest
@@ -493,6 +497,10 @@ from azentspublicclient.models.invitation_status import InvitationStatus as Invi
 from azentspublicclient.models.join_request_list_response import JoinRequestListResponse as JoinRequestListResponse
 from azentspublicclient.models.join_request_response import JoinRequestResponse as JoinRequestResponse
 from azentspublicclient.models.join_request_status import JoinRequestStatus as JoinRequestStatus
+from azentspublicclient.models.kimi_o_auth_config import KimiOAuthConfig as KimiOAuthConfig
+from azentspublicclient.models.kimi_o_auth_device_start_response import KimiOAuthDeviceStartResponse as KimiOAuthDeviceStartResponse
+from azentspublicclient.models.kimi_o_auth_device_status_response import KimiOAuthDeviceStatusResponse as KimiOAuthDeviceStatusResponse
+from azentspublicclient.models.kimi_o_auth_session_status import KimiOAuthSessionStatus as KimiOAuthSessionStatus
 from azentspublicclient.models.llm_catalog_scope import LLMCatalogScope as LLMCatalogScope
 from azentspublicclient.models.llm_model_developer import LLMModelDeveloper as LLMModelDeveloper
 from azentspublicclient.models.llm_provider import LLMProvider as LLMProvider
@@ -502,6 +510,7 @@ from azentspublicclient.models.llm_provider_integration_create_request import LL
 from azentspublicclient.models.llm_provider_integration_create_request_config import LLMProviderIntegrationCreateRequestConfig as LLMProviderIntegrationCreateRequestConfig
 from azentspublicclient.models.llm_provider_integration_list_response import LLMProviderIntegrationListResponse as LLMProviderIntegrationListResponse
 from azentspublicclient.models.llm_provider_integration_response import LLMProviderIntegrationResponse as LLMProviderIntegrationResponse
+from azentspublicclient.models.llm_provider_integration_response_config import LLMProviderIntegrationResponseConfig as LLMProviderIntegrationResponseConfig
 from azentspublicclient.models.llm_provider_integration_update_request import LLMProviderIntegrationUpdateRequest as LLMProviderIntegrationUpdateRequest
 from azentspublicclient.models.live_event_list_response import LiveEventListResponse as LiveEventListResponse
 from azentspublicclient.models.login_methods_response import LoginMethodsResponse as LoginMethodsResponse
@@ -634,6 +643,6 @@ from azentspublicclient.models.ws_ticket_response import WsTicketResponse as WsT
 from azentspublicclient.models.xai_o_auth_config import XaiOAuthConfig as XaiOAuthConfig
 from azentspublicclient.models.xai_o_auth_device_start_response import XaiOAuthDeviceStartResponse as XaiOAuthDeviceStartResponse
 from azentspublicclient.models.xai_o_auth_device_status_response import XaiOAuthDeviceStatusResponse as XaiOAuthDeviceStatusResponse
-from azentspublicclient.models.xai_o_auth_secrets import XaiOAuthSecrets as XaiOAuthSecrets
 from azentspublicclient.models.xai_o_auth_session_status import XaiOAuthSessionStatus as XaiOAuthSessionStatus
 from azentspublicclient.models.xai_subscription_financial_details_response import XaiSubscriptionFinancialDetailsResponse as XaiSubscriptionFinancialDetailsResponse
+

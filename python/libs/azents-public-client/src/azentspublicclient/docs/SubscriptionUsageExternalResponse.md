@@ -6,12 +6,12 @@ Public provider-managed subscription usage response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**type** | **str** |  |
-**integration_id** | **str** |  |
-**provider** | **str** |  |
-**fetched_at** | **datetime** |  |
-**url** | **str** |  |
-**message** | **str** |  |
+**type** | **str** |  | 
+**integration_id** | **str** |  | 
+**provider** | **str** |  | 
+**fetched_at** | **datetime** |  | 
+**url** | **str** |  | 
+**message** | **str** |  | 
 
 ## Example
 
@@ -31,3 +31,5 @@ subscription_usage_external_response_dict = subscription_usage_external_response
 subscription_usage_external_response_from_dict = SubscriptionUsageExternalResponse.from_dict(subscription_usage_external_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

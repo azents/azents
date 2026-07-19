@@ -8,6 +8,7 @@ azentspublicclient/api/chat_v1_api.py
 azentspublicclient/api/health_v1_api.py
 azentspublicclient/api/invitation_v1_api.py
 azentspublicclient/api/join_request_v1_api.py
+azentspublicclient/api/kimi_o_auth_v1_api.py
 azentspublicclient/api/llm_provider_integration_v1_api.py
 azentspublicclient/api/security_v1_api.py
 azentspublicclient/api/toolkit_o_auth_v1_api.py
@@ -102,7 +103,6 @@ azentspublicclient/docs/ChatFailedRunRetryRequest.md
 azentspublicclient/docs/ChatGPTOAuthConfig.md
 azentspublicclient/docs/ChatGPTOAuthDeviceStartResponse.md
 azentspublicclient/docs/ChatGPTOAuthDeviceStatusResponse.md
-azentspublicclient/docs/ChatGPTOAuthSecrets.md
 azentspublicclient/docs/ChatGPTOAuthSessionStatus.md
 azentspublicclient/docs/ChatGPTOAuthV1Api.md
 azentspublicclient/docs/ChatGPTSubscriptionFinancialDetailsResponse.md
@@ -164,6 +164,11 @@ azentspublicclient/docs/JoinRequestListResponse.md
 azentspublicclient/docs/JoinRequestResponse.md
 azentspublicclient/docs/JoinRequestStatus.md
 azentspublicclient/docs/JoinRequestV1Api.md
+azentspublicclient/docs/KimiOAuthConfig.md
+azentspublicclient/docs/KimiOAuthDeviceStartResponse.md
+azentspublicclient/docs/KimiOAuthDeviceStatusResponse.md
+azentspublicclient/docs/KimiOAuthSessionStatus.md
+azentspublicclient/docs/KimiOAuthV1Api.md
 azentspublicclient/docs/LLMCatalogScope.md
 azentspublicclient/docs/LLMModelDeveloper.md
 azentspublicclient/docs/LLMProvider.md
@@ -173,6 +178,7 @@ azentspublicclient/docs/LLMProviderIntegrationCreateRequest.md
 azentspublicclient/docs/LLMProviderIntegrationCreateRequestConfig.md
 azentspublicclient/docs/LLMProviderIntegrationListResponse.md
 azentspublicclient/docs/LLMProviderIntegrationResponse.md
+azentspublicclient/docs/LLMProviderIntegrationResponseConfig.md
 azentspublicclient/docs/LLMProviderIntegrationUpdateRequest.md
 azentspublicclient/docs/LLMProviderIntegrationV1Api.md
 azentspublicclient/docs/LiveEventListResponse.md
@@ -314,7 +320,6 @@ azentspublicclient/docs/XAIOAuthV1Api.md
 azentspublicclient/docs/XaiOAuthConfig.md
 azentspublicclient/docs/XaiOAuthDeviceStartResponse.md
 azentspublicclient/docs/XaiOAuthDeviceStatusResponse.md
-azentspublicclient/docs/XaiOAuthSecrets.md
 azentspublicclient/docs/XaiOAuthSessionStatus.md
 azentspublicclient/docs/XaiSubscriptionFinancialDetailsResponse.md
 azentspublicclient/exceptions.py
@@ -399,7 +404,6 @@ azentspublicclient/models/chat_gpt_subscription_financial_details_response.py
 azentspublicclient/models/chat_gpto_auth_config.py
 azentspublicclient/models/chat_gpto_auth_device_start_response.py
 azentspublicclient/models/chat_gpto_auth_device_status_response.py
-azentspublicclient/models/chat_gpto_auth_secrets.py
 azentspublicclient/models/chat_gpto_auth_session_status.py
 azentspublicclient/models/chat_input_write_request.py
 azentspublicclient/models/chat_input_write_request_action.py
@@ -455,6 +459,10 @@ azentspublicclient/models/invitation_status.py
 azentspublicclient/models/join_request_list_response.py
 azentspublicclient/models/join_request_response.py
 azentspublicclient/models/join_request_status.py
+azentspublicclient/models/kimi_o_auth_config.py
+azentspublicclient/models/kimi_o_auth_device_start_response.py
+azentspublicclient/models/kimi_o_auth_device_status_response.py
+azentspublicclient/models/kimi_o_auth_session_status.py
 azentspublicclient/models/live_event_list_response.py
 azentspublicclient/models/llm_catalog_scope.py
 azentspublicclient/models/llm_model_developer.py
@@ -465,6 +473,7 @@ azentspublicclient/models/llm_provider_integration_create_request.py
 azentspublicclient/models/llm_provider_integration_create_request_config.py
 azentspublicclient/models/llm_provider_integration_list_response.py
 azentspublicclient/models/llm_provider_integration_response.py
+azentspublicclient/models/llm_provider_integration_response_config.py
 azentspublicclient/models/llm_provider_integration_update_request.py
 azentspublicclient/models/login_methods_response.py
 azentspublicclient/models/mcpo_auth_connection_status.py
@@ -596,7 +605,6 @@ azentspublicclient/models/ws_ticket_response.py
 azentspublicclient/models/xai_o_auth_config.py
 azentspublicclient/models/xai_o_auth_device_start_response.py
 azentspublicclient/models/xai_o_auth_device_status_response.py
-azentspublicclient/models/xai_o_auth_secrets.py
 azentspublicclient/models/xai_o_auth_session_status.py
 azentspublicclient/models/xai_subscription_financial_details_response.py
 azentspublicclient/rest.py
@@ -684,7 +692,6 @@ azentspublicclient/test/test_chat_gpt_subscription_financial_details_response.py
 azentspublicclient/test/test_chat_gpto_auth_config.py
 azentspublicclient/test/test_chat_gpto_auth_device_start_response.py
 azentspublicclient/test/test_chat_gpto_auth_device_status_response.py
-azentspublicclient/test/test_chat_gpto_auth_secrets.py
 azentspublicclient/test/test_chat_gpto_auth_session_status.py
 azentspublicclient/test/test_chat_gpto_auth_v1_api.py
 azentspublicclient/test/test_chat_input_write_request.py
@@ -745,6 +752,11 @@ azentspublicclient/test/test_join_request_list_response.py
 azentspublicclient/test/test_join_request_response.py
 azentspublicclient/test/test_join_request_status.py
 azentspublicclient/test/test_join_request_v1_api.py
+azentspublicclient/test/test_kimi_o_auth_config.py
+azentspublicclient/test/test_kimi_o_auth_device_start_response.py
+azentspublicclient/test/test_kimi_o_auth_device_status_response.py
+azentspublicclient/test/test_kimi_o_auth_session_status.py
+azentspublicclient/test/test_kimi_o_auth_v1_api.py
 azentspublicclient/test/test_live_event_list_response.py
 azentspublicclient/test/test_llm_catalog_scope.py
 azentspublicclient/test/test_llm_model_developer.py
@@ -755,6 +767,7 @@ azentspublicclient/test/test_llm_provider_integration_create_request.py
 azentspublicclient/test/test_llm_provider_integration_create_request_config.py
 azentspublicclient/test/test_llm_provider_integration_list_response.py
 azentspublicclient/test/test_llm_provider_integration_response.py
+azentspublicclient/test/test_llm_provider_integration_response_config.py
 azentspublicclient/test/test_llm_provider_integration_update_request.py
 azentspublicclient/test/test_llm_provider_integration_v1_api.py
 azentspublicclient/test/test_login_methods_response.py
@@ -894,7 +907,6 @@ azentspublicclient/test/test_ws_ticket_response.py
 azentspublicclient/test/test_xai_o_auth_config.py
 azentspublicclient/test/test_xai_o_auth_device_start_response.py
 azentspublicclient/test/test_xai_o_auth_device_status_response.py
-azentspublicclient/test/test_xai_o_auth_secrets.py
 azentspublicclient/test/test_xai_o_auth_session_status.py
 azentspublicclient/test/test_xai_subscription_financial_details_response.py
 azentspublicclient/test/test_xaio_auth_v1_api.py

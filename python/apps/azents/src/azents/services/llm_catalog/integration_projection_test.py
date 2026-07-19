@@ -8,6 +8,7 @@ from azents.repos.llm_catalog.data import LiteLLMSourceSnapshot
 from azents.services.llm_catalog import (
     project_chatgpt_integration_entries,
     project_integration_entries,
+    project_kimi_integration_entries,
     project_openrouter_integration_entries,
 )
 from azents.services.model_listing.data import (
@@ -134,6 +135,56 @@ def test_project_chatgpt_entries_does_not_require_litellm_metadata() -> None:
     assert entry.projection_metadata == {
         "lowerer_target": "litellm",
         "freshness_rank": 5060,
+    }
+
+
+def test_project_kimi_entries_does_not_require_litellm_metadata() -> None:
+    """Kimi account models remain selectable without target metadata."""
+    fetched_at = datetime.datetime.now(datetime.UTC)
+    listing = ModelListingOutput(
+        models=[
+            NormalizedModelCandidate(
+                provider=LLMProvider.KIMI_OAUTH,
+                model_identifier="kimi-k2.5",
+                model_display_name="Kimi K2.5",
+                model_developer=LLMModelDeveloper.MOONSHOT,
+                model_family="kimi-k2.5",
+                normalized_capabilities=ModelCapabilities(
+                    compatibility=ModelCompatibilityCapabilities(
+                        provider_family="moonshot",
+                        responses_api=True,
+                    )
+                ),
+                model_snapshot={},
+                source_metadata={"context_length": 262144},
+                last_refreshed_at=fetched_at,
+            )
+        ],
+        summary=ModelListingSummary(
+            source="kimi:code_models",
+            fetched_at=fetched_at,
+            returned_count=1,
+            skipped_count=0,
+        ),
+        skips=[],
+    )
+
+    entries = project_kimi_integration_entries(
+        integration_id="integration-id",
+        listing=listing,
+        source_hash="source-hash",
+    )
+
+    [entry] = entries
+    assert entry.visibility_status == LLMCatalogEntryVisibility.SELECTABLE
+    assert entry.provider_model_identifier == "kimi-k2.5"
+    assert entry.runtime_model_identifier == "moonshot/kimi-k2.5"
+    assert entry.publisher == "moonshot"
+    assert entry.hidden_reason is None
+    assert entry.projection_metadata == {
+        "lowerer_target": "litellm",
+        "target_metadata_match_required": False,
+        "freshness_rank": 2050,
     }
 
 

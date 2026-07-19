@@ -6,15 +6,15 @@ Management-only OpenRouter API-key credit details.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**type** | **str** |  |
-**credit_limit** | **float** |  |
-**credit_remaining** | **float** |  |
-**usage** | **float** |  |
-**usage_daily** | **float** |  |
-**usage_weekly** | **float** |  |
-**usage_monthly** | **float** |  |
-**limit_reset** | **str** |  |
-**include_byok_in_limit** | **bool** |  |
+**type** | **str** |  | 
+**credit_limit** | **float** |  | 
+**credit_remaining** | **float** |  | 
+**usage** | **float** |  | 
+**usage_daily** | **float** |  | 
+**usage_weekly** | **float** |  | 
+**usage_monthly** | **float** |  | 
+**limit_reset** | **str** |  | 
+**include_byok_in_limit** | **bool** |  | 
 
 ## Example
 
@@ -34,3 +34,5 @@ open_router_subscription_financial_details_response_dict = open_router_subscript
 open_router_subscription_financial_details_response_from_dict = OpenRouterSubscriptionFinancialDetailsResponse.from_dict(open_router_subscription_financial_details_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

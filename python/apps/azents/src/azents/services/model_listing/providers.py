@@ -42,8 +42,14 @@ from azents.core.credentials import (
     ChatGPTOAuthSecrets,
     GcpConfig,
     GcpSecrets,
+    KimiOAuthConfig,
+    KimiOAuthSecrets,
 )
 from azents.core.enums import LLMModelDeveloper, LLMProvider
+from azents.core.kimi_oauth import (
+    build_kimi_compatibility_headers,
+    resolve_kimi_code_api_base_url,
+)
 from azents.core.llm_catalog import (
     ModelBuiltInToolCapabilities,
     ModelCapabilities,
@@ -84,6 +90,7 @@ OPENROUTER_PUBLISHERS: dict[str, LLMModelDeveloper] = {
 
 _BEDROCK_MODEL_SUMMARY_ADAPTER = TypeAdapter[dict[str, object]](dict[str, object])
 _CHATGPT_MODEL_ADAPTER = TypeAdapter[dict[str, object]](dict[str, object])
+_KIMI_MODEL_ADAPTER = TypeAdapter[dict[str, object]](dict[str, object])
 _OPENROUTER_MODEL_ADAPTER = TypeAdapter[dict[str, object]](dict[str, object])
 _VERTEX_MODEL_ADAPTER = TypeAdapter[dict[str, object]](dict[str, object])
 
@@ -135,6 +142,19 @@ async def list_chatgpt_models_for_integration(
     except (httpx.HTTPError, json.JSONDecodeError, ValueError) as exc:
         raise ListingProviderError(
             "ChatGPT model listing failed.",
+            automatic_retry_blocked=automatic_retry_blocked_for_listing_error(exc),
+        ) from exc
+
+
+async def list_kimi_models_for_integration(
+    integration: LLMProviderIntegrationWithSecrets,
+) -> ModelListingOutput:
+    """Fetch account-visible models from the Kimi Code API."""
+    try:
+        return await _list_kimi_models(integration)
+    except (httpx.HTTPError, json.JSONDecodeError, ValueError) as exc:
+        raise ListingProviderError(
+            "Kimi model listing failed.",
             automatic_retry_blocked=automatic_retry_blocked_for_listing_error(exc),
         ) from exc
 
@@ -433,6 +453,122 @@ def _chatgpt_source_metadata(model: dict[str, object]) -> dict[str, object]:
         "visibility",
     )
     return {key: model[key] for key in keys if key in model}
+
+
+async def _list_kimi_models(
+    integration: LLMProviderIntegrationWithSecrets,
+) -> ModelListingOutput:
+    """Fetch candidates from the authenticated Kimi Code models endpoint."""
+    _require_kimi_config(integration.config)
+    secrets = _require_kimi_secrets(integration.secrets)
+    fetched_at = datetime.now(timezone.utc)
+    headers = {
+        **build_kimi_compatibility_headers(device_id=secrets.device_id),
+        "Authorization": f"Bearer {secrets.access_token}",
+        "Accept": "application/json",
+    }
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        response = await client.get(
+            f"{resolve_kimi_code_api_base_url()}/models",
+            headers=headers,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    raw_models = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(raw_models, list):
+        raise InvalidProviderResponseError(
+            "Kimi model listing response must contain data."
+        )
+    models: list[NormalizedModelCandidate] = []
+    skipped = 0
+    for raw_model in raw_models:
+        try:
+            model = _KIMI_MODEL_ADAPTER.validate_python(raw_model)
+        except ValidationError:
+            skipped += 1
+            continue
+        candidate = _candidate_from_kimi_model(model, fetched_at=fetched_at)
+        if candidate is None:
+            skipped += 1
+            continue
+        models.append(candidate)
+    return _output(
+        source="kimi:code_models",
+        fetched_at=fetched_at,
+        models=models,
+        skips=_skip_summary("invalid_kimi_model", skipped),
+    )
+
+
+def _candidate_from_kimi_model(
+    model: dict[str, object],
+    *,
+    fetched_at: datetime,
+) -> NormalizedModelCandidate | None:
+    """Normalize one Kimi Code model entry."""
+    model_id = _str_value(model, "id")
+    if model_id is None:
+        return None
+    display_name = _str_value(model, "display_name") or model_id
+    supports_reasoning = model.get("supports_reasoning") is True
+    input_modalities = [ModelModality.TEXT]
+    if model.get("supports_image_in") is True:
+        input_modalities.append(ModelModality.IMAGE)
+    if model.get("supports_video_in") is True:
+        input_modalities.append(ModelModality.VIDEO)
+    capabilities = ModelCapabilities(
+        context_window=ModelContextWindow(
+            max_input_tokens=_positive_int(model.get("context_length"))
+        ),
+        modalities=ModelModalities(
+            input=input_modalities,
+            output=[ModelModality.TEXT],
+        ),
+        tool_calling=ModelToolCallingCapabilities(supported=True),
+        reasoning=ModelReasoningCapabilities(
+            supported=supports_reasoning,
+            effort_levels=[],
+        ),
+        compatibility=ModelCompatibilityCapabilities(
+            provider_family="moonshot",
+            responses_api=True,
+        ),
+    )
+    source_metadata = {
+        key: model[key]
+        for key in (
+            "context_length",
+            "supports_reasoning",
+            "supports_image_in",
+            "supports_video_in",
+        )
+        if key in model
+    }
+    return NormalizedModelCandidate(
+        provider=LLMProvider.KIMI_OAUTH,
+        model_identifier=model_id,
+        model_display_name=display_name,
+        model_developer=LLMModelDeveloper.MOONSHOT,
+        model_family=_kimi_family(model_id),
+        normalized_capabilities=capabilities,
+        model_snapshot={
+            "source": "kimi:code_models",
+            "provider": LLMProvider.KIMI_OAUTH.value,
+            "model_identifier": model_id,
+            "model_display_name": display_name,
+            "model_developer": LLMModelDeveloper.MOONSHOT.value,
+        },
+        source_metadata=source_metadata,
+        last_refreshed_at=fetched_at,
+    )
+
+
+def _kimi_family(model_id: str) -> str:
+    """Extract the stable Kimi model family prefix."""
+    parts = model_id.split("-")
+    if len(parts) >= 2 and parts[0].lower() == "kimi":
+        return "-".join(parts[:2])
+    return parts[0]
 
 
 async def _list_openrouter_models(
@@ -773,6 +909,20 @@ def _require_chatgpt_secrets(secrets: object) -> ChatGPTOAuthSecrets:
     """Validate ChatGPT OAuth secrets type."""
     if not isinstance(secrets, ChatGPTOAuthSecrets):
         raise ValueError("ChatGPT OAuth integration secrets are required.")
+    return secrets
+
+
+def _require_kimi_config(config: object) -> KimiOAuthConfig:
+    """Validate Kimi OAuth config type."""
+    if not isinstance(config, KimiOAuthConfig):
+        raise ValueError("Kimi OAuth integration config is required.")
+    return config
+
+
+def _require_kimi_secrets(secrets: object) -> KimiOAuthSecrets:
+    """Validate Kimi OAuth secrets type."""
+    if not isinstance(secrets, KimiOAuthSecrets):
+        raise ValueError("Kimi OAuth integration secrets are required.")
     return secrets
 
 

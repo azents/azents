@@ -49,3 +49,15 @@ async def test_xai_oauth_is_available_without_operator_configuration() -> None:
     )
     assert xai.display_name == "xAI Grok OAuth"
     assert xai.experimental is True
+
+
+async def test_kimi_oauth_is_available_as_experimental_subscription() -> None:
+    """Expose Kimi through its built-in device authorization contract."""
+    response = await list_integration_providers(_member())
+
+    kimi = next(
+        item for item in response.items if item.provider == LLMProvider.KIMI_OAUTH
+    )
+    assert kimi.display_name == "Kimi subscription"
+    assert kimi.credential_type == "kimi_oauth"
+    assert kimi.experimental is True

@@ -23,7 +23,7 @@ Name | Type | Description | Notes
 **runtime_provider_id** | **str** |  | 
 **shell_enabled** | **bool** |  | 
 **memory_enabled** | **bool** |  | 
-**tool_search_enabled** | **bool** |  |
+**tool_search_enabled** | **bool** |  | 
 **max_turns** | **int** |  | 
 **subagent_settings** | [**SubagentSettings**](SubagentSettings.md) |  | 
 **avatar** | [**UploadedImage**](UploadedImage.md) |  | [optional] 
