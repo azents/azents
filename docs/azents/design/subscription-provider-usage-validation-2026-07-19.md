@@ -309,6 +309,12 @@ validation PR is recorded.
    each ephemeral server starts, without changing product E2E journal behavior.
 3. Transport-close behavior was verified directly rather than assumed. Both ChatGPT and xAI scenarios
    produce real connection failures and normalize through adapter transport handling.
+4. The initial deterministic CI run found that the generated Python client's `to_json()` helper does
+   not serialize `datetime` fields in subscription-usage models. The E2E helper now unwraps the generated
+   model with `to_dict()` and applies Pydantic JSON-mode conversion without modifying generated code.
+5. The initial browser CI run found that Mantine attaches the toggle label to a visually hidden native
+   input. The browser assertion now verifies that the input exists and is enabled instead of requiring
+   the native input itself to be visually displayed.
 
 ## Required CI Evidence
 

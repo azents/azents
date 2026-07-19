@@ -140,7 +140,7 @@ def test_subscription_usage_cards_are_live_local_safe_and_responsive(
         assert card.find_element(
             By.CSS_SELECTOR,
             f'[aria-label="Toggle {name}"]',
-        ).is_displayed()
+        ).is_enabled()
         assert card.find_element(
             By.CSS_SELECTOR,
             f'[aria-label="Edit {name}"]',

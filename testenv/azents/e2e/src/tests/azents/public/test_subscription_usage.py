@@ -25,6 +25,12 @@ from azentspublicclient.models.llm_provider_integration_create_request_config im
     LLMProviderIntegrationCreateRequestConfig,
 )
 from azentspublicclient.models.secrets import Secrets
+from azentspublicclient.models.subscription_usage_unavailable_reason import (
+    SubscriptionUsageUnavailableReason,
+)
+from azentspublicclient.models.subscription_usage_unavailable_response import (
+    SubscriptionUsageUnavailableResponse,
+)
 from azentspublicclient.models.xai_o_auth_config import XaiOAuthConfig
 from azentspublicclient.models.xai_o_auth_secrets import XaiOAuthSecrets
 from pydantic import TypeAdapter
@@ -50,6 +56,34 @@ class SubscriptionWorkspace:
 def _headers(token: str) -> dict[str, str]:
     """Build bearer headers."""
     return {"Authorization": f"Bearer {token}"}
+
+
+def _json_object(value: dict[str, object]) -> dict[str, object]:
+    """Convert generated-client dictionaries into JSON-compatible values."""
+    return _JSON_OBJECT.validate_python(_JSON_OBJECT.dump_python(value, mode="json"))
+
+
+def test_json_object_normalizes_generated_datetime_values() -> None:
+    """Serialize generated-client datetime fields without using broken to_json."""
+    response = SubscriptionUsageUnavailableResponse(
+        type="unavailable",
+        integration_id="integration-id",
+        provider="chatgpt_oauth",
+        fetched_at=datetime.datetime(2026, 7, 19, tzinfo=datetime.UTC),
+        reason=SubscriptionUsageUnavailableReason.DISABLED,
+        message="Enable this integration to refresh subscription usage.",
+        retryable=False,
+    )
+
+    assert _json_object(response.to_dict()) == {
+        "type": "unavailable",
+        "integration_id": "integration-id",
+        "provider": "chatgpt_oauth",
+        "fetched_at": "2026-07-19T00:00:00Z",
+        "reason": "disabled",
+        "message": "Enable this integration to refresh subscription usage.",
+        "retryable": False,
+    }
 
 
 def setup_subscription_workspace(
@@ -188,7 +222,9 @@ def _usage(
         handle=workspace.handle,
         _headers=_headers(token),
     )
-    return _JSON_OBJECT.validate_python(json.loads(response.to_json()))
+    actual = response.actual_instance
+    assert actual is not None
+    return _json_object(actual.to_dict())
 
 
 def subscription_usage_journal(proxy_url: str) -> list[dict[str, object]]:
