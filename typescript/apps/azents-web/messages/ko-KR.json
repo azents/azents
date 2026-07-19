@@ -1394,7 +1394,7 @@
       "resumeHintPlaceholder": "예: blocker가 해소됐으니 실패한 CI job부터 이어서 확인하세요."
     },
     "compaction": {
-      "inProgress": "대화 컨텍스트 준비 중…",
+      "inProgress": "이전 대화 요약 중…",
       "summary": "이전 대화가 요약되었습니다",
       "expand": "요약 보기",
       "collapse": "요약 숨기기"
