@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, Mock
@@ -490,6 +491,55 @@ class TestClaudeRulesToolkit:
         assert storage.stat_calls == stat_calls
         assert get_calls == [rule_path]
         assert storage.get_calls == get_calls
+
+    async def test_structured_diagnostics_report_cache_dedupe_and_rpc_counts(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Claude rule appendix logs exact discovery and content RPC counts."""
+        caplog.set_level(logging.INFO)
+        rule_path = "/workspace/agent/.claude/rules/global.md"
+        storage = _CountingStorage({rule_path: b"# Global"})
+        toolkit = _make_toolkit(storage)
+
+        first = await _run_after_tool_call_hook(
+            toolkit,
+            _make_after_read_context("/workspace/agent/project/src/app.py"),
+        )
+        second = await _run_after_tool_call_hook(
+            toolkit,
+            _make_after_read_context("/workspace/agent/project/src/other.py"),
+        )
+
+        assert first is not None
+        assert second is None
+        records = [
+            record
+            for record in caplog.records
+            if record.getMessage() == "Processed Claude rules read appendix"
+        ]
+        assert len(records) == 2
+        first_record, second_record = records
+        first_fields = vars(first_record)
+        second_fields = vars(second_record)
+        assert first_fields["root_list_operation_count"] == 2
+        assert first_fields["discovered_path_count"] == 1
+        assert first_fields["discovery_cache_hit_count"] == 0
+        assert first_fields["discovery_cache_miss_count"] == 2
+        assert first_fields["dedupe_skipped_path_count"] == 0
+        assert first_fields["internal_stat_operation_count"] == 1
+        assert first_fields["internal_read_operation_count"] == 1
+        assert first_fields["appended_path_count"] == 1
+        assert first_fields["appendix_duration_ms"] >= 0
+        assert second_fields["root_list_operation_count"] == 0
+        assert second_fields["discovered_path_count"] == 1
+        assert second_fields["discovery_cache_hit_count"] == 2
+        assert second_fields["discovery_cache_miss_count"] == 0
+        assert second_fields["dedupe_skipped_path_count"] == 1
+        assert second_fields["internal_stat_operation_count"] == 0
+        assert second_fields["internal_read_operation_count"] == 0
+        assert second_fields["appended_path_count"] == 0
+        assert second_fields["appendix_duration_ms"] >= 0
 
     async def test_parallel_reads_singleflight_rule_discovery_and_content_io(
         self,

@@ -11,6 +11,7 @@ import shlex
 import time
 from collections.abc import Awaitable, Callable, Sequence
 from collections.abc import Set as AbstractSet
+from contextvars import ContextVar, Token
 from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
 from textwrap import dedent
@@ -705,26 +706,11 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
             runner_operations=self.runner_operations,
             agent_runtime_repo=self.agent_runtime_repo,
             session_manager=self.session_manager,
+            runtime_agent_id=runtime_agent_id,
+            owner_session_id=self._runtime_session_id,
         )
 
-        tools = [
-            make_exec_command_tool(
-                self.runner_operations,
-                agent_runtime_repo=self.agent_runtime_repo,
-                session_manager=self.session_manager,
-                agent_id=runtime_agent_id,
-                publish_event=context.publish_event,
-                owner_session_id=self._session_id,
-                peer_toolkits=self._peer_toolkits,
-            ),
-            make_write_stdin_tool(
-                self.runner_operations,
-                agent_runtime_repo=self.agent_runtime_repo,
-                session_manager=self.session_manager,
-                agent_id=runtime_agent_id,
-                publish_event=context.publish_event,
-                owner_session_id=self._session_id,
-            ),
+        file_tools = [
             make_read_image_tool(
                 session_storage=file_ss,
                 model_file_service=self.model_file_service,
@@ -778,6 +764,34 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
                 agent_id=agent_id,
                 user_id=user_id or "",
             ),
+        ]
+        tools = [
+            make_exec_command_tool(
+                self.runner_operations,
+                agent_runtime_repo=self.agent_runtime_repo,
+                session_manager=self.session_manager,
+                agent_id=runtime_agent_id,
+                publish_event=context.publish_event,
+                owner_session_id=self._session_id,
+                peer_toolkits=self._peer_toolkits,
+            ),
+            make_write_stdin_tool(
+                self.runner_operations,
+                agent_runtime_repo=self.agent_runtime_repo,
+                session_manager=self.session_manager,
+                agent_id=runtime_agent_id,
+                publish_event=context.publish_event,
+                owner_session_id=self._session_id,
+            ),
+            *[
+                _with_runtime_file_tool_diagnostics(
+                    tool,
+                    file_storage=file_ss,
+                    agent_id=runtime_agent_id,
+                    owner_session_id=self._runtime_session_id,
+                )
+                for tool in file_tools
+            ],
         ]
         # Filter tools requested by the runtime context.
         if self._excluded_tools:
@@ -1158,19 +1172,30 @@ class RuntimeRunnerFileStorage:
         runner_operations: RuntimeRunnerOperationClient,
         agent_runtime_repo: AgentRuntimeRepository,
         session_manager: SessionManager[AsyncSession] | None,
+        runtime_agent_id: str,
+        owner_session_id: str | None,
     ) -> None:
         self.runner_operations = runner_operations
         self.agent_runtime_repo = agent_runtime_repo
         self.session_manager = session_manager
+        self.runtime_agent_id = runtime_agent_id
+        self.owner_session_id = owner_session_id
+        self._runtime: AgentRuntime | None = None
+        self._runtime_lock = asyncio.Lock()
+        self._runtime_operation_count: ContextVar[int | None] = ContextVar(
+            "runtime_runner_file_storage_operation_count",
+            default=None,
+        )
 
     async def get(self, path: str, *, agent_id: str) -> bytes:
         """Read file bytes through the Runtime Runner."""
         runtime = await self._ready_runtime(agent_id)
         try:
+            self._count_runtime_operation()
             result = await self.runner_operations.read_file(
                 runtime_id=runtime.id,
                 runner_generation=runtime.runner_generation,
-                owner_session_id=None,
+                owner_session_id=self.owner_session_id,
                 path=path,
                 offset=0,
                 max_bytes=None,
@@ -1184,10 +1209,11 @@ class RuntimeRunnerFileStorage:
         """Fetch Runtime path metadata with file.stat."""
         runtime = await self._ready_runtime(agent_id)
         try:
+            self._count_runtime_operation()
             result = await self.runner_operations.stat_file(
                 runtime_id=runtime.id,
                 runner_generation=runtime.runner_generation,
-                owner_session_id=None,
+                owner_session_id=self.owner_session_id,
                 path=path,
                 deadline_at=_runtime_file_operation_deadline(),
             )
@@ -1211,10 +1237,11 @@ class RuntimeRunnerFileStorage:
         """Write file bytes through the Runtime Runner."""
         runtime = await self._ready_runtime(agent_id)
         try:
+            self._count_runtime_operation()
             result = await self.runner_operations.write_file(
                 runtime_id=runtime.id,
                 runner_generation=runtime.runner_generation,
-                owner_session_id=None,
+                owner_session_id=self.owner_session_id,
                 path=path,
                 data=data,
                 deadline_at=_runtime_file_operation_deadline(),
@@ -1233,10 +1260,11 @@ class RuntimeRunnerFileStorage:
         """Delete a Runtime path through a shell operation."""
         runtime = await self._ready_runtime(agent_id)
         try:
+            self._count_runtime_operation()
             result = await self.runner_operations.run_bash(
                 runtime_id=runtime.id,
                 runner_generation=runtime.runner_generation,
-                owner_session_id=None,
+                owner_session_id=self.owner_session_id,
                 command=f"rm -rf -- {shlex.quote(path)}",
                 timeout_seconds=30,
                 env=None,
@@ -1318,10 +1346,11 @@ class RuntimeRunnerFileStorage:
         """Search Runtime files through a single Runner grep operation."""
         runtime = await self._ready_runtime(agent_id)
         try:
+            self._count_runtime_operation()
             result = await self.runner_operations.grep_files(
                 runtime_id=runtime.id,
                 runner_generation=runtime.runner_generation,
-                owner_session_id=None,
+                owner_session_id=self.owner_session_id,
                 path=path,
                 pattern=pattern,
                 recursive=recursive,
@@ -1347,12 +1376,37 @@ class RuntimeRunnerFileStorage:
             stopped_reason=getattr(result, "stopped_reason", None),
         )
 
+    def begin_runtime_operation_count(self) -> Token[int | None]:
+        """Start task-local Runner operation counting for one visible tool."""
+        return self._runtime_operation_count.set(0)
+
+    def finish_runtime_operation_count(self, token: Token[int | None]) -> int:
+        """Return task-local Runner operation count and restore prior state."""
+        count = self._runtime_operation_count.get()
+        self._runtime_operation_count.reset(token)
+        return count or 0
+
+    def _count_runtime_operation(self) -> None:
+        """Record one Runner operation in the active task-local counter."""
+        count = self._runtime_operation_count.get()
+        if count is not None:
+            self._runtime_operation_count.set(count + 1)
+
     async def _ready_runtime(self, agent_id: str) -> AgentRuntime:
-        return await _ready_runtime_for_agent(
-            agent_runtime_repo=self.agent_runtime_repo,
-            session_manager=self.session_manager,
-            agent_id=agent_id,
-        )
+        del agent_id
+        runtime = self._runtime
+        if runtime is not None:
+            return runtime
+        async with self._runtime_lock:
+            runtime = self._runtime
+            if runtime is None:
+                runtime = await _ready_runtime_for_agent(
+                    agent_runtime_repo=self.agent_runtime_repo,
+                    session_manager=self.session_manager,
+                    agent_id=self.runtime_agent_id,
+                )
+                self._runtime = runtime
+            return runtime
 
     async def _list_entries(
         self,
@@ -1363,10 +1417,11 @@ class RuntimeRunnerFileStorage:
         exclude_patterns: list[str] | None = None,
     ) -> tuple[RuntimeFileListEntry, ...]:
         try:
+            self._count_runtime_operation()
             result = await self.runner_operations.list_files(
                 runtime_id=runtime.id,
                 runner_generation=runtime.runner_generation,
-                owner_session_id=None,
+                owner_session_id=self.owner_session_id,
                 path=path,
                 recursive=recursive,
                 exclude_patterns=exclude_patterns,
@@ -1380,6 +1435,45 @@ class RuntimeRunnerFileStorage:
             RuntimeRunnerOperationGenerationError,
         ) as exc:
             raise RuntimeStorageError(str(exc)) from exc
+
+
+def _with_runtime_file_tool_diagnostics(
+    tool: FunctionTool,
+    *,
+    file_storage: RuntimeRunnerFileStorage,
+    agent_id: str,
+    owner_session_id: str | None,
+) -> FunctionTool:
+    """Wrap one model-visible file tool with structured latency diagnostics."""
+    original_handler = tool.handler
+
+    async def handler(args_json: str) -> str | FunctionToolResult:
+        started_at = time.perf_counter()
+        count_token = file_storage.begin_runtime_operation_count()
+        status = "completed"
+        try:
+            return await original_handler(args_json)
+        except asyncio.CancelledError:
+            status = "cancelled"
+            raise
+        except Exception:
+            status = "failed"
+            raise
+        finally:
+            operation_count = file_storage.finish_runtime_operation_count(count_token)
+            logger.info(
+                "Processed Runtime file tool",
+                extra={
+                    "agent_id": agent_id,
+                    "session_id": owner_session_id,
+                    "tool_name": tool.spec.name,
+                    "tool_status": status,
+                    "tool_duration_ms": (time.perf_counter() - started_at) * 1000,
+                    "runtime_operation_count": operation_count,
+                },
+            )
+
+    return dataclasses.replace(tool, handler=handler)
 
 
 def _stat_metadata(result: RuntimeFileStatResult) -> dict[str, object]:

@@ -132,6 +132,26 @@ class _ToolPathRef(NamedTuple):
     directory: bool
 
 
+class _AgentsFileReadResult(NamedTuple):
+    """One AGENTS.md candidate read and its internal operation counts."""
+
+    content: str | None
+    stat_count: int
+    read_count: int
+    cache_hit_count: int
+    cache_miss_count: int
+
+
+class _AgentsFilesReadResult(NamedTuple):
+    """AGENTS.md candidate reads and aggregate internal operation counts."""
+
+    files: list[tuple[str, str]]
+    stat_count: int
+    read_count: int
+    cache_hit_count: int
+    cache_miss_count: int
+
+
 def extract_tool_path_refs(tool_name: str, args_json: str) -> list[_ToolPathRef]:
     """Extract runtime path candidate and directory flag from tool arguments."""
     try:
@@ -296,6 +316,7 @@ class AgentsAppendixMixin:
         instruction_context: RuntimeInstructionContext,
     ) -> ToolOutputReplace | None:
         """Discover and append AGENTS.md while holding the Session lock."""
+        started_at = time.perf_counter()
         dedupe = await self._load_appendix_dedupe_state()
         already_appended = set(dedupe.appended_paths)
         candidates = _agents_appendix_candidates_for_path(
@@ -309,26 +330,35 @@ class AgentsAppendixMixin:
             for path in candidates
             if path != target_path and path not in already_appended
         ]
-        files = await self._read_existing_agents_files(
+        read_result = await self._read_existing_agents_files(
             instruction_context.file_storage,
             candidates,
         )
-        if not files:
-            return None
-
-        appended_paths = sorted(already_appended | {path for path, _ in files})
-        await self._update_appendix_dedupe_state(
-            lambda state: state.model_copy(update={"appended_paths": appended_paths})
-        )
+        files = read_result.files
+        if files:
+            appended_paths = sorted(already_appended | {path for path, _ in files})
+            await self._update_appendix_dedupe_state(
+                lambda state: state.model_copy(
+                    update={"appended_paths": appended_paths}
+                )
+            )
         logger.info(
-            "Appended AGENTS.md instructions to read result",
+            "Processed AGENTS.md read appendix",
             extra={
                 "agent_id": self._runtime_agent_id,
                 "session_id": self._runtime_session_id,
+                "appendix_duration_ms": (time.perf_counter() - started_at) * 1000,
+                "candidate_path_count": len(candidates) + dedupe_skipped_count,
                 "appended_path_count": len(files),
                 "dedupe_skipped_path_count": dedupe_skipped_count,
+                "discovery_cache_hit_count": read_result.cache_hit_count,
+                "discovery_cache_miss_count": read_result.cache_miss_count,
+                "internal_stat_operation_count": read_result.stat_count,
+                "internal_read_operation_count": read_result.read_count,
             },
         )
+        if not files:
+            return None
         return ToolOutputReplace(
             output_text=f"{output}\n\n{render_agents_appendix(files)}"
         )
@@ -341,39 +371,79 @@ class AgentsAppendixMixin:
         self,
         file_storage: FileStorage,
         paths: Sequence[str],
-    ) -> list[tuple[str, str]]:
+    ) -> _AgentsFilesReadResult:
         """Read existing AGENTS.md files in deterministic order."""
         files: list[tuple[str, str]] = []
+        stat_count = 0
+        read_count = 0
+        cache_hit_count = 0
+        cache_miss_count = 0
         for path in paths:
-            content = await self._read_agents_file(file_storage, path)
-            if content is not None:
-                files.append((path, content))
-        return files
+            result = await self._read_agents_file(file_storage, path)
+            stat_count += result.stat_count
+            read_count += result.read_count
+            cache_hit_count += result.cache_hit_count
+            cache_miss_count += result.cache_miss_count
+            if result.content is not None:
+                files.append((path, result.content))
+        return _AgentsFilesReadResult(
+            files=files,
+            stat_count=stat_count,
+            read_count=read_count,
+            cache_hit_count=cache_hit_count,
+            cache_miss_count=cache_miss_count,
+        )
 
     async def _read_agents_file(
         self,
         file_storage: FileStorage,
         path: str,
-    ) -> str | None:
+    ) -> _AgentsFileReadResult:
         """Read AGENTS.md regular file from Runtime storage."""
         now = time.monotonic()
         missing_until = self._agents_missing_cache.get(path)
         if missing_until is not None:
             if missing_until > now:
-                return None
+                return _AgentsFileReadResult(
+                    content=None,
+                    stat_count=0,
+                    read_count=0,
+                    cache_hit_count=1,
+                    cache_miss_count=0,
+                )
             self._agents_missing_cache.pop(path, None)
+        read_count = 0
         try:
             metadata = await file_storage.stat(path, agent_id=self._runtime_agent_id)
             if metadata.get("is_file") is not True:
                 self._agents_missing_cache[path] = (
                     now + AGENTS_MISSING_CACHE_TTL_SECONDS
                 )
-                return None
+                return _AgentsFileReadResult(
+                    content=None,
+                    stat_count=1,
+                    read_count=0,
+                    cache_hit_count=0,
+                    cache_miss_count=1,
+                )
+            read_count = 1
             content = await file_storage.get(path, agent_id=self._runtime_agent_id)
         except FileNotFoundError:
             self._agents_missing_cache[path] = now + AGENTS_MISSING_CACHE_TTL_SECONDS
-            return None
-        return truncate_agents_content(content)
+            return _AgentsFileReadResult(
+                content=None,
+                stat_count=1,
+                read_count=read_count,
+                cache_hit_count=0,
+                cache_miss_count=1,
+            )
+        return _AgentsFileReadResult(
+            content=truncate_agents_content(content),
+            stat_count=1,
+            read_count=1,
+            cache_hit_count=0,
+            cache_miss_count=1,
+        )
 
     async def _load_appendix_dedupe_state(self) -> AgentsAppendixDedupeState:
         """Fetch persistent AGENTS.md appendix dedupe state."""
