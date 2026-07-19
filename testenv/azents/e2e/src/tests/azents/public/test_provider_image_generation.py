@@ -264,32 +264,12 @@ def _open_authenticated_session(
 
 def _image_projection_counts(driver: WebDriver) -> tuple[int, int, int]:
     """Return bounded card, completed-card, and image counts for diagnostics."""
-    cards = [
-        element
-        for element in driver.find_elements(
-            By.CSS_SELECTOR,
-            '[data-provider-tool-name="image_generation"]',
-        )
-        if element.is_displayed()
-    ]
-    completed_cards = [
-        element
-        for element in driver.find_elements(
-            By.CSS_SELECTOR,
-            '[data-provider-tool-name="image_generation"]'
-            '[data-provider-tool-status="completed"]',
-        )
-        if element.is_displayed()
-    ]
-    attachments = [
-        element
-        for card in cards
-        for element in card.find_elements(
-            By.CSS_SELECTOR,
-            'img[src*="/api/chat/exchange-files/"]',
-        )
-        if element.is_displayed()
-    ]
+    card_selector = '[data-provider-tool-name="image_generation"]'
+    completed_selector = f'{card_selector}[data-provider-tool-status="completed"]'
+    attachment_selector = f'{card_selector} img[src*="/api/chat/exchange-files/"]'
+    cards = driver.find_elements(By.CSS_SELECTOR, card_selector)
+    completed_cards = driver.find_elements(By.CSS_SELECTOR, completed_selector)
+    attachments = driver.find_elements(By.CSS_SELECTOR, attachment_selector)
     return len(cards), len(completed_cards), len(attachments)
 
 
