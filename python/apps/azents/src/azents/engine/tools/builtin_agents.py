@@ -1,8 +1,10 @@
 """Runtime AGENTS.md read-result appendix helpers."""
 
+import asyncio
 import json
 import logging
 import posixpath
+import time
 from collections.abc import Callable, Sequence
 from typing import NamedTuple, Protocol
 
@@ -36,6 +38,7 @@ ROOT_AGENTS_PATH = f"{SESSION_WORKSPACE_ROOT}/{AGENTS_FILENAME}"
 MAX_AGENTS_BYTES = 64 * 1024
 AGENTS_TOOLKIT_NAMESPACE = "builtin"
 AGENTS_APPENDIX_DEDUPE_TOOLKIT_STATE_NAME = "agents_md_appendix_dedupe"
+AGENTS_MISSING_CACHE_TTL_SECONDS = 5.0
 
 
 class AgentsAppendixDedupeState(ToolkitStateModel):
@@ -206,6 +209,8 @@ class AgentsAppendixMixin:
 
     agents_store: AgentsAppendixDedupeStateStore
     _agents_context: RuntimeInstructionContext | None
+    _agents_appendix_lock: asyncio.Lock
+    _agents_missing_cache: dict[str, float]
     _runtime_agent_id: str
     _runtime_session_id: str
 
@@ -247,9 +252,11 @@ class AgentsAppendixMixin:
     ) -> None:
         """Clear AGENTS.md appendix dedupe on compaction."""
         del context
-        await self._update_appendix_dedupe_state(
-            lambda state: state.model_copy(update={"appended_paths": []})
-        )
+        async with self._agents_appendix_lock:
+            self._agents_missing_cache.clear()
+            await self._update_appendix_dedupe_state(
+                lambda state: state.model_copy(update={"appended_paths": []})
+            )
 
     async def append_agents_after_read(
         self,
@@ -272,12 +279,29 @@ class AgentsAppendixMixin:
         if instruction_context is None:
             return None
 
+        async with self._agents_appendix_lock:
+            return await self._append_agents_after_read_locked(
+                target_path=target_path,
+                directory=refs[0].directory,
+                output=outcome.output,
+                instruction_context=instruction_context,
+            )
+
+    async def _append_agents_after_read_locked(
+        self,
+        *,
+        target_path: str,
+        directory: bool,
+        output: str,
+        instruction_context: RuntimeInstructionContext,
+    ) -> ToolOutputReplace | None:
+        """Discover and append AGENTS.md while holding the Session lock."""
         dedupe = await self._load_appendix_dedupe_state()
         already_appended = set(dedupe.appended_paths)
         candidates = _agents_appendix_candidates_for_path(
             target_path,
             instruction_context.projects,
-            directory=refs[0].directory,
+            directory=directory,
         )
         dedupe_skipped_count = sum(1 for path in candidates if path in already_appended)
         candidates = [
@@ -306,7 +330,7 @@ class AgentsAppendixMixin:
             },
         )
         return ToolOutputReplace(
-            output_text=f"{outcome.output}\n\n{render_agents_appendix(files)}"
+            output_text=f"{output}\n\n{render_agents_appendix(files)}"
         )
 
     def register_agents_context(self, context: RuntimeInstructionContext) -> None:
@@ -332,12 +356,22 @@ class AgentsAppendixMixin:
         path: str,
     ) -> str | None:
         """Read AGENTS.md regular file from Runtime storage."""
+        now = time.monotonic()
+        missing_until = self._agents_missing_cache.get(path)
+        if missing_until is not None:
+            if missing_until > now:
+                return None
+            self._agents_missing_cache.pop(path, None)
         try:
             metadata = await file_storage.stat(path, agent_id=self._runtime_agent_id)
             if metadata.get("is_file") is not True:
+                self._agents_missing_cache[path] = (
+                    now + AGENTS_MISSING_CACHE_TTL_SECONDS
+                )
                 return None
             content = await file_storage.get(path, agent_id=self._runtime_agent_id)
         except FileNotFoundError:
+            self._agents_missing_cache[path] = now + AGENTS_MISSING_CACHE_TTL_SECONDS
             return None
         return truncate_agents_content(content)
 

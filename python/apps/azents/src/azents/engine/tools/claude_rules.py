@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import fnmatch
 import logging
 import posixpath
+import time
 from collections.abc import Callable, Sequence
 from typing import Any, Literal, Protocol
 
@@ -54,6 +56,7 @@ CLAUDE_RULES_TOOLKIT_NAMESPACE = "claude_rules"
 CLAUDE_RULES_APPENDIX_DEDUPE_TOOLKIT_STATE_NAME = "claude_rules_appendix_dedupe"
 CLAUDE_RULES_DIR = ".claude/rules"
 MAX_CLAUDE_RULE_BYTES = 64 * 1024
+CLAUDE_RULE_PATH_CACHE_TTL_SECONDS = 5.0
 
 
 class ClaudeRulesAppendixDedupeState(ToolkitStateModel):
@@ -162,6 +165,22 @@ class ClaudeRuleFile:
     content: str
 
 
+@dataclasses.dataclass(frozen=True)
+class _ClaudeRuleCandidate:
+    """Discovered Claude rule path with its source root."""
+
+    root: ClaudeRuleRoot
+    path: str
+
+
+@dataclasses.dataclass(frozen=True)
+class _ClaudeRulePathCacheEntry:
+    """Short-lived sorted rule path discovery cache entry."""
+
+    paths: tuple[str, ...]
+    expires_at: float
+
+
 class ClaudeRulesToolkitConfig(BaseModel):
     """Claude rules Toolkit settings model."""
 
@@ -182,6 +201,8 @@ class ClaudeRulesToolkit(Toolkit[ClaudeRulesToolkitConfig]):
         self._session_id = session_id
         self._runtime_agent_id = agent_id
         self._runtime_session_id = session_id
+        self._appendix_lock = asyncio.Lock()
+        self._rule_path_cache: dict[str, _ClaudeRulePathCacheEntry] = {}
         self.instruction_context_store: RuntimeInstructionContextStore | None = None
 
     def set_agent_id(self, agent_id: str) -> None:
@@ -239,6 +260,21 @@ class ClaudeRulesToolkit(Toolkit[ClaudeRulesToolkitConfig]):
         if instruction_context is None:
             return None
 
+        async with self._appendix_lock:
+            return await self._append_rules_after_read_locked(
+                instruction_context=instruction_context,
+                target_path=target_path,
+                output_text=context.output_text,
+            )
+
+    async def _append_rules_after_read_locked(
+        self,
+        *,
+        instruction_context: RuntimeInstructionContext,
+        target_path: str,
+        output_text: str,
+    ) -> ToolOutputReplace | None:
+        """Discover and append Claude rules while holding the Session lock."""
         try:
             files = await self._matching_not_yet_appended_rules(
                 instruction_context,
@@ -273,9 +309,7 @@ class ClaudeRulesToolkit(Toolkit[ClaudeRulesToolkitConfig]):
             },
         )
         return ToolOutputReplace(
-            output_text=(
-                f"{context.output_text}\n\n{render_claude_rules_appendix(files)}"
-            )
+            output_text=f"{output_text}\n\n{render_claude_rules_appendix(files)}"
         )
 
     async def _on_session_compact_hook(
@@ -283,9 +317,11 @@ class ClaudeRulesToolkit(Toolkit[ClaudeRulesToolkitConfig]):
     ) -> None:
         """Clear Claude rules appendix dedupe on compaction."""
         del context
-        await self._update_appendix_dedupe_state(
-            lambda state: state.model_copy(update={"appended_paths": []})
-        )
+        async with self._appendix_lock:
+            self._rule_path_cache.clear()
+            await self._update_appendix_dedupe_state(
+                lambda state: state.model_copy(update={"appended_paths": []})
+            )
 
     def _instruction_context(self) -> RuntimeInstructionContext | None:
         store = self.instruction_context_store
@@ -301,18 +337,53 @@ class ClaudeRulesToolkit(Toolkit[ClaudeRulesToolkitConfig]):
         dedupe = await self._load_appendix_dedupe_state()
         already_appended = set(dedupe.appended_paths)
         roots = claude_rule_roots_for_path(target_path, instruction_context.projects)
-        discovered = await discover_claude_rule_files(
+        candidates = await self._discover_rule_candidates(
             instruction_context.file_storage,
             roots,
-            agent_id=self._runtime_agent_id,
         )
-        return [
-            rule
-            for rule in discovered
-            if rule.path != target_path
-            and rule.path not in already_appended
-            and rule_matches_target(rule.content, rule.path, roots, target_path)
-        ]
+        files: list[ClaudeRuleFile] = []
+        seen_real_paths: set[str] = set()
+        for candidate in candidates:
+            if candidate.path == target_path or candidate.path in already_appended:
+                continue
+            rule = await _read_rule_file(
+                instruction_context.file_storage,
+                candidate.root,
+                candidate.path,
+                agent_id=self._runtime_agent_id,
+            )
+            if rule is None or rule.real_path in seen_real_paths:
+                continue
+            seen_real_paths.add(rule.real_path)
+            if rule_matches_target(rule.content, rule.path, roots, target_path):
+                files.append(rule)
+        return files
+
+    async def _discover_rule_candidates(
+        self,
+        file_storage: FileStorage,
+        roots: Sequence[ClaudeRuleRoot],
+    ) -> list[_ClaudeRuleCandidate]:
+        """Return cached sorted rule paths for supported roots."""
+        now = time.monotonic()
+        candidates: list[_ClaudeRuleCandidate] = []
+        for root in roots:
+            cache_entry = self._rule_path_cache.get(root.rules_root)
+            if cache_entry is None or cache_entry.expires_at <= now:
+                paths = await _list_rule_paths(
+                    file_storage,
+                    root,
+                    agent_id=self._runtime_agent_id,
+                )
+                cache_entry = _ClaudeRulePathCacheEntry(
+                    paths=tuple(paths),
+                    expires_at=now + CLAUDE_RULE_PATH_CACHE_TTL_SECONDS,
+                )
+                self._rule_path_cache[root.rules_root] = cache_entry
+            candidates.extend(
+                _ClaudeRuleCandidate(root=root, path=path) for path in cache_entry.paths
+            )
+        return candidates
 
     async def _load_appendix_dedupe_state(self) -> ClaudeRulesAppendixDedupeState:
         """Fetch persistent Claude rules appendix dedupe state."""

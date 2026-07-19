@@ -210,7 +210,9 @@ class _FakeRunnerOperations:
         self.process_start_calls: list[dict[str, object]] = []
         self.process_write_calls: list[dict[str, object]] = []
         self.process_terminate_session_calls: list[dict[str, object]] = []
+        self.read_calls: list[str] = []
         self.stat_calls: list[str] = []
+        self.stat_started_count = 0
         self.stat_started_event: asyncio.Event | None = None
         self.stat_continue_event: asyncio.Event | None = None
         self.bash_unavailable_message: str | None = None
@@ -373,7 +375,8 @@ class _FakeRunnerOperations:
         max_bytes: int | None,
         deadline_at: datetime,
     ) -> RuntimeFileReadResult:
-        del runtime_id, runner_generation, deadline_at
+        del runtime_id, runner_generation, owner_session_id, deadline_at
+        self.read_calls.append(path)
         data = self.files[path]
         chunk = (
             data[offset:] if max_bytes is None else data[offset : offset + max_bytes]
@@ -389,7 +392,8 @@ class _FakeRunnerOperations:
         path: str,
         deadline_at: datetime,
     ) -> RuntimeFileStatResult:
-        del runtime_id, runner_generation, deadline_at
+        del runtime_id, runner_generation, owner_session_id, deadline_at
+        self.stat_started_count += 1
         if self.stat_started_event is not None:
             self.stat_started_event.set()
         if self.stat_continue_event is not None:
@@ -952,6 +956,115 @@ class TestRuntimeToolkitUpdateContext:
         )
 
         assert decision is None
+
+    @pytest.mark.asyncio
+    async def test_missing_agents_candidates_use_negative_cache_until_compaction(
+        self,
+    ) -> None:
+        """Absent AGENTS.md candidates avoid repeated stat calls within a Session."""
+        toolkit = _make_toolkit(
+            projects=[_make_project(path="/workspace/agent/app")],
+            storage_files={"/workspace/agent/app/file.py": b"print('hi')"},
+        )
+        await toolkit.update_context(_make_context())
+        runner_operations = cast(
+            _FakeRunnerOperations,
+            cast(Any, toolkit)._test_runner_operations,
+        )
+
+        first = await toolkit.append_agents_after_read(
+            MagicMock(
+                tool_name="read",
+                args_json='{"path": "/workspace/agent/app/file.py"}',
+            ),
+            ToolCallHookOutcome(output="ONE", error=None),
+        )
+        second = await toolkit.append_agents_after_read(
+            MagicMock(
+                tool_name="read",
+                args_json='{"path": "/workspace/agent/app/other.py"}',
+            ),
+            ToolCallHookOutcome(output="TWO", error=None),
+        )
+
+        assert first is None
+        assert second is None
+        assert runner_operations.stat_calls == [
+            "/workspace/agent/AGENTS.md",
+            "/workspace/agent/app/AGENTS.md",
+        ]
+
+        runner_operations.add_file("/workspace/agent/AGENTS.md", b"ROOT_RULE")
+        hook = toolkit.hooks().get("on_session_compact")
+        assert hook is not None
+        await hook(
+            SessionCompactHookContext(
+                workspace_id="ws-1",
+                agent_id="agent-1",
+                session_id="session-1",
+                run_id="run-1",
+            )
+        )
+        third = await toolkit.append_agents_after_read(
+            MagicMock(
+                tool_name="read",
+                args_json='{"path": "/workspace/agent/app/again.py"}',
+            ),
+            ToolCallHookOutcome(output="THREE", error=None),
+        )
+
+        assert third is not None
+        assert "ROOT_RULE" in third.output_text
+        assert runner_operations.stat_calls.count("/workspace/agent/AGENTS.md") == 2
+
+    @pytest.mark.asyncio
+    async def test_parallel_reads_singleflight_agents_appendix_io(self) -> None:
+        """Parallel reads perform AGENTS.md stat/read and append only once."""
+        toolkit = _make_toolkit(
+            storage_files={"/workspace/agent/AGENTS.md": b"ROOT_RULE"},
+        )
+        await toolkit.update_context(_make_context())
+        runner_operations = cast(
+            _FakeRunnerOperations,
+            cast(Any, toolkit)._test_runner_operations,
+        )
+        runner_operations.stat_started_event = asyncio.Event()
+        runner_operations.stat_continue_event = asyncio.Event()
+
+        first_task = asyncio.create_task(
+            toolkit.append_agents_after_read(
+                MagicMock(
+                    tool_name="read",
+                    args_json='{"path": "/workspace/agent/one.py"}',
+                ),
+                ToolCallHookOutcome(output="ONE", error=None),
+            )
+        )
+        await runner_operations.stat_started_event.wait()
+        second_started = asyncio.Event()
+
+        async def run_second() -> object:
+            second_started.set()
+            return await toolkit.append_agents_after_read(
+                MagicMock(
+                    tool_name="read",
+                    args_json='{"path": "/workspace/agent/two.py"}',
+                ),
+                ToolCallHookOutcome(output="TWO", error=None),
+            )
+
+        second_task = asyncio.create_task(run_second())
+        await second_started.wait()
+        await asyncio.sleep(0)
+        assert runner_operations.stat_started_count == 1
+
+        runner_operations.stat_continue_event.set()
+        first, second = await asyncio.gather(first_task, second_task)
+
+        assert first is not None
+        assert second is None
+        assert runner_operations.stat_calls == ["/workspace/agent/AGENTS.md"]
+        assert runner_operations.read_calls == ["/workspace/agent/AGENTS.md"]
 
     @pytest.mark.asyncio
     async def test_missing_or_non_file_agents_candidates_are_ignored(self) -> None:

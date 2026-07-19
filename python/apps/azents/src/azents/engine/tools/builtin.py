@@ -620,6 +620,8 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         self.project_repo = project_repo
         self.agents_store = agents_store
         self._agents_context: RuntimeInstructionContext | None = None
+        self._agents_appendix_lock = asyncio.Lock()
+        self._agents_missing_cache: dict[str, float] = {}
         self.instruction_context_store: RuntimeInstructionContextStore | None = None
 
     def set_instruction_context_store(

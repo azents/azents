@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, Mock
@@ -76,6 +77,71 @@ class _FailingListStorage(FakeSharedStorage):
         """Simulate runtime communication failure."""
         del path, agent_id, user_id, recursive, exclude_patterns, include_directories
         raise RuntimeStorageError("runtime disconnected")
+
+
+class _CountingStorage(FakeSharedStorage):
+    """Fake storage with instruction discovery operation counters and barriers."""
+
+    def __init__(self, files: dict[str, bytes] | None = None) -> None:
+        super().__init__(files)
+        self.list_calls: list[str] = []
+        self.stat_calls: list[str] = []
+        self.get_calls: list[str] = []
+        self.get_started_event: asyncio.Event | None = None
+        self.get_continue_event: asyncio.Event | None = None
+
+    async def list(
+        self,
+        path: str,
+        *,
+        agent_id: str = "",
+        user_id: str = "",
+        recursive: bool = False,
+        exclude_patterns: list[str] | None = None,
+        include_directories: bool = False,
+    ) -> list[RuntimeAttachment]:
+        """Count recursive rule-root listing."""
+        self.list_calls.append(path)
+        return await super().list(
+            path,
+            agent_id=agent_id,
+            user_id=user_id,
+            recursive=recursive,
+            exclude_patterns=exclude_patterns,
+            include_directories=include_directories,
+        )
+
+    async def stat(
+        self,
+        path: str,
+        *,
+        agent_id: str = "",
+        user_id: str = "",
+    ) -> dict[str, object]:
+        """Count candidate metadata reads."""
+        self.stat_calls.append(path)
+        return await super().stat(path, agent_id=agent_id, user_id=user_id)
+
+    async def get(
+        self,
+        path: str,
+        *,
+        agent_id: str = "",
+        user_id: str = "",
+        limit: int = 0,
+    ) -> bytes:
+        """Count and optionally block candidate content reads."""
+        self.get_calls.append(path)
+        if self.get_started_event is not None:
+            self.get_started_event.set()
+        if self.get_continue_event is not None:
+            await self.get_continue_event.wait()
+        return await super().get(
+            path,
+            agent_id=agent_id,
+            user_id=user_id,
+            limit=limit,
+        )
 
 
 class _SymlinkStorage(FakeSharedStorage):
@@ -392,6 +458,116 @@ class TestClaudeRulesToolkit:
             "### /workspace/agent/project/.claude/rules/python.md" in result.output_text
         )
         assert second is None
+
+    async def test_cached_discovery_and_pre_io_dedupe_avoid_repeat_rpcs(
+        self,
+    ) -> None:
+        """Repeated reads reuse root discovery and skip deduped content I/O."""
+        rule_path = "/workspace/agent/.claude/rules/global.md"
+        storage = _CountingStorage({rule_path: b"# Global"})
+        toolkit = _make_toolkit(storage)
+
+        first = await _run_after_tool_call_hook(
+            toolkit,
+            _make_after_read_context("/workspace/agent/project/src/app.py"),
+        )
+        list_calls = list(storage.list_calls)
+        stat_calls = list(storage.stat_calls)
+        get_calls = list(storage.get_calls)
+        second = await _run_after_tool_call_hook(
+            toolkit,
+            _make_after_read_context("/workspace/agent/project/src/other.py"),
+        )
+
+        assert first is not None
+        assert second is None
+        assert list_calls == [
+            "/workspace/agent/.claude/rules",
+            "/workspace/agent/project/.claude/rules",
+        ]
+        assert storage.list_calls == list_calls
+        assert stat_calls == [rule_path]
+        assert storage.stat_calls == stat_calls
+        assert get_calls == [rule_path]
+        assert storage.get_calls == get_calls
+
+    async def test_parallel_reads_singleflight_rule_discovery_and_content_io(
+        self,
+    ) -> None:
+        """Parallel reads list, stat, read, and append one rule only once."""
+        rule_path = "/workspace/agent/.claude/rules/global.md"
+        storage = _CountingStorage({rule_path: b"# Global"})
+        storage.get_started_event = asyncio.Event()
+        storage.get_continue_event = asyncio.Event()
+        toolkit = _make_toolkit(storage)
+
+        first_task = asyncio.create_task(
+            _run_after_tool_call_hook(
+                toolkit,
+                _make_after_read_context("/workspace/agent/one.py"),
+            )
+        )
+        await storage.get_started_event.wait()
+        second_started = asyncio.Event()
+
+        async def run_second() -> ToolOutputReplace | None:
+            second_started.set()
+            return await _run_after_tool_call_hook(
+                toolkit,
+                _make_after_read_context("/workspace/agent/two.py"),
+            )
+
+        second_task = asyncio.create_task(run_second())
+        await second_started.wait()
+        await asyncio.sleep(0)
+        assert storage.get_calls == [rule_path]
+
+        storage.get_continue_event.set()
+        first, second = await asyncio.gather(first_task, second_task)
+
+        assert first is not None
+        assert second is None
+        assert storage.list_calls == ["/workspace/agent/.claude/rules"]
+        assert storage.stat_calls == [rule_path]
+        assert storage.get_calls == [rule_path]
+
+    async def test_compaction_clears_rule_path_discovery_cache(self) -> None:
+        """Compaction refreshes previously empty rule-root discovery."""
+        rule_path = "/workspace/agent/.claude/rules/global.md"
+        storage = _CountingStorage()
+        toolkit = _make_toolkit(storage)
+
+        first = await _run_after_tool_call_hook(
+            toolkit,
+            _make_after_read_context("/workspace/agent/one.py"),
+        )
+        storage.add_file(rule_path, b"# New")
+        second = await _run_after_tool_call_hook(
+            toolkit,
+            _make_after_read_context("/workspace/agent/two.py"),
+        )
+        await _run_session_compact_hook(
+            toolkit,
+            SessionCompactHookContext(
+                workspace_id="ws-1",
+                agent_id="agent-1",
+                session_id="session-1",
+                run_id="run-1",
+            ),
+        )
+        third = await _run_after_tool_call_hook(
+            toolkit,
+            _make_after_read_context("/workspace/agent/three.py"),
+        )
+
+        assert first is None
+        assert second is None
+        assert third is not None
+        assert "# New" in third.output_text
+        assert storage.list_calls == [
+            "/workspace/agent/.claude/rules",
+            "/workspace/agent/.claude/rules",
+        ]
 
     async def test_failed_read_and_non_read_are_unchanged(self) -> None:
         """Original read failures and non-read tools do not append rules."""
