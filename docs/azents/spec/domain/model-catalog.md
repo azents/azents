@@ -10,6 +10,7 @@ code_paths:
   - python/apps/azents/src/azents/services/llm_catalog/__init__.py
   - python/apps/azents/src/azents/services/llm_provider_integration/__init__.py
   - python/apps/azents/src/azents/services/chatgpt_oauth/__init__.py
+  - python/apps/azents/src/azents/services/kimi_oauth/**
   - python/apps/azents/src/azents/repos/llm_catalog/__init__.py
   - python/apps/azents/src/azents/repos/llm_catalog/data.py
   - python/apps/azents/src/azents/api/public/llm_provider_integration/v1/__init__.py
@@ -27,7 +28,7 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
   - typescript/apps/azents-admin-web/src/features/model-catalog/containers/useModelCatalogPageContainer.ts
 last_verified_at: 2026-07-19
-spec_version: 15
+spec_version: 16
 ---
 
 # Model Catalog Domain Spec
@@ -102,7 +103,7 @@ The read path must not call provider listing APIs, models.dev, or remote LiteLLM
 
 The integration catalog sync endpoint refreshes the stored catalog for one integration.
 
-For AWS Bedrock and Google Vertex AI, sync fetches the provider-visible model list and projects it against the stored LiteLLM source snapshot. For ChatGPT OAuth, sync refreshes the OAuth token when necessary, calls the account-scoped Codex model endpoint with the fixed compatibility client version, and projects backend-visible models directly. For OpenRouter, sync calls the fixed authenticated account-model endpoint and projects every valid text-output model directly without requiring a LiteLLM metadata match.
+For AWS Bedrock and Google Vertex AI, sync fetches the provider-visible model list and projects it against the stored LiteLLM source snapshot. For ChatGPT OAuth, sync refreshes the OAuth token when necessary, calls the account-scoped Codex model endpoint with the fixed compatibility client version, and projects backend-visible models directly. For Kimi OAuth, sync refreshes the token when necessary, calls the authenticated Kimi Code model endpoint with the encrypted device identity, and directly projects valid account-visible models. For OpenRouter, sync calls the fixed authenticated account-model endpoint and projects every valid text-output model directly without requiring a LiteLLM metadata match.
 
 Integration catalog synchronization has four triggers:
 
