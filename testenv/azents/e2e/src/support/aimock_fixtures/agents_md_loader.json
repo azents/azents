@@ -814,8 +814,7 @@
     {
       "match": {
         "endpoint": "chat",
-        "userMessage": "Subagent E2E wait for mailbox sender",
-        "hasToolResult": false
+        "userMessage": "Subagent E2E wait for mailbox sender"
       },
       "response": {
         "toolCalls": [
@@ -866,7 +865,7 @@
       },
       "streamingProfile": {
         "ttft": 0,
-        "tps": 3,
+        "tps": 5,
         "jitter": 0
       }
     },
@@ -886,7 +885,7 @@
       },
       "streamingProfile": {
         "ttft": 0,
-        "tps": 3,
+        "tps": 5,
         "jitter": 0
       }
     },
@@ -906,7 +905,7 @@
       },
       "streamingProfile": {
         "ttft": 0,
-        "tps": 3,
+        "tps": 5,
         "jitter": 0
       }
     },
@@ -926,7 +925,7 @@
       },
       "streamingProfile": {
         "ttft": 0,
-        "tps": 3,
+        "tps": 5,
         "jitter": 0
       }
     },
@@ -946,7 +945,7 @@
       },
       "streamingProfile": {
         "ttft": 0,
-        "tps": 3,
+        "tps": 5,
         "jitter": 0
       }
     },
@@ -994,7 +993,7 @@
       },
       "streamingProfile": {
         "ttft": 0,
-        "tps": 3,
+        "tps": 5,
         "jitter": 0
       }
     },
@@ -1014,7 +1013,7 @@
       },
       "streamingProfile": {
         "ttft": 0,
-        "tps": 3,
+        "tps": 5,
         "jitter": 0
       }
     },
@@ -1034,7 +1033,7 @@
       },
       "streamingProfile": {
         "ttft": 0,
-        "tps": 3,
+        "tps": 5,
         "jitter": 0
       }
     },
@@ -1054,7 +1053,7 @@
       },
       "streamingProfile": {
         "ttft": 0,
-        "tps": 3,
+        "tps": 5,
         "jitter": 0
       }
     },
@@ -1074,7 +1073,7 @@
       },
       "streamingProfile": {
         "ttft": 0,
-        "tps": 3,
+        "tps": 5,
         "jitter": 0
       }
     },
@@ -1156,8 +1155,7 @@
     {
       "match": {
         "endpoint": "chat",
-        "userMessage": "Subagent E2E wait for active descendant timeout",
-        "hasToolResult": false
+        "userMessage": "Subagent E2E wait for active descendant timeout"
       },
       "response": {
         "toolCalls": [
@@ -1188,7 +1186,7 @@
       },
       "streamingProfile": {
         "ttft": 0,
-        "tps": 3,
+        "tps": 5,
         "jitter": 0
       }
     },
@@ -1208,7 +1206,7 @@
       },
       "streamingProfile": {
         "ttft": 0,
-        "tps": 3,
+        "tps": 5,
         "jitter": 0
       }
     },
@@ -1228,7 +1226,7 @@
       },
       "streamingProfile": {
         "ttft": 0,
-        "tps": 3,
+        "tps": 5,
         "jitter": 0
       }
     },
@@ -1248,7 +1246,7 @@
       },
       "streamingProfile": {
         "ttft": 0,
-        "tps": 3,
+        "tps": 5,
         "jitter": 0
       }
     },
@@ -1268,7 +1266,7 @@
       },
       "streamingProfile": {
         "ttft": 0,
-        "tps": 3,
+        "tps": 5,
         "jitter": 0
       }
     },
