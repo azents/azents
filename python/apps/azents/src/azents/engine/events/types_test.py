@@ -5,13 +5,14 @@ import datetime
 import pytest
 from pydantic import ValidationError
 
-from azents.core.enums import EventKind
+from azents.core.enums import AgentRunStatus, EventKind
 from azents.core.inference_profile import (
     AppliedInferenceProfile,
     RequestedInferenceProfile,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.engine.events.types import (
+    AgentMessagePayload,
     AssistantMessagePayload,
     ClientToolResultPayload,
     Event,
@@ -71,6 +72,50 @@ def test_native_artifact_rejects_mismatched_compat_key() -> None:
             model="gpt-5.1",
             schema_version="1",
             item={"type": "message"},
+        )
+
+
+def test_agent_result_requires_complete_terminal_metadata() -> None:
+    with pytest.raises(ValidationError, match="source Run metadata"):
+        AgentMessagePayload(
+            message_kind="agent_result",
+            source_session_agent_id="source-agent",
+            source_path="/root/reviewer",
+            target_session_agent_id="target-agent",
+            target_path="/root",
+            content="Done.",
+        )
+
+
+def test_agent_result_accepts_terminal_run_metadata() -> None:
+    payload = AgentMessagePayload(
+        message_kind="agent_result",
+        source_session_agent_id="source-agent",
+        source_path="/root/reviewer",
+        target_session_agent_id="target-agent",
+        target_path="/root",
+        source_run_id="1" * 32,
+        source_run_index=2,
+        run_status=AgentRunStatus.COMPLETED,
+        source_terminal_result_event_id=None,
+        content="Done.",
+    )
+
+    assert payload.run_status is AgentRunStatus.COMPLETED
+
+
+def test_instruction_agent_message_rejects_result_metadata() -> None:
+    with pytest.raises(ValidationError, match="cannot include result metadata"):
+        AgentMessagePayload(
+            message_kind="send_message",
+            source_session_agent_id="source-agent",
+            source_path="/root/reviewer",
+            target_session_agent_id="target-agent",
+            target_path="/root",
+            source_run_id="1" * 32,
+            source_run_index=2,
+            run_status=AgentRunStatus.COMPLETED,
+            content="Done.",
         )
 
 

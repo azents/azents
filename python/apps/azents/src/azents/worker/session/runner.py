@@ -22,6 +22,7 @@ from azents.engine.run.types import CheckStop, PollMessages, PollMessagesResult
 from azents.rdb.session import SessionManager
 from azents.repos.agent_session.data import PendingSessionCommand
 from azents.services.input_buffer import InputBufferService
+from azents.services.subagent_terminal_result import SubagentTerminalResultService
 from azents.worker.events.publisher import WorkerEventPublisher
 from azents.worker.run.executor import RunExecutor
 from azents.worker.run.results import RunExecutionResult
@@ -91,6 +92,7 @@ class SessionRunner:
         session_manager: SessionManager[AsyncSession],
         agent_session_repository: AgentSessionCommandReader,
         input_buffer_service: InputBufferService,
+        subagent_terminal_result_service: SubagentTerminalResultService,
         idle_continuation_service: IdleContinuationService,
         user_stop_finalizer: UserStopFinalizer,
         run_executor: RunExecutor,
@@ -103,6 +105,7 @@ class SessionRunner:
         self.session_manager = session_manager
         self.agent_session_repository = agent_session_repository
         self.input_buffer_service = input_buffer_service
+        self.subagent_terminal_result_service = subagent_terminal_result_service
         self.idle_continuation_service = idle_continuation_service
         self.run_executor = run_executor
         self.model_transport_state = model_transport_state
@@ -473,6 +476,16 @@ class SessionRunner:
                 if self.shutdown_event.is_set():
                     return None
 
+                if result.terminal_event_observed and isinstance(
+                    message,
+                    SessionWakeUp,
+                ):
+                    delivery_service = self.subagent_terminal_result_service
+                    await delivery_service.deliver_pending_for_source_session(
+                        message.session_id,
+                        repair_source="terminal_boundary",
+                    )
+
                 marked_idle = False
                 if result.terminal_event_observed:
                     if isinstance(message, SessionWakeUp):
@@ -597,6 +610,10 @@ class SessionRunner:
 
     async def _process_wake_up(self, message: SessionWakeUp) -> RunExecutionResult:
         """Handle command/run/continuation lifecycle for one SessionWakeUp."""
+        await self.subagent_terminal_result_service.deliver_pending_for_source_session(
+            message.session_id,
+            repair_source="source_session_reuse",
+        )
         command = await self._get_pending_command(message.session_id)
         self.run_active = True
         try:

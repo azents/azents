@@ -8,6 +8,7 @@ import pytest_asyncio
 from redis.asyncio import Redis
 
 from azents.core.enums import (
+    AgentRunStatus,
     EventKind,
     InputBufferKind,
     InputBufferSchedulingMode,
@@ -16,6 +17,7 @@ from azents.core.llm_catalog import ModelReasoningEffort
 from azents.engine.events.action_messages import ActionMessagePayload, SkillAction
 from azents.engine.events.types import (
     ActiveToolCall,
+    AgentMessagePayload,
     AssistantMessagePayload,
     ClientToolCallPayload,
     ProviderToolCallPayload,
@@ -58,6 +60,46 @@ def test_user_input_buffer_live_event_preserves_nullable_requested_profile() -> 
     assert event.payload.requested_inference_profile is not None
     assert event.payload.requested_inference_profile.model_target_label == "quality"
     assert event.payload.requested_inference_profile.reasoning_effort is None
+
+
+def test_agent_result_input_buffer_live_event_restores_terminal_metadata() -> None:
+    """Pending terminal result exposes the complete agent message payload."""
+    event = input_buffer_to_live_event(
+        InputBuffer(
+            id="0223456789abcdef0123456789abcdef",
+            session_id="1123456789abcdef0123456789abcdef",
+            kind=InputBufferKind.AGENT_MESSAGE,
+            scheduling_mode=InputBufferSchedulingMode.QUEUE_ONLY,
+            requested_model_target_label=None,
+            requested_reasoning_effort=None,
+            actor_user_id=None,
+            content="Review completed.",
+            idempotency_key="agent_result:" + "2" * 32,
+            metadata={
+                "source": "agent_mailbox",
+                "message_kind": "agent_result",
+                "source_session_agent_id": "source-agent",
+                "source_path": "/root/reviewer",
+                "target_session_agent_id": "target-agent",
+                "target_path": "/root",
+                "source_run_id": "2" * 32,
+                "source_run_index": "4",
+                "run_status": "completed",
+                "source_terminal_result_event_id": "3" * 32,
+            },
+            action=None,
+            attachments=[],
+            file_parts=[],
+            created_at=datetime.datetime(2026, 7, 19, tzinfo=datetime.UTC),
+        )
+    )
+
+    assert isinstance(event.payload, AgentMessagePayload)
+    assert event.payload.message_kind == "agent_result"
+    assert event.payload.source_run_id == "2" * 32
+    assert event.payload.source_run_index == 4
+    assert event.payload.run_status is AgentRunStatus.COMPLETED
+    assert event.payload.source_terminal_result_event_id == "3" * 32
 
 
 def test_action_input_buffer_live_event_preserves_requested_profile() -> None:

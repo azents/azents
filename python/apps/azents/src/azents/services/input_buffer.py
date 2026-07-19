@@ -1145,16 +1145,24 @@ def _user_message_payload_json(
 
 def _agent_message_payload(buffer: InputBuffer) -> AgentMessagePayload:
     """Build agent_message payload from mailbox input buffer metadata."""
-    return _AGENT_MESSAGE_ADAPTER.validate_python(
-        {
-            "message_kind": buffer.metadata["message_kind"],
-            "source_session_agent_id": buffer.metadata["source_session_agent_id"],
-            "source_path": buffer.metadata["source_path"],
-            "target_session_agent_id": buffer.metadata["target_session_agent_id"],
-            "target_path": buffer.metadata["target_path"],
-            "content": buffer.content,
-        }
-    )
+    payload: dict[str, object] = {
+        "message_kind": buffer.metadata["message_kind"],
+        "source_session_agent_id": buffer.metadata["source_session_agent_id"],
+        "source_path": buffer.metadata["source_path"],
+        "target_session_agent_id": buffer.metadata["target_session_agent_id"],
+        "target_path": buffer.metadata["target_path"],
+        "content": buffer.content,
+    }
+    for key in (
+        "source_run_id",
+        "source_run_index",
+        "run_status",
+        "source_terminal_result_event_id",
+    ):
+        value = buffer.metadata.get(key)
+        if value is not None:
+            payload[key] = value
+    return _AGENT_MESSAGE_ADAPTER.validate_python(payload)
 
 
 def _system_error_promoted_buffer(

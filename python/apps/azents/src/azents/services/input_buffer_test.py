@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent import AgentModelSelection
 from azents.core.enums import (
+    AgentRunStatus,
     AgentSessionRunState,
     EventKind,
     ExchangeFileOrigin,
@@ -259,6 +260,45 @@ async def _create_agent_message_buffer(
                     "source_path": "/root",
                     "target_session_agent_id": "target-agent",
                     "target_path": "/root/child",
+                },
+                action=None,
+                attachments=[],
+                file_parts=[],
+            ),
+        )
+        return created.id
+
+
+async def _create_agent_result_buffer(
+    rdb_session_manager: SessionManager[AsyncSession],
+    *,
+    session_id: str,
+    content: str,
+) -> str:
+    """Create terminal agent_result InputBuffer for tests."""
+    async with rdb_session_manager() as session:
+        created = await InputBufferRepository().create(
+            session,
+            InputBufferCreate(
+                session_id=session_id,
+                kind=InputBufferKind.AGENT_MESSAGE,
+                scheduling_mode=InputBufferSchedulingMode.QUEUE_ONLY,
+                requested_model_target_label=None,
+                requested_reasoning_effort=None,
+                actor_user_id=None,
+                content=content,
+                idempotency_key="agent_result:" + "1" * 32,
+                metadata={
+                    "source": "agent_mailbox",
+                    "message_kind": "agent_result",
+                    "source_session_agent_id": "source-agent",
+                    "source_path": "/root/reviewer",
+                    "target_session_agent_id": "target-agent",
+                    "target_path": "/root",
+                    "source_run_id": "1" * 32,
+                    "source_run_index": "2",
+                    "run_status": "completed",
+                    "source_terminal_result_event_id": "2" * 32,
                 },
                 action=None,
                 attachments=[],
@@ -1080,6 +1120,43 @@ class TestInputBufferService:
         assert event.payload.source_path == "/root"
         assert event.payload.target_path == "/root/child"
         assert event.payload.content == "continue with the next step"
+
+    async def test_flush_promotes_agent_result_terminal_metadata(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Terminal mailbox input persists complete agent_result metadata."""
+        session_id, _user_id = await _create_fixture(
+            rdb_session_manager,
+            "input-buffer-agent-result",
+        )
+        buffer_id = await _create_agent_result_buffer(
+            rdb_session_manager,
+            session_id=session_id,
+            content="No blocking issues.",
+        )
+
+        result = await _input_buffer_service(
+            rdb_session_manager
+        ).flush_session_input_buffers(
+            session_id=session_id,
+            model="gpt-5.4",
+            required_inference_profile=None,
+            expected_buffer_id=buffer_id,
+            prepared_inference_state=None,
+            profile_resolution_failure=None,
+            active_run_id=None,
+        )
+
+        event = result.events[0]
+        assert event.kind == EventKind.AGENT_MESSAGE
+        assert isinstance(event.payload, AgentMessagePayload)
+        assert event.payload.message_kind == "agent_result"
+        assert event.payload.source_run_id == "1" * 32
+        assert event.payload.source_run_index == 2
+        assert event.payload.run_status is AgentRunStatus.COMPLETED
+        assert event.payload.source_terminal_result_event_id == "2" * 32
+        assert event.payload.content == "No blocking issues."
 
     async def test_flush_skill_action_loads_skill_before_user_message(
         self,

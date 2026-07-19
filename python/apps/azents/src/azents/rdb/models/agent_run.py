@@ -8,7 +8,11 @@ from azcommon.uuid import uuid7
 from sqlalchemy.dialects.postgresql import ENUM, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from azents.core.enums import AgentRunPhase, AgentRunStatus
+from azents.core.enums import (
+    AgentRunParentResultDeliveryState,
+    AgentRunPhase,
+    AgentRunStatus,
+)
 from azents.rdb.models.base import RDBModel
 from azents.rdb.types.datetime import TimeZoneDateTime
 
@@ -30,6 +34,12 @@ agent_run_phase_enum = ENUM(
 agent_run_status_enum = ENUM(
     AgentRunStatus,
     name="agent_run_status",
+    create_type=False,
+    values_callable=_enum_values,
+)
+agent_run_parent_result_delivery_state_enum = ENUM(
+    AgentRunParentResultDeliveryState,
+    name="agent_run_parent_result_delivery_state",
     create_type=False,
     values_callable=_enum_values,
 )
@@ -116,6 +126,23 @@ class RDBAgentRun(RDBModel):
     )
     terminal_result_message: Mapped[str | None] = mapped_column(
         sa.Text,
+        nullable=True,
+        default=None,
+    )
+    parent_result_delivery_state: Mapped[AgentRunParentResultDeliveryState | None] = (
+        mapped_column(
+            agent_run_parent_result_delivery_state_enum,
+            nullable=True,
+            default=None,
+        )
+    )
+    parent_result_input_buffer_id: Mapped[str | None] = mapped_column(
+        sa.String(32),
+        nullable=True,
+        default=None,
+    )
+    parent_result_enqueued_at: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime,
         nullable=True,
         default=None,
     )

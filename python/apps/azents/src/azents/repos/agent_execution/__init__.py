@@ -9,7 +9,13 @@ from pydantic import TypeAdapter
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import AgentRunPhase, AgentRunStatus, EventKind
+from azents.core.enums import (
+    AgentRunParentResultDeliveryState,
+    AgentRunPhase,
+    AgentRunStatus,
+    EventKind,
+    SessionAgentKind,
+)
 from azents.engine.events.action_messages import ActionMessagePayload
 from azents.engine.events.types import (
     ActiveToolCall,
@@ -25,6 +31,7 @@ from azents.rdb.models.agent_run import RDBAgentRun
 from azents.rdb.models.agent_run_input_event import RDBAgentRunInputEvent
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.event import JSONValue, RDBEvent
+from azents.rdb.models.session_agent import RDBSessionAgent
 
 from .data import (
     AgentRunCreate,
@@ -777,6 +784,66 @@ class AgentRunRepository:
         )
         return run_id is not None
 
+    async def list_parent_result_delivery_candidate_ids_by_session_id(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+    ) -> list[str]:
+        """List eligible terminal subagent Runs in source Run order."""
+        result = await session.execute(
+            sa.select(RDBAgentRun.id)
+            .join(
+                RDBSessionAgent,
+                RDBSessionAgent.agent_session_id == RDBAgentRun.session_id,
+            )
+            .where(
+                RDBAgentRun.session_id == session_id,
+                RDBSessionAgent.kind == SessionAgentKind.SUBAGENT,
+                RDBAgentRun.status.in_(
+                    [
+                        AgentRunStatus.COMPLETED,
+                        AgentRunStatus.FAILED,
+                        AgentRunStatus.STOPPED,
+                        AgentRunStatus.INTERRUPTED,
+                        AgentRunStatus.CANCELLED,
+                    ]
+                ),
+                RDBAgentRun.parent_result_delivery_state.is_(None),
+            )
+            .order_by(RDBAgentRun.run_index.asc())
+        )
+        return list(result.scalars())
+
+    async def mark_parent_result_enqueued(
+        self,
+        session: AsyncSession,
+        *,
+        run_id: str,
+        input_buffer_id: str,
+        enqueued_at: datetime.datetime,
+    ) -> AgentRunState:
+        """Finalize a locked Run's parent mailbox delivery marker."""
+        rdb = await session.get(RDBAgentRun, run_id)
+        if rdb is None:
+            raise ValueError("AgentRun not found")
+        if rdb.parent_result_delivery_state is not None:
+            return self._build(rdb)
+        if rdb.status not in {
+            AgentRunStatus.COMPLETED,
+            AgentRunStatus.FAILED,
+            AgentRunStatus.STOPPED,
+            AgentRunStatus.INTERRUPTED,
+            AgentRunStatus.CANCELLED,
+        }:
+            raise ValueError("AgentRun is not terminal")
+        rdb.parent_result_delivery_state = AgentRunParentResultDeliveryState.ENQUEUED
+        rdb.parent_result_input_buffer_id = input_buffer_id
+        rdb.parent_result_enqueued_at = enqueued_at
+        await session.flush()
+        await session.refresh(rdb)
+        return self._build(rdb)
+
     async def get_running_by_session_id(
         self,
         session: AsyncSession,
@@ -952,6 +1019,9 @@ class AgentRunRepository:
             last_completed_event_id=rdb.last_completed_event_id,
             terminal_result_event_id=rdb.terminal_result_event_id,
             terminal_result_message=rdb.terminal_result_message,
+            parent_result_delivery_state=rdb.parent_result_delivery_state,
+            parent_result_input_buffer_id=rdb.parent_result_input_buffer_id,
+            parent_result_enqueued_at=rdb.parent_result_enqueued_at,
             stop_requested_at=rdb.stop_requested_at,
             created_at=rdb.created_at,
             started_at=rdb.started_at,

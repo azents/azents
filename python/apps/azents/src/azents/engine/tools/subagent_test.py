@@ -8,6 +8,7 @@ import json
 import time
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -39,6 +40,7 @@ from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepo
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession, SessionAgent
+from azents.services.agent_mailbox import AgentMailboxService
 from azents.services.input_buffer import InputBufferEnqueue, InputBufferService
 from azents.testing.model_selection import (
     make_test_model_selection,
@@ -480,6 +482,9 @@ class _AgentRunRepository:
             parent_agent_run_id=None,
             terminal_result_event_id=None,
             terminal_result_message=None,
+            parent_result_delivery_state=None,
+            parent_result_input_buffer_id=None,
+            parent_result_enqueued_at=None,
             created_at=_NOW,
             started_at=_NOW,
             model_call_started_at=None,
@@ -498,6 +503,9 @@ class _AgentRunRepository:
                 parent_agent_run_id=None,
                 terminal_result_event_id="event".rjust(32, "0"),
                 terminal_result_message="child result",
+                parent_result_delivery_state=None,
+                parent_result_input_buffer_id=None,
+                parent_result_enqueued_at=None,
                 created_at=_NOW,
                 started_at=_NOW,
                 model_call_started_at=None,
@@ -588,7 +596,7 @@ class _InputBufferService:
         """Record enqueued mailbox input."""
         del session
         self.enqueued.append(input)
-        return object()
+        return SimpleNamespace(input_buffer=object())
 
 
 class _Broker:
@@ -630,7 +638,13 @@ async def _make_toolkit() -> tuple[
         event_transcript_repository=cast(
             EventTranscriptRepository, _EventTranscriptRepository()
         ),
-        input_buffer_service=cast(InputBufferService, input_buffer_service),
+        agent_mailbox_service=AgentMailboxService(
+            input_buffer_service=cast(InputBufferService, input_buffer_service),
+            agent_session_repository=cast(
+                AgentSessionRepository,
+                agent_session_repository,
+            ),
+        ),
         broker=cast(SessionBroker, broker),
         agent_repository=cast(AgentRepository, agent_repository),
         agent=agent,
@@ -1789,6 +1803,9 @@ async def test_spawn_agent_counts_latest_running_run_toward_active_limit() -> No
         parent_agent_run_id=None,
         terminal_result_event_id=None,
         terminal_result_message=None,
+        parent_result_delivery_state=None,
+        parent_result_input_buffer_id=None,
+        parent_result_enqueued_at=None,
         created_at=_NOW,
         started_at=_NOW,
         model_call_started_at=None,

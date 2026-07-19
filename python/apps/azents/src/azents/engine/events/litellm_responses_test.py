@@ -21,7 +21,12 @@ from litellm.types.llms.openai import (
 from openai import OpenAIError as OpenAIBaseError
 from pydantic import ValidationError
 
-from azents.core.enums import EventKind, LLMModelDeveloper, LLMProvider
+from azents.core.enums import (
+    AgentRunStatus,
+    EventKind,
+    LLMModelDeveloper,
+    LLMProvider,
+)
 from azents.core.llm_catalog import (
     ModelCapabilities,
     ModelModalities,
@@ -318,6 +323,41 @@ class TestLiteLLMResponsesLowerer:
                 "Sender: /root\n"
                 "Payload:\n"
                 "status note"
+            ),
+        }
+
+    def test_lowers_agent_result_as_terminal_envelope(self) -> None:
+        """Terminal mailbox events render status without internal IDs."""
+        lowerer = LiteLLMResponsesLowerer(provider="openai", model="gpt-5.1")
+        transcript = [
+            _event(
+                EventKind.AGENT_MESSAGE,
+                AgentMessagePayload(
+                    message_kind="agent_result",
+                    source_session_agent_id="source-agent",
+                    source_path="/root/reviewer",
+                    target_session_agent_id="target-agent",
+                    target_path="/root",
+                    source_run_id="1" * 32,
+                    source_run_index=2,
+                    run_status=AgentRunStatus.COMPLETED,
+                    source_terminal_result_event_id="2" * 32,
+                    content="No blocking issues.",
+                ),
+            )
+        ]
+
+        request = lowerer.lower(transcript, model="gpt-5.1")
+
+        assert request.input[-1] == {
+            "role": "user",
+            "content": (
+                "Message Type: AGENT_RESULT\n"
+                "Task name: /root\n"
+                "Sender: /root/reviewer\n"
+                "Run status: completed\n"
+                "Payload:\n"
+                "No blocking issues."
             ),
         }
 

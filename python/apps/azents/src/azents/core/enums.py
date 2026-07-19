@@ -290,6 +290,13 @@ class AgentRunStatus(enum.StrEnum):
     CANCELLED = "cancelled"
 
 
+class AgentRunParentResultDeliveryState(enum.StrEnum):
+    """Finalized parent mailbox delivery state for a subagent Run."""
+
+    SUPPRESSED = "suppressed"
+    ENQUEUED = "enqueued"
+
+
 class AgentSessionStatus(enum.StrEnum):
     """AgentSession lifecycle status."""
 
