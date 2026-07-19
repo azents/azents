@@ -544,14 +544,11 @@ class TestProviderImageGeneration:
             session_id=session_id,
         )
 
-        _submit(
-            server_url=azents_public_server_url,
-            token=token,
-            agent_id=agent_id,
-            session_id=session_id,
-            message=_PROMPT,
-            reasoning_effort=None,
+        browser_wait = WebDriverWait(browser_driver, 30)
+        composer = browser_wait.until(
+            ec.element_to_be_clickable((By.CSS_SELECTOR, "textarea:not([disabled])"))
         )
+        composer.send_keys(_PROMPT, Keys.ENTER)
         _wait_for_idle(
             server_url=azents_public_server_url,
             token=token,
@@ -559,7 +556,6 @@ class TestProviderImageGeneration:
             session_id=session_id,
         )
 
-        browser_wait = WebDriverWait(browser_driver, 30)
         browser_wait.until(_has_single_completed_image_projection)
         browser_driver.refresh()
         browser_wait.until(_has_single_completed_image_projection)
