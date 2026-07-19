@@ -14,6 +14,7 @@ from azents.engine.events.output_parts import (
 from azents.engine.events.tools import (
     ToolCatalogClientToolExecutor,
     build_tool_catalog,
+    extend_tool_catalog,
     summarize_tool_arguments,
 )
 from azents.engine.events.types import (
@@ -31,6 +32,7 @@ from azents.engine.run.types import (
     FunctionToolResult,
     FunctionToolSpec,
 )
+from azents.engine.tooling.tool_search import ToolExposure
 
 
 class _ToolkitConfig(BaseModel):
@@ -172,6 +174,79 @@ async def test_build_tool_catalog_prefixes_and_lowers_native_schema() -> None:
         tools=catalog.native_tools,
     ).lower([], model="gpt-5.1")
     assert request.tools == catalog.native_tools
+
+
+async def test_build_tool_catalog_classifies_direct_and_deferred_tools() -> None:
+    """Keep core and service control tools direct while deferring operations."""
+    switch_installation = FunctionTool(
+        spec=FunctionToolSpec(
+            name="switch_installation",
+            description="Select the active GitHub installation.",
+            input_schema={"type": "object"},
+        ),
+        handler=_echo,
+    )
+    catalog = await build_tool_catalog(
+        toolkit_bindings=[
+            ToolkitBinding(
+                toolkit=_Toolkit(),
+                slug="core",
+                use_prefix=False,
+                toolkit_type=None,
+            ),
+            ToolkitBinding(
+                toolkit=_Toolkit(),
+                slug="azents",
+                use_prefix=True,
+                toolkit_type="github",
+            ),
+            ToolkitBinding(
+                toolkit=_InlineToolkit(switch_installation),
+                slug="github",
+                use_prefix=True,
+                toolkit_type="github",
+            ),
+        ],
+        context=TurnContext(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id="run-1",
+            publish_event=_noop_publish,
+        ),
+    )
+
+    assert catalog.direct_tool_names == ["echo", "github__switch_installation"]
+    assert catalog.deferred_tool_names == ["azents__echo"]
+    assert catalog.entries["azents__echo"].source.slug == "azents"
+    assert catalog.entries["azents__echo"].source.toolkit_type == "github"
+
+
+async def test_extend_tool_catalog_marks_runtime_builtin_direct() -> None:
+    """Client-executed runtime builtins remain pinned direct tools."""
+    catalog = await build_tool_catalog(
+        toolkit_bindings=[],
+        context=TurnContext(
+            user_id=None,
+            workspace_id="workspace-1",
+            model="grok-4",
+            run_id="run-1",
+            publish_event=_noop_publish,
+        ),
+    )
+    image_generation = FunctionTool(
+        spec=FunctionToolSpec(
+            name="image_generation",
+            description="Generate an image.",
+            input_schema={"type": "object"},
+        ),
+        handler=_echo,
+    )
+
+    extended = extend_tool_catalog(catalog, [image_generation])
+
+    assert extended.entries["image_generation"].exposure == ToolExposure.DIRECT
+    assert extended.direct_tool_names == ["image_generation"]
 
 
 async def test_build_tool_catalog_separates_dynamic_prompt_layer() -> None:
