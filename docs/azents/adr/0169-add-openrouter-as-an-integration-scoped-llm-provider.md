@@ -8,7 +8,7 @@ tags: [architecture, backend, frontend, engine, llm, security]
 
 ## Status
 
-Draft. Records decisions confirmed during design discussion.
+Accepted on 2026-07-19 after implementation and credential-free validation.
 
 ## Topic
 

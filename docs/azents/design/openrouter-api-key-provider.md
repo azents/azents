@@ -2,6 +2,7 @@
 title: "OpenRouter API Key Provider"
 created: 2026-07-19
 updated: 2026-07-19
+implemented: 2026-07-19
 tags: [backend, frontend, engine, security, api, testenv]
 ---
 
