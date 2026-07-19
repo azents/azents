@@ -21,6 +21,7 @@ from azents.services.subscription_usage.data import (
     SubscriptionUsageUnavailable,
     SubscriptionUsageUnavailableReason,
     SubscriptionUsageUnsupportedProvider,
+    XaiSubscriptionFinancialDetails,
 )
 
 from . import get_subscription_usage, list_integrations
@@ -242,3 +243,43 @@ def test_all_public_union_discriminators_are_required() -> None:
     for model in models:
         schema = model.model_json_schema()
         assert "type" in schema["required"]
+
+
+def test_xai_available_financial_details_use_unchanged_public_contract() -> None:
+    """Convert xAI usage through the Phase 1 response schema."""
+    now = datetime.datetime.now(datetime.UTC)
+    outcome = SubscriptionUsageAvailable(
+        integration_id="xai-integration-1",
+        provider=LLMProvider.XAI_OAUTH,
+        fetched_at=now,
+        plan_label="SuperGrok",
+        limits=(
+            SubscriptionUsageLimit(
+                id="subscription",
+                label="Weekly limit",
+                used_percent=25.0,
+                window_minutes=7 * 24 * 60,
+                resets_at=now + datetime.timedelta(days=1),
+                primary=True,
+            ),
+        ),
+        financial_details=XaiSubscriptionFinancialDetails(
+            prepaid_balance_cents=1250,
+            payg_cap_cents=5000,
+            payg_used_cents=300,
+            auto_top_up_enabled=True,
+            auto_top_up_amount_cents=500,
+            auto_top_up_monthly_maximum_cents=2000,
+        ),
+    )
+
+    response = convert_subscription_usage_response(outcome)
+
+    assert isinstance(response, SubscriptionUsageAvailableResponse)
+    assert response.provider == LLMProvider.XAI_OAUTH
+    assert isinstance(
+        response.financial_details, XaiSubscriptionFinancialDetailsResponse
+    )
+    assert response.financial_details.type == "xai"
+    assert response.financial_details.prepaid_balance_cents == 1250
+    assert response.financial_details.auto_top_up_enabled is True

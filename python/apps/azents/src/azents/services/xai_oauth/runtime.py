@@ -27,7 +27,7 @@ from .data import (
     TokenSet,
 )
 
-_REFRESH_WINDOW = datetime.timedelta(hours=1)
+_REFRESH_WINDOW = datetime.timedelta(minutes=5)
 
 
 async def ensure_runtime_tokens(

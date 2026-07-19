@@ -3,6 +3,7 @@
 import datetime
 import uuid
 from typing import cast
+from unittest.mock import AsyncMock
 
 import pytest
 from azcommon.result import Failure, Result, Success
@@ -119,6 +120,63 @@ class TestEnsureRuntimeTokens:
 
         assert isinstance(result, Success)
         assert result.value.id == integration_id
+
+    async def test_more_than_five_minutes_remaining_skips_refresh(
+        self, rdb_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A token outside the five-minute window remains unchanged."""
+        expires_at = datetime.datetime.now(datetime.UTC) + datetime.timedelta(
+            minutes=10
+        )
+        repo, integration_id = await _create_integration(
+            rdb_session,
+            expires_at=expires_at,
+        )
+        integration = await repo.get_by_id_with_secrets(rdb_session, integration_id)
+        assert integration is not None
+        refresh = AsyncMock()
+        monkeypatch.setattr(
+            "azents.services.xai_oauth.runtime.refresh_runtime_tokens", refresh
+        )
+
+        result = await ensure_runtime_tokens(
+            integration=integration,
+            integration_repository=repo,
+            session_manager=cast(
+                SessionManager[AsyncSession], _SessionManager(rdb_session)
+            ),
+        )
+
+        assert isinstance(result, Success)
+        assert result.value.id == integration.id
+        refresh.assert_not_awaited()
+
+    async def test_within_five_minutes_uses_shared_refresh_path(
+        self, rdb_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A token inside the five-minute window delegates to forced refresh."""
+        expires_at = datetime.datetime.now(datetime.UTC) + datetime.timedelta(minutes=4)
+        repo, integration_id = await _create_integration(
+            rdb_session,
+            expires_at=expires_at,
+        )
+        integration = await repo.get_by_id_with_secrets(rdb_session, integration_id)
+        assert integration is not None
+        refresh = AsyncMock(return_value=Success(integration))
+        monkeypatch.setattr(
+            "azents.services.xai_oauth.runtime.refresh_runtime_tokens", refresh
+        )
+
+        result = await ensure_runtime_tokens(
+            integration=integration,
+            integration_repository=repo,
+            session_manager=cast(
+                SessionManager[AsyncSession], _SessionManager(rdb_session)
+            ),
+        )
+
+        assert isinstance(result, Success)
+        refresh.assert_awaited_once()
 
     async def test_forced_refresh_rotates_a_fresh_rejected_token(
         self, rdb_session: AsyncSession, monkeypatch: pytest.MonkeyPatch

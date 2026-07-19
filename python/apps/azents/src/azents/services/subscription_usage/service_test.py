@@ -13,13 +13,25 @@ from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.chatgpt_oauth import ChatGPTOAuthConnectionMethod
-from azents.core.credentials import ChatGPTOAuthConfig, ChatGPTOAuthSecrets
+from azents.core.credentials import (
+    ChatGPTOAuthConfig,
+    ChatGPTOAuthSecrets,
+    XaiOAuthConfig,
+    XaiOAuthSecrets,
+)
 from azents.core.enums import LLMProvider
+from azents.core.xai_oauth import XaiOAuthConnectionMethod, XaiOAuthConnectionStatus
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationWithSecrets
 from azents.services.chatgpt_oauth.data import ProviderRejected, ProviderUnavailable
+from azents.services.xai_oauth.data import (
+    ProviderEntitlementDenied as XaiProviderEntitlementDenied,
+)
+from azents.services.xai_oauth.data import ProviderRejected as XaiProviderRejected
+from azents.services.xai_oauth.data import ProviderUnavailable as XaiProviderUnavailable
 
 from .data import (
     SubscriptionUsageAvailable,
+    SubscriptionUsageExternal,
     SubscriptionUsageNotFound,
     SubscriptionUsageNotInWorkspace,
     SubscriptionUsageUnavailable,
@@ -81,6 +93,61 @@ def _integration(
     )
 
 
+def _xai_integration(
+    *,
+    enabled: bool = True,
+    status: Literal[
+        "connected",
+        "refresh_required",
+        "temporarily_unavailable",
+        "entitlement_denied",
+        "disabled",
+    ] = "connected",
+) -> LLMProviderIntegrationWithSecrets:
+    """Build one xAI OAuth integration for service tests."""
+    now = datetime.datetime.now(datetime.UTC)
+    return LLMProviderIntegrationWithSecrets(
+        id="xai-integration-1",
+        workspace_id="workspace-1",
+        provider=LLMProvider.XAI_OAUTH,
+        name="xAI Subscription",
+        config=XaiOAuthConfig(
+            account_id="xai-account-1",
+            email="xai@example.com",
+            connection_method=XaiOAuthConnectionMethod.DEVICE.value,
+            status=status,
+            connected_at=now,
+            last_refreshed_at=now,
+        ),
+        enabled=enabled,
+        created_at=now,
+        updated_at=now,
+        secrets=XaiOAuthSecrets(
+            access_token="xai-access-1",
+            refresh_token="xai-refresh-1",
+            expires_at=now + datetime.timedelta(hours=1),
+        ),
+    )
+
+
+def _xai_payload(*, prepaid_balance: int = 0) -> dict[str, object]:
+    """Return one valid xAI credits response."""
+    return {
+        "config": {
+            "creditUsagePercent": 25,
+            "currentPeriod": {
+                "type": "USAGE_PERIOD_TYPE_WEEKLY",
+                "start": "2026-07-13T00:00:00Z",
+                "end": "2026-07-20T00:00:00Z",
+            },
+            "prepaidBalance": {"val": prepaid_balance},
+            "onDemandCap": {"val": 1000},
+            "onDemandUsed": {"val": 100},
+        },
+        "subscriptionTier": "SuperGrok",
+    }
+
+
 def _payload() -> dict[str, object]:
     return {
         "plan_type": "Pro",
@@ -110,6 +177,7 @@ async def _service(
             session_manager=_SessionManager(),
             http_client=http_client,
             chatgpt_usage_base_url="https://usage.example.test/backend-api",
+            xai_usage_base_url="https://xai-usage.example.test/v1",
         ),
         repository,
     )
@@ -457,3 +525,302 @@ async def test_unexpected_adapter_exception_propagates(
             )
     finally:
         await service.http_client.aclose()
+
+
+async def test_xai_financial_projection_depends_on_write_permission(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Expose xAI operational usage to readers and money only to writers."""
+    integration = _xai_integration()
+    monkeypatch.setattr(
+        f"{_SERVICE_MODULE}.ensure_xai_runtime_tokens",
+        AsyncMock(return_value=Success(integration)),
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/v1/settings":
+            return httpx.Response(200, json={})
+        assert request.url.path == "/v1/billing"
+        return httpx.Response(200, json=_xai_payload())
+
+    service, _ = await _service(handler, integration=integration)
+    try:
+        read_only = await service.read(
+            integration_id=integration.id,
+            workspace_id=integration.workspace_id,
+            include_financial_details=False,
+        )
+        writer = await service.read(
+            integration_id=integration.id,
+            workspace_id=integration.workspace_id,
+            include_financial_details=True,
+        )
+    finally:
+        await service.http_client.aclose()
+
+    assert isinstance(read_only, Success)
+    assert isinstance(read_only.value, SubscriptionUsageAvailable)
+    assert read_only.value.provider == LLMProvider.XAI_OAUTH
+    assert read_only.value.financial_details is None
+    assert isinstance(writer, Success)
+    assert isinstance(writer.value, SubscriptionUsageAvailable)
+    assert writer.value.financial_details is not None
+
+
+@pytest.mark.parametrize(
+    ("integration", "reason"),
+    [
+        (
+            _xai_integration(enabled=False),
+            SubscriptionUsageUnavailableReason.DISABLED,
+        ),
+        (
+            _xai_integration(status=XaiOAuthConnectionStatus.DISABLED.value),
+            SubscriptionUsageUnavailableReason.DISABLED,
+        ),
+        (
+            _xai_integration(status=XaiOAuthConnectionStatus.REFRESH_REQUIRED.value),
+            SubscriptionUsageUnavailableReason.RECONNECT_REQUIRED,
+        ),
+        (
+            _xai_integration(status=XaiOAuthConnectionStatus.ENTITLEMENT_DENIED.value),
+            SubscriptionUsageUnavailableReason.ENTITLEMENT_UNAVAILABLE,
+        ),
+    ],
+)
+async def test_xai_ineligible_state_short_circuits_freshness_and_provider(
+    monkeypatch: pytest.MonkeyPatch,
+    integration: LLMProviderIntegrationWithSecrets,
+    reason: SubscriptionUsageUnavailableReason,
+) -> None:
+    """Keep disabled and recovery-required xAI states provider-call free."""
+    ensure = AsyncMock()
+    monkeypatch.setattr(f"{_SERVICE_MODULE}.ensure_xai_runtime_tokens", ensure)
+    service, _ = await _service(
+        lambda _request: pytest.fail("provider must not be called"),
+        integration=integration,
+    )
+    try:
+        result = await service.read(
+            integration_id=integration.id,
+            workspace_id=integration.workspace_id,
+            include_financial_details=True,
+        )
+    finally:
+        await service.http_client.aclose()
+
+    assert isinstance(result, Success)
+    assert isinstance(result.value, SubscriptionUsageUnavailable)
+    assert result.value.reason == reason
+    ensure.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("error", "reason", "retryable"),
+    [
+        (
+            XaiProviderRejected(reason="rejected"),
+            SubscriptionUsageUnavailableReason.RECONNECT_REQUIRED,
+            False,
+        ),
+        (
+            XaiProviderEntitlementDenied(reason="denied"),
+            SubscriptionUsageUnavailableReason.ENTITLEMENT_UNAVAILABLE,
+            False,
+        ),
+        (
+            XaiProviderUnavailable(reason="timeout"),
+            SubscriptionUsageUnavailableReason.TEMPORARILY_UNAVAILABLE,
+            True,
+        ),
+    ],
+)
+async def test_xai_freshness_failures_map_without_provider_usage_call(
+    monkeypatch: pytest.MonkeyPatch,
+    error: XaiProviderRejected | XaiProviderEntitlementDenied | XaiProviderUnavailable,
+    reason: SubscriptionUsageUnavailableReason,
+    retryable: bool,
+) -> None:
+    """Project the shared xAI refresh lifecycle into safe usage outcomes."""
+    integration = _xai_integration()
+    monkeypatch.setattr(
+        f"{_SERVICE_MODULE}.ensure_xai_runtime_tokens",
+        AsyncMock(return_value=Failure(error)),
+    )
+    service, _ = await _service(
+        lambda _request: pytest.fail("provider must not be called"),
+        integration=integration,
+    )
+    try:
+        result = await service.read(
+            integration_id=integration.id,
+            workspace_id=integration.workspace_id,
+            include_financial_details=True,
+        )
+    finally:
+        await service.http_client.aclose()
+
+    assert isinstance(result, Success)
+    assert isinstance(result.value, SubscriptionUsageUnavailable)
+    assert result.value.reason == reason
+    assert result.value.retryable is retryable
+
+
+async def test_xai_billing_unauthorized_forces_one_full_sequence_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Repeat settings and billing once with the forced-refreshed credential."""
+    integration = _xai_integration()
+    refreshed = integration.model_copy(
+        update={
+            "secrets": XaiOAuthSecrets(
+                access_token="xai-refreshed-access",
+                refresh_token="xai-refreshed-refresh",
+                expires_at=datetime.datetime.now(datetime.UTC)
+                + datetime.timedelta(hours=1),
+            )
+        }
+    )
+    calls: list[tuple[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append((request.url.path, request.headers["authorization"]))
+        if request.url.path == "/v1/settings":
+            return httpx.Response(200, json={})
+        billing_calls = [path for path, _token in calls if path == "/v1/billing"]
+        if len(billing_calls) == 1:
+            return httpx.Response(401)
+        return httpx.Response(200, json=_xai_payload())
+
+    refresh = AsyncMock(return_value=Success(refreshed))
+    monkeypatch.setattr(
+        f"{_SERVICE_MODULE}.ensure_xai_runtime_tokens",
+        AsyncMock(return_value=Success(integration)),
+    )
+    monkeypatch.setattr(f"{_SERVICE_MODULE}.refresh_xai_runtime_tokens", refresh)
+    service, _ = await _service(handler, integration=integration)
+    try:
+        result = await service.read(
+            integration_id=integration.id,
+            workspace_id=integration.workspace_id,
+            include_financial_details=True,
+        )
+    finally:
+        await service.http_client.aclose()
+
+    assert isinstance(result, Success)
+    assert isinstance(result.value, SubscriptionUsageAvailable)
+    assert calls == [
+        ("/v1/settings", "Bearer xai-access-1"),
+        ("/v1/billing", "Bearer xai-access-1"),
+        ("/v1/settings", "Bearer xai-refreshed-access"),
+        ("/v1/billing", "Bearer xai-refreshed-access"),
+    ]
+    refresh.assert_awaited_once()
+
+
+async def test_xai_repeated_billing_unauthorized_stops_after_one_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Do not issue a third xAI sequence or a second forced refresh."""
+    integration = _xai_integration()
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if request.url.path == "/v1/settings":
+            return httpx.Response(200, json={})
+        return httpx.Response(401)
+
+    refresh = AsyncMock(return_value=Success(integration))
+    monkeypatch.setattr(
+        f"{_SERVICE_MODULE}.ensure_xai_runtime_tokens",
+        AsyncMock(return_value=Success(integration)),
+    )
+    monkeypatch.setattr(f"{_SERVICE_MODULE}.refresh_xai_runtime_tokens", refresh)
+    service, _ = await _service(handler, integration=integration)
+    try:
+        result = await service.read(
+            integration_id=integration.id,
+            workspace_id=integration.workspace_id,
+            include_financial_details=True,
+        )
+    finally:
+        await service.http_client.aclose()
+
+    assert isinstance(result, Success)
+    assert isinstance(result.value, SubscriptionUsageUnavailable)
+    assert result.value.reason == SubscriptionUsageUnavailableReason.RECONNECT_REQUIRED
+    assert calls == 4
+    refresh.assert_awaited_once()
+
+
+async def test_xai_billing_entitlement_denial_does_not_mutate_integration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep usage-specific 403 independent from runtime entitlement persistence."""
+    integration = _xai_integration()
+    monkeypatch.setattr(
+        f"{_SERVICE_MODULE}.ensure_xai_runtime_tokens",
+        AsyncMock(return_value=Success(integration)),
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/v1/settings":
+            return httpx.Response(200, json={})
+        return httpx.Response(403)
+
+    service, repository = await _service(handler, integration=integration)
+    try:
+        result = await service.read(
+            integration_id=integration.id,
+            workspace_id=integration.workspace_id,
+            include_financial_details=True,
+        )
+    finally:
+        await service.http_client.aclose()
+
+    assert isinstance(result, Success)
+    assert isinstance(result.value, SubscriptionUsageUnavailable)
+    assert (
+        result.value.reason
+        == SubscriptionUsageUnavailableReason.ENTITLEMENT_UNAVAILABLE
+    )
+    repository.update_by_id.assert_not_awaited()
+
+
+async def test_xai_trusted_redirect_returns_external_without_billing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Project the validated xAI redirect through the common external outcome."""
+    integration = _xai_integration()
+    monkeypatch.setattr(
+        f"{_SERVICE_MODULE}.ensure_xai_runtime_tokens",
+        AsyncMock(return_value=Success(integration)),
+    )
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(
+            200,
+            json={"usage_billing_redirect_url": "https://grok.com/usage"},
+        )
+
+    service, _ = await _service(handler, integration=integration)
+    try:
+        result = await service.read(
+            integration_id=integration.id,
+            workspace_id=integration.workspace_id,
+            include_financial_details=True,
+        )
+    finally:
+        await service.http_client.aclose()
+
+    assert isinstance(result, Success)
+    assert isinstance(result.value, SubscriptionUsageExternal)
+    assert result.value.url == "https://grok.com/usage"
+    assert result.value.message == "Usage is managed on xAI."
+    assert calls == 1

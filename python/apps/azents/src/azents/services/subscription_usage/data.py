@@ -165,6 +165,43 @@ ChatGPTUsageAdapterOutcome: TypeAlias = (
 )
 
 
+@dataclasses.dataclass(frozen=True)
+class XaiUsageSnapshot:
+    """Normalized xAI adapter result before integration projection."""
+
+    plan_label: str | None
+    limits: tuple[SubscriptionUsageLimit, ...]
+    financial_details: XaiSubscriptionFinancialDetails | None
+
+
+@dataclasses.dataclass(frozen=True)
+class XaiUsageExternal:
+    """Validated xAI-managed usage location."""
+
+    url: str
+
+
+@dataclasses.dataclass(frozen=True)
+class XaiUsageUnavailable:
+    """Controlled unavailable result from the xAI usage adapter."""
+
+    reason: SubscriptionUsageUnavailableReason
+    retryable: bool
+    http_status: int | None
+
+
+@dataclasses.dataclass(frozen=True)
+class XaiUsageUnauthorized:
+    """Internal marker requesting one forced token-refresh retry."""
+
+    http_status: int
+
+
+XaiUsageAdapterOutcome: TypeAlias = (
+    XaiUsageSnapshot | XaiUsageExternal | XaiUsageUnavailable | XaiUsageUnauthorized
+)
+
+
 def unavailable_message(reason: SubscriptionUsageUnavailableReason) -> str:
     """Return fixed Azents copy for a controlled unavailable reason."""
     match reason:
