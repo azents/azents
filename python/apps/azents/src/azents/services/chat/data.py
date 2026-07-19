@@ -258,7 +258,6 @@ class InvalidSessionTitle:
 
 EnsureSessionError = AgentNotFound | NotWorkspaceMember | SessionAccessDenied
 SessionAccessError = SessionNotFound | SessionAccessDenied
-DeleteSessionError = SessionAccessDenied | SubagentSessionReadOnly
 DeleteInputBufferError = SessionNotFound | SessionAccessDenied | SubagentSessionReadOnly
 UpdateGoalError = (
     SessionNotFound

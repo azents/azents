@@ -534,6 +534,29 @@ class AgentSessionRepository:
         await session.flush()
         return generation
 
+    async def fence_archived_owner_generations(
+        self,
+        session: AsyncSession,
+        *,
+        session_ids: Sequence[str],
+    ) -> int:
+        """Invalidate stale worker ownership for a locked archived subtree."""
+        if not session_ids:
+            return 0
+        fenced_ids = (
+            await session.scalars(
+                sa.update(RDBAgentSession)
+                .where(
+                    RDBAgentSession.id.in_(session_ids),
+                    RDBAgentSession.status == AgentSessionStatus.ARCHIVED,
+                )
+                .values(owner_generation=RDBAgentSession.owner_generation + 1)
+                .returning(RDBAgentSession.id)
+            )
+        ).all()
+        await session.flush()
+        return len(fenced_ids)
+
     async def list_session_agent_subtree_session_ids(
         self,
         session: AsyncSession,

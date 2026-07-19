@@ -10,6 +10,7 @@ from azents.scheduler.types import (
     TaskContext,
     TaskResult,
 )
+from azents.services.archived_session_purge import ArchivedSessionPurgeService
 from azents.services.archived_session_retention import (
     ArchivedSessionRetentionService,
 )
@@ -59,6 +60,20 @@ async def archived_session_retention_recalculation_handler(
     """Apply one bounded existing-archive retention recalculation batch."""
     service = await context.container.solve(ArchivedSessionRetentionService)
     summary = await service.recalculate_once(lease_owner=context.lease_owner)
+    return TaskResult(
+        summary={
+            "task_key": context.task_key,
+            "attempt_started_at": context.attempt_started_at.isoformat(),
+            "manual_triggered": context.manual_triggered,
+            **dataclasses.asdict(summary),
+        }
+    )
+
+
+async def archived_session_purge_handler(context: TaskContext) -> TaskResult:
+    """Advance one durable archived-session purge job."""
+    service = await context.container.solve(ArchivedSessionPurgeService)
+    summary = await service.purge_once(lease_owner=context.lease_owner)
     return TaskResult(
         summary={
             "task_key": context.task_key,
@@ -129,6 +144,20 @@ ARCHIVED_SESSION_RETENTION_RECALCULATION_TASK = ScheduledTaskDefinition(
     enabled_by_default=True,
 )
 
+ARCHIVED_SESSION_PURGE_TASK = ScheduledTaskDefinition(
+    key="archived_session_purge",
+    description="Fence and purge due archived SessionAgent trees.",
+    interval=datetime.timedelta(minutes=5),
+    timeout=datetime.timedelta(minutes=10),
+    retry_policy=RetryPolicy(
+        kind="bounded_backoff",
+        min_delay=datetime.timedelta(minutes=1),
+        max_delay=datetime.timedelta(minutes=30),
+    ),
+    handler=archived_session_purge_handler,
+    enabled_by_default=True,
+)
+
 FILE_LIFECYCLE_CLEANUP_TASK = ScheduledTaskDefinition(
     key="file_lifecycle_cleanup",
     description="Expire TTL-owned files and collect head-pruned ModelFiles.",
@@ -147,6 +176,7 @@ SCHEDULED_TASK_DEFINITIONS: tuple[ScheduledTaskDefinition, ...] = (
     HEARTBEAT_TASK,
     SYSTEM_CATALOG_PROJECTION_TASK,
     ARCHIVED_SESSION_RETENTION_RECALCULATION_TASK,
+    ARCHIVED_SESSION_PURGE_TASK,
     FILE_LIFECYCLE_CLEANUP_TASK,
 )
 

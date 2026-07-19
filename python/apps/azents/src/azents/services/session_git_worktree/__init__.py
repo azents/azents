@@ -4,7 +4,7 @@ import asyncio
 import dataclasses
 import logging
 import re
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
 from typing import Annotated, Literal, assert_never
@@ -1309,6 +1309,82 @@ class SessionGitWorktreeService:
 
         if last_cleaned is None:
             return
+
+    async def run_cleanup_for_root_tree(
+        self,
+        *,
+        agent_id: str,
+        root_session_id: str,
+        subtree_session_ids: Sequence[str],
+    ) -> int:
+        """Clean every worktree allocation in one root SessionAgent tree."""
+        allowed_session_ids = set(subtree_session_ids)
+        if root_session_id not in allowed_session_ids:
+            raise ValueError("Root session must belong to its purge subtree")
+
+        async with self.session_manager() as session:
+            allocations = await self.session_git_worktree_repository.list_by_session_id(
+                session,
+                session_id=root_session_id,
+            )
+            for allocation in allocations:
+                creator_session_id = allocation.created_by_agent_session_id
+                if creator_session_id not in allowed_session_ids:
+                    raise RuntimeError(
+                        "Git worktree allocation belongs outside the purge subtree"
+                    )
+                if allocation.status is not SessionGitWorktreeStatus.CLEANED:
+                    await self.session_git_worktree_repository.mark_cleanup_pending(
+                        session,
+                        worktree_id=allocation.id,
+                    )
+
+        cleanup_targets = [
+            allocation
+            for allocation in allocations
+            if allocation.status is not SessionGitWorktreeStatus.CLEANED
+        ]
+        if cleanup_targets:
+            runtime = await self._get_runtime(agent_id=agent_id)
+            if runtime is None or runtime.runner_state != RuntimeRunnerState.READY:
+                await self._mark_cleanup_targets_failed(
+                    allocations=cleanup_targets,
+                    reason="Runtime runner is not ready.",
+                )
+                raise RuntimeError("Runtime runner is not ready for purge cleanup")
+            if self.runner_operations is None:
+                await self._mark_cleanup_targets_failed(
+                    allocations=cleanup_targets,
+                    reason="Runtime runner operations are unavailable.",
+                )
+                raise RuntimeError(
+                    "Runtime runner operations are unavailable for purge cleanup"
+                )
+
+            for allocation in cleanup_targets:
+                creator_session_id = allocation.created_by_agent_session_id
+                if creator_session_id is None:
+                    raise RuntimeError(
+                        "Git worktree allocation creator AgentSession is missing"
+                    )
+                await self._run_cleanup_for_allocation(
+                    agent_id=agent_id,
+                    session_id=creator_session_id,
+                    runtime=runtime,
+                    allocation=allocation,
+                )
+
+        async with self.session_manager() as session:
+            remaining = await self.session_git_worktree_repository.list_by_session_id(
+                session,
+                session_id=root_session_id,
+            )
+        if any(
+            allocation.status is not SessionGitWorktreeStatus.CLEANED
+            for allocation in remaining
+        ):
+            raise RuntimeError("Git worktree purge cleanup is incomplete")
+        return len(allocations)
 
     async def _run_cleanup_for_allocation(
         self,

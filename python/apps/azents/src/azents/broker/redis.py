@@ -434,6 +434,15 @@ class RedisBroker:
             return None
         return _session_activity_adapter.validate_json(raw)
 
+    async def purge_session_state(self, session_id: str) -> None:
+        """Delete all ephemeral broker state owned by one Session."""
+        await self._redis.delete(f"{self._SESSION_PREFIX}{session_id}:messages")
+        await self._redis.delete(
+            _session_lock_key(self._SESSION_PREFIX, session_id),
+            _session_owner_heartbeat_key(self._SESSION_PREFIX, session_id),
+        )
+        await self._redis.delete(f"{self._SESSION_PREFIX}{session_id}:activity")
+
 
 def _stream_min_id(retention_seconds: int) -> str:
     """Return the minimum ID for time-based Redis Stream retention."""
