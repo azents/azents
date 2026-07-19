@@ -309,7 +309,12 @@ def test_admin_retention_page_updates_future_archive_policy(
         )
 
         retention_input = _wait(browser_driver).until(
-            ec.element_to_be_clickable((By.CSS_SELECTOR, "input[type='number']"))
+            ec.element_to_be_clickable(
+                (
+                    By.XPATH,
+                    "//label[normalize-space()='Retention days']/following::input[1]",
+                )
+            )
         )
         retention_input.send_keys(Keys.CONTROL, "a")
         retention_input.send_keys("14")
