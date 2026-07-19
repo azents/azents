@@ -56,6 +56,7 @@ from azents.core.llm_catalog import (
     ModelReasoningEffort,
     ModelToolCallingCapabilities,
 )
+from azents.core.openrouter import OPENROUTER_API_BASE_URL
 from azents.repos.llm_provider_integration.data import (
     LLMProviderIntegrationWithSecrets,
 )
@@ -72,7 +73,6 @@ VERTEX_PUBLISHERS: dict[str, LLMModelDeveloper] = {
     "google": LLMModelDeveloper.GOOGLE,
     "anthropic": LLMModelDeveloper.ANTHROPIC,
 }
-OPENROUTER_API_BASE_URL = "https://openrouter.ai/api/v1"
 OPENROUTER_PUBLISHERS: dict[str, LLMModelDeveloper] = {
     "openai": LLMModelDeveloper.OPENAI,
     "anthropic": LLMModelDeveloper.ANTHROPIC,

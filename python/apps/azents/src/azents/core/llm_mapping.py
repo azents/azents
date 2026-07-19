@@ -21,6 +21,7 @@ from azents.core.credentials import (
     XaiOAuthSecrets,
 )
 from azents.core.enums import LLMProvider
+from azents.core.openrouter import OPENROUTER_API_BASE_URL, OPENROUTER_APP_TITLE
 from azents.core.xai import resolve_xai_api_base_url
 from azents.repos.llm_provider_integration.data import (
     LLMProviderIntegrationWithSecrets,
@@ -82,6 +83,16 @@ def build_credential_kwargs(
                     "base_url": resolve_xai_api_base_url(),
                     "api_base": resolve_xai_api_base_url(),
                     "custom_llm_provider": "xai",
+                }
+            if integration.provider == LLMProvider.OPENROUTER:
+                return {
+                    "api_key": key,
+                    "base_url": OPENROUTER_API_BASE_URL,
+                    "api_base": OPENROUTER_API_BASE_URL,
+                    "custom_llm_provider": "openrouter",
+                    "extra_headers": {
+                        "X-OpenRouter-Title": OPENROUTER_APP_TITLE,
+                    },
                 }
             return {"api_key": key}
         case ChatGPTOAuthSecrets(access_token=token):

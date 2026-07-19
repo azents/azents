@@ -23,6 +23,7 @@ from azents.core.llm_mapping import (
     to_litellm_model,
     to_runtime_model,
 )
+from azents.core.openrouter import OPENROUTER_API_BASE_URL, OPENROUTER_APP_TITLE
 from azents.core.xai import XAI_API_BASE_URL
 from azents.repos.llm_provider_integration.data import (
     LLMProviderIntegrationWithSecrets,
@@ -198,6 +199,28 @@ class TestBuildCredentialKwargs:
             "api_base": XAI_API_BASE_URL,
             "custom_llm_provider": "xai",
         }
+
+    def test_openrouter_api_key_secrets(self) -> None:
+        """OpenRouter credentials use its fixed Responses endpoint and title."""
+        integration = _make_integration(
+            provider=LLMProvider.OPENROUTER,
+            secrets=ApiKeySecrets(api_key="openrouter-test-key"),
+        )
+
+        result = build_credential_kwargs(integration)
+
+        assert result == {
+            "api_key": "openrouter-test-key",
+            "base_url": OPENROUTER_API_BASE_URL,
+            "api_base": OPENROUTER_API_BASE_URL,
+            "custom_llm_provider": "openrouter",
+            "extra_headers": {
+                "X-OpenRouter-Title": OPENROUTER_APP_TITLE,
+            },
+        }
+        headers = result["extra_headers"]
+        assert isinstance(headers, dict)
+        assert "HTTP-Referer" not in headers
 
     def test_aws_secrets(self) -> None:
         """AwsSecrets + AwsConfig to aws_* kwargs conversion."""

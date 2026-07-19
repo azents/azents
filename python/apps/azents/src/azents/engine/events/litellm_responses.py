@@ -361,6 +361,7 @@ def _is_provider_hosted_tool(tool: dict[str, object]) -> bool:
     return "google_search" in tool or tool_type in {
         "web_search_20250305",
         "web_fetch_20250910",
+        "openrouter:web_search",
     }
 
 

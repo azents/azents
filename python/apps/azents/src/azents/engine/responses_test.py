@@ -6,6 +6,7 @@ from pytest import MonkeyPatch
 
 import azents.engine.responses as responses_module
 from azents.core.enums import LLMProvider
+from azents.core.openrouter import OPENROUTER_API_BASE_URL, OPENROUTER_APP_TITLE
 from azents.core.xai import XAI_API_BASE_URL
 from azents.engine.responses import call_responses_model, extract_response_text
 from azents.testing.model_stream import (
@@ -64,6 +65,7 @@ async def test_call_responses_model_builds_standard_payload(
             "text": {"format": {"type": "text"}, "verbosity": "low"},
             "include": None,
             "custom_llm_provider": None,
+            "extra_headers": None,
             "store": None,
             "api_key": None,
             "api_base": None,
@@ -153,6 +155,49 @@ async def test_call_responses_model_uses_xai_options(
         {"role": "system", "content": "Generate a title"},
         {"role": "user", "content": "Generate a title"},
     ]
+
+
+async def test_call_responses_model_preserves_openrouter_attribution(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Shared helper forwards OpenRouter endpoint and static title headers."""
+    calls: list[dict[str, object]] = []
+
+    async def fake_aresponses(**kwargs: object) -> object:
+        calls.append(kwargs)
+        return {"output_text": "OpenRouter title"}
+
+    monkeypatch.setattr(responses_module, "aresponses", fake_aresponses)
+
+    await call_responses_model(
+        provider=LLMProvider.OPENROUTER,
+        model="openrouter/anthropic/claude-sonnet-4.6",
+        credential_kwargs={
+            "api_key": "openrouter-test-key",
+            "base_url": OPENROUTER_API_BASE_URL,
+            "api_base": OPENROUTER_API_BASE_URL,
+            "custom_llm_provider": "openrouter",
+            "extra_headers": {
+                "X-OpenRouter-Title": OPENROUTER_APP_TITLE,
+            },
+        },
+        input_items=[{"role": "user", "content": "Generate a title"}],
+        instructions="Generate a title",
+        stream=False,
+        max_output_tokens=80,
+        watchdog=_TEST_WATCHDOG,
+        timeout_policy=_TEST_POLICY,
+        call_context=_TEST_CONTEXT,
+    )
+
+    assert calls[0]["custom_llm_provider"] == "openrouter"
+    assert calls[0]["api_key"] == "openrouter-test-key"
+    assert calls[0]["base_url"] == OPENROUTER_API_BASE_URL
+    assert calls[0]["api_base"] == OPENROUTER_API_BASE_URL
+    assert calls[0]["extra_headers"] == {
+        "X-OpenRouter-Title": OPENROUTER_APP_TITLE,
+    }
+    assert calls[0]["instructions"] == "Generate a title"
 
 
 async def test_extract_response_text_reads_response_output_text() -> None:

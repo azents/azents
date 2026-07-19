@@ -28,6 +28,7 @@ from azents.core.llm_catalog import (
     ModelModality,
     ModelReasoningEffort,
 )
+from azents.core.openrouter import OPENROUTER_API_BASE_URL, OPENROUTER_APP_TITLE
 from azents.core.xai import XAI_API_BASE_URL
 from azents.engine.events.file_parts import ModelFileLoweringContent
 from azents.engine.events.litellm_responses import (
@@ -439,6 +440,58 @@ class TestLiteLLMResponsesLowerer:
         assert "cache_control" not in request.tools[-1]
         assert request.input[-2] == {"role": "user", "content": "one"}
         assert request.input[-1] == {"role": "user", "content": "two"}
+
+    def test_openrouter_sets_provider_endpoint_and_attribution_kwargs(self) -> None:
+        """OpenRouter stays on LiteLLM Responses with fixed credential kwargs."""
+        lowerer = LiteLLMResponsesLowerer(
+            provider="openrouter",
+            model="anthropic/claude-sonnet-4.6",
+            provider_id=LLMProvider.OPENROUTER,
+            credential_kwargs={
+                "api_key": "test-key",
+                "base_url": OPENROUTER_API_BASE_URL,
+                "extra_headers": {
+                    "X-OpenRouter-Title": OPENROUTER_APP_TITLE,
+                },
+            },
+        )
+
+        request = lowerer.lower(
+            [],
+            model="openrouter/anthropic/claude-sonnet-4.6",
+        )
+
+        assert request.kwargs["custom_llm_provider"] == "openrouter"
+        assert request.kwargs["base_url"] == OPENROUTER_API_BASE_URL
+        assert request.kwargs["api_base"] == OPENROUTER_API_BASE_URL
+        assert request.kwargs["extra_headers"] == {
+            "X-OpenRouter-Title": OPENROUTER_APP_TITLE,
+        }
+
+    def test_openrouter_claude_does_not_add_anthropic_cache_control(self) -> None:
+        """OpenRouter wire semantics override the selected model developer."""
+        lowerer = LiteLLMResponsesLowerer(
+            provider="openrouter",
+            model="anthropic/claude-sonnet-4.6",
+            provider_id=LLMProvider.OPENROUTER,
+            model_developer=LLMModelDeveloper.ANTHROPIC,
+            tools=[
+                {
+                    "type": "function",
+                    "name": "read",
+                    "description": "Read a file",
+                    "parameters": {"type": "object"},
+                }
+            ],
+        )
+
+        request = lowerer.lower(
+            [_event(EventKind.USER_MESSAGE, UserMessagePayload(content="hello"))],
+            model="openrouter/anthropic/claude-sonnet-4.6",
+        )
+
+        assert "cache_control" not in request.tools[-1]
+        assert request.input == [{"role": "user", "content": "hello"}]
 
     def test_chatgpt_oauth_requests_encrypted_reasoning_content(self) -> None:
         """ChatGPT OAuth requests encrypted reasoning for stateless replay."""
@@ -1857,6 +1910,41 @@ class TestLiteLLMResponsesLowerer:
 
         assert request.tools == [{"type": "web_search"}]
 
+    def test_lowers_openrouter_web_search_hosted_tool(self) -> None:
+        """Lower OpenRouter web search to the current server-tool namespace."""
+        capabilities = ModelCapabilities()
+        capabilities.built_in_tools.supported = ["web_search"]
+        lowerer = LiteLLMResponsesLowerer(
+            provider="openrouter",
+            model="anthropic/claude-sonnet-4.6",
+            provider_id=LLMProvider.OPENROUTER,
+            model_developer=LLMModelDeveloper.ANTHROPIC,
+            hosted_tools=[BuiltinToolSpec(name="web_search", config={})],
+            model_capabilities=capabilities,
+        )
+
+        request = lowerer.lower(
+            [],
+            model="openrouter/anthropic/claude-sonnet-4.6",
+        )
+
+        assert request.tools == [{"type": "openrouter:web_search"}]
+
+    def test_openrouter_image_generation_hosted_tool_fails(self) -> None:
+        """Keep unverified OpenRouter image generation disabled."""
+        capabilities = ModelCapabilities()
+        capabilities.built_in_tools.supported = ["image_generation"]
+        lowerer = LiteLLMResponsesLowerer(
+            provider="openrouter",
+            model="openai/gpt-5-image",
+            provider_id=LLMProvider.OPENROUTER,
+            hosted_tools=[BuiltinToolSpec(name="image_generation", config={})],
+            model_capabilities=capabilities,
+        )
+
+        with pytest.raises(UnsupportedRequiredBuiltinToolError):
+            lowerer.lower([], model="openrouter/openai/gpt-5-image")
+
     def test_lowers_google_web_search_hosted_tool(self) -> None:
         """Lower Google web_search opt-in to google_search tool shape."""
         capabilities = ModelCapabilities()
@@ -2149,6 +2237,55 @@ class TestLiteLLMResponsesModelAdapter:
                 item={"type": "response.completed"},
             )
         ]
+
+    async def test_stream_forwards_openrouter_server_tool_and_headers(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Preserve OpenRouter-only Responses fields across LiteLLM validation."""
+        captured: dict[str, object] = {}
+
+        async def response_iter() -> AsyncIterator[object]:
+            if False:
+                yield object()
+
+        async def streaming_call(**kwargs: object) -> object:
+            captured.update(kwargs)
+            return response_iter()
+
+        monkeypatch.setattr(
+            "azents.engine.events.litellm_responses.aresponses",
+            streaming_call,
+        )
+        adapter = _TestLiteLLMResponsesModelAdapter()
+
+        _ = [
+            event
+            async for event in adapter.stream(
+                NativeModelRequest(
+                    model="openrouter/anthropic/claude-sonnet-4.6",
+                    input=[],
+                    tools=[{"type": "openrouter:web_search"}],
+                    kwargs={
+                        "custom_llm_provider": "openrouter",
+                        "api_key": "openrouter-test-key",
+                        "base_url": OPENROUTER_API_BASE_URL,
+                        "api_base": OPENROUTER_API_BASE_URL,
+                        "extra_headers": {
+                            "X-OpenRouter-Title": OPENROUTER_APP_TITLE,
+                        },
+                    },
+                )
+            )
+        ]
+
+        assert captured["tools"] == [{"type": "openrouter:web_search"}]
+        assert captured["custom_llm_provider"] == "openrouter"
+        assert captured["base_url"] == OPENROUTER_API_BASE_URL
+        assert captured["api_base"] == OPENROUTER_API_BASE_URL
+        assert captured["extra_headers"] == {
+            "X-OpenRouter-Title": OPENROUTER_APP_TITLE,
+        }
 
     async def test_stream_accepts_max_reasoning_effort(
         self,

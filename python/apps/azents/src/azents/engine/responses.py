@@ -47,6 +47,7 @@ class ResponsesEndpointKwargs:
     api_base: str | None = None
     base_url: str | None = None
     custom_llm_provider: str | None = None
+    extra_headers: dict[str, str] | None = None
     store: bool | None = None
     include: list[ResponseIncludable] | None = None
 
@@ -73,6 +74,7 @@ def responses_endpoint_kwargs(
         credential_kwargs.get("custom_llm_provider"),
         "custom_llm_provider",
     )
+    extra_headers = _optional_headers(credential_kwargs.get("extra_headers"))
     store = _optional_bool(credential_kwargs.get("store"), "store")
 
     include: list[ResponseIncludable] | None = None
@@ -95,6 +97,7 @@ def responses_endpoint_kwargs(
         api_base=api_base,
         base_url=base_url,
         custom_llm_provider=custom_llm_provider,
+        extra_headers=extra_headers,
         store=store,
         include=include,
     )
@@ -148,6 +151,7 @@ async def call_responses_model(
             text=text,
             include=endpoint_kwargs.include,
             custom_llm_provider=endpoint_kwargs.custom_llm_provider,
+            extra_headers=endpoint_kwargs.extra_headers,
             store=endpoint_kwargs.store,
             api_key=endpoint_kwargs.api_key,
             api_base=endpoint_kwargs.api_base,
@@ -363,6 +367,17 @@ def _optional_string(value: object, name: str) -> str | None:
         return value
     msg = f"{name} must be a string"
     raise TypeError(msg)
+
+
+def _optional_headers(value: object) -> dict[str, str] | None:
+    """Validate optional credential headers."""
+    if value is None:
+        return None
+    if not isinstance(value, dict) or not all(
+        isinstance(key, str) and isinstance(item, str) for key, item in value.items()
+    ):
+        raise TypeError("extra_headers must be dict[str, str]")
+    return dict(value)
 
 
 def _optional_bool(value: object, name: str) -> bool | None:
