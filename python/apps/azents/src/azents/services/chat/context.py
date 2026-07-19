@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentSessionStatus, EventKind
+from azents.engine.events.provider_tool_rendering import render_provider_tool_semantic
 from azents.engine.events.types import (
     AssistantMessagePayload,
     ClientToolCallPayload,
@@ -330,10 +331,12 @@ def _build_breakdown(
             chars["assistant"] += _content_chars(payload.content)
         elif isinstance(payload, ReasoningPayload):
             chars["assistant"] += len(payload.text or "") + len(payload.summary or "")
-        elif isinstance(payload, ClientToolCallPayload | ProviderToolCallPayload):
-            chars["tool"] += len(payload.name) + len(payload.arguments or "")
-        elif isinstance(payload, ClientToolResultPayload | ProviderToolResultPayload):
+        elif isinstance(payload, ClientToolCallPayload):
+            chars["tool"] += len(payload.name) + len(payload.arguments)
+        elif isinstance(payload, ClientToolResultPayload):
             chars["tool"] += sum(_output_part_chars(part) for part in payload.output)
+        elif isinstance(payload, ProviderToolCallPayload | ProviderToolResultPayload):
+            chars["tool"] += len(render_provider_tool_semantic(payload))
 
     known_chars = {key: value for key, value in chars.items() if value > 0}
     total_chars = sum(known_chars.values())

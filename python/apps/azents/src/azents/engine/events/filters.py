@@ -25,6 +25,7 @@ from azents.engine.events.protocols import (
     SummaryEnricher,
     SummaryGenerator,
 )
+from azents.engine.events.provider_tool_rendering import render_provider_tool_semantic
 from azents.engine.events.system_reminders import (
     format_compaction_summary_reminder,
     format_goal_continuation_reminder,
@@ -628,24 +629,6 @@ def _drop_none_values(value: dict[str, object | None]) -> dict[str, object]:
     return {key: item for key, item in value.items() if item is not None}
 
 
-def _provider_tool_call_text(payload: ProviderToolCallPayload) -> str:
-    """Return model-visible text of provider tool call."""
-    return _format_tool_call_text(
-        title=f"Provider tool call: {payload.name}",
-        call_id=None,
-        arguments=payload.arguments,
-    )
-
-
-def _provider_tool_result_text(payload: ProviderToolResultPayload) -> str:
-    """Return model-visible text of provider tool result."""
-    return _format_tool_result_text(
-        title=f"Provider tool result: {payload.name or 'unknown'} {payload.status}",
-        call_id=None,
-        output=_visible_tool_output(payload.output),
-    )
-
-
 def _format_tool_call_text(
     *,
     title: str,
@@ -659,22 +642,6 @@ def _format_tool_call_text(
     if arguments:
         lines.append("arguments:")
         lines.append(arguments)
-    return "\n".join(lines)
-
-
-def _format_tool_result_text(
-    *,
-    title: str,
-    call_id: str | None,
-    output: str,
-) -> str:
-    """Render a tool result as readable transcript text."""
-    lines = [title]
-    if call_id:
-        lines.append(f"call_id: {call_id}")
-    if output:
-        lines.append("output:")
-        lines.append(output)
     return "\n".join(lines)
 
 
@@ -887,10 +854,11 @@ def _model_visible_event_value(event: Event) -> object | None:
             "call_id": payload.call_id,
             "output": _visible_tool_output_value(payload.output),
         }
-    if isinstance(payload, ProviderToolCallPayload):
-        return {"role": "assistant", "content": _provider_tool_call_text(payload)}
-    if isinstance(payload, ProviderToolResultPayload):
-        return {"role": "assistant", "content": _provider_tool_result_text(payload)}
+    if isinstance(payload, ProviderToolCallPayload | ProviderToolResultPayload):
+        return {
+            "role": "assistant",
+            "content": render_provider_tool_semantic(payload),
+        }
     if isinstance(payload, CompactionSummaryPayload):
         return {
             "role": "user",
@@ -956,16 +924,10 @@ def _model_visible_event_text(
             _visible_tool_output(payload.output),
             include_label=include_label,
         )
-    if isinstance(payload, ProviderToolCallPayload):
+    if isinstance(payload, ProviderToolCallPayload | ProviderToolResultPayload):
         return _format_continuity_block(
             "Assistant",
-            _provider_tool_call_text(payload),
-            include_label=include_label,
-        )
-    if isinstance(payload, ProviderToolResultPayload):
-        return _format_continuity_block(
-            "Assistant",
-            _provider_tool_result_text(payload),
+            render_provider_tool_semantic(payload),
             include_label=include_label,
         )
     if isinstance(payload, CompactionSummaryPayload):
@@ -1032,11 +994,12 @@ def _payload_attachment_uris(payload: EventPayload) -> list[str]:
             if isinstance(part, AttachmentOutputPart)
         )
         return uris
-    if isinstance(
-        payload,
-        ClientToolResultPayload | ProviderToolCallPayload | ProviderToolResultPayload,
-    ):
+    if isinstance(payload, ClientToolResultPayload):
         for part in iter_output_parts(payload.output):
+            if isinstance(part, AttachmentOutputPart):
+                uris.append(part.uri)
+    if isinstance(payload, ProviderToolCallPayload | ProviderToolResultPayload):
+        for part in iter_output_parts(payload.semantic.output):
             if isinstance(part, AttachmentOutputPart):
                 uris.append(part.uri)
     return uris
@@ -1229,13 +1192,16 @@ def _payload_file_parts(payload: EventPayload) -> list[FileOutputPart]:
         if isinstance(payload.content, str):
             return []
         return [part for part in payload.content if isinstance(part, FileOutputPart)]
-    if isinstance(
-        payload,
-        ClientToolResultPayload | ProviderToolCallPayload | ProviderToolResultPayload,
-    ):
+    if isinstance(payload, ClientToolResultPayload):
         return [
             part
             for part in iter_output_parts(payload.output)
+            if isinstance(part, FileOutputPart)
+        ]
+    if isinstance(payload, ProviderToolCallPayload | ProviderToolResultPayload):
+        return [
+            part
+            for part in iter_output_parts(payload.semantic.output)
             if isinstance(part, FileOutputPart)
         ]
     return []

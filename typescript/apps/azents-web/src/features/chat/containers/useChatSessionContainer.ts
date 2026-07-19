@@ -205,6 +205,7 @@ function stringField(
 interface ProviderToolSemanticValue {
   input: string | null;
   output: unknown;
+  references: unknown[];
 }
 
 function providerToolSemanticFromValue(
@@ -222,7 +223,58 @@ function providerToolSemanticFromValue(
   return {
     input: value.input,
     output: value.output,
+    references: value.references,
   };
+}
+
+function providerToolReferenceText(value: unknown): string | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const kind = stringField(value, "kind") ?? "other";
+  const uri = stringField(value, "uri");
+  const title = stringField(value, "title");
+  const excerpt = stringField(value, "excerpt");
+  const primary = uri ?? title;
+  const lines = [`- ${kind}${primary === null ? "" : `: ${primary}`}`];
+  if (uri !== null && title !== null) {
+    lines.push(`  Title: ${title}`);
+  }
+  if (excerpt !== null) {
+    lines.push("  Excerpt:");
+    lines.push(...excerpt.split("\n").map((line) => `    ${line}`));
+  }
+  if (isRecord(value.metadata)) {
+    const metadata = Object.fromEntries(
+      Object.entries(value.metadata)
+        .filter(
+          (entry): entry is [string, string] => typeof entry[1] === "string",
+        )
+        .sort(([left], [right]) => left.localeCompare(right)),
+    );
+    if (Object.keys(metadata).length > 0) {
+      lines.push(`  Metadata: ${JSON.stringify(metadata)}`);
+    }
+  }
+  return lines.join("\n");
+}
+
+function providerToolSemanticOutputText(
+  semantic: ProviderToolSemanticValue,
+): string {
+  const sections: string[] = [];
+  const output = contentText(semantic.output);
+  if (output.length > 0) {
+    sections.push(output);
+  }
+  const references = semantic.references.flatMap((reference) => {
+    const rendered = providerToolReferenceText(reference);
+    return rendered === null ? [] : [rendered];
+  });
+  if (references.length > 0) {
+    sections.push(`References:\n${references.join("\n")}`);
+  }
+  return sections.join("\n");
 }
 
 function numberField(
@@ -1068,7 +1120,7 @@ function mapEvents(
               payload.status,
               messageStatus,
             ),
-            output: contentText(semanticOutput),
+            output: providerToolSemanticOutputText(semantic),
             attachments: [
               ...eventAttachments(payload),
               ...contentAttachments(semanticOutput),
@@ -1104,7 +1156,7 @@ function mapEvents(
         return applyProviderToolCallOutput(messages, {
           callId,
           name: stringField(payload, "name") ?? "Provider tool",
-          output: contentText(semanticOutput),
+          output: providerToolSemanticOutputText(semantic),
           status: payload.status === "completed" ? "completed" : "failed",
           attachments: [
             ...eventAttachments(payload),

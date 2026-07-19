@@ -92,6 +92,7 @@ from azents.engine.events.protocols import (
     TranscriptRepository,
 )
 from azents.engine.events.provider_output import ProviderOutputMaterializer
+from azents.engine.events.provider_tool_rendering import render_provider_tool_semantic
 from azents.engine.events.responses_continuation import ResponsesContinuationPlanner
 from azents.engine.events.system_prompt import build_system_prompt
 from azents.engine.events.tools import (
@@ -1144,14 +1145,8 @@ def _render_event_for_summary(event: Event) -> str:
                 f"[Client tool result: {name or 'unknown'} {status}] "
                 f"{_event_text_content(output)}"
             )
-        case ProviderToolCallPayload(name=name, arguments=arguments):
-            rendered_arguments = arguments or ""
-            return f"[Provider tool call: {name}({rendered_arguments})]"
-        case ProviderToolResultPayload(name=name, status=status, output=output):
-            return (
-                f"[Provider tool result: {name or 'unknown'} {status}] "
-                f"{_event_text_content(output)}"
-            )
+        case ProviderToolCallPayload() | ProviderToolResultPayload() as payload:
+            return render_provider_tool_semantic(payload)
         case CompactionSummaryPayload(content=content):
             return f"[Existing Checkpoint]: {content}"
         case CompactionMarkerPayload():

@@ -73,6 +73,7 @@ from azents.engine.events.types import (
     NativeArtifact,
     OutputTextPart,
     ProviderToolCallPayload,
+    ProviderToolReference,
     ProviderToolResultPayload,
     ProviderToolSemanticContent,
     ReasoningPayload,
@@ -1057,7 +1058,7 @@ class TestLiteLLMResponsesLowerer:
                 "content": [
                     {
                         "type": "input_text",
-                        "text": ("[provider tool result] image_generation: completed"),
+                        "text": "[Provider tool result: image_generation completed]",
                     },
                     {
                         "type": "input_image",
@@ -1108,7 +1109,7 @@ class TestLiteLLMResponsesLowerer:
         assert request.input[0]["content"] == [
             {
                 "type": "input_text",
-                "text": "[provider tool result] image_generation: completed",
+                "text": "[Provider tool result: image_generation completed]",
             },
             {
                 "type": "input_text",
@@ -1976,8 +1977,16 @@ class TestLiteLLMResponsesLowerer:
                     status=None,
                     semantic=ProviderToolSemanticContent(
                         input='{"query":"docs"}',
-                        output=[],
-                        references=[],
+                        output=[OutputTextPart(text="search complete")],
+                        references=[
+                            ProviderToolReference(
+                                kind="url",
+                                uri="https://example.com/docs",
+                                title="Docs",
+                                excerpt=None,
+                                metadata={},
+                            )
+                        ],
                     ),
                     attachments=[],
                     native_artifact=_artifact({"type": "web_search_call"}),
@@ -1990,11 +1999,19 @@ class TestLiteLLMResponsesLowerer:
                     name="image_generation",
                     status="completed",
                     semantic=ProviderToolSemanticContent(
-                        input=None,
+                        input="generate a diagram",
                         output=[
                             OutputTextPart(text="generated image"),
                         ],
-                        references=[],
+                        references=[
+                            ProviderToolReference(
+                                kind="file",
+                                uri=None,
+                                title="diagram.png",
+                                excerpt="Generated diagram",
+                                metadata={"file_id": "file-1"},
+                            )
+                        ],
                     ),
                     attachments=[],
                     native_artifact=_artifact({"type": "image_generation_call"}),
@@ -2007,13 +2024,30 @@ class TestLiteLLMResponsesLowerer:
         assert request.input == [
             {
                 "role": "assistant",
-                "content": '[provider tool call] web_search({"query":"docs"})',
+                "content": (
+                    "[Provider tool call: web_search]\n"
+                    "Input:\n"
+                    '{"query":"docs"}\n'
+                    "Output:\n"
+                    "search complete\n"
+                    "References:\n"
+                    "- url: https://example.com/docs\n"
+                    "  Title: Docs"
+                ),
             },
             {
                 "role": "assistant",
                 "content": (
-                    "[provider tool result] image_generation: completed\n"
-                    "generated image"
+                    "[Provider tool result: image_generation completed]\n"
+                    "Input:\n"
+                    "generate a diagram\n"
+                    "Output:\n"
+                    "generated image\n"
+                    "References:\n"
+                    "- file: diagram.png\n"
+                    "  Excerpt:\n"
+                    "    Generated diagram\n"
+                    '  Metadata: {"file_id":"file-1"}'
                 ),
             },
         ]

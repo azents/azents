@@ -9,6 +9,10 @@ from azents.engine.events.types import (
     Event,
     NativeArtifact,
     OutputTextPart,
+    ProviderToolCallPayload,
+    ProviderToolReference,
+    ProviderToolResultPayload,
+    ProviderToolSemanticContent,
     build_native_compat_key,
 )
 from azents.engine.run.emit import collect_event_result
@@ -65,3 +69,65 @@ def test_collect_event_result_reads_event_assistant_output() -> None:
     assert attachments[0].uri == "exchange://exchange/workspace/files/object/original"
     assert attachments[0].name == "report.txt"
     assert attachments[0].text_preview == "summary"
+
+
+def test_collect_event_result_preserves_provider_call_and_result_semantics() -> None:
+    """Collect semantic input, output, and references from both provider events."""
+    semantic = ProviderToolSemanticContent(
+        input='{"query":"Azents"}',
+        output=[OutputTextPart(text="provider output")],
+        references=[
+            ProviderToolReference(
+                kind="url",
+                uri="https://example.com/source",
+                title=None,
+                excerpt=None,
+                metadata={},
+            )
+        ],
+    )
+    now = datetime.datetime.now(datetime.UTC)
+    events = [
+        Event(
+            id="1" * 32,
+            session_id="session-1",
+            kind=EventKind.PROVIDER_TOOL_CALL,
+            payload=ProviderToolCallPayload(
+                call_id="call-1",
+                name="web_search",
+                status="completed",
+                semantic=semantic,
+                attachments=[],
+                native_artifact=_native_artifact(),
+            ),
+            created_at=now,
+        ),
+        Event(
+            id="2" * 32,
+            session_id="session-1",
+            kind=EventKind.PROVIDER_TOOL_RESULT,
+            payload=ProviderToolResultPayload(
+                call_id="result-1",
+                name="file_search",
+                status="completed",
+                semantic=semantic,
+                attachments=[],
+                native_artifact=_native_artifact(),
+            ),
+            created_at=now,
+        ),
+    ]
+    texts: list[str] = []
+    attachments = []
+
+    for event in events:
+        collect_event_result(event, texts, attachments)
+
+    assert len(texts) == 2
+    assert texts[0].startswith("[Provider tool call: web_search completed]")
+    assert texts[1].startswith("[Provider tool result: file_search completed]")
+    assert all('Input:\n{"query":"Azents"}' in text for text in texts)
+    assert all("Output:\nprovider output" in text for text in texts)
+    assert all(
+        "References:\n- url: https://example.com/source" in text for text in texts
+    )

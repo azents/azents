@@ -1,4 +1,4 @@
-"""Deterministic model, hosted-image, Imagine, and xAI OAuth proxy."""
+"""Deterministic model, hosted-tool, Imagine, and xAI OAuth proxy."""
 
 from __future__ import annotations
 
@@ -16,6 +16,36 @@ from urllib.parse import parse_qs
 
 _PROMPT = "Provider image generation handoff"
 _FOLLOW_UP_PROMPT = "Provider image generation follow-up"
+_SEMANTIC_PROMPT = "Provider semantic web search handoff"
+_SEMANTIC_SAME_NATIVE_PROMPT = "Provider semantic same-native follow-up"
+_SEMANTIC_CROSS_NATIVE_PROMPT = "Provider semantic cross-native follow-up"
+_SEMANTIC_POST_COMPACTION_PROMPT = "Provider semantic post-compaction follow-up"
+_SEMANTIC_QUERY = "Azents provider semantic transcript"
+_SEMANTIC_SOURCE_URL = "https://example.com/provider-semantic-transcript"
+_SEMANTIC_RESPONSE = "PROVIDER_SEMANTIC_WEB_SEARCH_COMPLETED"
+_SEMANTIC_SAME_NATIVE_RESPONSE = "PROVIDER_SEMANTIC_SAME_NATIVE_COMPLETED"
+_SEMANTIC_CROSS_NATIVE_RESPONSE = "PROVIDER_SEMANTIC_CROSS_NATIVE_COMPLETED"
+_SEMANTIC_POST_COMPACTION_RESPONSE = "PROVIDER_SEMANTIC_POST_COMPACTION_COMPLETED"
+_SEMANTIC_ITEM_ID = "search_provider_semantic"
+_COMPACTION_SYSTEM_PREFIX = (
+    "You are a context compaction engine for a long-running coding agent."
+)
+_COMPACTION_SUMMARY = f"""## Goal
+Preserve provider-hosted tool semantics across compaction.
+
+## Current State
+- Web search query: {_SEMANTIC_QUERY}
+- Source: {_SEMANTIC_SOURCE_URL}
+- Assistant answer: {_SEMANTIC_RESPONSE}
+
+## Pending Work
+- Continue the deterministic provider semantic transcript verification.
+"""
+_SEMANTIC_FOLLOW_UP_RESPONSES = {
+    _SEMANTIC_SAME_NATIVE_PROMPT: _SEMANTIC_SAME_NATIVE_RESPONSE,
+    _SEMANTIC_CROSS_NATIVE_PROMPT: _SEMANTIC_CROSS_NATIVE_RESPONSE,
+    _SEMANTIC_POST_COMPACTION_PROMPT: _SEMANTIC_POST_COMPACTION_RESPONSE,
+}
 _UPSTREAM = os.environ.get("AIMOCK_UPSTREAM", "http://mock-openai:8080")
 _IMAGE_PATH = Path(
     os.environ.get(
@@ -72,6 +102,20 @@ def _last_user_text(request: dict[str, object]) -> str | None:
     return None
 
 
+def _is_semantic_compaction_request(request: dict[str, object]) -> bool:
+    """Return whether compaction belongs to the semantic transcript scenario."""
+    instructions = request.get("instructions")
+    user_text = _last_user_text(request)
+    return (
+        isinstance(instructions, str)
+        and instructions.startswith(_COMPACTION_SYSTEM_PREFIX)
+        and user_text is not None
+        and _SEMANTIC_QUERY in user_text
+        and _SEMANTIC_SOURCE_URL in user_text
+        and _SEMANTIC_RESPONSE in user_text
+    )
+
+
 class _State:
     requests: ClassVar[list[dict[str, object]]] = []
     imagine_requests: ClassVar[list[dict[str, object]]] = []
@@ -103,7 +147,7 @@ class _Handler(BaseHTTPRequestHandler):
         self._proxy()
 
     def do_POST(self) -> None:
-        """Handle deterministic image and OAuth boundaries."""
+        """Handle deterministic image, hosted-tool, and OAuth boundaries."""
         body = self._read_body()
         if self.path == "/v1/images/generations":
             self._write_xai_imagine_response(body)
@@ -120,11 +164,33 @@ class _Handler(BaseHTTPRequestHandler):
             return
         request = cast(dict[str, object], request_value)
         user_text = _last_user_text(request)
-        if user_text in _CAPTURED_MODEL_PROMPTS:
+        compaction_request = _is_semantic_compaction_request(request)
+        captured_prompts = _CAPTURED_MODEL_PROMPTS | {
+            _SEMANTIC_PROMPT,
+            *_SEMANTIC_FOLLOW_UP_RESPONSES,
+        }
+        if user_text in captured_prompts or compaction_request:
             with _State.lock:
                 _State.requests.append(request)
         if self.path == "/v1/responses" and user_text == _PROMPT:
             self._write_image_generation_response(request)
+            return
+        if user_text == _SEMANTIC_PROMPT:
+            self._write_semantic_web_search_response(request)
+            return
+        if user_text in _SEMANTIC_FOLLOW_UP_RESPONSES:
+            self._write_text_response(
+                request,
+                _SEMANTIC_FOLLOW_UP_RESPONSES[user_text],
+                response_id=f"resp_{user_text.lower().replace(' ', '_')}",
+            )
+            return
+        if compaction_request:
+            self._write_text_response(
+                request,
+                _COMPACTION_SUMMARY,
+                response_id="resp_provider_semantic_compaction",
+            )
             return
         self._proxy(body)
 
@@ -227,6 +293,225 @@ class _Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", "0"))
         return self.rfile.read(length)
 
+    def _write_text_response(
+        self,
+        request: dict[str, object],
+        text: str,
+        *,
+        response_id: str,
+    ) -> None:
+        """Write one deterministic assistant message response."""
+        model_value = request.get("model")
+        model = model_value if isinstance(model_value, str) else "gpt-5.5"
+        item_id = f"msg_{response_id.removeprefix('resp_')}"
+        message_item: dict[str, object] = {
+            "id": item_id,
+            "type": "message",
+            "role": "assistant",
+            "status": "completed",
+            "content": [
+                {
+                    "type": "output_text",
+                    "text": text,
+                    "annotations": [],
+                }
+            ],
+        }
+        response = self._response(
+            request=request,
+            response_id=response_id,
+            model=model,
+            output=[message_item],
+        )
+        if request.get("stream") is not True:
+            self._write_json(200, response)
+            return
+        self._write_sse(
+            [
+                {
+                    "type": "response.created",
+                    "sequence_number": 0,
+                    "response": {**response, "status": "in_progress", "output": []},
+                },
+                {
+                    "type": "response.output_item.added",
+                    "sequence_number": 1,
+                    "output_index": 0,
+                    "item": {
+                        **message_item,
+                        "status": "in_progress",
+                        "content": [],
+                    },
+                },
+                {
+                    "type": "response.output_item.done",
+                    "sequence_number": 2,
+                    "output_index": 0,
+                    "item": message_item,
+                },
+                {
+                    "type": "response.completed",
+                    "sequence_number": 3,
+                    "response": response,
+                },
+            ]
+        )
+
+    def _write_semantic_web_search_response(
+        self,
+        request: dict[str, object],
+    ) -> None:
+        """Write Web-search semantics followed by a separate assistant answer."""
+        model_value = request.get("model")
+        model = model_value if isinstance(model_value, str) else "gpt-5.5"
+        search_item: dict[str, object] = {
+            "id": _SEMANTIC_ITEM_ID,
+            "type": "web_search_call",
+            "status": "completed",
+            "action": {
+                "type": "search",
+                "query": _SEMANTIC_QUERY,
+                "sources": [
+                    {
+                        "type": "url",
+                        "url": _SEMANTIC_SOURCE_URL,
+                    }
+                ],
+            },
+        }
+        message_item: dict[str, object] = {
+            "id": "msg_provider_semantic",
+            "type": "message",
+            "role": "assistant",
+            "status": "completed",
+            "content": [
+                {
+                    "type": "output_text",
+                    "text": _SEMANTIC_RESPONSE,
+                    "annotations": [],
+                }
+            ],
+        }
+        response = self._response(
+            request=request,
+            response_id="resp_provider_semantic",
+            model=model,
+            output=[search_item, message_item],
+        )
+        if request.get("stream") is not True:
+            self._write_json(200, response)
+            return
+        self._write_sse(
+            [
+                {
+                    "type": "response.created",
+                    "sequence_number": 0,
+                    "response": {**response, "status": "in_progress", "output": []},
+                },
+                {
+                    "type": "response.output_item.added",
+                    "sequence_number": 1,
+                    "output_index": 0,
+                    "item": {**search_item, "status": "in_progress"},
+                },
+                {
+                    "type": "response.web_search_call.in_progress",
+                    "sequence_number": 2,
+                    "output_index": 0,
+                    "item_id": _SEMANTIC_ITEM_ID,
+                },
+                {
+                    "type": "response.web_search_call.searching",
+                    "sequence_number": 3,
+                    "output_index": 0,
+                    "item_id": _SEMANTIC_ITEM_ID,
+                },
+                {
+                    "type": "response.web_search_call.completed",
+                    "sequence_number": 4,
+                    "output_index": 0,
+                    "item_id": _SEMANTIC_ITEM_ID,
+                },
+                {
+                    "type": "response.output_item.done",
+                    "sequence_number": 5,
+                    "output_index": 0,
+                    "item": search_item,
+                },
+                {
+                    "type": "response.output_item.added",
+                    "sequence_number": 6,
+                    "output_index": 1,
+                    "item": {
+                        **message_item,
+                        "status": "in_progress",
+                        "content": [],
+                    },
+                },
+                {
+                    "type": "response.output_item.done",
+                    "sequence_number": 7,
+                    "output_index": 1,
+                    "item": message_item,
+                },
+                {
+                    "type": "response.completed",
+                    "sequence_number": 8,
+                    "response": response,
+                },
+            ]
+        )
+
+    def _response(
+        self,
+        *,
+        request: dict[str, object],
+        response_id: str,
+        model: str,
+        output: list[dict[str, object]],
+    ) -> dict[str, object]:
+        """Build one completed Responses payload."""
+        return {
+            "id": response_id,
+            "object": "response",
+            "created_at": time.time(),
+            "model": model,
+            "status": "completed",
+            "output": output,
+            "parallel_tool_calls": True,
+            "tool_choice": "auto",
+            "tools": request.get("tools", []),
+            "usage": {
+                "input_tokens": 1,
+                "output_tokens": 1,
+                "total_tokens": 2,
+                "input_tokens_details": {
+                    "cached_tokens": 0,
+                    "cache_write_tokens": 0,
+                },
+                "output_tokens_details": {"reasoning_tokens": 0},
+            },
+        }
+
+    def _write_sse(self, events: list[dict[str, object]]) -> None:
+        """Write deterministic Responses server-sent events."""
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        for event in events:
+            event_type = event.get("type")
+            if not isinstance(event_type, str):
+                raise RuntimeError("Responses event type is missing.")
+            encoded = json.dumps(event, separators=(",", ":")).encode()
+            self.wfile.write(b"event: " + event_type.encode() + b"\n")
+            self.wfile.write(b"data: " + encoded + b"\n\n")
+            self.wfile.flush()
+        self.wfile.write(b"data: [DONE]\n\n")
+        self.wfile.flush()
+        self.close_connection = True
+
     def _write_image_generation_response(self, request: dict[str, object]) -> None:
         image_base64 = b64encode(_IMAGE_PATH.read_bytes()).decode()
         model_value = request.get("model")
@@ -254,7 +539,10 @@ class _Handler(BaseHTTPRequestHandler):
                 "input_tokens": 1,
                 "output_tokens": 1,
                 "total_tokens": 2,
-                "input_tokens_details": {"cached_tokens": 0},
+                "input_tokens_details": {
+                    "cached_tokens": 0,
+                    "cache_write_tokens": 0,
+                },
                 "output_tokens_details": {"reasoning_tokens": 0},
             },
         }

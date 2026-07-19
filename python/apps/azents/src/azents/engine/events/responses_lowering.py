@@ -18,6 +18,7 @@ from azents.engine.events.file_parts import (
 )
 from azents.engine.events.output_parts import iter_output_parts, lower_output_to_text
 from azents.engine.events.protocols import NativeModelRequest
+from azents.engine.events.provider_tool_rendering import render_provider_tool_semantic
 from azents.engine.events.responses_continuation import sanitize_responses_native_item
 from azents.engine.events.system_reminders import (
     format_compaction_summary_reminder,
@@ -304,9 +305,10 @@ class ResponsesRequestLowerer:
             case ProviderToolResultPayload(
                 name="image_generation",
                 status=status,
-                output=output,
+                semantic=semantic,
                 native_artifact=artifact,
             ):
+                output = semantic.output
                 if not artifact.compatible_with(self.compat_key):
                     return None
                 if _file_output_parts(output):
@@ -385,39 +387,12 @@ class ResponsesRequestLowerer:
                 }
             case AssistantMessagePayload(content=content):
                 return {"role": "assistant", "content": _lower_output_content(content)}
-            case ProviderToolCallPayload(name=name, arguments=arguments):
-                return {
-                    "role": "assistant",
-                    "content": _provider_tool_call_text(name, arguments),
-                }
-            case ProviderToolResultPayload(
-                name="image_generation",
-                status=status,
-                output=output,
-            ):
-                if _file_output_parts(output):
-                    return {
-                        "role": "user",
-                        "content": _lower_image_generation_result(
-                            status,
-                            output,
-                            capabilities=self._file_part_capabilities,
-                            model_file_resolver=self.model_file_resolver,
-                        ),
-                    }
-                return {
-                    "role": "assistant",
-                    "content": _provider_tool_result_text(
-                        "image_generation",
-                        status,
-                        output,
-                    ),
-                }
-            case ProviderToolResultPayload(name=name, status=status, output=output):
-                return {
-                    "role": "assistant",
-                    "content": _provider_tool_result_text(name, status, output),
-                }
+            case ProviderToolCallPayload() | ProviderToolResultPayload() as payload:
+                return _lower_provider_tool_semantic_payload(
+                    payload,
+                    capabilities=self._file_part_capabilities,
+                    model_file_resolver=self.model_file_resolver,
+                )
             case ClientToolCallPayload(call_id=call_id, name=name, arguments=args):
                 return {
                     "type": "function_call",
@@ -919,50 +894,42 @@ def _rehydrated_image_generation_result(
     return encoded
 
 
-def _lower_image_generation_result(
-    status: str,
-    output: ToolOutput,
+def _lower_provider_tool_semantic_payload(
+    payload: ProviderToolCallPayload | ProviderToolResultPayload,
     *,
     capabilities: FilePartLoweringCapabilities,
     model_file_resolver: ModelFileResolver | None,
-) -> list[dict[str, object]]:
-    """Lower an incompatible generated image through shared FilePart policy."""
-    lowered: list[dict[str, object]] = [
+) -> dict[str, object]:
+    """Lower canonical provider-tool semantics with rich FileParts when present."""
+    file_parts = _file_output_parts(payload.semantic.output)
+    if not file_parts:
+        return {
+            "role": "assistant",
+            "content": render_provider_tool_semantic(payload),
+        }
+
+    non_file_output = [
+        part
+        for part in iter_output_parts(payload.semantic.output)
+        if not isinstance(part, FileOutputPart)
+    ]
+    rendered_payload = payload.model_copy(
+        update={
+            "semantic": payload.semantic.model_copy(update={"output": non_file_output})
+        }
+    )
+    content: list[dict[str, object]] = [
         {
             "type": "input_text",
-            "text": f"[provider tool result] image_generation: {status}",
+            "text": render_provider_tool_semantic(rendered_payload),
         }
     ]
-    for part in iter_output_parts(output):
-        if isinstance(part, FileOutputPart):
-            lowered.append(
-                lower_file_output_part(
-                    part,
-                    capabilities=capabilities,
-                    resolver=model_file_resolver,
-                )
-            )
-            continue
-        text = lower_output_to_text([part])
-        if text:
-            lowered.append({"type": "input_text", "text": text})
-    return lowered
-
-
-def _provider_tool_call_text(name: str, arguments: str | None) -> str:
-    """Lower unsupported provider tool call to model-visible transcript."""
-    rendered_arguments = arguments or ""
-    return f"[provider tool call] {name}({rendered_arguments})"
-
-
-def _provider_tool_result_text(
-    name: str | None,
-    status: str,
-    output: ToolOutput,
-) -> str:
-    """Lower unsupported provider tool result to model-visible transcript."""
-    rendered_name = name or "unknown"
-    rendered_output = lower_output_to_text(output)
-    if not rendered_output:
-        return f"[provider tool result] {rendered_name}: {status}"
-    return f"[provider tool result] {rendered_name}: {status}\n{rendered_output}"
+    content.extend(
+        lower_file_output_part(
+            part,
+            capabilities=capabilities,
+            resolver=model_file_resolver,
+        )
+        for part in file_parts
+    )
+    return {"role": "user", "content": content}

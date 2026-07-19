@@ -9,8 +9,14 @@ from azents.engine.events.types import (
     Attachment,
     AttachmentOutputPart,
     ClientToolResultPayload,
+    NativeArtifact,
     OutputTextPart,
+    ProviderToolCallPayload,
+    ProviderToolReference,
+    ProviderToolResultPayload,
+    ProviderToolSemanticContent,
     UserMessagePayload,
+    build_native_compat_key,
 )
 from azents.rdb.models.event import JSONValue, RDBEvent
 from azents.repos.message import event_to_chat_message
@@ -18,6 +24,25 @@ from azents.repos.message import event_to_chat_message
 _JSON_PAYLOAD_ADAPTER: TypeAdapter[dict[str, JSONValue]] = TypeAdapter(
     dict[str, JSONValue]
 )
+
+
+def _native_artifact() -> NativeArtifact:
+    """Create native artifact for message projection tests."""
+    return NativeArtifact(
+        compat_key=build_native_compat_key(
+            adapter="litellm",
+            native_format="responses",
+            provider="openai",
+            model="gpt-5.1",
+            schema_version="1",
+        ),
+        adapter="litellm",
+        native_format="responses",
+        provider="openai",
+        model="gpt-5.1",
+        schema_version="1",
+        item={"type": "provider_tool"},
+    )
 
 
 def test_tool_result_attachment_output_part_projects_to_rest_attachment() -> None:
@@ -115,3 +140,86 @@ def test_user_message_attachment_projection_preserves_download_identity() -> Non
     assert attachment.preview_thumbnail_width == 300
     assert attachment.preview_thumbnail_height == 225
     assert attachment.preview_generated_at == created_at
+
+
+def test_provider_tool_call_projects_semantic_output_and_references() -> None:
+    """REST message projection preserves complete provider-call semantics."""
+    provider_payload = ProviderToolCallPayload(
+        call_id="call-search",
+        name="web_search",
+        status="completed",
+        semantic=ProviderToolSemanticContent(
+            input='{"query":"Azents"}',
+            output=[OutputTextPart(text="search complete")],
+            references=[
+                ProviderToolReference(
+                    kind="url",
+                    uri="https://example.com/source",
+                    title=None,
+                    excerpt=None,
+                    metadata={},
+                )
+            ],
+        ),
+        attachments=[],
+        native_artifact=_native_artifact(),
+    )
+    row = RDBEvent(
+        session_id="session-1",
+        kind=EventKind.PROVIDER_TOOL_CALL,
+        payload=_JSON_PAYLOAD_ADAPTER.validate_python(
+            provider_payload.model_dump(mode="json", exclude_none=True)
+        ),
+        model_order=1,
+    )
+    row.created_at = datetime.datetime.now(datetime.UTC)
+
+    message = event_to_chat_message(row)
+
+    assert message is not None
+    assert message.tool_calls is not None
+    assert message.tool_calls[0].arguments == '{"query":"Azents"}'
+    assert message.content is not None
+    assert "Output:\nsearch complete" in message.content
+    assert "References:\n- url: https://example.com/source" in message.content
+
+
+def test_provider_tool_result_projects_semantic_input_output_and_references() -> None:
+    """REST message projection preserves complete provider-result semantics."""
+    provider_payload = ProviderToolResultPayload(
+        call_id="result-search",
+        name="file_search",
+        status="completed",
+        semantic=ProviderToolSemanticContent(
+            input="find the design",
+            output=[OutputTextPart(text="design found")],
+            references=[
+                ProviderToolReference(
+                    kind="file",
+                    uri=None,
+                    title="design.md",
+                    excerpt="Relevant design",
+                    metadata={"file_id": "file-1"},
+                )
+            ],
+        ),
+        attachments=[],
+        native_artifact=_native_artifact(),
+    )
+    row = RDBEvent(
+        session_id="session-1",
+        kind=EventKind.PROVIDER_TOOL_RESULT,
+        payload=_JSON_PAYLOAD_ADAPTER.validate_python(
+            provider_payload.model_dump(mode="json", exclude_none=True)
+        ),
+        model_order=1,
+    )
+    row.created_at = datetime.datetime.now(datetime.UTC)
+
+    message = event_to_chat_message(row)
+
+    assert message is not None
+    assert message.content is not None
+    assert "Input:\nfind the design" in message.content
+    assert "Output:\ndesign found" in message.content
+    assert "References:\n- file: design.md" in message.content
