@@ -124,6 +124,7 @@ export function AgentForm({
       reasoning_effort: null,
       shell_enabled: true,
       memory_enabled: true,
+      tool_search_enabled: false,
       max_turns: null,
       subagent_max_subagents: 3,
       subagent_max_depth: 1,
@@ -176,6 +177,7 @@ export function AgentForm({
         reasoning_effort: defaultReasoningEffort,
         shell_enabled: agent.shell_enabled,
         memory_enabled: agent.memory_enabled,
+        tool_search_enabled: agent.tool_search_enabled,
         max_turns: agent.max_turns ?? null,
         subagent_max_subagents: agent.subagent_settings.max_subagents ?? 3,
         subagent_max_depth: agent.subagent_settings.max_depth ?? 1,
@@ -479,6 +481,20 @@ export function AgentForm({
               checked={form.values.memory_enabled ?? true}
               onChange={(e) =>
                 form.setFieldValue("memory_enabled", e.currentTarget.checked)
+              }
+            />
+          )}
+
+          {showCapabilities && (
+            <Switch
+              label={t("toolSearchEnabledLabel")}
+              description={t("toolSearchEnabledDescription")}
+              checked={form.values.tool_search_enabled}
+              onChange={(e) =>
+                form.setFieldValue(
+                  "tool_search_enabled",
+                  e.currentTarget.checked,
+                )
               }
             />
           )}

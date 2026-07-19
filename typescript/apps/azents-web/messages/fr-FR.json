@@ -597,6 +597,8 @@
       "shellEnabledLabel": "Activer le shell",
       "memoryEnabledLabel": "Activer la mémoire",
       "memoryEnabledDescription": "Permettre à cet agent de sauvegarder et rappeler des mémoires persistantes entre les conversations",
+      "toolSearchEnabledLabel": "Activer la recherche d’outils",
+      "toolSearchEnabledDescription": "Différer l’affichage des outils de service connectés et permettre au modèle de les rechercher selon les besoins",
       "settingsHub": {
         "title": "Agent settings",
         "description": "Choose a settings area to review or update this agent.",
