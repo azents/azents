@@ -195,7 +195,7 @@ pnpm exec turbo run build-storybook --filter=@azents/web
 Results:
 
 - workspace format, lint, and type checking: passed;
-- azents-web tests: 39 passed;
+- azents-web tests: 40 passed;
 - production web build: passed;
 - Storybook build: passed;
 - only the existing non-failing large-chunk Storybook warning was emitted.
@@ -263,7 +263,7 @@ responses and server logs. Those assertions require Docker and are pending requi
 | D1 — Integration-scoped live snapshot | One child endpoint reads one integration and returns `fetched_at` without attributing usage to Azents | Backend tests passed; API E2E authored | None |
 | D2 — OAuth subscription providers only | Only `chatgpt_oauth` and `xai_oauth` are eligible; API-key providers do not request usage | Backend/frontend tests passed | None |
 | D3 — Adapter-owned provider contracts | Paths, headers, parsing, compatibility identity, and failures remain in provider adapters | Adapter and proxy suites passed | None |
-| D4 — Read-through and non-durable | No usage table, history, scheduler, polling, or server cache; frontend keeps only query state | Code review and frontend tests passed | None |
+| D4 — Read-through and non-durable | No usage table, history, scheduler, polling, or server cache; frontend keeps only card-local query and last-successful snapshot state | Code review and frontend tests passed | None |
 | D5 — Operational/financial permission split | Readers receive quota state; writers additionally receive financial details | Service/route tests passed; product E2E authored | None |
 | D6 — Card-local canonical UI | Usage renders inside each eligible LLM Settings card with manual refresh and freshness | Frontend tests/build/Storybook passed; browser E2E authored | None |
 | D7 — Typed expected outcomes and isolation | Expected provider outcomes normalize to `available`, `external`, or `unavailable`; unexpected UI defects are card-contained | Backend/frontend tests passed; isolation E2E authored | None |
@@ -315,6 +315,13 @@ validation PR is recorded.
 5. The initial browser CI run found that Mantine attaches the toggle label to a visually hidden native
    input. The browser assertion now verifies that the input exists and is enabled instead of requiring
    the native input itself to be visually displayed.
+6. The next browser CI run found that a provider 503 becomes a typed `unavailable` response rather than
+   a React Query transport error. That successful HTTP response replaced the prior query data, so the
+   stale-warning projection could not retain the last successful snapshot. The card container now keeps
+   the latest `available` or `external` snapshot in workspace-and-integration-keyed TanStack Query memory,
+   with a mounted-card ref retaining the same value for the active card lifecycle. The state projector
+   uses that snapshot when a later typed `unavailable` response arrives. A regression test covers the
+   exact success-then-unavailable transition.
 
 ## Required CI Evidence
 

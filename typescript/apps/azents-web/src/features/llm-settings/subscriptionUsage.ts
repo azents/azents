@@ -43,6 +43,7 @@ export interface SubscriptionUsageQueryProjection {
   isError: boolean;
   isFetching: boolean;
   isLoading: boolean;
+  lastSuccessfulSnapshot: SubscriptionUsageSnapshot | null;
 }
 
 export function supportsSubscriptionUsage(provider: string): boolean {
@@ -83,6 +84,9 @@ export function projectSubscriptionUsageState(
     };
   }
   if (data?.type === "unavailable") {
+    if (query.lastSuccessfulSnapshot !== null) {
+      return { type: "STALE_ERROR", snapshot: query.lastSuccessfulSnapshot };
+    }
     return {
       type: "UNAVAILABLE",
       reason: data.reason,
@@ -93,6 +97,9 @@ export function projectSubscriptionUsageState(
     return { type: "LOADING" };
   }
   if (query.isError) {
+    if (query.lastSuccessfulSnapshot !== null) {
+      return { type: "STALE_ERROR", snapshot: query.lastSuccessfulSnapshot };
+    }
     return { type: "UNAVAILABLE", reason: null, retryable: true };
   }
   return { type: "LOADING" };
