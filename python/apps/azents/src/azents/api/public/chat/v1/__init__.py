@@ -94,6 +94,7 @@ from azents.services.chat.data import (
     InvalidSessionTitle,
     NotWorkspaceMember,
     PrimarySessionArchiveBlocked,
+    PurgeStartedRestoreBlocked,
     RunningSessionArchiveBlocked,
     SessionAccessDenied,
     SessionNotFound,
@@ -1714,10 +1715,8 @@ async def create_team_agent_session(
 async def archive_agent_session(
     agent_id: str,
     session_id: str,
-    background_tasks: BackgroundTasks,
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
     chat_service: Annotated[ChatSessionService, Depends()],
-    session_git_worktree_service: Annotated[SessionGitWorktreeService, Depends()],
 ) -> None:
     """Archive a non-primary inactive AgentSession."""
     _validate_session_id(session_id)
@@ -1727,14 +1726,7 @@ async def archive_agent_session(
         user_id=current_user.user_id,
     )
     match result:
-        case Success(value):
-            if value.cleanup_requested:
-                background_tasks.add_task(
-                    session_git_worktree_service.run_cleanup_for_session,
-                    agent_id=agent_id,
-                    session_id=session_id,
-                    session_workspace_project_id=None,
-                )
+        case Success():
             return
         case Failure(error):
             match error:
@@ -1809,6 +1801,62 @@ async def cleanup_session_git_worktree(
                     raise HTTPException(
                         status_code=409,
                         detail="Subagent sessions are read-only.",
+                    )
+                case _:
+                    assert_never(error)
+        case _:
+            assert_never(result)
+
+
+@router.get("/agents/{agent_id}/sessions/archived")
+async def list_archived_agent_sessions(
+    agent_id: str,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    chat_service: Annotated[ChatSessionService, Depends()],
+) -> AgentSessionListResponse:
+    """List archived root sessions for an accessible Agent."""
+    _validate_uuid7_hex(agent_id, label="agent ID")
+    result = await chat_service.list_archived_agent_sessions(
+        agent_id=agent_id,
+        user_id=current_user.user_id,
+    )
+    match result:
+        case Success(items):
+            return AgentSessionListResponse(
+                items=[AgentSessionResponse.from_domain(item) for item in items]
+            )
+        case Failure(SessionNotFound()):
+            raise HTTPException(status_code=404, detail="Agent not found.")
+        case _:
+            assert_never(result)
+
+
+@router.post("/agents/{agent_id}/sessions/{session_id}/restore")
+async def restore_agent_session(
+    agent_id: str,
+    session_id: str,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    chat_service: Annotated[ChatSessionService, Depends()],
+) -> AgentSessionResponse:
+    """Restore an archived root SessionAgent tree before purge starts."""
+    _validate_uuid7_hex(agent_id, label="agent ID")
+    _validate_session_id(session_id)
+    result = await chat_service.restore_agent_session(
+        agent_id=agent_id,
+        session_id=session_id,
+        user_id=current_user.user_id,
+    )
+    match result:
+        case Success(session):
+            return AgentSessionResponse.from_domain(session)
+        case Failure(error):
+            match error:
+                case SessionNotFound() | SessionAccessDenied():
+                    raise HTTPException(status_code=404, detail="Session not found.")
+                case PurgeStartedRestoreBlocked():
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Session deletion has already started.",
                     )
                 case _:
                     assert_never(error)

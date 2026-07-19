@@ -756,6 +756,27 @@ class AgentRunRepository:
         )
         return self._build(rdb) if rdb is not None else None
 
+    async def has_active_for_session_ids(
+        self,
+        session: AsyncSession,
+        *,
+        session_ids: Sequence[str],
+    ) -> bool:
+        """Return whether any session has a pending or running AgentRun."""
+        if not session_ids:
+            return False
+        run_id = await session.scalar(
+            sa.select(RDBAgentRun.id)
+            .where(
+                RDBAgentRun.session_id.in_(session_ids),
+                RDBAgentRun.status.in_(
+                    [AgentRunStatus.PENDING, AgentRunStatus.RUNNING]
+                ),
+            )
+            .limit(1)
+        )
+        return run_id is not None
+
     async def get_running_by_session_id(
         self,
         session: AsyncSession,

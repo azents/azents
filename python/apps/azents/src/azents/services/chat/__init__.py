@@ -47,6 +47,7 @@ from azents.repos.agent_session.data import (
     AgentSessionCreate,
     SessionAgent,
 )
+from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
 from azents.repos.message import MessageRepository
 from azents.repos.session_git_worktree import SessionGitWorktreeRepository
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
@@ -87,6 +88,8 @@ from .data import (
     NotWorkspaceMember,
     PaginatedEvents,
     PrimarySessionArchiveBlocked,
+    PurgeStartedRestoreBlocked,
+    RestoreSessionError,
     RunningSessionArchiveBlocked,
     SessionAccessDenied,
     SessionAccessError,
@@ -300,6 +303,10 @@ class ChatSessionService:
     ]
     agent_session_repository: Annotated[
         AgentSessionRepository, Depends(AgentSessionRepository)
+    ]
+    archived_session_retention_repository: Annotated[
+        ArchivedSessionRetentionRepository,
+        Depends(ArchivedSessionRetentionRepository),
     ]
     workspace_user_repository: Annotated[
         WorkspaceUserRepository, Depends(WorkspaceUserRepository)
@@ -837,29 +844,142 @@ class ChatSessionService:
                 return Failure(SubagentSessionReadOnly())
             if agent_session.primary_kind == AgentSessionPrimaryKind.TEAM_PRIMARY:
                 return Failure(PrimarySessionArchiveBlocked())
-            if agent_session.run_state == AgentSessionRunState.RUNNING:
-                return Failure(RunningSessionArchiveBlocked())
-            cleanup_requested = False
-            worktree_service = self.session_git_worktree_service
-            if worktree_service is not None:
-                mark_cleanup_pending = worktree_service.mark_cleanup_pending_for_session
-                cleanup_request = await mark_cleanup_pending(
-                    session,
-                    session_id=session_id,
-                )
-                cleanup_requested = cleanup_request.cleanup_requested
-            await self.agent_session_repository.archive(
+            tree = await self.agent_session_repository.lock_root_tree_sessions(
                 session,
-                session_id,
-                ended_at=datetime.datetime.now(datetime.UTC),
+                root_session_id=session_id,
             )
+            session_ids = [item.id for item in tree]
+            if not tree or any(
+                item.status != AgentSessionStatus.ACTIVE
+                or item.run_state == AgentSessionRunState.RUNNING
+                for item in tree
+            ):
+                return Failure(RunningSessionArchiveBlocked())
+            if await self.agent_run_repository.has_active_for_session_ids(
+                session,
+                session_ids=session_ids,
+            ):
+                return Failure(RunningSessionArchiveBlocked())
+            settings = await self.archived_session_retention_repository.lock_settings(
+                session
+            )
+            archived_at = datetime.datetime.now(datetime.UTC)
+            purge_after = (
+                None
+                if settings.archived_session_retention_days is None
+                else archived_at
+                + datetime.timedelta(days=settings.archived_session_retention_days)
+            )
+            await self.agent_session_repository.archive_tree(
+                session,
+                root_session_id=session_id,
+                session_ids=session_ids,
+                archived_at=archived_at,
+                purge_after=purge_after,
+                policy_revision=settings.revision,
+                retention_days=settings.archived_session_retention_days,
+            )
+            if purge_after is not None:
+                await self.archived_session_retention_repository.schedule_purge_job(
+                    session,
+                    root_session_id=session_id,
+                    eligible_at=purge_after,
+                    policy_revision=settings.revision,
+                    now=archived_at,
+                )
             await session.commit()
             return Success(
                 ArchiveSessionResult(
                     archived_session_id=session_id,
-                    cleanup_requested=cleanup_requested,
+                    cleanup_requested=False,
                 )
             )
+
+    async def list_archived_agent_sessions(
+        self,
+        *,
+        agent_id: str,
+        user_id: str,
+    ) -> Result[list[AgentSession], SessionNotFound]:
+        """List archived root sessions for one accessible Agent."""
+        async with self.session_manager() as session:
+            agent = await self.agent_repository.get_by_id(session, agent_id)
+            if agent is None:
+                return Failure(SessionNotFound())
+            workspace_user = (
+                await self.workspace_user_repository.get_by_workspace_and_user(
+                    session,
+                    workspace_id=agent.workspace_id,
+                    user_id=user_id,
+                )
+            )
+            if workspace_user is None:
+                return Failure(SessionNotFound())
+            return Success(
+                await self.agent_session_repository.list_archived_by_agent_id(
+                    session,
+                    agent_id,
+                )
+            )
+
+    async def restore_agent_session(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        user_id: str,
+    ) -> Result[AgentSession, RestoreSessionError]:
+        """Restore an archived root tree before purge fencing starts."""
+        async with self.session_manager() as session:
+            root = await self.agent_session_repository.get_by_id(session, session_id)
+            if (
+                root is None
+                or root.agent_id != agent_id
+                or root.session_kind is not AgentSessionKind.ROOT
+                or root.status != AgentSessionStatus.ARCHIVED
+            ):
+                return Failure(SessionNotFound())
+            workspace_user = (
+                await self.workspace_user_repository.get_by_workspace_and_user(
+                    session,
+                    workspace_id=root.workspace_id,
+                    user_id=user_id,
+                )
+            )
+            if workspace_user is None:
+                return Failure(SessionAccessDenied())
+            tree = await self.agent_session_repository.lock_root_tree_sessions(
+                session,
+                root_session_id=session_id,
+            )
+            if not tree or any(
+                item.status != AgentSessionStatus.ARCHIVED for item in tree
+            ):
+                return Failure(SessionNotFound())
+            if await self.archived_session_retention_repository.purge_fencing_started(
+                session,
+                root_session_id=session_id,
+            ):
+                return Failure(PurgeStartedRestoreBlocked())
+            now = datetime.datetime.now(datetime.UTC)
+            await self.archived_session_retention_repository.cancel_unstarted_purge_job(
+                session,
+                root_session_id=session_id,
+                now=now,
+            )
+            await self.agent_session_repository.restore_tree(
+                session,
+                root_session_id=session_id,
+                session_ids=[item.id for item in tree],
+            )
+            await session.commit()
+            restored = await self.agent_session_repository.get_by_id(
+                session,
+                session_id,
+            )
+            if restored is None:
+                raise RuntimeError("Restored AgentSession disappeared")
+            return Success(restored)
 
     async def update_session_title(
         self,
