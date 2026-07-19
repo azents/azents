@@ -34,6 +34,7 @@ from azents.core.enums import (
 )
 from azents.core.inference_profile import SessionInferenceState
 from azents.core.llm_catalog import ModelBuiltInToolCapabilities, ModelCapabilities
+from azents.core.openrouter import OPENROUTER_API_BASE_URL, OPENROUTER_APP_TITLE
 from azents.core.tools import Toolkit, ToolkitState, ToolkitStatus, TurnContext
 from azents.engine.context.compaction import (
     SummaryModelCall,
@@ -58,6 +59,7 @@ from azents.engine.events.filters import (
     EventPreLowerFilterPipeline,
     PostLowerFilterPipeline,
 )
+from azents.engine.events.litellm_responses import LiteLLMResponsesModelAdapter
 from azents.engine.events.openai_responses import (
     OpenAIResponsesModelAdapter,
     OpenAIResponsesRequest,
@@ -1322,6 +1324,83 @@ async def test_model_kwargs_routes_chatgpt_oauth_to_backend_api() -> None:
     model_adapter = captured["model_adapter"]
     assert isinstance(model_adapter, OpenAIResponsesModelAdapter)
     assert model_adapter.continuation_planner is None
+
+
+async def test_model_kwargs_keep_openrouter_on_litellm_responses() -> None:
+    """OpenRouter uses LiteLLM Responses and preserves endpoint credentials."""
+    execution = _Execution()
+    captured: dict[str, object] = {}
+
+    def factory(**kwargs: object) -> _Execution:
+        captured.update(kwargs)
+        return (
+            setattr(
+                execution,
+                "model_call_preparer",
+                kwargs["model_call_preparer"],
+            )
+            or execution
+        )
+
+    adapter = _agent_engine_adapter(
+        session_manager=_session_context,
+        artifact_service=_ArtifactService(),
+        exchange_file_service=_ExchangeFileService(),
+        model_file_service=_ModelFileService(),
+        run_repo=_RunRepo(),
+        agent_session_repo=_AgentSessionRepo(),
+        execution_factory=factory,
+    )
+
+    _ = [
+        emit
+        async for emit in adapter.run(
+            RunRequest(
+                session_id="session-1",
+                user_messages=[],
+                agent_prompt=None,
+                toolkits=[],
+                provider=LLMProvider.OPENROUTER,
+                model="openrouter/anthropic/claude-sonnet-4.6",
+                model_developer=LLMModelDeveloper.ANTHROPIC,
+                credential_kwargs={
+                    "api_key": "openrouter-test-key",
+                    "base_url": OPENROUTER_API_BASE_URL,
+                    "api_base": OPENROUTER_API_BASE_URL,
+                    "custom_llm_provider": "openrouter",
+                    "extra_headers": {
+                        "X-OpenRouter-Title": OPENROUTER_APP_TITLE,
+                    },
+                },
+                workspace_id="workspace-1",
+                agent_id="agent-1",
+                auto_compaction_threshold_tokens=None,
+                inference_state=None,
+                compaction_provider_integration_id=None,
+            ),
+            RunContext(
+                owner_generation=1,
+                tool_admission_barrier=_OpenToolAdmissionBarrier(),
+                model_transport_state=InMemoryModelTransportState(
+                    websocket_enabled=False
+                ),
+                user_id="user-1",
+                run_id="0" * 32,
+                publish_event=_noop_publish,
+            ),
+        )
+    ]
+
+    assert execution.prepared_model_call is not None
+    native_request = execution.prepared_model_call.native_request
+    assert isinstance(native_request, NativeModelRequest)
+    assert native_request.model == "openrouter/anthropic/claude-sonnet-4.6"
+    assert native_request.kwargs["custom_llm_provider"] == "openrouter"
+    assert native_request.kwargs["base_url"] == OPENROUTER_API_BASE_URL
+    assert native_request.kwargs["extra_headers"] == {
+        "X-OpenRouter-Title": OPENROUTER_APP_TITLE,
+    }
+    assert isinstance(captured["model_adapter"], LiteLLMResponsesModelAdapter)
 
 
 async def test_adapter_wires_event_filters_and_session_head_repo() -> None:

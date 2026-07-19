@@ -276,6 +276,12 @@ class ResponsesRequestLowerer:
             if base_url is not None:
                 kwargs.setdefault("base_url", base_url)
                 kwargs.setdefault("api_base", base_url)
+        if self._provider_id == LLMProvider.OPENROUTER:
+            kwargs.setdefault("custom_llm_provider", "openrouter")
+            base_url = kwargs.get("base_url") or kwargs.get("api_base")
+            if base_url is not None:
+                kwargs.setdefault("base_url", base_url)
+                kwargs.setdefault("api_base", base_url)
         if self._provider_id in {LLMProvider.OPENAI, LLMProvider.CHATGPT_OAUTH}:
             prompt_cache_key = _openai_prompt_cache_key(self._prompt_cache_scope)
             if prompt_cache_key is not None:
@@ -535,6 +541,7 @@ def _uses_anthropic_cache_control(
         LLMProvider.XAI,
         LLMProvider.XAI_OAUTH,
         LLMProvider.GOOGLE_GEMINI,
+        LLMProvider.OPENROUTER,
     }:
         return False
     return model_developer == LLMModelDeveloper.ANTHROPIC
@@ -639,6 +646,8 @@ def _lower_hosted_tools(
                 match target:
                     case "openai" | "xai":
                         native_tools.append({"type": "web_search", **config})
+                    case "openrouter":
+                        native_tools.append({"type": "openrouter:web_search", **config})
                     case "google":
                         native_tools.append({"google_search": config})
                     case "anthropic":
@@ -656,7 +665,7 @@ def _lower_hosted_tools(
                         msg = f"Required builtin tool is not supported: {tool.name}"
                         raise UnsupportedRequiredBuiltinToolError(msg)
             case "image_generation":
-                if target == "fallback":
+                if target in {"fallback", "openrouter"}:
                     msg = f"Required builtin tool is not supported: {tool.name}"
                     raise UnsupportedRequiredBuiltinToolError(msg)
                 native_tools.append({"type": "image_generation", **config})
@@ -678,6 +687,8 @@ def _hosted_tool_target(
         return "openai"
     if provider_id in _XAI_PROVIDER_IDS:
         return "xai"
+    if provider_id == LLMProvider.OPENROUTER:
+        return "openrouter"
     if model_developer == LLMModelDeveloper.GOOGLE:
         return "google"
     if model_developer == LLMModelDeveloper.ANTHROPIC:
@@ -686,6 +697,8 @@ def _hosted_tool_target(
         return "openai"
     if provider in {"xai", "xai_oauth"}:
         return "xai"
+    if provider == "openrouter":
+        return "openrouter"
     if provider in {"google_gemini", "google_vertex_ai"}:
         return "google"
     if provider == "anthropic":
