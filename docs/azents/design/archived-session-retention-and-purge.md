@@ -2,6 +2,7 @@
 title: "Archived Session Retention and Durable Purge"
 created: 2026-07-19
 updated: 2026-07-19
+implemented: 2026-07-19
 tags: [backend, frontend, scheduler, session, retention, admin]
 ---
 
