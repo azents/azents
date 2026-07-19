@@ -622,7 +622,6 @@
         },
         "subagents": {
           "title": "Subagents",
-          "open": "Open subagent tree",
           "loading": "Loading subagent tree…",
           "summary": "{count, plural, =0 {No child agents} =1 {1 child agent} other {# child agents}}",
           "total": "{count, plural, =1 {1 node} other {# nodes}}",

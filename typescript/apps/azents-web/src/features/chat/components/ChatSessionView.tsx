@@ -26,13 +26,11 @@ import {
   IconArrowUp,
   IconDotsVertical,
   IconHome,
-  IconRobot,
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { AgentSessionHeader } from "@/features/agents/components/AgentSessionHeader";
-import { SubagentTreePanel } from "@/features/agents/components/SubagentTreePanel";
 import { useSubagentTreePanelContainer } from "@/features/agents/containers/useSubagentTreePanelContainer";
 import { useChatSessionContainer } from "../containers/useChatSessionContainer";
 import { WorkspacePanel } from "../workspace/components/WorkspacePanel";
@@ -106,7 +104,6 @@ export function ChatSessionView({
     `(min-width: ${theme.breakpoints.lg})`,
   );
   const [runtimeDrawerOpened, setRuntimeDrawerOpened] = useState(false);
-  const [subagentDrawerOpened, setSubagentDrawerOpened] = useState(false);
   const [headerSession, setHeaderSession] =
     useState<AgentSessionResponse>(session);
   useEffect(() => {
@@ -126,7 +123,7 @@ export function ChatSessionView({
   const subagentTreePanel = useSubagentTreePanelContainer({
     agentId: agent.id,
     sessionId,
-    pollingEnabled: subagentDrawerOpened,
+    pollingEnabled: false,
   });
   const subagentNavigation = useMemo((): SubagentNavigationLinks | null => {
     if (subagentTreePanel.state.type !== "LOADED") {
@@ -162,20 +159,10 @@ export function ChatSessionView({
         onSessionTitleChange={setHeaderSession}
         onOpenRuntime={() => setRuntimeDrawerOpened(true)}
         chatControls={
-          <Group gap="xs" wrap="nowrap">
-            <TokenUsageIndicator
-              usage={output.tokenUsage}
-              activeRun={output.liveRun}
-            />
-            <ActionIcon
-              variant="subtle"
-              radius="xl"
-              onClick={() => setSubagentDrawerOpened(true)}
-              aria-label={tAgentDetail("subagents.open")}
-            >
-              <IconRobot size={rem(18)} />
-            </ActionIcon>
-          </Group>
+          <TokenUsageIndicator
+            usage={output.tokenUsage}
+            activeRun={output.liveRun}
+          />
         }
       />
       {subagentNavigation !== null && (
@@ -309,36 +296,6 @@ export function ChatSessionView({
           }
         />
       </Box>
-      <Drawer
-        opened={subagentDrawerOpened}
-        onClose={() => setSubagentDrawerOpened(false)}
-        title={tAgentDetail("subagents.title")}
-        position="right"
-        size="md"
-        styles={{
-          body: {
-            flex: 1,
-            minHeight: 0,
-            overflow: "hidden",
-            padding: 0,
-          },
-          content: {
-            display: "flex",
-            flexDirection: "column",
-            height: "100dvh",
-            overflow: "hidden",
-          },
-          header: { flexShrink: 0 },
-        }}
-      >
-        <SubagentTreePanel
-          handle={handle}
-          agentId={agent.id}
-          activeSessionId={sessionId}
-          state={subagentTreePanel.state}
-          onNavigate={() => setSubagentDrawerOpened(false)}
-        />
-      </Drawer>
       <Drawer
         hiddenFrom="lg"
         opened={runtimeDrawerOpened}
