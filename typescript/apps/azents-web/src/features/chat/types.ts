@@ -173,7 +173,6 @@ export interface ClientToolResultPayload {
   name?: string | null;
   status: ToolResultStatus;
   output: string | OutputPart[];
-  attachments: EventAttachment[];
 }
 
 export interface ProviderToolReference {
@@ -193,17 +192,14 @@ export interface ProviderToolSemanticContent {
 export interface ProviderToolCallPayload {
   call_id: string;
   name: string;
-  status: "running" | "completed" | "failed" | null;
+  status:
+    | "running"
+    | "completed"
+    | "failed"
+    | "cancelled"
+    | "interrupted"
+    | null;
   semantic: ProviderToolSemanticContent;
-  attachments: EventAttachment[];
-}
-
-export interface ProviderToolResultPayload {
-  call_id: string;
-  name: string | null;
-  status: ToolResultStatus;
-  semantic: ProviderToolSemanticContent;
-  attachments: EventAttachment[];
 }
 
 export interface TurnMarkerPayload {
@@ -320,7 +316,6 @@ export type ChatEventPayload =
   | ClientToolCallPayload
   | ClientToolResultPayload
   | ProviderToolCallPayload
-  | ProviderToolResultPayload
   | TurnMarkerPayload
   | RunMarkerPayload
   | InterruptedPayload
@@ -355,7 +350,6 @@ export type ChatHistoryEvent =
   | EventBase<"client_tool_call", ClientToolCallPayload>
   | EventBase<"client_tool_result", ClientToolResultPayload>
   | EventBase<"provider_tool_call", ProviderToolCallPayload>
-  | EventBase<"provider_tool_result", ProviderToolResultPayload>
   | EventBase<"turn_marker", TurnMarkerPayload>
   | EventBase<"run_marker", RunMarkerPayload>
   | EventBase<"interrupted", InterruptedPayload>

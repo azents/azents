@@ -1,6 +1,6 @@
 import { expect, userEvent, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
-import { imageAttachment } from "../story-fixtures";
+import { binaryAttachment, imageAttachment } from "../story-fixtures";
 import { ProviderToolCallCard } from "./ProviderToolCallCard";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
@@ -59,11 +59,30 @@ export const CompletedWithOutputAndAttachment = {
   },
 } satisfies Story;
 
-export const Failed = {
+export const CompletedWithGenericAttachment = {
   args: {
     toolCall: {
       id: "provider-call-3",
       callId: "provider-call-3",
+      name: "custom_retrieval",
+      arguments: '{"query":"release artifacts"}',
+      status: "completed",
+      output: "Retrieved one artifact.",
+      attachments: [binaryAttachment],
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByText("Custom retrieval")).toBeVisible();
+    await expect(canvas.getByText(binaryAttachment.name ?? "")).toBeVisible();
+  },
+} satisfies Story;
+
+export const Failed = {
+  args: {
+    toolCall: {
+      id: "provider-call-4",
+      callId: "provider-call-4",
       name: "web_search",
       arguments: "",
       status: "failed",
@@ -75,8 +94,8 @@ export const Failed = {
 export const UnknownHistoricalStatus = {
   args: {
     toolCall: {
-      id: "provider-call-4",
-      callId: "provider-call-4",
+      id: "provider-call-5",
+      callId: "provider-call-5",
       name: "custom_retrieval",
       arguments: "",
       status: "unknown",

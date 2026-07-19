@@ -26,7 +26,7 @@ import {
 } from "../hooks/liveRetryVisibility";
 import {
   applyProviderToolCallItem,
-  providerToolCallStatusFromPayload,
+  providerToolCallFromPayload,
 } from "../hooks/providerToolCallProjection";
 import {
   applyFunctionCallItem,
@@ -199,81 +199,6 @@ function stringField(
 ): string | null {
   const value = record[key];
   return typeof value === "string" ? value : null;
-}
-
-interface ProviderToolSemanticValue {
-  input: string | null;
-  output: unknown;
-  references: unknown[];
-}
-
-function providerToolSemanticFromValue(
-  value: unknown,
-): ProviderToolSemanticValue | null {
-  if (
-    !isRecord(value) ||
-    !("input" in value) ||
-    (value.input !== null && typeof value.input !== "string") ||
-    !("output" in value) ||
-    !Array.isArray(value.references)
-  ) {
-    return null;
-  }
-  return {
-    input: value.input,
-    output: value.output,
-    references: value.references,
-  };
-}
-
-function providerToolReferenceText(value: unknown): string | null {
-  if (!isRecord(value)) {
-    return null;
-  }
-  const kind = stringField(value, "kind") ?? "other";
-  const uri = stringField(value, "uri");
-  const title = stringField(value, "title");
-  const excerpt = stringField(value, "excerpt");
-  const primary = uri ?? title;
-  const lines = [`- ${kind}${primary === null ? "" : `: ${primary}`}`];
-  if (uri !== null && title !== null) {
-    lines.push(`  Title: ${title}`);
-  }
-  if (excerpt !== null) {
-    lines.push("  Excerpt:");
-    lines.push(...excerpt.split("\n").map((line) => `    ${line}`));
-  }
-  if (isRecord(value.metadata)) {
-    const metadata = Object.fromEntries(
-      Object.entries(value.metadata)
-        .filter(
-          (entry): entry is [string, string] => typeof entry[1] === "string",
-        )
-        .sort(([left], [right]) => left.localeCompare(right)),
-    );
-    if (Object.keys(metadata).length > 0) {
-      lines.push(`  Metadata: ${JSON.stringify(metadata)}`);
-    }
-  }
-  return lines.join("\n");
-}
-
-function providerToolSemanticOutputText(
-  semantic: ProviderToolSemanticValue,
-): string {
-  const sections: string[] = [];
-  const output = contentText(semantic.output);
-  if (output.length > 0) {
-    sections.push(output);
-  }
-  const references = semantic.references.flatMap((reference) => {
-    const rendered = providerToolReferenceText(reference);
-    return rendered === null ? [] : [rendered];
-  });
-  if (references.length > 0) {
-    sections.push(`References:\n${references.join("\n")}`);
-  }
-  return sections.join("\n");
 }
 
 function numberField(
@@ -1095,30 +1020,16 @@ function mapEvents(
         );
       }
       case "provider_tool_call": {
-        const callId = stringField(payload, "call_id");
-        const name = stringField(payload, "name");
-        const semantic = providerToolSemanticFromValue(payload.semantic);
-        if (callId === null || name === null || semantic === null) {
+        const providerToolCall = providerToolCallFromPayload(
+          payload,
+          messageStatus,
+        );
+        if (providerToolCall === null) {
           return messages;
         }
-        const semanticOutput = semantic.output;
         return applyProviderToolCallItem(
           messages,
-          {
-            id: callId,
-            callId,
-            name,
-            arguments: semantic.input ?? "",
-            status: providerToolCallStatusFromPayload(
-              payload.status,
-              messageStatus,
-            ),
-            output: providerToolSemanticOutputText(semantic),
-            attachments: [
-              ...eventAttachments(payload),
-              ...contentAttachments(semanticOutput),
-            ],
-          },
+          providerToolCall,
           event.id,
           event.created_at,
           messageStatus,
@@ -1133,10 +1044,7 @@ function mapEvents(
           callId,
           content: contentText(payload.output),
           status: toolResultStatusFromPayload(payload),
-          attachments: [
-            ...eventAttachments(payload),
-            ...contentAttachments(payload.output),
-          ],
+          attachments: contentAttachments(payload.output),
         });
       }
       case "turn_marker": {
