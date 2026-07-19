@@ -853,56 +853,107 @@
       "match": {
         "endpoint": "chat",
         "userMessage": "Subagent E2E idle child task",
-        "hasToolResult": false,
-        "sequenceIndex": 0
+        "hasToolResult": false
       },
       "response": {
-        "error": {
-          "message": "Subagent idle child synchronization retry 1",
-          "type": "rate_limit_error",
-          "code": "rate_limit"
-        },
-        "status": 429
+        "toolCalls": [
+          {
+            "id": "call_subagent_mailbox_idle_hold_1",
+            "name": "list_agents",
+            "arguments": {}
+          }
+        ]
+      },
+      "streamingProfile": {
+        "ttft": 0,
+        "tps": 3,
+        "jitter": 0
       }
     },
     {
       "match": {
         "endpoint": "chat",
-        "userMessage": "Subagent E2E idle child task",
-        "hasToolResult": false,
-        "sequenceIndex": 1
+        "toolCallId": "call_subagent_mailbox_idle_hold_1"
       },
       "response": {
-        "error": {
-          "message": "Subagent idle child synchronization retry 2",
-          "type": "rate_limit_error",
-          "code": "rate_limit"
-        },
-        "status": 429
+        "toolCalls": [
+          {
+            "id": "call_subagent_mailbox_idle_hold_2",
+            "name": "list_agents",
+            "arguments": {}
+          }
+        ]
+      },
+      "streamingProfile": {
+        "ttft": 0,
+        "tps": 3,
+        "jitter": 0
       }
     },
     {
       "match": {
         "endpoint": "chat",
-        "userMessage": "Subagent E2E idle child task",
-        "hasToolResult": false,
-        "sequenceIndex": 2
+        "toolCallId": "call_subagent_mailbox_idle_hold_2"
       },
       "response": {
-        "error": {
-          "message": "Subagent idle child synchronization retry 3",
-          "type": "rate_limit_error",
-          "code": "rate_limit"
-        },
-        "status": 429
+        "toolCalls": [
+          {
+            "id": "call_subagent_mailbox_idle_hold_3",
+            "name": "list_agents",
+            "arguments": {}
+          }
+        ]
+      },
+      "streamingProfile": {
+        "ttft": 0,
+        "tps": 3,
+        "jitter": 0
       }
     },
     {
       "match": {
         "endpoint": "chat",
-        "userMessage": "Subagent E2E idle child task",
-        "hasToolResult": false,
-        "sequenceIndex": 3
+        "toolCallId": "call_subagent_mailbox_idle_hold_3"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_subagent_mailbox_idle_hold_4",
+            "name": "list_agents",
+            "arguments": {}
+          }
+        ]
+      },
+      "streamingProfile": {
+        "ttft": 0,
+        "tps": 3,
+        "jitter": 0
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_subagent_mailbox_idle_hold_4"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_subagent_mailbox_idle_hold_5",
+            "name": "list_agents",
+            "arguments": {}
+          }
+        ]
+      },
+      "streamingProfile": {
+        "ttft": 0,
+        "tps": 3,
+        "jitter": 0
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_subagent_mailbox_idle_hold_5"
       },
       "response": {
         "content": "Subagent idle child completed."
@@ -930,53 +981,107 @@
     {
       "match": {
         "endpoint": "chat",
-        "toolCallId": "call_subagent_mailbox_sender_message",
-        "sequenceIndex": 0
+        "toolCallId": "call_subagent_mailbox_sender_message"
       },
       "response": {
-        "error": {
-          "message": "Subagent sender child hold retry 1",
-          "type": "rate_limit_error",
-          "code": "rate_limit"
-        },
-        "status": 429
+        "toolCalls": [
+          {
+            "id": "call_subagent_mailbox_sender_hold_1",
+            "name": "list_agents",
+            "arguments": {}
+          }
+        ]
+      },
+      "streamingProfile": {
+        "ttft": 0,
+        "tps": 3,
+        "jitter": 0
       }
     },
     {
       "match": {
         "endpoint": "chat",
-        "toolCallId": "call_subagent_mailbox_sender_message",
-        "sequenceIndex": 1
+        "toolCallId": "call_subagent_mailbox_sender_hold_1"
       },
       "response": {
-        "error": {
-          "message": "Subagent sender child hold retry 2",
-          "type": "rate_limit_error",
-          "code": "rate_limit"
-        },
-        "status": 429
+        "toolCalls": [
+          {
+            "id": "call_subagent_mailbox_sender_hold_2",
+            "name": "list_agents",
+            "arguments": {}
+          }
+        ]
+      },
+      "streamingProfile": {
+        "ttft": 0,
+        "tps": 3,
+        "jitter": 0
       }
     },
     {
       "match": {
         "endpoint": "chat",
-        "toolCallId": "call_subagent_mailbox_sender_message",
-        "sequenceIndex": 2
+        "toolCallId": "call_subagent_mailbox_sender_hold_2"
       },
       "response": {
-        "error": {
-          "message": "Subagent sender child hold retry 3",
-          "type": "rate_limit_error",
-          "code": "rate_limit"
-        },
-        "status": 429
+        "toolCalls": [
+          {
+            "id": "call_subagent_mailbox_sender_hold_3",
+            "name": "list_agents",
+            "arguments": {}
+          }
+        ]
+      },
+      "streamingProfile": {
+        "ttft": 0,
+        "tps": 3,
+        "jitter": 0
       }
     },
     {
       "match": {
         "endpoint": "chat",
-        "toolCallId": "call_subagent_mailbox_sender_message",
-        "sequenceIndex": 3
+        "toolCallId": "call_subagent_mailbox_sender_hold_3"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_subagent_mailbox_sender_hold_4",
+            "name": "list_agents",
+            "arguments": {}
+          }
+        ]
+      },
+      "streamingProfile": {
+        "ttft": 0,
+        "tps": 3,
+        "jitter": 0
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_subagent_mailbox_sender_hold_4"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_subagent_mailbox_sender_hold_5",
+            "name": "list_agents",
+            "arguments": {}
+          }
+        ]
+      },
+      "streamingProfile": {
+        "ttft": 0,
+        "tps": 3,
+        "jitter": 0
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_subagent_mailbox_sender_hold_5"
       },
       "response": {
         "content": "Subagent sender child completed."
@@ -1070,56 +1175,107 @@
       "match": {
         "endpoint": "chat",
         "userMessage": "Subagent E2E timeout child task",
-        "hasToolResult": false,
-        "sequenceIndex": 0
+        "hasToolResult": false
       },
       "response": {
-        "error": {
-          "message": "Subagent timeout child synchronization retry 1",
-          "type": "rate_limit_error",
-          "code": "rate_limit"
-        },
-        "status": 429
+        "toolCalls": [
+          {
+            "id": "call_subagent_timeout_child_hold_1",
+            "name": "list_agents",
+            "arguments": {}
+          }
+        ]
+      },
+      "streamingProfile": {
+        "ttft": 0,
+        "tps": 3,
+        "jitter": 0
       }
     },
     {
       "match": {
         "endpoint": "chat",
-        "userMessage": "Subagent E2E timeout child task",
-        "hasToolResult": false,
-        "sequenceIndex": 1
+        "toolCallId": "call_subagent_timeout_child_hold_1"
       },
       "response": {
-        "error": {
-          "message": "Subagent timeout child synchronization retry 2",
-          "type": "rate_limit_error",
-          "code": "rate_limit"
-        },
-        "status": 429
+        "toolCalls": [
+          {
+            "id": "call_subagent_timeout_child_hold_2",
+            "name": "list_agents",
+            "arguments": {}
+          }
+        ]
+      },
+      "streamingProfile": {
+        "ttft": 0,
+        "tps": 3,
+        "jitter": 0
       }
     },
     {
       "match": {
         "endpoint": "chat",
-        "userMessage": "Subagent E2E timeout child task",
-        "hasToolResult": false,
-        "sequenceIndex": 2
+        "toolCallId": "call_subagent_timeout_child_hold_2"
       },
       "response": {
-        "error": {
-          "message": "Subagent timeout child synchronization retry 3",
-          "type": "rate_limit_error",
-          "code": "rate_limit"
-        },
-        "status": 429
+        "toolCalls": [
+          {
+            "id": "call_subagent_timeout_child_hold_3",
+            "name": "list_agents",
+            "arguments": {}
+          }
+        ]
+      },
+      "streamingProfile": {
+        "ttft": 0,
+        "tps": 3,
+        "jitter": 0
       }
     },
     {
       "match": {
         "endpoint": "chat",
-        "userMessage": "Subagent E2E timeout child task",
-        "hasToolResult": false,
-        "sequenceIndex": 3
+        "toolCallId": "call_subagent_timeout_child_hold_3"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_subagent_timeout_child_hold_4",
+            "name": "list_agents",
+            "arguments": {}
+          }
+        ]
+      },
+      "streamingProfile": {
+        "ttft": 0,
+        "tps": 3,
+        "jitter": 0
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_subagent_timeout_child_hold_4"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_subagent_timeout_child_hold_5",
+            "name": "list_agents",
+            "arguments": {}
+          }
+        ]
+      },
+      "streamingProfile": {
+        "ttft": 0,
+        "tps": 3,
+        "jitter": 0
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_subagent_timeout_child_hold_5"
       },
       "response": {
         "content": "Subagent timeout child completed."
