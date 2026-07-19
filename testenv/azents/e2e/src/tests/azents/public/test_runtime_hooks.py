@@ -151,15 +151,88 @@ def _log_debug(text: str) -> str:
     return _shorten(text)
 
 
+def _journal_items(mock_openai_url: str) -> list[dict[str, object]]:
+    """Return typed AIMock request journal items."""
+    raw_payload: object = requests.get(
+        f"{mock_openai_url}/v1/_requests", timeout=10
+    ).json()
+    payload = _object_list(raw_payload)
+    if payload is None:
+        raise AssertionError(f"AIMock journal is not a list: {raw_payload!r}")
+    return [
+        cast("dict[str, object]", item) for item in payload if isinstance(item, dict)
+    ]
+
+
+def _request_tool_names(item: dict[str, object]) -> list[str]:
+    """Extract declared client function names from one AIMock request."""
+    body = _object_dict(item.get("body"))
+    if body is None:
+        return []
+    tools = _object_list(body.get("tools"))
+    if tools is None:
+        return []
+    names: list[str] = []
+    for raw_tool in tools:
+        tool = _object_dict(raw_tool)
+        if tool is None:
+            continue
+        name = tool.get("name")
+        if isinstance(name, str):
+            names.append(name)
+            continue
+        function = _object_dict(tool.get("function"))
+        if function is not None and isinstance(function.get("name"), str):
+            names.append(str(function["name"]))
+    return names
+
+
+def _tool_request_snapshots(
+    mock_openai_url: str,
+    user_message: str,
+) -> list[list[str]]:
+    """Return declared tool names for requests containing one user message."""
+    snapshots: list[list[str]] = []
+    for item in _journal_items(mock_openai_url):
+        if user_message not in _message_texts(item):
+            continue
+        names = _request_tool_names(item)
+        if names:
+            snapshots.append(names)
+    return snapshots
+
+
+def _wait_for_tool_request_snapshots(
+    mock_openai_url: str,
+    user_message: str,
+    *,
+    minimum_count: int,
+    required_tool: str,
+    timeout: float = 120,
+) -> list[list[str]]:
+    """Wait for request snapshots proving one tool declaration transition."""
+    deadline = time.monotonic() + timeout
+    snapshots: list[list[str]] = []
+    while time.monotonic() < deadline:
+        snapshots = _tool_request_snapshots(mock_openai_url, user_message)
+        if len(snapshots) >= minimum_count and any(
+            required_tool in names for names in snapshots
+        ):
+            return snapshots
+        time.sleep(0.5)
+    raise TimeoutError(
+        "AIMock journal did not include required tool request snapshots: "
+        f"message={user_message!r}, required_tool={required_tool!r}, "
+        f"snapshots={snapshots!r}, journal={_journal_debug(mock_openai_url)}"
+    )
+
+
 def _all_journal_text(mock_openai_url: str) -> str:
     """AIMock journal t t message text t t stringt t."""
-    payload = requests.get(f"{mock_openai_url}/v1/_requests", timeout=10).json()
-    items = cast("list[object]", payload)
     return "\n".join(
         text
-        for item in items
-        if isinstance(item, dict)
-        for text in _message_texts(cast("dict[str, object]", item))
+        for item in _journal_items(mock_openai_url)
+        for text in _message_texts(item)
     )
 
 
@@ -287,6 +360,35 @@ def _run_message(
             f"REST write response did not include session_id: {payload!r}"
         )
     return observed_session_id
+
+
+def _wait_for_session_idle(
+    *,
+    public_url: str,
+    access_token: str,
+    agent_id: str,
+    session_id: str,
+    timeout: float = 120,
+) -> None:
+    """Wait until the authoritative session projection becomes idle."""
+    deadline = time.monotonic() + timeout
+    last_state: object = None
+    while time.monotonic() < deadline:
+        response = requests.get(
+            f"{public_url}/chat/v1/agents/{agent_id}/sessions/{session_id}",
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=10,
+        )
+        response.raise_for_status()
+        raw_payload: object = response.json()
+        payload = _object_dict(raw_payload)
+        if payload is None:
+            raise AssertionError(f"Session response is not an object: {raw_payload!r}")
+        last_state = payload.get("run_state")
+        if last_state == "idle":
+            return
+        time.sleep(0.5)
+    raise TimeoutError(f"Tool Search session did not become idle: {last_state!r}")
 
 
 class _RuntimeHookWorkspace:
@@ -498,4 +600,100 @@ class TestRuntimeHooks:
             raise AssertionError(
                 "Sensitive runtime hook marker leaked into worker logs: "
                 f"{_shorten(worker_logs)}"
+            )
+
+    def test_tool_search_persists_deferred_probe_across_runs(
+        self,
+        public_api_client: azentspublicclient.ApiClient,
+        admin_api_client: azentsadminclient.ApiClient,
+        azents_public_server_url: str,
+        azents_public_server_container: DockerContainer,
+        azents_engine_worker_container: DockerContainer,
+        mock_openai_url: str,
+    ) -> None:
+        """Verify deferred search activation and session persistence end to end."""
+        requests.delete(
+            f"{mock_openai_url}/v1/_requests",
+            timeout=10,
+        ).raise_for_status()
+        workspace = _setup_workspace(public_api_client, admin_api_client)
+        agent_id = _create_agent_with_runtime_hook_toolkit(
+            public_api_client,
+            workspace,
+            toolkit_slug="rtqa_tool_search",
+            mode="observe",
+        )
+        probe_name = "rtqa_tool_search__runtime_hook_qa_probe"
+        first_message = "Tool Search deferred probe first run"
+        session_id = _run_message(
+            public_api_client=public_api_client,
+            public_url=azents_public_server_url,
+            access_token=workspace.token,
+            agent_id=agent_id,
+            message=first_message,
+            debug_public_container=azents_public_server_container,
+            debug_worker_container=azents_engine_worker_container,
+            debug_mock_openai_url=mock_openai_url,
+        )
+
+        first_snapshots = _wait_for_tool_request_snapshots(
+            mock_openai_url,
+            first_message,
+            minimum_count=2,
+            required_tool=probe_name,
+        )
+        _wait_for_session_idle(
+            public_url=azents_public_server_url,
+            access_token=workspace.token,
+            agent_id=agent_id,
+            session_id=session_id,
+        )
+
+        if "tool_search" not in first_snapshots[0]:
+            raise AssertionError(
+                f"First request did not expose tool_search: {first_snapshots!r}"
+            )
+        if probe_name in first_snapshots[0]:
+            raise AssertionError(
+                f"Deferred probe leaked into first request: {first_snapshots!r}"
+            )
+        if not any(probe_name in names for names in first_snapshots[1:]):
+            raise AssertionError(
+                f"Deferred probe was not activated after search: {first_snapshots!r}"
+            )
+
+        persisted_message = "Tool Search deferred probe persisted run"
+        observed_session_id = _run_message(
+            public_api_client=public_api_client,
+            public_url=azents_public_server_url,
+            access_token=workspace.token,
+            agent_id=agent_id,
+            session_id=session_id,
+            message=persisted_message,
+            debug_public_container=azents_public_server_container,
+            debug_worker_container=azents_engine_worker_container,
+            debug_mock_openai_url=mock_openai_url,
+        )
+        if observed_session_id != session_id:
+            raise AssertionError(
+                "Persisted Tool Search run changed AgentSession identity: "
+                f"expected={session_id!r}, observed={observed_session_id!r}"
+            )
+        persisted_snapshots = _wait_for_tool_request_snapshots(
+            mock_openai_url,
+            persisted_message,
+            minimum_count=1,
+            required_tool=probe_name,
+        )
+        _wait_for_session_idle(
+            public_url=azents_public_server_url,
+            access_token=workspace.token,
+            agent_id=agent_id,
+            session_id=session_id,
+        )
+
+        if probe_name not in persisted_snapshots[0]:
+            raise AssertionError(
+                "Persisted deferred probe was absent from the next Run's first "
+                f"request: {persisted_snapshots!r}"
             )

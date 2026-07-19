@@ -563,6 +563,24 @@
       "response": {
         "toolCalls": [
           {
+            "id": "call_runtime_hook_qa_deny_search",
+            "name": "tool_search",
+            "arguments": {
+              "query": "runtime hook qa probe",
+              "limit": 1
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_runtime_hook_qa_deny_search"
+      },
+      "response": {
+        "toolCalls": [
+          {
             "id": "call_runtime_hook_qa_deny",
             "name": "rtqa_deny__runtime_hook_qa_probe",
             "arguments": {
@@ -590,6 +608,24 @@
       "response": {
         "toolCalls": [
           {
+            "id": "call_runtime_hook_qa_replace_search",
+            "name": "tool_search",
+            "arguments": {
+              "query": "runtime hook qa probe",
+              "limit": 1
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_runtime_hook_qa_replace_search"
+      },
+      "response": {
+        "toolCalls": [
+          {
             "id": "call_runtime_hook_qa_replace",
             "name": "rtqa_replace__runtime_hook_qa_probe",
             "arguments": {
@@ -606,6 +642,77 @@
       },
       "response": {
         "content": "Replace hook QA completed."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Tool Search deferred probe first run",
+        "hasToolResult": false
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_tool_search_deferred_probe_search",
+            "name": "tool_search",
+            "arguments": {
+              "query": "runtime hook qa probe",
+              "limit": 1
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_tool_search_deferred_probe_search"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_tool_search_deferred_probe_first",
+            "name": "rtqa_tool_search__runtime_hook_qa_probe",
+            "arguments": {
+              "marker": "tool-search-first"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_tool_search_deferred_probe_first"
+      },
+      "response": {
+        "content": "TOOL_SEARCH_FIRST_RUN_COMPLETED"
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Tool Search deferred probe persisted run"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_tool_search_deferred_probe_persisted",
+            "name": "rtqa_tool_search__runtime_hook_qa_probe",
+            "arguments": {
+              "marker": "tool-search-persisted"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_tool_search_deferred_probe_persisted"
+      },
+      "response": {
+        "content": "TOOL_SEARCH_PERSISTED_RUN_COMPLETED"
       }
     },
     {
