@@ -853,45 +853,56 @@
       "match": {
         "endpoint": "chat",
         "userMessage": "Subagent E2E idle child task",
-        "hasToolResult": false
+        "hasToolResult": false,
+        "sequenceIndex": 0
       },
       "response": {
-        "toolCalls": [
-          {
-            "id": "call_subagent_mailbox_idle_delay",
-            "name": "exec_command",
-            "arguments": {
-              "command": "sleep 60",
-              "yield_time_ms": 1000,
-              "max_output_bytes": 1000
-            }
-          }
-        ]
+        "error": {
+          "message": "Subagent idle child synchronization retry 1",
+          "type": "rate_limit_error",
+          "code": "rate_limit"
+        },
+        "status": 429
       }
     },
     {
       "match": {
         "endpoint": "chat",
-        "toolCallId": "call_subagent_mailbox_idle_delay"
+        "userMessage": "Subagent E2E idle child task",
+        "hasToolResult": false,
+        "sequenceIndex": 1
       },
       "response": {
-        "toolCalls": [
-          {
-            "id": "call_subagent_mailbox_idle_hold",
-            "name": "exec_command",
-            "arguments": {
-              "command": "sleep 25",
-              "yield_time_ms": 30000,
-              "max_output_bytes": 1000
-            }
-          }
-        ]
+        "error": {
+          "message": "Subagent idle child synchronization retry 2",
+          "type": "rate_limit_error",
+          "code": "rate_limit"
+        },
+        "status": 429
       }
     },
     {
       "match": {
         "endpoint": "chat",
-        "toolCallId": "call_subagent_mailbox_idle_hold"
+        "userMessage": "Subagent E2E idle child task",
+        "hasToolResult": false,
+        "sequenceIndex": 2
+      },
+      "response": {
+        "error": {
+          "message": "Subagent idle child synchronization retry 3",
+          "type": "rate_limit_error",
+          "code": "rate_limit"
+        },
+        "status": 429
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Subagent E2E idle child task",
+        "hasToolResult": false,
+        "sequenceIndex": 3
       },
       "response": {
         "content": "Subagent idle child completed."
@@ -902,25 +913,6 @@
         "endpoint": "chat",
         "userMessage": "Subagent E2E sender child task",
         "hasToolResult": false
-      },
-      "response": {
-        "toolCalls": [
-          {
-            "id": "call_subagent_mailbox_sender_delay",
-            "name": "exec_command",
-            "arguments": {
-              "command": "sleep 1",
-              "yield_time_ms": 5000,
-              "max_output_bytes": 1000
-            }
-          }
-        ]
-      }
-    },
-    {
-      "match": {
-        "endpoint": "chat",
-        "toolCallId": "call_subagent_mailbox_sender_delay"
       },
       "response": {
         "toolCalls": [
@@ -938,45 +930,53 @@
     {
       "match": {
         "endpoint": "chat",
-        "toolCallId": "call_subagent_mailbox_sender_message"
+        "toolCallId": "call_subagent_mailbox_sender_message",
+        "sequenceIndex": 0
       },
       "response": {
-        "toolCalls": [
-          {
-            "id": "call_subagent_mailbox_sender_hold",
-            "name": "exec_command",
-            "arguments": {
-              "command": "sleep 60",
-              "yield_time_ms": 1000,
-              "max_output_bytes": 1000
-            }
-          }
-        ]
+        "error": {
+          "message": "Subagent sender child hold retry 1",
+          "type": "rate_limit_error",
+          "code": "rate_limit"
+        },
+        "status": 429
       }
     },
     {
       "match": {
         "endpoint": "chat",
-        "toolCallId": "call_subagent_mailbox_sender_hold"
+        "toolCallId": "call_subagent_mailbox_sender_message",
+        "sequenceIndex": 1
       },
       "response": {
-        "toolCalls": [
-          {
-            "id": "call_subagent_mailbox_sender_hold_again",
-            "name": "exec_command",
-            "arguments": {
-              "command": "sleep 25",
-              "yield_time_ms": 30000,
-              "max_output_bytes": 1000
-            }
-          }
-        ]
+        "error": {
+          "message": "Subagent sender child hold retry 2",
+          "type": "rate_limit_error",
+          "code": "rate_limit"
+        },
+        "status": 429
       }
     },
     {
       "match": {
         "endpoint": "chat",
-        "toolCallId": "call_subagent_mailbox_sender_hold_again"
+        "toolCallId": "call_subagent_mailbox_sender_message",
+        "sequenceIndex": 2
+      },
+      "response": {
+        "error": {
+          "message": "Subagent sender child hold retry 3",
+          "type": "rate_limit_error",
+          "code": "rate_limit"
+        },
+        "status": 429
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_subagent_mailbox_sender_message",
+        "sequenceIndex": 3
       },
       "response": {
         "content": "Subagent sender child completed."
@@ -1070,45 +1070,56 @@
       "match": {
         "endpoint": "chat",
         "userMessage": "Subagent E2E timeout child task",
-        "hasToolResult": false
+        "hasToolResult": false,
+        "sequenceIndex": 0
       },
       "response": {
-        "toolCalls": [
-          {
-            "id": "call_subagent_timeout_child_delay",
-            "name": "exec_command",
-            "arguments": {
-              "command": "sleep 60",
-              "yield_time_ms": 1000,
-              "max_output_bytes": 1000
-            }
-          }
-        ]
+        "error": {
+          "message": "Subagent timeout child synchronization retry 1",
+          "type": "rate_limit_error",
+          "code": "rate_limit"
+        },
+        "status": 429
       }
     },
     {
       "match": {
         "endpoint": "chat",
-        "toolCallId": "call_subagent_timeout_child_delay"
+        "userMessage": "Subagent E2E timeout child task",
+        "hasToolResult": false,
+        "sequenceIndex": 1
       },
       "response": {
-        "toolCalls": [
-          {
-            "id": "call_subagent_timeout_child_hold",
-            "name": "exec_command",
-            "arguments": {
-              "command": "sleep 25",
-              "yield_time_ms": 30000,
-              "max_output_bytes": 1000
-            }
-          }
-        ]
+        "error": {
+          "message": "Subagent timeout child synchronization retry 2",
+          "type": "rate_limit_error",
+          "code": "rate_limit"
+        },
+        "status": 429
       }
     },
     {
       "match": {
         "endpoint": "chat",
-        "toolCallId": "call_subagent_timeout_child_hold"
+        "userMessage": "Subagent E2E timeout child task",
+        "hasToolResult": false,
+        "sequenceIndex": 2
+      },
+      "response": {
+        "error": {
+          "message": "Subagent timeout child synchronization retry 3",
+          "type": "rate_limit_error",
+          "code": "rate_limit"
+        },
+        "status": 429
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Subagent E2E timeout child task",
+        "hasToolResult": false,
+        "sequenceIndex": 3
       },
       "response": {
         "content": "Subagent timeout child completed."

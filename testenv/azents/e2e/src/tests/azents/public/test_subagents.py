@@ -44,7 +44,6 @@ _MAILBOX_MESSAGE = "Subagent E2E mailbox any sender"
 _MAILBOX_IDLE_SPAWN_RESPONSE = "Subagent mailbox idle child was spawned."
 _MAILBOX_WAIT_MESSAGE = "Subagent E2E wait for mailbox sender"
 _MAILBOX_WAIT_CALL_ID = "call_subagent_mailbox_wait"
-_MAILBOX_IDLE_CALL_ID = "call_subagent_mailbox_idle_delay"
 _MAILBOX_SENDER_CALL_ID = "call_subagent_mailbox_sender_message"
 _MAILBOX_RESPONSE = "Subagent mailbox wait observed an intermediate message."
 _MAILBOX_PROMOTION_MESSAGE = "Subagent E2E promote mailbox messages"
@@ -58,7 +57,6 @@ _ACTIVE_TIMEOUT_MESSAGE = "Subagent E2E active descendant timeout"
 _ACTIVE_TIMEOUT_SPAWN_RESPONSE = "Subagent timeout child was spawned."
 _ACTIVE_TIMEOUT_WAIT_MESSAGE = "Subagent E2E wait for active descendant timeout"
 _ACTIVE_TIMEOUT_CALL_ID = "call_subagent_timeout_wait"
-_ACTIVE_TIMEOUT_CHILD_CALL_ID = "call_subagent_timeout_child_delay"
 _ACTIVE_TIMEOUT_RESPONSE = "Subagent active-descendant timeout observed."
 _INTERRUPT_SPAWN_MESSAGE = "Subagent E2E spawn interrupt child"
 _INTERRUPT_SPAWN_RESPONSE = "Subagent interrupt child was spawned."
@@ -880,13 +878,6 @@ class TestSubagents:
             expected_status="running",
             expected_unread=False,
         )
-        _wait_for_tool_result_content(
-            public_url=azents_public_server_url,
-            token=workspace.token,
-            session_id=idle.agent_session_id,
-            call_id=_MAILBOX_IDLE_CALL_ID,
-            expected="status: running",
-        )
         _wait_for_session_run_state(
             public_url=azents_public_server_url,
             token=workspace.token,
@@ -1130,13 +1121,6 @@ class TestSubagents:
             name="timeout_child",
             expected_status="running",
             expected_unread=False,
-        )
-        _wait_for_tool_result_content(
-            public_url=azents_public_server_url,
-            token=workspace.token,
-            session_id=child.agent_session_id,
-            call_id=_ACTIVE_TIMEOUT_CHILD_CALL_ID,
-            expected="status: running",
         )
 
         _run_message(
