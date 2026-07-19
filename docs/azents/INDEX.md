@@ -221,6 +221,7 @@ Design documents are accumulated records and are not listed individually in this
 - [ADR-0167: Normalize Provider Tool Semantic Transcript Content](adr/0167-normalize-provider-tool-semantic-transcript.md)
 - [ADR-0168: Use Single Durable Events for Provider Tool Items](adr/0168-use-single-provider-tool-events.md)
 - [ADR-0169: Read Subscription Usage Through Provider Integrations](adr/0169-integration-scoped-subscription-usage.md)
+- [ADR-0170: Project Subscription Usage from the Selected Composer Model](adr/0170-project-subscription-usage-from-selected-model.md)
 
 ## Issues (Bug Tracking)
 
