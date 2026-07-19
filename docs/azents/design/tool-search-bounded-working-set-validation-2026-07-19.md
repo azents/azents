@@ -84,9 +84,9 @@ uv run pytest -q
 Results:
 
 - Ruff: passed
-- Format check: 986 files already formatted
+- Format check: 987 files already formatted
 - Pyright: 0 errors
-- Pytest: 1,712 passed, 400 skipped, 5 existing dependency warnings
+- Pytest: 1,714 passed, 400 skipped, 5 existing dependency warnings
 
 ### Public OpenAPI and Generated Clients
 
@@ -188,7 +188,7 @@ The E2E reads AIMock request journals rather than inferring membership only from
 | Requirement | Evidence | Result |
 | --- | --- | --- |
 | New and existing Agents default to disabled | RDB default, migration server default, create input defaults, service forwarding tests | Passed |
-| Agent create/update/response API carries the setting | Public API models and mappers, OpenAPI, generated clients | Passed |
+| Agent create/update/response API carries and persists the setting | Public API and service mappers, deterministic repository write tests, OpenAPI, generated clients | Passed |
 | `RunRequest` uses the resolved Agent snapshot | Resolve propagation and runtime request tests | Passed |
 | Disabled mode exposes the complete catalog | Engine adapter integration test over deferred-classified service tools | Passed |
 | Disabled mode injects no `tool_search` and does not mutate state | Engine adapter request and execution assertions | Passed |
@@ -214,6 +214,10 @@ The E2E reads AIMock request journals rather than inferring membership only from
 ### Disabled compatibility behavior needed a separate runtime branch
 
 Simply leaving the working set empty would still have injected `tool_search`, hidden service tools, and applied provider budgets. The adapter now branches before budget resolution and state loading. Disabled Agents use the complete canonical executable catalog and the unwrapped client-tool executor.
+
+### The Agent repository initially dropped explicit Tool Search values
+
+The public API and Agent service carried `tool_search_enabled`, but the repository initially omitted it when constructing the RDB row and the partial update statement. Enabled creates therefore fell back to the database default `false`, which the Docker product-path CI exposed when the first request showed the deferred probe directly. Create and update now persist explicit values, and deterministic repository tests inspect both the mapped RDB object and SQL update parameters.
 
 ### Prepared executors initially retained routes outside the visible projection
 
