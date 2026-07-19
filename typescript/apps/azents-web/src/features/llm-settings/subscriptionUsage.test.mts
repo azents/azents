@@ -61,6 +61,7 @@ void test("unsupported and disabled integrations do not load usage", () => {
     isError: false,
     isFetching: false,
     isLoading: false,
+    lastSuccessfulSnapshot: null,
   };
   assert.deepEqual(projectSubscriptionUsageState("openai", true, query), {
     type: "IDLE",
@@ -78,6 +79,7 @@ void test("successful responses project to available and external states", () =>
       isError: false,
       isFetching: false,
       isLoading: false,
+      lastSuccessfulSnapshot: null,
     }),
     { type: "AVAILABLE", snapshot: available, refreshing: false },
   );
@@ -96,6 +98,7 @@ void test("successful responses project to available and external states", () =>
       isError: false,
       isFetching: true,
       isLoading: false,
+      lastSuccessfulSnapshot: null,
     }),
     { type: "EXTERNAL", snapshot: external, refreshing: true },
   );
@@ -107,6 +110,29 @@ void test("available data remains visible after a refresh error", () => {
     isError: true,
     isFetching: false,
     isLoading: false,
+    lastSuccessfulSnapshot: null,
+  });
+  assert.deepEqual(state, {
+    type: "STALE_ERROR",
+    snapshot: available,
+  });
+});
+
+void test("a typed unavailable refresh preserves the last successful snapshot", () => {
+  const state = projectSubscriptionUsageState("chatgpt_oauth", true, {
+    data: {
+      type: "unavailable",
+      integration_id: "integration-1",
+      provider: "chatgpt_oauth",
+      fetched_at: "2026-07-19T00:01:00Z",
+      message: "Subscription usage is temporarily unavailable.",
+      reason: "temporarily_unavailable",
+      retryable: true,
+    },
+    isError: false,
+    isFetching: false,
+    isLoading: false,
+    lastSuccessfulSnapshot: available,
   });
   assert.deepEqual(state, {
     type: "STALE_ERROR",
@@ -121,6 +147,7 @@ void test("an initial request failure is card-local unavailable state", () => {
       isError: true,
       isFetching: false,
       isLoading: false,
+      lastSuccessfulSnapshot: null,
     }),
     { type: "UNAVAILABLE", reason: null, retryable: true },
   );

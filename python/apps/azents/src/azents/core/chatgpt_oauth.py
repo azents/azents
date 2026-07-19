@@ -27,6 +27,11 @@ def resolve_chatgpt_usage_base_url() -> str:
     )
 
 
+def resolve_chatgpt_oauth_token_url() -> str:
+    """Resolve the non-secret ChatGPT OAuth token endpoint."""
+    return os.environ.get("AZ_CHATGPT_OAUTH_TOKEN_URL", CHATGPT_OAUTH_TOKEN_URL)
+
+
 def build_chatgpt_oauth_headers(*, account_id: str | None) -> dict[str, str]:
     """Build common ChatGPT backend client identity headers."""
     headers = {

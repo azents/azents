@@ -13,7 +13,6 @@ from azents.core.chatgpt_oauth import (
     CHATGPT_OAUTH_CLIENT_ID,
     CHATGPT_OAUTH_DEVICE_TOKEN_URL,
     CHATGPT_OAUTH_DEVICE_USER_CODE_URL,
-    CHATGPT_OAUTH_TOKEN_URL,
     ChatGPTOAuthConnectionMethod,
 )
 
@@ -30,9 +29,10 @@ from .data import (
 class ChatGPTOAuthClient:
     """ChatGPT OAuth endpoint invocation client."""
 
-    def __init__(self, http_client: httpx.AsyncClient) -> None:
-        """Inject HTTP client."""
+    def __init__(self, http_client: httpx.AsyncClient, *, token_url: str) -> None:
+        """Inject the HTTP client and OAuth token endpoint."""
         self._http_client = http_client
+        self._token_url = token_url
 
     async def request_device_user_code(
         self,
@@ -113,7 +113,7 @@ class ChatGPTOAuthClient:
         """Exchange Authorization code for token."""
         try:
             response = await self._http_client.post(
-                CHATGPT_OAUTH_TOKEN_URL,
+                self._token_url,
                 data={
                     "grant_type": "authorization_code",
                     "code": code,
@@ -139,7 +139,7 @@ class ChatGPTOAuthClient:
         """Refresh token using Refresh token grant."""
         try:
             response = await self._http_client.post(
-                CHATGPT_OAUTH_TOKEN_URL,
+                self._token_url,
                 data={
                     "grant_type": "refresh_token",
                     "refresh_token": refresh_token,
