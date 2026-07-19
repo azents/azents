@@ -214,10 +214,9 @@ class SubagentTerminalResultService:
 
 def _terminal_result_content(run: AgentRunState) -> str:
     """Return the user-safe terminal projection or a fixed status fallback."""
-    if run.terminal_result_message is not None:
-        message = run.terminal_result_message.strip()
-        if message:
-            return message
+    message = _sanitized_terminal_result_message(run)
+    if message is not None:
+        return message
     match run.status:
         case AgentRunStatus.COMPLETED:
             return "The agent run completed without a result message."
@@ -231,3 +230,17 @@ def _terminal_result_content(run: AgentRunState) -> str:
             return "The agent run was cancelled before completing."
         case _:
             raise ValueError("Terminal result content requires a terminal Run")
+
+
+def _sanitized_terminal_result_message(run: AgentRunState) -> str | None:
+    """Return safe terminal text after removing provider failure details."""
+    if run.terminal_result_message is None:
+        return None
+    message = run.terminal_result_message.strip()
+    if not message:
+        return None
+    if run.status is AgentRunStatus.FAILED and message.startswith(
+        "Model provider error:"
+    ):
+        return None
+    return message

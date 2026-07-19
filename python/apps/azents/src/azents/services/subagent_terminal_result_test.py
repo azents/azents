@@ -359,6 +359,35 @@ async def test_delivers_every_terminal_status_to_direct_parent(
     assert finalized.parent_result_enqueued_at is not None
 
 
+@pytest.mark.parametrize(
+    ("message", "expected_content"),
+    [
+        ("Safe runtime failure.", "Safe runtime failure."),
+        (
+            "Model provider error: provider-private detail",
+            "The agent run failed.",
+        ),
+    ],
+)
+async def test_failed_result_sanitizes_provider_details(
+    message: str,
+    expected_content: str,
+) -> None:
+    service, _store, _run_repository, mailbox_service = _service(
+        _run(AgentRunStatus.FAILED, message=message),
+    )
+
+    summary = await service.deliver_pending_for_source_session(
+        "child-session",
+        repair_source="terminal_boundary",
+    )
+
+    assert summary.enqueued == 1
+    assert mailbox_service.attempts == [
+        ("child-agent", "root-agent", _RUN_ID, expected_content)
+    ]
+
+
 async def test_delivery_is_durable_and_idempotent_across_repair_attempts() -> None:
     service, store, run_repository, mailbox_service = _service(
         _run(AgentRunStatus.COMPLETED, message="Done."),
