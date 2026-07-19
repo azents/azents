@@ -52,7 +52,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ChatView.tsx
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
 last_verified_at: 2026-07-19
-spec_version: 106
+spec_version: 107
 ---
 
 # Agent Execution Loop
@@ -180,12 +180,12 @@ followed by `false` for the full retry.
 
 Azents owns the lifecycle bounds for every streaming Responses call used by primary sampling,
 context compaction, and automatic Session title generation. The process configuration supplies one
-default policy; there are no provider-, model-, inference-profile-, Session-, or legacy-fallback
-overrides. The production defaults are:
+default policy. OpenRouter overrides only response-handle acquisition to 60 seconds; there are no
+model-, inference-profile-, Session-, or legacy-fallback overrides. The production defaults are:
 
 | Bound | Default | Activity rule |
 | --- | ---: | --- |
-| Connection establishment | 15 seconds | Expires while acquiring the provider response handle. |
+| Connection establishment | 15 seconds; 60 seconds for OpenRouter | Expires while acquiring the provider response handle. |
 | Parsed-event idle | 300 seconds | Resets after every parsed provider event, regardless of event type or payload. |
 | Absolute attempt | 1,800 seconds | Starts with response-handle acquisition and never resets. |
 | Provider close grace | 5 seconds | Bounds cooperative close before cleanup remains process-owned. |
@@ -908,6 +908,7 @@ updated by the user.
 
 ## Changelog
 
+- **2026-07-19** — v107. Extended OpenRouter response-handle acquisition to 60 seconds while preserving the common stream idle and absolute attempt bounds.
 - **2026-07-19** — v106. Replaced provider call/result durability with one provider-call event, canonical output-part attachments, and same-/cross-native replay without duplicated rich input.
 
 - **2026-07-18** (spec_version 105) — Promoted bounded provider-tool semantic input, output, references,
