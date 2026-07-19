@@ -28,6 +28,12 @@ from azents.engine.run.types import (
     FunctionToolError,
     FunctionToolResult,
 )
+from azents.engine.tooling.tool_search import (
+    CatalogTool,
+    ToolCatalogSource,
+    ToolExposure,
+    classify_tool_exposure,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -40,9 +46,28 @@ class ToolCatalog:
     """Tool catalog used by one run/turn of event loop."""
 
     tools: dict[str, FunctionTool]
+    entries: dict[str, CatalogTool]
     static_prompt_fragment_inputs: list[ToolkitPromptInput]
     dynamic_prompt_fragment_inputs: list[ToolkitPromptInput]
     active_toolkit_bindings: list[ToolkitBinding]
+
+    @property
+    def direct_tool_names(self) -> list[str]:
+        """Return direct tool names in canonical order."""
+        return sorted(
+            name
+            for name, entry in self.entries.items()
+            if entry.exposure == ToolExposure.DIRECT
+        )
+
+    @property
+    def deferred_tool_names(self) -> list[str]:
+        """Return deferred tool names in canonical order."""
+        return sorted(
+            name
+            for name, entry in self.entries.items()
+            if entry.exposure == ToolExposure.DEFERRED
+        )
 
     @property
     def prompt_fragment_inputs(self) -> list[ToolkitPromptInput]:
@@ -73,13 +98,27 @@ def extend_tool_catalog(
 ) -> ToolCatalog:
     """Return a catalog extended with collision-checked auto-bound tools."""
     tools = dict(catalog.tools)
+    entries = dict(catalog.entries)
+    source = ToolCatalogSource(
+        slug="builtin",
+        toolkit_type=None,
+        toolkit_class="RuntimeBuiltinTool",
+        display_name="Runtime",
+        use_prefix=False,
+    )
     for tool in additional_tools:
         name = tool.spec.name
         if name in tools:
             raise ValueError(f"Tool name is already bound: {name}")
         tools[name] = tool
+        entries[name] = CatalogTool(
+            tool=tool,
+            source=source,
+            exposure=ToolExposure.DIRECT,
+        )
     return ToolCatalog(
         tools=tools,
+        entries=entries,
         static_prompt_fragment_inputs=catalog.static_prompt_fragment_inputs,
         dynamic_prompt_fragment_inputs=catalog.dynamic_prompt_fragment_inputs,
         active_toolkit_bindings=catalog.active_toolkit_bindings,
@@ -93,6 +132,7 @@ async def build_tool_catalog(
 ) -> ToolCatalog:
     """Collect Toolkit state and build event tool catalog."""
     tools: dict[str, FunctionTool] = {}
+    entries: dict[str, CatalogTool] = {}
     static_prompt_fragment_inputs: list[ToolkitPromptInput] = []
     dynamic_prompt_fragment_inputs: list[ToolkitPromptInput] = []
     active_toolkit_bindings: list[ToolkitBinding] = []
@@ -140,18 +180,43 @@ async def build_tool_catalog(
                     content=dynamic_prompt,
                 )
             )
-        bound_tools: list[FunctionTool] = []
+        source = _tool_catalog_source(binding)
         for tool in state.tools:
             bound = (
                 tool.with_prefix(f"{binding.slug}__") if binding.use_prefix else tool
             )
-            bound_tools.append(bound)
             tools[bound.spec.name] = bound
+            entries[bound.spec.name] = CatalogTool(
+                tool=bound,
+                source=source,
+                exposure=classify_tool_exposure(
+                    source=source,
+                    original_tool_name=tool.spec.name,
+                ),
+            )
     return ToolCatalog(
         tools=tools,
+        entries=entries,
         static_prompt_fragment_inputs=static_prompt_fragment_inputs,
         dynamic_prompt_fragment_inputs=dynamic_prompt_fragment_inputs,
         active_toolkit_bindings=active_toolkit_bindings,
+    )
+
+
+def _tool_catalog_source(binding: ToolkitBinding) -> ToolCatalogSource:
+    """Retain searchable source and routing metadata for one Toolkit binding."""
+    routing_metadata: list[tuple[str, str]] = []
+    if binding.slug:
+        routing_metadata.append(("slug", binding.slug))
+    if binding.toolkit_type is not None:
+        routing_metadata.append(("toolkit_type", binding.toolkit_type))
+    return ToolCatalogSource(
+        slug=binding.slug,
+        toolkit_type=binding.toolkit_type,
+        toolkit_class=binding.toolkit.__class__.__name__,
+        display_name=binding.toolkit.display_name.strip(),
+        use_prefix=binding.use_prefix,
+        routing_metadata=tuple(routing_metadata),
     )
 
 
