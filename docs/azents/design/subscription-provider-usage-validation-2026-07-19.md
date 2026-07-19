@@ -232,8 +232,9 @@ Results:
 
 ## Safe Fixture and Journal Evidence
 
-The deterministic fixture uses fixed account identifiers only as provider-boundary scenario selectors.
-The selectors and test credentials are never copied into journal entries. Journal entries contain only:
+The deterministic fixture uses fixed provider account identifiers only as provider-boundary scenario
+selectors. The selectors and test credentials are never copied into journal entries. Journal entries
+contain only:
 
 - a normalized closed scenario label such as `chatgpt_normal` or `xai_transport`;
 - the URL path without query values;
@@ -241,11 +242,12 @@ The selectors and test credentials are never copied into journal entries. Journa
 - an integer status or the safe `transport_close` classification;
 - booleans recording whether required headers were present.
 
-Direct proxy assertions reject token values, refresh-token values, account identifiers, emails, provider
-financial source values, provider plan values, trusted and rejected redirect values, and header values.
+Direct proxy assertions reject token values, refresh-token values, provider account identifiers, emails,
+provider financial source values, provider plan values, trusted and rejected redirect values, and header
+values.
 The journal never records provider request bodies or response payloads.
 
-Product API tests additionally reject deterministic credentials and account metadata from normalized API
+Product API tests additionally reject deterministic credentials and provider account metadata from normalized API
 responses and subscription-usage service logs. Required Docker-backed CI executed and passed those
 assertions.
 
@@ -294,7 +296,7 @@ billing mutation was added.
 | Initial failure is local; failed refresh preserves stale success | Frontend tests, Storybook, and browser scenario passed | Match |
 | Usage failures do not change entitlement or enabled state | Service/adapter tests and xAI 403 product assertion passed | Match |
 | Existing OAuth refresh lifecycle remains authoritative | ChatGPT/xAI runtime tests passed; deterministic token endpoints preserve production defaults | Match |
-| No credentials, account identifiers, provider bodies, redirects, or unauthorized financial values enter logs | Unit/proxy and product structured-log assertions passed | Match |
+| No credentials, provider account identifiers, provider bodies, redirects, or unauthorized financial values enter logs | Unit/proxy and product structured-log assertions passed | Match |
 
 ## Current Living Spec Comparison Before Promotion
 
