@@ -23,7 +23,6 @@ from azents.engine.events.types import (
     InterruptedPayload,
     OutputTextPart,
     ProviderToolCallPayload,
-    ProviderToolResultPayload,
     ReasoningPayload,
     RunMarkerPayload,
     SkillLoadedPayload,
@@ -67,8 +66,6 @@ def _validate_payload(row: RDBEvent) -> EventPayload:
             return ClientToolResultPayload.model_validate(row.payload)
         case EventKind.PROVIDER_TOOL_CALL:
             return ProviderToolCallPayload.model_validate(row.payload)
-        case EventKind.PROVIDER_TOOL_RESULT:
-            return ProviderToolResultPayload.model_validate(row.payload)
         case EventKind.TURN_MARKER:
             return TurnMarkerPayload.model_validate(row.payload)
         case EventKind.RUN_MARKER:
@@ -214,8 +211,7 @@ def _to_chat_message(row: RDBEvent) -> ChatMessage | None:
                     )
                 ],
                 tool_call_id=None,
-                attachments=_attachments(payload.attachments)
-                + _output_part_attachments(payload.semantic.output),
+                attachments=_output_part_attachments(payload.semantic.output),
                 reasoning_summary=None,
                 usage=None,
                 metadata={"status": payload.status or "unknown"},
@@ -229,23 +225,7 @@ def _to_chat_message(row: RDBEvent) -> ChatMessage | None:
                 content=_tool_output_text(payload.output),
                 tool_calls=None,
                 tool_call_id=payload.call_id,
-                attachments=_attachments(payload.attachments)
-                + _output_part_attachments(payload.output),
-                reasoning_summary=None,
-                usage=None,
-                metadata={"status": payload.status},
-                created_at=row.created_at,
-            )
-        case ProviderToolResultPayload():
-            return ChatMessage(
-                id=row.id,
-                session_id=row.session_id,
-                role=MessageRole.ASSISTANT,
-                content=render_provider_tool_semantic(payload),
-                tool_calls=None,
-                tool_call_id=payload.call_id,
-                attachments=_attachments(payload.attachments)
-                + _output_part_attachments(payload.semantic.output),
+                attachments=_output_part_attachments(payload.output),
                 reasoning_summary=None,
                 usage=None,
                 metadata={"status": payload.status},

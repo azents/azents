@@ -25,9 +25,16 @@ _REFERENCE_METADATA_KEY_MAX_CHARS = 100
 _REFERENCE_METADATA_VALUE_MAX_CHARS = 1000
 _TRUNCATION_SUFFIX = "... [truncated]"
 
-ProviderToolCallStatus = Literal["running", "completed", "failed"] | None
-ProviderToolResultStatus = Literal["completed", "failed", "cancelled", "interrupted"]
-ProviderToolStatus = ProviderToolCallStatus | ProviderToolResultStatus
+ProviderToolStatus = (
+    Literal[
+        "running",
+        "completed",
+        "failed",
+        "cancelled",
+        "interrupted",
+    ]
+    | None
+)
 SemanticExtractor = Callable[[dict[str, object]], ProviderToolSemanticContent]
 NameExtractor = Callable[[dict[str, object]], str]
 
@@ -36,10 +43,7 @@ NameExtractor = Callable[[dict[str, object]], str]
 class ResponsesProviderToolSpec:
     """One recognized Responses hosted-tool output item contract."""
 
-    event_kind: Literal[
-        EventKind.PROVIDER_TOOL_CALL,
-        EventKind.PROVIDER_TOOL_RESULT,
-    ]
+    event_kind: Literal[EventKind.PROVIDER_TOOL_CALL]
     name: str | NameExtractor
     extract: SemanticExtractor
 
@@ -54,10 +58,7 @@ class ResponsesProviderToolSpec:
 class NormalizedProviderToolItem:
     """Provider-neutral durable hosted-tool item fields."""
 
-    event_kind: Literal[
-        EventKind.PROVIDER_TOOL_CALL,
-        EventKind.PROVIDER_TOOL_RESULT,
-    ]
+    event_kind: Literal[EventKind.PROVIDER_TOOL_CALL]
     name: str
     semantic: ProviderToolSemanticContent
 

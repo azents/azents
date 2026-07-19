@@ -13,7 +13,6 @@ from azents.engine.events.types import (
     OutputTextPart,
     ProviderToolCallPayload,
     ProviderToolReference,
-    ProviderToolResultPayload,
     ProviderToolSemanticContent,
     UserMessagePayload,
     build_native_compat_key,
@@ -161,7 +160,6 @@ def test_provider_tool_call_projects_semantic_output_and_references() -> None:
                 )
             ],
         ),
-        attachments=[],
         native_artifact=_native_artifact(),
     )
     row = RDBEvent(
@@ -184,9 +182,9 @@ def test_provider_tool_call_projects_semantic_output_and_references() -> None:
     assert "References:\n- url: https://example.com/source" in message.content
 
 
-def test_provider_tool_result_projects_semantic_input_output_and_references() -> None:
-    """REST message projection preserves complete provider-result semantics."""
-    provider_payload = ProviderToolResultPayload(
+def test_provider_tool_call_projects_semantic_input_output_and_references() -> None:
+    """REST message projection preserves complete provider-call semantics."""
+    provider_payload = ProviderToolCallPayload(
         call_id="result-search",
         name="file_search",
         status="completed",
@@ -203,12 +201,11 @@ def test_provider_tool_result_projects_semantic_input_output_and_references() ->
                 )
             ],
         ),
-        attachments=[],
         native_artifact=_native_artifact(),
     )
     row = RDBEvent(
         session_id="session-1",
-        kind=EventKind.PROVIDER_TOOL_RESULT,
+        kind=EventKind.PROVIDER_TOOL_CALL,
         payload=_JSON_PAYLOAD_ADAPTER.validate_python(
             provider_payload.model_dump(mode="json", exclude_none=True)
         ),

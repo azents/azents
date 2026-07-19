@@ -61,6 +61,7 @@ from azents.engine.events.types import (
     AgentMessagePayload,
     AssistantMessagePayload,
     Attachment,
+    AttachmentOutputPart,
     ClientToolCallPayload,
     ClientToolResultPayload,
     CompactionSummaryPayload,
@@ -74,7 +75,6 @@ from azents.engine.events.types import (
     OutputTextPart,
     ProviderToolCallPayload,
     ProviderToolReference,
-    ProviderToolResultPayload,
     ProviderToolSemanticContent,
     ReasoningPayload,
     RunMarkerPayload,
@@ -956,8 +956,8 @@ class TestLiteLLMResponsesLowerer:
         )
         transcript = [
             _event(
-                EventKind.PROVIDER_TOOL_RESULT,
-                ProviderToolResultPayload(
+                EventKind.PROVIDER_TOOL_CALL,
+                ProviderToolCallPayload(
                     call_id="image-call-1",
                     name="image_generation",
                     status="completed",
@@ -970,11 +970,17 @@ class TestLiteLLMResponsesLowerer:
                                 name="generated.jpg",
                                 size=123,
                                 kind="image",
-                            )
+                            ),
+                            AttachmentOutputPart(
+                                attachment_id="attachment-1",
+                                uri="exchange://generated-image",
+                                name="generated.jpg",
+                                media_type="image/jpeg",
+                                size=123,
+                            ),
                         ],
                         references=[],
                     ),
-                    attachments=[],
                     native_artifact=_artifact(
                         {
                             "type": "image_generation_call",
@@ -998,13 +1004,24 @@ class TestLiteLLMResponsesLowerer:
         }
         if provider_id != LLMProvider.CHATGPT_OAUTH:
             expected_item["id"] = "image-call-1"
-        assert request.input == [expected_item]
+        assert request.input == [
+            expected_item,
+            {
+                "role": "assistant",
+                "content": (
+                    "[Provider tool call: image_generation completed]\n"
+                    "Output:\n"
+                    "Attachment: generated.jpg (image/jpeg, 123 bytes)\n"
+                    "URI: exchange://generated-image"
+                ),
+            },
+        ]
         assert request.kwargs.get("store") is (
             False if provider_id == LLMProvider.CHATGPT_OAUTH else None
         )
 
     def test_cross_adapter_image_generation_uses_rich_file_fallback(self) -> None:
-        """Lower incompatible generated output through shared image policy."""
+        """Lower incompatible generated output with rich image and URI context."""
         capabilities = ModelCapabilities(
             modalities=ModelModalities(input=[ModelModality.IMAGE])
         )
@@ -1020,8 +1037,8 @@ class TestLiteLLMResponsesLowerer:
         )
         transcript = [
             _event(
-                EventKind.PROVIDER_TOOL_RESULT,
-                ProviderToolResultPayload(
+                EventKind.PROVIDER_TOOL_CALL,
+                ProviderToolCallPayload(
                     call_id="image-call-1",
                     name="image_generation",
                     status="completed",
@@ -1034,11 +1051,17 @@ class TestLiteLLMResponsesLowerer:
                                 name="generated.jpg",
                                 size=123,
                                 kind="image",
-                            )
+                            ),
+                            AttachmentOutputPart(
+                                attachment_id="attachment-1",
+                                uri="exchange://generated-image",
+                                name="generated.jpg",
+                                media_type="image/jpeg",
+                                size=123,
+                            ),
                         ],
                         references=[],
                     ),
-                    attachments=[],
                     native_artifact=_openai_artifact(
                         {
                             "type": "image_generation_call",
@@ -1058,7 +1081,12 @@ class TestLiteLLMResponsesLowerer:
                 "content": [
                     {
                         "type": "input_text",
-                        "text": "[Provider tool result: image_generation completed]",
+                        "text": (
+                            "[Provider tool call: image_generation completed]\n"
+                            "Output:\n"
+                            "Attachment: generated.jpg (image/jpeg, 123 bytes)\n"
+                            "URI: exchange://generated-image"
+                        ),
                     },
                     {
                         "type": "input_image",
@@ -1074,8 +1102,8 @@ class TestLiteLLMResponsesLowerer:
         lowerer = LiteLLMResponsesLowerer(provider="openai", model="text-only")
         transcript = [
             _event(
-                EventKind.PROVIDER_TOOL_RESULT,
-                ProviderToolResultPayload(
+                EventKind.PROVIDER_TOOL_CALL,
+                ProviderToolCallPayload(
                     call_id="image-call-1",
                     name="image_generation",
                     status="completed",
@@ -1092,7 +1120,6 @@ class TestLiteLLMResponsesLowerer:
                         ],
                         references=[],
                     ),
-                    attachments=[],
                     native_artifact=_openai_artifact(
                         {
                             "type": "image_generation_call",
@@ -1109,7 +1136,7 @@ class TestLiteLLMResponsesLowerer:
         assert request.input[0]["content"] == [
             {
                 "type": "input_text",
-                "text": "[Provider tool result: image_generation completed]",
+                "text": "[Provider tool call: image_generation completed]",
             },
             {
                 "type": "input_text",
@@ -1338,7 +1365,6 @@ class TestLiteLLMResponsesLowerer:
                         output=[],
                         references=[],
                     ),
-                    attachments=[],
                     native_artifact=_artifact(raw_item),
                 ),
             )
@@ -1360,8 +1386,8 @@ class TestLiteLLMResponsesLowerer:
         }
         transcript = [
             _event(
-                EventKind.PROVIDER_TOOL_RESULT,
-                ProviderToolResultPayload(
+                EventKind.PROVIDER_TOOL_CALL,
+                ProviderToolCallPayload(
                     call_id="img-1",
                     name="image_generation",
                     status="completed",
@@ -1370,7 +1396,6 @@ class TestLiteLLMResponsesLowerer:
                         output="Generated image",
                         references=[],
                     ),
-                    attachments=[],
                     native_artifact=_artifact(raw_item),
                 ),
             )
@@ -1988,13 +2013,12 @@ class TestLiteLLMResponsesLowerer:
                             )
                         ],
                     ),
-                    attachments=[],
                     native_artifact=_artifact({"type": "web_search_call"}),
                 ),
             ),
             _event(
-                EventKind.PROVIDER_TOOL_RESULT,
-                ProviderToolResultPayload(
+                EventKind.PROVIDER_TOOL_CALL,
+                ProviderToolCallPayload(
                     call_id="img-1",
                     name="image_generation",
                     status="completed",
@@ -2013,7 +2037,6 @@ class TestLiteLLMResponsesLowerer:
                             )
                         ],
                     ),
-                    attachments=[],
                     native_artifact=_artifact({"type": "image_generation_call"}),
                 ),
             ),
@@ -2038,7 +2061,7 @@ class TestLiteLLMResponsesLowerer:
             {
                 "role": "assistant",
                 "content": (
-                    "[Provider tool result: image_generation completed]\n"
+                    "[Provider tool call: image_generation completed]\n"
                     "Input:\n"
                     "generate a diagram\n"
                     "Output:\n"
@@ -3409,7 +3432,6 @@ class TestLiteLLMResponsesOutputNormalizer:
         provider_tool_call = output.events[4].payload
         assert isinstance(provider_tool_call, ProviderToolCallPayload)
         assert provider_tool_call.output == []
-        assert provider_tool_call.attachments == []
         assert "result" not in provider_tool_call.native_artifact.item
         assert len(output.pending_provider_files) == 1
         pending = output.pending_provider_files[0]

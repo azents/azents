@@ -387,14 +387,10 @@ def _assert_success_result(
         payload.get("output"),
         label="client result output",
     )
-    attachments = json_object_list_payload(
-        payload.get("attachments"),
-        label="client result attachments",
-    )
+    assert "attachments" not in payload
     assert len(output) == 2
     assert output[0].get("kind") == "image"
     assert isinstance(output[0].get("model_file_id"), str)
-    assert attachments == []
     attachment = output[1]
     assert attachment.get("type") == "attachment"
     assert attachment.get("availability") == "available"
@@ -627,7 +623,7 @@ class TestXaiImageGeneration:
             label="failed client result",
         )
         assert payload.get("status") == "failed"
-        assert payload.get("attachments") == []
+        assert "attachments" not in payload
         assert payload.get("output") == [
             {
                 "type": "text",

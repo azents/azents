@@ -27,7 +27,6 @@ from azents.engine.events.types import (
     Event,
     FileOutputPart,
     ProviderToolCallPayload,
-    ProviderToolResultPayload,
 )
 from azents.engine.run.errors import ModelCallError
 from azents.repos.exchange_file import exchange_file_object_key
@@ -607,7 +606,7 @@ class ProviderOutputMaterializer:
         for event in normalized.events:
             payload = event.payload
             if not (
-                isinstance(payload, ProviderToolCallPayload | ProviderToolResultPayload)
+                isinstance(payload, ProviderToolCallPayload)
                 and payload.name == "image_generation"
                 and payload.call_id in by_call_id
             ):

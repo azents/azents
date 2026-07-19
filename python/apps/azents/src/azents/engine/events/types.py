@@ -321,9 +321,17 @@ class ProviderToolCallPayload(BaseModel):
 
     call_id: str = Field(min_length=1)
     name: str = Field(min_length=1)
-    status: Literal["running", "completed", "failed"] | None
+    status: (
+        Literal[
+            "running",
+            "completed",
+            "failed",
+            "cancelled",
+            "interrupted",
+        ]
+        | None
+    )
     semantic: ProviderToolSemanticContent
-    attachments: list[Attachment]
     native_artifact: NativeArtifact = Field(description="Native artifact")
 
     @model_serializer(mode="wrap")
@@ -356,46 +364,12 @@ class ClientToolResultPayload(BaseModel):
     name: str | None = Field(default=None)
     status: Literal["completed", "failed", "cancelled", "interrupted"]
     output: ToolOutput = Field(default_factory=list)
-    attachments: list[Attachment] = Field(default_factory=list)
     metadata: JSONObject = Field(default_factory=dict)
     pending_generated_files: list[PendingGeneratedFileOutput] = Field(
         default_factory=list,
         exclude=True,
         repr=False,
     )
-
-
-class ProviderToolResultPayload(BaseModel):
-    """Provider hosted tool result payload."""
-
-    model_config = ConfigDict(frozen=True)
-
-    call_id: str = Field(min_length=1)
-    name: str | None
-    status: Literal["completed", "failed", "cancelled", "interrupted"]
-    semantic: ProviderToolSemanticContent
-    attachments: list[Attachment]
-    native_artifact: NativeArtifact = Field(description="Native artifact")
-
-    @model_serializer(mode="wrap")
-    def serialize_required_nullable_fields(
-        self,
-        handler: SerializerFunctionWrapHandler,
-    ) -> dict[str, object]:
-        """Preserve explicit nullable result name in canonical JSON."""
-        serialized: dict[str, object] = handler(self)
-        serialized["name"] = self.name
-        return serialized
-
-    @property
-    def arguments(self) -> str | None:
-        """Return semantic input during staged consumer migration."""
-        return self.semantic.input
-
-    @property
-    def output(self) -> ToolOutput:
-        """Return semantic output during staged consumer migration."""
-        return self.semantic.output
 
 
 class TokenUsagePayload(BaseModel):
@@ -573,7 +547,6 @@ EventPayload = (
     | ClientToolCallPayload
     | ClientToolResultPayload
     | ProviderToolCallPayload
-    | ProviderToolResultPayload
     | TurnMarkerPayload
     | RunMarkerPayload
     | InterruptedPayload
@@ -602,7 +575,6 @@ PAYLOAD_BY_KIND: dict[EventKind, type[BaseModel]] = {
     EventKind.CLIENT_TOOL_CALL: ClientToolCallPayload,
     EventKind.CLIENT_TOOL_RESULT: ClientToolResultPayload,
     EventKind.PROVIDER_TOOL_CALL: ProviderToolCallPayload,
-    EventKind.PROVIDER_TOOL_RESULT: ProviderToolResultPayload,
     EventKind.TURN_MARKER: TurnMarkerPayload,
     EventKind.RUN_MARKER: RunMarkerPayload,
     EventKind.INTERRUPTED: InterruptedPayload,
@@ -633,7 +605,6 @@ NATIVE_ARTIFACT_REQUIRED_KINDS = frozenset(
         EventKind.REASONING,
         EventKind.CLIENT_TOOL_CALL,
         EventKind.PROVIDER_TOOL_CALL,
-        EventKind.PROVIDER_TOOL_RESULT,
         EventKind.UNKNOWN_ADAPTER_OUTPUT,
     }
 )
@@ -671,7 +642,6 @@ class Event(BaseModel):
             | ReasoningPayload
             | ClientToolCallPayload
             | ProviderToolCallPayload
-            | ProviderToolResultPayload
             | UnknownAdapterOutputPayload,
         )
         if self.kind in NATIVE_ARTIFACT_REQUIRED_KINDS and not has_artifact:

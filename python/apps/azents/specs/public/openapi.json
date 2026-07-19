@@ -11899,7 +11899,6 @@
           "client_tool_call",
           "client_tool_result",
           "provider_tool_call",
-          "provider_tool_result",
           "turn_marker",
           "run_marker",
           "interrupted",

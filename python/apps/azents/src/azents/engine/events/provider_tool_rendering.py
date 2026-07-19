@@ -1,31 +1,24 @@
 """Provider-neutral hosted-tool semantic rendering."""
 
 import json
-from typing import assert_never
 
 from azents.engine.events.output_parts import lower_output_to_text
 from azents.engine.events.types import (
     ProviderToolCallPayload,
     ProviderToolReference,
-    ProviderToolResultPayload,
 )
 
 
 def render_provider_tool_semantic(
-    payload: ProviderToolCallPayload | ProviderToolResultPayload,
+    payload: ProviderToolCallPayload,
 ) -> str:
     """Render canonical provider-tool semantics as deterministic readable text."""
-    match payload:
-        case ProviderToolCallPayload(name=name, status=status, semantic=semantic):
-            event_label = "call"
-        case ProviderToolResultPayload(name=name, status=status, semantic=semantic):
-            event_label = "result"
-        case _:
-            assert_never(payload)
-
+    name = payload.name
+    status = payload.status
+    semantic = payload.semantic
     rendered_name = name or "unknown"
     status_suffix = f" {status}" if status is not None else ""
-    lines = [f"[Provider tool {event_label}: {rendered_name}{status_suffix}]"]
+    lines = [f"[Provider tool call: {rendered_name}{status_suffix}]"]
     if semantic.input:
         lines.extend(["Input:", semantic.input])
 

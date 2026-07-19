@@ -8,7 +8,6 @@ from azents.engine.events.types import (
     OutputTextPart,
     ProviderToolCallPayload,
     ProviderToolReference,
-    ProviderToolResultPayload,
     ProviderToolSemanticContent,
     build_native_compat_key,
 )
@@ -53,7 +52,6 @@ def test_render_provider_tool_call_includes_all_semantic_axes() -> None:
                 )
             ],
         ),
-        attachments=[],
         native_artifact=_native_artifact(),
     )
 
@@ -72,17 +70,16 @@ def test_render_provider_tool_call_includes_all_semantic_axes() -> None:
     )
 
 
-def test_render_provider_tool_result_preserves_empty_semantic_identity() -> None:
+def test_render_provider_tool_call_preserves_empty_semantic_identity() -> None:
     """Render name and status even when the provider exposed no semantic body."""
-    payload = ProviderToolResultPayload(
+    payload = ProviderToolCallPayload(
         call_id="call-image",
-        name=None,
+        name="image_generation",
         status="failed",
         semantic=ProviderToolSemanticContent(input=None, output=[], references=[]),
-        attachments=[],
         native_artifact=_native_artifact(),
     )
 
     assert render_provider_tool_semantic(payload) == (
-        "[Provider tool result: unknown failed]"
+        "[Provider tool call: image_generation failed]"
     )

@@ -11,7 +11,6 @@ from azents.engine.events.types import (
     OutputTextPart,
     ProviderToolCallPayload,
     ProviderToolReference,
-    ProviderToolResultPayload,
     ProviderToolSemanticContent,
     build_native_compat_key,
 )
@@ -72,7 +71,7 @@ def test_collect_event_result_reads_event_assistant_output() -> None:
 
 
 def test_collect_event_result_preserves_provider_call_and_result_semantics() -> None:
-    """Collect semantic input, output, and references from both provider events."""
+    """Collect semantic input, output, and references from provider events."""
     semantic = ProviderToolSemanticContent(
         input='{"query":"Azents"}',
         output=[OutputTextPart(text="provider output")],
@@ -97,7 +96,6 @@ def test_collect_event_result_preserves_provider_call_and_result_semantics() -> 
                 name="web_search",
                 status="completed",
                 semantic=semantic,
-                attachments=[],
                 native_artifact=_native_artifact(),
             ),
             created_at=now,
@@ -105,13 +103,12 @@ def test_collect_event_result_preserves_provider_call_and_result_semantics() -> 
         Event(
             id="2" * 32,
             session_id="session-1",
-            kind=EventKind.PROVIDER_TOOL_RESULT,
-            payload=ProviderToolResultPayload(
+            kind=EventKind.PROVIDER_TOOL_CALL,
+            payload=ProviderToolCallPayload(
                 call_id="result-1",
                 name="file_search",
                 status="completed",
                 semantic=semantic,
-                attachments=[],
                 native_artifact=_native_artifact(),
             ),
             created_at=now,
@@ -125,7 +122,7 @@ def test_collect_event_result_preserves_provider_call_and_result_semantics() -> 
 
     assert len(texts) == 2
     assert texts[0].startswith("[Provider tool call: web_search completed]")
-    assert texts[1].startswith("[Provider tool result: file_search completed]")
+    assert texts[1].startswith("[Provider tool call: file_search completed]")
     assert all('Input:\n{"query":"Azents"}' in text for text in texts)
     assert all("Output:\nprovider output" in text for text in texts)
     assert all(

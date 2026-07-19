@@ -24,7 +24,6 @@ from azents.engine.events.types import (
     OutputTextPart,
     ProviderToolCallPayload,
     ProviderToolReference,
-    ProviderToolResultPayload,
     ProviderToolSemanticContent,
     build_native_compat_key,
 )
@@ -66,19 +65,12 @@ def _semantic() -> ProviderToolSemanticContent:
     )
 
 
-def _event(
-    payload: ProviderToolCallPayload | ProviderToolResultPayload,
-) -> Event:
+def _event(payload: ProviderToolCallPayload) -> Event:
     """Wrap a provider-tool payload as a durable event."""
-    kind = (
-        EventKind.PROVIDER_TOOL_CALL
-        if isinstance(payload, ProviderToolCallPayload)
-        else EventKind.PROVIDER_TOOL_RESULT
-    )
     return Event(
         id="0" * 32,
         session_id="session-1",
-        kind=kind,
+        kind=EventKind.PROVIDER_TOOL_CALL,
         payload=payload,
         created_at=datetime.datetime.now(datetime.UTC),
     )
@@ -93,27 +85,25 @@ def _event(
                 name="web_search",
                 status="completed",
                 semantic=_semantic(),
-                attachments=[],
                 native_artifact=_native_artifact(),
             )
         ),
         _event(
-            ProviderToolResultPayload(
-                call_id="result-1",
+            ProviderToolCallPayload(
+                call_id="interrupted-1",
                 name="file_search",
-                status="completed",
+                status="interrupted",
                 semantic=_semantic(),
-                attachments=[],
                 native_artifact=_native_artifact(),
             )
         ),
     ],
-    ids=["call", "result"],
+    ids=["completed", "interrupted"],
 )
 def test_provider_tool_consumers_share_the_semantic_renderer(event: Event) -> None:
     """Summary, continuity, and token estimation use the same semantic text."""
     payload = event.payload
-    assert isinstance(payload, ProviderToolCallPayload | ProviderToolResultPayload)
+    assert isinstance(payload, ProviderToolCallPayload)
     rendered = render_provider_tool_semantic(payload)
 
     assert _render_event_for_summary(event) == rendered

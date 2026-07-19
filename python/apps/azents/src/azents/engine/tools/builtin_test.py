@@ -1803,7 +1803,6 @@ class TestProcessToolHandler:
                         status="completed",
                         output=tool_output.output,
                         metadata=tool_output.metadata,
-                        attachments=[],
                     ),
                     created_at=datetime.now(UTC),
                 )

@@ -30,7 +30,6 @@ from azents.engine.events.types import (
     NativeArtifact,
     OutputTextPart,
     ProviderToolCallPayload,
-    ProviderToolResultPayload,
     ReasoningPayload,
     UserContentPart,
     UserMessagePayload,
@@ -231,7 +230,6 @@ def _provider_tool_activity_live_event(
             name=name,
             status=status,
             semantic=provider_tool_semantic_input_content(arguments),
-            attachments=[],
             native_artifact=_live_native_artifact(
                 projection="provider_tool_call",
                 source="provider_tool_activity",
@@ -614,7 +612,7 @@ class BaseLiveEventStore:
                     await self.remove(event.session_id, live_event.id)
         elif isinstance(
             event.payload,
-            ProviderToolCallPayload | ProviderToolResultPayload,
+            ProviderToolCallPayload,
         ):
             await self.remove(
                 event.session_id,
