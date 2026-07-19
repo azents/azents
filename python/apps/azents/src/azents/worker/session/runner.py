@@ -198,7 +198,7 @@ class SessionRunner:
         """Wake next turn only when pending buffer remains after Stop."""
         if not self.stop_controller.user_stop_requested:
             return
-        has_pending = self.input_buffer_service.has_pending_session_input_buffers
+        has_pending = self.input_buffer_service.has_pending_wake_session_input_buffers
         if not await has_pending(message.session_id):
             discarded = self.inbox.discard_wake_ups(message.session_id)
             if discarded:
@@ -280,7 +280,9 @@ class SessionRunner:
             return True
         if await self._has_pending_command(session_id):
             return True
-        has_pending_input = self.input_buffer_service.has_pending_session_input_buffers
+        has_pending_input = (
+            self.input_buffer_service.has_pending_wake_session_input_buffers
+        )
         return await has_pending_input(session_id)
 
     async def _has_pending_command(self, session_id: str) -> bool:

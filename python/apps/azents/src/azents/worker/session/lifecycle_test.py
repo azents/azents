@@ -8,7 +8,11 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.types import SessionBroker
-from azents.core.enums import AgentRunPhase, AgentRunStatus
+from azents.core.enums import (
+    AgentRunPhase,
+    AgentRunStatus,
+    InputBufferSchedulingMode,
+)
 from azents.engine.events.types import AgentRunState
 from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import AgentRunRepository
@@ -112,19 +116,22 @@ class _AgentSessionRepository:
 class _InputBufferRepository:
     """InputBufferRepository test double."""
 
-    def __init__(self, pending: bool) -> None:
-        self.pending = pending
+    def __init__(
+        self,
+        pending_scheduling_modes: set[InputBufferSchedulingMode],
+    ) -> None:
+        self.pending_scheduling_modes = pending_scheduling_modes
 
-    async def list_for_flush(
+    async def has_by_session_id_and_scheduling_mode(
         self,
         session: AsyncSession,
-        session_id: str,
         *,
-        limit: int | None = None,
-    ) -> list[object]:
-        """Return the configured queue state at the idle boundary."""
-        del session, session_id, limit
-        return [object()] if self.pending else []
+        session_id: str,
+        scheduling_mode: InputBufferSchedulingMode,
+    ) -> bool:
+        """Return whether the requested scheduling mode is pending."""
+        del session, session_id
+        return scheduling_mode in self.pending_scheduling_modes
 
 
 class _AgentRunRepository:
@@ -245,7 +252,7 @@ def _service(
     *,
     agent_run_repository: _AgentRunRepository,
     agent_session_repository: _AgentSessionRepository,
-    pending_input: bool,
+    pending_scheduling_modes: set[InputBufferSchedulingMode],
 ) -> SessionLifecycleService:
     """Create SessionLifecycleService with test doubles."""
     return SessionLifecycleService(
@@ -258,7 +265,7 @@ def _service(
         agent_run_repository=cast(AgentRunRepository, agent_run_repository),
         input_buffer_repository=cast(
             InputBufferRepository,
-            _InputBufferRepository(pending_input),
+            _InputBufferRepository(pending_scheduling_modes),
         ),
     )
 
@@ -278,7 +285,7 @@ async def test_heartbeat_session_refreshes_db_and_active_owner_lease() -> None:
         agent_run_repository=cast(AgentRunRepository, _AgentRunRepository(None)),
         input_buffer_repository=cast(
             InputBufferRepository,
-            _InputBufferRepository(False),
+            _InputBufferRepository(set()),
         ),
     )
 
@@ -297,7 +304,7 @@ async def test_mark_session_idle_rejects_active_agent_run() -> None:
     service = _service(
         agent_run_repository=agent_run_repository,
         agent_session_repository=agent_session_repository,
-        pending_input=False,
+        pending_scheduling_modes=set(),
     )
 
     marked_idle = await service.mark_session_idle("session-001")
@@ -315,13 +322,30 @@ async def test_mark_session_idle_rechecks_queue_under_session_lock() -> None:
     service = _service(
         agent_run_repository=agent_run_repository,
         agent_session_repository=agent_session_repository,
-        pending_input=True,
+        pending_scheduling_modes={InputBufferSchedulingMode.WAKE_SESSION},
     )
 
     marked_idle = await service.mark_session_idle("session-001")
 
     assert not marked_idle
     assert agent_session_repository.idle_session_ids == []
+
+
+@pytest.mark.asyncio
+async def test_mark_session_idle_allows_queue_only_pending_input() -> None:
+    """Queue-only mailbox input does not keep a finished session running."""
+    agent_run_repository = _AgentRunRepository(None)
+    agent_session_repository = _AgentSessionRepository()
+    service = _service(
+        agent_run_repository=agent_run_repository,
+        agent_session_repository=agent_session_repository,
+        pending_scheduling_modes={InputBufferSchedulingMode.QUEUE_ONLY},
+    )
+
+    marked_idle = await service.mark_session_idle("session-001")
+
+    assert marked_idle
+    assert agent_session_repository.idle_session_ids == ["session-001"]
 
 
 @pytest.mark.asyncio
@@ -332,7 +356,7 @@ async def test_mark_session_idle_allows_terminal_run_boundary() -> None:
     service = _service(
         agent_run_repository=agent_run_repository,
         agent_session_repository=agent_session_repository,
-        pending_input=False,
+        pending_scheduling_modes=set(),
     )
 
     marked_idle = await service.mark_session_idle("session-001")
@@ -351,7 +375,7 @@ async def test_mark_session_idle_propagates_db_failure() -> None:
             active_lookup_error=RuntimeError("database unavailable"),
         ),
         agent_session_repository=_AgentSessionRepository(),
-        pending_input=False,
+        pending_scheduling_modes=set(),
     )
 
     with pytest.raises(RuntimeError, match="database unavailable"):
@@ -366,7 +390,7 @@ async def test_terminal_update_rejects_cross_session_run() -> None:
     service = _service(
         agent_run_repository=agent_run_repository,
         agent_session_repository=_AgentSessionRepository(),
-        pending_input=False,
+        pending_scheduling_modes=set(),
     )
 
     with pytest.raises(ValueError, match="AgentRun session mismatch"):
@@ -390,7 +414,7 @@ async def test_activate_pending_sets_initial_phase_before_commit() -> None:
     service = _service(
         agent_run_repository=agent_run_repository,
         agent_session_repository=_AgentSessionRepository(),
-        pending_input=False,
+        pending_scheduling_modes=set(),
     )
 
     run = await service.activate_pending_agent_run(
@@ -417,7 +441,7 @@ async def test_activate_pending_rejects_session_mismatch() -> None:
     service = _service(
         agent_run_repository=agent_run_repository,
         agent_session_repository=_AgentSessionRepository(),
-        pending_input=False,
+        pending_scheduling_modes=set(),
     )
 
     with pytest.raises(ValueError, match="AgentRun session mismatch"):

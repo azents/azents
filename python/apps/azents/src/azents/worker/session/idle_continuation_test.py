@@ -6,7 +6,11 @@ from typing import Any, cast
 import pytest
 
 from azents.broker.types import BrokerMessage, SessionBroker, SessionWakeUp
-from azents.core.enums import EventKind, InputBufferKind
+from azents.core.enums import (
+    EventKind,
+    InputBufferKind,
+    InputBufferSchedulingMode,
+)
 from azents.core.tools import Toolkit, ToolkitState, ToolkitStatus, TurnContext
 from azents.engine.events.types import Event
 from azents.engine.hooks.types import (
@@ -53,6 +57,7 @@ class _InputBufferService:
                     id=f"{index + 1:032d}",
                     session_id=input.session_id,
                     kind=input.kind,
+                    scheduling_mode=input.scheduling_mode,
                     requested_model_target_label=None,
                     requested_reasoning_effort=None,
                     actor_user_id=input.actor_user_id,
@@ -259,6 +264,7 @@ async def test_enqueue_stores_continuation_and_sends_wake_up() -> None:
     [enqueue] = input_buffer_service.enqueued_batches[0]
     assert enqueue.session_id == "session-001"
     assert enqueue.kind == InputBufferKind.GOAL_CONTINUATION
+    assert enqueue.scheduling_mode == InputBufferSchedulingMode.WAKE_SESSION
     assert enqueue.metadata == {
         "source": "goal",
         "goal_objective": "Ship",

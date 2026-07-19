@@ -231,6 +231,13 @@ class InputBufferKind(enum.StrEnum):
     AGENT_MESSAGE = "agent_message"
 
 
+class InputBufferSchedulingMode(enum.StrEnum):
+    """Whether pending input can start or resume an idle session."""
+
+    QUEUE_ONLY = "queue_only"
+    WAKE_SESSION = "wake_session"
+
+
 class EventKind(enum.StrEnum):
     """Event transcript event kind."""
 

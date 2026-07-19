@@ -13,6 +13,7 @@ from azents.core.enums import (
     AgentSessionRunState,
     EventKind,
     InputBufferKind,
+    InputBufferSchedulingMode,
 )
 from azents.core.inference_profile import RequestedInferenceProfile
 from azents.engine.events.types import FileOutputPart, SystemErrorPayload
@@ -184,6 +185,7 @@ class ChatWriteService:
                 InputBufferEnqueue(
                     session_id=session_id,
                     kind=InputBufferKind.USER_MESSAGE,
+                    scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
                     requested_model_target_label=inference_profile.model_target_label,
                     requested_reasoning_effort=inference_profile.reasoning_effort,
                     actor_user_id=user_id,

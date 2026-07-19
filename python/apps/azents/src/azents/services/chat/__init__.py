@@ -20,6 +20,7 @@ from azents.core.enums import (
     AgentSessionTitleSource,
     EventKind,
     InputBufferKind,
+    InputBufferSchedulingMode,
 )
 from azents.core.inference_profile import AppliedInferenceProfile
 from azents.engine.events.action_messages import CreateGitWorktreeAction
@@ -765,6 +766,7 @@ class ChatSessionService:
                         InputBufferEnqueue(
                             session_id=agent_session.id,
                             kind=InputBufferKind.ACTION_MESSAGE,
+                            scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
                             requested_model_target_label=None,
                             requested_reasoning_effort=None,
                             actor_user_id=user_id,

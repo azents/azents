@@ -69,6 +69,7 @@ from azents.core.enums import (
     AgentSessionStatus,
     EventKind,
     InputBufferKind,
+    InputBufferSchedulingMode,
 )
 from azents.core.inference_profile import (
     AppliedInferenceProfile,
@@ -293,6 +294,7 @@ class _BufferedInputService:
             id="0123456789abcdef0123456789abcdef",
             session_id=session_id,
             kind=InputBufferKind.ACTION_MESSAGE,
+            scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
             requested_model_target_label=None,
             requested_reasoning_effort=None,
             actor_user_id=str(kwargs["user_id"]),
@@ -365,6 +367,7 @@ class _BufferedInputService:
             id="0123456789abcdef0123456789abcdef",
             session_id=session_id,
             kind=InputBufferKind.USER_MESSAGE,
+            scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
             requested_model_target_label=None,
             requested_reasoning_effort=None,
             actor_user_id=str(kwargs["user_id"]),
@@ -672,6 +675,7 @@ class _RestWriteIdempotencyService:
                 id="0123456789abcdef0123456789abcdef",
                 session_id=str(kwargs["session_id"]),
                 kind=InputBufferKind.USER_MESSAGE,
+                scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
                 requested_model_target_label=None,
                 requested_reasoning_effort=None,
                 actor_user_id=str(kwargs["user_id"]),

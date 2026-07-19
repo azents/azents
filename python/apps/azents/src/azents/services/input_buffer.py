@@ -11,7 +11,12 @@ from fastapi import Depends
 from pydantic import TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import ActionExecutionStatus, EventKind, InputBufferKind
+from azents.core.enums import (
+    ActionExecutionStatus,
+    EventKind,
+    InputBufferKind,
+    InputBufferSchedulingMode,
+)
 from azents.core.inference_profile import (
     AppliedInferenceProfile,
     RequestedInferenceProfile,
@@ -66,6 +71,7 @@ class InputBufferEnqueue:
 
     session_id: str
     kind: InputBufferKind
+    scheduling_mode: InputBufferSchedulingMode
     requested_model_target_label: str | None
     requested_reasoning_effort: ModelReasoningEffort | None
     actor_user_id: str | None
@@ -237,6 +243,7 @@ class InputBufferService:
             create = InputBufferCreate(
                 session_id=input.session_id,
                 kind=input.kind,
+                scheduling_mode=input.scheduling_mode,
                 requested_model_target_label=input.requested_model_target_label,
                 requested_reasoning_effort=input.requested_reasoning_effort,
                 actor_user_id=input.actor_user_id,
@@ -261,6 +268,10 @@ class InputBufferService:
         else:
             created = False
             input_buffer = existing
+        if input_buffer.scheduling_mode != input.scheduling_mode:
+            raise ValueError(
+                "Input idempotency key already used for another scheduling mode"
+            )
         if (
             input_buffer.requested_model_target_label
             != input.requested_model_target_label
@@ -370,6 +381,25 @@ class InputBufferService:
                 limit=1,
             )
         return bool(pending)
+
+    async def has_pending_wake_session_input_buffers(self, session_id: str) -> bool:
+        """Check whether pending input can start or resume an idle session."""
+        async with self.session_manager() as session:
+            repository = self.input_buffer_repository
+            return await repository.has_by_session_id_and_scheduling_mode(
+                session,
+                session_id=session_id,
+                scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
+            )
+
+    async def has_pending_agent_messages(self, session_id: str) -> bool:
+        """Check whether the session mailbox has pending agent input."""
+        async with self.session_manager() as session:
+            return await self.input_buffer_repository.has_by_session_id_and_kind(
+                session,
+                session_id=session_id,
+                kind=InputBufferKind.AGENT_MESSAGE,
+            )
 
     async def flush_session_input_buffers(
         self,

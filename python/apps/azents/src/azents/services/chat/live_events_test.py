@@ -7,7 +7,11 @@ import pytest
 import pytest_asyncio
 from redis.asyncio import Redis
 
-from azents.core.enums import EventKind, InputBufferKind
+from azents.core.enums import (
+    EventKind,
+    InputBufferKind,
+    InputBufferSchedulingMode,
+)
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.engine.events.action_messages import ActionMessagePayload, SkillAction
 from azents.engine.events.types import (
@@ -36,6 +40,7 @@ def test_user_input_buffer_live_event_preserves_nullable_requested_profile() -> 
             id="0023456789abcdef0123456789abcdef",
             session_id="1123456789abcdef0123456789abcdef",
             kind=InputBufferKind.USER_MESSAGE,
+            scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
             requested_model_target_label="quality",
             requested_reasoning_effort=None,
             actor_user_id="user-1",
@@ -62,6 +67,7 @@ def test_action_input_buffer_live_event_preserves_requested_profile() -> None:
             id="0123456789abcdef0123456789abcdef",
             session_id="1123456789abcdef0123456789abcdef",
             kind=InputBufferKind.ACTION_MESSAGE,
+            scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
             requested_model_target_label="reasoning",
             requested_reasoning_effort=ModelReasoningEffort.HIGH,
             actor_user_id="user-1",

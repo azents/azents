@@ -4,7 +4,7 @@ import datetime
 
 from pydantic import BaseModel, Field
 
-from azents.core.enums import InputBufferKind
+from azents.core.enums import InputBufferKind, InputBufferSchedulingMode
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.engine.events.types import FileOutputPart
 from azents.rdb.models.event import JSONValue
@@ -16,6 +16,9 @@ class InputBuffer(BaseModel):
     id: str = Field(description="InputBuffer ID")
     session_id: str = Field(description="AgentSession ID")
     kind: InputBufferKind = Field(description="InputBuffer payload kind")
+    scheduling_mode: InputBufferSchedulingMode = Field(
+        description="Producer-selected session scheduling intent",
+    )
     requested_model_target_label: str | None = Field(
         description="Requested Agent-owned model target label",
     )
@@ -42,6 +45,9 @@ class InputBufferCreate(BaseModel):
 
     session_id: str = Field(description="AgentSession ID")
     kind: InputBufferKind = Field(description="InputBuffer payload kind")
+    scheduling_mode: InputBufferSchedulingMode = Field(
+        description="Producer-selected session scheduling intent",
+    )
     requested_model_target_label: str | None = Field(
         description="Requested Agent-owned model target label",
     )

@@ -12,6 +12,7 @@ from azents.core.enums import (
     AgentSessionKind,
     AgentSessionStatus,
     InputBufferKind,
+    InputBufferSchedulingMode,
 )
 from azents.core.inference_profile import RequestedInferenceProfile
 from azents.engine.events.action_messages import CreateGitWorktreeAction
@@ -220,6 +221,7 @@ class AgentSessionInputService:
                 InputBufferEnqueue(
                     session_id=agent_session.id,
                     kind=InputBufferKind.ACTION_MESSAGE,
+                    scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
                     requested_model_target_label=inference_profile.model_target_label,
                     requested_reasoning_effort=inference_profile.reasoning_effort,
                     actor_user_id=user_id,
@@ -391,6 +393,7 @@ class AgentSessionInputService:
                         InputBufferEnqueue(
                             session_id=agent_session.id,
                             kind=InputBufferKind.ACTION_MESSAGE,
+                            scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
                             requested_model_target_label=inference_profile.model_target_label,
                             requested_reasoning_effort=inference_profile.reasoning_effort,
                             actor_user_id=user_id,
@@ -425,6 +428,7 @@ class AgentSessionInputService:
             InputBufferEnqueue(
                 session_id=agent_session.id,
                 kind=InputBufferKind.USER_MESSAGE,
+                scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
                 requested_model_target_label=inference_profile.model_target_label,
                 requested_reasoning_effort=inference_profile.reasoning_effort,
                 actor_user_id=user_id,

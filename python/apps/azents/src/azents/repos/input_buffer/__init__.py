@@ -9,7 +9,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import InputBufferKind
+from azents.core.enums import InputBufferKind, InputBufferSchedulingMode
 from azents.engine.events.types import FileOutputPart
 from azents.rdb.models.event import JSONValue
 from azents.rdb.models.input_buffer import RDBInputBuffer
@@ -29,6 +29,7 @@ class InputBufferRepository:
         rdb = RDBInputBuffer(
             session_id=create.session_id,
             kind=create.kind,
+            scheduling_mode=create.scheduling_mode,
             requested_model_target_label=create.requested_model_target_label,
             requested_reasoning_effort=create.requested_reasoning_effort,
             actor_user_id=create.actor_user_id,
@@ -60,6 +61,7 @@ class InputBufferRepository:
                 id=uuid7().hex,
                 session_id=create.session_id,
                 kind=create.kind,
+                scheduling_mode=create.scheduling_mode,
                 requested_model_target_label=create.requested_model_target_label,
                 requested_reasoning_effort=create.requested_reasoning_effort,
                 actor_user_id=create.actor_user_id,
@@ -130,6 +132,42 @@ class InputBufferRepository:
             .order_by(RDBInputBuffer.id.asc())
         )
         return [self._build(rdb) for rdb in result.scalars()]
+
+    async def has_by_session_id_and_scheduling_mode(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        scheduling_mode: InputBufferSchedulingMode,
+    ) -> bool:
+        """Return whether the session has input with the scheduling mode."""
+        result = await session.scalar(
+            sa.select(
+                sa.exists().where(
+                    RDBInputBuffer.session_id == session_id,
+                    RDBInputBuffer.scheduling_mode == scheduling_mode,
+                )
+            )
+        )
+        return bool(result)
+
+    async def has_by_session_id_and_kind(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        kind: InputBufferKind,
+    ) -> bool:
+        """Return whether the session has input with the payload kind."""
+        result = await session.scalar(
+            sa.select(
+                sa.exists().where(
+                    RDBInputBuffer.session_id == session_id,
+                    RDBInputBuffer.kind == kind,
+                )
+            )
+        )
+        return bool(result)
 
     async def list_for_flush(
         self,
@@ -258,6 +296,7 @@ class InputBufferRepository:
             id=rdb.id,
             session_id=rdb.session_id,
             kind=rdb.kind,
+            scheduling_mode=rdb.scheduling_mode,
             requested_model_target_label=rdb.requested_model_target_label,
             requested_reasoning_effort=rdb.requested_reasoning_effort,
             actor_user_id=rdb.actor_user_id,

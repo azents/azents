@@ -10,7 +10,11 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.types import SessionBroker, SessionWakeUp
-from azents.core.enums import AgentRunPhase, AgentRunStatus
+from azents.core.enums import (
+    AgentRunPhase,
+    AgentRunStatus,
+    InputBufferSchedulingMode,
+)
 from azents.engine.events.types import AgentRunState
 from azents.engine.run.failure import FailedRunRetryState
 from azents.rdb.deps import get_session_manager
@@ -96,14 +100,18 @@ class SessionLifecycleService:
             )
             if agent_session is None:
                 raise ValueError("AgentSession not found")
-            pending_input = await self.input_buffer_repository.list_for_flush(
-                db_session,
-                session_id,
-                limit=1,
+            input_buffer_repository = self.input_buffer_repository
+            pending_wake_input = (
+                await input_buffer_repository.has_by_session_id_and_scheduling_mode(
+                    db_session,
+                    session_id=session_id,
+                    scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
+                )
             )
-            if pending_input:
+            if pending_wake_input:
                 logger.info(
-                    "Skipped session idle transition because input is pending",
+                    "Skipped session idle transition because "
+                    "wake-producing input is pending",
                     extra={"session_id": session_id},
                 )
                 return False
