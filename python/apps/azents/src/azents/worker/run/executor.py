@@ -92,6 +92,8 @@ from azents.engine.run.model_transport import ModelTransportState
 from azents.engine.run.provider_failure import (
     ModelProviderFailure,
     ModelProviderFailureRetryability,
+    UnclassifiedModelProviderError,
+    model_provider_error_log_fields,
 )
 from azents.engine.run.resolve import (
     ModelTargetNotFound,
@@ -1611,14 +1613,19 @@ class RunExecutor:
                             },
                         )
                     else:
+                        error_log_fields: dict[str, object] = {
+                            "session_id": message.session_id,
+                            "run_id": run_id,
+                            "attempt_number": attempt_number,
+                            "error_type": exc.__class__.__name__,
+                        }
+                        if isinstance(exc, UnclassifiedModelProviderError):
+                            error_log_fields.update(
+                                model_provider_error_log_fields(exc)
+                            )
                         logger.exception(
                             "Internal error during engine run attempt",
-                            extra={
-                                "session_id": message.session_id,
-                                "run_id": run_id,
-                                "attempt_number": attempt_number,
-                                "error_type": exc.__class__.__name__,
-                            },
+                            extra=error_log_fields,
                         )
                     finalization_reason = _failed_run_finalization_reason(retry_state)
                     if finalization_reason is not None:
@@ -1824,6 +1831,7 @@ class RunExecutor:
                     "provider_failure_error_type": (
                         provider_failure.provider_error_type
                     ),
+                    "provider_failure_message": provider_failure.provider_message,
                     "provider_failure_fingerprint": provider_failure.fingerprint,
                     "provider_failure_retry_outcome": (
                         "scheduled"
@@ -1873,10 +1881,16 @@ class RunExecutor:
                 done.result()
             except asyncio.CancelledError:
                 return
-            except Exception:
+            except Exception as exc:
+                error_log_fields: dict[str, object] = {
+                    "session_id": session_id,
+                    "event_id": event.id,
+                }
+                if isinstance(exc, UnclassifiedModelProviderError):
+                    error_log_fields.update(model_provider_error_log_fields(exc))
                 logger.warning(
                     "Automatic session title task failed",
-                    extra={"session_id": session_id, "event_id": event.id},
+                    extra=error_log_fields,
                     exc_info=True,
                 )
 

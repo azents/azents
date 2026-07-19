@@ -39,6 +39,7 @@ from azents.engine.responses import (
 from azents.engine.run.errors import ModelCallError, ModelStreamTimeoutError
 from azents.engine.run.provider_failure import (
     ModelProviderFailure,
+    model_provider_error_log_fields,
     model_provider_failure,
 )
 from azents.engine.run.retry_policy import (
@@ -281,16 +282,7 @@ class SessionTitleService:
                         "session_id": session_id,
                         "agent_id": agent_id,
                         "attempt_number": attempt_number,
-                        "provider_failure_operation": exc.operation,
-                        "provider_failure_provider": exc.provider,
-                        "provider_failure_integration": exc.integration,
-                        "provider_failure_model": exc.model,
-                        "provider_failure_category": exc.category.value,
-                        "provider_failure_retryability": exc.retryability.value,
-                        "provider_failure_status_code": exc.status_code,
-                        "provider_failure_code": exc.provider_code,
-                        "provider_failure_error_type": exc.provider_error_type,
-                        "provider_failure_fingerprint": exc.fingerprint,
+                        **model_provider_error_log_fields(exc),
                         "provider_failure_retry_outcome": (
                             "scheduled" if retry_available else "exhausted"
                         ),
@@ -424,8 +416,6 @@ async def generate_session_title_with_model(
         ) from None
     except (LiteLLMOpenAIError, OpenAIBaseError) as exc:
         failure = map_litellm_provider_error(exc, call_context=call_context)
-        if failure is None:
-            raise
         raise failure from None
     if not text:
         return None

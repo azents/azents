@@ -820,8 +820,8 @@ async def test_adapter_preserves_omission_null_and_stop_extension() -> None:
     assert client.closed is True
 
 
-async def test_unclassified_sdk_error_is_reraised() -> None:
-    """Preserve the original SDK exception and traceback for incidents."""
+async def test_unclassified_sdk_error_is_safely_normalized() -> None:
+    """Preserve safe provider diagnostics without raw SDK serialization."""
     original = OpenAIError("synthetic unclassified SDK failure")
     client = _SequencedFakeClient([original])
     adapter = OpenAIResponsesModelAdapter(
@@ -844,7 +844,7 @@ async def test_unclassified_sdk_error_is_reraised() -> None:
         inference_profile=None,
     )
 
-    with pytest.raises(OpenAIError) as raised:
+    with pytest.raises(UnclassifiedModelProviderError) as raised:
         _ = [
             event
             async for event in adapter.stream(
@@ -855,7 +855,9 @@ async def test_unclassified_sdk_error_is_reraised() -> None:
             )
         ]
 
-    assert raised.value is original
+    assert raised.value.provider_message == "synthetic unclassified SDK failure"
+    assert raised.value.provider_error_type == "OpenAIError"
+    assert raised.value.fingerprint
     await adapter.close()
 
 

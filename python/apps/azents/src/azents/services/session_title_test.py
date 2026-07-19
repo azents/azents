@@ -273,6 +273,7 @@ class TestSessionTitleHelpers:
         assert fields["provider_failure_status_code"] == 400
         assert fields["provider_failure_code"] == "invalid_request"
         assert fields["provider_failure_error_type"] == "bad_request"
+        assert fields["provider_failure_message"] == "Stream must be set to true"
         assert fields["provider_failure_fingerprint"] == failure.fingerprint
         assert fields["provider_failure_retry_outcome"] == "exhausted"
 

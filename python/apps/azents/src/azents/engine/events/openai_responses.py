@@ -780,8 +780,6 @@ class OpenAIResponsesModelAdapter:
                     else call_context.provider_integration_id
                 ),
             )
-            if failure is None:
-                raise
             raise failure from None
         finally:
             await close_stream_response(response)
@@ -1707,8 +1705,8 @@ def _map_openai_error(
     *,
     call_context: ModelStreamCallContext,
     integration: str | None,
-) -> ModelProviderFailure | None:
-    """Map one classified SDK exception or return None for bare re-raise."""
+) -> ModelProviderFailure:
+    """Map one SDK exception into a sanitized classified or internal error."""
     status_code = exc.status_code if isinstance(exc, APIStatusError) else None
     error_body = _openai_error_body(exc)
     provider_code = sanitize_provider_identifier(
@@ -1722,8 +1720,6 @@ def _map_openai_error(
         provider_code=provider_code,
         provider_error_type=provider_error_type,
     )
-    if category is ModelProviderFailureCategory.UNKNOWN:
-        return None
     return model_provider_failure(
         operation=call_context.call_kind,
         provider=call_context.provider,
@@ -1732,6 +1728,7 @@ def _map_openai_error(
         provider_message=(
             extract_provider_message_text(error_body.get("message"))
             or extract_provider_message_text(getattr(exc, "message", None))
+            or extract_provider_message_text(str(exc))
         ),
         status_code=status_code,
         provider_code=provider_code,
