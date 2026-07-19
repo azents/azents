@@ -138,12 +138,24 @@ from azents.engine.run.builtin_tools import (
 from azents.engine.run.contracts import RunContext, RunRequest, ToolkitBinding
 from azents.engine.run.emit import Emit, durable, ephemeral
 from azents.engine.run.model_transport import ModelTransportKey
+from azents.engine.run.tool_budget import (
+    ProviderHostedToolDeclarationCounts,
+    ToolRequestCompatibilityKey,
+    build_default_tool_request_compatibility_registry,
+    resolve_tool_declaration_budget,
+)
 from azents.engine.run.types import (
     USER_STOP_CANCEL_MESSAGE,
     CheckStop,
     FunctionTool,
     FunctionToolError,
     PollMessages,
+)
+from azents.engine.tooling.tool_search import (
+    DeferredToolSearchIndex,
+    ToolWorkingSetStore,
+    make_tool_search_tool,
+    project_tool_catalog,
 )
 from azents.engine.tools.xai_image_generation import (
     XaiImageGenerationExecutor,
@@ -208,6 +220,16 @@ def _xai_imagine_client_factory() -> XaiImagineClientFactory:
             )
 
     return create
+
+
+def _tool_working_set_store(
+    session_manager: Annotated[
+        SessionManager[AsyncSession],
+        Depends(get_session_manager),
+    ],
+) -> ToolWorkingSetStore:
+    """Build the session-scoped deferred-tool working-set store."""
+    return ToolWorkingSetStore(session_manager=session_manager)
 
 
 def _summary_model_call(
@@ -280,6 +302,10 @@ class AgentEngineAdapter:
     session_manager: Annotated[
         SessionManager[AsyncSession],
         Depends(get_session_manager),
+    ]
+    tool_working_set_store: Annotated[
+        ToolWorkingSetStore,
+        Depends(_tool_working_set_store),
     ]
     artifact_service: Annotated[ArtifactService, Depends(ArtifactService)]
     exchange_file_service: Annotated[ExchangeFileService, Depends(ExchangeFileService)]
@@ -566,10 +592,99 @@ class AgentEngineAdapter:
                 if _uses_openai_sdk(request.provider)
                 else LiteLLMResponsesLowerer
             )
+            model_family = (
+                request.inference_state.model_selection.model_family
+                if request.inference_state is not None
+                else None
+            )
+            provider_visible_tool_names: tuple[str, ...]
+            deferred_tool_names: frozenset[str]
+            if request.tool_search_enabled:
+                budget = resolve_tool_declaration_budget(
+                    registry=build_default_tool_request_compatibility_registry(),
+                    key=ToolRequestCompatibilityKey(
+                        provider=request.provider,
+                        adapter=lowerer_type.adapter,
+                        native_format=lowerer_type.native_format,
+                        model_identifier=model,
+                        model_developer=request.model_developer,
+                        model_family=model_family,
+                    ),
+                    provider_hosted=ProviderHostedToolDeclarationCounts(
+                        total_tools=len(resolved_builtin_tools.provider_hosted),
+                        function_declarations=0,
+                    ),
+                )
+                search_index = DeferredToolSearchIndex(list(catalog.entries.values()))
+                if search_index.entries:
+                    direct_count_with_search = len(catalog.direct_tool_names) + 1
+                    if budget.client_function_capacity is None:
+                        activation_capacity = None
+                    else:
+                        activation_capacity = max(
+                            0,
+                            budget.client_function_capacity - direct_count_with_search,
+                        )
+                    search_tool = make_tool_search_tool(
+                        index=search_index,
+                        store=self.tool_working_set_store,
+                        agent_id=request.agent_id,
+                        session_id=request.session_id,
+                        activation_capacity=activation_capacity,
+                    )
+                    catalog = extend_tool_catalog(catalog, [search_tool])
+
+                working_set = await self.tool_working_set_store.load(
+                    request.agent_id,
+                    request.session_id,
+                )
+                projection = project_tool_catalog(
+                    entries=catalog.entries,
+                    working_set=working_set,
+                    budget=budget,
+                )
+                provider_visible_tool_names = projection.provider_visible_tool_names
+                deferred_tool_names = frozenset(catalog.deferred_tool_names)
+                logger.info(
+                    "Prepared model tool projection",
+                    extra={
+                        "session_id": request.session_id,
+                        "run_id": context.run_id,
+                        "provider": request.provider.value,
+                        "model": model,
+                        "tool_budget_rule_id": (
+                            budget.rule.rule_id if budget.rule is not None else None
+                        ),
+                        "resolved_tool_limit": budget.maximum_declarations,
+                        "counted_provider_hosted_tools": (
+                            budget.counted_provider_hosted_declarations
+                        ),
+                        "direct_tool_count": len(projection.direct_tool_names),
+                        "active_deferred_tool_count": len(
+                            projection.active_deferred_tool_names
+                        ),
+                        "visible_deferred_tool_count": len(
+                            projection.visible_deferred_tool_names
+                        ),
+                    },
+                )
+            else:
+                provider_visible_tool_names = tuple(catalog.tools)
+                deferred_tool_names = frozenset()
+                logger.info(
+                    "Prepared complete model tool catalog",
+                    extra={
+                        "session_id": request.session_id,
+                        "run_id": context.run_id,
+                        "provider": request.provider.value,
+                        "model": model,
+                        "tool_count": len(provider_visible_tool_names),
+                    },
+                )
             lowerer = lowerer_type(
                 provider=provider,
                 model=model,
-                tools=catalog.native_tools,
+                tools=catalog.native_tools_for(provider_visible_tool_names),
                 provider_id=request.provider,
                 credential_kwargs=(
                     {}
@@ -597,6 +712,19 @@ class AgentEngineAdapter:
                 session_id=request.session_id,
                 run_id=context.run_id,
             )
+            prepared_tool_executor: ClientToolExecutor = hooked_tool_executor
+            if request.tool_search_enabled:
+                prepared_tool_executor = _WorkingSetClientToolExecutor(
+                    inner=hooked_tool_executor,
+                    deferred_tool_names=deferred_tool_names,
+                    store=self.tool_working_set_store,
+                    agent_id=request.agent_id,
+                    session_id=request.session_id,
+                )
+                prepared_tool_executor = _PreparedToolAllowlistExecutor(
+                    inner=prepared_tool_executor,
+                    allowed_tool_names=frozenset(provider_visible_tool_names),
+                )
 
             async def on_turn_end(reason: TurnEndReason) -> None:
                 await hook_dispatcher.dispatch_observation(
@@ -628,7 +756,7 @@ class AgentEngineAdapter:
                 native_request=native_request,
                 inference_state=request.inference_state,
                 system_prompt_analysis=system_prompt_result.analysis,
-                tool_executor=hooked_tool_executor,
+                tool_executor=prepared_tool_executor,
                 on_turn_end=on_turn_end,
             )
 
@@ -883,6 +1011,64 @@ def _runtime_hook_provider_refs(
     for binding in toolkits:
         refs.append(RuntimeHookProviderRef(slug=binding.slug, toolkit=binding.toolkit))
     return refs
+
+
+class _PreparedToolAllowlistExecutor:
+    """Reject client tool calls outside one prepared provider projection."""
+
+    def __init__(
+        self,
+        *,
+        inner: ClientToolExecutor,
+        allowed_tool_names: frozenset[str],
+    ) -> None:
+        self.inner = inner
+        self.allowed_tool_names = allowed_tool_names
+
+    def request_cancel(self, call: ClientToolCallPayload) -> None:
+        """Forward cancellation only for tools admitted to this prepared call."""
+        if call.name in self.allowed_tool_names:
+            self.inner.request_cancel(call)
+
+    async def execute(self, call: ClientToolCallPayload) -> ClientToolResultPayload:
+        """Execute only tools whose schemas were sent to the provider."""
+        if call.name not in self.allowed_tool_names:
+            return ClientToolResultPayload(
+                call_id=call.call_id,
+                name=call.name,
+                status="failed",
+                output=[OutputTextPart(text=f"Tool not found: {call.name}")],
+            )
+        return await self.inner.execute(call)
+
+
+class _WorkingSetClientToolExecutor:
+    """Refresh deferred-tool recency before every admitted invocation."""
+
+    def __init__(
+        self,
+        *,
+        inner: ClientToolExecutor,
+        deferred_tool_names: frozenset[str],
+        store: ToolWorkingSetStore,
+        agent_id: str,
+        session_id: str,
+    ) -> None:
+        self.inner = inner
+        self.deferred_tool_names = deferred_tool_names
+        self.store = store
+        self.agent_id = agent_id
+        self.session_id = session_id
+
+    def request_cancel(self, call: ClientToolCallPayload) -> None:
+        """Forward running inner tool cancellation request."""
+        self.inner.request_cancel(call)
+
+    async def execute(self, call: ClientToolCallPayload) -> ClientToolResultPayload:
+        """Touch deferred recency before hooks or handler execution."""
+        if call.name in self.deferred_tool_names:
+            await self.store.touch(self.agent_id, self.session_id, call.name)
+        return await self.inner.execute(call)
 
 
 class _HookedClientToolExecutor:

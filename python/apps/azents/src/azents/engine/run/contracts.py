@@ -71,6 +71,7 @@ class RunRequest:
     credential_kwargs: dict[str, object]
     workspace_id: str
     agent_id: str
+    tool_search_enabled: bool
     auto_compaction_threshold_tokens: int | None
     """Exact auto-compaction threshold, or None to derive it from input limits."""
     inference_state: SessionInferenceState | None
