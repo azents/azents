@@ -38,6 +38,7 @@ code_paths:
   - python/apps/azents/src/azents/services/model_file.py
   - python/apps/azents/src/azents/services/xai_imagine.py
   - python/apps/azents/src/azents/services/xai_oauth/runtime.py
+  - python/apps/azents/src/azents/services/kimi_oauth/runtime.py
   - python/apps/azents/src/azents/services/session_title.py
   - python/apps/azents/src/azents/repos/input_buffer/**
   - python/apps/azents/src/azents/repos/agent_session/**
@@ -60,7 +61,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ChatView.tsx
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
 last_verified_at: 2026-07-19
-spec_version: 111
+spec_version: 112
 ---
 
 # Agent Execution Loop

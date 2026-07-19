@@ -101,7 +101,7 @@ api_routes:
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-07-19
-spec_version: 115
+spec_version: 116
 ---
 
 # Conversation & Events
@@ -211,18 +211,18 @@ success, azents-web replaces the draft
 URL with the created session URL and invalidates the Agent session list cache.
 
 The draft and concrete-session composers project usage for the currently selected Agent-owned model
-option when its provider is `chatgpt_oauth`, `xai_oauth`, or `openrouter`. The composer resolves the
-option's stored integration ID, reuses the integration-scoped subscription-usage query, and switches
-query identity when the selected model changes. Other API-key and unsupported providers do not render
-the affordance or request usage. OpenRouter participates only when its API key has a bounded credit
-limit; a successful snapshot with a `null` limit or remaining-limit value has no displayable limits and
-renders no composer affordance. Desktop shows a compact status beside the model selector and
-operational details in the model popover; mobile keeps the compact status and places the same details
-in the model bottom sheet. Available limits, loading, stale, unavailable, and trusted external states
-remain local to the usage projection and never disable model selection or message submission. The
-session surface exposes no financial details. Manual refresh, the existing 60-second query freshness
-policy, focus revalidation, no automatic retry, and last-successful stale projection remain shared
-with Workspace LLM Settings.
+option when its provider is `chatgpt_oauth`, `xai_oauth`, `openrouter`, or `kimi_oauth`. The composer
+resolves the option's stored integration ID, reuses the integration-scoped subscription-usage query,
+and switches query identity when the selected model changes. Other API-key and unsupported providers
+do not render the affordance or request usage. OpenRouter participates only when its API key has a
+bounded credit limit; a successful snapshot with a `null` limit or remaining-limit value has no
+displayable limits and renders no composer affordance. Desktop shows a compact status beside the model
+selector and operational details in the model popover; mobile keeps the compact status and places the
+same details in the model bottom sheet. Available limits, loading, stale, unavailable, and trusted
+external states remain local to the usage projection and never disable model selection or message
+submission. The session surface exposes no financial details. Manual refresh, the existing 60-second
+query freshness policy, focus revalidation, no automatic retry, and last-successful stale projection
+remain shared with Workspace LLM Settings.
 
 Each session may have a user-facing `title`. `PATCH /chat/v1/sessions/{session_id}/title`
 sets or clears a manual title after workspace membership validation. The request body uses `{ "title":
