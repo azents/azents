@@ -39,7 +39,8 @@ type ProviderLabels = Record<
   | "google_vertex_ai"
   | "chatgpt_oauth"
   | "xai"
-  | "xai_oauth",
+  | "xai_oauth"
+  | "openrouter",
   string
 >;
 
@@ -59,6 +60,8 @@ function providerColor(provider: string): string {
     case "xai":
     case "xai_oauth":
       return "dark";
+    case "openrouter":
+      return "violet";
     default:
       return "gray";
   }
@@ -82,6 +85,8 @@ function labelForProvider(provider: string, labels: ProviderLabels): string {
       return labels.xai;
     case "xai_oauth":
       return labels.xai_oauth;
+    case "openrouter":
+      return labels.openrouter;
     default:
       return provider;
   }
@@ -214,6 +219,7 @@ function IntegrationCard({
     chatgpt_oauth: t("providers.chatgpt_oauth"),
     xai: t("providers.xai"),
     xai_oauth: t("providers.xai_oauth"),
+    openrouter: t("providers.openrouter"),
   };
 
   return (

@@ -24,6 +24,15 @@ const integrations: LlmProviderIntegrationResponse[] = [
     created_at: "2026-07-10T00:00:00Z",
     updated_at: "2026-07-10T00:00:00Z",
   },
+  {
+    id: "integration-openrouter",
+    provider: "openrouter",
+    name: "OpenRouter workspace",
+    config: null,
+    enabled: true,
+    created_at: "2026-07-19T00:00:00Z",
+    updated_at: "2026-07-19T00:00:00Z",
+  },
 ];
 
 const meta = {
@@ -46,7 +55,7 @@ const meta = {
     mutationState: { type: "IDLE", error: null },
     canManage: true,
     providerOptions: [],
-    availableProviderValues: ["xai", "xai_oauth"],
+    availableProviderValues: ["xai", "xai_oauth", "openrouter"],
     modelOptions: [],
     catalogStates: new Map(),
     modelsLoading: false,
@@ -74,5 +83,7 @@ export const XaiCredentialModes = {
     await expect(canvas.getByText("xAI Grok OAuth")).toBeVisible();
     await expect(canvas.getByText("Production xAI API")).toBeVisible();
     await expect(canvas.getByText("Personal Grok account")).toBeVisible();
+    await expect(canvas.getByText("OpenRouter")).toBeVisible();
+    await expect(canvas.getByText("OpenRouter workspace")).toBeVisible();
   },
 } satisfies Story;

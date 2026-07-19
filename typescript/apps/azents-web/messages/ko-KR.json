@@ -373,6 +373,11 @@
       "setupGuideToggle": "설정 가이드",
       "setupGuideApiKey": "프로바이더 대시보드에서 API 키를 생성한 뒤 위에 붙여넣으세요.",
       "setupGuideXaiApiKey": "xAI Console에서 API 키를 생성한 뒤 위에 붙여넣으세요. xAI 개발자 API 사용 요금은 SuperGrok 및 X Premium 구독과 별도로 청구됩니다.",
+      "setupGuideOpenRouterTitle": "OpenRouter 설정",
+      "setupGuideOpenRouterApiKey": "OpenRouter의 Keys 설정에서 API 키를 생성한 뒤 위에 붙여넣으세요.",
+      "setupGuideOpenRouterCatalog": "사용 가능한 모델과 라우팅 경로는 OpenRouter 계정 및 API 키 설정을 따릅니다. 해당 설정을 변경한 뒤에는 모델 카탈로그를 새로고침하세요.",
+      "setupGuideOpenRouterRouting": "요청은 OpenRouter를 통해 외부 모델 프로바이더로 라우팅될 수 있습니다.",
+      "setupGuideOpenRouterDataPolicy": "데이터 보관, 학습 사용, 제로 데이터 보관(ZDR) 요구사항은 OpenRouter에서 설정하세요. Azents는 이 연동에 대해 ZDR을 별도로 보장하거나 강제하지 않습니다.",
       "setupGuideAwsTitle": "AWS Bedrock 설정",
       "setupGuideAwsStep1": "1. AWS 콘솔에서 IAM 사용자를 생성합니다 (또는 기존 사용자 사용).",
       "setupGuideAwsStep2": "2. 다음 권한 정책을 연결합니다:",
@@ -400,7 +405,8 @@
         "google_vertex_ai": "Google Vertex AI",
         "chatgpt_oauth": "ChatGPT 구독",
         "xai": "xAI API 키",
-        "xai_oauth": "xAI Grok OAuth"
+        "xai_oauth": "xAI Grok OAuth",
+        "openrouter": "OpenRouter"
       },
       "chatgptOAuth": {
         "title": "ChatGPT 구독",

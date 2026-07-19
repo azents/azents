@@ -373,6 +373,11 @@
       "setupGuideToggle": "Setup guide",
       "setupGuideApiKey": "Go to the provider's dashboard, create an API key, and paste it above.",
       "setupGuideXaiApiKey": "Create an API key in the xAI Console and paste it above. xAI developer API usage is billed separately from SuperGrok and X Premium subscriptions.",
+      "setupGuideOpenRouterTitle": "OpenRouter setup",
+      "setupGuideOpenRouterApiKey": "Create an API key in OpenRouter's Keys settings and paste it above.",
+      "setupGuideOpenRouterCatalog": "Available models and routes follow your OpenRouter account and API-key settings. Refresh the model catalog after changing those settings.",
+      "setupGuideOpenRouterRouting": "Requests may be routed by OpenRouter to upstream model providers.",
+      "setupGuideOpenRouterDataPolicy": "Configure retention, training, and zero-data-retention requirements in OpenRouter. Azents does not independently claim or enforce ZDR for this integration.",
       "setupGuideAwsTitle": "AWS Bedrock Setup",
       "setupGuideAwsStep1": "1. Create an IAM user (or use an existing one) in the AWS Console.",
       "setupGuideAwsStep2": "2. Attach the following permission policy:",
@@ -400,7 +405,8 @@
         "google_vertex_ai": "Google Vertex AI",
         "chatgpt_oauth": "ChatGPT subscription",
         "xai": "xAI API key",
-        "xai_oauth": "xAI Grok OAuth"
+        "xai_oauth": "xAI Grok OAuth",
+        "openrouter": "OpenRouter"
       },
       "chatgptOAuth": {
         "title": "ChatGPT subscription",

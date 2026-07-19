@@ -37,6 +37,7 @@ const PROVIDER_VALUES = [
   "chatgpt_oauth",
   "xai",
   "xai_oauth",
+  "openrouter",
 ] as const;
 
 type ProviderValue = (typeof PROVIDER_VALUES)[number];
@@ -72,6 +73,8 @@ function labelForProvider(provider: string, labels: ProviderLabels): string {
       return labels.xai;
     case "xai_oauth":
       return labels.xai_oauth;
+    case "openrouter":
+      return labels.openrouter;
     default:
       return provider;
   }
@@ -162,6 +165,7 @@ function IntegrationFormContent({
     chatgpt_oauth: t("providers.chatgpt_oauth"),
     xai: t("providers.xai"),
     xai_oauth: t("providers.xai_oauth"),
+    openrouter: t("providers.openrouter"),
   };
   const availableProviders = new Set(availableProviderValues);
   const providerOptions = PROVIDER_VALUES.filter((value) =>

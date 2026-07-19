@@ -373,6 +373,11 @@
       "setupGuideToggle": "設定ガイド",
       "setupGuideApiKey": "プロバイダーのダッシュボードでAPIキーを作成し、上に貼り付けてください。",
       "setupGuideXaiApiKey": "xAI ConsoleでAPIキーを作成し、上に貼り付けてください。xAI開発者APIの利用料金は、SuperGrokやX Premiumのサブスクリプションとは別に請求されます。",
+      "setupGuideOpenRouterTitle": "OpenRouter の設定",
+      "setupGuideOpenRouterApiKey": "OpenRouter の Keys 設定で API キーを作成し、上に貼り付けてください。",
+      "setupGuideOpenRouterCatalog": "利用可能なモデルとルートは、OpenRouter アカウントと API キーの設定に従います。設定を変更した後は、モデルカタログを更新してください。",
+      "setupGuideOpenRouterRouting": "リクエストは OpenRouter によって上流のモデルプロバイダーへルーティングされる場合があります。",
+      "setupGuideOpenRouterDataPolicy": "データ保持、学習利用、ゼロデータ保持（ZDR）の要件は OpenRouter で設定してください。Azents はこの連携に対して ZDR を独自に保証または強制しません。",
       "setupGuideAwsTitle": "AWS Bedrock 設定",
       "setupGuideAwsStep1": "1. AWSコンソールでIAMユーザーを作成します（または既存のユーザーを使用）。",
       "setupGuideAwsStep2": "2. 以下の権限ポリシーをアタッチします：",
@@ -400,7 +405,8 @@
         "google_vertex_ai": "Google Vertex AI",
         "chatgpt_oauth": "ChatGPT サブスクリプション",
         "xai": "xAI APIキー",
-        "xai_oauth": "xAI Grok OAuth"
+        "xai_oauth": "xAI Grok OAuth",
+        "openrouter": "OpenRouter"
       },
       "chatgptOAuth": {
         "title": "ChatGPT サブスクリプション",

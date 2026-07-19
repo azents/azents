@@ -47,7 +47,26 @@ export function SetupGuide({
             border: "1px solid var(--mantine-color-default-border)",
           }}
         >
-          {credType === "api_key" && (
+          {credType === "api_key" && provider === "openrouter" && (
+            <>
+              <Text size="sm" fw={500}>
+                {t("setupGuideOpenRouterTitle")}
+              </Text>
+              <Text size="sm" c="dimmed">
+                {t("setupGuideOpenRouterApiKey")}
+              </Text>
+              <Text size="sm" c="dimmed">
+                {t("setupGuideOpenRouterCatalog")}
+              </Text>
+              <Text size="sm" c="dimmed">
+                {t("setupGuideOpenRouterRouting")}
+              </Text>
+              <Text size="sm" c="dimmed">
+                {t("setupGuideOpenRouterDataPolicy")}
+              </Text>
+            </>
+          )}
+          {credType === "api_key" && provider !== "openrouter" && (
             <Text size="sm" c="dimmed">
               {provider === "xai"
                 ? t("setupGuideXaiApiKey")
