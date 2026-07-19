@@ -247,6 +247,71 @@ class ExchangeFileRepository:
         await session.flush()
         return Success(None)
 
+    async def list_for_retention_root(
+        self,
+        session: AsyncSession,
+        *,
+        retention_root_session_id: str,
+    ) -> list[ExchangeFile]:
+        """List ExchangeFiles owned by one retention root."""
+        rows = (
+            await session.scalars(
+                sa.select(RDBExchangeFile)
+                .where(
+                    RDBExchangeFile.retention_root_session_id
+                    == retention_root_session_id
+                )
+                .order_by(RDBExchangeFile.id)
+            )
+        ).all()
+        return [self._build(row) for row in rows]
+
+    async def expire_for_retention_root(
+        self,
+        session: AsyncSession,
+        *,
+        retention_root_session_id: str,
+        expired_at: datetime.datetime,
+    ) -> list[ExchangeFile]:
+        """Expire available ExchangeFiles owned by one retention root."""
+        rows = (
+            await session.scalars(
+                sa.select(RDBExchangeFile)
+                .where(
+                    RDBExchangeFile.retention_root_session_id
+                    == retention_root_session_id,
+                    RDBExchangeFile.status == ExchangeFileStatus.AVAILABLE,
+                )
+                .order_by(RDBExchangeFile.id)
+            )
+        ).all()
+        for row in rows:
+            row.status = ExchangeFileStatus.EXPIRED
+            row.expired_at = expired_at
+        await session.flush()
+        return [self._build(row) for row in rows]
+
+    async def delete_purged_for_retention_root(
+        self,
+        session: AsyncSession,
+        *,
+        retention_root_session_id: str,
+    ) -> int:
+        """Delete owned ExchangeFile metadata after blob cleanup."""
+        deleted_ids = (
+            await session.scalars(
+                sa.delete(RDBExchangeFile)
+                .where(
+                    RDBExchangeFile.retention_root_session_id
+                    == retention_root_session_id,
+                    RDBExchangeFile.status == ExchangeFileStatus.EXPIRED,
+                    RDBExchangeFile.blob_deleted_at.is_not(None),
+                )
+                .returning(RDBExchangeFile.id)
+            )
+        ).all()
+        return len(deleted_ids)
+
     async def expire_due(
         self,
         session: AsyncSession,

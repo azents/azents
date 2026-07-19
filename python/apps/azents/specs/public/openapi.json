@@ -4361,47 +4361,6 @@
         }
       }
     },
-    "/chat/v1/sessions/{session_id}": {
-      "delete": {
-        "tags": [
-          "Chat v1"
-        ],
-        "summary": "Delete Session",
-        "description": "Delete a session and related files. Only the owner can delete it.",
-        "operationId": "chat_v1_delete_session",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "session_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Session Id"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/chat/v1/agents/{agent_id}/upload": {
       "post": {
         "tags": [

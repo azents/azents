@@ -256,6 +256,224 @@ async def test_recalculation_to_unlimited_cancels_pending_job(
         assert job.cancelled_at is not None
 
 
+async def test_invalid_unstarted_purge_jobs_are_cancelled_in_bounded_batches(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """Stale schedule identities become observable cancelled tombstones."""
+    repository = ArchivedSessionRetentionRepository()
+    now = datetime.datetime.now(datetime.UTC)
+    async with rdb_session_manager() as session:
+        stale_root_id = await _create_archived_root(
+            session,
+            suffix="stale-purge-job",
+            archived_at=now - datetime.timedelta(days=1),
+        )
+        valid_root_id = await _create_archived_root(
+            session,
+            suffix="valid-purge-job",
+            archived_at=now - datetime.timedelta(days=1),
+        )
+        stale_root = await session.get(RDBAgentSession, stale_root_id)
+        valid_root = await session.get(RDBAgentSession, valid_root_id)
+        assert stale_root is not None
+        assert stale_root.purge_after is not None
+        assert valid_root is not None
+        assert valid_root.purge_after is not None
+        session.add_all(
+            [
+                RDBArchivedSessionPurgeJob(
+                    root_session_id=stale_root_id,
+                    eligible_at=stale_root.purge_after,
+                    policy_revision=2,
+                ),
+                RDBArchivedSessionPurgeJob(
+                    root_session_id=valid_root_id,
+                    eligible_at=valid_root.purge_after,
+                    policy_revision=1,
+                ),
+            ]
+        )
+
+    async with rdb_session_manager() as session:
+        cancelled_count = await repository.cancel_invalid_unstarted_purge_jobs(
+            session,
+            now=now,
+            limit=100,
+        )
+
+    assert cancelled_count == 1
+    async with rdb_session_manager() as session:
+        jobs = list(
+            (
+                await session.scalars(
+                    sa.select(RDBArchivedSessionPurgeJob).where(
+                        RDBArchivedSessionPurgeJob.root_session_id.in_(
+                            (stale_root_id, valid_root_id)
+                        )
+                    )
+                )
+            ).all()
+        )
+    jobs_by_root = {job.root_session_id: job for job in jobs}
+    assert jobs_by_root[stale_root_id].status is ArchivedSessionPurgeStatus.CANCELLED
+    assert jobs_by_root[stale_root_id].last_error_kind == "InvalidRootSchedule"
+    assert jobs_by_root[valid_root_id].status is ArchivedSessionPurgeStatus.PENDING
+
+
+async def test_purge_job_claim_respects_lease_and_reclaims_after_expiry(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """Only one worker owns a valid due purge job until its lease expires."""
+    repository = ArchivedSessionRetentionRepository()
+    now = datetime.datetime.now(datetime.UTC)
+    async with rdb_session_manager() as session:
+        root_session_id = await _create_archived_root(
+            session,
+            suffix="purge-lease",
+            archived_at=now - datetime.timedelta(days=31),
+        )
+        root = await session.get(RDBAgentSession, root_session_id)
+        assert root is not None
+        assert root.purge_after is not None
+        session.add(
+            RDBArchivedSessionPurgeJob(
+                root_session_id=root_session_id,
+                eligible_at=root.purge_after,
+                policy_revision=1,
+            )
+        )
+
+    lease_until = now + datetime.timedelta(minutes=1)
+    async with rdb_session_manager() as session:
+        first = await repository.claim_due_purge_job(
+            session,
+            now=now,
+            lease_owner="purge-worker-1",
+            lease_until=lease_until,
+        )
+    assert first is not None
+    assert first.status is ArchivedSessionPurgeStatus.FENCING
+    assert first.fencing_started_at is not None
+    assert first.attempt_count == 1
+
+    async with rdb_session_manager() as session:
+        blocked = await repository.claim_due_purge_job(
+            session,
+            now=now + datetime.timedelta(seconds=30),
+            lease_owner="purge-worker-2",
+            lease_until=now + datetime.timedelta(minutes=2),
+        )
+    assert blocked is None
+
+    reclaimed_at = lease_until + datetime.timedelta(seconds=1)
+    async with rdb_session_manager() as session:
+        reclaimed = await repository.claim_due_purge_job(
+            session,
+            now=reclaimed_at,
+            lease_owner="purge-worker-2",
+            lease_until=reclaimed_at + datetime.timedelta(minutes=1),
+        )
+    assert reclaimed is not None
+    assert reclaimed.id == first.id
+    assert reclaimed.attempt_count == 2
+    assert reclaimed.lease_owner == "purge-worker-2"
+    assert reclaimed.fencing_started_at == first.fencing_started_at
+
+
+async def test_purge_retry_completion_and_tombstone_survive_root_delete(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """Retry state is durable and completion survives the final DB cascade."""
+    repository = ArchivedSessionRetentionRepository()
+    now = datetime.datetime.now(datetime.UTC)
+    async with rdb_session_manager() as session:
+        root_session_id = await _create_archived_root(
+            session,
+            suffix="purge-tombstone",
+            archived_at=now - datetime.timedelta(days=31),
+        )
+        root = await session.get(RDBAgentSession, root_session_id)
+        assert root is not None
+        assert root.purge_after is not None
+        session.add(
+            RDBArchivedSessionPurgeJob(
+                root_session_id=root_session_id,
+                eligible_at=root.purge_after,
+                policy_revision=1,
+            )
+        )
+
+    async with rdb_session_manager() as session:
+        claimed = await repository.claim_due_purge_job(
+            session,
+            now=now,
+            lease_owner="purge-worker-1",
+            lease_until=now + datetime.timedelta(minutes=1),
+        )
+        assert claimed is not None
+        retry_at = now + datetime.timedelta(minutes=5)
+        await repository.mark_purge_retry(
+            session,
+            job_id=claimed.id,
+            lease_owner="purge-worker-1",
+            next_attempt_at=retry_at,
+            error_kind="S3Unavailable",
+            error_summary="Object cleanup failed.",
+            now=now,
+        )
+
+    async with rdb_session_manager() as session:
+        too_early = await repository.claim_due_purge_job(
+            session,
+            now=retry_at - datetime.timedelta(seconds=1),
+            lease_owner="purge-worker-2",
+            lease_until=retry_at + datetime.timedelta(minutes=1),
+        )
+    assert too_early is None
+
+    async with rdb_session_manager() as session:
+        retried = await repository.claim_due_purge_job(
+            session,
+            now=retry_at,
+            lease_owner="purge-worker-2",
+            lease_until=retry_at + datetime.timedelta(minutes=1),
+        )
+        assert retried is not None
+        marked = await repository.mark_purge_cleaning(
+            session,
+            job_id=retried.id,
+            lease_owner="purge-worker-2",
+            model_file_count=2,
+            artifact_count=3,
+            exchange_file_count=4,
+            worktree_count=5,
+            now=retry_at,
+        )
+        assert marked is True
+        await AgentSessionRepository().delete_by_id(session, root_session_id)
+        completed = await repository.complete_purge_job(
+            session,
+            job_id=retried.id,
+            lease_owner="purge-worker-2",
+            now=retry_at,
+        )
+        assert completed is True
+
+    async with rdb_session_manager() as session:
+        root = await session.get(RDBAgentSession, root_session_id)
+        tombstone = await session.get(RDBArchivedSessionPurgeJob, retried.id)
+    assert root is None
+    assert tombstone is not None
+    assert tombstone.status is ArchivedSessionPurgeStatus.COMPLETED
+    assert tombstone.completed_at == retry_at
+    assert tombstone.model_file_count == 2
+    assert tombstone.artifact_count == 3
+    assert tombstone.exchange_file_count == 4
+    assert tombstone.worktree_count == 5
+    assert tombstone.last_error_kind is None
+    assert tombstone.last_error_summary is None
+
+
 async def test_revision_and_active_application_conflicts(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> None:

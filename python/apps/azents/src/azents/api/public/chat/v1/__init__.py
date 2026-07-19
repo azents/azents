@@ -86,7 +86,6 @@ from azents.services.chat.context import SessionContextService
 from azents.services.chat.data import (
     AgentNotFound,
     DeleteInputBufferError,
-    DeleteSessionError,
     InvalidGoalStatusTransition,
     InvalidSessionTitle,
     NotWorkspaceMember,
@@ -2747,36 +2746,6 @@ def _workspace_file_response_from_domain(
             return AgentWorkspaceFileResponse.from_domain(value)
         case _:
             assert_never(value)
-
-
-@router.delete("/sessions/{session_id}", status_code=204)
-async def delete_session(
-    session_id: str,
-    current_user: Annotated[CurrentUser, Depends(get_current_user)],
-    chat_service: Annotated[ChatSessionService, Depends()],
-) -> None:
-    """Delete a session and related files. Only the owner can delete it."""
-    _validate_session_id(session_id)
-    result: Result[None, DeleteSessionError] = await chat_service.delete_session(
-        session_id,
-        user_id=current_user.user_id,
-    )
-    match result:
-        case Success():
-            return
-        case Failure(error):
-            match error:
-                case SessionAccessDenied():
-                    raise HTTPException(status_code=404, detail="Session not found.")
-                case SubagentSessionReadOnly():
-                    raise HTTPException(
-                        status_code=409,
-                        detail="Subagent sessions are read-only.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
 
 
 _MAX_UPLOAD_SIZE = 20 * 1024 * 1024  # 20 MB

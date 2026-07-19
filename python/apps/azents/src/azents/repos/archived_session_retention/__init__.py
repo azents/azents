@@ -149,6 +149,59 @@ class ArchivedSessionRetentionRepository:
         )
         return result.scalar_one_or_none() is not None
 
+    async def cancel_invalid_unstarted_purge_jobs(
+        self,
+        session: AsyncSession,
+        *,
+        now: datetime.datetime,
+        limit: int,
+    ) -> int:
+        """Cancel bounded unstarted jobs whose root schedule no longer matches."""
+        valid_root_schedule = sa.exists(
+            sa.select(RDBAgentSession.id).where(
+                RDBAgentSession.id == RDBArchivedSessionPurgeJob.root_session_id,
+                RDBAgentSession.status == AgentSessionStatus.ARCHIVED,
+                RDBAgentSession.session_kind == AgentSessionKind.ROOT,
+                RDBAgentSession.purge_after.is_not(None),
+                RDBAgentSession.purge_after == RDBArchivedSessionPurgeJob.eligible_at,
+                RDBAgentSession.archive_policy_revision
+                == RDBArchivedSessionPurgeJob.policy_revision,
+            )
+        )
+        candidates = (
+            sa.select(RDBArchivedSessionPurgeJob.id)
+            .where(
+                RDBArchivedSessionPurgeJob.status.in_(
+                    (
+                        ArchivedSessionPurgeStatus.PENDING,
+                        ArchivedSessionPurgeStatus.RETRY_WAIT,
+                    )
+                ),
+                RDBArchivedSessionPurgeJob.fencing_started_at.is_(None),
+                ~valid_root_schedule,
+            )
+            .order_by(RDBArchivedSessionPurgeJob.updated_at)
+            .limit(limit)
+        )
+        result = await session.execute(
+            sa.update(RDBArchivedSessionPurgeJob)
+            .where(RDBArchivedSessionPurgeJob.id.in_(candidates))
+            .values(
+                status=ArchivedSessionPurgeStatus.CANCELLED,
+                cancelled_at=now,
+                lease_owner=None,
+                lease_until=None,
+                next_attempt_at=None,
+                last_error_kind="InvalidRootSchedule",
+                last_error_summary=(
+                    "Archived root schedule no longer matches this purge job."
+                ),
+                updated_at=now,
+            )
+            .returning(RDBArchivedSessionPurgeJob.id)
+        )
+        return len(result.scalars().all())
+
     async def purge_fencing_started(
         self,
         session: AsyncSession,
@@ -531,6 +584,183 @@ class ArchivedSessionRetentionRepository:
                 updated_at=now,
             )
         )
+
+    async def claim_due_purge_job(
+        self,
+        session: AsyncSession,
+        *,
+        now: datetime.datetime,
+        lease_owner: str,
+        lease_until: datetime.datetime,
+    ) -> ArchivedSessionPurgeJob | None:
+        """Claim one due purge job and cross the irreversible fence."""
+        claimable = sa.or_(
+            RDBArchivedSessionPurgeJob.status.in_(
+                (
+                    ArchivedSessionPurgeStatus.PENDING,
+                    ArchivedSessionPurgeStatus.RETRY_WAIT,
+                )
+            ),
+            sa.and_(
+                RDBArchivedSessionPurgeJob.status.in_(
+                    (
+                        ArchivedSessionPurgeStatus.FENCING,
+                        ArchivedSessionPurgeStatus.CLEANING,
+                    )
+                ),
+                RDBArchivedSessionPurgeJob.lease_until < now,
+            ),
+        )
+        valid_root = sa.exists(
+            sa.select(RDBAgentSession.id).where(
+                RDBAgentSession.id == RDBArchivedSessionPurgeJob.root_session_id,
+                RDBAgentSession.status == AgentSessionStatus.ARCHIVED,
+                RDBAgentSession.session_kind == AgentSessionKind.ROOT,
+                RDBAgentSession.purge_after.is_not(None),
+                RDBAgentSession.purge_after == RDBArchivedSessionPurgeJob.eligible_at,
+                RDBAgentSession.purge_after <= now,
+                RDBAgentSession.archive_policy_revision
+                == RDBArchivedSessionPurgeJob.policy_revision,
+            )
+        )
+        candidate = (
+            sa.select(RDBArchivedSessionPurgeJob.id)
+            .where(
+                claimable,
+                valid_root,
+                RDBArchivedSessionPurgeJob.eligible_at <= now,
+                sa.or_(
+                    RDBArchivedSessionPurgeJob.next_attempt_at.is_(None),
+                    RDBArchivedSessionPurgeJob.next_attempt_at <= now,
+                ),
+                sa.or_(
+                    RDBArchivedSessionPurgeJob.lease_until.is_(None),
+                    RDBArchivedSessionPurgeJob.lease_until < now,
+                ),
+            )
+            .order_by(
+                RDBArchivedSessionPurgeJob.eligible_at,
+                RDBArchivedSessionPurgeJob.id,
+            )
+            .with_for_update(skip_locked=True)
+            .limit(1)
+            .scalar_subquery()
+        )
+        result = await session.execute(
+            sa.update(RDBArchivedSessionPurgeJob)
+            .where(RDBArchivedSessionPurgeJob.id == candidate)
+            .values(
+                status=ArchivedSessionPurgeStatus.FENCING,
+                fencing_started_at=sa.func.coalesce(
+                    RDBArchivedSessionPurgeJob.fencing_started_at,
+                    now,
+                ),
+                started_at=sa.func.coalesce(
+                    RDBArchivedSessionPurgeJob.started_at,
+                    now,
+                ),
+                last_attempt_at=now,
+                attempt_count=RDBArchivedSessionPurgeJob.attempt_count + 1,
+                lease_owner=lease_owner,
+                lease_until=lease_until,
+                next_attempt_at=None,
+                last_error_kind=None,
+                last_error_summary=None,
+                updated_at=now,
+            )
+            .returning(RDBArchivedSessionPurgeJob)
+        )
+        row = result.scalar_one_or_none()
+        return None if row is None else self._build_job(row)
+
+    async def mark_purge_cleaning(
+        self,
+        session: AsyncSession,
+        *,
+        job_id: str,
+        lease_owner: str,
+        model_file_count: int,
+        artifact_count: int,
+        exchange_file_count: int,
+        worktree_count: int,
+        now: datetime.datetime,
+    ) -> bool:
+        """Persist cleanup scope and enter the cleaning phase."""
+        result = await session.execute(
+            sa.update(RDBArchivedSessionPurgeJob)
+            .where(
+                RDBArchivedSessionPurgeJob.id == job_id,
+                RDBArchivedSessionPurgeJob.lease_owner == lease_owner,
+            )
+            .values(
+                status=ArchivedSessionPurgeStatus.CLEANING,
+                model_file_count=model_file_count,
+                artifact_count=artifact_count,
+                exchange_file_count=exchange_file_count,
+                worktree_count=worktree_count,
+                updated_at=now,
+            )
+            .returning(RDBArchivedSessionPurgeJob.id)
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def mark_purge_retry(
+        self,
+        session: AsyncSession,
+        *,
+        job_id: str,
+        lease_owner: str,
+        next_attempt_at: datetime.datetime,
+        error_kind: str,
+        error_summary: str,
+        now: datetime.datetime,
+    ) -> None:
+        """Release a purge lease into bounded retry wait."""
+        await session.execute(
+            sa.update(RDBArchivedSessionPurgeJob)
+            .where(
+                RDBArchivedSessionPurgeJob.id == job_id,
+                RDBArchivedSessionPurgeJob.lease_owner == lease_owner,
+            )
+            .values(
+                status=ArchivedSessionPurgeStatus.RETRY_WAIT,
+                lease_owner=None,
+                lease_until=None,
+                next_attempt_at=next_attempt_at,
+                last_error_kind=error_kind[:120],
+                last_error_summary=error_summary[:500],
+                updated_at=now,
+            )
+        )
+
+    async def complete_purge_job(
+        self,
+        session: AsyncSession,
+        *,
+        job_id: str,
+        lease_owner: str,
+        now: datetime.datetime,
+    ) -> bool:
+        """Complete a content-free purge tombstone and release its lease."""
+        result = await session.execute(
+            sa.update(RDBArchivedSessionPurgeJob)
+            .where(
+                RDBArchivedSessionPurgeJob.id == job_id,
+                RDBArchivedSessionPurgeJob.lease_owner == lease_owner,
+            )
+            .values(
+                status=ArchivedSessionPurgeStatus.COMPLETED,
+                lease_owner=None,
+                lease_until=None,
+                next_attempt_at=None,
+                last_error_kind=None,
+                last_error_summary=None,
+                completed_at=now,
+                updated_at=now,
+            )
+            .returning(RDBArchivedSessionPurgeJob.id)
+        )
+        return result.scalar_one_or_none() is not None
 
     def _build_settings(
         self, row: RDBSystemFileLifecycleSetting

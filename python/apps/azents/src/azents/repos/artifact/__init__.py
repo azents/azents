@@ -1,6 +1,7 @@
 """Artifact repository."""
 
 import datetime
+from collections.abc import Sequence
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -83,6 +84,72 @@ class ArtifactRepository:
         if rdb is None:
             return None
         return self._build(rdb)
+
+    async def list_for_session_ids(
+        self,
+        session: AsyncSession,
+        *,
+        session_ids: Sequence[str],
+    ) -> list[Artifact]:
+        """List Artifacts owned by a SessionAgent subtree."""
+        if not session_ids:
+            return []
+        rows = (
+            await session.scalars(
+                sa.select(RDBArtifact)
+                .where(RDBArtifact.session_id.in_(session_ids))
+                .order_by(RDBArtifact.id)
+            )
+        ).all()
+        return [self._build(row) for row in rows]
+
+    async def expire_for_session_ids(
+        self,
+        session: AsyncSession,
+        *,
+        session_ids: Sequence[str],
+        expired_at: datetime.datetime,
+    ) -> list[Artifact]:
+        """Expire available subtree Artifacts for purge."""
+        if not session_ids:
+            return []
+        rows = (
+            await session.scalars(
+                sa.select(RDBArtifact)
+                .where(
+                    RDBArtifact.session_id.in_(session_ids),
+                    RDBArtifact.status == ArtifactStatus.AVAILABLE,
+                )
+                .order_by(RDBArtifact.id)
+            )
+        ).all()
+        for row in rows:
+            row.status = ArtifactStatus.EXPIRED
+            row.expired_at = expired_at
+        await session.flush()
+        return [self._build(row) for row in rows]
+
+    async def delete_purged_for_session_ids(
+        self,
+        session: AsyncSession,
+        *,
+        session_ids: Sequence[str],
+    ) -> int:
+        """Delete subtree Artifact metadata after blob cleanup."""
+        if not session_ids:
+            return 0
+        deleted_ids = (
+            await session.scalars(
+                sa.delete(RDBArtifact)
+                .where(
+                    RDBArtifact.session_id.in_(session_ids),
+                    RDBArtifact.status == ArtifactStatus.EXPIRED,
+                    RDBArtifact.blob_deleted_at.is_not(None),
+                )
+                .returning(RDBArtifact.id)
+            )
+        ).all()
+        return len(deleted_ids)
 
     async def expire_due(
         self,

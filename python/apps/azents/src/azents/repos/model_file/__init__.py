@@ -105,6 +105,77 @@ class ModelFileRepository:
         ).all()
         return {row.id: row.status for row in rows}
 
+    async def list_for_session_ids(
+        self,
+        session: AsyncSession,
+        *,
+        session_ids: Sequence[str],
+    ) -> list[ModelFile]:
+        """List ModelFiles owned by a SessionAgent subtree."""
+        if not session_ids:
+            return []
+        rows = (
+            await session.scalars(
+                sa.select(RDBModelFile)
+                .where(RDBModelFile.session_id.in_(session_ids))
+                .order_by(RDBModelFile.id)
+            )
+        ).all()
+        return [self._build(row) for row in rows]
+
+    async def mark_deleted_for_session_ids(
+        self,
+        session: AsyncSession,
+        *,
+        session_ids: Sequence[str],
+        deleted_at: datetime.datetime,
+    ) -> list[ModelFile]:
+        """Mark unpinned subtree ModelFiles deleted for purge."""
+        if not session_ids:
+            return []
+        rows = (
+            await session.scalars(
+                sa.select(RDBModelFile)
+                .where(
+                    RDBModelFile.session_id.in_(session_ids),
+                    RDBModelFile.status == ModelFileStatus.AVAILABLE,
+                    ~sa.exists(
+                        sa.select(RDBModelFilePin.model_file_id).where(
+                            RDBModelFilePin.model_file_id == RDBModelFile.id
+                        )
+                    ),
+                )
+                .order_by(RDBModelFile.id)
+            )
+        ).all()
+        for row in rows:
+            row.status = ModelFileStatus.DELETED
+            row.deleted_at = deleted_at
+        await session.flush()
+        return [self._build(row) for row in rows]
+
+    async def delete_purged_for_session_ids(
+        self,
+        session: AsyncSession,
+        *,
+        session_ids: Sequence[str],
+    ) -> int:
+        """Delete subtree ModelFile metadata after blob cleanup."""
+        if not session_ids:
+            return 0
+        deleted_ids = (
+            await session.scalars(
+                sa.delete(RDBModelFile)
+                .where(
+                    RDBModelFile.session_id.in_(session_ids),
+                    RDBModelFile.status == ModelFileStatus.DELETED,
+                    RDBModelFile.blob_deleted_at.is_not(None),
+                )
+                .returning(RDBModelFile.id)
+            )
+        ).all()
+        return len(deleted_ids)
+
     async def mark_deleted_if_unpinned(
         self,
         session: AsyncSession,

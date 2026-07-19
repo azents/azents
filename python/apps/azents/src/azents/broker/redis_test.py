@@ -2,6 +2,8 @@
 
 import dataclasses
 from collections.abc import AsyncGenerator
+from typing import cast
+from unittest.mock import AsyncMock, call
 
 import pytest_asyncio
 from redis.asyncio import Redis
@@ -62,6 +64,23 @@ class TestRedisBrokerSetup:
 
         groups = await redis.xinfo_groups("azents:incoming")
         assert len(groups) == 1
+
+
+async def test_purge_session_state_avoids_cross_slot_delete() -> None:
+    """Cluster-incompatible key groups are deleted in separate commands."""
+    redis = AsyncMock()
+    broker = RedisBroker(cast(Redis, redis))
+
+    await broker.purge_session_state("session-1")
+
+    assert redis.delete.await_args_list == [
+        call("azents:session:session-1:messages"),
+        call(
+            "azents:session:{session-1}:lock",
+            "azents:session:{session-1}:owner-heartbeat",
+        ),
+        call("azents:session:session-1:activity"),
+    ]
 
 
 class TestRedisBrokerMessages:

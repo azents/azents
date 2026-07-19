@@ -19,6 +19,7 @@ from azents.core.enums import (
     EventKind,
     LLMProvider,
     RuntimeRunnerState,
+    SessionGitWorktreeBranchCreatedBy,
     SessionGitWorktreeStatus,
     WorkspaceUserRole,
 )
@@ -47,6 +48,7 @@ from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession, AgentSessionCreate
 from azents.repos.input_buffer import InputBufferRepository
 from azents.repos.session_git_worktree import SessionGitWorktreeRepository
+from azents.repos.session_git_worktree.data import SessionGitWorktreeCreate
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.session_workspace_project.data import SessionWorkspaceProjectCreate
 from azents.repos.user import UserRepository
@@ -1392,6 +1394,95 @@ class TestSessionGitWorktreeService:
         ]
         remove_call = runner.calls[1]
         assert remove_call["force"] is False
+
+    async def test_root_tree_cleanup_uses_each_allocation_creator(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Purge cleanup preserves child worktree ownership validation."""
+        runner = _RunnerOperations()
+        (
+            worktree_service,
+            _,
+            agent_id,
+            root_session_id,
+        ) = await _create_ready_worktree_session(
+            rdb_session_manager,
+            slug="cleanup-root-tree",
+            runner=runner,
+        )
+        async with rdb_session_manager() as session:
+            root_agent = await AgentSessionRepository().get_session_agent_by_session_id(
+                session,
+                root_session_id,
+            )
+            assert root_agent is not None
+            child_agent = await AgentSessionRepository().create_child_session_agent(
+                session,
+                parent_session_agent_id=root_agent.id,
+                name="child",
+                agent_type="default",
+                title="Child",
+                last_task_message=None,
+            )
+            child_session = await AgentSessionRepository().get_by_id(
+                session,
+                child_agent.agent_session_id,
+            )
+            assert child_session is not None
+            child_worktree_path = (
+                f"/workspace/agent/.azents/worktrees/{child_session.handle}/repo"
+            )
+            child_project = await SessionWorkspaceProjectRepository().create_project(
+                session,
+                SessionWorkspaceProjectCreate(
+                    session_id=child_session.id,
+                    path=child_worktree_path,
+                ),
+            )
+            await AgentProjectCatalogRepository().upsert_entry(
+                session,
+                agent_id=agent_id,
+                path=child_worktree_path,
+            )
+            await SessionGitWorktreeRepository().create(
+                session,
+                SessionGitWorktreeCreate(
+                    id="01900000000070008000000000000003",
+                    session_id=child_session.id,
+                    action_execution_id=None,
+                    session_workspace_project_id=child_project.id,
+                    source_project_path="/workspace/agent/repo",
+                    starting_ref="main",
+                    worktree_path=child_worktree_path,
+                    branch_name=f"azents/{child_session.handle}",
+                    branch_created_by=SessionGitWorktreeBranchCreatedBy.AZENTS,
+                    status=SessionGitWorktreeStatus.READY,
+                ),
+            )
+
+        count = await worktree_service.run_cleanup_for_root_tree(
+            agent_id=agent_id,
+            root_session_id=root_session_id,
+            subtree_session_ids=[root_session_id, child_session.id],
+        )
+
+        async with rdb_session_manager() as session:
+            allocations = await SessionGitWorktreeRepository().list_by_session_id(
+                session,
+                session_id=root_session_id,
+            )
+        assert count == 2
+        assert {
+            allocation.created_by_agent_session_id for allocation in allocations
+        } == {
+            root_session_id,
+            child_session.id,
+        }
+        assert all(
+            allocation.status is SessionGitWorktreeStatus.CLEANED
+            for allocation in allocations
+        )
 
     async def test_manual_cleanup_rejects_ordinary_project_target(
         self,

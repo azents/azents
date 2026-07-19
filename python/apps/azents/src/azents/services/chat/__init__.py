@@ -58,7 +58,6 @@ from azents.services.session_git_worktree import (
     ExistingProjectWorkspaceItem,
     GitWorktreeWorkspaceItem,
     NewSessionWorkspaceItem,
-    SessionGitWorktreeService,
 )
 from azents.services.session_workspace_project import (
     InvalidProjectPath,
@@ -76,7 +75,6 @@ from .data import (
     ChatLiveRunState,
     ChatLiveStateSnapshot,
     DeleteInputBufferError,
-    DeleteSessionError,
     EnsureSessionError,
     InvalidGoalStatusTransition,
     InvalidSessionTitle,
@@ -319,9 +317,6 @@ class ChatSessionService:
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
     ]
-    session_git_worktree_service: Annotated[
-        SessionGitWorktreeService | None, Depends(SessionGitWorktreeService)
-    ] = None
 
     async def get_team_primary_session(
         self,
@@ -1254,57 +1249,6 @@ class ChatSessionService:
                 action_executions=action_executions,
             )
         )
-
-    async def delete_session(
-        self,
-        session_id: str,
-        *,
-        user_id: str,
-    ) -> Result[None, DeleteSessionError]:
-        """Delete session.
-
-        :param session_id: Session ID to delete
-        :param user_id: Requester user ID
-        :return: None on success, error on failure
-        """
-        # Access control: reuse get_session
-        get_result = await self.get_session(session_id, user_id=user_id)
-        match get_result:
-            case Success(agent_session):
-                if agent_session.session_kind is AgentSessionKind.SUBAGENT:
-                    return Failure(SubagentSessionReadOnly())
-            case Failure(error):
-                match error:
-                    case SessionNotFound():
-                        # Already deleted session — treat as idempotent success
-                        return Success(None)
-                    case SessionAccessDenied():
-                        return Failure(error)
-                    case _:
-                        assert_never(error)
-
-        worktree_service = self.session_git_worktree_service
-        if worktree_service is not None:
-            cleanup_requested = False
-            async with self.session_manager() as session:
-                mark_cleanup_pending = worktree_service.mark_cleanup_pending_for_session
-                cleanup_request = await mark_cleanup_pending(
-                    session,
-                    session_id=session_id,
-                )
-                cleanup_requested = cleanup_request.cleanup_requested
-            if cleanup_requested:
-                await worktree_service.run_cleanup_for_session(
-                    agent_id=agent_session.agent_id,
-                    session_id=session_id,
-                    session_workspace_project_id=None,
-                )
-
-        # Delete DB record
-        async with self.session_manager() as session:
-            await self.agent_session_repository.delete_by_id(session, session_id)
-
-        return Success(None)
 
     async def _append_goal_updated_event(
         self,

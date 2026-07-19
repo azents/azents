@@ -34,6 +34,9 @@ from azents.api.public.chat.v1 import (
     update_agent_session_title,
     update_session_goal_status,
 )
+from azents.api.public.chat.v1 import (
+    router as chat_router,
+)
 from azents.api.public.chat.v1.data import (
     AgentSessionCreateRequest,
     AgentSessionTitleUpdateRequest,
@@ -201,6 +204,15 @@ def _exchange_file_service() -> AsyncMock:
 def _model_file_service() -> AsyncMock:
     """ModelFileService double for route helper calls without attachments."""
     return AsyncMock()
+
+
+def test_public_session_hard_delete_route_is_absent() -> None:
+    """Permanent session deletion remains internal to the purge workflow."""
+    assert not any(
+        getattr(route, "path", None) == "/sessions/{session_id}"
+        and "DELETE" in (getattr(route, "methods", None) or set())
+        for route in chat_router.routes
+    )
 
 
 async def test_health_check_ack_requires_current_confirmed_generation() -> None:

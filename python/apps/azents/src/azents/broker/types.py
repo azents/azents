@@ -102,3 +102,7 @@ class SessionBroker(Protocol):
     async def get_session_activity(self, session_id: str) -> SessionActivity | None:
         """Get the current execution state of a session."""
         ...
+
+    async def purge_session_state(self, session_id: str) -> None:
+        """Delete queued messages, ownership, heartbeat, and activity state."""
+        ...

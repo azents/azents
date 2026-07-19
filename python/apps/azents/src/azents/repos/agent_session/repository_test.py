@@ -106,6 +106,44 @@ class TestAgentSessionRepository:
         assert refreshed is not None
         assert refreshed.owner_generation == 2
 
+    async def test_fence_archived_owner_generations_invalidates_stale_workers(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Increment durable ownership only for the locked archived subtree."""
+        workspace_id = await _create_workspace(rdb_session, "purge-fence-ws")
+        agent_id = await _create_agent(rdb_session, workspace_id, "purge-fence")
+        repo = AgentSessionRepository()
+        created = await repo.create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        archived_at = datetime.datetime.now(datetime.UTC)
+        await repo.archive_tree(
+            rdb_session,
+            root_session_id=created.id,
+            session_ids=[created.id],
+            archived_at=archived_at,
+            purge_after=archived_at,
+            policy_revision=1,
+            retention_days=0,
+        )
+
+        fenced_count = await repo.fence_archived_owner_generations(
+            rdb_session,
+            session_ids=[created.id],
+        )
+
+        assert fenced_count == 1
+        refreshed = await repo.get_by_id(rdb_session, created.id)
+        assert refreshed is not None
+        assert refreshed.status is AgentSessionStatus.ARCHIVED
+        assert refreshed.owner_generation == 1
+
     async def test_last_inference_profile_round_trip(
         self,
         rdb_session: AsyncSession,
