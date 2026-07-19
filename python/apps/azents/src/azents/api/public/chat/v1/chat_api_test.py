@@ -1143,10 +1143,8 @@ class TestAgentSessionRoutes:
         response = await archive_agent_session(
             agent_id="agent-1",
             session_id="2123456789abcdef0123456789abcdef",
-            background_tasks=BackgroundTasks(),
             current_user=CurrentUser(user_id="user-1", session_id="auth-session"),
             chat_service=chat_service,  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
-            session_git_worktree_service=_RouteWorktreeCleanupService(),  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
         )
 
         assert response is None
@@ -1189,10 +1187,8 @@ class TestAgentSessionRoutes:
             await archive_agent_session(
                 agent_id="agent-1",
                 session_id="1123456789abcdef0123456789abcdef",
-                background_tasks=BackgroundTasks(),
                 current_user=CurrentUser(user_id="user-1", session_id="auth-session"),
                 chat_service=chat_service,  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
-                session_git_worktree_service=_RouteWorktreeCleanupService(),  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
             )
         except Exception as exc:
             assert getattr(exc, "status_code", None) == 409
@@ -1211,10 +1207,8 @@ class TestAgentSessionRoutes:
             await archive_agent_session(
                 agent_id="agent-1",
                 session_id="2123456789abcdef0123456789abcdef",
-                background_tasks=BackgroundTasks(),
                 current_user=CurrentUser(user_id="user-1", session_id="auth-session"),
                 chat_service=chat_service,  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
-                session_git_worktree_service=_RouteWorktreeCleanupService(),  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
             )
         except Exception as exc:
             assert getattr(exc, "status_code", None) == 409

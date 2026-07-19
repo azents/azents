@@ -1946,6 +1946,15 @@ class AgentSessionResponse(BaseModel):
     run_state: AgentSessionRunState = Field(
         description="Session execution state",
     )
+    archived_at: datetime.datetime | None = Field(
+        description="Archive boundary timestamp",
+    )
+    purge_after: datetime.datetime | None = Field(
+        description="Scheduled deletion time, or null for Unlimited retention",
+    )
+    archive_retention_days_snapshot: int | None = Field(
+        description="Archived retention snapshot in days, or null for Unlimited",
+    )
     created_at: datetime.datetime = Field(description="Created time")
     updated_at: datetime.datetime = Field(description="Updated time")
 
@@ -1970,6 +1979,9 @@ class AgentSessionResponse(BaseModel):
             status=session.status,
             primary_kind=session.primary_kind,
             run_state=session.run_state,
+            archived_at=session.archived_at,
+            purge_after=session.purge_after,
+            archive_retention_days_snapshot=(session.archive_retention_days_snapshot),
             created_at=session.created_at,
             updated_at=session.updated_at,
         )

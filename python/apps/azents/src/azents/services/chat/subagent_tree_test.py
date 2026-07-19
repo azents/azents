@@ -24,6 +24,7 @@ from azents.repos.agent_project_default import AgentProjectDefaultRepository
 from azents.repos.agent_project_preset import AgentProjectPresetRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSessionCreate
+from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
 from azents.repos.message import MessageRepository
 from azents.repos.session_git_worktree import SessionGitWorktreeRepository
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
@@ -147,6 +148,7 @@ def _service(rdb_session_manager: SessionManager[AsyncSession]) -> ChatSessionSe
         action_execution_repository=ActionExecutionRepository(),
         event_transcript_repository=EventTranscriptRepository(),
         agent_session_repository=AgentSessionRepository(),
+        archived_session_retention_repository=ArchivedSessionRetentionRepository(),
         workspace_user_repository=WorkspaceUserRepository(),
         session_workspace_project_repository=SessionWorkspaceProjectRepository(),
         input_buffer_service=cast(InputBufferService, object()),

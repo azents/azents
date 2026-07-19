@@ -2995,6 +2995,111 @@
         }
       }
     },
+    "/chat/v1/agents/{agent_id}/sessions/archived": {
+      "get": {
+        "tags": [
+          "Chat v1"
+        ],
+        "summary": "List Archived Agent Sessions",
+        "description": "List archived root sessions for an accessible Agent.",
+        "operationId": "chat_v1_list_archived_agent_sessions",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentSessionListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/chat/v1/agents/{agent_id}/sessions/{session_id}/restore": {
+      "post": {
+        "tags": [
+          "Chat v1"
+        ],
+        "summary": "Restore Agent Session",
+        "description": "Restore an archived root SessionAgent tree before purge starts.",
+        "operationId": "chat_v1_restore_agent_session",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentSessionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/chat/v1/agents/{agent_id}/sessions/{session_id}": {
       "get": {
         "tags": [
@@ -9282,6 +9387,44 @@
             "$ref": "#/components/schemas/AgentSessionRunState",
             "description": "Session execution state"
           },
+          "archived_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived At",
+            "description": "Archive boundary timestamp"
+          },
+          "purge_after": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Purge After",
+            "description": "Scheduled deletion time, or null for Unlimited retention"
+          },
+          "archive_retention_days_snapshot": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archive Retention Days Snapshot",
+            "description": "Archived retention snapshot in days, or null for Unlimited"
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -9305,6 +9448,9 @@
           "title_source",
           "status",
           "run_state",
+          "archived_at",
+          "purge_after",
+          "archive_retention_days_snapshot",
           "created_at",
           "updated_at"
         ],

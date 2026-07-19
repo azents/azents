@@ -27,6 +27,7 @@ from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
 from azents.repos.agent_project_default import AgentProjectDefaultRepository
 from azents.repos.agent_project_preset import AgentProjectPresetRepository
 from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
 from azents.repos.input_buffer import InputBufferRepository
 from azents.repos.message import MessageRepository
 from azents.repos.session_git_worktree import SessionGitWorktreeRepository
@@ -134,6 +135,7 @@ def _service(
         action_execution_repository=ActionExecutionRepository(),
         event_transcript_repository=EventTranscriptRepository(),
         agent_session_repository=AgentSessionRepository(),
+        archived_session_retention_repository=ArchivedSessionRetentionRepository(),
         workspace_user_repository=WorkspaceUserRepository(),
         session_workspace_project_repository=SessionWorkspaceProjectRepository(),
         input_buffer_service=InputBufferService(
@@ -875,7 +877,31 @@ class TestChatSessionTeamSessions:
             )
             assert archived is not None
             assert archived.status == AgentSessionStatus.ARCHIVED
-            assert archived.ended_at is not None
+            assert archived.archived_at is not None
+            assert archived.purge_after == archived.archived_at + datetime.timedelta(
+                days=30
+            )
+            assert archived.archive_policy_revision == 1
+            assert archived.archive_retention_days_snapshot == 30
+
+        archived_list = await _service(
+            rdb_session_manager
+        ).list_archived_agent_sessions(
+            agent_id=agent_id,
+            user_id=user_id,
+        )
+        assert isinstance(archived_list, Success)
+        assert [item.id for item in archived_list.value] == [create_result.value.id]
+
+        restore_result = await _service(rdb_session_manager).restore_agent_session(
+            agent_id=agent_id,
+            session_id=create_result.value.id,
+            user_id=user_id,
+        )
+        assert isinstance(restore_result, Success)
+        assert restore_result.value.status == AgentSessionStatus.ACTIVE
+        assert restore_result.value.archived_at is None
+        assert restore_result.value.purge_after is None
 
     async def test_archive_team_primary_session_is_blocked(
         self,

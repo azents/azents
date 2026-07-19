@@ -37,6 +37,7 @@ from azents.repos.agent_project_default import AgentProjectDefaultRepository
 from azents.repos.agent_project_preset import AgentProjectPresetRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
 from azents.repos.input_buffer import InputBufferRepository
 from azents.repos.input_buffer.data import InputBufferCreate
 from azents.repos.message import MessageRepository
@@ -186,6 +187,7 @@ def _service(
         action_execution_repository=ActionExecutionRepository(),
         event_transcript_repository=EventTranscriptRepository(),
         agent_session_repository=AgentSessionRepository(),
+        archived_session_retention_repository=ArchivedSessionRetentionRepository(),
         workspace_user_repository=WorkspaceUserRepository(),
         session_workspace_project_repository=SessionWorkspaceProjectRepository(),
         input_buffer_service=input_buffer_service,

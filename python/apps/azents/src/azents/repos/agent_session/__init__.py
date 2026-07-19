@@ -453,6 +453,28 @@ class AgentSessionRepository:
         )
         return [self._build(rdb) for rdb in result.scalars()]
 
+    async def list_archived_by_agent_id(
+        self,
+        session: AsyncSession,
+        agent_id: str,
+    ) -> list[AgentSession]:
+        """Fetch archived root sessions in latest-archive-first order."""
+        rows = (
+            await session.execute(
+                sa.select(RDBAgentSession)
+                .where(
+                    RDBAgentSession.agent_id == agent_id,
+                    RDBAgentSession.session_kind == AgentSessionKind.ROOT,
+                    RDBAgentSession.status == AgentSessionStatus.ARCHIVED,
+                )
+                .order_by(
+                    RDBAgentSession.archived_at.desc(),
+                    RDBAgentSession.updated_at.desc(),
+                )
+            )
+        ).scalars()
+        return [self._build(row) for row in rows]
+
     async def get_latest_active_non_primary(
         self,
         session: AsyncSession,
@@ -500,7 +522,10 @@ class AgentSessionRepository:
         """Increment and return the durable ownership generation."""
         generation = await session.scalar(
             sa.update(RDBAgentSession)
-            .where(RDBAgentSession.id == agent_session_id)
+            .where(
+                RDBAgentSession.id == agent_session_id,
+                RDBAgentSession.status == AgentSessionStatus.ACTIVE,
+            )
             .values(owner_generation=RDBAgentSession.owner_generation + 1)
             .returning(RDBAgentSession.owner_generation)
         )
@@ -721,6 +746,96 @@ class AgentSessionRepository:
         await session.flush()
         return self._build(rdb)
 
+    async def lock_root_tree_sessions(
+        self,
+        session: AsyncSession,
+        *,
+        root_session_id: str,
+    ) -> list[AgentSession]:
+        """Lock all AgentSessions in one root SessionAgent tree."""
+        root_agent = await session.scalar(
+            sa.select(RDBSessionAgent).where(
+                RDBSessionAgent.agent_session_id == root_session_id,
+                RDBSessionAgent.kind == SessionAgentKind.ROOT,
+            )
+        )
+        if root_agent is None:
+            return []
+        session_ids = sa.select(RDBSessionAgent.agent_session_id).where(
+            RDBSessionAgent.root_session_agent_id == root_agent.id
+        )
+        rows = (
+            await session.execute(
+                sa.select(RDBAgentSession)
+                .where(RDBAgentSession.id.in_(session_ids))
+                .order_by(RDBAgentSession.id)
+                .with_for_update()
+            )
+        ).scalars()
+        return [self._build(row) for row in rows]
+
+    async def archive_tree(
+        self,
+        session: AsyncSession,
+        *,
+        root_session_id: str,
+        session_ids: Sequence[str],
+        archived_at: datetime.datetime,
+        purge_after: datetime.datetime | None,
+        policy_revision: int,
+        retention_days: int | None,
+        end_reason: AgentSessionEndReason | None = None,
+    ) -> None:
+        """Archive a complete root tree and snapshot policy on its root."""
+        await session.execute(
+            sa.update(RDBAgentSession)
+            .where(RDBAgentSession.id.in_(session_ids))
+            .values(
+                status=AgentSessionStatus.ARCHIVED,
+                ended_at=archived_at,
+                end_reason=end_reason,
+                run_state=AgentSessionRunState.IDLE,
+            )
+        )
+        await session.execute(
+            sa.update(RDBAgentSession)
+            .where(RDBAgentSession.id == root_session_id)
+            .values(
+                archived_at=archived_at,
+                purge_after=purge_after,
+                archive_policy_revision=policy_revision,
+                archive_retention_days_snapshot=retention_days,
+            )
+        )
+        await session.flush()
+
+    async def restore_tree(
+        self,
+        session: AsyncSession,
+        *,
+        root_session_id: str,
+        session_ids: Sequence[str],
+    ) -> None:
+        """Restore a complete archived tree and clear root archive metadata."""
+        await session.execute(
+            sa.update(RDBAgentSession)
+            .where(RDBAgentSession.id.in_(session_ids))
+            .values(status=AgentSessionStatus.ACTIVE)
+        )
+        await session.execute(
+            sa.update(RDBAgentSession)
+            .where(RDBAgentSession.id == root_session_id)
+            .values(
+                archived_at=None,
+                purge_after=None,
+                archive_policy_revision=None,
+                archive_retention_days_snapshot=None,
+                ended_at=None,
+                end_reason=None,
+            )
+        )
+        await session.flush()
+
     async def archive(
         self,
         session: AsyncSession,
@@ -729,7 +844,7 @@ class AgentSessionRepository:
         ended_at: datetime.datetime,
         end_reason: AgentSessionEndReason | None = None,
     ) -> None:
-        """Transition AgentSession to archived state."""
+        """Transition one AgentSession to archived state for legacy callers."""
         await session.execute(
             sa.update(RDBAgentSession)
             .where(RDBAgentSession.id == agent_session_id)
@@ -917,14 +1032,20 @@ class AgentSessionRepository:
 
     async def mark_running(self, session: AsyncSession, session_id: str) -> None:
         """Transition AgentSession run state to RUNNING."""
-        await session.execute(
+        updated_id = await session.scalar(
             sa.update(RDBAgentSession)
-            .where(RDBAgentSession.id == session_id)
+            .where(
+                RDBAgentSession.id == session_id,
+                RDBAgentSession.status == AgentSessionStatus.ACTIVE,
+            )
             .values(
                 run_state=AgentSessionRunState.RUNNING,
                 run_heartbeat_at=sa.func.now(),
             )
+            .returning(RDBAgentSession.id)
         )
+        if updated_id is None:
+            raise ValueError("Active AgentSession not found")
         await session.flush()
 
     async def mark_running_for_input_wakeup(
@@ -937,6 +1058,7 @@ class AgentSessionRepository:
             sa.update(RDBAgentSession)
             .where(
                 RDBAgentSession.id == session_id,
+                RDBAgentSession.status == AgentSessionStatus.ACTIVE,
                 RDBAgentSession.run_state != AgentSessionRunState.RUNNING,
             )
             .values(
@@ -961,6 +1083,7 @@ class AgentSessionRepository:
             sa.update(RDBAgentSession)
             .where(
                 RDBAgentSession.id == session_id,
+                RDBAgentSession.status == AgentSessionStatus.ACTIVE,
                 RDBAgentSession.run_state == AgentSessionRunState.IDLE,
                 RDBAgentSession.pending_command_id.is_(None),
             )

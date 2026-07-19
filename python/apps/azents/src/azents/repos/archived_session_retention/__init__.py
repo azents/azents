@@ -82,6 +82,87 @@ class ArchivedSessionRetentionRepository:
         row = result.scalar_one_or_none()
         return None if row is None else self._build_settings(row)
 
+    async def schedule_purge_job(
+        self,
+        session: AsyncSession,
+        *,
+        root_session_id: str,
+        eligible_at: datetime.datetime,
+        policy_revision: int,
+        now: datetime.datetime,
+    ) -> None:
+        """Create or reactivate unstarted purge work for an archived root."""
+        values = {
+            "eligible_at": eligible_at,
+            "policy_revision": policy_revision,
+            "status": ArchivedSessionPurgeStatus.PENDING,
+            "fencing_started_at": None,
+            "attempt_count": 0,
+            "lease_owner": None,
+            "lease_until": None,
+            "next_attempt_at": None,
+            "last_error_kind": None,
+            "last_error_summary": None,
+            "started_at": None,
+            "last_attempt_at": None,
+            "cancelled_at": None,
+            "completed_at": None,
+            "updated_at": now,
+        }
+        await session.execute(
+            insert(RDBArchivedSessionPurgeJob)
+            .values(
+                id=uuid7().hex,
+                root_session_id=root_session_id,
+                **values,
+            )
+            .on_conflict_do_update(
+                constraint="uq_archived_session_purge_jobs_root_session_id",
+                set_=values,
+                where=RDBArchivedSessionPurgeJob.fencing_started_at.is_(None),
+            )
+        )
+
+    async def cancel_unstarted_purge_job(
+        self,
+        session: AsyncSession,
+        *,
+        root_session_id: str,
+        now: datetime.datetime,
+    ) -> bool:
+        """Cancel purge work only before its irreversible fence."""
+        result = await session.execute(
+            sa.update(RDBArchivedSessionPurgeJob)
+            .where(
+                RDBArchivedSessionPurgeJob.root_session_id == root_session_id,
+                RDBArchivedSessionPurgeJob.fencing_started_at.is_(None),
+            )
+            .values(
+                status=ArchivedSessionPurgeStatus.CANCELLED,
+                cancelled_at=now,
+                lease_owner=None,
+                lease_until=None,
+                next_attempt_at=None,
+                updated_at=now,
+            )
+            .returning(RDBArchivedSessionPurgeJob.id)
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def purge_fencing_started(
+        self,
+        session: AsyncSession,
+        *,
+        root_session_id: str,
+    ) -> bool:
+        """Return whether irreversible purge fencing has started."""
+        started = await session.scalar(
+            sa.select(RDBArchivedSessionPurgeJob.fencing_started_at)
+            .where(RDBArchivedSessionPurgeJob.root_session_id == root_session_id)
+            .with_for_update()
+        )
+        return started is not None
+
     async def preview(
         self,
         session: AsyncSession,

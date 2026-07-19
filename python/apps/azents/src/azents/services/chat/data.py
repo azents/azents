@@ -245,6 +245,11 @@ class RunningSessionArchiveBlocked:
 
 
 @dataclasses.dataclass(frozen=True)
+class PurgeStartedRestoreBlocked:
+    """Restore is blocked after irreversible purge fencing starts."""
+
+
+@dataclasses.dataclass(frozen=True)
 class InvalidSessionTitle:
     """Invalid AgentSession title."""
 
@@ -268,6 +273,7 @@ ArchiveSessionError = (
     | PrimarySessionArchiveBlocked
     | RunningSessionArchiveBlocked
 )
+RestoreSessionError = SessionNotFound | SessionAccessDenied | PurgeStartedRestoreBlocked
 UpdateSessionTitleError = (
     SessionNotFound
     | SessionAccessDenied
