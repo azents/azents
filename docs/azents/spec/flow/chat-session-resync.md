@@ -17,7 +17,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
 last_verified_at: 2026-07-19
-spec_version: 34
+spec_version: 35
 ---
 
 # Chat Session Resync
@@ -207,15 +207,16 @@ status order—running, failed/completed, interrupted, then pending/idle—with 
 fallback. The parent-child hierarchy is never flattened by this ordering.
 
 Refresh/reconnect must reconstruct tree state by refetching this endpoint from durable DB state.
-While the Subagents tab or drawer is visible, the frontend also polls the endpoint every five seconds;
-session detail views refetch on window focus. Agent-message and run-lifecycle tree changes publish
+While the Subagents tab is visible, the frontend also polls the endpoint every five seconds; session
+detail views refetch on window focus. Full tree navigation lives in the Subagents tab; the chat top bar
+does not expose a separate Subagent Tree drawer. Agent-message and run-lifecycle tree changes publish
 `subagent_tree_changed` to every SessionAgent view in the same tree, and the frontend immediately
 invalidates cached tree queries. These events remain invalidation signals rather than source-of-truth
 state. Child detail views also use the tree projection to render a compact
 back button to the parent SessionAgent and an overflow menu with parent/root navigation options, so
-users can move back up the session-agent tree without relying on the drawer. Child detail composers are
-read-only for humans and render a disabled direct-input placeholder while preserving the stop control
-for running child sessions; new instructions to a subagent must be sent by another agent through
+users can move back up the session-agent tree directly from the child detail view. Child detail
+composers are read-only for humans and render a disabled direct-input placeholder while preserving
+the stop control for running child sessions; new instructions to a subagent must be sent by another agent through
 the collaboration tools.
 
 Durable and live `agent_message` events render in the chat timeline as collapsed, left-aligned
@@ -441,10 +442,12 @@ finite transaction periodically.
 - Provider-call rendering preserves canonical status and semantic text/references, projects only canonical attachment output parts, and never renders model-only file output parts.
 - The “new message” control is a semantic keyboard-accessible button.
 - Subagent Tree state is restored from the dedicated tree endpoint; `subagent_tree_changed` only invalidates/refetches cached tree queries.
+- Full Subagent Tree navigation is exposed through the Subagents tab without a duplicate chat top-bar drawer.
 - Child subagent detail views are human read-only for input but retain stop controls for running child sessions.
 
 ## 11. Changelog
 
+- **2026-07-19** — v35. Removed the duplicate chat top-bar Subagent Tree drawer and kept full tree navigation in the Subagents tab.
 - **2026-07-19** — v34. Replaced provider call/result merging with live-to-durable provider-call replacement and one-card canonical attachment projection.
 
 - **2026-07-18** — v32. Added reconnect-safe context-preparation operation replacement and provider/runtime retry presentation discrimination.

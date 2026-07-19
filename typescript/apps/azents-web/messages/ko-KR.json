@@ -622,7 +622,6 @@
         },
         "subagents": {
           "title": "서브에이전트",
-          "open": "서브에이전트 트리 열기",
           "loading": "서브에이전트 트리를 불러오는 중…",
           "summary": "서브에이전트 {count}개",
           "total": "노드 {count}개",

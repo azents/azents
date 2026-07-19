@@ -622,7 +622,6 @@
         },
         "subagents": {
           "title": "Sous-agents",
-          "open": "Ouvrir l’arbre des sous-agents",
           "loading": "Chargement de l’arbre des sous-agents…",
           "summary": "{count, plural, =0 {Aucun sous-agent} =1 {1 sous-agent} other {# sous-agents}}",
           "total": "{count, plural, =1 {1 nœud} other {# nœuds}}",
