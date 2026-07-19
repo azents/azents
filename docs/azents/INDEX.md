@@ -16,7 +16,7 @@ Design documents are accumulated records and are not listed individually in this
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
 | [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-07-18 | 50 |
-| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-19 | 111 |
+| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-19 | 112 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-16 | 9 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-17 | 5 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-07-19 | 14 |
@@ -223,6 +223,7 @@ Design documents are accumulated records and are not listed individually in this
 - [ADR-0168: Use Single Durable Events for Provider Tool Items](adr/0168-use-single-provider-tool-events.md)
 - [ADR-0169: Add OpenRouter as an Integration-Scoped LLM Provider](adr/0169-add-openrouter-as-an-integration-scoped-llm-provider.md)
 - [ADR-0169: Read Subscription Usage Through Provider Integrations](adr/0169-integration-scoped-subscription-usage.md)
+- [ADR-0170: Project Subscription Usage from the Selected Composer Model](adr/0170-project-subscription-usage-from-selected-model.md)
 
 ## Issues (Bug Tracking)
 

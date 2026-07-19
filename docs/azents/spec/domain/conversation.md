@@ -93,7 +93,7 @@ api_routes:
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-07-19
-spec_version: 111
+spec_version: 112
 ---
 
 # Conversation & Events
@@ -201,6 +201,18 @@ Project's currently checked-out local branch by default, supports branch-name se
 branches only. On first-message
 success, azents-web replaces the draft
 URL with the created session URL and invalidates the Agent session list cache.
+
+The draft and concrete-session composers project subscription usage for the currently selected
+Agent-owned model option when its provider is `chatgpt_oauth` or `xai_oauth`. The composer resolves
+the option's stored integration ID, reuses the integration-scoped subscription-usage query, and
+switches query identity when the selected model changes. API-key and unsupported providers do not
+render the affordance or request subscription usage. Desktop shows a compact status beside the model
+selector and operational details in the model popover; mobile keeps the compact status and places the
+same details in the model bottom sheet. Available limits, loading, stale, unavailable, and trusted
+external states remain local to the usage projection and never disable model selection or message
+submission. The session surface exposes no financial details. Manual refresh, the existing 60-second
+query freshness policy, focus revalidation, no automatic retry, and last-successful stale projection
+remain shared with Workspace LLM Settings.
 
 Each session may have a user-facing `title`. `PATCH /chat/v1/sessions/{session_id}/title`
 sets or clears a manual title after workspace membership validation. The request body uses `{ "title":
@@ -793,6 +805,7 @@ Current verification:
 
 ## 11. Changelog
 
+- **2026-07-19** — v112. Added selected-model OAuth subscription usage to draft and concrete-session composers with provider-eligible query selection, compact desktop/mobile presentation, operational-only detail, and composer-local failure isolation.
 - **2026-07-18** — v109. Added xAI client-owned image-generation events with the shared Base64-free attachment and ModelFile output contract.
 - **2026-07-18** — v107. Added bounded typed provider-failure metadata, complete-budget provider retry, reconnect-safe context preparation, atomic successful compaction commit, and terminal non-replayable User Stop.
 - **2026-07-17** — v106. Added Base64-free dual materialization, request-local replay, retry-safe admission, and direct attachment presentation for provider-hosted generated images.

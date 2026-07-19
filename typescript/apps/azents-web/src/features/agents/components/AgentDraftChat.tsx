@@ -22,6 +22,7 @@ export function AgentDraftChat(
   props: AgentDraftChatContainerOutput,
 ): React.ReactElement {
   const {
+    handle,
     agent,
     isWritePending,
     canSendMessage,
@@ -140,6 +141,7 @@ export function AgentDraftChat(
             onSetWorktreeStartingRef={onSetWorktreeStartingRef}
           />
           <ChatInput
+            handle={handle}
             agentId={agent.id}
             sessionId={null}
             isMobile={isMobile}
