@@ -227,6 +227,7 @@ Design documents are accumulated records and are not listed individually in this
 - [ADR-0169: Add OpenRouter as an Integration-Scoped LLM Provider](adr/0169-add-openrouter-as-an-integration-scoped-llm-provider.md)
 - [ADR-0169: Read Subscription Usage Through Provider Integrations](adr/0169-integration-scoped-subscription-usage.md)
 - [ADR-0170: Project Subscription Usage from the Selected Composer Model](adr/0170-project-subscription-usage-from-selected-model.md)
+- [ADR-0171: Add Kimi Subscription as an Integration-Scoped Provider](adr/0171-add-kimi-subscription-as-an-integration-scoped-provider.md)
 - [ADR-0171: Archived Session Retention and Durable Purge](adr/0171-archived-session-retention-and-purge.md)
 
 ## Issues (Bug Tracking)
