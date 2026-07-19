@@ -146,6 +146,7 @@ class PromotedInputBuffers:
     events: list[Event]
     promoted_event_ids: list[str]
     deleted_buffer_ids: list[str]
+    changed_session_agent_ids: list[str]
     claimed_count: int
     inserted_count: int
     deduped_count: int
@@ -447,6 +448,7 @@ class InputBufferService:
                     events=[],
                     promoted_event_ids=[],
                     deleted_buffer_ids=[],
+                    changed_session_agent_ids=[],
                     claimed_count=0,
                     inserted_count=0,
                     deduped_count=0,
@@ -536,6 +538,11 @@ class InputBufferService:
                     events_by_external_id[item.external_id].id for item in promoted
                 )
             )
+            changed_session_agent_ids = await self._acknowledge_promoted_agent_results(
+                session,
+                session_id=session_id,
+                promoted=promoted,
+            )
             if active_run_id is not None:
                 await self.agent_run_repository.associate_input_events(
                     session,
@@ -572,10 +579,71 @@ class InputBufferService:
             events=event_inserted,
             promoted_event_ids=promoted_event_ids,
             deleted_buffer_ids=buffer_ids,
+            changed_session_agent_ids=changed_session_agent_ids,
             claimed_count=len(buffer_ids),
             inserted_count=len(event_inserted),
             deduped_count=len(deduped),
         )
+
+    async def _acknowledge_promoted_agent_results(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        promoted: list[_PromotedInputBuffer],
+    ) -> list[str]:
+        """Advance source cursors for terminal results consumed by the model."""
+        result_payloads: list[AgentMessagePayload] = []
+        for item in promoted:
+            if item.event_kind is not EventKind.AGENT_MESSAGE:
+                continue
+            payload = _AGENT_MESSAGE_ADAPTER.validate_python(item.payload)
+            if payload.message_kind == "agent_result":
+                result_payloads.append(payload)
+        if not result_payloads:
+            return []
+
+        repository = self.agent_session_repository
+        target = await repository.get_session_agent_by_session_id(session, session_id)
+        if target is None:
+            return []
+
+        changed_ids: list[str] = []
+        for payload in result_payloads:
+            if payload.target_session_agent_id != target.id:
+                continue
+            assert payload.source_run_id is not None
+            assert payload.source_run_index is not None
+            assert payload.run_status is not None
+            source = await repository.get_session_agent_by_id(
+                session,
+                payload.source_session_agent_id,
+            )
+            run = await self.agent_run_repository.get_by_id(
+                session,
+                payload.source_run_id,
+            )
+            if (
+                source is None
+                or source.parent_session_agent_id != target.id
+                or run is None
+                or run.session_id != source.agent_session_id
+                or run.run_index != payload.source_run_index
+                or run.status != payload.run_status
+                or run.terminal_result_event_id
+                != payload.source_terminal_result_event_id
+            ):
+                continue
+            updated = await repository.advance_session_agent_observation_cursor(
+                session,
+                session_agent_id=payload.source_session_agent_id,
+                parent_session_agent_id=target.id,
+                parent_observed_run_index=payload.source_run_index,
+                parent_observed_event_id=payload.source_terminal_result_event_id,
+            )
+            if updated is not None:
+                changed_ids.append(updated.id)
+        return list(dict.fromkeys(changed_ids))
 
     async def _prepare_input_buffer_attachments(
         self,

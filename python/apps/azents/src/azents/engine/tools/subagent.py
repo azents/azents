@@ -10,7 +10,7 @@ import time
 from textwrap import dedent
 from typing import Literal
 
-from pydantic import BaseModel, Field, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.types import SessionBroker, SessionStopSignal, SessionWakeUp
@@ -59,6 +59,7 @@ from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession, SessionAgent
 from azents.services.agent_mailbox import AgentMailboxService
 from azents.services.input_buffer import InputBufferService
+from azents.services.subagent_terminal_result import SubagentTerminalResultService
 
 _ROOT_AGENT_USAGE_HINT_TEXT = """You are `/root`, the primary agent in a team of agents collaborating to fulfill the user's goals.
 
@@ -69,7 +70,7 @@ All agents in the team, including the agents that you can assign tasks to, are e
 You can use `spawn_agent` to create a new agent, `followup_task` to give an existing agent a new task and trigger a turn, and `send_message` to pass a message to a running agent without triggering a turn.
 Child agents can also spawn their own sub-agents.
 You can decide how much context you want to propagate to your sub-agents with the `fork_turns` parameter.
-Use `wait_agent` to observe unread terminal child results when you need completion output from child agents.
+Use `wait_agent` to pause until your mailbox changes or all descendants become idle.
 
 You will receive messages in the model input in the form:
 ```
@@ -88,7 +89,7 @@ You can spawn sub-agents to handle subtasks, and those sub-agents can spawn thei
 You can use `spawn_agent` to create a new agent, `followup_task` to give an existing agent a new task and trigger a turn, and `send_message` to pass a message to a running agent.
 Child agents can also spawn their own sub-agents.
 
-When you provide a final response, that content is stored as a terminal child result for your parent to observe with `wait_agent`.
+When you provide a final response, that content is queued in your direct parent's mailbox as a terminal result.
 
 You will receive messages in the model input in the form:
 ```
@@ -164,20 +165,13 @@ class FollowupTaskInput(BaseModel):
 class WaitAgentInput(BaseModel):
     """wait_agent tool input."""
 
-    agent_name: str | None = Field(
-        default=None,
-        description=(
-            "Optional target agent path or child name. "
-            "Omit to wait for all descendants."
-        ),
-    )
-    timeout_seconds: int | None = Field(
-        default=None,
+    model_config = ConfigDict(extra="forbid")
+
+    timeout_seconds: int = Field(
+        default=30,
         ge=0,
         le=600,
-        description=(
-            "Optional maximum wait time. Blocking wait is completed in a later phase."
-        ),
+        description="Maximum mailbox activity wait in seconds. Defaults to 30.",
     )
 
 
@@ -189,13 +183,6 @@ class InterruptAgentInput(BaseModel):
 
 _JSON_OBJECT_ADAPTER = TypeAdapter[dict[str, JSONValue]](dict[str, JSONValue])
 
-_TERMINAL_STATUSES = {
-    AgentRunStatus.COMPLETED,
-    AgentRunStatus.FAILED,
-    AgentRunStatus.STOPPED,
-    AgentRunStatus.INTERRUPTED,
-    AgentRunStatus.CANCELLED,
-}
 _WAIT_AGENT_POLL_INTERVAL_SECONDS = 0.1
 
 
@@ -210,6 +197,13 @@ class _SpawnInferenceProfile:
     state: SessionInferenceState
 
 
+@dataclasses.dataclass(frozen=True)
+class _WaitObservation:
+    mailbox_updated: bool
+    descendant_count: int
+    active_paths: tuple[str, ...]
+
+
 class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
     """Model-visible subagent collaboration tools."""
 
@@ -221,6 +215,8 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
         agent_run_repository: AgentRunRepository,
         event_transcript_repository: EventTranscriptRepository,
         agent_mailbox_service: AgentMailboxService,
+        input_buffer_service: InputBufferService,
+        subagent_terminal_result_service: SubagentTerminalResultService,
         broker: SessionBroker,
         agent_repository: AgentRepository,
         agent: Agent,
@@ -231,6 +227,8 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
         self.agent_run_repository = agent_run_repository
         self.event_transcript_repository = event_transcript_repository
         self.agent_mailbox_service = agent_mailbox_service
+        self.input_buffer_service = input_buffer_service
+        self.subagent_terminal_result_service = subagent_terminal_result_service
         self.broker = broker
         self.agent_repository = agent_repository
         self.agent = agent
@@ -651,93 +649,108 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
 
     def _wait_agent_tool(self) -> FunctionTool:
         async def wait_agent(input: WaitAgentInput) -> str:
-            """Observe unread terminal child results."""
-            deadline = (
-                None
-                if input.timeout_seconds is None
-                else time.monotonic() + input.timeout_seconds
-            )
-            while True:
-                changed_targets: list[SessionAgent] = []
-                async with self.session_manager() as session:
-                    current = await self._current_session_agent(session)
-                    targets = await self._wait_targets(
-                        session, current, input.agent_name
-                    )
-                    if not targets:
-                        message = (
-                            "not_found"
-                            if input.agent_name is not None
-                            else "No descendant agents to wait for."
-                        )
-                        return _json({"message": message, "timed_out": False})
-                    latest_runs = (
-                        await self.agent_run_repository.list_latest_by_session_ids(
-                            session,
-                            session_ids=[target.agent_session_id for target in targets],
-                        )
-                    )
-                    messages: list[str] = []
-                    running: list[str] = []
-                    for target in targets:
-                        run = latest_runs.get(target.agent_session_id)
-                        target_session = await self.agent_session_repository.get_by_id(
-                            session,
-                            target.agent_session_id,
-                        )
-                        session_running = (
-                            target_session is not None
-                            and target_session.run_state == AgentSessionRunState.RUNNING
-                        )
-                        if run is None:
-                            if session_running:
-                                running.append(target.path)
-                            continue
-                        terminal_unread = run.status in _TERMINAL_STATUSES and (
-                            target.parent_observed_run_index is None
-                            or run.run_index > target.parent_observed_run_index
-                        )
-                        if terminal_unread:
-                            text = (
-                                run.terminal_result_message
-                                or f"{target.path}: {run.status.value}"
-                            )
-                            messages.append(text)
-                            repo = self.agent_session_repository
-                            update_cursor = repo.update_session_agent_observation_cursor
-                            updated = await update_cursor(
-                                session,
-                                session_agent_id=target.id,
-                                parent_observed_run_index=run.run_index,
-                                parent_observed_event_id=run.terminal_result_event_id,
-                            )
-                            changed_targets.append(updated or target)
-                            continue
-                        if run.status == AgentRunStatus.RUNNING or session_running:
-                            running.append(target.path)
-                for target in changed_targets:
-                    await self._publish_tree_changed(target)
-                if messages:
-                    return _json({"message": "\n\n".join(messages), "timed_out": False})
-                if not running:
-                    return _json(
-                        {"message": "No unread terminal result.", "timed_out": False}
-                    )
-                if deadline is None:
-                    return _json(
-                        {"message": "No unread terminal result.", "timed_out": False}
-                    )
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    return _json(
-                        {
-                            "message": "Still running: " + ", ".join(running),
-                            "timed_out": True,
-                        }
-                    )
-                await asyncio.sleep(min(_WAIT_AGENT_POLL_INTERVAL_SECONDS, remaining))
+            """Wait for current mailbox activity or descendant idleness."""
+            return await self._wait_agent(input.timeout_seconds)
 
         return make_tool(wait_agent, name="wait_agent")
+
+    async def _wait_agent(self, timeout_seconds: int) -> str:
+        """Poll mailbox activity with descendant-idle fallback."""
+        current_session_id = self._current_session_id()
+        deadline = time.monotonic() + timeout_seconds
+        while True:
+            await self.subagent_terminal_result_service.deliver_pending_for_parent_children(
+                current_session_id,
+                repair_source="parent_wait",
+            )
+            observation = await self._observe_wait_state()
+            immediate = self._wait_observation_result(observation)
+            if immediate is not None:
+                if observation.mailbox_updated or observation.descendant_count == 0:
+                    return immediate
+                await self.subagent_terminal_result_service.deliver_pending_for_parent_children(
+                    current_session_id,
+                    repair_source="parent_wait",
+                )
+                final = await self._observe_wait_state()
+                final_result = self._wait_observation_result(final)
+                if final_result is not None:
+                    return final_result
+                observation = final
+
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                await self.subagent_terminal_result_service.deliver_pending_for_parent_children(
+                    current_session_id,
+                    repair_source="parent_wait",
+                )
+                final = await self._observe_wait_state()
+                final_result = self._wait_observation_result(final)
+                if final_result is not None:
+                    return final_result
+                return _json(
+                    {
+                        "message": "Wait timed out; active descendants: "
+                        + ", ".join(final.active_paths),
+                        "timed_out": True,
+                    }
+                )
+            await asyncio.sleep(min(_WAIT_AGENT_POLL_INTERVAL_SECONDS, remaining))
+
+    async def _observe_wait_state(self) -> _WaitObservation:
+        """Read current mailbox state and descendant activity."""
+        current_session_id = self._current_session_id()
+        mailbox_updated = await self.input_buffer_service.has_pending_agent_messages(
+            current_session_id
+        )
+        async with self.session_manager() as session:
+            current = await self._current_session_agent(session)
+            descendants = (
+                await self.agent_session_repository.list_descendant_session_agents(
+                    session,
+                    session_agent_id=current.id,
+                    include_self=False,
+                )
+            )
+            session_ids = [agent.agent_session_id for agent in descendants]
+            sessions = await self.agent_session_repository.list_by_ids(
+                session,
+                agent_session_ids=session_ids,
+            )
+            latest_runs = await self.agent_run_repository.list_latest_by_session_ids(
+                session,
+                session_ids=session_ids,
+            )
+        active_paths: list[str] = []
+        for descendant in descendants:
+            session = sessions.get(descendant.agent_session_id)
+            latest_run = latest_runs.get(descendant.agent_session_id)
+            if _session_agent_active(session, latest_run) or (
+                await self.input_buffer_service.has_pending_wake_session_input_buffers(
+                    descendant.agent_session_id
+                )
+            ):
+                active_paths.append(descendant.path)
+        return _WaitObservation(
+            mailbox_updated=mailbox_updated,
+            descendant_count=len(descendants),
+            active_paths=tuple(active_paths),
+        )
+
+    @staticmethod
+    def _wait_observation_result(observation: _WaitObservation) -> str | None:
+        """Return a completed wait result when observation is terminal."""
+        if observation.mailbox_updated:
+            return _json({"message": "Mailbox updated.", "timed_out": False})
+        if observation.descendant_count == 0:
+            return _json(
+                {"message": "No descendant agents to wait for.", "timed_out": False}
+            )
+        if not observation.active_paths:
+            return _json(
+                {"message": "All descendant agents are idle.", "timed_out": False}
+            )
+        return None
 
     def _interrupt_agent_tool(self) -> FunctionTool:
         async def interrupt_agent(input: InterruptAgentInput) -> str:
@@ -851,40 +864,6 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
         except ValueError:
             target = None
         return _TargetResolution(current=current, target=target)
-
-    async def _wait_targets(
-        self,
-        session: AsyncSession,
-        current: SessionAgent,
-        agent_name: str | None,
-    ) -> list[SessionAgent]:
-        if agent_name is not None:
-            try:
-                resolved = (
-                    await self.agent_session_repository.resolve_session_agent_path(
-                        session,
-                        current_session_agent_id=current.id,
-                        path=agent_name,
-                    )
-                )
-            except ValueError:
-                return []
-            if resolved is None and agent_name != current.name:
-                return []
-            if resolved is None or resolved.id == current.id:
-                raise FunctionToolError(
-                    "an agent cannot wait for itself; wait_agent only observes "
-                    "descendants"
-                )
-            return [resolved]
-        descendants = (
-            await self.agent_session_repository.list_descendant_session_agents(
-                session,
-                session_agent_id=current.id,
-                include_self=False,
-            )
-        )
-        return descendants
 
     async def _enforce_spawn_limits(
         self,
@@ -1094,14 +1073,23 @@ class SubagentToolkitProvider(ToolkitProvider[SubagentToolkitConfig]):
             raise ValueError("Agent not found while resolving subagent Toolkit")
         subagent_settings = agent.subagent_settings
         agent_session_repository = AgentSessionRepository()
+        agent_run_repository = AgentRunRepository()
+        agent_mailbox_service = AgentMailboxService(
+            input_buffer_service=self.input_buffer_service,
+            agent_session_repository=agent_session_repository,
+        )
         toolkit = SubagentToolkit(
             session_manager=self.session_manager,
             agent_session_repository=agent_session_repository,
-            agent_run_repository=AgentRunRepository(),
+            agent_run_repository=agent_run_repository,
             event_transcript_repository=EventTranscriptRepository(),
-            agent_mailbox_service=AgentMailboxService(
-                input_buffer_service=self.input_buffer_service,
+            agent_mailbox_service=agent_mailbox_service,
+            input_buffer_service=self.input_buffer_service,
+            subagent_terminal_result_service=SubagentTerminalResultService(
+                session_manager=self.session_manager,
+                agent_run_repository=agent_run_repository,
                 agent_session_repository=agent_session_repository,
+                agent_mailbox_service=agent_mailbox_service,
             ),
             broker=self.broker,
             agent_repository=self.agent_repository,
@@ -1145,7 +1133,8 @@ def _session_agent_active(
     if session is None:
         return False
     return session.run_state == AgentSessionRunState.RUNNING or (
-        latest_run is not None and latest_run.status == AgentRunStatus.RUNNING
+        latest_run is not None
+        and latest_run.status in {AgentRunStatus.PENDING, AgentRunStatus.RUNNING}
     )
 
 

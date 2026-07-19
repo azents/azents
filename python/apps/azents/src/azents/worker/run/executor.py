@@ -678,6 +678,7 @@ class RunExecutor:
                 ),
                 poll_fn=None,
                 process_actions=True,
+                dispatch_event=dispatch_event,
             )
             if initial_input.requested_inference_profile is not None:
                 selected_profile = RequestedProfileSelection(
@@ -1407,6 +1408,7 @@ class RunExecutor:
                             owner_generation=owner_generation,
                             tool_admission_barrier=tool_admission_barrier,
                             mark_context_invalidated=mark_turn_boundary_context_invalidated,
+                            dispatch_event=dispatch_event,
                         )
                         engine_iter = self.engine.run(
                             run_request,
@@ -1957,6 +1959,62 @@ class RunExecutor:
             source=InferenceProfileSource.AGENT_DEFAULT,
         )
 
+    async def _publish_session_agent_tree_changes(
+        self,
+        session_agent_ids: list[str],
+        *,
+        dispatch_event: Callable[[str, PublishedEvent], Awaitable[None]],
+    ) -> None:
+        """Publish committed SessionAgent changes to every tree viewer."""
+        unique_ids = list(dict.fromkeys(session_agent_ids))
+        if not unique_ids:
+            return
+
+        async with self.session_manager() as session:
+            changed_agents = [
+                agent
+                for session_agent_id in unique_ids
+                if (
+                    agent
+                    := await self.agent_session_repository.get_session_agent_by_id(
+                        session,
+                        session_agent_id,
+                    )
+                )
+                is not None
+            ]
+            session_ids_by_root: dict[str, list[str]] = {}
+            for agent in changed_agents:
+                if agent.root_session_agent_id in session_ids_by_root:
+                    continue
+                tree_agents = (
+                    await self.agent_session_repository.list_session_agent_tree(
+                        session,
+                        root_session_agent_id=agent.root_session_agent_id,
+                    )
+                )
+                session_ids_by_root[agent.root_session_agent_id] = sorted(
+                    {tree_agent.agent_session_id for tree_agent in tree_agents}
+                )
+
+        for agent in changed_agents:
+            event = SubagentTreeChanged(
+                root_session_agent_id=agent.root_session_agent_id,
+                changed_session_agent_id=agent.id,
+            )
+            for target_session_id in session_ids_by_root[agent.root_session_agent_id]:
+                try:
+                    await dispatch_event(target_session_id, event)
+                except Exception:
+                    logger.exception(
+                        "Failed to publish committed SessionAgent tree change",
+                        extra={
+                            "target_session_id": target_session_id,
+                            "changed_session_agent_id": agent.id,
+                            "root_session_agent_id": agent.root_session_agent_id,
+                        },
+                    )
+
     def make_boundary_poll(
         self,
         *,
@@ -1968,6 +2026,7 @@ class RunExecutor:
         owner_generation: int,
         tool_admission_barrier: ToolAdmissionBarrier,
         mark_context_invalidated: Callable[[], None],
+        dispatch_event: Callable[[str, PublishedEvent], Awaitable[None]],
     ) -> PollMessages:
         """Combine model-call boundary polling with turn action processing."""
 
@@ -1983,6 +2042,7 @@ class RunExecutor:
                 initial_turn_eligible=True,
                 poll_fn=poll_fn,
                 process_actions=True,
+                dispatch_event=dispatch_event,
             )
             if result.context_invalidated:
                 mark_context_invalidated()
@@ -2011,6 +2071,7 @@ class RunExecutor:
         initial_turn_eligible: bool,
         poll_fn: PollMessages | None,
         process_actions: bool,
+        dispatch_event: Callable[[str, PublishedEvent], Awaitable[None]],
     ) -> RunInputPollResult:
         """Consume pending run inputs and report whether a wake-up has work."""
         user_messages: list[RunUserMessage] = []
@@ -2039,6 +2100,10 @@ class RunExecutor:
                 required_inference_profile=selected_profile,
                 active_run_id=active_run_id,
                 include_action_messages=process_actions,
+            )
+            await self._publish_session_agent_tree_changes(
+                promoted.changed_session_agent_ids,
+                dispatch_event=dispatch_event,
             )
             if not promoted.deleted_buffer_ids:
                 break

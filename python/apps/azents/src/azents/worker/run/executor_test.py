@@ -150,6 +150,14 @@ class _SessionManager:
         return _SessionScope()
 
 
+async def _noop_dispatch_event(
+    session_id: str,
+    event: PublishedEvent,
+) -> None:
+    """Ignore a published worker event."""
+    del session_id, event
+
+
 @dataclasses.dataclass(frozen=True)
 class _PendingRun:
     """Minimal pending-run projection for executor tests."""
@@ -438,6 +446,24 @@ class _AgentSessionRepository:
         """Return the configured current SessionAgent."""
         del session, session_id
         return self.current_session_agent
+
+    async def get_session_agent_by_id(
+        self,
+        session: AsyncSession,
+        session_agent_id: str,
+    ) -> object | None:
+        """Return a configured SessionAgent by ID."""
+        del session
+        candidates = [self.current_session_agent, *self.tree_session_agents]
+        return next(
+            (
+                candidate
+                for candidate in candidates
+                if candidate is not None
+                and getattr(candidate, "id", None) == session_agent_id
+            ),
+            None,
+        )
 
     async def clear_pending_command(
         self,
@@ -2120,6 +2146,7 @@ async def test_boundary_poll_processes_turn_actions(
         owner_generation=1,
         tool_admission_barrier=ToolAdmissionBarrier(),
         mark_context_invalidated=lambda: None,
+        dispatch_event=_noop_dispatch_event,
     )
 
     assert await poll() == PollMessagesResult(
@@ -2183,6 +2210,7 @@ async def test_boundary_poll_stops_after_context_invalidating_action(
         owner_generation=1,
         tool_admission_barrier=ToolAdmissionBarrier(),
         mark_context_invalidated=mark_context_invalidated,
+        dispatch_event=_noop_dispatch_event,
     )
 
     assert await poll() == PollMessagesResult(
@@ -2217,6 +2245,7 @@ async def test_poll_run_inputs_continues_fifo_after_failed_turn_action(
             user_messages=[],
             events=[],
             deleted_buffer_ids=["buffer-action"],
+            changed_session_agent_ids=[],
             claimed_count=1,
             inserted_count=0,
             deduped_count=0,
@@ -2237,6 +2266,7 @@ async def test_poll_run_inputs_continues_fifo_after_failed_turn_action(
                 )
             ],
             deleted_buffer_ids=["buffer-user"],
+            changed_session_agent_ids=[],
             claimed_count=1,
             inserted_count=1,
             deduped_count=0,
@@ -2249,6 +2279,7 @@ async def test_poll_run_inputs_continues_fifo_after_failed_turn_action(
             user_messages=[],
             events=[],
             deleted_buffer_ids=[],
+            changed_session_agent_ids=[],
             claimed_count=0,
             inserted_count=0,
             deduped_count=0,
@@ -2295,6 +2326,7 @@ async def test_poll_run_inputs_continues_fifo_after_failed_turn_action(
         initial_turn_eligible=False,
         poll_fn=None,
         process_actions=True,
+        dispatch_event=_noop_dispatch_event,
     )
 
     assert result.user_messages == [user_message]
@@ -2302,6 +2334,102 @@ async def test_poll_run_inputs_continues_fifo_after_failed_turn_action(
     assert result.context_invalidated is False
     assert result.complete_run is False
     assert processed_worktree_actions == [None, None]
+    assert promoted_batches == []
+
+
+@pytest.mark.asyncio
+async def test_poll_run_inputs_publishes_acknowledgment_after_promotion_commit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Committed cursor changes notify viewers without failing on one error."""
+    root_agent = SimpleNamespace(
+        id="root-agent",
+        root_session_agent_id="root-agent",
+        agent_session_id="root-session",
+    )
+    child_agent = SimpleNamespace(
+        id="child-agent",
+        root_session_agent_id="root-agent",
+        agent_session_id="child-session",
+    )
+    session_repository = _AgentSessionRepository(
+        current_session_agent=root_agent,
+        tree_session_agents=[root_agent, child_agent],
+    )
+    executor = _executor(agent_session_repository=session_repository)
+    order: list[str] = []
+    promoted_batches = [
+        PromotedInputBuffers(
+            worktree_action=None,
+            turn_effect=TurnEffect.NEUTRAL,
+            requested_inference_profile=None,
+            promoted_event_ids=[],
+            user_messages=[],
+            events=[],
+            deleted_buffer_ids=["buffer-result"],
+            changed_session_agent_ids=["child-agent"],
+            claimed_count=1,
+            inserted_count=1,
+            deduped_count=0,
+        ),
+        PromotedInputBuffers(
+            worktree_action=None,
+            turn_effect=TurnEffect.NEUTRAL,
+            requested_inference_profile=None,
+            promoted_event_ids=[],
+            user_messages=[],
+            events=[],
+            deleted_buffer_ids=[],
+            changed_session_agent_ids=[],
+            claimed_count=0,
+            inserted_count=0,
+            deduped_count=0,
+        ),
+    ]
+
+    async def promote(*args: object, **kwargs: object) -> PromotedInputBuffers:
+        del args, kwargs
+        result = promoted_batches.pop(0)
+        order.append("promotion_committed")
+        return result
+
+    async def has_actionable_model_input(session_id: str) -> bool:
+        del session_id
+        return False
+
+    async def dispatch_event(session_id: str, event: PublishedEvent) -> None:
+        assert isinstance(event, SubagentTreeChanged)
+        order.append(f"dispatch:{session_id}:{event.changed_session_agent_id}")
+        if session_id == "child-session":
+            raise RuntimeError("viewer unavailable")
+
+    monkeypatch.setattr(executor, "_promote_input_buffers", promote)
+    monkeypatch.setattr(
+        executor,
+        "_has_actionable_model_input",
+        has_actionable_model_input,
+    )
+
+    await executor.poll_run_inputs(
+        agent_id="agent-1",
+        session_id="root-session",
+        model="gpt-test",
+        required_inference_profile=None,
+        active_run_id="run-1",
+        owner_generation=1,
+        tool_admission_barrier=ToolAdmissionBarrier(),
+        initial_turn_eligible=True,
+        poll_fn=None,
+        process_actions=False,
+        dispatch_event=dispatch_event,
+    )
+
+    assert order == [
+        "promotion_committed",
+        "dispatch:child-session:child-agent",
+        "dispatch:root-session:child-agent",
+        "promotion_committed",
+    ]
     assert promoted_batches == []
 
 
@@ -2320,6 +2448,7 @@ async def test_poll_run_inputs_completes_run_after_terminal_preparation_failure(
             user_messages=[],
             events=[],
             deleted_buffer_ids=["buffer-failed"],
+            changed_session_agent_ids=[],
             claimed_count=1,
             inserted_count=1,
             deduped_count=0,
@@ -2332,6 +2461,7 @@ async def test_poll_run_inputs_completes_run_after_terminal_preparation_failure(
             user_messages=[],
             events=[],
             deleted_buffer_ids=[],
+            changed_session_agent_ids=[],
             claimed_count=0,
             inserted_count=0,
             deduped_count=0,
@@ -2364,6 +2494,7 @@ async def test_poll_run_inputs_completes_run_after_terminal_preparation_failure(
         initial_turn_eligible=False,
         poll_fn=None,
         process_actions=False,
+        dispatch_event=_noop_dispatch_event,
     )
 
     assert result.complete_run is True
