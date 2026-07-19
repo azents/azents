@@ -209,6 +209,7 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 const baseArgs = {
+  handle: "story-workspace",
   agentId: "story-agent-001",
   sessionId: "story-session-001",
   isMobile: false,

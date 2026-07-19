@@ -37,6 +37,11 @@ import {
   normalizeReasoningEffort,
   reasoningEffortLevels,
 } from "@/shared/lib/reasoning-effort";
+import { resolveComposerSubscriptionSelection } from "../composerSubscriptionUsage";
+import {
+  ComposerSubscriptionUsageDetailsContainer,
+  ComposerSubscriptionUsageIndicatorContainer,
+} from "../containers/ComposerSubscriptionUsageContainer";
 import { AttachmentPreviewBar } from "./AttachmentPreviewBar";
 import { TodoPreviewBar } from "./TodoPreviewBar";
 import type { PendingFile, UploadedFile } from "../hooks/useFileUpload";
@@ -68,6 +73,8 @@ function getScopedStorageKey(
 }
 
 interface ChatInputProps {
+  /** current workspace handle */
+  handle: string;
   /** current agent ID */
   agentId: string | null;
   /** current session ID */
@@ -508,6 +515,7 @@ function HighlightedKeyword({
 }
 
 export const ChatInput = memo(function ChatInput({
+  handle,
   agentId,
   sessionId,
   isMobile,
@@ -635,6 +643,14 @@ export const ChatInput = memo(function ChatInput({
     selectableModelOptions.find(
       (option) => option.label === inferenceProfile.model_target_label,
     )?.label ?? inferenceProfile.model_target_label;
+  const subscriptionSelection = useMemo(
+    () =>
+      resolveComposerSubscriptionSelection(
+        selectableModelOptions,
+        inferenceProfile.model_target_label,
+      ),
+    [inferenceProfile.model_target_label, selectableModelOptions],
+  );
   const selectedEffortLabel = inferenceProfile.reasoning_effort ?? "";
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -1053,6 +1069,11 @@ export const ChatInput = memo(function ChatInput({
     [inferenceProfile, selectableEfforts, updateInferenceProfile],
   );
 
+  const handleOpenSubscriptionUsage = useCallback((): void => {
+    setProfilePickerOpened(true);
+    setDesktopProfileSection(null);
+  }, []);
+
   const profileTrigger = (
     <Button
       variant="light"
@@ -1171,6 +1192,13 @@ export const ChatInput = memo(function ChatInput({
       >
         {modelOptionRows}
       </Stack>
+      {subscriptionSelection !== null ? (
+        <ComposerSubscriptionUsageDetailsContainer
+          handle={handle}
+          integrationId={subscriptionSelection.integrationId}
+          provider={subscriptionSelection.provider}
+        />
+      ) : null}
       {selectableEfforts.length > 0 && (
         <Stack gap={rem(6)}>
           <Text size="sm" fw={600}>
@@ -1259,6 +1287,13 @@ export const ChatInput = memo(function ChatInput({
               </Group>
             </UnstyledButton>
           )}
+          {subscriptionSelection !== null ? (
+            <ComposerSubscriptionUsageDetailsContainer
+              handle={handle}
+              integrationId={subscriptionSelection.integrationId}
+              provider={subscriptionSelection.provider}
+            />
+          ) : null}
         </Stack>
       </Paper>
       {desktopProfileSection === "model" && (
@@ -1538,6 +1573,15 @@ export const ChatInput = memo(function ChatInput({
               {isMobile ? (
                 <>
                   {profileTrigger}
+                  {subscriptionSelection !== null ? (
+                    <ComposerSubscriptionUsageIndicatorContainer
+                      compact
+                      handle={handle}
+                      integrationId={subscriptionSelection.integrationId}
+                      onOpen={handleOpenSubscriptionUsage}
+                      provider={subscriptionSelection.provider}
+                    />
+                  ) : null}
                   <Drawer
                     opened={profilePickerOpened}
                     onClose={() => setProfilePickerOpened(false)}
@@ -1583,32 +1627,43 @@ export const ChatInput = memo(function ChatInput({
                   </Drawer>
                 </>
               ) : (
-                <Popover
-                  opened={profilePickerOpened}
-                  onChange={(opened) => {
-                    setProfilePickerOpened(opened);
-                    if (!opened) {
-                      setDesktopProfileSection(null);
-                    }
-                  }}
-                  position="top-start"
-                  width="auto"
-                  shadow="none"
-                  withinPortal
-                >
-                  <Popover.Target>{profileTrigger}</Popover.Target>
-                  <Popover.Dropdown
-                    p={0}
-                    style={{
-                      background: "transparent",
-                      border: 0,
-                      boxShadow: "none",
-                      overflow: "visible",
+                <>
+                  <Popover
+                    opened={profilePickerOpened}
+                    onChange={(opened) => {
+                      setProfilePickerOpened(opened);
+                      if (!opened) {
+                        setDesktopProfileSection(null);
+                      }
                     }}
+                    position="top-start"
+                    width="auto"
+                    shadow="none"
+                    withinPortal
                   >
-                    {desktopProfileMenu}
-                  </Popover.Dropdown>
-                </Popover>
+                    <Popover.Target>{profileTrigger}</Popover.Target>
+                    <Popover.Dropdown
+                      p={0}
+                      style={{
+                        background: "transparent",
+                        border: 0,
+                        boxShadow: "none",
+                        overflow: "visible",
+                      }}
+                    >
+                      {desktopProfileMenu}
+                    </Popover.Dropdown>
+                  </Popover>
+                  {subscriptionSelection !== null ? (
+                    <ComposerSubscriptionUsageIndicatorContainer
+                      compact={false}
+                      handle={handle}
+                      integrationId={subscriptionSelection.integrationId}
+                      onOpen={handleOpenSubscriptionUsage}
+                      provider={subscriptionSelection.provider}
+                    />
+                  ) : null}
+                </>
               )}
               <Box style={{ flex: "1 1 auto" }} />
               {isStopAvailable &&

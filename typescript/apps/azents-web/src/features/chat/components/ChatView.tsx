@@ -399,6 +399,7 @@ interface ChatViewProps {
 }
 
 export function ChatView({
+  handle,
   chatViewState,
   chatTimelineState,
   messages,
@@ -1397,6 +1398,7 @@ export function ChatView({
           <Box px="md" py="sm">
             <Box maw={rem(920)} mx="auto">
               <ChatInput
+                handle={handle}
                 agentId={activeAgent?.id ?? null}
                 sessionId={sessionId}
                 isMobile={isMobile}
