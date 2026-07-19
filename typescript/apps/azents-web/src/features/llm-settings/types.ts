@@ -25,3 +25,17 @@ export type FormModalState =
 export type MutationState =
   | { type: "IDLE"; error: string | null }
   | { type: "SUBMITTING" };
+
+/** Kimi device authorization state. */
+export type KimiOAuthDeviceState =
+  | { type: "IDLE" }
+  | {
+      type: "PENDING";
+      sessionId: string;
+      userCode: string;
+      verificationUri: string;
+      intervalMs: number;
+      expiresAt: string;
+    }
+  | { type: "CONNECTED" }
+  | { type: "ERROR"; message: string };

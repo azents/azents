@@ -26,8 +26,10 @@ import {
 import { IconEdit, IconPlus, IconTrash } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { IntegrationFormModal } from "./IntegrationFormModal";
+import { KimiConnectionStatusBadge } from "./KimiOAuthConnectionCard";
 import { WorkspaceModelSettingsCard } from "./WorkspaceModelSettingsCard";
 import type { LlmSettingsContainerOutput } from "../containers/useLlmSettingsContainer";
+import type { KimiOAuthConnectionStatus } from "./KimiOAuthConnectionCard";
 import type { LlmProviderIntegrationResponse } from "@azents/public-client";
 import type { ReactNode } from "react";
 
@@ -40,6 +42,7 @@ type ProviderLabels = Record<
   | "chatgpt_oauth"
   | "xai"
   | "xai_oauth"
+  | "kimi_oauth"
   | "openrouter",
   string
 >;
@@ -60,6 +63,8 @@ function providerColor(provider: string): string {
     case "xai":
     case "xai_oauth":
       return "dark";
+    case "kimi_oauth":
+      return "violet";
     case "openrouter":
       return "violet";
     default:
@@ -85,11 +90,25 @@ function labelForProvider(provider: string, labels: ProviderLabels): string {
       return labels.xai;
     case "xai_oauth":
       return labels.xai_oauth;
+    case "kimi_oauth":
+      return labels.kimi_oauth;
     case "openrouter":
       return labels.openrouter;
     default:
       return provider;
   }
+}
+
+function kimiConnectionStatusForIntegration(
+  integration: LlmProviderIntegrationResponse,
+): KimiOAuthConnectionStatus | null {
+  if (
+    integration.provider !== "kimi_oauth" ||
+    integration.config?.type !== "kimi_oauth"
+  ) {
+    return null;
+  }
+  return integration.config.status;
 }
 
 export interface LlmSettingsProps extends LlmSettingsContainerOutput {
@@ -219,8 +238,10 @@ function IntegrationCard({
     chatgpt_oauth: t("providers.chatgpt_oauth"),
     xai: t("providers.xai"),
     xai_oauth: t("providers.xai_oauth"),
+    kimi_oauth: t("providers.kimi_oauth"),
     openrouter: t("providers.openrouter"),
   };
+  const kimiConnectionStatus = kimiConnectionStatusForIntegration(integration);
 
   return (
     <Card withBorder padding="md">
@@ -236,6 +257,9 @@ function IntegrationCard({
                 {t("disabled")}
               </Badge>
             )}
+            {integration.enabled ? (
+              <KimiConnectionStatusBadge status={kimiConnectionStatus} />
+            ) : null}
           </Group>
           {canManage && (
             <Group gap="xs" wrap="nowrap">

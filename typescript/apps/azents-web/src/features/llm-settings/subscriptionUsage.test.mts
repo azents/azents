@@ -53,6 +53,7 @@ void test("subscription and bounded-credit providers are eligible", () => {
   assert.equal(supportsSubscriptionUsage("chatgpt_oauth"), true);
   assert.equal(supportsSubscriptionUsage("xai_oauth"), true);
   assert.equal(supportsSubscriptionUsage("openrouter"), true);
+  assert.equal(supportsSubscriptionUsage("kimi_oauth"), true);
   assert.equal(supportsSubscriptionUsage("openai"), false);
   assert.equal(supportsSubscriptionUsage("xai"), false);
 });

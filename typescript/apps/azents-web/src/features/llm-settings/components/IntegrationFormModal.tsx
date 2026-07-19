@@ -18,6 +18,7 @@ import {
 } from "@mantine/core";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
+import { KimiOAuthConnectionCardContainer } from "../containers/KimiOAuthConnectionCardContainer";
 import { ApiKeyForm } from "./ApiKeyForm";
 import { AwsCredentialsForm } from "./AwsCredentialsForm";
 import { ChatGPTOAuthConnectionCard } from "./ChatGPTOAuthConnectionCard";
@@ -37,6 +38,7 @@ const PROVIDER_VALUES = [
   "chatgpt_oauth",
   "xai",
   "xai_oauth",
+  "kimi_oauth",
   "openrouter",
 ] as const;
 
@@ -73,6 +75,8 @@ function labelForProvider(provider: string, labels: ProviderLabels): string {
       return labels.xai;
     case "xai_oauth":
       return labels.xai_oauth;
+    case "kimi_oauth":
+      return labels.kimi_oauth;
     case "openrouter":
       return labels.openrouter;
     default:
@@ -165,6 +169,7 @@ function IntegrationFormContent({
     chatgpt_oauth: t("providers.chatgpt_oauth"),
     xai: t("providers.xai"),
     xai_oauth: t("providers.xai_oauth"),
+    kimi_oauth: t("providers.kimi_oauth"),
     openrouter: t("providers.openrouter"),
   };
   const availableProviders = new Set(availableProviderValues);
@@ -191,7 +196,12 @@ function IntegrationFormContent({
     : "";
   const isChatGPTOAuth = provider === "chatgpt_oauth";
   const isXaiOAuth = provider === "xai_oauth";
-  const isOAuthProvider = isChatGPTOAuth || isXaiOAuth;
+  const isKimiOAuth = provider === "kimi_oauth";
+  const kimiConnectionStatus =
+    integration?.config?.type === "kimi_oauth"
+      ? integration.config.status
+      : null;
+  const isOAuthProvider = isChatGPTOAuth || isXaiOAuth || isKimiOAuth;
 
   const formProps: ProviderFormProps = {
     name,
@@ -244,6 +254,15 @@ function IntegrationFormContent({
         <XaiOAuthConnectionCard
           handle={handle}
           canManage
+          onConnected={onClose}
+        />
+      )}
+      {isKimiOAuth && (
+        <KimiOAuthConnectionCardContainer
+          handle={handle}
+          canManage
+          connectionStatus={kimiConnectionStatus}
+          reconnect={!isCreate}
           onConnected={onClose}
         />
       )}

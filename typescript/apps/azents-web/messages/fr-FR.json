@@ -420,6 +420,7 @@
         "chatgpt_oauth": "Abonnement ChatGPT",
         "xai": "Clé API xAI",
         "xai_oauth": "OAuth xAI Grok",
+        "kimi_oauth": "Abonnement Kimi",
         "openrouter": "OpenRouter"
       },
       "chatgptOAuth": {
@@ -526,6 +527,28 @@
         "copyCode": "Copier le code",
         "copied": "Copié",
         "connectWithDeviceCode": "Connecter avec un code appareil",
+        "cancel": "Annuler",
+        "statusError": "Autorisation appareil {status}."
+      },
+      "kimiOAuth": {
+        "title": "Abonnement Kimi",
+        "experimentalBadge": "Expérimental",
+        "description": "Connectez un abonnement Kimi Code avec l’autorisation par appareil.",
+        "deviceOnly": "L’identifiant de l’appareil et les jetons sont chiffrés et conservés sur le serveur.",
+        "availabilityNotice": "Les modèles et quotas disponibles dépendent des droits de votre abonnement Kimi.",
+        "connected": "Connecté",
+        "reconnectRequired": "Reconnexion requise",
+        "temporarilyUnavailable": "Temporairement indisponible",
+        "disabled": "Désactivé",
+        "connectionFailed": "Échec de la connexion Kimi",
+        "deviceInstruction": "Ouvrez <link>l’autorisation Kimi</link> et saisissez le code ci-dessous.",
+        "openVerificationPage": "Ouvrir la page d’autorisation Kimi",
+        "copyCode": "Copier le code",
+        "copied": "Copié",
+        "expiresAt": "Le code expire {value}",
+        "connectWithDeviceCode": "Connecter l’abonnement Kimi",
+        "reconnectWithDeviceCode": "Reconnecter l’abonnement Kimi",
+        "tryAgain": "Réessayer",
         "cancel": "Annuler",
         "statusError": "Autorisation appareil {status}."
       }
