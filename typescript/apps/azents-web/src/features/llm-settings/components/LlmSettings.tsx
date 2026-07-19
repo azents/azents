@@ -16,10 +16,12 @@ import {
   Container,
   Group,
   Loader,
+  rem,
   Stack,
   Switch,
   Text,
   Title,
+  Tooltip,
 } from "@mantine/core";
 import { IconEdit, IconPlus, IconTrash } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
@@ -27,6 +29,7 @@ import { IntegrationFormModal } from "./IntegrationFormModal";
 import { WorkspaceModelSettingsCard } from "./WorkspaceModelSettingsCard";
 import type { LlmSettingsContainerOutput } from "../containers/useLlmSettingsContainer";
 import type { LlmProviderIntegrationResponse } from "@azents/public-client";
+import type { ReactNode } from "react";
 
 type ProviderLabels = Record<
   | "openai"
@@ -84,9 +87,13 @@ function labelForProvider(provider: string, labels: ProviderLabels): string {
   }
 }
 
-export function LlmSettings(
-  props: LlmSettingsContainerOutput,
-): React.ReactElement {
+export interface LlmSettingsProps extends LlmSettingsContainerOutput {
+  renderSubscriptionUsage: (
+    integration: LlmProviderIntegrationResponse,
+  ) => ReactNode;
+}
+
+export function LlmSettings(props: LlmSettingsProps): React.ReactElement {
   const {
     listState,
     formModal,
@@ -97,6 +104,7 @@ export function LlmSettings(
     modelOptions,
     catalogStates,
     modelsLoading,
+    renderSubscriptionUsage,
     onOpenCreate,
     onOpenEdit,
     onCloseModal,
@@ -115,7 +123,10 @@ export function LlmSettings(
         <Group justify="space-between">
           <Title order={3}>{t("headline")}</Title>
           {canManage && (
-            <Button leftSection={<IconPlus size={16} />} onClick={onOpenCreate}>
+            <Button
+              leftSection={<IconPlus size={rem(16)} />}
+              onClick={onOpenCreate}
+            >
               {t("addIntegration")}
             </Button>
           )}
@@ -156,6 +167,7 @@ export function LlmSettings(
               onEdit={onOpenEdit}
               onDelete={onDelete}
               onToggleEnabled={onToggleEnabled}
+              usage={renderSubscriptionUsage(integration)}
             />
           ))}
 
@@ -180,6 +192,7 @@ function IntegrationCard({
   onEdit,
   onDelete,
   onToggleEnabled,
+  usage,
 }: {
   integration: LlmProviderIntegrationResponse;
   canManage: boolean;
@@ -189,6 +202,7 @@ function IntegrationCard({
     integration: LlmProviderIntegrationResponse,
     enabled: boolean,
   ) => void;
+  usage: ReactNode;
 }): React.ReactElement {
   const t = useTranslations("workspace.llmSettings");
   const providerLabels: ProviderLabels = {
@@ -204,40 +218,59 @@ function IntegrationCard({
 
   return (
     <Card withBorder padding="md">
-      <Group justify="space-between" wrap="nowrap">
-        <Group gap="sm">
-          <Badge color={providerColor(integration.provider)} variant="light">
-            {labelForProvider(integration.provider, providerLabels)}
-          </Badge>
-          <Text fw={500}>{integration.name}</Text>
-          {!integration.enabled && (
-            <Badge color="gray" variant="outline" size="sm">
-              {t("disabled")}
+      <Stack gap={0}>
+        <Group justify="space-between" align="flex-start">
+          <Group gap="sm">
+            <Badge color={providerColor(integration.provider)} variant="light">
+              {labelForProvider(integration.provider, providerLabels)}
             </Badge>
+            <Text fw={500}>{integration.name}</Text>
+            {!integration.enabled && (
+              <Badge color="gray" variant="outline" size="sm">
+                {t("disabled")}
+              </Badge>
+            )}
+          </Group>
+          {canManage && (
+            <Group gap="xs" wrap="nowrap">
+              <Switch
+                aria-label={t("toggleIntegration", {
+                  name: integration.name,
+                })}
+                checked={integration.enabled}
+                onChange={(e) =>
+                  onToggleEnabled(integration, e.currentTarget.checked)
+                }
+                size="sm"
+              />
+              <Tooltip label={t("editIntegration", { name: integration.name })}>
+                <ActionIcon
+                  aria-label={t("editIntegration", { name: integration.name })}
+                  variant="subtle"
+                  onClick={() => onEdit(integration)}
+                >
+                  <IconEdit size={rem(16)} />
+                </ActionIcon>
+              </Tooltip>
+              <Tooltip
+                label={t("deleteIntegration", { name: integration.name })}
+              >
+                <ActionIcon
+                  aria-label={t("deleteIntegration", {
+                    name: integration.name,
+                  })}
+                  variant="subtle"
+                  color="red"
+                  onClick={() => onDelete(integration.id)}
+                >
+                  <IconTrash size={rem(16)} />
+                </ActionIcon>
+              </Tooltip>
+            </Group>
           )}
         </Group>
-        {canManage && (
-          <Group gap="xs">
-            <Switch
-              checked={integration.enabled}
-              onChange={(e) =>
-                onToggleEnabled(integration, e.currentTarget.checked)
-              }
-              size="sm"
-            />
-            <ActionIcon variant="subtle" onClick={() => onEdit(integration)}>
-              <IconEdit size={16} />
-            </ActionIcon>
-            <ActionIcon
-              variant="subtle"
-              color="red"
-              onClick={() => onDelete(integration.id)}
-            >
-              <IconTrash size={16} />
-            </ActionIcon>
-          </Group>
-        )}
-      </Group>
+        {usage}
+      </Stack>
     </Card>
   );
 }
