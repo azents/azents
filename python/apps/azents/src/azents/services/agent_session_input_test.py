@@ -4,8 +4,9 @@ import datetime
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import cast
+from unittest.mock import AsyncMock
 
-from azcommon.result import Failure, Success
+from azcommon.result import Failure, Result, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
@@ -42,7 +43,11 @@ from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.repos.workspace_user.data import WorkspaceUserCreate
-from azents.services.exchange_file import ExchangeFileService
+from azents.services.exchange_file import (
+    ExchangeFileInputClaimError,
+    ExchangeFileService,
+    FileRetentionOwnerConflict,
+)
 from azents.testing.model_selection import make_test_model_selection_dict
 
 from .agent_session_input import (
@@ -198,6 +203,36 @@ class _ExchangeFileService(ExchangeFileService):
     def __init__(self) -> None:
         """Bypass Base dataclass initialization."""
 
+    async def claim_input_attachments(
+        self,
+        session: AsyncSession,
+        *,
+        agent_id: str,
+        session_id: str,
+        user_id: str,
+        attachment_uris: list[str],
+    ) -> Result[None, ExchangeFileInputClaimError]:
+        """Accept all test attachment claims."""
+        del session, agent_id, session_id, user_id, attachment_uris
+        return Success(None)
+
+
+class _RejectingExchangeFileService(_ExchangeFileService):
+    """Reject attachment claims as cross-root conflicts."""
+
+    async def claim_input_attachments(
+        self,
+        session: AsyncSession,
+        *,
+        agent_id: str,
+        session_id: str,
+        user_id: str,
+        attachment_uris: list[str],
+    ) -> Result[None, ExchangeFileInputClaimError]:
+        """Reject claims after input enqueue to exercise transaction rollback."""
+        del session, agent_id, session_id, user_id, attachment_uris
+        return Failure(FileRetentionOwnerConflict())
+
 
 def _input_buffer_service(
     rdb_session_manager: SessionManager[AsyncSession],
@@ -304,6 +339,7 @@ class TestAgentSessionInputService:
             agent_session_repository=session_repository,
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
             workspace_user_repository=WorkspaceUserRepository(),
+            exchange_file_service=_ExchangeFileService(),
             input_buffer_service=input_buffer_service,
             session_manager=rdb_session_manager,
         )
@@ -337,6 +373,54 @@ class TestAgentSessionInputService:
         assert input_buffer_service.enqueued.session_id == "session-1"
         assert input_buffer_service.enqueued.content == "restore me"
 
+    async def test_attachment_claim_failure_rolls_back_buffer_acceptance(self) -> None:
+        """A cross-root claim conflict cannot leave a pending input behind."""
+        calls: list[str] = []
+        db_session = AsyncMock(spec=AsyncSession)
+
+        @asynccontextmanager
+        async def session_manager() -> AsyncGenerator[AsyncSession, None]:
+            yield db_session
+
+        input_buffer_service = _InputBufferServiceDouble(calls)
+        service = AgentSessionInputService(
+            agent_repository=AgentRepository(),
+            agent_project_preset_repository=AgentProjectPresetRepository(),
+            agent_project_catalog_repository=AgentProjectCatalogRepository(),
+            agent_project_default_repository=AgentProjectDefaultRepository(),
+            agent_runtime_repository=_RuntimeRepositoryDouble(calls),
+            agent_session_repository=_AgentSessionRepositoryDouble(calls),
+            session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+            workspace_user_repository=WorkspaceUserRepository(),
+            exchange_file_service=_RejectingExchangeFileService(),
+            input_buffer_service=input_buffer_service,
+            session_manager=session_manager,
+        )
+
+        result = await service.create_buffered_agent_input(
+            agent_id="agent-1",
+            agent_session_id="session-1",
+            message=InputMessage(
+                text="conflicting attachment",
+                user_id="user-1",
+                headers=[],
+                metadata={"source": "chat"},
+                attachments=["exchange://workspace-1/file-1"],
+            ),
+            inference_profile=_TEST_INFERENCE_PROFILE,
+            user_id="user-1",
+        )
+
+        assert isinstance(result, Failure)
+        assert isinstance(result.error, FileRetentionOwnerConflict)
+        db_session.rollback.assert_awaited_once()
+        assert calls == [
+            "get_by_id",
+            "ensure_for_agent",
+            "enqueue_input_buffer",
+        ]
+        assert input_buffer_service.enqueued is not None
+
     async def test_create_buffered_agent_input_rejects_subagent_before_wake(
         self,
     ) -> None:
@@ -357,6 +441,7 @@ class TestAgentSessionInputService:
             agent_session_repository=session_repository,
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
             workspace_user_repository=WorkspaceUserRepository(),
+            exchange_file_service=_ExchangeFileService(),
             input_buffer_service=input_buffer_service,
             session_manager=_session_manager_double,
         )
@@ -416,6 +501,7 @@ class TestAgentSessionInputService:
             agent_session_repository=AgentSessionRepository(),
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
             workspace_user_repository=WorkspaceUserRepository(),
+            exchange_file_service=_ExchangeFileService(),
             input_buffer_service=_input_buffer_service(rdb_session_manager),
             session_manager=rdb_session_manager,
         )
@@ -481,6 +567,80 @@ class TestAgentSessionInputService:
         assert updated is not None
         assert updated.run_state == AgentSessionRunState.RUNNING
 
+    async def test_new_session_attachment_conflict_rolls_back_session_and_input(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """First-message claim failure removes the new Session and InputBuffer."""
+        async with rdb_session_manager() as session:
+            workspace_id = await _create_workspace(
+                session,
+                "draft-session-claim-conflict",
+            )
+            user_id = await _create_user(
+                session,
+                "draft-session-claim-conflict@example.com",
+            )
+            await _add_workspace_user(
+                session,
+                workspace_id=workspace_id,
+                user_id=user_id,
+            )
+            agent_id = await _create_agent(
+                session,
+                workspace_id,
+                "draft-session-claim-conflict",
+            )
+            primary = await AgentSessionRepository().ensure_team_primary_for_agent(
+                session,
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+            )
+
+        service = AgentSessionInputService(
+            agent_repository=AgentRepository(),
+            agent_project_preset_repository=AgentProjectPresetRepository(),
+            agent_project_catalog_repository=AgentProjectCatalogRepository(),
+            agent_project_default_repository=AgentProjectDefaultRepository(),
+            agent_runtime_repository=AgentRuntimeRepository(),
+            agent_session_repository=AgentSessionRepository(),
+            session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+            workspace_user_repository=WorkspaceUserRepository(),
+            exchange_file_service=_RejectingExchangeFileService(),
+            input_buffer_service=_input_buffer_service(rdb_session_manager),
+            session_manager=rdb_session_manager,
+        )
+
+        result = await service.create_team_session_with_buffered_input(
+            agent_id=agent_id,
+            message=InputMessage(
+                text="first draft message",
+                user_id=user_id,
+                headers=[],
+                metadata={"source": "chat"},
+                attachments=["exchange://workspace-1/file-1"],
+            ),
+            inference_profile=_TEST_INFERENCE_PROFILE,
+            user_id=user_id,
+            existing_project_paths=[],
+            setup_actions=[],
+            client_request_id="draft-claim-conflict",
+        )
+
+        assert isinstance(result, Failure)
+        assert isinstance(result.error, FileRetentionOwnerConflict)
+        async with rdb_session_manager() as session:
+            sessions = await AgentSessionRepository().list_active_by_agent_id(
+                session,
+                agent_id,
+            )
+            primary_buffers = await InputBufferRepository().list_by_session_id(
+                session,
+                primary.id,
+            )
+        assert [item.id for item in sessions] == [primary.id]
+        assert primary_buffers == []
+
     async def test_buffered_agent_input_rejects_archived_session_after_rollover(
         self,
         rdb_session_manager: SessionManager[AsyncSession],
@@ -515,6 +675,7 @@ class TestAgentSessionInputService:
             agent_session_repository=AgentSessionRepository(),
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
             workspace_user_repository=WorkspaceUserRepository(),
+            exchange_file_service=_ExchangeFileService(),
             input_buffer_service=_input_buffer_service(rdb_session_manager),
             session_manager=rdb_session_manager,
         )
@@ -579,6 +740,7 @@ class TestAgentSessionInputService:
             agent_session_repository=AgentSessionRepository(),
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
             workspace_user_repository=WorkspaceUserRepository(),
+            exchange_file_service=_ExchangeFileService(),
             input_buffer_service=_input_buffer_service(rdb_session_manager),
             session_manager=rdb_session_manager,
         )
@@ -635,6 +797,7 @@ class TestAgentSessionInputService:
             agent_session_repository=AgentSessionRepository(),
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
             workspace_user_repository=WorkspaceUserRepository(),
+            exchange_file_service=_ExchangeFileService(),
             input_buffer_service=_input_buffer_service(rdb_session_manager),
             session_manager=rdb_session_manager,
         )
@@ -693,6 +856,7 @@ class TestAgentSessionInputService:
             agent_session_repository=AgentSessionRepository(),
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
             workspace_user_repository=WorkspaceUserRepository(),
+            exchange_file_service=_ExchangeFileService(),
             input_buffer_service=_input_buffer_service(rdb_session_manager),
             session_manager=rdb_session_manager,
         )

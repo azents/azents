@@ -30,6 +30,8 @@ def _make_artifact_file() -> ExchangeFile:
         size_bytes=12,
         sha256="1" * 64,
         created_by_user_id="user-1",
+        retention_root_session_id="session-1",
+        retention_bound_at=_NOW,
         preview_thumbnail_file_id=None,
         preview_thumbnail_uri=None,
         preview_title="result.txt",

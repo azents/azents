@@ -402,6 +402,8 @@ def _exchange_file() -> ExchangeFile:
         size_bytes=1,
         sha256="2" * 64,
         created_by_user_id="user-1",
+        retention_root_session_id=None,
+        retention_bound_at=None,
         expires_at=_NOW - datetime.timedelta(seconds=1),
         expired_at=None,
         blob_deleted_at=None,

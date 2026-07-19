@@ -4,12 +4,22 @@ import datetime
 from collections.abc import Sequence
 
 import sqlalchemy as sa
+from azcommon.result import Failure, Result, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import ExchangeFileStatus
 from azents.rdb.models.exchange_file import RDBExchangeFile
 
-from .data import ExchangeFile, ExchangeFileCreate
+from .data import (
+    ExchangeFile,
+    ExchangeFileClaimError,
+    ExchangeFileClaimExpired,
+    ExchangeFileClaimNotFound,
+    ExchangeFileClaimOwnerConflict,
+    ExchangeFileClaimUnavailable,
+    ExchangeFileClaimWrongScope,
+    ExchangeFileCreate,
+)
 
 
 def exchange_file_object_key(*, workspace_id: str, file_id: str) -> str:
@@ -36,6 +46,8 @@ class ExchangeFileRepository:
             size_bytes=create.size_bytes,
             sha256=create.sha256,
             created_by_user_id=create.created_by_user_id,
+            retention_root_session_id=create.retention_root_session_id,
+            retention_bound_at=create.retention_bound_at,
             preview_title=create.preview_title,
             preview_summary=create.preview_summary,
             preview_thumbnail_media_type=create.preview_thumbnail_media_type,
@@ -154,6 +166,86 @@ class ExchangeFileRepository:
             if preview_thumbnail is not None:
                 preview_thumbnail_uri = f"exchange://{preview_thumbnail.object_key}"
         return self._build(rdb, preview_thumbnail_uri=preview_thumbnail_uri)
+
+    async def claim_for_retention_root(
+        self,
+        session: AsyncSession,
+        *,
+        object_keys: Sequence[str],
+        workspace_id: str,
+        agent_id: str,
+        retention_root_session_id: str,
+        bound_at: datetime.datetime,
+    ) -> Result[None, ExchangeFileClaimError]:
+        """Atomically bind referenced source and preview rows to one root session."""
+        deduped_keys = sorted(set(object_keys))
+        if not deduped_keys:
+            return Success(None)
+
+        preview_ids = (
+            sa.select(RDBExchangeFile.preview_thumbnail_file_id)
+            .where(
+                RDBExchangeFile.object_key.in_(deduped_keys),
+                RDBExchangeFile.preview_thumbnail_file_id.is_not(None),
+            )
+            .scalar_subquery()
+        )
+        rows = list(
+            (
+                await session.scalars(
+                    sa.select(RDBExchangeFile)
+                    .where(
+                        sa.or_(
+                            RDBExchangeFile.object_key.in_(deduped_keys),
+                            RDBExchangeFile.id.in_(preview_ids),
+                        )
+                    )
+                    .order_by(RDBExchangeFile.id.asc())
+                    .with_for_update()
+                )
+            ).all()
+        )
+        sources_by_key = {
+            row.object_key: row for row in rows if row.object_key in deduped_keys
+        }
+        if set(sources_by_key) != set(deduped_keys):
+            return Failure(ExchangeFileClaimNotFound())
+
+        rows_by_id = {row.id: row for row in rows}
+        claim_ids = set(rows_by_id)
+        for source in sources_by_key.values():
+            if source.preview_thumbnail_file_id is not None:
+                if source.preview_thumbnail_file_id not in rows_by_id:
+                    return Failure(ExchangeFileClaimNotFound())
+                claim_ids.add(source.preview_thumbnail_file_id)
+        claim_rows = [rows_by_id[file_id] for file_id in sorted(claim_ids)]
+
+        if any(
+            row.workspace_id != workspace_id or row.agent_id != agent_id
+            for row in claim_rows
+        ):
+            return Failure(ExchangeFileClaimWrongScope())
+        if any(
+            row.status != ExchangeFileStatus.AVAILABLE or row.expires_at <= bound_at
+            for row in claim_rows
+        ):
+            return Failure(ExchangeFileClaimExpired())
+        if any(row.blob_deleted_at is not None for row in claim_rows):
+            return Failure(ExchangeFileClaimUnavailable())
+        if any(
+            row.retention_root_session_id not in {None, retention_root_session_id}
+            for row in claim_rows
+        ):
+            return Failure(ExchangeFileClaimOwnerConflict())
+
+        for row in claim_rows:
+            if row.retention_root_session_id is None:
+                row.retention_root_session_id = retention_root_session_id
+                row.retention_bound_at = bound_at
+            elif row.retention_bound_at is None:
+                row.retention_bound_at = bound_at
+        await session.flush()
+        return Success(None)
 
     async def expire_due(
         self,
@@ -280,6 +372,8 @@ class ExchangeFileRepository:
             size_bytes=rdb.size_bytes,
             sha256=rdb.sha256,
             created_by_user_id=rdb.created_by_user_id,
+            retention_root_session_id=rdb.retention_root_session_id,
+            retention_bound_at=rdb.retention_bound_at,
             preview_thumbnail_file_id=rdb.preview_thumbnail_file_id,
             preview_thumbnail_uri=preview_thumbnail_uri,
             preview_title=rdb.preview_title,

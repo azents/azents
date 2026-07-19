@@ -1,14 +1,14 @@
 """ExchangeFileService tests."""
 
 import datetime
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Sequence
 from contextlib import asynccontextmanager
 from io import BytesIO
 from typing import Any, cast
 from unittest.mock import AsyncMock
 
 import pytest
-from azcommon.result import Failure, Success
+from azcommon.result import Failure, Result, Success
 from PIL import Image
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,8 +22,17 @@ from azents.core.enums import (
     WorkspaceUserRole,
 )
 from azents.repos.agent.data import Agent
-from azents.repos.agent_session.data import AgentSession
-from azents.repos.exchange_file.data import ExchangeFile, ExchangeFileCreate
+from azents.repos.agent_session.data import AgentSession, SessionAgent
+from azents.repos.exchange_file.data import (
+    ExchangeFile,
+    ExchangeFileClaimError,
+    ExchangeFileClaimExpired,
+    ExchangeFileClaimNotFound,
+    ExchangeFileClaimOwnerConflict,
+    ExchangeFileClaimUnavailable,
+    ExchangeFileClaimWrongScope,
+    ExchangeFileCreate,
+)
 from azents.repos.workspace_user.data import WorkspaceUser
 from azents.testing.model_selection import (
     make_test_model_selection,
@@ -35,6 +44,7 @@ from . import (
     FileAccessDenied,
     FileExpired,
     FileNotFound,
+    FileRetentionOwnerConflict,
     FileUnavailable,
     SessionNotFound,
     exchange_object_key_from_uri,
@@ -69,6 +79,8 @@ class _FakeExchangeFileRepository:
             size_bytes=create.size_bytes,
             sha256=create.sha256,
             created_by_user_id=create.created_by_user_id,
+            retention_root_session_id=create.retention_root_session_id,
+            retention_bound_at=create.retention_bound_at,
             preview_thumbnail_file_id=None,
             preview_thumbnail_uri=None,
             preview_title=create.preview_title,
@@ -141,6 +153,56 @@ class _FakeExchangeFileRepository:
         )
         self.files[file_id] = updated
         return updated
+
+    async def claim_for_retention_root(
+        self,
+        session: AsyncSession,
+        *,
+        object_keys: Sequence[str],
+        workspace_id: str,
+        agent_id: str,
+        retention_root_session_id: str,
+        bound_at: datetime.datetime,
+    ) -> Result[None, ExchangeFileClaimError]:
+        """Bind source and preview rows to one retention root."""
+        del session
+        sources = [
+            file for file in self.files.values() if file.object_key in object_keys
+        ]
+        if len(sources) != len(set(object_keys)):
+            return Failure(ExchangeFileClaimNotFound())
+        claim_ids = {source.id for source in sources}
+        claim_ids.update(
+            source.preview_thumbnail_file_id
+            for source in sources
+            if source.preview_thumbnail_file_id is not None
+        )
+        claim_rows = [self.files[file_id] for file_id in sorted(claim_ids)]
+        if any(
+            file.workspace_id != workspace_id or file.agent_id != agent_id
+            for file in claim_rows
+        ):
+            return Failure(ExchangeFileClaimWrongScope())
+        if any(
+            file.status != ExchangeFileStatus.AVAILABLE or file.expires_at <= bound_at
+            for file in claim_rows
+        ):
+            return Failure(ExchangeFileClaimExpired())
+        if any(file.blob_deleted_at is not None for file in claim_rows):
+            return Failure(ExchangeFileClaimUnavailable())
+        if any(
+            file.retention_root_session_id not in {None, retention_root_session_id}
+            for file in claim_rows
+        ):
+            return Failure(ExchangeFileClaimOwnerConflict())
+        for file in claim_rows:
+            self.files[file.id] = file.model_copy(
+                update={
+                    "retention_root_session_id": retention_root_session_id,
+                    "retention_bound_at": file.retention_bound_at or bound_at,
+                }
+            )
+        return Success(None)
 
     async def expire_due(
         self,
@@ -350,6 +412,9 @@ def _make_service(
     agent_session_repository.get_by_id.return_value = (
         agent_session if agent_session is not None else _make_agent_session()
     )
+    agent_session_repository.get_root_session_agent_by_session_id.return_value = (
+        SessionAgent.model_construct(agent_session_id="root-session-1")
+    )
 
     workspace_user_repository = AsyncMock()
     workspace_user_repository.get_by_workspace_and_user.return_value = workspace_user
@@ -409,6 +474,8 @@ async def test_create_agent_upload_stores_object_and_metadata() -> None:
     assert s3_service.objects[file.object_key] == b"a,b\n1,2\n"
     assert file.preview_summary == "a,b\n1,2\n"
     assert repository.files[file.id].sha256
+    assert file.retention_root_session_id is None
+    assert file.retention_bound_at is None
 
 
 @pytest.mark.asyncio
@@ -461,6 +528,65 @@ async def test_create_image_upload_stores_preview_thumbnail() -> None:
 
 
 @pytest.mark.asyncio
+async def test_claim_input_attachment_binds_preview_and_rejects_another_root() -> None:
+    """Claim source and preview atomically with same-root retry semantics."""
+    service, repository, _s3_service = _make_service(
+        workspace_user=_make_workspace_user()
+    )
+    created = await service.create_agent_upload(
+        agent_id="agent-1",
+        user_id="user-1",
+        filename="photo.jpg",
+        media_type="image/jpeg",
+        body=_jpeg_bytes(),
+    )
+    assert isinstance(created, Success)
+    source = created.value
+    assert source.preview_thumbnail_file_id is not None
+
+    claim = await service.claim_input_attachments(
+        cast(AsyncSession, object()),
+        agent_id="agent-1",
+        session_id="session-1",
+        user_id="user-1",
+        attachment_uris=[source.uri, source.uri],
+    )
+    assert isinstance(claim, Success)
+    claimed_source = repository.files[source.id]
+    claimed_preview = repository.files[source.preview_thumbnail_file_id]
+    assert claimed_source.retention_root_session_id == "root-session-1"
+    assert claimed_preview.retention_root_session_id == "root-session-1"
+    assert claimed_source.retention_bound_at is not None
+    assert claimed_preview.retention_bound_at == claimed_source.retention_bound_at
+
+    retry = await service.claim_input_attachments(
+        cast(AsyncSession, object()),
+        agent_id="agent-1",
+        session_id="session-1",
+        user_id="user-1",
+        attachment_uris=[source.uri],
+    )
+    assert isinstance(retry, Success)
+
+    root_lookup = cast(
+        Any,
+        service.agent_session_repository,
+    ).get_root_session_agent_by_session_id
+    root_lookup.return_value = SessionAgent.model_construct(
+        agent_session_id="another-root-session"
+    )
+    conflict = await service.claim_input_attachments(
+        cast(AsyncSession, object()),
+        agent_id="agent-1",
+        session_id="session-1",
+        user_id="user-1",
+        attachment_uris=[source.uri],
+    )
+    assert isinstance(conflict, Failure)
+    assert isinstance(conflict.error, FileRetentionOwnerConflict)
+
+
+@pytest.mark.asyncio
 async def test_create_artifact_stores_artifact_origin() -> None:
     """Artifact creation also uses files namespace URI and object key."""
     service, _repository, s3_service = _make_service(
@@ -478,6 +604,8 @@ async def test_create_artifact_stores_artifact_origin() -> None:
     assert isinstance(result, Success)
     file = result.value
     assert file.origin_type == ExchangeFileOrigin.ARTIFACT
+    assert file.retention_root_session_id == "root-session-1"
+    assert file.retention_bound_at is not None
     assert file.object_key == f"exchange/workspace-1/files/{file.id}/original"
     assert file.uri == f"exchange://{file.object_key}"
     assert s3_service.objects[file.object_key] == b"hello"
@@ -510,6 +638,8 @@ async def test_create_session_upload_uses_session_scope() -> None:
     assert file.agent_id == "agent-1"
     assert file.workspace_id == "workspace-1"
     assert file.origin_type == ExchangeFileOrigin.UPLOAD
+    assert file.retention_root_session_id == "root-session-1"
+    assert file.retention_bound_at is not None
     assert s3_service.objects[file.object_key] == b"a,b\n1,2\n"
 
 

@@ -57,6 +57,13 @@ class RDBExchangeFile(RDBModel):
         "ix_exchange_files_preview_thumbnail_file_id",
         "preview_thumbnail_file_id",
     )
+    IX_RETENTION_ROOT_STATUS = sa.Index(
+        "ix_exchange_files_retention_root_status",
+        "retention_root_session_id",
+        "status",
+        "id",
+        postgresql_where=sa.text("retention_root_session_id IS NOT NULL"),
+    )
     UQ_OBJECT_KEY = sa.UniqueConstraint(
         "object_key",
         name="uq_exchange_files_object_key",
@@ -91,6 +98,15 @@ class RDBExchangeFile(RDBModel):
         sa.String(32),
         sa.ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
+    )
+    retention_root_session_id: Mapped[str | None] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("agent_sessions.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    retention_bound_at: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime,
+        nullable=True,
     )
     expires_at: Mapped[datetime.datetime] = mapped_column(
         TimeZoneDateTime,
@@ -162,5 +178,6 @@ class RDBExchangeFile(RDBModel):
         IX_ORIGIN_TYPE,
         IX_STATUS_EXPIRES_AT,
         IX_PREVIEW_THUMBNAIL_FILE_ID,
+        IX_RETENTION_ROOT_STATUS,
         UQ_OBJECT_KEY,
     )

@@ -58,6 +58,8 @@ def _make_exchange_file() -> ExchangeFile:
         size_bytes=7,
         sha256="0" * 64,
         created_by_user_id="user-1",
+        retention_root_session_id=None,
+        retention_bound_at=None,
         preview_thumbnail_file_id=None,
         preview_thumbnail_uri=None,
         preview_title="report.csv",

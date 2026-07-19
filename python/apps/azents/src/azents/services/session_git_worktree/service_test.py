@@ -513,6 +513,7 @@ def _input_service(
         agent_session_repository=AgentSessionRepository(),
         session_workspace_project_repository=SessionWorkspaceProjectRepository(),
         workspace_user_repository=WorkspaceUserRepository(),
+        exchange_file_service=_ExchangeFileService(),
         input_buffer_service=InputBufferService(
             session_manager=session_manager,
             input_buffer_repository=InputBufferRepository(),

@@ -63,9 +63,6 @@ from azents.engine.events.action_messages import (
 from azents.engine.events.types import FileOutputPart
 from azents.engine.run.commands import COMMAND_REGISTRY, list_registered_commands
 from azents.engine.run.input import InputMessage
-from azents.engine.run.resolve import (
-    materialize_user_input_exchange_file_attachments,
-)
 from azents.engine.tools.deps import get_skill_state_store
 from azents.engine.tools.skill import (
     SkillStateStore,
@@ -128,6 +125,7 @@ from azents.services.exchange_file import (
     FileAccessDenied,
     FileExpired,
     FileNotFound,
+    FileRetentionOwnerConflict,
     FileUnavailable,
 )
 from azents.services.exchange_file import (
@@ -608,26 +606,19 @@ async def _write_message_via_rest(
     tz: ZoneInfo,
 ) -> ChatWriteResponse:
     """Handle REST message writes as input buffer commit boundaries."""
+    del exchange_file_service, model_file_service
     resolved_session_id = await _validate_rest_session(
         chat_service,
         session_id=session_id,
         agent_id=request.agent_id,
         user_id=user_id,
     )
-    materialized = await materialize_user_input_exchange_file_attachments(
-        request.attachments or [],
-        agent_id=request.agent_id,
-        session_id=resolved_session_id,
-        exchange_file_service=exchange_file_service,
-        model_file_service=model_file_service,
-        user_id=user_id,
-    )
     message = _create_chat_input_message(
         text=request.message,
         user_id=user_id,
         tz=tz,
-        attachments=[attachment.uri for attachment in materialized.attachments],
-        file_parts=materialized.file_parts,
+        attachments=request.attachments or [],
+        file_parts=[],
     )
     input_result = await agent_session_input_service.create_buffered_agent_input(
         agent_id=request.agent_id,
@@ -747,6 +738,31 @@ def _handle_created_agent_session_input_result(
                         status_code=409,
                         detail="Subagent sessions are read-only.",
                     )
+                case FileNotFound():
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Attachment was not found.",
+                    )
+                case FileAccessDenied():
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Attachment is outside this session.",
+                    )
+                case FileExpired():
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Attachment has expired.",
+                    )
+                case FileUnavailable():
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Attachment is unavailable.",
+                    )
+                case FileRetentionOwnerConflict():
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Attachment is already used by another session.",
+                    )
                 case InvalidProjectPath():
                     raise HTTPException(status_code=400, detail=error.reason)
                 case _:
@@ -777,6 +793,31 @@ def _handle_agent_session_input_result(
                     raise HTTPException(
                         status_code=409,
                         detail="Subagent sessions are read-only.",
+                    )
+                case FileNotFound():
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Attachment was not found.",
+                    )
+                case FileAccessDenied():
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Attachment is outside this session.",
+                    )
+                case FileExpired():
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Attachment has expired.",
+                    )
+                case FileUnavailable():
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Attachment is unavailable.",
+                    )
+                case FileRetentionOwnerConflict():
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Attachment is already used by another session.",
                     )
                 case InvalidProjectPath():
                     raise HTTPException(status_code=400, detail=error.reason)
@@ -1099,6 +1140,7 @@ async def _write_edit_message_via_rest(
     tz: ZoneInfo,
 ) -> ChatWriteResponse:
     """Handle REST edit writes as idle-only input buffer boundaries."""
+    del exchange_file_service, model_file_service
     resolved_session_id = await _validate_rest_session(
         chat_service,
         session_id=session_id,
@@ -1106,14 +1148,6 @@ async def _write_edit_message_via_rest(
         user_id=user_id,
     )
     payload = request.model_dump(mode="json")
-    materialized = await materialize_user_input_exchange_file_attachments(
-        request.attachments or [],
-        agent_id=request.agent_id,
-        session_id=resolved_session_id,
-        exchange_file_service=exchange_file_service,
-        model_file_service=model_file_service,
-        user_id=user_id,
-    )
     metadata = {
         "timestamp": datetime.now(tz).isoformat(),
         "source": "chat",
@@ -1129,8 +1163,8 @@ async def _write_edit_message_via_rest(
             text=request.message,
             inference_profile=request.inference_profile,
             metadata=metadata,
-            attachments=[attachment.uri for attachment in materialized.attachments],
-            file_parts=materialized.file_parts,
+            attachments=request.attachments or [],
+            file_parts=[],
             payload=payload,
         )
     except ValueError as exc:

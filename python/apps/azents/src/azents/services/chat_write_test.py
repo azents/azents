@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from typing import cast
 
 import sqlalchemy as sa
-from azcommon.result import Success
+from azcommon.result import Result, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
@@ -54,7 +54,10 @@ from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
 from azents.services.chat_write import ChatWriteService
-from azents.services.exchange_file import ExchangeFileService
+from azents.services.exchange_file import (
+    ExchangeFileInputClaimError,
+    ExchangeFileService,
+)
 from azents.services.input_buffer import InputBufferService
 from azents.testing.model_selection import (
     make_test_model_selection_dict,
@@ -168,6 +171,7 @@ def _service(
         agent_run_repository=AgentRunRepository(),
         chat_write_request_repository=ChatWriteRequestRepository(),
         message_repository=MessageRepository(),
+        exchange_file_service=_ExchangeFileService(),
         input_buffer_service=input_buffer_service,
         session_manager=rdb_session_manager,
     )
@@ -178,6 +182,19 @@ class _ExchangeFileService(ExchangeFileService):
 
     def __init__(self) -> None:
         """Bypass Base dataclass initialization."""
+
+    async def claim_input_attachments(
+        self,
+        session: AsyncSession,
+        *,
+        agent_id: str,
+        session_id: str,
+        user_id: str,
+        attachment_uris: list[str],
+    ) -> Result[None, ExchangeFileInputClaimError]:
+        """Accept all test attachment claims."""
+        del session, agent_id, session_id, user_id, attachment_uris
+        return Success(None)
 
 
 def _failed_run_system_error_payload() -> dict[str, JSONValue]:
@@ -252,6 +269,7 @@ class TestChatWriteService:
             agent_run_repository=cast(AgentRunRepository, object()),
             chat_write_request_repository=cast(ChatWriteRequestRepository, object()),
             message_repository=cast(MessageRepository, object()),
+            exchange_file_service=_ExchangeFileService(),
             input_buffer_service=cast(InputBufferService, object()),
             session_manager=_session_manager_double,
         )
@@ -283,6 +301,7 @@ class TestChatWriteService:
                 "2223456789abcdef0123456789abcdef"
             ),
             message_repository=MessageRepository(),
+            exchange_file_service=_ExchangeFileService(),
             input_buffer_service=InputBufferService(
                 session_manager=rdb_session_manager,
                 input_buffer_repository=InputBufferRepository(),

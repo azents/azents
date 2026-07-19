@@ -1,8 +1,9 @@
 """REST chat write service."""
 
 import dataclasses
-from typing import Annotated
+from typing import Annotated, assert_never
 
+from azcommon.result import Failure, Success
 from azcommon.uuid import uuid7
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,7 +30,32 @@ from azents.repos.chat_write_request.data import (
 )
 from azents.repos.input_buffer.data import InputBuffer
 from azents.repos.message import MessageRepository
+from azents.services.exchange_file import (
+    ExchangeFileService,
+    FileAccessDenied,
+    FileExpired,
+    FileNotFound,
+    FileRetentionOwnerConflict,
+    FileUnavailable,
+)
 from azents.services.input_buffer import InputBufferEnqueue, InputBufferService
+
+
+def _raise_attachment_claim_error(error: object) -> None:
+    """Raise the public-safe edit rejection for an attachment claim failure."""
+    match error:
+        case FileNotFound():
+            raise ValueError("Attachment was not found.")
+        case FileAccessDenied():
+            raise ValueError("Attachment is outside this session.")
+        case FileExpired():
+            raise ValueError("Attachment has expired.")
+        case FileUnavailable():
+            raise ValueError("Attachment is unavailable.")
+        case FileRetentionOwnerConflict():
+            raise ValueError("Attachment is already used by another session.")
+        case _:
+            raise TypeError("Unexpected ExchangeFile claim error")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -87,6 +113,7 @@ class ChatWriteService:
         ChatWriteRequestRepository, Depends(ChatWriteRequestRepository)
     ]
     message_repository: Annotated[MessageRepository, Depends(MessageRepository)]
+    exchange_file_service: Annotated[ExchangeFileService, Depends(ExchangeFileService)]
     input_buffer_service: Annotated[InputBufferService, Depends(InputBufferService)]
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
@@ -168,6 +195,20 @@ class ChatWriteService:
                     file_parts=file_parts,
                 ),
             )
+            claim = await self.exchange_file_service.claim_input_attachments(
+                session,
+                agent_id=agent_id,
+                session_id=session_id,
+                user_id=user_id,
+                attachment_uris=result.input_buffer.attachments,
+            )
+            match claim:
+                case Success():
+                    pass
+                case Failure(error):
+                    _raise_attachment_claim_error(error)
+                case _:
+                    assert_never(claim)
             await self.agent_session_repository.mark_running_for_input_wakeup(
                 session,
                 session_id,

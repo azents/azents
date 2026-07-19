@@ -36,7 +36,7 @@ from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSession
+from azents.repos.agent_session.data import AgentSession, SessionAgent
 from azents.repos.exchange_file import ExchangeFileRepository
 from azents.repos.exchange_file.data import ExchangeFile, ExchangeFileCreate
 from azents.repos.model_file import ModelFileRepository
@@ -99,6 +99,15 @@ class _AgentSessionRepository(AgentSessionRepository):
             workspace_id="workspace-1",
             agent_id="agent-1",
         )
+
+    async def get_root_session_agent_by_session_id(
+        self,
+        session: AsyncSession,
+        agent_session_id: str,
+    ) -> SessionAgent | None:
+        """Return the root retention owner for generated output."""
+        del session, agent_session_id
+        return SessionAgent.model_construct(agent_session_id="session-1")
 
 
 class _WorkspaceUserRepository(WorkspaceUserRepository):

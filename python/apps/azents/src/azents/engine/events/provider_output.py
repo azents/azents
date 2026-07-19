@@ -166,9 +166,13 @@ class ProviderOutputMaterializer:
                 materializer=self,
                 generated_images=(),
             )
-        await self._validate_scope()
+        retention_root_session_id = await self._validate_scope()
         generated_images = tuple(
-            self._prepare_generated_image(file, source_kind="provider_tool")
+            self._prepare_generated_image(
+                file,
+                source_kind="provider_tool",
+                retention_root_session_id=retention_root_session_id,
+            )
             for file in pending
         )
         self._validate_unique_outputs(generated_images)
@@ -190,11 +194,15 @@ class ProviderOutputMaterializer:
                 materializer=self,
                 generated_images=(),
             )
-        await self._validate_scope()
+        retention_root_session_id = await self._validate_scope()
         if any(file.call_id != result.call_id for file in pending):
             raise ModelCallError("Generated image result identity is invalid.")
         generated_images = tuple(
-            self._prepare_generated_image(file, source_kind="client_tool")
+            self._prepare_generated_image(
+                file,
+                source_kind="client_tool",
+                retention_root_session_id=retention_root_session_id,
+            )
             for file in pending
         )
         self._validate_unique_outputs(generated_images)
@@ -220,7 +228,12 @@ class ProviderOutputMaterializer:
         )
         if run is None or run.session_id != self.session_id:
             raise ModelCallError("Generated image output scope is unavailable.")
-        await self._validate_scope_in_session(session)
+        retention_root_session_id = await self._validate_scope_in_session(session)
+        if any(
+            image.exchange_source.retention_root_session_id != retention_root_session_id
+            for image in generated_images
+        ):
+            raise ModelCallError("Generated image output scope changed.")
         existing_keys = await self._validated_persisted_object_keys_in_session(
             session,
             generated_images,
@@ -378,6 +391,7 @@ class ProviderOutputMaterializer:
             or existing.size_bytes != expected.size_bytes
             or existing.sha256 != expected.sha256
             or existing.created_by_user_id != expected.created_by_user_id
+            or existing.retention_root_session_id != expected.retention_root_session_id
         ):
             raise ModelCallError("Generated image output identity collided.")
 
@@ -400,13 +414,13 @@ class ProviderOutputMaterializer:
         ):
             raise ModelCallError("Generated image output identity collided.")
 
-    async def _validate_scope(self) -> None:
-        """Validate provider output ownership before object upload."""
+    async def _validate_scope(self) -> str:
+        """Validate provider output ownership and return its retention root."""
         async with self.model_file_service.session_manager() as session:
-            await self._validate_scope_in_session(session)
+            return await self._validate_scope_in_session(session)
 
-    async def _validate_scope_in_session(self, session: AsyncSession) -> None:
-        """Validate Session, Agent, Workspace, and actor ownership."""
+    async def _validate_scope_in_session(self, session: AsyncSession) -> str:
+        """Validate scope and return the root AgentSession retention owner."""
         agent_session = (
             await self.model_file_service.agent_session_repository.get_by_id(
                 session,
@@ -428,6 +442,15 @@ class ProviderOutputMaterializer:
         )
         if workspace_user is None:
             raise ModelCallError("Generated image output scope is unavailable.")
+        root = await (
+            self.model_file_service.agent_session_repository
+        ).get_root_session_agent_by_session_id(
+            session,
+            self.session_id,
+        )
+        if root is None:
+            raise ModelCallError("Generated image output scope is unavailable.")
+        return root.agent_session_id
 
     def _required_user_id(self) -> str:
         """Return the actor required for user-owned file metadata."""
@@ -442,6 +465,7 @@ class ProviderOutputMaterializer:
         pending: PendingGeneratedFileOutput,
         *,
         source_kind: Literal["provider_tool", "client_tool"],
+        retention_root_session_id: str,
     ) -> _PreparedGeneratedImage:
         """Prepare dual resource metadata and bytes for one pending image."""
         user_id = self._required_user_id()
@@ -476,6 +500,8 @@ class ProviderOutputMaterializer:
             size_bytes=len(pending.body),
             sha256=pending.sha256,
             created_by_user_id=user_id,
+            retention_root_session_id=retention_root_session_id,
+            retention_bound_at=now,
             expires_at=expires_at,
             preview_title=filename,
             preview_generated_at=now,
@@ -510,6 +536,8 @@ class ProviderOutputMaterializer:
                 size_bytes=len(preview_body.body),
                 sha256=hashlib.sha256(preview_body.body).hexdigest(),
                 created_by_user_id=user_id,
+                retention_root_session_id=retention_root_session_id,
+                retention_bound_at=now,
                 expires_at=expires_at,
                 preview_title=f"{filename} preview",
                 preview_generated_at=preview_body.generated_at,
