@@ -364,6 +364,9 @@ class ToolkitProvider(ABC, Generic[ConfigT]):
     config_model: ClassVar[type[BaseModel]]
     """Pydantic model used for Config validation and automatic schema generation."""
 
+    vfs_resource_root: ClassVar[str | None] = None
+    """Optional package-relative root for Provider-owned release VFS files."""
+
     @abstractmethod
     async def resolve(
         self,

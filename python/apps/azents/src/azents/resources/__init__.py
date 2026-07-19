@@ -1,0 +1,1 @@
+"""Azents packaged application resources."""

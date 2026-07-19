@@ -115,6 +115,7 @@ from azents.engine.tools.deps import (
     get_goal_toolkit_provider,
     get_todo_toolkit_provider,
     get_toolkit_registry,
+    get_vfs_projection_service,
 )
 from azents.engine.tools.goal import GoalToolkitProvider
 from azents.engine.tools.skill import SkillToolkitProvider
@@ -158,6 +159,7 @@ from azents.services.session_git_worktree import (
     SessionGitWorktreeService,
 )
 from azents.services.session_title import SessionTitleService
+from azents.services.vfs import VfsProjectionService
 from azents.transport.chat import (
     chat_action_execution_removed_dump,
     chat_action_execution_updated_dump,
@@ -314,6 +316,9 @@ class RunExecutor:
     ]
     toolkit_registry: Annotated[
         dict[str, ToolkitProvider[Any]], Depends(get_toolkit_registry)
+    ]
+    vfs_projection_service: Annotated[
+        VfsProjectionService, Depends(get_vfs_projection_service)
     ]
     agent_toolkit_repository: Annotated[
         AgentToolkitRepository, Depends(AgentToolkitRepository)
@@ -660,6 +665,12 @@ class RunExecutor:
             )
 
         run_id = agent_run.id
+        await self.vfs_projection_service.ensure_run_projection(
+            run_id=run_id,
+            agent_id=message.agent_id,
+            session_id=message.session_id,
+            workspace_id=session_state.workspace_id,
+        )
         if command is None:
             initial_input = await self.poll_run_inputs(
                 agent_id=message.agent_id,

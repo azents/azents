@@ -25,6 +25,7 @@ from azents.core.inference_profile import (
     AppliedInferenceProfile,
     RequestedInferenceProfile,
 )
+from azents.core.vfs import VfsProjection
 from azents.engine.events.action_messages import ActionMessagePayload
 from azents.engine.events.generated_files import PendingGeneratedFileOutput
 from azents.engine.run.failure import (
@@ -737,6 +738,7 @@ class AgentRunState(BaseModel):
     parent_agent_run_id: str | None
     active_tool_calls: list[ActiveToolCall] = Field(default_factory=list)
     retry_state: FailedRunRetryState | None = Field(default=None)
+    vfs_projection: VfsProjection | None = Field(default=None)
     last_completed_event_id: str | None = Field(default=None)
     terminal_result_event_id: str | None = Field(default=None)
     terminal_result_message: str | None = Field(default=None)
