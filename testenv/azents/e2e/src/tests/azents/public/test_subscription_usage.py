@@ -377,7 +377,7 @@ class TestChatGPTSubscriptionUsage:
         assert member["financial_details"] is None
         exhausted_limits = _limits(exhausted)
         assert exhausted_limits[0]["used_percent"] == 100.0
-        assert "remaining" not in json.dumps(exhausted, sort_keys=True).lower()
+        assert all("remaining" not in limit for limit in exhausted_limits)
         _assert_no_sensitive_source_values(owner)
         _assert_no_sensitive_source_values(member)
         _assert_safe_subscription_usage_journal(

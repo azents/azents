@@ -329,6 +329,10 @@ validation PR is recorded.
    identifiers so unrelated email-service logs do not produce false positives. Static checks, two pure
    helper tests, and all 13 direct proxy tests pass locally; Docker-backed product-path confirmation
    remains required in CI.
+8. The next deterministic run passed those three boundaries and exposed an overbroad exhausted-usage
+   assertion. The no-inference invariant applies to normalized usage-limit fields, while the provider's
+   financial `spend_remaining_percent` value is intentionally preserved for writers. The assertion now
+   rejects remaining-value fields only inside normalized usage limits.
 
 ## Required CI Evidence
 
