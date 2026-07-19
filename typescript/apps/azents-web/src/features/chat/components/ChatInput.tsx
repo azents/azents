@@ -1192,13 +1192,6 @@ export const ChatInput = memo(function ChatInput({
       >
         {modelOptionRows}
       </Stack>
-      {subscriptionSelection !== null ? (
-        <ComposerSubscriptionUsageDetailsContainer
-          handle={handle}
-          integrationId={subscriptionSelection.integrationId}
-          provider={subscriptionSelection.provider}
-        />
-      ) : null}
       {selectableEfforts.length > 0 && (
         <Stack gap={rem(6)}>
           <Text size="sm" fw={600}>
@@ -1216,6 +1209,13 @@ export const ChatInput = memo(function ChatInput({
           </Stack>
         </Stack>
       )}
+      {subscriptionSelection !== null ? (
+        <ComposerSubscriptionUsageDetailsContainer
+          handle={handle}
+          integrationId={subscriptionSelection.integrationId}
+          provider={subscriptionSelection.provider}
+        />
+      ) : null}
     </Stack>
   );
   const desktopProfileMenu = (
