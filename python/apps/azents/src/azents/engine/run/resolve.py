@@ -794,6 +794,7 @@ async def materialize_user_input_exchange_file_attachments(
             await exchange_file_service.resolve_attachment_metadata_for_agent(
                 uri=uri,
                 agent_id=agent_id,
+                session_id=session_id,
                 user_id=user_id,
             )
         )
@@ -833,6 +834,7 @@ async def materialize_user_input_exchange_file_attachments(
         download_result = await exchange_file_service.resolve_attachment_for_agent(
             uri=uri,
             agent_id=agent_id,
+            session_id=session_id,
             user_id=user_id,
         )
         if isinstance(download_result, Failure):

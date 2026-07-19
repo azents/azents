@@ -31,6 +31,10 @@ from azents.repos.input_buffer.data import InputBuffer
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.session_workspace_project.data import SessionWorkspaceProjectCreate
 from azents.repos.workspace_user import WorkspaceUserRepository
+from azents.services.exchange_file import (
+    ExchangeFileInputClaimError,
+    ExchangeFileService,
+)
 from azents.services.input_buffer import InputBufferEnqueue, InputBufferService
 from azents.services.session_git_worktree import (
     ExistingProjectWorkspaceItem,
@@ -87,6 +91,7 @@ AgentSessionInputError = (
     | AgentSessionInputWrongAgent
     | AgentSessionInputInactiveSession
     | AgentSessionInputSubagentReadOnly
+    | ExchangeFileInputClaimError
     | InvalidProjectPath
 )
 
@@ -120,6 +125,7 @@ class AgentSessionInputService:
     workspace_user_repository: Annotated[
         WorkspaceUserRepository, Depends(WorkspaceUserRepository)
     ]
+    exchange_file_service: Annotated[ExchangeFileService, Depends(ExchangeFileService)]
     input_buffer_service: Annotated[InputBufferService, Depends(InputBufferService)]
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
@@ -152,7 +158,7 @@ class AgentSessionInputService:
             runtime = await self.agent_runtime_repository.ensure_for_agent(
                 session, agent_id
             )
-            input_buffer = await self._enqueue_user_message(
+            enqueue_result = await self._enqueue_user_message(
                 session,
                 agent_session=agent_session,
                 message=message,
@@ -160,6 +166,14 @@ class AgentSessionInputService:
                 user_id=user_id,
                 client_request_id=client_request_id,
             )
+            match enqueue_result:
+                case Success(input_buffer):
+                    pass
+                case Failure(error):
+                    await session.rollback()
+                    return Failure(error)
+                case _:
+                    assert_never(enqueue_result)
             await self.agent_session_repository.mark_running_for_input_wakeup(
                 session,
                 agent_session.id,
@@ -217,6 +231,21 @@ class AgentSessionInputService:
                     file_parts=message.file_parts,
                 ),
             )
+            claim = await self.exchange_file_service.claim_input_attachments(
+                session,
+                agent_id=agent_session.agent_id,
+                session_id=agent_session.id,
+                user_id=user_id,
+                attachment_uris=result.input_buffer.attachments,
+            )
+            match claim:
+                case Success():
+                    pass
+                case Failure(error):
+                    await session.rollback()
+                    return Failure(error)
+                case _:
+                    assert_never(claim)
             await self.agent_session_repository.mark_running_for_input_wakeup(
                 session,
                 agent_session.id,
@@ -304,7 +333,7 @@ class AgentSessionInputService:
                 user_id=user_id,
                 client_request_id=client_request_id,
             )
-            input_buffer = await self._enqueue_user_message(
+            enqueue_result = await self._enqueue_user_message(
                 session,
                 agent_session=agent_session,
                 message=message,
@@ -312,6 +341,14 @@ class AgentSessionInputService:
                 user_id=user_id,
                 client_request_id=client_request_id,
             )
+            match enqueue_result:
+                case Success(input_buffer):
+                    pass
+                case Failure(error):
+                    await session.rollback()
+                    return Failure(error)
+                case _:
+                    assert_never(enqueue_result)
             await self.agent_session_repository.mark_running_for_input_wakeup(
                 session,
                 agent_session.id,
@@ -381,8 +418,8 @@ class AgentSessionInputService:
         inference_profile: RequestedInferenceProfile,
         user_id: str,
         client_request_id: str | None,
-    ) -> InputBuffer:
-        """Enqueue one user message for an already selected AgentSession."""
+    ) -> Result[InputBuffer, ExchangeFileInputClaimError]:
+        """Enqueue one user message and claim its ExchangeFiles atomically."""
         result = await self.input_buffer_service.enqueue(
             session,
             InputBufferEnqueue(
@@ -399,7 +436,20 @@ class AgentSessionInputService:
                 file_parts=message.file_parts,
             ),
         )
-        return result.input_buffer
+        claim = await self.exchange_file_service.claim_input_attachments(
+            session,
+            agent_id=agent_session.agent_id,
+            session_id=agent_session.id,
+            user_id=user_id,
+            attachment_uris=result.input_buffer.attachments,
+        )
+        match claim:
+            case Success():
+                return Success(result.input_buffer)
+            case Failure(error):
+                return Failure(error)
+            case _:
+                assert_never(claim)
 
     def _workspace_items_from_request(
         self,

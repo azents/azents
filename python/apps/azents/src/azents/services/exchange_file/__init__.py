@@ -6,7 +6,7 @@ import hashlib
 import logging
 import re
 from io import BytesIO
-from typing import Annotated
+from typing import Annotated, assert_never
 
 from azcommon.infra.s3.service import S3Service
 from azcommon.result import Failure, Result, Success
@@ -24,7 +24,15 @@ from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.exchange_file import ExchangeFileRepository, exchange_file_object_key
-from azents.repos.exchange_file.data import ExchangeFile, ExchangeFileCreate
+from azents.repos.exchange_file.data import (
+    ExchangeFile,
+    ExchangeFileClaimExpired,
+    ExchangeFileClaimNotFound,
+    ExchangeFileClaimOwnerConflict,
+    ExchangeFileClaimUnavailable,
+    ExchangeFileClaimWrongScope,
+    ExchangeFileCreate,
+)
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.services.file_lifecycle_policy import exchange_file_expires_at
 
@@ -54,6 +62,20 @@ class FileExpired:
 @dataclasses.dataclass(frozen=True)
 class FileUnavailable:
     """Cannot access original file in object storage."""
+
+
+@dataclasses.dataclass(frozen=True)
+class FileRetentionOwnerConflict:
+    """Exchange file is already bound to another root session."""
+
+
+ExchangeFileInputClaimError = (
+    FileNotFound
+    | FileAccessDenied
+    | FileExpired
+    | FileUnavailable
+    | FileRetentionOwnerConflict
+)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -263,6 +285,72 @@ class ExchangeFileService:
             origin_type=ExchangeFileOrigin.ARTIFACT,
         )
 
+    async def claim_input_attachments(
+        self,
+        session: AsyncSession,
+        *,
+        agent_id: str,
+        session_id: str,
+        user_id: str,
+        attachment_uris: list[str],
+    ) -> Result[None, ExchangeFileInputClaimError]:
+        """Claim input ExchangeFiles inside the caller's acceptance transaction."""
+        if not attachment_uris:
+            return Success(None)
+        object_keys: list[str] = []
+        for uri in attachment_uris:
+            object_key = exchange_object_key_from_uri(uri)
+            if object_key is None:
+                return Failure(FileNotFound())
+            object_keys.append(object_key)
+
+        agent_session = await self.agent_session_repository.get_by_id(
+            session,
+            session_id,
+        )
+        if agent_session is None or agent_session.agent_id != agent_id:
+            return Failure(FileAccessDenied())
+        if not await self._has_workspace_access(
+            session,
+            workspace_id=agent_session.workspace_id,
+            user_id=user_id,
+        ):
+            return Failure(FileAccessDenied())
+        root = await self.agent_session_repository.get_root_session_agent_by_session_id(
+            session,
+            session_id,
+        )
+        if root is None:
+            return Failure(FileAccessDenied())
+
+        claim = await self.exchange_file_repository.claim_for_retention_root(
+            session,
+            object_keys=object_keys,
+            workspace_id=agent_session.workspace_id,
+            agent_id=agent_id,
+            retention_root_session_id=root.agent_session_id,
+            bound_at=datetime.datetime.now(datetime.UTC),
+        )
+        match claim:
+            case Success():
+                return Success(None)
+            case Failure(error):
+                match error:
+                    case ExchangeFileClaimNotFound():
+                        return Failure(FileNotFound())
+                    case ExchangeFileClaimWrongScope():
+                        return Failure(FileAccessDenied())
+                    case ExchangeFileClaimExpired():
+                        return Failure(FileExpired())
+                    case ExchangeFileClaimUnavailable():
+                        return Failure(FileUnavailable())
+                    case ExchangeFileClaimOwnerConflict():
+                        return Failure(FileRetentionOwnerConflict())
+                    case _:
+                        assert_never(error)
+            case _:
+                assert_never(claim)
+
     async def _create_agent_file(
         self,
         *,
@@ -292,6 +380,7 @@ class ExchangeFileService:
             media_type=media_type,
             body=body,
             origin_type=origin_type,
+            retention_root_session_id=None,
         )
         succeeded = False
         try:
@@ -337,7 +426,14 @@ class ExchangeFileService:
                 session, workspace_id=agent_session.workspace_id, user_id=user_id
             ):
                 return Failure(FileAccessDenied())
+            get_root = (
+                self.agent_session_repository.get_root_session_agent_by_session_id
+            )
+            root = await get_root(session, session_id)
+            if root is None:
+                return Failure(SessionNotFound())
             workspace_id = agent_session.workspace_id
+            retention_root_session_id = root.agent_session_id
 
         prepared = self._prepare_files(
             workspace_id=workspace_id,
@@ -347,6 +443,7 @@ class ExchangeFileService:
             media_type=media_type,
             body=body,
             origin_type=origin_type,
+            retention_root_session_id=retention_root_session_id,
         )
         succeeded = False
         try:
@@ -367,6 +464,14 @@ class ExchangeFileService:
                     user_id=user_id,
                 ):
                     return Failure(FileAccessDenied())
+                root = await (
+                    self.agent_session_repository.get_root_session_agent_by_session_id
+                )(
+                    session,
+                    session_id,
+                )
+                if root is None or root.agent_session_id != retention_root_session_id:
+                    return Failure(SessionNotFound())
                 created = await self._persist_prepared_files(session, prepared)
             succeeded = True
             return Success(created)
@@ -397,8 +502,15 @@ class ExchangeFileService:
                 session, workspace_id=agent_session.workspace_id, user_id=user_id
             ):
                 return Failure(FileAccessDenied())
+            get_root = (
+                self.agent_session_repository.get_root_session_agent_by_session_id
+            )
+            root = await get_root(session, session_id)
+            if root is None:
+                return Failure(SessionNotFound())
             workspace_id = agent_session.workspace_id
             agent_id = agent_session.agent_id
+            retention_root_session_id = root.agent_session_id
 
         prepared = self._prepare_files(
             workspace_id=workspace_id,
@@ -408,6 +520,7 @@ class ExchangeFileService:
             media_type=media_type,
             body=body,
             origin_type=origin_type,
+            retention_root_session_id=retention_root_session_id,
         )
         succeeded = False
         try:
@@ -428,6 +541,14 @@ class ExchangeFileService:
                     user_id=user_id,
                 ):
                     return Failure(FileAccessDenied())
+                root = await (
+                    self.agent_session_repository.get_root_session_agent_by_session_id
+                )(
+                    session,
+                    session_id,
+                )
+                if root is None or root.agent_session_id != retention_root_session_id:
+                    return Failure(SessionNotFound())
                 created = await self._persist_prepared_files(session, prepared)
             succeeded = True
             return Success(created)
@@ -447,6 +568,7 @@ class ExchangeFileService:
         media_type: str,
         body: bytes,
         origin_type: ExchangeFileOrigin,
+        retention_root_session_id: str | None,
     ) -> list[_PreparedExchangeFile]:
         """Prepare stable metadata and object keys before external upload."""
         safe_filename = sanitize_exchange_filename(filename)
@@ -466,6 +588,10 @@ class ExchangeFileService:
                     size_bytes=len(body),
                     sha256=sha256,
                     created_by_user_id=user_id,
+                    retention_root_session_id=retention_root_session_id,
+                    retention_bound_at=(
+                        now if retention_root_session_id is not None else None
+                    ),
                     expires_at=expires_at,
                     preview_title=safe_filename,
                     preview_summary=_make_text_preview(body, media_type),
@@ -496,6 +622,10 @@ class ExchangeFileService:
                     size_bytes=len(thumbnail_body.body),
                     sha256=hashlib.sha256(thumbnail_body.body).hexdigest(),
                     created_by_user_id=user_id,
+                    retention_root_session_id=retention_root_session_id,
+                    retention_bound_at=(
+                        now if retention_root_session_id is not None else None
+                    ),
                     expires_at=expires_at,
                     preview_title=f"{safe_filename} preview",
                     preview_generated_at=thumbnail_body.generated_at,
@@ -628,15 +758,17 @@ class ExchangeFileService:
         *,
         uri: str,
         agent_id: str,
+        session_id: str,
         user_id: str,
     ) -> Result[ExchangeFileDownload, ExchangeFileError]:
-        """Download attachment URI inside current Agent namespace."""
+        """Download attachment URI inside the current root retention unit."""
         object_key = exchange_object_key_from_uri(uri)
         if object_key is None:
             return Failure(FileNotFound())
         return await self._download_by_object_key_for_agent(
             object_key=object_key,
             agent_id=agent_id,
+            session_id=session_id,
             user_id=user_id,
         )
 
@@ -663,15 +795,17 @@ class ExchangeFileService:
         *,
         uri: str,
         agent_id: str,
+        session_id: str,
         user_id: str,
     ) -> Result[ExchangeFile, SessionNotFound | FileNotFound | FileAccessDenied]:
-        """Resolve attachment metadata inside current Agent namespace."""
+        """Resolve metadata inside the current root retention unit."""
         object_key = exchange_object_key_from_uri(uri)
         if object_key is None:
             return Failure(FileNotFound())
         file = await self._get_accessible_file_by_object_key_for_agent(
             object_key=object_key,
             agent_id=agent_id,
+            session_id=session_id,
             user_id=user_id,
         )
         if isinstance(file, Failure):
@@ -696,12 +830,14 @@ class ExchangeFileService:
         *,
         object_key: str,
         agent_id: str,
+        session_id: str,
         user_id: str,
     ) -> Result[ExchangeFileDownload, ExchangeFileError]:
-        """Download Exchange object key inside current Agent namespace."""
+        """Download Exchange object key inside the current retention root."""
         file = await self._get_accessible_file_by_object_key_for_agent(
             object_key=object_key,
             agent_id=agent_id,
+            session_id=session_id,
             user_id=user_id,
         )
         return await self._download_resolved_file(file)
@@ -764,15 +900,33 @@ class ExchangeFileService:
         *,
         object_key: str,
         agent_id: str,
+        session_id: str,
         user_id: str,
     ) -> Result[ExchangeFile, FileNotFound | FileAccessDenied]:
-        """Check file location only inside current Agent namespace."""
+        """Check file location inside the current root retention unit."""
         async with self.session_manager() as session:
+            agent_session = await self.agent_session_repository.get_by_id(
+                session,
+                session_id,
+            )
+            if agent_session is None or agent_session.agent_id != agent_id:
+                return Failure(FileAccessDenied())
+            get_root = (
+                self.agent_session_repository.get_root_session_agent_by_session_id
+            )
+            root = await get_root(session, session_id)
+            if root is None:
+                return Failure(FileAccessDenied())
             file = await self.exchange_file_repository.get_by_object_key_for_agent(
                 session,
                 object_key=object_key,
                 agent_id=agent_id,
             )
+            if (
+                file is not None
+                and file.retention_root_session_id != root.agent_session_id
+            ):
+                return Failure(FileAccessDenied())
             return await self._authorize_and_expire_file(
                 session,
                 file=file,

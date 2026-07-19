@@ -315,6 +315,8 @@ def _exchange_file(
         size_bytes=11,
         sha256="sha256",
         created_by_user_id=user_id,
+        retention_root_session_id="session-root",
+        retention_bound_at=tznow(),
         preview_thumbnail_file_id=preview_thumbnail_file_id,
         preview_thumbnail_uri=preview_thumbnail_uri,
         preview_title="report.txt",
@@ -349,10 +351,11 @@ class _ExchangeFileService(ExchangeFileService):
         *,
         uri: str,
         agent_id: str,
+        session_id: str,
         user_id: str,
     ) -> Result[ExchangeFile, SessionNotFound | FileNotFound | FileAccessDenied]:
         """Return configured metadata resolve result."""
-        del uri, agent_id, user_id
+        del uri, agent_id, session_id, user_id
         if self.metadata_result is None:
             return Failure(FileNotFound())
         return self.metadata_result
@@ -362,10 +365,11 @@ class _ExchangeFileService(ExchangeFileService):
         *,
         uri: str,
         agent_id: str,
+        session_id: str,
         user_id: str,
     ) -> Result[ExchangeFileDownload, ExchangeFileError]:
         """Record Download attempt and treat as failure."""
-        del uri, agent_id, user_id
+        del uri, agent_id, session_id, user_id
         self.resolve_attachment_for_agent_called = True
         return Failure(FileNotFound())
 
@@ -395,6 +399,7 @@ class _DeletingExchangeFileService(_ExchangeFileService):
         *,
         uri: str,
         agent_id: str,
+        session_id: str,
         user_id: str,
     ) -> Result[ExchangeFile, SessionNotFound | FileNotFound | FileAccessDenied]:
         """Mutate FIFO state through another session before returning metadata."""
@@ -407,6 +412,7 @@ class _DeletingExchangeFileService(_ExchangeFileService):
         return await super().resolve_attachment_metadata_for_agent(
             uri=uri,
             agent_id=agent_id,
+            session_id=session_id,
             user_id=user_id,
         )
 

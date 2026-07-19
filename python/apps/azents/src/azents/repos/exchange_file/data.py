@@ -1,10 +1,45 @@
 """ExchangeFile repository data models."""
 
+import dataclasses
 import datetime
 
 from pydantic import BaseModel, Field
 
 from azents.core.enums import ExchangeFileOrigin, ExchangeFileStatus
+
+
+@dataclasses.dataclass(frozen=True)
+class ExchangeFileClaimNotFound:
+    """One referenced ExchangeFile or preview row was not found."""
+
+
+@dataclasses.dataclass(frozen=True)
+class ExchangeFileClaimWrongScope:
+    """A referenced ExchangeFile belongs to another workspace or Agent."""
+
+
+@dataclasses.dataclass(frozen=True)
+class ExchangeFileClaimExpired:
+    """A referenced ExchangeFile is no longer available for new input."""
+
+
+@dataclasses.dataclass(frozen=True)
+class ExchangeFileClaimUnavailable:
+    """A referenced ExchangeFile has no available backing blob."""
+
+
+@dataclasses.dataclass(frozen=True)
+class ExchangeFileClaimOwnerConflict:
+    """A referenced ExchangeFile belongs to another retention root."""
+
+
+ExchangeFileClaimError = (
+    ExchangeFileClaimNotFound
+    | ExchangeFileClaimWrongScope
+    | ExchangeFileClaimExpired
+    | ExchangeFileClaimUnavailable
+    | ExchangeFileClaimOwnerConflict
+)
 
 
 class ExchangeFile(BaseModel):
@@ -21,6 +56,12 @@ class ExchangeFile(BaseModel):
     size_bytes: int = Field(description="File size")
     sha256: str = Field(description="Source bytes SHA-256 digest")
     created_by_user_id: str = Field(description="Creator user ID")
+    retention_root_session_id: str | None = Field(
+        description="Root AgentSession that owns retention cleanup",
+    )
+    retention_bound_at: datetime.datetime | None = Field(
+        description="Time the file was bound to its retention root",
+    )
     preview_thumbnail_file_id: str | None = Field(
         default=None,
         description="Image preview thumbnail ExchangeFile ID",
@@ -75,6 +116,12 @@ class ExchangeFileCreate(BaseModel):
     size_bytes: int = Field(description="File size")
     sha256: str = Field(description="Source bytes SHA-256 digest")
     created_by_user_id: str = Field(description="Creator user ID")
+    retention_root_session_id: str | None = Field(
+        description="Root AgentSession that owns retention cleanup",
+    )
+    retention_bound_at: datetime.datetime | None = Field(
+        description="Time the file was bound to its retention root",
+    )
     expires_at: datetime.datetime = Field(description="Expiration time")
     preview_title: str | None = Field(default=None, description="Preview title")
     preview_summary: str | None = Field(default=None, description="Preview summary")
