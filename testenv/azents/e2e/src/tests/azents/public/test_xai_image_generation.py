@@ -391,11 +391,12 @@ def _assert_success_result(
         payload.get("attachments"),
         label="client result attachments",
     )
-    assert len(output) == 1
+    assert len(output) == 2
     assert output[0].get("kind") == "image"
     assert isinstance(output[0].get("model_file_id"), str)
-    assert len(attachments) == 1
-    attachment = attachments[0]
+    assert attachments == []
+    attachment = output[1]
+    assert attachment.get("type") == "attachment"
     assert attachment.get("availability") == "available"
     assert attachment.get("media_type") == "image/png"
     assert attachment.get("size") == len(_IMAGE_BYTES)

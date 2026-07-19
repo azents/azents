@@ -302,11 +302,19 @@ class ResponsesRequestLowerer:
     ) -> dict[str, object] | None:
         """Return raw item that can be replayed same-native."""
         match event.payload:
-            case ProviderToolResultPayload(
-                name="image_generation",
-                status=status,
-                semantic=semantic,
-                native_artifact=artifact,
+            case (
+                ProviderToolCallPayload(
+                    name="image_generation",
+                    status=status,
+                    semantic=semantic,
+                    native_artifact=artifact,
+                )
+                | ProviderToolResultPayload(
+                    name="image_generation",
+                    status=status,
+                    semantic=semantic,
+                    native_artifact=artifact,
+                )
             ):
                 output = semantic.output
                 if not artifact.compatible_with(self.compat_key):
@@ -690,7 +698,7 @@ def _drop_orphan_tool_outputs(
 def _lower_image_generation_native_item(
     native_item: Mapping[str, object],
     *,
-    status: str,
+    status: str | None,
     result: str | None,
 ) -> dict[str, object]:
     """Rebuild one generated-image replay item for the Responses input schema."""

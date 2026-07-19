@@ -329,7 +329,7 @@ RESPONSES_PROVIDER_TOOL_SPECS: dict[str, ResponsesProviderToolSpec] = {
         extract=_extract_code_interpreter,
     ),
     "image_generation_call": ResponsesProviderToolSpec(
-        event_kind=EventKind.PROVIDER_TOOL_RESULT,
+        event_kind=EventKind.PROVIDER_TOOL_CALL,
         name="image_generation",
         extract=_extract_image_generation,
     ),

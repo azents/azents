@@ -9,7 +9,6 @@ from azents.engine.events.responses_output import ResponsesOutputNormalizer
 from azents.engine.events.types import (
     OutputTextPart,
     ProviderToolCallPayload,
-    ProviderToolResultPayload,
     UnknownAdapterOutputPayload,
 )
 
@@ -173,9 +172,9 @@ def test_normalizes_image_generation_prompt_without_persisting_result_bytes() ->
         output_index=0,
     )
 
-    assert event.kind == EventKind.PROVIDER_TOOL_RESULT
+    assert event.kind == EventKind.PROVIDER_TOOL_CALL
     payload = event.payload
-    assert isinstance(payload, ProviderToolResultPayload)
+    assert isinstance(payload, ProviderToolCallPayload)
     assert payload.semantic.input == (
         '{"prompt":"Draw a semantic transcript diagram","quality":"high"}'
     )

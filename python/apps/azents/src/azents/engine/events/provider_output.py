@@ -22,10 +22,11 @@ from azents.engine.events.generated_files import (
 )
 from azents.engine.events.protocols import NormalizedAdapterOutput
 from azents.engine.events.types import (
-    Attachment,
+    AttachmentOutputPart,
     ClientToolResultPayload,
     Event,
     FileOutputPart,
+    ProviderToolCallPayload,
     ProviderToolResultPayload,
 )
 from azents.engine.run.errors import ModelCallError
@@ -79,7 +80,7 @@ class _PreparedGeneratedImage:
     preview_generated_at: datetime.datetime | None
     model_file: ModelFileCreate
     uploads: tuple[_ObjectUpload, ...]
-    attachment: Attachment
+    attachment_part: AttachmentOutputPart
     file_part: FileOutputPart
 
 
@@ -559,14 +560,12 @@ class ProviderOutputMaterializer:
             sha256=hashlib.sha256(normalized.body).hexdigest(),
             metadata=model_metadata,
         )
-        attachment = Attachment(
+        attachment_part = AttachmentOutputPart(
             attachment_id=exchange_id,
             uri=f"exchange://{exchange_key}",
             name=filename,
             media_type=pending.media_type,
             size=len(pending.body),
-            created_at=now,
-            source=source_kind,
             preview_title=filename,
             preview_thumbnail_uri=preview_uri,
             preview_thumbnail_media_type=preview_media_type,
@@ -592,7 +591,7 @@ class ProviderOutputMaterializer:
             preview_generated_at=preview_generated_at,
             model_file=model_file,
             uploads=tuple(uploads),
-            attachment=attachment,
+            attachment_part=attachment_part,
             file_part=file_part,
         )
 
@@ -601,14 +600,14 @@ class ProviderOutputMaterializer:
         normalized: NormalizedAdapterOutput,
         generated_images: tuple[_PreparedGeneratedImage, ...],
     ) -> NormalizedAdapterOutput:
-        """Replace provider result skeletons with durable file references."""
+        """Replace provider image skeletons with durable output parts."""
         by_call_id = {image.call_id: image for image in generated_images}
         updated_events: list[Event] = []
         attached_call_ids: set[str] = set()
         for event in normalized.events:
             payload = event.payload
             if not (
-                isinstance(payload, ProviderToolResultPayload)
+                isinstance(payload, ProviderToolCallPayload | ProviderToolResultPayload)
                 and payload.name == "image_generation"
                 and payload.call_id in by_call_id
             ):
@@ -618,15 +617,14 @@ class ProviderOutputMaterializer:
             updated_payload = payload.model_copy(
                 update={
                     "semantic": payload.semantic.model_copy(
-                        update={"output": [image.file_part]}
+                        update={"output": [image.file_part, image.attachment_part]}
                     ),
-                    "attachments": [image.attachment],
                 }
             )
             updated_events.append(event.model_copy(update={"payload": updated_payload}))
             attached_call_ids.add(payload.call_id)
         if attached_call_ids != set(by_call_id):
-            raise ModelCallError("Generated image result event is missing.")
+            raise ModelCallError("Generated image provider event is missing.")
         return normalized.model_copy(
             update={
                 "events": updated_events,
@@ -639,7 +637,7 @@ class ProviderOutputMaterializer:
         result: ClientToolResultPayload,
         generated_images: tuple[_PreparedGeneratedImage, ...],
     ) -> ClientToolResultPayload:
-        """Replace a client result skeleton with durable file references."""
+        """Replace a client result skeleton with durable output parts."""
         if len(generated_images) != 1:
             raise ModelCallError("Generated image result count is invalid.")
         image = generated_images[0]
@@ -647,8 +645,7 @@ class ProviderOutputMaterializer:
             raise ModelCallError("Generated image result identity is invalid.")
         return result.model_copy(
             update={
-                "output": [image.file_part],
-                "attachments": [image.attachment],
+                "output": [image.file_part, image.attachment_part],
                 "pending_generated_files": [],
             }
         )
