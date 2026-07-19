@@ -277,6 +277,86 @@ class TestXaiApiKeyIntegrationLifecycle:
         assert exc_info.value.status == 404  # pyright: ignore[reportUnknownMemberType]
 
 
+class TestOpenRouterIntegrationLifecycle:
+    """Stable OpenRouter API-key integration lifecycle."""
+
+    def test_openrouter_crud_is_discoverable_and_secret_safe(
+        self,
+        public_api_client: azentspublicclient.ApiClient,
+        admin_api_client: azentsadminclient.ApiClient,
+    ) -> None:
+        """Discover and manage OpenRouter through the public API without a live key."""
+        access_token, handle = _setup_workspace(public_api_client, admin_api_client)
+        api = LLMProviderIntegrationV1Api(public_api_client)
+        headers = {"Authorization": f"Bearer {access_token}"}
+
+        capabilities = api.llm_provider_integration_v1_list_integration_providers(
+            handle=handle,
+            _headers=headers,
+        )
+        openrouter = next(
+            item
+            for item in capabilities.items
+            if item.provider == LLMProvider.OPENROUTER
+        )
+        assert openrouter.credential_type == "api_key"
+        assert openrouter.experimental is False
+
+        created = api.llm_provider_integration_v1_create_integration(
+            handle=handle,
+            llm_provider_integration_create_request=LLMProviderIntegrationCreateRequest(
+                provider=LLMProvider.OPENROUTER,
+                name="__testenv_model_listing:deterministic-openrouter",
+                secrets=Secrets(ApiKeySecrets(api_key="test-openrouter-key")),
+            ),
+            _headers=headers,
+        )
+        assert created.provider == LLMProvider.OPENROUTER
+        assert created.config is None
+        assert "secrets" not in created.to_dict()
+
+        listed = api.llm_provider_integration_v1_list_integrations(
+            handle=handle,
+            _headers=headers,
+        )
+        assert [item.id for item in listed.items] == [created.id]
+        assert "secrets" not in listed.items[0].to_dict()
+
+        fetched = api.llm_provider_integration_v1_get_integration(
+            integration_id=created.id,
+            handle=handle,
+            _headers=headers,
+        )
+        assert fetched.id == created.id
+        assert "secrets" not in fetched.to_dict()
+
+        updated = api.llm_provider_integration_v1_update_integration(
+            integration_id=created.id,
+            handle=handle,
+            llm_provider_integration_update_request=LLMProviderIntegrationUpdateRequest(
+                name="Updated OpenRouter",
+                enabled=False,
+            ),
+            _headers=headers,
+        )
+        assert updated.name == "Updated OpenRouter"
+        assert updated.enabled is False
+        assert "secrets" not in updated.to_dict()
+
+        api.llm_provider_integration_v1_delete_integration(
+            integration_id=created.id,
+            handle=handle,
+            _headers=headers,
+        )
+        with pytest.raises(ApiException) as exc_info:
+            api.llm_provider_integration_v1_get_integration(
+                integration_id=created.id,
+                handle=handle,
+                _headers=headers,
+            )
+        assert exc_info.value.status == 404  # pyright: ignore[reportUnknownMemberType]
+
+
 class TestListIntegrations:
     """LLM Provider Integration list fetch test."""
 
