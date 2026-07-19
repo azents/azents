@@ -313,15 +313,11 @@ class TestProviderImageGeneration:
             semantic.get("output"),
             label="provider result semantic output",
         )
-        attachments = json_object_list_payload(
-            result_payload.get("attachments"),
-            label="provider call attachments",
-        )
+        assert "attachments" not in result_payload
         assert len(output) == 2
         assert isinstance(output[0].get("model_file_id"), str)
         assert output[0].get("kind") == "image"
         assert output[0].get("media_type") == "image/jpeg"
-        assert attachments == []
         attachment = output[1]
         assert attachment.get("type") == "attachment"
         assert attachment.get("availability") == "available"
