@@ -239,6 +239,72 @@ async def test_blocked_file_list_does_not_block_unrelated_read(
 
 
 @pytest.mark.asyncio
+async def test_file_operation_executor_never_exceeds_worker_bound(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Queued filesystem work never exceeds the configured worker bound."""
+    for index in range(4):
+        (tmp_path / f"read-{index}.txt").write_text("ready")
+    lock = threading.Lock()
+    active_count = 0
+    maximum_active_count = 0
+    bound_reached = threading.Event()
+    release = threading.Event()
+
+    def blocking_read(
+        path: Path,
+        *,
+        offset: int,
+        max_bytes: int,
+        cancellation: threading.Event,
+    ) -> bytes:
+        del path, offset, max_bytes, cancellation
+        nonlocal active_count, maximum_active_count
+        with lock:
+            active_count += 1
+            maximum_active_count = max(maximum_active_count, active_count)
+            if active_count == 2:
+                bound_reached.set()
+        release.wait(timeout=2)
+        with lock:
+            active_count -= 1
+        return b"ready"
+
+    monkeypatch.setattr(
+        "azents_runtime_runner.operations._read_file_bytes",
+        blocking_read,
+    )
+    client = _FakeClient()
+    operations = RunnerOperations(
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+        max_file_operation_workers=2,
+    )
+    tasks = [
+        asyncio.create_task(
+            operations.handle(
+                _operation(
+                    operation_type="file.read",
+                    payload={"path": str(tmp_path / f"read-{index}.txt")},
+                )
+            )
+        )
+        for index in range(4)
+    ]
+
+    assert await asyncio.to_thread(bound_reached.wait, 1)
+    await asyncio.sleep(0)
+    assert maximum_active_count == 2
+    assert sum(task.done() for task in tasks) == 0
+
+    release.set()
+    await asyncio.gather(*tasks)
+    assert maximum_active_count == 2
+    await operations.close()
+
+
+@pytest.mark.asyncio
 async def test_cancelled_file_list_signals_blocking_traversal(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
