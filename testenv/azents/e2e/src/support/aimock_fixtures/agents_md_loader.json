@@ -309,6 +309,129 @@
     {
       "match": {
         "endpoint": "chat",
+        "userMessage": "Apply patch E2E prepare",
+        "hasToolResult": false
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_apply_patch_prepare",
+            "name": "exec_command",
+            "arguments": {
+              "command": "base=/workspace/agent/apply-patch-e2e; rm -rf \"$base\" /workspace/agent/apply-patch-escaped.txt; mkdir -p \"$base\"; { echo alpha; echo keep-one; echo middle; echo keep-two; echo omega; } > \"$base/source.txt\"; echo 'remove me' > \"$base/legacy.txt\"",
+              "yield_time_ms": 10000,
+              "max_output_bytes": 1000
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_apply_patch_prepare"
+      },
+      "response": {
+        "content": "Apply patch E2E workspace prepared."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Apply patch E2E success",
+        "hasToolResult": false
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_apply_patch_success",
+            "name": "apply_patch",
+            "arguments": {
+              "base_path": "/workspace/agent/apply-patch-e2e",
+              "patch": "*** Begin Patch\n*** Update File: source.txt\n@@\n-alpha\n+ALPHA\n keep-one\n@@\n keep-two\n-omega\n+OMEGA\n*** Add File: added.txt\n+first\n+second\n*** Delete File: legacy.txt\n*** End Patch"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_apply_patch_success"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_apply_patch_success_inspect",
+            "name": "exec_command",
+            "arguments": {
+              "command": "base=/workspace/agent/apply-patch-e2e; echo 'source<<'; cat \"$base/source.txt\"; echo '>>'; echo 'added<<'; cat \"$base/added.txt\"; echo '>>'; test ! -e \"$base/legacy.txt\" && echo 'legacy=missing'",
+              "yield_time_ms": 10000,
+              "max_output_bytes": 2000
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_apply_patch_success_inspect"
+      },
+      "response": {
+        "content": "Apply patch E2E success verified."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Apply patch E2E reject traversal",
+        "hasToolResult": false
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_apply_patch_traversal",
+            "name": "apply_patch",
+            "arguments": {
+              "base_path": "/workspace/agent/apply-patch-e2e",
+              "patch": "*** Begin Patch\n*** Add File: ../apply-patch-escaped.txt\n+TRAVERSAL_SECRET\n*** End Patch"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_apply_patch_traversal"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_apply_patch_traversal_inspect",
+            "name": "exec_command",
+            "arguments": {
+              "command": "base=/workspace/agent/apply-patch-e2e; test ! -e /workspace/agent/apply-patch-escaped.txt && echo 'escape=missing'; source=$(paste -sd, \"$base/source.txt\"); echo \"source=$source\"",
+              "yield_time_ms": 10000,
+              "max_output_bytes": 1000
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_apply_patch_traversal_inspect"
+      },
+      "response": {
+        "content": "Apply patch E2E traversal rejection verified."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
         "userMessage": "Runtime exec quick command",
         "hasToolResult": false
       },
