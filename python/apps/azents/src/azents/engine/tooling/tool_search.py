@@ -244,6 +244,20 @@ class ToolWorkingSetStore:
         """Move an invoked deferred tool to the most-recent position."""
         return await self.activate(agent_id, session_id, [tool_name])
 
+    async def clear_in_session(
+        self,
+        session: AsyncSession,
+        agent_id: str,
+        session_id: str,
+    ) -> ToolWorkingSetState:
+        """Clear working-set recency within a caller-owned transaction."""
+        return await self._update_in_session(
+            session,
+            agent_id,
+            session_id,
+            lambda _: ToolWorkingSetState(),
+        )
+
     async def _update(
         self,
         agent_id: str,
@@ -252,21 +266,36 @@ class ToolWorkingSetStore:
     ) -> ToolWorkingSetState:
         """Update recency state using the shared optimistic-lock retry."""
         async with self.session_manager() as session:
-            handle = self._handle(session, agent_id, session_id)
-            updated: ToolWorkingSetState | None = None
-
-            def capture(current: ToolWorkingSetState) -> ToolWorkingSetState:
-                nonlocal updated
-                updated = mutator(current)
-                return updated
-
-            await handle.update(
-                default_factory=ToolWorkingSetState,
-                mutator=capture,
+            return await self._update_in_session(
+                session,
+                agent_id,
+                session_id,
+                mutator,
             )
-            if updated is None:
-                raise RuntimeError("Tool working-set update did not run")
+
+    async def _update_in_session(
+        self,
+        session: AsyncSession,
+        agent_id: str,
+        session_id: str,
+        mutator: Callable[[ToolWorkingSetState], ToolWorkingSetState],
+    ) -> ToolWorkingSetState:
+        """Update recency state inside a caller-owned transaction."""
+        handle = self._handle(session, agent_id, session_id)
+        updated: ToolWorkingSetState | None = None
+
+        def capture(current: ToolWorkingSetState) -> ToolWorkingSetState:
+            nonlocal updated
+            updated = mutator(current)
             return updated
+
+        await handle.update(
+            default_factory=ToolWorkingSetState,
+            mutator=capture,
+        )
+        if updated is None:
+            raise RuntimeError("Tool working-set update did not run")
+        return updated
 
     def _handle(
         self,

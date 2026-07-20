@@ -210,6 +210,18 @@ class _ToolWorkingSetStore(ToolWorkingSetStore):
         """Move one invoked name to the in-memory recency front."""
         return await self.activate(agent_id, session_id, [tool_name])
 
+    async def clear_in_session(
+        self,
+        session: AsyncSession,
+        agent_id: str,
+        session_id: str,
+    ) -> ToolWorkingSetState:
+        """Clear one in-memory working set."""
+        del session
+        state = ToolWorkingSetState()
+        self.states[(agent_id, session_id)] = state
+        return state
+
 
 class _ArtifactService(ArtifactService):
     """ArtifactService for tests."""
@@ -447,6 +459,7 @@ class _Compactor:
         summary_context_window_tokens: int | None = None,
         reason: str | None = None,
         summary_enricher: SummaryEnricher | None = None,
+        on_committing: Callable[[AsyncSession], Awaitable[None]] | None = None,
     ) -> Event:
         """Call summary generator and return summary event."""
         self.reason = reason
@@ -464,6 +477,8 @@ class _Compactor:
                 reason=reason,
                 covered_until_event_id=transcript[-1].id,
             )
+        if on_committing is not None:
+            await on_committing(_Session())
         self.summary = summary
         return Event(
             id="2" * 32,
@@ -493,6 +508,7 @@ class _FailingCompactor:
         summary_context_window_tokens: int | None = None,
         reason: str | None = None,
         summary_enricher: SummaryEnricher | None = None,
+        on_committing: Callable[[AsyncSession], Awaitable[None]] | None = None,
     ) -> Event | None:
         """Raise compaction failure."""
         del (
@@ -504,6 +520,7 @@ class _FailingCompactor:
             summary_context_window_tokens,
             reason,
             summary_enricher,
+            on_committing,
         )
         raise CompactionFailedError(
             "Compaction failed: summary model returned no text."
@@ -1735,8 +1752,12 @@ async def test_model_kwargs_keep_openrouter_on_litellm_responses() -> None:
 
 
 async def test_adapter_wires_event_filters_and_session_head_repo() -> None:
-    """Production assembly injects ADR filter pipeline and session head lookup."""
+    """Production assembly injects filters, head lookup, and compaction reset."""
     captured: dict[str, object] = {}
+    store = _ToolWorkingSetStore()
+    store.states[("agent-1", "session-1")] = ToolWorkingSetState(
+        tool_names=["service__probe"]
+    )
 
     def factory(**kwargs: object) -> _Execution:
         captured.update(kwargs)
@@ -1745,6 +1766,7 @@ async def test_adapter_wires_event_filters_and_session_head_repo() -> None:
     session_head_repo = _EventSessionHeadRepo(None)
     adapter = _agent_engine_adapter(
         session_manager=_session_context,
+        tool_working_set_store=store,
         artifact_service=_ArtifactService(),
         exchange_file_service=_ExchangeFileService(),
         model_file_service=_ModelFileService(),
@@ -1807,6 +1829,9 @@ async def test_adapter_wires_event_filters_and_session_head_repo() -> None:
         model_adapter.continuation_planner,
         ResponsesContinuationPlanner,
     )
+    assert auto_compaction_filter.on_committing is not None
+    await auto_compaction_filter.on_committing(_Session())
+    assert (await store.load("agent-1", "session-1")).tool_names == []
 
 
 async def test_manual_compact_runs_append_only_event_compactor() -> None:
@@ -1820,6 +1845,10 @@ async def test_manual_compact_runs_append_only_event_compactor() -> None:
     )
     transcript_repo = _TranscriptRepo([transcript_event])
     compactor = _Compactor()
+    store = _ToolWorkingSetStore()
+    store.states[("agent-1", "session-1")] = ToolWorkingSetState(
+        tool_names=["service__probe"]
+    )
     captured_prompts: dict[str, str] = {}
 
     async def summarize(
@@ -1849,6 +1878,7 @@ async def test_manual_compact_runs_append_only_event_compactor() -> None:
 
     adapter = _agent_engine_adapter(
         session_manager=_session_context,
+        tool_working_set_store=store,
         artifact_service=_ArtifactService(),
         exchange_file_service=_ExchangeFileService(),
         model_file_service=_ModelFileService(),
@@ -1892,6 +1922,7 @@ async def test_manual_compact_runs_append_only_event_compactor() -> None:
     assert "Do not answer the user" in captured_prompts["system_prompt"]
     assert "## Relevant Files and Symbols" in captured_prompts["user_prompt"]
     assert "existing checkpoints" in captured_prompts["user_prompt"]
+    assert (await store.load("agent-1", "session-1")).tool_names == []
 
 
 async def test_manual_compact_runs_compaction_summary_hook() -> None:
@@ -2110,8 +2141,13 @@ async def test_manual_compact_propagates_compaction_failure() -> None:
         created_at=datetime.datetime.now(datetime.UTC),
     )
     transcript_repo = _TranscriptRepo([transcript_event])
+    store = _ToolWorkingSetStore()
+    store.states[("agent-1", "session-1")] = ToolWorkingSetState(
+        tool_names=["service__probe"]
+    )
     adapter = _agent_engine_adapter(
         session_manager=_session_context,
+        tool_working_set_store=store,
         artifact_service=_ArtifactService(),
         exchange_file_service=_ExchangeFileService(),
         model_file_service=_ModelFileService(),
@@ -2144,6 +2180,7 @@ async def test_manual_compact_propagates_compaction_failure() -> None:
     assert first.event.__class__.__name__ == "CompactionStarted"
     with pytest.raises(CompactionFailedError, match="summary model returned no text"):
         await anext(iterator)
+    assert (await store.load("agent-1", "session-1")).tool_names == ["service__probe"]
 
 
 class _StreamingExecutionFactory:

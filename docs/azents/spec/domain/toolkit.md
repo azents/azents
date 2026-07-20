@@ -37,7 +37,7 @@ api_routes:
   - /toolkit/v1
   - /shell-environment/v1
 last_verified_at: 2026-07-20
-spec_version: 60
+spec_version: 61
 ---
 
 # Toolkit
@@ -208,7 +208,7 @@ When at least one deferred tool exists, the engine adds the unprefixed direct `t
 
 Calling `tool_search` activates the returned names for the immediately following prepared model call. Search activation moves results to the front of shared recency in relevance order; searching for an already-active tool refreshes it. Invoking a deferred tool also moves it to the most-recent position before runtime-hook denial, handler execution, or tool-level failure, because invocation itself is the relevance signal.
 
-The working set is session-bound Toolkit State with identity `tool_search/working_set`. Its versioned payload stores only an ordered most-recent-first list of final tool names; it does not copy descriptions, schemas, handlers, or MCP snapshots. Updates use the existing optimistic-lock retry contract. A missing name is skipped while unavailable but remains in recency state. If that final name returns, or its schema/handler changes, the current executable catalog entry is used without losing activation. The state survives model turns, AgentRuns, worker handoff/restart, compaction, and archive/unarchive through the normal AgentSession Toolkit State lifecycle.
+The working set is session-bound Toolkit State with identity `tool_search/working_set`. Its versioned payload stores only an ordered most-recent-first list of final tool names; it does not copy descriptions, schemas, handlers, or MCP snapshots. Updates use the existing optimistic-lock retry contract. A missing name is skipped while unavailable but remains in recency state. If that final name returns, or its schema/handler changes, the current executable catalog entry is used without losing activation. The state survives model turns, AgentRuns, worker handoff/restart, and archive/unarchive until a successful context compaction. Manual and automatic compaction replace its `tool_names` with an empty list in the same transaction that appends the summary and moves the model-input head, regardless of the current Agent opt-in value. Skipped, failed, cancelled, or stale compaction leaves the working set unchanged. Other Session Toolkit State is not reset.
 
 Tool Search does not replace Toolkit attachment, credential validation, or MCP discovery. MCP-backed availability continues to come only from the latest successful session snapshot described above; Tool Search indexes the executable catalog produced from that snapshot and never performs `list_tools` on the model-call critical path.
 
@@ -589,6 +589,7 @@ OpenAPI spec is authoritative for all endpoints. Major operations:
 
 ## Changelog
 
+- **2026-07-20** (spec_version 61) — Reset only `tool_search/working_set` after successful context compaction while preserving all other Session Toolkit State.
 - **2026-07-20** (spec_version 60) — Defined Shell `glob` as a shell-style pathname matching subset with zero-or-more-segment `**`, bounded comma-separated brace alternatives, explicit rejection of tilde expansion, and no shell quoting or backslash interpretation.
 - **2026-07-19** (spec_version 59) — Made `wait_agent` targetless and mailbox-activity based, preserved source-owned wake scheduling, and moved terminal unread acknowledgment to mailbox promotion.
 - **2026-07-19** (spec_version 58) — Made Tool Search an Agent-level opt-in capability that defaults to the complete legacy model-visible catalog.

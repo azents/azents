@@ -21,7 +21,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-17 | 5 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-07-19 | 16 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-19 | 1 |
-| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-07-20 | 60 |
+| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-07-20 | 61 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-07-13 | 7 |
 | [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-07-19 | 41 |
 
@@ -29,12 +29,12 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
-| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-07-19 | 112 |
+| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-07-20 | 113 |
 | [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-07-20 | 21 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-07-03 | 3 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-19 | 36 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-07-19 | 17 |
-| [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-07-19 | 28 |
+| [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-07-20 | 29 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-07-20 | 21 |
 | [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-07-19 | 1 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
@@ -230,6 +230,7 @@ Design documents are accumulated records and are not listed individually in this
 - [ADR-0170: Project Subscription Usage from the Selected Composer Model](adr/0170-project-subscription-usage-from-selected-model.md)
 - [ADR-0171: Add Kimi Subscription as an Integration-Scoped Provider](adr/0171-add-kimi-subscription-as-an-integration-scoped-provider.md)
 - [ADR-0171: Archived Session Retention and Durable Purge](adr/0171-archived-session-retention-and-purge.md)
+- [ADR-0172: Reset the Tool Search Working Set on Successful Compaction](adr/0172-reset-tool-search-working-set-on-compaction.md)
 
 ## Issues (Bug Tracking)
 

@@ -10,14 +10,16 @@ code_paths:
   - python/apps/azents/src/azents/engine/context/window.py
   - python/apps/azents/src/azents/engine/events/**
   - python/apps/azents/src/azents/engine/hooks/**
+  - python/apps/azents/src/azents/engine/tooling/tool_search.py
+  - python/apps/azents/src/azents/engine/tooling/toolkit_state.py
   - python/apps/azents/src/azents/engine/run/commands.py
   - python/apps/azents/src/azents/engine/run/contracts.py
   - python/apps/azents/src/azents/engine/run/resolve.py
   - python/apps/azents/src/azents/rdb/models/agent_session.py
   - python/apps/azents/src/azents/rdb/models/agent_run.py
   - python/apps/azents/src/azents/rdb/models/agent.py
-last_verified_at: 2026-07-19
-spec_version: 28
+last_verified_at: 2026-07-20
+spec_version: 29
 ---
 
 # Context Compaction
@@ -46,8 +48,8 @@ When compaction is required:
 5. Dispatch the compaction summary enrichment hook pipeline with the generated summary and rendered continuity history.
 6. Append the continuity history after the enriched summary.
 7. In one short database transaction, append adjacent `compaction_marker(status=started)` and `compaction_summary` events with the same `compaction_id` and reason. The summary payload contains the enriched checkpoint followed by bounded `Recent User Messages` and `Recent Transcript` sections.
-8. Move `agent_sessions.model_input_head_event_id` and `agent_sessions.model_input_head_model_order` to the summary event and commit the same transaction.
-9. Remove the live operation after success, Stop, cancellation, or terminal failure. A failed or cancelled attempt appends no compaction marker or summary and does not move the model-input head.
+8. Move `agent_sessions.model_input_head_event_id` and `agent_sessions.model_input_head_model_order` to the summary event, replace the Session's `tool_search/working_set.tool_names` with an empty list, and commit the same transaction. The Tool Search reset applies even when the Agent currently has Tool Search disabled; other Toolkit State identities are unchanged.
+9. Remove the live operation after success, Stop, cancellation, or terminal failure. A skipped, failed, cancelled, or stale attempt appends no compaction marker or summary, does not move the model-input head, and does not reset the Tool Search working set.
 
 Old events remain queryable. The head pointer and event model order only change which
 event range and ordering are used for future model input. Sequential appends leave gaps in
@@ -184,6 +186,7 @@ the immediate shape of the recent interaction.
 ## Invariants
 
 - Compaction is append-only: success atomically appends one adjacent marker/summary pair; failure or cancellation appends no compaction lifecycle event.
+- Successful compaction resets only the Session's `tool_search/working_set` in the marker/summary/head transaction. A skipped or unsuccessful attempt preserves that working set, and all other Toolkit State remains unchanged.
 - External summary generation and enrichment run before the successful commit transaction opens and do not hold the session-row event-ordering lock.
 - Events appended during external summary work remain outside the fixed selected cutoff and visible after the model-input head moves.
 - Summary failure or cancellation leaves the model-input head unchanged.
@@ -217,6 +220,7 @@ the immediate shape of the recent interaction.
 
 ## Changelog
 
+- **2026-07-20** (spec_version 29) — Reset the Session Tool Search working set in the successful compaction transaction while preserving it on skipped or unsuccessful attempts.
 - **2026-07-19** (spec_version 28) — Updated compaction rendering and token estimation for one durable provider call with canonical output-part metadata.
 
 - **2026-07-18** (spec_version 27) — Added provider-tool semantic input, output, and reference rendering

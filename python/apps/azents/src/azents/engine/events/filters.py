@@ -15,6 +15,7 @@ from azents.engine.context.window import compute_auto_compaction_threshold_token
 from azents.engine.events.file_parts import file_output_part_placeholder_text
 from azents.engine.events.output_parts import iter_output_parts
 from azents.engine.events.protocols import (
+    CompactionCommitAction,
     EventAppendRepository,
     EventPayloadRepository,
     ManualCompactor,
@@ -253,6 +254,7 @@ class EventAutoCompactionFilter:
         compaction_id_factory: Callable[[], str],
         on_compaction_started: Callable[[], Awaitable[None]] | None = None,
         summary_enricher: SummaryEnricher | None = None,
+        on_committing: CompactionCommitAction | None = None,
     ) -> None:
         self._session_id = session_id
         self.compactor = compactor
@@ -266,6 +268,7 @@ class EventAutoCompactionFilter:
         self.compaction_id_factory = compaction_id_factory
         self.on_compaction_started = on_compaction_started
         self.summary_enricher = summary_enricher
+        self.on_committing = on_committing
         self.was_compacted = False
 
     async def compact(
@@ -295,6 +298,7 @@ class EventAutoCompactionFilter:
             summary_context_window_tokens=self._max_input_tokens,
             reason="auto_threshold_exceeded",
             summary_enricher=self.summary_enricher,
+            on_committing=self.on_committing,
         )
         if summary is None:
             return events
@@ -359,8 +363,9 @@ class EventCompactor:
         summary_context_window_tokens: int | None = None,
         reason: str | None = None,
         summary_enricher: SummaryEnricher | None = None,
+        on_committing: CompactionCommitAction | None = None,
     ) -> Event | None:
-        """Append one successful summary and move the model-input head."""
+        """Append one successful summary and commit related state atomically."""
         old_events = list(transcript)
         if not old_events:
             return None
@@ -445,6 +450,8 @@ class EventCompactor:
                 session_id,
                 summary_event.id,
             )
+            if on_committing is not None:
+                await on_committing(session)
         return summary_event
 
 
