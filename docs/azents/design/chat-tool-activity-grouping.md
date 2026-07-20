@@ -2,6 +2,7 @@
 title: "Chat Tool Activity Grouping"
 created: 2026-07-20
 updated: 2026-07-20
+implemented: 2026-07-20
 tags: [frontend, chat, tools, ux]
 ---
 
