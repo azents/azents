@@ -1152,20 +1152,16 @@
           "type": "string"
         },
         "appIdKey": {
-          "type": "string",
-          "minLength": 1
+          "type": "string"
         },
         "privateKeyKey": {
-          "type": "string",
-          "minLength": 1
+          "type": "string"
         },
         "clientIdKey": {
-          "type": "string",
-          "minLength": 1
+          "type": "string"
         },
         "clientSecretKey": {
-          "type": "string",
-          "minLength": 1
+          "type": "string"
         }
       }
     },
