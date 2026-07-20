@@ -144,6 +144,64 @@ class RuntimeFileWriteResult:
     final_cursor: str
 
 
+type RuntimeFilePatchAction = Literal["add", "update", "delete"]
+type RuntimeFilePatchPhase = Literal[
+    "parse",
+    "preflight",
+    "stage",
+    "revalidate",
+    "commit",
+]
+
+
+@dataclasses.dataclass(frozen=True)
+class RuntimeFilePatchOperation:
+    """One file operation referenced by a Runtime patch result."""
+
+    path: str
+    action: RuntimeFilePatchAction
+
+
+@dataclasses.dataclass(frozen=True)
+class RuntimeFilePatchChange:
+    """One file change committed by a Runtime patch operation."""
+
+    path: str
+    action: RuntimeFilePatchAction
+    added_lines: int
+    removed_lines: int
+    content_sha256: str | None
+
+
+@dataclasses.dataclass(frozen=True)
+class RuntimeFileApplyPatchFailure:
+    """Typed Runtime patch failure with committed-delta detail."""
+
+    phase: RuntimeFilePatchPhase
+    reason: str
+    applied: tuple[RuntimeFilePatchChange, ...]
+    failed: RuntimeFilePatchOperation | None
+    not_attempted: tuple[RuntimeFilePatchOperation, ...]
+    exact: bool
+
+
+@dataclasses.dataclass(frozen=True)
+class RuntimeFileApplyPatchResult:
+    """Completed Runtime patch operation result."""
+
+    changes: tuple[RuntimeFilePatchChange, ...]
+    final_cursor: str
+
+
+class RuntimeFileApplyPatchFailedError(RuntimeRunnerOperationFailedError):
+    """Runtime Runner returned a typed file patch failure."""
+
+    def __init__(self, message: str, *, failure: RuntimeFileApplyPatchFailure) -> None:
+        """Initialize the failure with committed-delta detail."""
+        super().__init__(message)
+        self.failure = failure
+
+
 class RuntimeRunnerOperationClient(Protocol):
     """Runtime Runner operation client used by Builtin tools."""
 
@@ -231,6 +289,20 @@ class RuntimeRunnerOperationClient(Protocol):
         deadline_at: datetime,
     ) -> RuntimeFileWriteResult:
         """Run file write operation and return result."""
+        ...
+
+    async def apply_patch(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        owner_session_id: str | None,
+        base_path: str,
+        patch: bytes,
+        schema_version: int,
+        deadline_at: datetime,
+    ) -> RuntimeFileApplyPatchResult:
+        """Run one strict Runtime patch operation and return committed changes."""
         ...
 
     async def list_files(
