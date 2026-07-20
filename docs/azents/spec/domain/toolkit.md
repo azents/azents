@@ -10,6 +10,10 @@ code_paths:
   - python/apps/azents/src/azents/toolkit/**
   - python/apps/azents/src/azents/shell_environment/**
   - python/apps/azents/src/azents/services/toolkit/**
+  - python/apps/azents/src/azents/services/github_platform_system_setting/runtime.py
+  - python/apps/azents/src/azents/services/github_platform_system_setting/binding.py
+  - python/apps/azents/src/azents/api/public/toolkit/v1/**
+  - python/apps/azents/src/azents/rdb/models/github_user_installation.py
   - python/apps/azents/src/azents/services/agent_runtime/**
   - python/apps/azents/src/azents/services/shell_environment/**
   - python/apps/azents/src/azents/engine/hooks/**
@@ -138,13 +142,21 @@ azents-web provides workspace-scoped toolkit management screens.
 GitHub App Toolkit credentials are installation-aware.
 
 - `github_app` stores App ID, private key, and `installations[]` target metadata.
-- `github_app_platform` stores `installations[]` target metadata and uses platform App credentials from server config.
+- `github_app_platform` stores `installations[]` target metadata plus the durable Platform App ID that authorized them. It resolves the current effective App credentials from System Settings at each OAuth or token operation boundary.
 - Each installation target includes `installation_id`, `account_login`, `account_type`, and optional avatar URL.
 - Platform App credentials validate every selected installation through the current user's synced `github_user_installations` access list.
 
 At runtime, GitHubToolkitProvider creates one lazy MCP binding per installation. `update_context()` collects each binding's GitHub MCP tools and prefixes them with a safe account-login segment before the engine applies the ToolkitConfig slug prefix. For example, a toolkit slug `github` with `azents` and `hardtack` installations exposes final tool names such as `github__azents__get_file_contents` and `github__hardtack__create_pull_request`. The toolkit prompt includes the account-login to installation-ID mapping so the model can choose tools by repository owner.
 
 When Runtime environment injection is enabled, multi-installation GitHub App credentials expose `GITHUB_INSTALLATION_MAP` and installation-specific token variables. The git credential helper routes HTTPS Git credentials by repository owner. GitHub CLI commands use `GH_TOKEN` / `GITHUB_TOKEN` from the current default installation. The default installation initially falls back to the first configured installation and can be changed during the session with the `switch_installation` tool by passing an installation ID or account login. The selected installation is stored in session-bound Toolkit State under namespace `github` and state name `selected_installation`. Single-installation credentials also expose `GH_TOKEN` and `GITHUB_TOKEN` for normal GitHub CLI compatibility.
+
+### Platform GitHub App identity and runtime resolution
+
+Platform App installation rows and `github_app_platform` Toolkit credentials are bound to the numeric App ID that authorized them. OAuth synchronization writes App-aware installation ownership, and Toolkit creation copies that identity into encrypted Toolkit credentials. The one-time upgrade migration may claim legacy null bindings only from an explicitly present `AZ_GITHUB_PLATFORM_APP_ID`; otherwise it records a durable skipped outcome. A later Admin confirmation may explicitly claim still-unbound legacy rows for the first configured App.
+
+Public install URL generation, OAuth start/callback, installation synchronization, and Worker token issuance resolve one coherent Platform GitHub App snapshot from System Settings at the operation boundary. OAuth state carries the internal effective generation, and callback processing rejects generation drift before code exchange. Token issuance verifies the Toolkit's bound App ID and the User installation's App ID against the current effective App before any external token request. Same-App key or OAuth-secret rotation preserves the binding; a null legacy binding or App-ID mismatch fails closed.
+
+Toolkit list/detail responses expose only an optional redacted `authorization_state` with `status=reconnect_required`. Its stable reason is `legacy_binding_unbound` for a null Toolkit App ID or `app_identity_changed` for a mismatch. Main Web uses this Public API projection to block misleading connect/test actions and guide a manager to reconnect; it does not call the Admin API or depend on the Admin client. Persisted Toolkit configuration and Agent attachments are retained across App identity changes.
 
 ### MCP OAuth Connection Flow
 
@@ -417,7 +429,7 @@ Goal and Todo auto-bound toolkits expose fixed tool definitions independent of c
 | `runtime` | auto-bound when runtime tools are enabled. Domain restriction by ShellEnvironment. | — |
 | `claude_rules` | auto-bound when runtime tools are enabled; exposes hooks only, no model-visible tools | — |
 | `mcp` | ToolkitConfig.enabled=True and `auth_type` satisfied (`none`/`header`/`bearer`/`oauth2`) | `encrypted_credentials` for static auth or `MCPOAuthConnection` for OAuth2 |
-| `github` | depends on `github_auth_type` — `pat`: workspace ToolkitConfig credentials, `github_app`: installation id, `github_app_platform`: platform App JWT | ToolkitConfig `encrypted_credentials` or platform App configuration |
+| `github` | depends on `github_auth_type` — `pat`: workspace ToolkitConfig credentials, `github_app`: installation ID, `github_app_platform`: System Settings-resolved platform App JWT with App-ID binding checks | ToolkitConfig `encrypted_credentials` plus the current effective Platform GitHub App Section |
 | `notion`, `sentry` | MCP + toolkit-level OAuth2 connection exists | `MCPOAuthConnection` |
 | `gcp`, `aws` | Cloud-provider native auth (IRSA / workload identity) | — (no config) |
 | `kubernetes` | depends on `clusters[].auth_type` — kubeconfig / token / EKS / GKE | kubeconfig secret |
@@ -589,6 +601,7 @@ OpenAPI spec is authoritative for all endpoints. Major operations:
 
 ## Changelog
 
+- **2026-07-20** (spec_version 61) — Bound Platform GitHub App installations and Toolkits to durable App identity, moved OAuth and Worker token operations to System Settings resolution, and added the redacted Public reconnect-required projection.
 - **2026-07-20** (spec_version 61) — Reset only `tool_search/working_set` after successful context compaction while preserving all other Session Toolkit State.
 - **2026-07-20** (spec_version 60) — Defined Shell `glob` as a shell-style pathname matching subset with zero-or-more-segment `**`, bounded comma-separated brace alternatives, explicit rejection of tilde expansion, and no shell quoting or backslash interpretation.
 - **2026-07-19** (spec_version 59) — Made `wait_agent` targetless and mailbox-activity based, preserved source-owned wake scheduling, and moved terminal unread acknowledgment to mailbox promotion.

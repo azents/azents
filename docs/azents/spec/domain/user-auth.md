@@ -4,7 +4,7 @@ spec_type: domain
 domain: user-auth
 owner: "@Hardtack"
 created: 2026-04-20
-updated: 2026-07-13
+updated: 2026-07-20
 tags: [backend, security, api]
 code_paths:
   - python/apps/azents/src/azents/core/auth/**
@@ -12,6 +12,7 @@ code_paths:
   - python/apps/azents/src/azents/api/public/auth/v1/**
   - python/apps/azents/src/azents/api/admin/auth/v1/**
   - python/apps/azents/src/azents/api/admin/system/v1/**
+  - python/apps/azents/src/azents/api/admin/system_setting/v1/**
   - python/apps/azents/src/azents/api/admin/bootstrap/v1/**
   - python/apps/azents/src/azents/api/admin/__init__.py
   - python/apps/azents/src/azents/app.py
@@ -72,9 +73,10 @@ api_routes:
   - /security/v1
   - /workspace/v1
   - /system/v1
+  - /system-setting/v1
   - /debug/v1
-last_verified_at: 2026-07-13
-spec_version: 7
+last_verified_at: 2026-07-20
+spec_version: 8
 ---
 
 # User & Authentication
@@ -266,7 +268,9 @@ Token redeem validates password policy before consuming the token. On success it
 
 `system_user_roles` stores instance-wide assignments separately from Workspace membership. The only current role is `system_admin`. Every operational Admin API request decodes the ordinary Azents access token, verifies its live Session/User, and reads the current assignment from PostgreSQL. Role state is not embedded in the JWT, so grant or revoke applies immediately to an already-issued access token.
 
-All Admin routers are protected by this dependency except health probes and the two bootstrap operations. Debug, global User/Workspace management, token administration, and model-catalog operations use the same boundary. Missing or invalid identity returns `401`; an authenticated user without the live role receives `403`.
+All Admin routers are protected by this dependency except health probes and the two bootstrap operations. Debug, global User/Workspace management, token administration, model-catalog operations, and System Settings inventory/detail/mutation/health/audit operations use the same boundary. System Settings adds no machine credential, environment-granted administrator, or Workspace-role fallback. Missing or invalid identity returns `401`; an authenticated user without the live role receives `403`.
+
+Adding System Settings does not alter bootstrap or role lifecycle behavior. Bootstrap still creates only the first persisted `system_admin`, the exact-email CLI remains the only later promotion/recovery path, and System Settings mutations cannot revoke roles or bypass the final-admin invariant.
 
 Role revoke and User deletion share one serialized transaction boundary. An operation that would remove the final `system_admin` fails with stable `409 Conflict`, while deleting a non-final administrator cascades that user's assignment. `GET /user/v1/me/system-roles` exposes only the authenticated user's current roles for Main Web navigation. UI visibility is not an authorization control.
 
@@ -350,6 +354,7 @@ Sensitive operations require `elv=true` access token. Elevation is acquired by e
 - `[system-admin-final-assignment]` — role revoke and User deletion cannot leave the instance with zero system administrators.
 - `[system-admin-distinct-from-workspace]` — OWNER/MANAGER Workspace roles do not grant Admin API access.
 - `[system-admin-existing-install-cli]` — users-first installations and recovery require explicit exact-email CLI grant; no automatic promotion path exists.
+- `[system-settings-existing-admin-boundary]` — System Settings uses the same live persisted `system_admin` dependency and does not change bootstrap, promotion, revoke, or final-admin behavior.
 - `[workspace-invitation-membership-intent]` — invitation has no signup authority.
 - `[credential-email-smtp-gated]` — verified email credential is valid login/elevation credential only when SMTP/email delivery is configured.
 - `[credential-last-valid-required]` — credential deletion is allowed only when at least one valid credential remains after deletion.
@@ -399,7 +404,7 @@ Sensitive operations require `elv=true` access token. Elevation is acquired by e
 - `DELETE /password-reset-tokens/{token_id}` → 204
 - Existing E2E helpers: `/email-verifications*`
 
-All other Admin API operations, including `/auth/v1` token operations and Debug routes, require the same user bearer token plus live `system_admin` assignment. Health probes and the two bootstrap operations above are the complete unauthenticated Admin allowlist.
+All other Admin API operations, including `/auth/v1` token operations, `/system-setting/v1` operations, and Debug routes, require the same user bearer token plus live `system_admin` assignment. Health probes and the two bootstrap operations above are the complete unauthenticated Admin allowlist.
 
 ### Public — `/security/v1`
 
@@ -426,6 +431,7 @@ Admin-issued signup/password-reset token management and other instance-wide oper
 
 ## 9. Changelog
 
+- **2026-07-20** (v8) — Confirmed that System Settings inventory, mutation, health, and audit operations reuse the live persisted `system_admin` boundary without changing bootstrap, promotion, or final-admin invariants.
 - **2026-07-13** (v7) — Replaced public first-owner Workspace bootstrap with one-time Admin bootstrap, added persisted live system-administrator authorization and CLI recovery, and documented independent Admin Web user sessions.
 - **2026-04-20** (v1) — Initial living spec.
 - **2026-05-09** (v2) — Refresh/session/elevation behavior verified.

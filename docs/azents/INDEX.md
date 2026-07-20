@@ -20,9 +20,9 @@ Design documents are accumulated records and are not listed individually in this
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-16 | 9 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-17 | 5 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-07-19 | 16 |
-| [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-19 | 1 |
+| [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-20 | 2 |
 | [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-07-20 | 61 |
-| [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-07-13 | 7 |
+| [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-07-20 | 8 |
 | [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-07-19 | 41 |
 
 ## Living Specs — Flow
