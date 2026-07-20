@@ -43,6 +43,7 @@ azentsadminclient/docs/InvitationV1Api.md
 azentsadminclient/docs/ModelCatalogV1Api.md
 azentsadminclient/docs/PasswordResetTokenListResponse.md
 azentsadminclient/docs/PasswordResetTokenResponse.md
+azentsadminclient/docs/PlatformGitHubAppBindingResponse.md
 azentsadminclient/docs/PlatformGitHubAppCandidateResponse.md
 azentsadminclient/docs/PlatformGitHubAppConfirmRequest.md
 azentsadminclient/docs/PlatformGitHubAppDetailResponse.md
@@ -127,6 +128,7 @@ azentsadminclient/models/invitation_response.py
 azentsadminclient/models/invitation_status.py
 azentsadminclient/models/password_reset_token_list_response.py
 azentsadminclient/models/password_reset_token_response.py
+azentsadminclient/models/platform_git_hub_app_binding_response.py
 azentsadminclient/models/platform_git_hub_app_candidate_response.py
 azentsadminclient/models/platform_git_hub_app_confirm_request.py
 azentsadminclient/models/platform_git_hub_app_detail_response.py
@@ -209,6 +211,7 @@ azentsadminclient/test/test_invitation_v1_api.py
 azentsadminclient/test/test_model_catalog_v1_api.py
 azentsadminclient/test/test_password_reset_token_list_response.py
 azentsadminclient/test/test_password_reset_token_response.py
+azentsadminclient/test/test_platform_git_hub_app_binding_response.py
 azentsadminclient/test/test_platform_git_hub_app_candidate_response.py
 azentsadminclient/test/test_platform_git_hub_app_confirm_request.py
 azentsadminclient/test/test_platform_git_hub_app_detail_response.py

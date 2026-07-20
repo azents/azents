@@ -346,6 +346,7 @@ async def test_confirmation_rechecks_impact_before_activation(
         _session: AsyncSession,
         _action: str,
         _candidate: object,
+        _impact: dict[str, object] | None,
     ) -> None:
         return None
 

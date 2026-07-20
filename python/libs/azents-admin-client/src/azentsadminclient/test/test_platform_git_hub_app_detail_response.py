@@ -68,6 +68,13 @@ class TestPlatformGitHubAppDetailResponse(unittest.TestCase):
                     action_hint = '',
                     metadata = { },
                     checked_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), ),
+                binding_impact = azentsadminclient.models.platform_git_hub_app_binding_response.PlatformGitHubAppBindingResponse(
+                    affected_user_count = 56,
+                    affected_installation_count = 56,
+                    affected_toolkit_count = 56,
+                    affected_agent_count = 56,
+                    unbound_installation_count = 56,
+                    unbound_toolkit_count = 56, ),
                 activation_validation_status = 'pending',
                 app_slug = ''
             )
@@ -106,6 +113,13 @@ class TestPlatformGitHubAppDetailResponse(unittest.TestCase):
                     action_hint = '',
                     metadata = { },
                     checked_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), ),
+                binding_impact = azentsadminclient.models.platform_git_hub_app_binding_response.PlatformGitHubAppBindingResponse(
+                    affected_user_count = 56,
+                    affected_installation_count = 56,
+                    affected_toolkit_count = 56,
+                    affected_agent_count = 56,
+                    unbound_installation_count = 56,
+                    unbound_toolkit_count = 56, ),
                 activation_validation_status = 'pending',
                 app_slug = '',
         )

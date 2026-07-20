@@ -63,6 +63,7 @@ def _detail() -> PlatformGitHubAppDetail:
         ),
         candidate=None,
         health=None,
+        binding_impact=None,
         activation_validation_status=None,
         app_slug=None,
     )

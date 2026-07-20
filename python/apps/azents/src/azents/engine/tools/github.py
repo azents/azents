@@ -969,6 +969,11 @@ class GitHubToolkitProvider(ToolkitProvider[GitHubToolkitConfig]):
         if credentials is None:
             return None
 
+        if credentials.get("type") == "github_app_platform":
+            if self._platform_app_id is None:
+                return "GitHub Platform App is not configured."
+            credentials["app_id"] = self._platform_app_id
+
         try:
             secrets = _github_secrets_adapter.validate_python(credentials)
         except ValidationError as exc:
@@ -994,7 +999,14 @@ class GitHubToolkitProvider(ToolkitProvider[GitHubToolkitConfig]):
                 installation_id = int(installation_id_raw)
             except ValueError:
                 return "GitHub installation is not accessible to this user."
-            has_access = await repo.has_access(session, user_id, installation_id)
+            if secrets.app_id is None:
+                return "GitHub Platform App identity is not bound."
+            has_access = await repo.has_access(
+                session,
+                user_id,
+                secrets.app_id,
+                installation_id,
+            )
             if not has_access:
                 return "GitHub installation is not accessible to this user."
 

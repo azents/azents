@@ -13,6 +13,7 @@ Name | Type | Description | Notes
 **fields** | [**List[PlatformGitHubAppFieldResponse]**](PlatformGitHubAppFieldResponse.md) |  |
 **candidate** | [**PlatformGitHubAppCandidateResponse**](PlatformGitHubAppCandidateResponse.md) |  |
 **health** | [**PlatformGitHubAppHealthResponse**](PlatformGitHubAppHealthResponse.md) |  |
+**binding_impact** | [**PlatformGitHubAppBindingResponse**](PlatformGitHubAppBindingResponse.md) |  |
 **activation_validation_status** | [**SystemSettingValidationStatus**](SystemSettingValidationStatus.md) |  |
 **app_slug** | **str** |  |
 

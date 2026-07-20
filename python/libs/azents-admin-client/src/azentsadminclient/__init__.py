@@ -62,6 +62,7 @@ __all__ = [
     "InvitationStatus",
     "PasswordResetTokenListResponse",
     "PasswordResetTokenResponse",
+    "PlatformGitHubAppBindingResponse",
     "PlatformGitHubAppCandidateResponse",
     "PlatformGitHubAppConfirmRequest",
     "PlatformGitHubAppDetailResponse",
@@ -165,6 +166,7 @@ from azentsadminclient.models.invitation_response import InvitationResponse as I
 from azentsadminclient.models.invitation_status import InvitationStatus as InvitationStatus
 from azentsadminclient.models.password_reset_token_list_response import PasswordResetTokenListResponse as PasswordResetTokenListResponse
 from azentsadminclient.models.password_reset_token_response import PasswordResetTokenResponse as PasswordResetTokenResponse
+from azentsadminclient.models.platform_git_hub_app_binding_response import PlatformGitHubAppBindingResponse as PlatformGitHubAppBindingResponse
 from azentsadminclient.models.platform_git_hub_app_candidate_response import PlatformGitHubAppCandidateResponse as PlatformGitHubAppCandidateResponse
 from azentsadminclient.models.platform_git_hub_app_confirm_request import PlatformGitHubAppConfirmRequest as PlatformGitHubAppConfirmRequest
 from azentsadminclient.models.platform_git_hub_app_detail_response import PlatformGitHubAppDetailResponse as PlatformGitHubAppDetailResponse

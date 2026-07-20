@@ -19,6 +19,7 @@ import json
 
 from pydantic import BaseModel, ConfigDict, StrictInt, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
+from azentsadminclient.models.platform_git_hub_app_binding_response import PlatformGitHubAppBindingResponse
 from azentsadminclient.models.platform_git_hub_app_candidate_response import PlatformGitHubAppCandidateResponse
 from azentsadminclient.models.platform_git_hub_app_effective_status import PlatformGitHubAppEffectiveStatus
 from azentsadminclient.models.platform_git_hub_app_field_response import PlatformGitHubAppFieldResponse
@@ -38,10 +39,11 @@ class PlatformGitHubAppDetailResponse(BaseModel):
     fields: List[PlatformGitHubAppFieldResponse]
     candidate: Optional[PlatformGitHubAppCandidateResponse]
     health: Optional[PlatformGitHubAppHealthResponse]
+    binding_impact: Optional[PlatformGitHubAppBindingResponse]
     activation_validation_status: Optional[SystemSettingValidationStatus]
     app_slug: Optional[StrictStr]
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["section", "schema_version", "admin_version", "effective_status", "fields", "candidate", "health", "activation_validation_status", "app_slug"]
+    __properties: ClassVar[List[str]] = ["section", "schema_version", "admin_version", "effective_status", "fields", "candidate", "health", "binding_impact", "activation_validation_status", "app_slug"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -97,6 +99,9 @@ class PlatformGitHubAppDetailResponse(BaseModel):
         # override the default output from pydantic by calling `to_dict()` of health
         if self.health:
             _dict['health'] = self.health.to_dict()
+        # override the default output from pydantic by calling `to_dict()` of binding_impact
+        if self.binding_impact:
+            _dict['binding_impact'] = self.binding_impact.to_dict()
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
@@ -111,6 +116,11 @@ class PlatformGitHubAppDetailResponse(BaseModel):
         # and model_fields_set contains the field
         if self.health is None and "health" in self.model_fields_set:
             _dict['health'] = None
+
+        # set to None if binding_impact (nullable) is None
+        # and model_fields_set contains the field
+        if self.binding_impact is None and "binding_impact" in self.model_fields_set:
+            _dict['binding_impact'] = None
 
         # set to None if activation_validation_status (nullable) is None
         # and model_fields_set contains the field
@@ -141,6 +151,7 @@ class PlatformGitHubAppDetailResponse(BaseModel):
             "fields": [PlatformGitHubAppFieldResponse.from_dict(_item) for _item in obj["fields"]] if obj.get("fields") is not None else None,
             "candidate": PlatformGitHubAppCandidateResponse.from_dict(obj["candidate"]) if obj.get("candidate") is not None else None,
             "health": PlatformGitHubAppHealthResponse.from_dict(obj["health"]) if obj.get("health") is not None else None,
+            "binding_impact": PlatformGitHubAppBindingResponse.from_dict(obj["binding_impact"]) if obj.get("binding_impact") is not None else None,
             "activation_validation_status": obj.get("activation_validation_status"),
             "app_slug": obj.get("app_slug")
         })
