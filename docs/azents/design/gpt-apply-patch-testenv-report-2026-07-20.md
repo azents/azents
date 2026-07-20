@@ -8,7 +8,7 @@ tags: [engine, runtime, testenv, validation]
 
 ## Status
 
-The deterministic real-Runner E2E scenario is implemented and statically validated. Local container execution is pending because this agent runtime does not expose a Docker daemon socket. The stacked PR runtime-provider E2E lane is the authoritative execution environment and must pass before validation is complete.
+The required credential-free CI matrix passed on PR #656 in CI run `29742272333`, including deterministic, runtime-provider, and web-surface E2E lanes. The runtime-provider lane executed the new scenario through a real Docker Runtime Provider and Runtime Runner. Local container execution remained unavailable because this agent runtime does not expose a Docker daemon socket.
 
 ## Validated Scope
 
@@ -48,7 +48,7 @@ The scenario also verifies that success and failure result text do not repeat re
 | E2E static validation | `uv run ruff check --fix . && uv run ruff format . && uv run pyright .` | Passed |
 | E2E collection | focused `pytest --collect-only` for the apply-patch runtime-provider test | Passed: 1 test collected |
 | E2E local execution | focused real-Runner pytest invocation | Environment-blocked before fixture setup: Docker socket not present |
-| E2E CI execution | runtime-provider E2E lane on the validation PR | Pending |
+| E2E CI execution | CI run `29742272333` on PR #656 | Passed: deterministic, runtime-provider, and web-surface E2E lanes |
 
 ## Fixture and Credential Policy
 
