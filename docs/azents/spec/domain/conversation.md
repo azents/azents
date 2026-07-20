@@ -647,10 +647,12 @@ source. Goal continuation starts as a pending `goal_continuation` input buffer a
 The `/live` reader obtains access, pending input, active Run, Goal/Todo Toolkit state, and action
 execution projections in one short PostgreSQL session. It closes that session before reading Redis
 live projections and performs no nested database session reads inside the snapshot.
-`goal_updated` is appended when the user updates the session Goal. User-requested stop appends
-`interrupted` before the terminal run marker. The UI must not render these control events as user
-bubbles or delete controls; it may render non-interactive timeline indicators such as goal controls or
-an interrupted divider.
+`goal_updated` is appended when the user updates the session Goal. After a User stop closes its active
+Run, the worker persists and publishes `interrupted` followed by the terminal run marker. The UI renders
+an interrupted divider only from the persisted `interrupted` history event; Stop requests, RunStopped
+controls, and live projections never create an interruption divider. The UI must not render these control
+events as user bubbles or delete controls; it may render non-interactive timeline indicators such as goal
+controls or an interrupted divider.
 
 Session todo is persisted in `toolkit_states`, not in the transcript. `/live` and REST write snapshots expose it as `todo: { items }`; each item has `content` and status `pending`, `in_progress`, or `completed`. The same live and write snapshots expose `action_executions` as the current active operation TurnAction projections. Terminal snapshots exist only as durable `action_execution_result` events so completed, failed, or cancelled worktree progress remains visible after live state is deleted. The worker broadcasts `todo_state_changed` after `update_todo` so the chat UI can update without a separate todo read API.
 
