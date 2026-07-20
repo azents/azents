@@ -1,20 +1,28 @@
-"""edit tool.
+"""Runtime-native edit tool."""
 
-Replace string in text file using scope/path format.
-"""
-
+import dataclasses
 import logging
+from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime, timedelta
+from typing import Protocol
 
 from pydantic import BaseModel, Field
 
 from azents.engine.run.types import FunctionTool, FunctionToolError
 from azents.engine.tooling.make_tool import make_tool
 from azents.engine.tools.path_policy import RUNTIME_ACCESSIBLE_PATHS_MSG
-from azents.services.file_storage import FileStorage
+from azents.engine.tools.runtime_io import (
+    RuntimeFileEditResult,
+    RuntimeRunnerOperationFailedError,
+    RuntimeRunnerOperationGenerationError,
+    RuntimeRunnerOperationUnavailable,
+)
 from azents.services.runtime_storage_error import RuntimeStorageError
-from azents.services.session_storage import guess_media_type
 
 logger = logging.getLogger(__name__)
+
+_EDIT_TIMEOUT_SECONDS = 30
+_OPERATION_RESULT_GRACE_SECONDS = 10
 
 
 class EditInput(BaseModel):
@@ -37,111 +45,96 @@ class EditInput(BaseModel):
     )
 
 
+@dataclasses.dataclass(frozen=True)
+class RuntimeEditTarget:
+    """Current Runtime identity used for one edit operation."""
+
+    runtime_id: str
+    runner_generation: int
+
+
+type RuntimeEditTargetResolver = Callable[[], Awaitable[RuntimeEditTarget]]
+
+
+class RuntimeEditOperationClient(Protocol):
+    """Narrow Runtime operation dependency required by edit."""
+
+    async def edit_file(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        owner_session_id: str | None,
+        path: str,
+        old_string: str,
+        new_string: str,
+        replace_all: bool,
+        deadline_at: datetime,
+    ) -> RuntimeFileEditResult:
+        """Run one atomic Runtime text replacement."""
+        ...
+
+
 def make_edit_tool(
     *,
-    session_storage: FileStorage,
+    runner_operations: RuntimeEditOperationClient,
+    resolve_runtime_target: RuntimeEditTargetResolver,
+    owner_session_id: str | None,
     agent_id: str,
-    user_id: str,
 ) -> FunctionTool:
-    """Create edit tool.
-
-    :param session_storage: File storage client
-    :param agent_id: Agent ID
-    :param user_id: User ID
-    :return: edit Tool instance
-    """
+    """Create the Runtime-native exact text replacement tool."""
 
     async def handler(input: EditInput) -> str:
-        """Replace string in text file."""
-        abs_path = input.path
-
-        # Read file
+        """Replace exact text in one Runtime file transaction."""
         try:
-            data = await session_storage.get(
-                abs_path,
-                agent_id=agent_id,
+            target = await resolve_runtime_target()
+            result = await runner_operations.edit_file(
+                runtime_id=target.runtime_id,
+                runner_generation=target.runner_generation,
+                owner_session_id=owner_session_id,
+                path=input.path,
+                old_string=input.old_string,
+                new_string=input.new_string,
+                replace_all=input.replace_all,
+                deadline_at=datetime.now(UTC)
+                + timedelta(
+                    seconds=_EDIT_TIMEOUT_SECONDS + _OPERATION_RESULT_GRACE_SECONDS
+                ),
             )
-        except FileNotFoundError:
-            raise FunctionToolError(
-                f"File not found: {abs_path}. {RUNTIME_ACCESSIBLE_PATHS_MSG}"
-            ) from None
         except RuntimeStorageError as exc:
-            raise FunctionToolError(f"Failed to read file: {exc.detail}") from None
-        except ValueError as exc:
             raise FunctionToolError(str(exc)) from None
-        except OSError:
-            logger.exception(
-                "Failed to read file for editing",
-                extra={"path": abs_path},
-            )
+        except (
+            RuntimeRunnerOperationUnavailable,
+            RuntimeRunnerOperationGenerationError,
+        ):
             raise FunctionToolError(
-                f"Failed to read file: {abs_path}. {RUNTIME_ACCESSIBLE_PATHS_MSG}"
+                "Runtime is temporarily unavailable. Please try again in a moment."
             ) from None
-
-        # UTF-8 decode
-        try:
-            text = data.decode("utf-8")
-        except UnicodeDecodeError:
-            raise FunctionToolError(
-                f"File is not valid UTF-8 text: {abs_path}"
-            ) from None
-
-        # Search and replace old_string
-        old_string = input.old_string
-        new_string = input.new_string
-        count = text.count(old_string)
-
-        if count == 0:
-            raise FunctionToolError(
-                f"old_string not found in {abs_path}. "
-                "Make sure the text matches exactly, including whitespace."
+        except RuntimeRunnerOperationFailedError as exc:
+            code, _detail = _operation_failure(exc)
+            logger.info(
+                "Runtime edit failed",
+                extra={
+                    "agent_id": agent_id,
+                    "session_id": owner_session_id,
+                    "path": input.path,
+                    "failure_code": code,
+                },
             )
+            raise FunctionToolError(_failure_message(exc, input.path)) from None
 
-        if not input.replace_all and count > 1:
-            raise FunctionToolError(
-                f"old_string found {count} times in {abs_path}. "
-                "Use replace_all=true to replace all occurrences, "
-                "or provide a more specific old_string."
-            )
-
-        if input.replace_all:
-            new_text = text.replace(old_string, new_string)
-        else:
-            new_text = text.replace(old_string, new_string, 1)
-
-        # Store
-        new_data = new_text.encode("utf-8")
-        media_type = guess_media_type(abs_path)
-
-        try:
-            await session_storage.put(
-                abs_path,
-                new_data,
-                media_type,
-                agent_id=agent_id,
-            )
-        except PermissionError:
-            raise FunctionToolError(
-                f"Cannot write to read-only scope: {abs_path}. "
-                f"{RUNTIME_ACCESSIBLE_PATHS_MSG}"
-            ) from None
-        except RuntimeStorageError as exc:
-            raise FunctionToolError(f"Failed to save file: {exc.detail}") from None
-        except ValueError as exc:
-            raise FunctionToolError(str(exc)) from None
-        except OSError:
-            logger.exception(
-                "Failed to save edited file",
-                extra={"path": abs_path},
-            )
-            raise FunctionToolError(
-                f"Failed to save file: {abs_path}. {RUNTIME_ACCESSIBLE_PATHS_MSG}"
-            ) from None
-
-        replacements = count if input.replace_all else 1
+        logger.info(
+            "Runtime edit completed",
+            extra={
+                "agent_id": agent_id,
+                "session_id": owner_session_id,
+                "path": input.path,
+                "replacement_count": result.replacements,
+            },
+        )
         return (
-            f"Edited {abs_path}: replaced {replacements} occurrence(s) "
-            f"of old_string with new_string."
+            f"Edited {input.path}: replaced {result.replacements} occurrence(s) "
+            "of old_string with new_string."
         )
 
     return make_tool(
@@ -154,3 +147,46 @@ def make_edit_tool(
             f"{RUNTIME_ACCESSIBLE_PATHS_MSG}"
         ),
     )
+
+
+def _failure_message(exc: RuntimeRunnerOperationFailedError, path: str) -> str:
+    """Map safe Runner edit failure codes to existing model-visible messages."""
+    code, detail = _operation_failure(exc)
+    if code == "FILE_EDIT_NOT_FOUND":
+        return f"File not found: {path}. {RUNTIME_ACCESSIBLE_PATHS_MSG}"
+    if code == "FILE_EDIT_INVALID_UTF8":
+        return f"File is not valid UTF-8 text: {path}"
+    if code == "FILE_EDIT_OLD_STRING_NOT_FOUND":
+        return (
+            f"old_string not found in {path}. "
+            "Make sure the text matches exactly, including whitespace."
+        )
+    if code == "FILE_EDIT_MULTIPLE_MATCHES":
+        return (
+            f"old_string found {_match_count(detail)} times in {path}. "
+            "Use replace_all=true to replace all occurrences, "
+            "or provide a more specific old_string."
+        )
+    if code == "FILE_EDIT_PERMISSION_DENIED":
+        return (
+            f"Cannot write to read-only scope: {path}. {RUNTIME_ACCESSIBLE_PATHS_MSG}"
+        )
+    if code.startswith("FILE_EDIT_WRITE"):
+        return f"Failed to save file: {detail}"
+    if code.startswith("FILE_EDIT"):
+        return f"Failed to read file: {detail}"
+    return f"Failed to edit file: {exc}"
+
+
+def _operation_failure(exc: RuntimeRunnerOperationFailedError) -> tuple[str, str]:
+    """Split a Runner error without interpreting raw operation input."""
+    code, separator, detail = str(exc).partition(": ")
+    return (code, detail) if separator else (code, "Runtime edit operation failed")
+
+
+def _match_count(detail: str) -> int:
+    """Return the Runner-reported safe match count."""
+    try:
+        return int(detail)
+    except ValueError:
+        return 0

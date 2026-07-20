@@ -144,6 +144,14 @@ class RuntimeFileWriteResult:
     final_cursor: str
 
 
+@dataclasses.dataclass(frozen=True)
+class RuntimeFileEditResult:
+    """Completed file edit operation result."""
+
+    replacements: int
+    final_cursor: str
+
+
 type RuntimeFilePatchAction = Literal["add", "update", "delete"]
 type RuntimeFilePatchPhase = Literal[
     "parse",
@@ -303,6 +311,21 @@ class RuntimeRunnerOperationClient(Protocol):
         deadline_at: datetime,
     ) -> RuntimeFileApplyPatchResult:
         """Run one strict Runtime patch operation and return committed changes."""
+        ...
+
+    async def edit_file(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        owner_session_id: str | None,
+        path: str,
+        old_string: str,
+        new_string: str,
+        replace_all: bool,
+        deadline_at: datetime,
+    ) -> RuntimeFileEditResult:
+        """Run one atomic Runtime text replacement."""
         ...
 
     async def list_files(

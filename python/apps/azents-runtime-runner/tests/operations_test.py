@@ -177,6 +177,91 @@ async def test_file_write_read_and_list_stay_in_workspace(tmp_path: Path) -> Non
 
 
 @pytest.mark.asyncio
+async def test_file_edit_replaces_text_in_one_native_operation(tmp_path: Path) -> None:
+    """file.edit validates, replaces, and atomically saves one regular file."""
+    path = tmp_path / "note.txt"
+    path.write_text("before\nbefore\n")
+    client = _FakeClient()
+    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+
+    await operations.handle(
+        _operation(
+            operation_type="file.edit",
+            payload={
+                "path": str(path),
+                "old_string": "before",
+                "new_string": "after",
+                "replace_all": True,
+            },
+        )
+    )
+
+    assert path.read_text() == "after\nafter\n"
+    assert client.events[-1].event_type == RuntimeRunnerEventType.FINAL_SUCCESS
+    assert client.events[-1].payload == {"replacements": 2}
+    await operations.close()
+
+
+@pytest.mark.asyncio
+async def test_file_edit_rejects_ambiguous_match_without_changing_file(
+    tmp_path: Path,
+) -> None:
+    """file.edit preserves the source when replace_all is required."""
+    path = tmp_path / "note.txt"
+    path.write_text("before\nbefore\n")
+    client = _FakeClient()
+    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+
+    await operations.handle(
+        _operation(
+            operation_type="file.edit",
+            payload={
+                "path": str(path),
+                "old_string": "before",
+                "new_string": "after",
+                "replace_all": False,
+            },
+        )
+    )
+
+    assert path.read_text() == "before\nbefore\n"
+    assert client.events[-1].event_type == RuntimeRunnerEventType.FINAL_ERROR
+    assert client.events[-1].payload == {
+        "error_code": "FILE_EDIT_MULTIPLE_MATCHES",
+        "error_message": "2",
+    }
+    await operations.close()
+
+
+@pytest.mark.asyncio
+async def test_file_edit_rejects_symlink_paths(tmp_path: Path) -> None:
+    """file.edit never follows a final target or parent-directory symlink."""
+    target = tmp_path / "target.txt"
+    target.write_text("before")
+    link = tmp_path / "link.txt"
+    link.symlink_to(target)
+    client = _FakeClient()
+    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+
+    await operations.handle(
+        _operation(
+            operation_type="file.edit",
+            payload={
+                "path": str(link),
+                "old_string": "before",
+                "new_string": "after",
+                "replace_all": False,
+            },
+        )
+    )
+
+    assert target.read_text() == "before"
+    assert client.events[-1].event_type == RuntimeRunnerEventType.FINAL_ERROR
+    assert client.events[-1].payload["error_code"] == "FILE_EDIT_UNSAFE_PATH"
+    await operations.close()
+
+
+@pytest.mark.asyncio
 async def test_file_list_supports_file_path(tmp_path: Path) -> None:
     file_path = tmp_path / "nested" / "report.txt"
     file_path.parent.mkdir()

@@ -10,6 +10,7 @@ import re
 import shutil
 import signal
 import stat as stat_module
+import tempfile
 import threading
 import time
 import uuid
@@ -240,6 +241,9 @@ class RunnerOperations:
                 return
             if operation.operation_type == "file.apply_patch":
                 await self._file_apply_patch(operation)
+                return
+            if operation.operation_type == "file.edit":
+                await self._file_edit(operation)
                 return
             if operation.operation_type == "file.list":
                 await self._file_list(operation)
@@ -596,6 +600,35 @@ class RunnerOperations:
             await self._file_apply_patch_error(operation, result)
             return
         await self._final_success(operation, result.payload())
+
+    async def _file_edit(self, operation: RunnerOperationEnvelope) -> None:
+        """Apply one exact UTF-8 text replacement without exposing file contents."""
+        try:
+            path = _resolve_lexical_path(
+                operation.payload.get("path"),
+                workspace=self._workspace,
+            )
+        except ValueError as exc:
+            await self._final_error(operation, "FILE_EDIT_INVALID_PATH", str(exc))
+            return
+        old_string = _str_payload(operation.payload, "old_string")
+        new_string = _str_payload(operation.payload, "new_string")
+        replace_all = _bool_payload(operation.payload, "replace_all", default=False)
+        try:
+            replacements = await self._run_file_operation(
+                operation,
+                lambda cancellation: _edit_file_text(
+                    path,
+                    old_string=old_string,
+                    new_string=new_string,
+                    replace_all=replace_all,
+                    cancellation=cancellation,
+                ),
+            )
+        except _FileOperationSemanticError as exc:
+            await self._final_error(operation, exc.code, exc.message)
+            return
+        await self._final_success(operation, {"replacements": replacements})
 
     async def _run_apply_patch_operation(
         self,
@@ -2418,6 +2451,147 @@ def _write_file_bytes(
         return 0
     path.write_bytes(data)
     return len(data)
+
+
+def _edit_file_text(
+    path: Path,
+    *,
+    old_string: str,
+    new_string: str,
+    replace_all: bool,
+    cancellation: threading.Event,
+) -> int:
+    """Replace exact UTF-8 text in one regular file with an atomic write."""
+    if cancellation.is_set():
+        raise _FileOperationSemanticError(
+            "FILE_EDIT_CANCELLED",
+            "File edit was cancelled before replacement",
+        )
+    _assert_edit_path_has_no_symlinks(path)
+    try:
+        source_stat = path.lstat()
+    except FileNotFoundError as exc:
+        raise _FileOperationSemanticError(
+            "FILE_EDIT_NOT_FOUND",
+            "File does not exist",
+        ) from exc
+    except OSError as exc:
+        raise _FileOperationSemanticError("FILE_EDIT_READ_FAILED", str(exc)) from exc
+    if not stat_module.S_ISREG(source_stat.st_mode):
+        raise _FileOperationSemanticError(
+            "FILE_EDIT_UNSUPPORTED_FILE_TYPE",
+            "File is not a regular file",
+        )
+    try:
+        data = path.read_bytes()
+    except FileNotFoundError as exc:
+        raise _FileOperationSemanticError(
+            "FILE_EDIT_NOT_FOUND",
+            "File does not exist",
+        ) from exc
+    except OSError as exc:
+        raise _FileOperationSemanticError("FILE_EDIT_READ_FAILED", str(exc)) from exc
+    if cancellation.is_set():
+        raise _FileOperationSemanticError(
+            "FILE_EDIT_CANCELLED",
+            "File edit was cancelled before replacement",
+        )
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise _FileOperationSemanticError(
+            "FILE_EDIT_INVALID_UTF8",
+            "File is not valid UTF-8 text",
+        ) from exc
+    matches = text.count(old_string)
+    if matches == 0:
+        raise _FileOperationSemanticError(
+            "FILE_EDIT_OLD_STRING_NOT_FOUND",
+            "old_string was not found",
+        )
+    if not replace_all and matches > 1:
+        raise _FileOperationSemanticError(
+            "FILE_EDIT_MULTIPLE_MATCHES",
+            str(matches),
+        )
+    edited_text = text.replace(
+        old_string,
+        new_string,
+        -1 if replace_all else 1,
+    )
+    temp_path: Path | None = None
+    try:
+        descriptor, temp_name = tempfile.mkstemp(
+            prefix=f".{path.name}.",
+            dir=path.parent,
+        )
+        temp_path = Path(temp_name)
+        with os.fdopen(descriptor, "wb") as file:
+            os.fchmod(file.fileno(), stat_module.S_IMODE(source_stat.st_mode))
+            file.write(edited_text.encode("utf-8"))
+            file.flush()
+            os.fsync(file.fileno())
+        if cancellation.is_set():
+            raise _FileOperationSemanticError(
+                "FILE_EDIT_CANCELLED",
+                "File edit was cancelled before replacement",
+            )
+        _assert_edit_path_has_no_symlinks(path)
+        current_stat = path.lstat()
+        if not _same_file_identity(source_stat, current_stat):
+            raise _FileOperationSemanticError(
+                "FILE_EDIT_FILE_CHANGED",
+                "File changed while edit was in progress",
+            )
+        os.replace(temp_path, path)
+        temp_path = None
+    except PermissionError as exc:
+        raise _FileOperationSemanticError(
+            "FILE_EDIT_PERMISSION_DENIED",
+            "Permission denied while saving file",
+        ) from exc
+    except _FileOperationSemanticError:
+        raise
+    except OSError as exc:
+        raise _FileOperationSemanticError("FILE_EDIT_WRITE_FAILED", str(exc)) from exc
+    finally:
+        if temp_path is not None:
+            with contextlib.suppress(OSError):
+                temp_path.unlink()
+    return matches if replace_all else 1
+
+
+def _assert_edit_path_has_no_symlinks(path: Path) -> None:
+    """Reject edit paths whose final target or parent chain contains a symlink."""
+    current = Path(path.anchor)
+    for part in path.parts[1:]:
+        current /= part
+        try:
+            mode = current.lstat().st_mode
+        except FileNotFoundError as exc:
+            raise _FileOperationSemanticError(
+                "FILE_EDIT_NOT_FOUND",
+                "File does not exist",
+            ) from exc
+        except OSError as exc:
+            raise _FileOperationSemanticError(
+                "FILE_EDIT_READ_FAILED",
+                str(exc),
+            ) from exc
+        if stat_module.S_ISLNK(mode):
+            raise _FileOperationSemanticError(
+                "FILE_EDIT_UNSAFE_PATH",
+                "Editing symlink paths is not supported",
+            )
+
+
+def _same_file_identity(left: os.stat_result, right: os.stat_result) -> bool:
+    """Return whether two lstat results refer to the same regular file."""
+    return (
+        stat_module.S_ISREG(right.st_mode)
+        and left.st_dev == right.st_dev
+        and left.st_ino == right.st_ino
+    )
 
 
 def _read_stat_payload(

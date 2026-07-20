@@ -16,6 +16,7 @@ from azents.runtime.control_protocol.runner_operations import (
     RuntimeFileApplyPatchFailedError,
     RuntimeFileApplyPatchResult,
     RuntimeFileDeleteResult,
+    RuntimeFileEditResult,
     RuntimeFileListResult,
     RuntimeFileMkdirResult,
     RuntimeFileMoveResult,
@@ -558,6 +559,49 @@ async def test_apply_patch_preserves_typed_failure_detail() -> None:
     assert error.value.failure.failed.path == "src/legacy.py"
     assert error.value.failure.not_attempted[0].path == "src/after.py"
     assert error.value.failure.exact is True
+
+
+@pytest.mark.asyncio
+async def test_edit_file_dispatches_one_native_operation_and_returns_count() -> None:
+    """File edit passes replacement parameters to one Runner operation."""
+    harness = await _make_harness()
+    task = asyncio.create_task(
+        harness.client.edit_file(
+            runtime_id="runtime-1",
+            runner_generation=harness.runner_generation,
+            owner_session_id="session-1",
+            path="/workspace/agent/note.txt",
+            old_string="before",
+            new_string="after",
+            replace_all=True,
+            deadline_at=_now() + timedelta(seconds=30),
+        )
+    )
+    await asyncio.sleep(0)
+    request = await harness.control.claim_next_runner_request(
+        runtime_id="runtime-1",
+        generation=harness.runner_generation,
+        consumer_id="runner-a",
+        block_ms=0,
+    )
+
+    assert request is not None
+    assert request.operation_type == "file.edit"
+    assert request.payload["payload"] == {
+        "path": "/workspace/agent/note.txt",
+        "old_string": "before",
+        "new_string": "after",
+        "replace_all": True,
+    }
+    await harness.reply(
+        request.request_id,
+        RuntimeReplyEventType.FINAL_SUCCESS,
+        {"replacements": 3},
+        final=True,
+    )
+
+    result = await asyncio.wait_for(task, timeout=1)
+    assert result == RuntimeFileEditResult(replacements=3, final_cursor="1")
 
 
 @pytest.mark.asyncio
