@@ -9,6 +9,8 @@ import {
   type KeyboardEvent,
   useCallback,
   useEffect,
+  useId,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -37,6 +39,40 @@ interface OverflowMaskState {
 }
 
 const fadeWidth = rem(40);
+const previewHistoryStateKey = "__azentsAttachmentPreview";
+
+interface PreviewHistoryMarker {
+  viewerId: string;
+  index: number;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function previewHistoryMarker(state: unknown): PreviewHistoryMarker | null {
+  if (!isRecord(state)) {
+    return null;
+  }
+  const marker = state[previewHistoryStateKey];
+  if (
+    !isRecord(marker) ||
+    typeof marker.viewerId !== "string" ||
+    typeof marker.index !== "number"
+  ) {
+    return null;
+  }
+  return { viewerId: marker.viewerId, index: marker.index };
+}
+
+function historyStateWithPreview(
+  viewerId: string,
+  index: number,
+): Record<string, unknown> {
+  return {
+    [previewHistoryStateKey]: { viewerId, index },
+  };
+}
 
 function isImageFile(mediaType: string): boolean {
   return mediaType.startsWith("image/");
@@ -199,7 +235,7 @@ function AttachmentTile({
   onPreview,
 }: {
   file: FileAttachment;
-  onPreview: (selection: PreviewSelection) => void;
+  onPreview: (file: FileAttachment) => void;
 }): React.ReactElement {
   const t = useTranslations("chat.attachment");
   const displayName = file.name ?? extractFilename(file.uri);
@@ -212,7 +248,7 @@ function AttachmentTile({
 
   const activate = (): void => {
     if (selection !== null) {
-      onPreview(selection);
+      onPreview(file);
       return;
     }
     activateDownload(downloadUrl);
@@ -325,7 +361,7 @@ function AttachmentStrip({
   onPreview,
 }: {
   files: FileAttachment[];
-  onPreview: (selection: PreviewSelection) => void;
+  onPreview: (file: FileAttachment) => void;
 }): React.ReactElement {
   const { ref, style } = useOverflowMask();
   const pointerStartX = useRef<number | null>(null);
@@ -379,7 +415,7 @@ function AgentImageGallery({
   onPreview,
 }: {
   files: FileAttachment[];
-  onPreview: (selection: PreviewSelection) => void;
+  onPreview: (file: FileAttachment) => void;
 }): React.ReactElement {
   const visibleFiles = files.slice(0, 4);
   const hiddenCount = Math.max(0, files.length - visibleFiles.length);
@@ -407,7 +443,7 @@ function AgentImageGallery({
           activationFile.name ?? extractFilename(activationFile.uri);
         const activate = (): void => {
           if (selection !== null) {
-            onPreview(selection);
+            onPreview(activationFile);
             return;
           }
           activateDownload(downloadUrl);
@@ -477,34 +513,138 @@ export function FileAttachmentList({
   files,
   presentation = "agent",
 }: FileAttachmentListProps): React.ReactElement | null {
-  const [selection, setSelection] = useState<PreviewSelection | null>(null);
+  const viewerId = useId();
+  const { prominentImages, compactFiles, previewFiles } = useMemo(() => {
+    const nextProminentImages = files.filter(
+      (file) =>
+        isImageFile(file.mediaType) &&
+        isFileAvailable(file) &&
+        buildDownloadUrl(file) !== null,
+    );
+    const nextCompactFiles = files.filter(
+      (file) => !nextProminentImages.includes(file),
+    );
+    const usesAgentGallery =
+      presentation === "agent" && nextProminentImages.length > 0;
+    return {
+      prominentImages: nextProminentImages,
+      compactFiles: nextCompactFiles,
+      previewFiles: usesAgentGallery
+        ? [...nextProminentImages, ...nextCompactFiles]
+        : files,
+    };
+  }, [files, presentation]);
+  const previewSelections = useMemo(
+    () =>
+      previewFiles.flatMap((file) => {
+        const selection = previewSelection(file);
+        return selection === null ? [] : [selection];
+      }),
+    [previewFiles],
+  );
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const previewOpenerRef = useRef<HTMLElement | null>(null);
+  const historyEntryActiveRef = useRef(false);
+  const historyClosePendingRef = useRef(false);
 
-  const openPreview = useCallback((nextSelection: PreviewSelection): void => {
-    if (document.activeElement instanceof HTMLElement) {
-      previewOpenerRef.current = document.activeElement;
-    }
-    setSelection(nextSelection);
-  }, []);
-  const closePreview = useCallback((): void => {
-    setSelection(null);
+  const restorePreviewOpener = useCallback((): void => {
     requestAnimationFrame(() => previewOpenerRef.current?.focus());
   }, []);
+  const writePreviewHistory = useCallback(
+    (index: number, mode: "push" | "replace"): void => {
+      const state = historyStateWithPreview(viewerId, index);
+      if (mode === "push") {
+        window.history.pushState(state, "", window.location.href);
+      } else {
+        window.history.replaceState(state, "", window.location.href);
+      }
+    },
+    [viewerId],
+  );
+
+  useEffect(() => {
+    const handlePopState = (event: PopStateEvent): void => {
+      const marker = previewHistoryMarker(event.state);
+      if (
+        marker?.viewerId === viewerId &&
+        Number.isInteger(marker.index) &&
+        marker.index >= 0 &&
+        marker.index < previewSelections.length
+      ) {
+        historyEntryActiveRef.current = true;
+        historyClosePendingRef.current = false;
+        setSelectedIndex(marker.index);
+        return;
+      }
+      if (!historyEntryActiveRef.current) {
+        return;
+      }
+      historyEntryActiveRef.current = false;
+      historyClosePendingRef.current = false;
+      setSelectedIndex(null);
+      restorePreviewOpener();
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [previewSelections.length, restorePreviewOpener, viewerId]);
+
+  const openPreview = useCallback(
+    (file: FileAttachment): void => {
+      const nextIndex = previewSelections.findIndex(
+        (selection) => selection.file === file,
+      );
+      if (nextIndex < 0) {
+        return;
+      }
+      if (document.activeElement instanceof HTMLElement) {
+        previewOpenerRef.current = document.activeElement;
+      }
+      writePreviewHistory(
+        nextIndex,
+        historyEntryActiveRef.current ? "replace" : "push",
+      );
+      historyEntryActiveRef.current = true;
+      historyClosePendingRef.current = false;
+      setSelectedIndex(nextIndex);
+    },
+    [previewSelections, writePreviewHistory],
+  );
+  const closePreview = useCallback((): void => {
+    if (historyEntryActiveRef.current) {
+      if (historyClosePendingRef.current) {
+        return;
+      }
+      historyClosePendingRef.current = true;
+      window.history.back();
+      return;
+    }
+    setSelectedIndex(null);
+    restorePreviewOpener();
+  }, [restorePreviewOpener]);
+  const movePreview = useCallback(
+    (offset: -1 | 1): void => {
+      if (selectedIndex === null) {
+        return;
+      }
+      const nextIndex = selectedIndex + offset;
+      if (nextIndex < 0 || nextIndex >= previewSelections.length) {
+        return;
+      }
+      writePreviewHistory(nextIndex, "replace");
+      setSelectedIndex(nextIndex);
+    },
+    [previewSelections.length, selectedIndex, writePreviewHistory],
+  );
 
   if (files.length === 0) {
     return null;
   }
 
-  const prominentImages = files.filter(
-    (file) =>
-      isImageFile(file.mediaType) &&
-      isFileAvailable(file) &&
-      buildDownloadUrl(file) !== null,
-  );
-  const compactFiles = files.filter((file) => !prominentImages.includes(file));
   const showAgentGallery =
     presentation === "agent" && prominentImages.length > 0;
   const showMixedGroup = showAgentGallery && compactFiles.length > 0;
+  const selection =
+    selectedIndex === null ? null : (previewSelections[selectedIndex] ?? null);
 
   const content =
     presentation === "compact" || !showAgentGallery ? (
@@ -523,10 +663,18 @@ export function FileAttachmentList({
   return (
     <>
       {content}
-      {selection ? (
+      {selection && selectedIndex !== null ? (
         <AttachmentPreviewViewer
           opened
           onClose={closePreview}
+          {...(selectedIndex > 0 ? { onPrevious: () => movePreview(-1) } : {})}
+          {...(selectedIndex < previewSelections.length - 1
+            ? { onNext: () => movePreview(1) }
+            : {})}
+          position={{
+            current: selectedIndex + 1,
+            total: previewSelections.length,
+          }}
           name={selection.file.name ?? extractFilename(selection.file.uri)}
           mediaType={selection.file.mediaType}
           size={selection.file.size}
