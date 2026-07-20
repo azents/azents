@@ -39,7 +39,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/AttachmentPreviewViewer.tsx
   - typescript/apps/azents-web/src/features/chat/components/ProviderToolCallCard.tsx
 last_verified_at: 2026-07-20
-spec_version: 20
+spec_version: 21
 ---
 
 # File Exchange Storage
@@ -149,7 +149,7 @@ reference before external deletion succeeds.
 - An available `image_generation` attachment renders directly inside its provider-tool or client-tool card below the header. Both execution paths use the same Exchange preview and download behavior and do not expose Base64 or require diagnostic details to be expanded.
 - Agent-originated non-image files use the compact strip. Mixed Agent output groups the image gallery and compact file strip inside one bordered attachment group.
 - Every available sent attachment opens `AttachmentPreviewViewer` from its tile body or gallery cell. The trailing tile download action downloads the original without opening the viewer.
-- Exchange-file creation stores a bounded UTF-8 `preview_summary` for `text/*`, JSON, XML, and JavaScript payloads. User uploads and Agent-presented text files therefore use the same text preview path while retaining the complete original for download.
+- Exchange-file creation stores a bounded `preview_summary` for safe UTF-8 text. Supported payloads include `text/*`, common textual `application/*` media types, structured media types ending in `+json`, `+xml`, or `+yaml`, and `application/octet-stream` content that decodes as UTF-8 without binary control characters. Invalid UTF-8 and binary-control content do not receive a text preview. User uploads and Agent-presented files use this same preview path while retaining the complete original for download.
 - `AttachmentPreviewViewer` selects image or text rendering from available preview capability data and shows a download-guidance fallback for other file types. It uses a full-screen mobile overlay and a bounded centered desktop modal with persistent close, metadata, file-position, previous/next, and download controls. Images remain fitted inside the viewer; selecting an image opens the original with inline disposition in the browser's native image viewer. Text previews scroll inside a pre-wrapped monospaced surface.
 - A preview navigates across every available attachment in the rendered attachment group without closing. Users can use the previous/next controls, keyboard arrow keys, a horizontal wheel gesture, or a horizontal touch swipe. Gallery count cells open the first hidden image so every item represented by `+N` remains reachable.
 - Opening a preview adds a same-URL browser history entry. Browser Back closes the preview before leaving the conversation, while the close control and Escape consume the same entry.
@@ -165,6 +165,7 @@ reference before external deletion succeeds.
 
 ## Changelog
 
+- **2026-07-20** — v21. Extended attachment text previews to Markdown, common textual application media types, and safe UTF-8 files with unknown media types while excluding invalid UTF-8 and binary-control content.
 - **2026-07-20** — v20. Added attachment preview navigation through gallery overflow, pointer and keyboard gestures, and modal-aware browser history behavior.
 - **2026-07-19** — v19. Added atomic root-retention claims for ExchangeFile source/preview rows, same-tree access, archive preservation, and cleanup-before-cascade file purge semantics.
 - **2026-07-19** — v18. Moved provider-generated Exchange attachments into canonical provider-call semantic output alongside ModelFile-backed replay parts.

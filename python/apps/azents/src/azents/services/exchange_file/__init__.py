@@ -5,6 +5,7 @@ import datetime
 import hashlib
 import logging
 import re
+import unicodedata
 from io import BytesIO
 from typing import Annotated, assert_never
 
@@ -101,10 +102,22 @@ _PREVIEW_THUMBNAIL_MAX_SIZE = 512
 _PREVIEW_THUMBNAIL_MEDIA_TYPE = "image/jpeg"
 _MAX_TEXT_PREVIEW_CHARS = 2000
 _TEXT_PREVIEW_MEDIA_TYPES = {
+    "application/graphql",
     "application/javascript",
     "application/json",
+    "application/rtf",
+    "application/sql",
+    "application/toml",
+    "application/x-httpd-php",
+    "application/x-javascript",
+    "application/x-latex",
+    "application/x-sh",
+    "application/x-tex",
     "application/xml",
+    "application/yaml",
 }
+_TEXT_PREVIEW_MEDIA_TYPE_SUFFIXES = ("+json", "+xml", "+yaml")
+_UNKNOWN_MEDIA_TYPE = "application/octet-stream"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -150,13 +163,26 @@ def sanitize_exchange_filename(filename: str | None) -> str:
 
 
 def _make_text_preview(body: bytes, media_type: str) -> str | None:
-    """Create a bounded UTF-8 preview for supported text attachments."""
+    """Create a bounded preview when attachment bytes are safe UTF-8 text."""
+    normalized_media_type = media_type.partition(";")[0].strip().lower()
     supported = (
-        media_type.startswith("text/") or media_type in _TEXT_PREVIEW_MEDIA_TYPES
+        normalized_media_type.startswith("text/")
+        or normalized_media_type in _TEXT_PREVIEW_MEDIA_TYPES
+        or normalized_media_type.endswith(_TEXT_PREVIEW_MEDIA_TYPE_SUFFIXES)
+        or normalized_media_type == _UNKNOWN_MEDIA_TYPE
     )
     if not supported:
         return None
-    text = body.decode("utf-8", errors="replace")
+
+    try:
+        text = body.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    if any(
+        unicodedata.category(character) == "Cc" and character not in "\t\n\r"
+        for character in text
+    ):
+        return None
     if len(text) <= _MAX_TEXT_PREVIEW_CHARS:
         return text
     return text[:_MAX_TEXT_PREVIEW_CHARS] + "\n... (truncated)"

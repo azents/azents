@@ -498,6 +498,101 @@ async def test_create_text_upload_truncates_preview() -> None:
 
 
 @pytest.mark.asyncio
+async def test_create_markdown_upload_stores_text_preview() -> None:
+    """Markdown upload stores its UTF-8 content as a preview."""
+    service, _repository, _s3_service = _make_service(
+        workspace_user=_make_workspace_user()
+    )
+
+    result = await service.create_agent_upload(
+        agent_id="agent-1",
+        user_id="user-1",
+        filename="README.md",
+        media_type="text/markdown",
+        body=b"# Preview\n\nMarkdown content.\n",
+    )
+
+    assert isinstance(result, Success)
+    assert result.value.preview_summary == "# Preview\n\nMarkdown content.\n"
+
+
+@pytest.mark.asyncio
+async def test_create_unknown_media_utf8_upload_stores_text_preview() -> None:
+    """Unknown MIME upload stores a preview when its content is safe UTF-8 text."""
+    service, _repository, _s3_service = _make_service(
+        workspace_user=_make_workspace_user()
+    )
+
+    result = await service.create_agent_upload(
+        agent_id="agent-1",
+        user_id="user-1",
+        filename="Makefile",
+        media_type="application/octet-stream",
+        body=b"test:\n\tuv run pytest\n",
+    )
+
+    assert isinstance(result, Success)
+    assert result.value.preview_summary == "test:\n\tuv run pytest\n"
+
+
+@pytest.mark.asyncio
+async def test_create_binary_upload_omits_text_preview() -> None:
+    """Unknown MIME upload does not preview binary bytes as text."""
+    service, _repository, _s3_service = _make_service(
+        workspace_user=_make_workspace_user()
+    )
+
+    result = await service.create_agent_upload(
+        agent_id="agent-1",
+        user_id="user-1",
+        filename="archive.bin",
+        media_type="application/octet-stream",
+        body=b"PK\x03\x04\x00\x00binary",
+    )
+
+    assert isinstance(result, Success)
+    assert result.value.preview_summary is None
+
+
+@pytest.mark.asyncio
+async def test_create_utf8_control_upload_omits_text_preview() -> None:
+    """Unknown MIME upload does not preview Unicode control content as text."""
+    service, _repository, _s3_service = _make_service(
+        workspace_user=_make_workspace_user()
+    )
+
+    result = await service.create_agent_upload(
+        agent_id="agent-1",
+        user_id="user-1",
+        filename="control.bin",
+        media_type="application/octet-stream",
+        body=b"prefix\xc2\x80suffix",
+    )
+
+    assert isinstance(result, Success)
+    assert result.value.preview_summary is None
+
+
+@pytest.mark.asyncio
+async def test_create_invalid_utf8_text_upload_omits_preview() -> None:
+    """Declared text upload does not replace invalid UTF-8 bytes in its preview."""
+    service, _repository, _s3_service = _make_service(
+        workspace_user=_make_workspace_user()
+    )
+
+    result = await service.create_agent_upload(
+        agent_id="agent-1",
+        user_id="user-1",
+        filename="invalid.txt",
+        media_type="text/plain",
+        body=b"text\xffcontent",
+    )
+
+    assert isinstance(result, Success)
+    assert result.value.preview_summary is None
+
+
+@pytest.mark.asyncio
 async def test_create_image_upload_stores_preview_thumbnail() -> None:
     """Image upload also stores preview thumbnail Exchange file."""
     service, repository, s3_service = _make_service(

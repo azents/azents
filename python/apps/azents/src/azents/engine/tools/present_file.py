@@ -28,7 +28,6 @@ from azents.services.session_storage import guess_media_type
 
 logger = logging.getLogger(__name__)
 
-_MAX_TEXT_PREVIEW_CHARS = 2000
 _PRESENTABLE_ROOT = "/workspace/agent"
 
 
@@ -105,7 +104,6 @@ def make_present_file_tool(
                 continue
 
             media_type = guess_media_type(abs_path)
-            text_preview: str | None = None
             file_name = abs_path.rsplit("/", 1)[-1]
             try:
                 body = await session_storage.get(abs_path, agent_id=agent_id)
@@ -122,17 +120,6 @@ def make_present_file_tool(
                     f"{RUNTIME_ACCESSIBLE_PATHS_MSG}"
                 )
                 continue
-
-            # Preview text files only
-            if media_type.startswith("text/") or media_type in (
-                "application/json",
-                "application/xml",
-                "application/javascript",
-            ):
-                text = body.decode("utf-8", errors="replace")
-                if len(text) > _MAX_TEXT_PREVIEW_CHARS:
-                    text = text[:_MAX_TEXT_PREVIEW_CHARS] + "\n... (truncated)"
-                text_preview = text
 
             created = await exchange_file_service.create_artifact(
                 session_id=session_id,
@@ -162,7 +149,7 @@ def make_present_file_tool(
                     media_type=created.value.media_type,
                     size=created.value.size_bytes,
                     name=created.value.filename,
-                    text_preview=text_preview,
+                    text_preview=created.value.preview_summary,
                 )
             )
 
