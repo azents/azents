@@ -910,6 +910,9 @@
         "systemBootstrap": {
           "$ref": "#/definitions/systemBootstrap"
         },
+        "platformGitHubApp": {
+          "$ref": "#/definitions/platformGitHubApp"
+        },
         "apiserver": {
           "type": "object",
           "properties": {
@@ -1132,6 +1135,33 @@
         "tokenKey": {
           "type": "string",
           "minLength": 1
+        }
+      }
+    },
+    "platformGitHubApp": {
+      "type": "object",
+      "required": [
+        "existingSecret",
+        "appIdKey",
+        "privateKeyKey",
+        "clientIdKey",
+        "clientSecretKey"
+      ],
+      "properties": {
+        "existingSecret": {
+          "type": "string"
+        },
+        "appIdKey": {
+          "type": "string"
+        },
+        "privateKeyKey": {
+          "type": "string"
+        },
+        "clientIdKey": {
+          "type": "string"
+        },
+        "clientSecretKey": {
+          "type": "string"
         }
       }
     },

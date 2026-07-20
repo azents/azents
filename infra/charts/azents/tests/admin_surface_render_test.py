@@ -85,6 +85,45 @@ def test_admin_surface_configured_bootstrap_secret_contract() -> None:
     assert 'key: "initial-setup-token"' in rendered
 
 
+def test_platform_github_app_secret_is_scoped_to_required_workloads() -> None:
+    """Platform GitHub App fields use a dedicated Secret outside scheduler."""
+    rendered = _helm_template(
+        "server.platformGitHubApp.existingSecret=azents-github-app",
+        "server.platformGitHubApp.appIdKey=app-id",
+        "server.platformGitHubApp.privateKeyKey=private-key",
+        "server.platformGitHubApp.clientIdKey=client-id",
+        "server.platformGitHubApp.clientSecretKey=client-secret",
+    )
+
+    assert rendered.count("AZ_GITHUB_PLATFORM_APP_ID") == 3
+    assert rendered.count("AZ_GITHUB_PLATFORM_PRIVATE_KEY") == 3
+    assert rendered.count("AZ_GITHUB_PLATFORM_CLIENT_ID") == 3
+    assert rendered.count("AZ_GITHUB_PLATFORM_CLIENT_SECRET") == 3
+    assert rendered.count('name: "azents-github-app"') >= 12
+    scheduler_document = next(
+        document
+        for document in rendered.split("---")
+        if "./bin/scheduler.sh" in document
+    )
+    assert "AZ_GITHUB_PLATFORM_" not in scheduler_document
+
+
+def test_platform_github_app_supports_mixed_field_ownership() -> None:
+    """Empty field keys leave those fields under Admin-managed ownership."""
+    rendered = _helm_template(
+        "server.platformGitHubApp.existingSecret=azents-github-app",
+        "server.platformGitHubApp.appIdKey=app-id",
+        "server.platformGitHubApp.privateKeyKey=",
+        "server.platformGitHubApp.clientIdKey=client-id",
+        "server.platformGitHubApp.clientSecretKey=",
+    )
+
+    assert rendered.count("AZ_GITHUB_PLATFORM_APP_ID") == 3
+    assert rendered.count("AZ_GITHUB_PLATFORM_CLIENT_ID") == 3
+    assert "AZ_GITHUB_PLATFORM_PRIVATE_KEY" not in rendered
+    assert "AZ_GITHUB_PLATFORM_CLIENT_SECRET" not in rendered
+
+
 def test_admin_surface_can_be_disabled() -> None:
     """Disabling Admin Web omits its workload while keeping Main Web deployable."""
     rendered = _helm_template("adminWeb.enabled=false")

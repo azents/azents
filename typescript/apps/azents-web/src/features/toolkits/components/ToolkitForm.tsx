@@ -469,6 +469,11 @@ export function ToolkitForm({
                   formState.type === "EDIT" &&
                   formState.config.has_credentials === true
                 }
+                authorizationState={
+                  formState.type === "EDIT"
+                    ? (formState.config.authorization_state ?? null)
+                    : null
+                }
                 handle={handle}
                 {...(formState.type === "EDIT" && {
                   toolkitConfigId: formState.config.id,

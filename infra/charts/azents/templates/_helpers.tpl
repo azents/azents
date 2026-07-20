@@ -353,26 +353,43 @@ Render environment variables injected from the server auth Secret.
     secretKeyRef:
       name: {{ .Values.secrets.existingSecrets.auth | quote }}
       key: oauth-secret-key
+{{- end }}
+{{- end -}}
+
+{{/*
+Render optional field-level Platform GitHub App Secret references.
+*/}}
+{{- define "azents.platformGitHubAppSecretEnv" -}}
+{{- $github := .Values.server.platformGitHubApp -}}
+{{- if $github.existingSecret }}
+{{- if $github.appIdKey }}
 - name: AZ_GITHUB_PLATFORM_APP_ID
   valueFrom:
     secretKeyRef:
-      name: {{ .Values.secrets.existingSecrets.auth | quote }}
-      key: github-platform-app-id
+      name: {{ $github.existingSecret | quote }}
+      key: {{ $github.appIdKey | quote }}
+{{- end }}
+{{- if $github.privateKeyKey }}
 - name: AZ_GITHUB_PLATFORM_PRIVATE_KEY
   valueFrom:
     secretKeyRef:
-      name: {{ .Values.secrets.existingSecrets.auth | quote }}
-      key: github-platform-private-key
+      name: {{ $github.existingSecret | quote }}
+      key: {{ $github.privateKeyKey | quote }}
+{{- end }}
+{{- if $github.clientIdKey }}
 - name: AZ_GITHUB_PLATFORM_CLIENT_ID
   valueFrom:
     secretKeyRef:
-      name: {{ .Values.secrets.existingSecrets.auth | quote }}
-      key: github-platform-client-id
+      name: {{ $github.existingSecret | quote }}
+      key: {{ $github.clientIdKey | quote }}
+{{- end }}
+{{- if $github.clientSecretKey }}
 - name: AZ_GITHUB_PLATFORM_CLIENT_SECRET
   valueFrom:
     secretKeyRef:
-      name: {{ .Values.secrets.existingSecrets.auth | quote }}
-      key: github-platform-client-secret
+      name: {{ $github.existingSecret | quote }}
+      key: {{ $github.clientSecretKey | quote }}
+{{- end }}
 {{- end }}
 {{- end -}}
 

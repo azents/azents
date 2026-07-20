@@ -40,6 +40,12 @@ server:
   systemBootstrap:
     existingSecret: ""
     tokenKey: setup-token
+  platformGitHubApp:
+    existingSecret: ""
+    appIdKey: github-platform-app-id
+    privateKeyKey: github-platform-private-key
+    clientIdKey: github-platform-client-id
+    clientSecretKey: github-platform-client-secret
   apiserver:
     enabled: true
     resources: {}

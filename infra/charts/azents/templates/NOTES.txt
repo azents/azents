@@ -15,6 +15,9 @@ Default-off components:
 
 Prepare existing Secrets with these keys before installing:
 - {{ .Values.secrets.existingSecrets.auth }}: jwt-secret-key, credential-encryption-key, sentry-dsn, oauth-secret-key
+{{ if .Values.server.platformGitHubApp.existingSecret }}
+- {{ .Values.server.platformGitHubApp.existingSecret }}: {{ .Values.server.platformGitHubApp.appIdKey }}, {{ .Values.server.platformGitHubApp.privateKeyKey }}, {{ .Values.server.platformGitHubApp.clientIdKey }}, {{ .Values.server.platformGitHubApp.clientSecretKey }} for Platform GitHub App field overlays
+{{ end }}
 {{ if .Values.server.systemBootstrap.existingSecret }}
 - {{ .Values.server.systemBootstrap.existingSecret }}: {{ .Values.server.systemBootstrap.tokenKey }} for the optional zero-user setup token
 {{ end }}

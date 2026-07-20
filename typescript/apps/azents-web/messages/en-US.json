@@ -1011,7 +1011,11 @@
         "addInstallation": "Add installation",
         "removeInstallation": "Remove",
         "refreshInstallations": "Refresh installations",
-        "installationsLinked": "GitHub App installations linked"
+        "installationsLinked": "GitHub App installations linked",
+        "reconnectRequiredTitle": "GitHub reconnect required",
+        "reconnectReasonAppIdentityChanged": "The instance Platform GitHub App changed. Reconnect this toolkit and save the refreshed installations before using it again.",
+        "reconnectReasonLegacyBindingUnbound": "This toolkit predates App identity binding. Reconnect it once to bind its installations to the current Platform GitHub App.",
+        "reconnectGithub": "Reconnect with GitHub"
       },
       "envvar": {
         "warningTitle": "Long-lived credential warning",

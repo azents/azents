@@ -9,6 +9,7 @@ import { modelCatalogRouter } from "./modelCatalog";
 import { retentionRouter } from "./retention";
 import { signupTokenRouter } from "./signupToken";
 import { systemRoleRouter } from "./systemRole";
+import { systemSettingsRouter } from "./systemSettings";
 import { userRouter } from "./user";
 import { userEmailRouter } from "./userEmail";
 import { verificationRouter } from "./verification";
@@ -27,6 +28,7 @@ export const appRouter = router({
   modelCatalog: modelCatalogRouter,
   retention: retentionRouter,
   systemRole: systemRoleRouter,
+  systemSettings: systemSettingsRouter,
 });
 
 // 클라이언트용 타입 export
