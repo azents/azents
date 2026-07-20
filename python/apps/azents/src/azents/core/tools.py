@@ -14,6 +14,7 @@ from pydantic import BaseModel, BeforeValidator, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.engine.hooks.types import RuntimeHooks
+from azents.engine.run.client_tool_compatibility import ClientToolProfile
 from azents.engine.run.emit import PublishedEvent
 from azents.engine.run.types import CheckStop, FunctionTool
 
@@ -34,6 +35,14 @@ class ToolkitStatus(enum.StrEnum):
 
     ENABLED = "enabled"
     DISABLED = "disabled"
+
+
+@dataclasses.dataclass(frozen=True)
+class ProfiledToolkitPrompt:
+    """Static toolkit prompt fragment gated by one client tool profile."""
+
+    required_client_tool_profile: ClientToolProfile
+    content: str
 
 
 @dataclasses.dataclass(frozen=True)
@@ -238,6 +247,14 @@ class Toolkit(ABC, Generic[ConfigT]):
         """
         del context
         return ""
+
+    async def get_profiled_static_prompts(
+        self,
+        context: TurnContext,
+    ) -> list[ProfiledToolkitPrompt]:
+        """Return static prompt fragments gated by client tool profiles."""
+        del context
+        return []
 
     async def get_dynamic_prompt(self, context: TurnContext) -> str:
         """Return dynamic prompt content for explicitly dynamic prompt sources.

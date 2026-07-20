@@ -115,10 +115,13 @@ Dependency: Phase 3.
 
 - Add `apply_patch({base_path, patch})` as an ordinary `FunctionTool` with
   `additionalProperties: false`.
-- Add a normalized client-tool compatibility profile for identified OpenAI GPT-family models.
-  Determine eligibility from existing developer/family metadata, not provider hosting or raw model
-  substring checks inside the tool.
-- Prepare the executable catalog, GPT-only prompt fragment, and declaration budget together.
+- Add a normalized `gpt_v4a_apply_patch` client-tool compatibility profile for identified OpenAI
+  GPT-family models. Determine eligibility from the immutable developer/family model snapshot, not
+  provider hosting or raw model substring checks inside the tool.
+- Let toolkits contribute profile-tagged candidate tools and prompt fragments, then project tools,
+  handlers, and prompts through the resolved profile set before Tool Search, declaration budgeting,
+  lowerer construction, and executor freezing. Do not extend the general `TurnContext` with model
+  compatibility state.
 - Keep `edit` unchanged and visible to all supported models.
 - Invoke the typed Runtime Runner operation with the invoking Session owner and bounded deadline.
 - Render concise model-visible success and actionable failure text. Preserve typed generic metadata on

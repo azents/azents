@@ -35,7 +35,13 @@ from azents.core.enums import (
 from azents.core.inference_profile import SessionInferenceState
 from azents.core.llm_catalog import ModelBuiltInToolCapabilities, ModelCapabilities
 from azents.core.openrouter import OPENROUTER_API_BASE_URL, OPENROUTER_APP_TITLE
-from azents.core.tools import Toolkit, ToolkitState, ToolkitStatus, TurnContext
+from azents.core.tools import (
+    ProfiledToolkitPrompt,
+    Toolkit,
+    ToolkitState,
+    ToolkitStatus,
+    TurnContext,
+)
 from azents.engine.context.compaction import (
     SummaryModelCall,
     compute_summary_budget,
@@ -99,6 +105,7 @@ from azents.engine.hooks.types import (
     TurnStartHookContext,
     TurnStartResult,
 )
+from azents.engine.run.client_tool_compatibility import ClientToolProfile
 from azents.engine.run.contracts import RunContext, RunRequest, ToolkitBinding
 from azents.engine.run.emit import Emit
 from azents.engine.run.errors import CompactionFailedError, ModelCallError
@@ -669,6 +676,48 @@ class _DeferredToolkit(Toolkit[BaseModel]):
         return ToolkitState(status=ToolkitStatus.ENABLED, tools=tools)
 
 
+class _ProfiledCandidateToolkit(Toolkit[BaseModel]):
+    """Toolkit exposing one profile-gated deferred tool and prompt."""
+
+    display_name = "Profiled Service"
+
+    async def update_context(self, context: TurnContext) -> ToolkitState:
+        """Return one profile-gated candidate tool."""
+        del context
+
+        async def handler(arguments: str) -> str:
+            return arguments
+
+        return ToolkitState(
+            status=ToolkitStatus.ENABLED,
+            tools=[
+                FunctionTool(
+                    spec=FunctionToolSpec(
+                        name="apply_patch",
+                        description="Apply one V4A patch.",
+                        input_schema={"type": "object", "properties": {}},
+                    ),
+                    handler=handler,
+                ).with_required_client_tool_profile(
+                    ClientToolProfile.GPT_V4A_APPLY_PATCH
+                )
+            ],
+        )
+
+    async def get_profiled_static_prompts(
+        self,
+        context: TurnContext,
+    ) -> list[ProfiledToolkitPrompt]:
+        """Return guidance coupled to the profile-gated tool."""
+        del context
+        return [
+            ProfiledToolkitPrompt(
+                required_client_tool_profile=(ClientToolProfile.GPT_V4A_APPLY_PATCH),
+                content="Use apply_patch for multi-file changes.",
+            )
+        ]
+
+
 class _DenyHookToolkit(Toolkit[BaseModel]):
     """Runtime hook provider that denies every tool call."""
 
@@ -949,6 +998,86 @@ async def test_disabled_tool_search_exposes_complete_catalog() -> None:
     assert (await store.load("agent-1", "session-1")).tool_names == []
 
 
+@pytest.mark.parametrize(
+    ("model_identifier", "model_developer", "model_family", "expected_tools"),
+    [
+        (
+            "gpt-5.1",
+            LLMModelDeveloper.OPENAI,
+            "gpt-5",
+            ["tool_search"],
+        ),
+        (
+            "claude-sonnet-4",
+            LLMModelDeveloper.ANTHROPIC,
+            "claude-sonnet-4",
+            [],
+        ),
+    ],
+)
+async def test_client_tool_profile_projects_before_search_and_lowering(
+    model_identifier: str,
+    model_developer: LLMModelDeveloper,
+    model_family: str,
+    expected_tools: list[str],
+) -> None:
+    """Project profile-gated candidates before search indexing and lowering."""
+    prepared = await _prepare_profiled_model_call(
+        model_identifier=model_identifier,
+        model_developer=model_developer,
+        model_family=model_family,
+        request_model_developer=model_developer,
+    )
+
+    native_request = prepared.native_request
+    assert isinstance(native_request, OpenAIResponsesRequest)
+    assert [tool["name"] for tool in native_request.tools] == expected_tools
+    instructions = native_request.options.get("instructions")
+    if expected_tools:
+        assert isinstance(instructions, str)
+        assert "Use apply_patch for multi-file changes." in instructions
+    else:
+        assert isinstance(instructions, str)
+        assert "Use apply_patch for multi-file changes." not in instructions
+
+
+async def test_client_tool_profile_uses_selected_snapshot_developer() -> None:
+    """Prefer immutable selected-model identity over the request fallback field."""
+    prepared = await _prepare_profiled_model_call(
+        model_identifier="gpt-5.1",
+        model_developer=LLMModelDeveloper.OPENAI,
+        model_family="gpt-5",
+        request_model_developer=LLMModelDeveloper.ANTHROPIC,
+    )
+
+    native_request = prepared.native_request
+    assert isinstance(native_request, OpenAIResponsesRequest)
+    assert [tool["name"] for tool in native_request.tools] == ["tool_search"]
+
+
+async def test_client_tool_profile_re_evaluates_for_changed_model_snapshot() -> None:
+    """Re-evaluate profile projection when the selected model snapshot changes."""
+    gpt_prepared = await _prepare_profiled_model_call(
+        model_identifier="gpt-5.1",
+        model_developer=LLMModelDeveloper.OPENAI,
+        model_family="gpt-5",
+        request_model_developer=LLMModelDeveloper.OPENAI,
+    )
+    non_gpt_prepared = await _prepare_profiled_model_call(
+        model_identifier="claude-sonnet-4",
+        model_developer=LLMModelDeveloper.ANTHROPIC,
+        model_family="claude-sonnet-4",
+        request_model_developer=LLMModelDeveloper.ANTHROPIC,
+    )
+
+    gpt_request = gpt_prepared.native_request
+    non_gpt_request = non_gpt_prepared.native_request
+    assert isinstance(gpt_request, OpenAIResponsesRequest)
+    assert isinstance(non_gpt_request, OpenAIResponsesRequest)
+    assert [tool["name"] for tool in gpt_request.tools] == ["tool_search"]
+    assert non_gpt_request.tools == []
+
+
 async def test_tool_search_activation_updates_the_next_prepared_call() -> None:
     """Hide deferred tools until search and retain immutable call snapshots."""
     toolkit = _DeferredToolkit(["probe", "other"])
@@ -1066,6 +1195,68 @@ async def test_tool_search_activation_updates_the_next_prepared_call() -> None:
 
     assert invoked.status == "completed"
     assert state.tool_names[:2] == ["service__probe", "service__other"]
+
+
+async def _prepare_profiled_model_call(
+    *,
+    model_identifier: str,
+    model_developer: LLMModelDeveloper,
+    model_family: str,
+    request_model_developer: LLMModelDeveloper | None,
+) -> PreparedModelCall[NativeRequestInspection]:
+    """Prepare one call from a normalized selected-model snapshot."""
+    execution = _Execution()
+    adapter = _agent_engine_adapter(
+        execution_factory=lambda **kwargs: (
+            setattr(
+                execution,
+                "model_call_preparer",
+                kwargs["model_call_preparer"],
+            )
+            or execution
+        ),
+    )
+    selection = make_test_model_selection(
+        model_identifier=model_identifier,
+        model_developer=model_developer,
+    ).model_copy(update={"model_family": model_family})
+    inference_state = SessionInferenceState(
+        model_target_label="default",
+        model_selection=selection,
+        model_settings=make_test_model_settings(),
+        reasoning_effort=None,
+        effective_context_window_tokens=128_000,
+        effective_auto_compaction_threshold_tokens=102_400,
+        resolved_at=datetime.datetime.now(datetime.UTC),
+    )
+    request = RunRequest(
+        session_id="session-1",
+        user_messages=[],
+        agent_prompt=None,
+        toolkits=[
+            ToolkitBinding(
+                toolkit=_ProfiledCandidateToolkit(),
+                slug="profiled",
+                use_prefix=False,
+                toolkit_type="github",
+            )
+        ],
+        model=model_identifier,
+        model_developer=request_model_developer,
+        credential_kwargs={"api_key": "test"},
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        tool_search_enabled=True,
+        auto_compaction_threshold_tokens=None,
+        inference_state=inference_state,
+        compaction_provider_integration_id=None,
+    )
+
+    _ = [emit async for emit in adapter.run(request, _run_context())]
+
+    if execution.prepared_model_call is None:
+        raise AssertionError("model call was not prepared")
+    return execution.prepared_model_call
 
 
 def _valid_png_base64() -> str:

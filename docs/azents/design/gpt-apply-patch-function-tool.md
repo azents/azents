@@ -86,23 +86,37 @@ model is eligible, while a non-GPT model hosted by OpenAI-compatible infrastruct
 not.
 
 Use the existing normalized model developer/family compatibility boundary rather than
-raw model-name substring checks inside the tool implementation. Add a code-owned client
-tool profile such as `gpt_v4a_apply_patch` to the prepared-call compatibility registry.
-Exact-model overrides remain possible when a GPT release demonstrates incompatible
-behavior.
+raw provider hosting or raw model-name checks inside the tool implementation. Resolve a
+code-owned `gpt_v4a_apply_patch` client-tool profile from the immutable selected-model
+snapshot. Exact-model rules take precedence over family rules when a GPT release needs an
+explicit compatibility override.
 
-### Prepared catalog
+The profile is derived preparation policy. Do not persist profile names in the database
+or transcript. The selected model snapshot and the actual tool call/result remain the
+durable source of truth.
+
+### Profile-aware catalog projection
+
+Toolkits contribute executable candidate tools and prompt fragments with an optional
+required client-tool profile. The Runtime toolkit contributes `apply_patch` and its GPT
+prompt fragment with `required_profile=gpt_v4a_apply_patch`; existing tools and prompts
+remain unconditional.
 
 During each immutable prepared-call build:
 
-1. build the existing executable tool catalog;
-2. resolve the selected model's client-tool profile;
-3. add the `apply_patch` `FunctionTool` only for the GPT V4A profile;
-4. freeze the model-visible schema and executor together; and
-5. include the tool in normal declaration-budget accounting.
+1. build the candidate executable tool catalog;
+2. resolve the selected model's client-tool profile set from normalized developer,
+   family, and exact-model compatibility rules;
+3. project tools, catalog entries, and prompt fragments through the same profile set;
+4. run Tool Search indexing and declaration-budget accounting against the projected
+   catalog;
+5. freeze the projected model-visible schema and executor together; and
+6. lower only the projected declarations to the provider request.
 
-A model switch automatically removes or adds `apply_patch` on the next prepared call.
-Existing durable `apply_patch` calls/results remain valid transcript history and are not
+Do not add profiles to the general `TurnContext`. Model compatibility belongs to prepared
+catalog projection rather than the shared runtime context used by every toolkit. A model
+switch automatically removes or adds `apply_patch` on the next prepared call. Existing
+durable `apply_patch` calls/results remain valid transcript history and are not
 re-executed.
 
 ### GPT-only prompt fragment

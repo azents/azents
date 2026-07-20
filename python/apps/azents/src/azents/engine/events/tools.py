@@ -11,7 +11,7 @@ from types import MappingProxyType
 
 from pydantic import TypeAdapter
 
-from azents.core.tools import ToolkitStatus, TurnContext
+from azents.core.tools import ProfiledToolkitPrompt, ToolkitStatus, TurnContext
 from azents.engine.events.execution import ClientToolExecutor
 from azents.engine.events.generated_files import PendingGeneratedFileOutput
 from azents.engine.events.output_parts import enforce_tool_output_text_hard_cap
@@ -23,6 +23,7 @@ from azents.engine.events.types import (
     ToolkitSourceSnapshot,
     ToolOutput,
 )
+from azents.engine.run.client_tool_compatibility import ClientToolProfile
 from azents.engine.run.contracts import ToolkitBinding
 from azents.engine.run.types import (
     FunctionTool,
@@ -128,6 +129,43 @@ class ToolCatalog:
         ]
 
 
+def project_tool_catalog_for_client_profiles(
+    catalog: ToolCatalog,
+    profiles: frozenset[ClientToolProfile],
+) -> ToolCatalog:
+    """Project tools, handlers, and prompts through one resolved profile set."""
+    tools = {
+        name: tool
+        for name, tool in catalog.tools.items()
+        if (
+            tool.required_client_tool_profile is None
+            or tool.required_client_tool_profile in profiles
+        )
+    }
+    entries = {name: catalog.entries[name] for name in tools}
+    return ToolCatalog(
+        tools=MappingProxyType(tools),
+        entries=MappingProxyType(entries),
+        static_prompt_fragment_inputs=[
+            prompt
+            for prompt in catalog.static_prompt_fragment_inputs
+            if (
+                prompt.required_client_tool_profile is None
+                or prompt.required_client_tool_profile in profiles
+            )
+        ],
+        dynamic_prompt_fragment_inputs=[
+            prompt
+            for prompt in catalog.dynamic_prompt_fragment_inputs
+            if (
+                prompt.required_client_tool_profile is None
+                or prompt.required_client_tool_profile in profiles
+            )
+        ],
+        active_toolkit_bindings=catalog.active_toolkit_bindings,
+    )
+
+
 def extend_tool_catalog(
     catalog: ToolCatalog,
     additional_tools: Sequence[FunctionTool],
@@ -205,6 +243,21 @@ async def build_tool_catalog(
                     content=prompt,
                 )
             )
+        profiled_prompts = await binding.toolkit.get_profiled_static_prompts(context)
+        for prompt_index, profiled_prompt in enumerate(profiled_prompts):
+            content = profiled_prompt.content.strip()
+            if not content:
+                continue
+            static_prompt_fragment_inputs.append(
+                _profiled_toolkit_prompt_input(
+                    binding=binding,
+                    index=index,
+                    prompt_index=prompt_index,
+                    label=label,
+                    prompt=profiled_prompt,
+                    content=content,
+                )
+            )
         dynamic_prompt = (await binding.toolkit.get_dynamic_prompt(context)).strip()
         if dynamic_prompt:
             dynamic_prompt_fragment_inputs.append(
@@ -271,6 +324,30 @@ def _toolkit_prompt_input(
         label=label,
         content=content,
         metadata={**_toolkit_prompt_metadata(binding), "prompt_layer": layer},
+        required_client_tool_profile=None,
+    )
+
+
+def _profiled_toolkit_prompt_input(
+    *,
+    binding: ToolkitBinding,
+    index: int,
+    prompt_index: int,
+    label: str,
+    prompt: ProfiledToolkitPrompt,
+    content: str,
+) -> ToolkitPromptInput:
+    """Build one profile-gated static toolkit prompt input."""
+    return ToolkitPromptInput(
+        id=f"toolkit-{index}-profile-{prompt_index}",
+        label=label,
+        content=content,
+        metadata={
+            **_toolkit_prompt_metadata(binding),
+            "prompt_layer": "static",
+            "required_client_tool_profile": (prompt.required_client_tool_profile.value),
+        },
+        required_client_tool_profile=prompt.required_client_tool_profile,
     )
 
 
