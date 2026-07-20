@@ -31,6 +31,13 @@ from azents_runtime_control.runner import (
     RuntimeRunnerEventType,
 )
 
+from azents_runtime_runner.apply_patch import (
+    ApplyPatchFailure,
+    ApplyPatchFaultInjector,
+    ApplyPatchLimits,
+    ApplyPatchResult,
+    execute_apply_patch,
+)
 from azents_runtime_runner.workspace import Workspace
 
 logger = logging.getLogger(__name__)
@@ -189,6 +196,8 @@ class RunnerOperations:
         max_runtime_process_count: int = _DEFAULT_MAX_RUNTIME_PROCESS_COUNT,
         max_session_process_count: int = _DEFAULT_MAX_SESSION_PROCESS_COUNT,
         max_file_operation_workers: int = _DEFAULT_MAX_FILE_OPERATION_WORKERS,
+        apply_patch_limits: ApplyPatchLimits | None = None,
+        apply_patch_fault_injector: ApplyPatchFaultInjector | None = None,
     ) -> None:
         """Initialize operation handlers."""
         self._client = client
@@ -208,6 +217,9 @@ class RunnerOperations:
             max_workers=self._max_file_operation_workers,
             thread_name_prefix="azents-runtime-file",
         )
+        self._apply_patch_lock = asyncio.Lock()
+        self._apply_patch_limits = apply_patch_limits or ApplyPatchLimits()
+        self._apply_patch_fault_injector = apply_patch_fault_injector
 
     async def handle(self, operation: RunnerOperationEnvelope) -> None:
         """Run one operation and publish progress/final events."""
@@ -225,6 +237,9 @@ class RunnerOperations:
                 return
             if operation.operation_type in {"file.write", "file.upload"}:
                 await self._file_write(operation)
+                return
+            if operation.operation_type == "file.apply_patch":
+                await self._file_apply_patch(operation)
                 return
             if operation.operation_type == "file.list":
                 await self._file_list(operation)
@@ -519,6 +534,109 @@ class RunnerOperations:
             ),
         )
         await self._final_success(operation, {"bytes_written": bytes_written})
+
+    async def _file_apply_patch(self, operation: RunnerOperationEnvelope) -> None:
+        base_path = _str_payload(operation.payload, "base_path")
+        if not base_path:
+            await self._file_apply_patch_error(
+                operation,
+                ApplyPatchFailure(
+                    phase="preflight",
+                    reason="base_path_required",
+                    message="base_path is required",
+                    applied=(),
+                    failed=None,
+                    not_attempted=(),
+                    exact=True,
+                ),
+            )
+            return
+        patch = b"".join(chunk.data for chunk in operation.body_chunks)
+        declared_patch_bytes = _int_payload(
+            operation.payload,
+            "total_bytes",
+            default=-1,
+        )
+        schema_version = _int_payload(
+            operation.payload,
+            "schema_version",
+            default=0,
+        )
+        async with self._apply_patch_lock:
+            result = await self._run_apply_patch_operation(
+                operation,
+                base_path=base_path,
+                patch=patch,
+                declared_patch_bytes=declared_patch_bytes,
+                schema_version=schema_version,
+            )
+        if isinstance(result, ApplyPatchFailure):
+            await self._file_apply_patch_error(operation, result)
+            return
+        await self._final_success(operation, result.payload())
+
+    async def _run_apply_patch_operation(
+        self,
+        operation: RunnerOperationEnvelope,
+        *,
+        base_path: str,
+        patch: bytes,
+        declared_patch_bytes: int,
+        schema_version: int,
+    ) -> ApplyPatchResult:
+        cancellation = threading.Event()
+        submitted_at = time.perf_counter()
+        started_at: list[float] = []
+
+        def run() -> ApplyPatchResult:
+            started_at.append(time.perf_counter())
+            return execute_apply_patch(
+                base_path=base_path,
+                patch=patch,
+                declared_patch_bytes=declared_patch_bytes,
+                schema_version=schema_version,
+                cancellation=cancellation,
+                deadline_at=operation.deadline_at,
+                limits=self._apply_patch_limits,
+                fault_injector=self._apply_patch_fault_injector,
+            )
+
+        future = asyncio.get_running_loop().run_in_executor(
+            self._file_operation_executor,
+            run,
+        )
+        while True:
+            try:
+                result = await asyncio.shield(future)
+                break
+            except asyncio.CancelledError:
+                cancellation.set()
+                current_task = asyncio.current_task()
+                if current_task is not None:
+                    current_task.uncancel()
+        self._log_file_operation(
+            operation,
+            submitted_at=submitted_at,
+            started_at=started_at[0] if started_at else None,
+            status="completed",
+        )
+        return result
+
+    async def _file_apply_patch_error(
+        self,
+        operation: RunnerOperationEnvelope,
+        failure: ApplyPatchFailure,
+    ) -> None:
+        await self._event(
+            operation,
+            RuntimeRunnerEventType.FINAL_ERROR,
+            {
+                "error_code": "FILE_APPLY_PATCH_FAILED",
+                "error_message": failure.message,
+                "file_apply_patch": failure.detail_payload(),
+            },
+            final=True,
+        )
 
     async def _file_list(self, operation: RunnerOperationEnvelope) -> None:
         try:
