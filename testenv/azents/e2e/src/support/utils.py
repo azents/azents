@@ -170,7 +170,7 @@ def authenticate_user(
     )
 
 
-def _list_integration_models(
+def list_ready_integration_models(
     server_url: str,
     token: str,
     handle: str,
@@ -187,7 +187,15 @@ def _list_integration_models(
     if response.status_code == 404:
         raise AssertionError("Stored catalog has not been created yet.")
     response.raise_for_status()
-    payload = response.json()
+    payload = cast("dict[str, object]", response.json())
+    if payload.get("catalog_scope") != "integration":
+        raise AssertionError("Integration-scoped catalog is not ready yet.")
+    latest_attempt_payload = payload.get("latest_attempt")
+    if not isinstance(latest_attempt_payload, dict):
+        raise AssertionError("Integration catalog sync has not started yet.")
+    latest_attempt = cast("dict[str, object]", latest_attempt_payload)
+    if latest_attempt.get("status") != "succeeded":
+        raise AssertionError("Integration catalog sync has not succeeded yet.")
     entries = payload.get("entries")
     if not isinstance(entries, list) or not entries:
         raise AssertionError("Stored catalog does not have selectable entries yet.")
@@ -202,7 +210,9 @@ def model_selection_from_first_candidate(
 ) -> AgentModelSelectionInput:
     """Build an agent model selection from the initial stored projection."""
     listing = wait_until(
-        lambda: _list_integration_models(server_url, token, handle, integration_id),
+        lambda: list_ready_integration_models(
+            server_url, token, handle, integration_id
+        ),
         timeout=10,
         interval=0.2,
         message="Stored catalog did not become readable",
