@@ -6,6 +6,64 @@
     {
       "if": {
         "properties": {
+          "server": {
+            "properties": {
+              "runtimeControl": {
+                "properties": {
+                  "enabled": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "enabled"
+                ]
+              }
+            },
+            "required": [
+              "runtimeControl"
+            ]
+          }
+        },
+        "required": [
+          "server"
+        ]
+      },
+      "then": {
+        "properties": {
+          "server": {
+            "properties": {
+              "runtimeControl": {
+                "properties": {
+                  "replicas": {
+                    "minimum": 2
+                  },
+                  "autoscaling": {
+                    "properties": {
+                      "minReplicas": {
+                        "minimum": 2
+                      },
+                      "maxReplicas": {
+                        "minimum": 2
+                      }
+                    }
+                  }
+                },
+                "required": [
+                  "replicas",
+                  "autoscaling"
+                ]
+              }
+            }
+          }
+        },
+        "required": [
+          "server"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
           "database": {
             "properties": {
               "mode": {
@@ -981,10 +1039,35 @@
               "type": "object"
             },
             "autoscaling": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "minReplicas": {
+                  "type": "integer"
+                },
+                "maxReplicas": {
+                  "type": "integer"
+                },
+                "targetCPUUtilizationPercentage": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 100
+                }
+              }
             },
             "pdb": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "minAvailable": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
             }
           }
         }

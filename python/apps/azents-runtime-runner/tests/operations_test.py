@@ -1,6 +1,8 @@
 """Runner operation handler tests."""
 
 import asyncio
+import os
+import signal
 import subprocess
 import threading
 from collections.abc import Iterator
@@ -8,6 +10,9 @@ from datetime import datetime
 from pathlib import Path
 
 import pytest
+from azents_runtime_control.grpc_runner_client import (
+    RuntimeRunnerControlStreamClosed,
+)
 from azents_runtime_control.runner import (
     JsonValue,
     RunnerBodyChunk,
@@ -26,6 +31,34 @@ class _FakeClient:
 
     async def append_runner_event(self, event: RunnerOperationEvent) -> None:
         self.events.append(event)
+
+
+class _ClosedClient:
+    def __init__(self) -> None:
+        self.attempts = 0
+
+    async def append_runner_event(self, event: RunnerOperationEvent) -> None:
+        del event
+        self.attempts += 1
+        raise RuntimeRunnerControlStreamClosed("stream closed")
+
+
+@pytest.mark.asyncio
+async def test_stream_closed_event_is_not_retried_as_final_error(
+    tmp_path: Path,
+) -> None:
+    client = _ClosedClient()
+    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+
+    with pytest.raises(RuntimeRunnerControlStreamClosed, match="stream closed"):
+        await operations.handle(
+            _operation(
+                operation_type="file.read",
+                payload={"path": "missing.txt"},
+            )
+        )
+
+    assert client.attempts == 1
 
 
 @pytest.mark.asyncio
@@ -47,6 +80,48 @@ async def test_bash_operation_emits_stdout_and_final_success(tmp_path: Path) -> 
     ]
     assert client.events[1].payload == {"text": "hello"}
     assert client.events[-1].payload == {"exit_code": 0}
+
+
+@pytest.mark.asyncio
+async def test_bash_cancellation_terminates_process_group(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _FakeClient()
+    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+    original_killpg = os.killpg
+    signals: list[signal.Signals] = []
+
+    def record_killpg(process_group_id: int, requested_signal: int) -> None:
+        if requested_signal:
+            signals.append(signal.Signals(requested_signal))
+        original_killpg(process_group_id, requested_signal)
+
+    monkeypatch.setattr(os, "killpg", record_killpg)
+    marker = tmp_path / "bash-started"
+    task = asyncio.create_task(
+        operations.handle(
+            _operation(
+                operation_type="bash",
+                payload={
+                    "command": "touch bash-started; sleep 30 & wait",
+                    "timeout_seconds": 120,
+                },
+            )
+        )
+    )
+    for _ in range(100):
+        if marker.exists():
+            break
+        await asyncio.sleep(0.01)
+    else:
+        pytest.fail("bash subprocess did not start")
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert signal.SIGTERM in signals
 
 
 @pytest.mark.asyncio
@@ -778,6 +853,72 @@ async def test_process_quota_prunes_oldest_process(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_close_does_not_signal_exited_process_group(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _FakeClient()
+    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+
+    await operations.handle(
+        _operation(
+            operation_type="process.start",
+            payload={
+                "command": "printf done",
+                "yield_time_ms": 1000,
+                "owner_session_id": "session-1",
+            },
+        )
+    )
+    assert client.events[-1].payload["status"] == "exited_unread"
+
+    def fail_on_signal(*_args: object) -> None:
+        pytest.fail("exited process groups must not be signaled")
+
+    monkeypatch.setattr(operations, "_signal_process_group", fail_on_signal)
+
+    await operations.close()
+
+
+@pytest.mark.asyncio
+async def test_close_terminates_process_group_without_blocking_on_child_pipes(
+    tmp_path: Path,
+) -> None:
+    client = _FakeClient()
+    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+
+    await operations.handle(
+        _operation(
+            operation_type="process.start",
+            payload={
+                "command": "sleep 30 & wait",
+                "yield_time_ms": 0,
+                "owner_session_id": "session-1",
+            },
+        )
+    )
+    process_id = client.events[-1].payload["process_id"]
+    assert isinstance(process_id, str)
+    assert client.events[-1].payload["status"] == "running"
+
+    await asyncio.wait_for(operations.close(), timeout=6)
+
+    await operations.handle(
+        _operation(
+            operation_type="process.write",
+            payload={
+                "process_id": process_id,
+                "stdin": "",
+                "yield_time_ms": 0,
+                "owner_session_id": "session-1",
+            },
+        )
+    )
+    assert client.events[-1].payload["status"] == "terminated"
+    assert client.events[-1].payload["missing_reason"] == "runner_shutdown"
+
+
+@pytest.mark.asyncio
 async def test_process_terminate_session_terminates_only_owned_processes(
     tmp_path: Path,
 ) -> None:
@@ -908,6 +1049,58 @@ async def test_file_bulk_move_moves_multiple_files_into_directory(
     assert not (tmp_path / "a.txt").exists()
     assert (tmp_path / "archive" / "a.txt").read_text() == "a"
     assert (tmp_path / "archive" / "b.txt").read_text() == "b"
+
+
+@pytest.mark.asyncio
+async def test_git_cancellation_terminates_process_group(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _init_git_repo(tmp_path / "repo")
+    client = _FakeClient()
+    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+    original_killpg = os.killpg
+    signals: list[signal.Signals] = []
+
+    def record_killpg(process_group_id: int, requested_signal: int) -> None:
+        if requested_signal:
+            signals.append(signal.Signals(requested_signal))
+        original_killpg(process_group_id, requested_signal)
+
+    monkeypatch.setattr(os, "killpg", record_killpg)
+    marker = tmp_path / "git-hook-started"
+    hooks_dir = repo / ".githooks"
+    hooks_dir.mkdir()
+    post_checkout = hooks_dir / "post-checkout"
+    post_checkout.write_text(f"#!/bin/sh\ntouch {marker}\nsleep 30\n")
+    post_checkout.chmod(0o755)
+    _git(repo, "config", "core.hooksPath", str(hooks_dir))
+    worktree_path = tmp_path / "worktree"
+    task = asyncio.create_task(
+        operations.handle(
+            _operation(
+                operation_type="create_git_worktree",
+                payload={
+                    "source_project_path": str(repo),
+                    "worktree_path": str(worktree_path),
+                    "branch_name": "azents/cancelled",
+                    "starting_ref": "main",
+                },
+            )
+        )
+    )
+    for _ in range(100):
+        if marker.exists():
+            break
+        await asyncio.sleep(0.01)
+    else:
+        pytest.fail("Git subprocess did not start")
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert signal.SIGTERM in signals
 
 
 @pytest.mark.asyncio

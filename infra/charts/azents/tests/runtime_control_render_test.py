@@ -73,6 +73,54 @@ def test_runtime_control_enabled_render_contract() -> None:
     assert "AZ_RUNTIME_CONTROL_AUTH_TOKEN" not in rendered
     assert "AZ_RUNTIME_RUNNER_IMAGE" in rendered
     assert "repo/runner:sha@sha256:runnerdigest" in rendered
+    assert "replicas: 2" in rendered
+    assert "minReplicas: 2" in rendered
+    assert "minAvailable: 1" in rendered
+
+
+def test_runtime_control_disabled_allows_single_replica_configuration() -> None:
+    """Disabled Runtime Control may retain non-HA placeholder values."""
+    rendered = _helm_template(
+        "server.runtimeControl.enabled=false",
+        "server.runtimeControl.replicas=1",
+        "server.runtimeControl.autoscaling.minReplicas=1",
+        "server.runtimeControl.autoscaling.maxReplicas=1",
+    )
+
+    assert "src/cli/runtime_control_server.py" not in rendered
+
+
+def test_runtime_control_rejects_single_replica_configuration() -> None:
+    """Enabled Runtime Control requires at least two replicas."""
+    with pytest.raises(subprocess.CalledProcessError):
+        _helm_template(
+            "server.runtimeControl.enabled=true",
+            "server.runtimeControl.replicas=1",
+            "server.runtimeControl.runnerImage.repository=repo/runner",
+            "server.runtimeControl.runnerImage.tag=sha",
+        )
+
+
+def test_runtime_control_rejects_single_autoscaling_replica() -> None:
+    """Runtime Control autoscaling keeps at least two replicas."""
+    with pytest.raises(subprocess.CalledProcessError):
+        _helm_template(
+            "server.runtimeControl.enabled=true",
+            "server.runtimeControl.autoscaling.minReplicas=1",
+            "server.runtimeControl.runnerImage.repository=repo/runner",
+            "server.runtimeControl.runnerImage.tag=sha",
+        )
+
+
+def test_runtime_control_rejects_single_autoscaling_maximum() -> None:
+    """Enabled Runtime Control keeps autoscaling maximum HA-capable."""
+    with pytest.raises(subprocess.CalledProcessError):
+        _helm_template(
+            "server.runtimeControl.enabled=true",
+            "server.runtimeControl.autoscaling.maxReplicas=1",
+            "server.runtimeControl.runnerImage.repository=repo/runner",
+            "server.runtimeControl.runnerImage.tag=sha",
+        )
 
 
 def test_runtime_control_auth_enabled_render_contract() -> None:

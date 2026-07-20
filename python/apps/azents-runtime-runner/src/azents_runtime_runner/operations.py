@@ -8,6 +8,7 @@ import logging
 import os
 import re
 import shutil
+import signal
 import stat as stat_module
 import threading
 import time
@@ -19,6 +20,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal, Protocol, TypeVar
 
+from azents_runtime_control.grpc_runner_client import (
+    RuntimeRunnerControlStreamClosed,
+)
 from azents_runtime_control.runner import (
     JsonValue,
     RunnerOperationEnvelope,
@@ -46,6 +50,8 @@ _DEFAULT_MAX_SESSION_PROCESS_COUNT = 16
 _PROCESS_READ_CHUNK_BYTES = 4096
 _PROCESS_DRAIN_AFTER_EXIT_TIMEOUT_SECONDS = 1.0
 _PROCESS_TERMINATE_TIMEOUT_SECONDS = 2.0
+_PROCESS_KILL_TIMEOUT_SECONDS = 2.0
+_PROCESS_CLOSE_TIMEOUT_SECONDS = 5.0
 _MAX_MISSING_PROCESS_RECORDS = 128
 
 _T = TypeVar("_T")
@@ -134,6 +140,7 @@ class _ManagedProcess:
     generation: int
     owner_session_id: str
     process: asyncio.subprocess.Process
+    process_group_id: int
     stdout: _ProcessOutputBuffer
     stderr: _ProcessOutputBuffer
     created_at: float
@@ -269,20 +276,73 @@ class RunnerOperations:
             )
         except asyncio.CancelledError:
             raise
+        except RuntimeRunnerControlStreamClosed:
+            raise
         except Exception as exc:
             await self._final_error(operation, "RUNNER_OPERATION_ERROR", str(exc))
 
     async def close(self) -> None:
-        """Terminate Runner-owned processes and stop accepting filesystem work."""
+        """Stop filesystem work and terminate processes before reconnecting."""
         self._file_operation_executor.shutdown(wait=False, cancel_futures=True)
-        for process_id in tuple(self._processes):
-            record = self._processes.get(process_id)
-            if record is not None:
-                await self._terminate_process(
+        records = tuple(self._processes.values())
+        if not records:
+            return
+        started_at = time.monotonic()
+        logger.info(
+            "Runtime Runner process cleanup started",
+            extra={"process_count": len(records)},
+        )
+        tasks = tuple(
+            asyncio.create_task(
+                self._terminate_process(
                     record,
                     status="terminated",
                     reason="runner_shutdown",
                 )
+            )
+            for record in records
+        )
+        timed_out = False
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*tasks),
+                timeout=_PROCESS_CLOSE_TIMEOUT_SECONDS,
+            )
+        except TimeoutError:
+            timed_out = True
+            for record in records:
+                self._signal_process_group(record, signal.SIGKILL)
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            logger.warning(
+                "Runtime Runner process cleanup timed out",
+                extra={
+                    "process_count": len(records),
+                    "timeout_seconds": _PROCESS_CLOSE_TIMEOUT_SECONDS,
+                },
+            )
+        except asyncio.CancelledError:
+            for record in records:
+                self._signal_process_group(record, signal.SIGKILL)
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            raise
+        finally:
+            logger.info(
+                "Runtime Runner process cleanup finished",
+                extra={
+                    "process_count": len(records),
+                    "duration_ms": round(
+                        (time.monotonic() - started_at) * 1000,
+                        3,
+                    ),
+                    "timed_out": timed_out,
+                },
+            )
 
     async def _run_file_operation(
         self,
@@ -376,6 +436,7 @@ class RunnerOperations:
             env=env,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            start_new_session=True,
         )
         try:
             stdout, stderr = await asyncio.wait_for(
@@ -383,10 +444,20 @@ class RunnerOperations:
                 timeout=timeout_seconds,
             )
         except TimeoutError:
-            process.kill()
-            await process.wait()
+            await self._terminate_operation_process_group(
+                operation,
+                process,
+                reason="command_timeout",
+            )
             await self._final_error(operation, "COMMAND_TIMEOUT", "Command timed out")
             return
+        except asyncio.CancelledError:
+            await self._terminate_operation_process_group(
+                operation,
+                process,
+                reason="operation_cancelled",
+            )
+            raise
         if stdout:
             await self._event(
                 operation,
@@ -923,6 +994,7 @@ class RunnerOperations:
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                start_new_session=True,
             )
         except OSError as exc:
             await self._final_error(operation, "PROCESS_START_FAILED", str(exc))
@@ -1041,6 +1113,7 @@ class RunnerOperations:
             generation=operation.runner_generation,
             owner_session_id=owner_session_id,
             process=process,
+            process_group_id=process.pid,
             stdout=_ProcessOutputBuffer(
                 max_unread_bytes=self._process_max_unread_bytes
             ),
@@ -1270,25 +1343,173 @@ class RunnerOperations:
         status: Literal["terminated", "expired"],
         reason: str,
     ) -> None:
+        started_at = time.monotonic()
         self._processes.pop(record.process_id, None)
-        if not _process_exited(record):
-            record.process.terminate()
-            wait_task = record.wait_task
-            if wait_task is not None:
+        already_exited = _process_exited(record)
+        escalated = False
+        timed_out = False
+        if not already_exited:
+            self._signal_process_group(record, signal.SIGTERM)
+            terminated = await self._wait_for_process_tasks(
+                record,
+                timeout_seconds=_PROCESS_TERMINATE_TIMEOUT_SECONDS,
+            )
+            if not terminated:
+                escalated = True
+                self._signal_process_group(record, signal.SIGKILL)
+                killed = await self._wait_for_process_tasks(
+                    record,
+                    timeout_seconds=_PROCESS_KILL_TIMEOUT_SECONDS,
+                )
+                if not killed:
+                    timed_out = True
+                    logger.warning(
+                        "Runtime Runner process group did not exit after SIGKILL",
+                        extra={
+                            "process_id": record.process_id,
+                            "process_group_id": record.process_group_id,
+                            "timeout_seconds": _PROCESS_KILL_TIMEOUT_SECONDS,
+                        },
+                    )
+        tasks = tuple(
+            task
+            for task in (record.wait_task, *record.drain_tasks)
+            if task is not None and not task.done()
+        )
+        for task in tasks:
+            task.cancel()
+        for task in tasks:
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        self._record_missing(record.process_id, status=status, reason=reason)
+        logger.info(
+            "Runtime Runner managed process cleanup finished",
+            extra={
+                "process_id": record.process_id,
+                "process_group_id": record.process_group_id,
+                "status": status,
+                "reason": reason,
+                "already_exited": already_exited,
+                "escalated": escalated,
+                "timed_out": timed_out,
+                "duration_ms": round(
+                    (time.monotonic() - started_at) * 1000,
+                    3,
+                ),
+            },
+        )
+
+    async def _terminate_operation_process_group(
+        self,
+        operation: RunnerOperationEnvelope,
+        process: asyncio.subprocess.Process,
+        *,
+        reason: str,
+    ) -> None:
+        """Terminate an operation-local subprocess group within bounded deadlines."""
+        del self
+        started_at = time.monotonic()
+        process_group_id = process.pid
+        wait_task = asyncio.create_task(process.wait())
+        escalated = False
+        timed_out = False
+        _signal_process_group(
+            process_id=process.pid,
+            process_group_id=process_group_id,
+            requested_signal=signal.SIGTERM,
+            operation=operation,
+        )
+        try:
+            try:
+                await asyncio.wait_for(
+                    asyncio.shield(wait_task),
+                    timeout=_PROCESS_TERMINATE_TIMEOUT_SECONDS,
+                )
+            except TimeoutError:
+                pass
+            escalated = _signal_process_group(
+                process_id=process.pid,
+                process_group_id=process_group_id,
+                requested_signal=signal.SIGKILL,
+                operation=operation,
+            )
+            if not wait_task.done():
                 try:
                     await asyncio.wait_for(
                         asyncio.shield(wait_task),
-                        timeout=_PROCESS_TERMINATE_TIMEOUT_SECONDS,
+                        timeout=_PROCESS_KILL_TIMEOUT_SECONDS,
                     )
                 except TimeoutError:
-                    record.process.kill()
-                    await asyncio.shield(wait_task)
-        for task in record.drain_tasks:
-            if not task.done():
-                task.cancel()
-        if record.drain_tasks:
-            await asyncio.gather(*record.drain_tasks, return_exceptions=True)
-        self._record_missing(record.process_id, status=status, reason=reason)
+                    timed_out = True
+                    logger.warning(
+                        "Runtime Runner operation process did not exit after SIGKILL",
+                        extra={
+                            **_operation_process_log_extra(
+                                operation,
+                                process_id=process.pid,
+                                process_group_id=process_group_id,
+                            ),
+                            "reason": reason,
+                            "timeout_seconds": _PROCESS_KILL_TIMEOUT_SECONDS,
+                        },
+                    )
+        finally:
+            if not wait_task.done():
+                wait_task.cancel()
+            await asyncio.gather(wait_task, return_exceptions=True)
+            logger.info(
+                "Runtime Runner operation process cleanup finished",
+                extra={
+                    **_operation_process_log_extra(
+                        operation,
+                        process_id=process.pid,
+                        process_group_id=process_group_id,
+                    ),
+                    "reason": reason,
+                    "duration_ms": round(
+                        (time.monotonic() - started_at) * 1000,
+                        3,
+                    ),
+                    "escalated": escalated,
+                    "timed_out": timed_out,
+                },
+            )
+
+    def _signal_process_group(
+        self,
+        record: _ManagedProcess,
+        requested_signal: signal.Signals,
+    ) -> None:
+        try:
+            os.killpg(record.process_group_id, requested_signal)
+        except ProcessLookupError:
+            return
+        except PermissionError:
+            logger.exception(
+                "Runtime Runner process group signal denied",
+                extra={
+                    "process_id": record.process_id,
+                    "process_group_id": record.process_group_id,
+                    "signal": requested_signal.name,
+                },
+            )
+
+    async def _wait_for_process_tasks(
+        self,
+        record: _ManagedProcess,
+        *,
+        timeout_seconds: float,
+    ) -> bool:
+        del self
+        tasks = tuple(
+            task
+            for task in (record.wait_task, *record.drain_tasks)
+            if task is not None and not task.done()
+        )
+        if not tasks:
+            return True
+        _done, pending = await asyncio.wait(tasks, timeout=timeout_seconds)
+        return not pending
 
     def _record_missing(
         self,
@@ -1478,6 +1699,7 @@ class RunnerOperations:
                 cwd=cwd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                start_new_session=True,
             )
         except OSError as exc:
             await self._final_error(operation, "git_command_failed", str(exc))
@@ -1506,17 +1728,28 @@ class RunnerOperations:
                 exit_code = await process.wait()
             else:
                 exit_code = await asyncio.wait_for(process.wait(), timeout=timeout)
+            stdout, stderr = await asyncio.gather(stdout_task, stderr_task)
         except TimeoutError:
-            process.kill()
-            await process.wait()
-            await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
+            await self._terminate_operation_process_group(
+                operation,
+                process,
+                reason="operation_timeout",
+            )
+            await _cancel_tasks(stdout_task, stderr_task)
             await self._final_error(
                 operation,
                 "operation_timeout",
                 "Git operation timed out",
             )
             return None
-        stdout, stderr = await asyncio.gather(stdout_task, stderr_task)
+        except asyncio.CancelledError:
+            await self._terminate_operation_process_group(
+                operation,
+                process,
+                reason="operation_cancelled",
+            )
+            await _cancel_tasks(stdout_task, stderr_task)
+            raise
         return _GitCommandResult(
             exit_code=exit_code,
             stdout=stdout,
@@ -1585,6 +1818,57 @@ class RunnerOperations:
                 final=final,
             )
         )
+
+
+async def _cancel_tasks(*tasks: asyncio.Task[str]) -> None:
+    for task in tasks:
+        if not task.done():
+            task.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
+
+
+def _signal_process_group(
+    *,
+    process_id: int,
+    process_group_id: int,
+    requested_signal: signal.Signals,
+    operation: RunnerOperationEnvelope,
+) -> bool:
+    try:
+        os.killpg(process_group_id, requested_signal)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        logger.exception(
+            "Runtime Runner operation process group signal denied",
+            extra={
+                **_operation_process_log_extra(
+                    operation,
+                    process_id=process_id,
+                    process_group_id=process_group_id,
+                ),
+                "signal": requested_signal.name,
+            },
+        )
+        return False
+    return True
+
+
+def _operation_process_log_extra(
+    operation: RunnerOperationEnvelope,
+    *,
+    process_id: int,
+    process_group_id: int,
+) -> dict[str, JsonValue]:
+    return {
+        "runtime_id": operation.runtime_id,
+        "runner_generation": operation.runner_generation,
+        "request_id": operation.request_id,
+        "operation_type": operation.operation_type,
+        "owner_session_id": operation.owner_session_id,
+        "process_id": process_id,
+        "process_group_id": process_group_id,
+    }
 
 
 def _process_exited(record: _ManagedProcess) -> bool:
