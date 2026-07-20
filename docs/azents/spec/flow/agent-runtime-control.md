@@ -23,7 +23,7 @@ code_paths:
   - infra/argocd/azents-runtime-provider-kubernetes/**
   - infra/argocd/azents-server/**
 last_verified_at: 2026-07-20
-spec_version: 21
+spec_version: 22
 ---
 
 # Agent Runtime Control
@@ -97,6 +97,8 @@ Provider report framing always uses the generation accepted for the current Cont
 
 Provider and Runner request streams use explicit claim/ack delivery. Control returns each claimed request with the stream cursor and consumer-group metadata needed to acknowledge the request only after it has been sent on the matching gRPC stream. Unacknowledged requests may be reclaimed after an idle interval so a Control replica crash or stream interruption does not strand in-flight Provider/Runner work.
 
+Runner operation cancellation is an ordered request on the same generation-scoped stream as the original operation. Control records `cancel_requested_at`, transitions non-final metadata to `cancel_requested`, and appends `operation.cancel` after the operation request. Start authorization atomically claims an active operation as running, so cancellation may win before handler creation. A Runner whose start claim is denied emits the operation's terminal cancellation result instead of silently dropping the request. Pending work is removed from the owner queue; active work is cancelled through its handler task. Final operation metadata and reply cursors remain authoritative, and a late Runner final cannot overwrite an already accepted terminal result.
+
 Connection heartbeat and revoke operations are generation-fenced. In Redis-backed coordination, heartbeat refresh and revoke are atomic compare-and-set/delete operations against the current connection generation. Reading an expired connection must not delete the key because a newer reconnect may have replaced it concurrently. When a Runner stream closes, Control records `stream_closed` durable state only if revoking that same generation succeeds; stale close handling must not overwrite a newer Runner generation.
 
 The store is not a source of product truth. Losing store data may interrupt in-flight commands but must not make a Control replica infer that a Runtime does not exist or that workspace data can be discarded.
@@ -145,8 +147,15 @@ Runner is operation-only. It handles operations inside an already provisioned Ru
 
 `file.grep` accepts a workspace file path or directory path plus a regex pattern. The Runner performs file discovery, text decoding, regex matching, line limiting, file limiting, exclude filtering, searched-file limiting, and scanned-byte limiting inside the Runtime workspace, then returns a structured final payload of matched files, line matches, truncation status, and truncation reason. Callers should not implement grep by issuing `file.list` plus one `file.read` operation per file.
 
-Runner executes blocking file read/download, write/upload, stat, list, glob, grep, delete, mkdir, move, bulk-delete, and bulk-move sections through a dedicated `ThreadPoolExecutor` instead of on the asyncio event loop. The production default is eight filesystem workers, bounded independently from ordinary Runner admission and owner scheduling limits. This prevents one admitted recursive traversal or regex scan from blocking unrelated async operations after fair scheduling has dispatched them.
+`file.apply_patch` accepts one bounded UTF-8 V4A document plus an absolute Runtime `base_path`. The grammar requires `*** Begin Patch` and `*** End Patch`, supports only Add File, Update File, and Delete File operations, and permits each relative path at most once. Update hunks use exact unique logical-line context with optional anchors and an end-of-file assertion. The parser rejects malformed envelopes, unsupported operations, ambiguous or missing context, overlapping hunks, duplicate paths, invalid encodings, and mixed patch newlines before mutation.
 
+Every patch path is confined below the canonical base directory. The Runner rejects absolute paths, lexical parent traversal, escaping or symlink parents, final symlinks, unsupported file kinds, invalid UTF-8 or binary source, mixed source newlines, existing Add destinations, missing Update/Delete targets, and destructive precondition drift. Bounded limits cover patch bytes, operation and hunk counts, path length, per-file and aggregate bytes, and the end-to-end deadline. LF and CRLF sources retain their newline style and final-newline state.
+
+The Runner parses an immutable operation plan, preflights all targets, stages Add/Update payloads, records source observations, and revalidates the complete plan before commit. It commits Add and Update operations in patch order, then Delete operations in patch order, revalidating immediately before each publication. Each path uses an atomic publication primitive where supported. Parse, preflight, stage, or pre-commit revalidation failure leaves every target unchanged. A later commit failure stops immediately, preserves the committed prefix, cleans uncommitted staging files, and does not attempt rollback.
+
+Terminal success returns ordered changes with path, action, added and removed line counts, and the resulting content hash when applicable. Terminal failure returns phase, stable reason, exact committed changes, the failed operation, remaining operations, and whether the delta is exact. Runner logs contain only bounded operational counts, phases, reasons, paths where safe, and timing; raw patch, source, and replacement content are excluded.
+
+Runner executes blocking file read/download, write/upload, stat, list, glob, grep, delete, mkdir, move, bulk-delete, and bulk-move sections through a dedicated `ThreadPoolExecutor` instead of on the asyncio event loop. The production default is eight filesystem workers, bounded independently from ordinary Runner admission and owner scheduling limits. This prevents one admitted recursive traversal or regex scan from blocking unrelated async operations after fair scheduling has dispatched them.
 Recursive list and grep helpers receive a thread-safe cancellation signal. Cancelling the async handler sets that signal, and traversal plus line scanning check it between blocking operations. Cancellation is cooperative and does not preempt an operating-system filesystem call already executing in a worker thread. Existing final payloads and semantic file error mappings remain unchanged.
 
 Git operations are typed Runner operations, not arbitrary shell strings. `list_git_refs` previews local branches, remote branches, tags, default branch, and HEAD commit for a source Project path. `create_git_worktree` creates a branch-backed worktree from a source Project and starting ref and returns the final worktree path, branch name, and base commit. `remove_git_worktree` removes an owned worktree path with explicit force policy. `delete_git_branch` deletes only the requested branch in the source repository. These operations return semantic failures for non-Git paths, invalid refs, collisions, and Git command failures so product services can show user-safe setup or cleanup summaries.
@@ -172,6 +181,8 @@ A Control stream disconnect fences the previous Runner generation, cancels its a
 Process output is continuously drained into bounded Runner-owned buffers. Tool calls drain unread buffers into one model-visible client tool result and preserve structured process metadata. Callers observe process completion through process events or later `write_stdin` polling. Runtime Control has no fire-and-forget Background operation envelope, receipt, completion claim, or completion-input path. `RunnerOperationRequest` protobuf field 7 is reserved and must not be reused.
 
 Runner operations are deadline-bounded end to end. Every `RuntimeRunnerOperation` carries a non-null `deadline_at`. Callers pass the same deadline to the reply-stream fold/resume path; waiting for a final reply without a deadline is invalid. If the reply stream does not produce a final event before the deadline, Control appends a local final error event with `operation_timeout`, marks the operation final, and the caller receives a failed operation result instead of waiting indefinitely. Coordination Store operation metadata must live at least until the operation deadline plus a buffer so timeout/final folding can complete; it must not expire earlier merely because the default operation TTL is shorter than the requested deadline. Provider lifecycle commands and Coordination Store metadata may still model optional deadlines because they cover different request classes and storage TTL semantics.
+
+For `file.apply_patch`, cancellation is cooperative through parse, preflight, staging, and complete-plan revalidation. A cancellation observed before commit returns a typed no-change failure. Commit does not accept a cancellation checkpoint after its first mutation boundary; Control and Engine continue waiting for the bounded typed success or partial-failure terminal result so committed changes are never misreported as a generic cancellation.
 
 ## Lifecycle Semantics
 
@@ -203,14 +214,17 @@ Required deterministic coverage:
 - repository/service tests for desired/observed/runner state summary/actions
 - Coordination Store contract tests for in-memory and Redis implementations
 - provider/runner gRPC registration, generation fencing, request/reply/body stream tests
-- Runner operation tests for process, file, and Git operations
+- Runner operation tests for process, file, Git, and strict V4A patch operations
+- Runtime Control contract tests for ordered operation cancellation, start/cancel races, terminal cursor authority, and typed patch result folding
 - Provider tests for Docker host bind mount persistence and Kubernetes PVC persistence
 - azents deterministic E2E for Agent Workspace bootstrap and lifecycle actions
+- credential-free runtime-provider E2E for multi-file `apply_patch`, typed results, final manifests, and traversal rejection
 
 Live/provider evidence belongs in the testenv prerequisite system and must redact tokens, credential ids, auth headers, rendered secrets, and raw Runtime tokens.
 
 ## Changelog
 
+- **2026-07-20** (spec_version 22) — Added strict Runner-owned V4A `file.apply_patch`, ordered cancellation and terminal settlement, bounded path and content safety, staged revalidation, deterministic commit ordering, and exact no-rollback partial-failure reporting.
 - **2026-07-20** (spec_version 21) — Removed chart-enforced Runtime Control replica, autoscaling, and disruption-budget availability policy so deployments own their scaling configuration.
 - **2026-07-20** (spec_version 20) — Added native Runner `file.glob` evaluation so Engine glob calls use one Runtime filesystem operation with recursive, brace, directory, exclude, and explicit tilde-rejection semantics.
 - **2026-07-20** (spec_version 19) — Bounded Runner reconnect cleanup with process-group termination and required highly available Runtime Control replicas.
