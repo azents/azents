@@ -1,11 +1,22 @@
 ---
 name: ship-feature
-description: "Ship a feature after design discussion is complete. Convert the design into an implementation plan and stacked PRs for phased delivery. Use when: (1) design discussion is complete and the user says to implement, (2) the user invokes 'ship-feature', (3) a design document exists and must be turned into code."
+description: "Ship a large, multi-phase feature after design discussion is complete. Convert the approved design into an implementation plan and stacked PRs for phased delivery. Use when: (1) a large feature design is complete and the user says to implement, (2) the user invokes 'ship-feature' for phased delivery, (3) a design document requires multiple implementation phases. Use one focused PR instead for simple fixes and small, self-contained changes."
 ---
 
 # Ship Feature Workflow
 
-After feature design is complete, deliver the work as a stacked PR series: design document → implementation plan → phased implementation → validation → spec promotion → cleanup.
+Use this workflow for large features that require multiple reviewable delivery phases after design is complete.
+
+## Choose the delivery shape
+
+Before creating plans or branches, choose the delivery shape based on reviewability, dependencies, validation, and rollout needs rather than an arbitrary line count.
+
+- Use stacked PRs when the feature has multiple independently reviewable phases, sequential dependencies, cross-cutting validation, or rollout work that benefits from separate boundaries.
+- Use one focused PR for bug fixes, maintenance changes, and small self-contained features that remain reviewable end to end.
+- Include all required tests, generated artifacts, and spec or documentation updates in that single PR.
+- Do not create separate design, plan, validation, spec-promotion, or cleanup PRs only to match this workflow.
+
+For work that requires phased delivery, use this stacked PR series: design document → implementation plan → phased implementation → validation → spec promotion → cleanup.
 
 ## PR stack structure
 
@@ -150,6 +161,7 @@ For each completed phase, report:
 
 ## Guardrails
 
+- Do not inflate a simple fix or small self-contained change into a PR stack; use one focused PR.
 - Do not start implementation without a design or explicit user approval.
 - Do not collapse a large feature into one PR when phased delivery is expected.
 - Do not leave stale plan documents after implementation is complete.
