@@ -1,19 +1,18 @@
 .root {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: var(--mantine-spacing-xs);
-  min-height: 2rem;
-  margin-bottom: var(--mantine-spacing-md);
+  min-height: rem(16px);
 }
 
 .dots {
   display: inline-flex;
-  gap: 0.25rem;
+  gap: rem(4px);
 }
 
 .dot {
-  width: 0.3125rem;
-  height: 0.3125rem;
+  width: rem(5px);
+  height: rem(5px);
   border-radius: 999rem;
   background: var(--mantine-color-dimmed);
   animation: agent-run-dot 1.65s infinite cubic-bezier(0.34, 1.35, 0.64, 1);
@@ -43,7 +42,7 @@
 
   28% {
     opacity: 1;
-    transform: translateY(-0.25rem) scale(1.02);
+    transform: translateY(rem(-4px)) scale(1.02);
   }
 }
 

@@ -386,7 +386,7 @@ function timelineEvents(
             id: semanticKey(event),
             kind: "reasoning",
             message,
-            category: null,
+            category: { key: "reasoning", label: "reasoning" },
             status: "complete",
           },
           boundary: false,

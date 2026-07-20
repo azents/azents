@@ -1403,9 +1403,12 @@
     "toolActivity": {
       "title": "Activité",
       "working": "En cours",
+      "complete": "Terminé",
       "failed": "Échec",
+      "failedCount": "Échec {count}",
       "approvalNeeded": "Approbation requise",
       "overflowCategories": "+{count}",
+      "categoryReasoning": "Raisonnement",
       "categorySkill": "Skill",
       "categoryExplore": "Explorer",
       "categoryShell": "Shell",

@@ -305,7 +305,6 @@ export function ChatSessionView({
           sessionId={output.sessionId}
           isResponsePending={output.isResponsePending}
           isWritePending={output.isWritePending}
-          isModelResponsePending={output.isModelResponsePending}
           liveRun={output.liveRun}
           tokenUsage={output.tokenUsage}
           onComposerInferenceProfileChange={
