@@ -13,6 +13,7 @@ import { useDisclosure, useElementSize } from "@mantine/hooks";
 import { IconCheck, IconChevronRight } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { AgentRunIndicator } from "./AgentRunIndicator";
+import inlineControlClasses from "./ChatInlineControl.module.css";
 import { CompactionDivider } from "./CompactionDivider";
 import { MessageBubble } from "./MessageBubble";
 import { ProviderToolCallCard } from "./ProviderToolCallCard";
@@ -146,7 +147,12 @@ export function ToolActivityGroup({
   const hasDetails = activity.events.length > 0;
 
   const header = (
-    <Group gap="xs" wrap="nowrap" miw={0}>
+    <Group
+      gap={rem(6)}
+      wrap="nowrap"
+      miw={0}
+      className={inlineControlClasses.root}
+    >
       {hasDetails ? (
         <IconChevronRight
           aria-hidden="true"
@@ -165,7 +171,7 @@ export function ToolActivityGroup({
         <IconCheck
           aria-label={t("complete")}
           size={rem(14)}
-          color="var(--mantine-color-green-6)"
+          color="var(--mantine-color-dimmed)"
           style={{ flexShrink: 0 }}
         />
       )}
@@ -204,7 +210,7 @@ export function ToolActivityGroup({
       </Group>
 
       <Collapse expanded={opened}>
-        <Stack gap="xs" mt="xs" pl="lg">
+        <Stack gap="xs" mt="xs" pl="md">
           {activity.events.map((event) => (
             <Box key={event.id}>{eventDetail(event)}</Box>
           ))}

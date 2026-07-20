@@ -57,7 +57,6 @@ import { OptimisticInputBubble } from "./OptimisticInputBubble";
 import { PendingInputBufferBubble } from "./PendingInputBufferBubble";
 import { RunRetryCard } from "./RunRetryCard";
 import { ToolActivityGroup } from "./ToolActivityGroup";
-import { TurnDivider } from "./TurnDivider";
 import type {
   ActionExecutionProjection,
   AuthorizationRequest,
@@ -131,10 +130,6 @@ function parseStoredChatScrollState(
   return null;
 }
 
-interface BoundaryControls {
-  usage: Record<string, unknown> | null;
-}
-
 interface EditingMessageState {
   messageId: string;
   content: string;
@@ -165,7 +160,22 @@ function latestVisibleMessageId(messages: ChatMessage[]): string | null {
   return null;
 }
 
-function activeRunActivity(runId: string): ToolActivityGroupModel {
+function latestUserMessageIndex(messages: ChatMessage[]): number {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index]?.role === "user") {
+      return index;
+    }
+  }
+  return -1;
+}
+
+function activeRunActivity(
+  runId: string,
+  source: ToolActivityGroupModel | null,
+): ToolActivityGroupModel {
+  if (source !== null) {
+    return { ...source, id: `activity:run:${runId}` };
+  }
   return {
     id: `activity:run:${runId}`,
     firstMessageId: `run:${runId}`,
@@ -310,30 +320,6 @@ function getTimelineItemIds(
   }
 
   return ids;
-}
-
-/** display message bar with after to text completion marker UI control with collects.. */
-function getBoundaryControls(
-  messages: ChatMessage[],
-  messageIndex: number,
-): BoundaryControls {
-  let usage: Record<string, unknown> | null = null;
-
-  for (let i = messageIndex + 1; i < messages.length; i += 1) {
-    const next = messages[i];
-    if (!next) {
-      continue;
-    }
-    if (isVisibleMessageAnchor(next) || next.role === "compaction") {
-      break;
-    }
-    if (next.role === "turn_complete") {
-      usage = next.usage ?? null;
-      continue;
-    }
-  }
-
-  return { usage };
 }
 
 interface ChatViewProps {
@@ -556,6 +542,10 @@ export function ChatView({
       ),
     [actionBoundaryMessageIds, messages, timelineEvents],
   );
+  const latestUserIndex = useMemo(
+    () => latestUserMessageIndex(messages),
+    [messages],
+  );
   const latestActivityId = useMemo(() => {
     for (let index = chatPresentationItems.length - 1; index >= 0; index -= 1) {
       const item = chatPresentationItems[index];
@@ -565,10 +555,28 @@ export function ChatView({
     }
     return null;
   }, [chatPresentationItems]);
-  const standaloneActiveActivity =
-    activeRun === null || latestActivityId !== null
+  const activeActivitySource = useMemo(() => {
+    if (activeRun === null) {
+      return null;
+    }
+    for (let index = chatPresentationItems.length - 1; index >= 0; index -= 1) {
+      const item = chatPresentationItems[index];
+      if (
+        item?.type === "activity" &&
+        item.activity.startMessageIndex > latestUserIndex
+      ) {
+        return item;
+      }
+    }
+    return null;
+  }, [activeRun, chatPresentationItems, latestUserIndex]);
+  const activeActivity =
+    activeRun === null
       ? null
-      : activeRunActivity(activeRun.run_id);
+      : activeRunActivity(
+          activeRun.run_id,
+          activeActivitySource?.activity ?? null,
+        );
   const attachedAuthorizationRequest =
     latestActivityId === null ? null : (authorizationRequests[0] ?? null);
   const unattachedAuthorizationRequests =
@@ -1293,6 +1301,9 @@ export function ChatView({
               <Stack gap={0}>
                 {chatPresentationItems.map((item) => {
                   if (item.type === "activity") {
+                    if (activeActivitySource?.id === item.id) {
+                      return null;
+                    }
                     const durableBefore =
                       actionExecutionPlacement.durableBeforeMessage.get(
                         item.activity.firstMessageId,
@@ -1311,15 +1322,8 @@ export function ChatView({
                         <ToolActivityGroup
                           activity={item.activity}
                           dimmed={dimmedByEdit}
-                          active={
-                            activeRun !== null && item.id === latestActivityId
-                          }
-                          modelCallStartedAt={
-                            activeRun !== null && item.id === latestActivityId
-                              ? activeRun.modelCallStartedAt
-                              : null
-                          }
                           authorizationAction={
+                            activeRun === null &&
                             item.id === latestActivityId &&
                             attachedAuthorizationRequest !== null ? (
                               <AuthorizationRequestBubble
@@ -1339,7 +1343,6 @@ export function ChatView({
                             ) : null
                           }
                         />
-                        <TurnDivider usage={item.activity.usage} />
                       </Fragment>
                     );
                   }
@@ -1377,7 +1380,6 @@ export function ChatView({
                       </Fragment>
                     ) : null;
                   }
-                  const boundaryControls = getBoundaryControls(messages, index);
                   const dimmedByEdit =
                     editingMessageIndex !== null &&
                     index >= editingMessageIndex;
@@ -1418,15 +1420,30 @@ export function ChatView({
                         onEdit={() => handleStartEdit(msg)}
                         failedRunRetryAction={failedRunRetryAction}
                       />
-                      <TurnDivider usage={boundaryControls.usage} />
                     </Fragment>
                   );
                 })}
-                {standaloneActiveActivity !== null && activeRun !== null && (
+                {activeActivity !== null && activeRun !== null && (
                   <ToolActivityGroup
-                    activity={standaloneActiveActivity}
+                    activity={activeActivity}
                     active
                     modelCallStartedAt={activeRun.modelCallStartedAt}
+                    authorizationAction={
+                      attachedAuthorizationRequest !== null ? (
+                        <AuthorizationRequestBubble
+                          variant="compact"
+                          toolkitName={attachedAuthorizationRequest.toolkitName}
+                          authorizationUrl={
+                            attachedAuthorizationRequest.authorizationUrl
+                          }
+                          onAuthorized={() =>
+                            onAuthorizationComplete(
+                              attachedAuthorizationRequest.toolkitId,
+                            )
+                          }
+                        />
+                      ) : null
+                    }
                   />
                 )}
                 {actionExecutionPlacement.durableTail.map((actionExecution) => (
