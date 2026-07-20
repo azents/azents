@@ -40,8 +40,16 @@ const editSchema = z
     new_string: z.string(),
   })
   .passthrough();
-const imageGenerationSchema = z
+const clientImageGenerationSchema = z
   .object({ prompt: z.string().min(1) })
+  .passthrough();
+const providerImageGenerationSchema = z
+  .object({
+    action: z.string().min(1).optional(),
+    prompt: z.string().min(1).optional(),
+    quality: z.string().min(1).optional(),
+    size: z.string().min(1).optional(),
+  })
   .passthrough();
 const providerSearchSchema = z
   .object({ query: z.string().min(1).optional() })
@@ -124,7 +132,7 @@ export function toolCallPresentation(
             ? specialized("execution")
             : generic();
         case "image_generation":
-          return imageGenerationSchema.safeParse(args).success
+          return providerImageGenerationSchema.safeParse(args).success
             ? specialized("generation", imageDeliverables(call))
             : generic();
         default:
@@ -162,7 +170,7 @@ export function toolCallPresentation(
           ? specialized("changes")
           : generic();
       case "image_generation":
-        return imageGenerationSchema.safeParse(args).success
+        return clientImageGenerationSchema.safeParse(args).success
           ? specialized("generation", imageDeliverables(call))
           : generic();
       default:
