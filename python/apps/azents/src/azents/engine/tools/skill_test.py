@@ -1,11 +1,18 @@
 """Skill Toolkit tests."""
 
 import json
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
 
 from azents.engine.run.types import FunctionToolError
+from azents.engine.tools.runtime_io import (
+    RuntimeFileListEntry,
+    RuntimeFileListResult,
+    RuntimeFileReadResult,
+    RuntimeRunnerOperationClient,
+)
 from azents.engine.tools.skill import (
     SkillProjectionItem,
     SkillProjectionService,
@@ -16,6 +23,7 @@ from azents.engine.tools.skill import (
     resolve_active_skill,
     skill_actions_from_snapshot,
 )
+from azents.repos.session_workspace_project.data import SessionWorkspaceProject
 
 
 def _skill_item(
@@ -40,6 +48,107 @@ def _skill_item(
         source_label="project",
         relative_hint=".agents/skills/review",
     )
+
+
+def _project(
+    path: str = "/workspace/agent/project",
+) -> SessionWorkspaceProject:
+    """Create a registered Project for Skill scan tests."""
+    now = datetime.now(UTC)
+    return SessionWorkspaceProject(
+        id="project-1",
+        session_id="session-1",
+        session_agent_context_id="context-1",
+        path=path,
+        created_at=now,
+        updated_at=now,
+    )
+
+
+class _SkillScanRunner:
+    """Runtime operation test double for Skill discovery."""
+
+    def __init__(
+        self,
+        *,
+        entries_by_root: dict[str, tuple[str, ...]],
+        files: dict[str, bytes],
+    ) -> None:
+        self.entries_by_root = entries_by_root
+        self.files = files
+        self.read_calls: list[str] = []
+
+    async def list_files(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        owner_session_id: str | None,
+        path: str,
+        recursive: bool = False,
+        exclude_patterns: list[str] | None = None,
+        deadline_at: datetime,
+    ) -> RuntimeFileListResult:
+        """Return configured canonical directory entries for a source root."""
+        del (
+            runtime_id,
+            runner_generation,
+            owner_session_id,
+            recursive,
+            exclude_patterns,
+            deadline_at,
+        )
+        entries = tuple(
+            RuntimeFileListEntry(
+                path=entry_path,
+                type="directory",
+                size_bytes=None,
+            )
+            for entry_path in self.entries_by_root.get(path, ())
+        )
+        return RuntimeFileListResult(entries=entries, final_cursor="cursor-list")
+
+    async def read_file(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        owner_session_id: str | None,
+        path: str,
+        offset: int,
+        max_bytes: int | None,
+        deadline_at: datetime,
+    ) -> RuntimeFileReadResult:
+        """Return configured Skill content and record reads."""
+        del runtime_id, runner_generation, owner_session_id, deadline_at
+        self.read_calls.append(path)
+        data = self.files[path]
+        chunk = (
+            data[offset:] if max_bytes is None else data[offset : offset + max_bytes]
+        )
+        return RuntimeFileReadResult(data=chunk, final_cursor="cursor-read")
+
+
+class _TestableSkillProjectionService(SkillProjectionService):
+    """Expose protected Skill scanning for focused service tests."""
+
+    async def scan_runtime_for_test(
+        self,
+        *,
+        runner_operations: RuntimeRunnerOperationClient,
+        runtime_id: str,
+        runner_generation: int,
+        owner_session_id: str,
+        projects: list[SessionWorkspaceProject],
+    ) -> list[SkillProjectionItem]:
+        """Delegate to the runtime scanner from an allowed subclass boundary."""
+        return await self._scan_runtime(
+            runner_operations=runner_operations,
+            runtime_id=runtime_id,
+            runner_generation=runner_generation,
+            owner_session_id=owner_session_id,
+            projects=projects,
+        )
 
 
 class _SkillStore:
@@ -151,6 +260,79 @@ class TestLoadSkill:
 
 class TestSkillProjectionService:
     """Skill projection service behavior."""
+
+    @pytest.mark.asyncio
+    async def test_scan_runtime_collapses_symlinked_source_aliases(self) -> None:
+        """Scanner reads one Skill and prefers its direct canonical source root."""
+        project_path = "/workspace/agent/project"
+        canonical_dir = f"{project_path}/.claude/skills/review"
+        skill_path = f"{canonical_dir}/SKILL.md"
+        runner = _SkillScanRunner(
+            entries_by_root={
+                f"{project_path}/.agents/skills": (canonical_dir,),
+                f"{project_path}/.claude/skills": (canonical_dir,),
+            },
+            files={
+                skill_path: b"---\nname: review\ndescription: Review code.\n---\nBody"
+            },
+        )
+        service = _TestableSkillProjectionService(
+            store=object(),  # pyright: ignore[reportArgumentType]
+            session_manager=object(),  # pyright: ignore[reportArgumentType]
+        )
+
+        items = await service.scan_runtime_for_test(
+            runner_operations=runner,  # pyright: ignore[reportArgumentType]
+            runtime_id="runtime-1",
+            runner_generation=1,
+            owner_session_id="session-1",
+            projects=[_project(project_path)],
+        )
+
+        assert runner.read_calls == [skill_path]
+        assert len(items) == 1
+        assert items[0].source_kind == "project_claude"
+        assert items[0].skill_path == skill_path
+        assert items[0].relative_hint == ".claude/skills/review"
+
+    @pytest.mark.asyncio
+    async def test_scan_runtime_keeps_duplicate_slugs_at_distinct_paths(self) -> None:
+        """Scanner preserves same-slug Skills when their exact paths differ."""
+        project_path = "/workspace/agent/project"
+        agents_dir = f"{project_path}/.agents/skills/review"
+        claude_dir = f"{project_path}/.claude/skills/review"
+        agents_skill_path = f"{agents_dir}/SKILL.md"
+        claude_skill_path = f"{claude_dir}/SKILL.md"
+        body = b"---\nname: review\ndescription: Review code.\n---\nBody"
+        runner = _SkillScanRunner(
+            entries_by_root={
+                f"{project_path}/.agents/skills": (agents_dir,),
+                f"{project_path}/.claude/skills": (claude_dir,),
+            },
+            files={agents_skill_path: body, claude_skill_path: body},
+        )
+        service = _TestableSkillProjectionService(
+            store=object(),  # pyright: ignore[reportArgumentType]
+            session_manager=object(),  # pyright: ignore[reportArgumentType]
+        )
+
+        items = await service.scan_runtime_for_test(
+            runner_operations=runner,  # pyright: ignore[reportArgumentType]
+            runtime_id="runtime-1",
+            runner_generation=1,
+            owner_session_id="session-1",
+            projects=[_project(project_path)],
+        )
+
+        assert runner.read_calls == [agents_skill_path, claude_skill_path]
+        assert [item.skill_path for item in items] == [
+            agents_skill_path,
+            claude_skill_path,
+        ]
+        assert [item.source_kind for item in items] == [
+            "project_agents",
+            "project_claude",
+        ]
 
     @pytest.mark.asyncio
     async def test_publish_input_actions_updated_uses_session_channel(self) -> None:
