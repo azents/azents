@@ -8,7 +8,7 @@ tags: [frontend, chat, tools, ux, testing]
 
 ## Scope
 
-This report validates the complete frontend implementation described by [Chat Tool Activity Grouping](./chat-tool-activity-grouping.md) and [ADR-0172](../adr/0172-group-chat-tool-activity-in-the-frontend.md) through implementation commit `aeeab69b`.
+This report validates the complete frontend implementation described by [Chat Tool Activity Grouping](./chat-tool-activity-grouping.md) and [ADR-0173](../adr/0173-group-chat-tool-activity-in-the-frontend.md) through implementation commit `f6a6c04d`.
 
 The validation covers:
 
@@ -30,7 +30,8 @@ Backend event, API, storage, and execution payloads remain unchanged.
 | Item | Value |
 | --- | --- |
 | Date | 2026-07-20 |
-| Implementation commit | `aeeab69b6423e737618c016f61527bc7b6db8dbe` |
+| Implementation commit | `f6a6c04d8ab54902152ae91a93bb4ba41e58776a` |
+| Validation fix commit | `addb7a2880c2a87d02d35dca74d5bc53ba99abdb` |
 | Runtime | Linux 6.8.0-134-generic x86_64 |
 | Python | 3.14.6 |
 | uv | 0.11.1 |
@@ -39,7 +40,7 @@ Backend event, API, storage, and execution payloads remain unchanged.
 | Browser | Playwright Chromium 1.61.0 |
 | Docker | Unavailable: `/bin/sh: docker: not found` |
 
-The local runtime cannot start the containerized Azents E2E topology. The updated deterministic browser E2E is therefore delegated to the required GitHub Actions `ci-web-surface-e2e-run` job. No local full-stack E2E pass is claimed.
+The local runtime cannot start the containerized Azents E2E topology. The updated deterministic browser E2E therefore ran in the required GitHub Actions `ci-web-surface-e2e-run` job and passed after the provider empty-input fix. No local full-stack E2E pass is claimed.
 
 ## Added Validation
 
@@ -106,11 +107,11 @@ Local screenshot artifacts are stored outside tracked source under `/workspace/a
 | Testenv types | `cd testenv/azents/e2e && uv run pyright .` | Pass; 0 errors |
 | Web lint | `cd typescript && pnpm --filter @azents/web lint` | Pass |
 | Web types | `cd typescript && pnpm --filter @azents/web typecheck` | Pass |
-| Web unit tests | `cd typescript && pnpm --filter @azents/web test` | Pass; 60 tests |
+| Web unit tests | `cd typescript && pnpm --filter @azents/web test` | Pass; 61 tests |
 | Storybook build | `cd typescript && pnpm --filter @azents/web build-storybook` | Pass on the validation branch |
 | Browser matrix | Playwright Chromium against built Storybook | Pass in four viewport/theme combinations |
 | Patch integrity | `git diff --check` | Pass |
-| Full-stack web E2E | `uv run pytest -vv -m "web_surface and not live_external and not runtime_provider" ./src` | Deferred to required PR CI because Docker is unavailable locally |
+| Full-stack web E2E | `uv run pytest -vv -m "web_surface and not live_external and not runtime_provider" ./src` | Pass in required PR CI; not run locally because Docker is unavailable |
 
 The known Node `MODULE_TYPELESS_PACKAGE_JSON` warnings remain non-failing and predate this feature.
 
@@ -121,7 +122,7 @@ The known Node `MODULE_TYPELESS_PACKAGE_JSON` warnings remain non-failing and pr
 | Multiple tool-only model turns | Pure projection test and native `ChatView` story | Pass |
 | Visible assistant text between tool sequences | Pure projection boundary test | Pass |
 | Assistant-level attachment delivery | Added projection regression test | Pass |
-| Validated generated image | Registry test, production story, browser matrix, updated full-stack E2E | Pass locally except Docker-dependent E2E; required CI gate |
+| Validated generated image | Registry test, production story, browser matrix, updated full-stack E2E | Pass; required CI gate completed |
 | Reasoning, turn marker, or compaction between calls | Pure projection continuation test | Pass |
 | Permission pause/resume | Compact `Review` production story; independent button and unchanged group count in browser matrix | Pass |
 | Terminal Run followed by later tools | Pure projection terminal-boundary test | Pass |
@@ -134,7 +135,7 @@ The known Node `MODULE_TYPELESS_PACKAGE_JSON` warnings remain non-failing and pr
 | Live-to-durable replacement | Existing client/provider semantic identity projection tests | Pass |
 | Light/dark desktop | Native production component browser captures | Pass |
 | Narrow mobile | 390 × 844 captures, title/Review retention, no page overflow | Pass |
-| Browser refresh | Updated full-stack generated-image E2E | Required PR CI gate |
+| Browser refresh | Updated full-stack generated-image E2E | Pass in required PR CI |
 
 ## Implementation-to-Spec Comparison
 
@@ -149,17 +150,18 @@ The known Node `MODULE_TYPELESS_PACKAGE_JSON` warnings remain non-failing and pr
 | Backend tool/event payloads remain unchanged | No backend or public-client contract changes | Existing event and semantic identity contracts remain aligned | Retain current backend contract wording |
 | Durable provider calls replace matching live calls by `call_id` | Preserved | Existing `domain/conversation.md` wording is aligned | Verify and refresh metadata only |
 
-No new ADR is required. ADR-0172 already owns the hard-to-reverse frontend grouping decision and remains immutable.
+No new ADR is required. ADR-0173 already owns the hard-to-reverse frontend grouping decision and remains immutable.
 
 ## Findings
 
 - Validation found one stale full-stack browser assertion: it required the generated image to remain nested inside the provider card. The validation branch updates that test to the approved promoted-delivery contract.
 - Validation added the missing assistant-level attachment boundary regression test.
-- No implementation defect was found in grouping, specialization, delivery ownership, approval composition, theme behavior, or responsive layout.
+- The first required CI run exposed one specialization defect: provider-hosted image calls may have an empty canonical input object, while the registry reused the client schema that requires a prompt. The fix separates client and provider image schemas, preserves the client prompt requirement, accepts the provider canonical allowlist with optional fields, and adds a unit regression for empty provider input.
+- No remaining defect was found in grouping, specialization, delivery ownership, approval composition, theme behavior, or responsive layout.
 - Mobile summary truncation behaves as designed: lower-priority metadata truncates before the fixed title or `Review` action is lost.
 - Browser screenshots use a deterministic placeholder image body, so they validate layout and attachment ownership rather than image-content fidelity.
-- Docker-dependent web-surface E2E remains the required final gate for this PR.
+- Docker-dependent web-surface E2E passed in required GitHub Actions CI; no local full-stack E2E pass is claimed.
 
 ## Required CI Policy
 
-The validation PR is complete only when `ci-web-surface-e2e-run` passes with the updated generated-image assertion. The test uses deterministic local fixtures and requires no external provider credential. All other required changed-scope CI jobs must also pass before spec promotion is considered validated.
+`ci-web-surface-e2e-run` passed with the updated generated-image assertion and provider empty-input fix. The deterministic test required no external provider credential, and every other required changed-scope CI job also passed before spec promotion.
