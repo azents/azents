@@ -1,8 +1,8 @@
 .root {
   display: inline-flex;
   align-items: center;
-  gap: var(--mantine-spacing-xs);
   min-height: rem(16px);
+  padding-right: rem(2px);
 }
 
 .dots {
@@ -24,12 +24,6 @@
 
 .dot:nth-child(3) {
   animation-delay: 0.24s;
-}
-
-.duration {
-  font-family: var(--font-geist-mono), monospace;
-  font-variant-numeric: tabular-nums;
-  line-height: 1;
 }
 
 @keyframes agent-run-dot {

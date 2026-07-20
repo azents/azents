@@ -179,6 +179,7 @@ function activeRunActivity(
   return {
     id: `activity:run:${runId}`,
     firstMessageId: `run:${runId}`,
+    startedAt: null,
     startMessageIndex: 0,
     endMessageIndex: 0,
     events: [],
@@ -1301,9 +1302,10 @@ export function ChatView({
               <Stack gap={0}>
                 {chatPresentationItems.map((item) => {
                   if (item.type === "activity") {
-                    if (activeActivitySource?.id === item.id) {
-                      return null;
-                    }
+                    const sourceActivity =
+                      activeActivitySource?.id === item.id
+                        ? activeActivity
+                        : null;
                     const durableBefore =
                       actionExecutionPlacement.durableBeforeMessage.get(
                         item.activity.firstMessageId,
@@ -1320,11 +1322,18 @@ export function ChatView({
                           />
                         ))}
                         <ToolActivityGroup
-                          activity={item.activity}
+                          activity={sourceActivity ?? item.activity}
                           dimmed={dimmedByEdit}
+                          active={sourceActivity !== null}
+                          modelCallStartedAt={
+                            sourceActivity === null
+                              ? null
+                              : (activeRun?.modelCallStartedAt ?? null)
+                          }
                           authorizationAction={
-                            activeRun === null &&
-                            item.id === latestActivityId &&
+                            (sourceActivity !== null ||
+                              (activeRun === null &&
+                                item.id === latestActivityId)) &&
                             attachedAuthorizationRequest !== null ? (
                               <AuthorizationRequestBubble
                                 variant="compact"
@@ -1423,29 +1432,33 @@ export function ChatView({
                     </Fragment>
                   );
                 })}
-                {activeActivity !== null && activeRun !== null && (
-                  <ToolActivityGroup
-                    activity={activeActivity}
-                    active
-                    modelCallStartedAt={activeRun.modelCallStartedAt}
-                    authorizationAction={
-                      attachedAuthorizationRequest !== null ? (
-                        <AuthorizationRequestBubble
-                          variant="compact"
-                          toolkitName={attachedAuthorizationRequest.toolkitName}
-                          authorizationUrl={
-                            attachedAuthorizationRequest.authorizationUrl
-                          }
-                          onAuthorized={() =>
-                            onAuthorizationComplete(
-                              attachedAuthorizationRequest.toolkitId,
-                            )
-                          }
-                        />
-                      ) : null
-                    }
-                  />
-                )}
+                {activeActivity !== null &&
+                  activeRun !== null &&
+                  activeActivitySource === null && (
+                    <ToolActivityGroup
+                      activity={activeActivity}
+                      active
+                      modelCallStartedAt={activeRun.modelCallStartedAt}
+                      authorizationAction={
+                        attachedAuthorizationRequest !== null ? (
+                          <AuthorizationRequestBubble
+                            variant="compact"
+                            toolkitName={
+                              attachedAuthorizationRequest.toolkitName
+                            }
+                            authorizationUrl={
+                              attachedAuthorizationRequest.authorizationUrl
+                            }
+                            onAuthorized={() =>
+                              onAuthorizationComplete(
+                                attachedAuthorizationRequest.toolkitId,
+                              )
+                            }
+                          />
+                        ) : null
+                      }
+                    />
+                  )}
                 {actionExecutionPlacement.durableTail.map((actionExecution) => (
                   <ActionExecutionTimelineCard
                     key={actionExecution.execution.id}

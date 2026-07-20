@@ -47,6 +47,7 @@ export interface ActivityEvent {
 export interface ToolActivityGroup {
   id: string;
   firstMessageId: string;
+  startedAt: string | null;
   startMessageIndex: number;
   endMessageIndex: number;
   events: ActivityEvent[];
@@ -539,6 +540,7 @@ export function projectChatPresentationItems(
         current = {
           id: `activity:${item.activityEvent.id}`,
           firstMessageId: item.message?.id ?? item.event.id,
+          startedAt: item.event.created_at,
           startMessageIndex: index,
           endMessageIndex: index,
           events: [],

@@ -12,6 +12,7 @@ import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 const activity: ToolActivityGroupModel = {
   id: "activity:story-call",
   firstMessageId: "story-tool-message-1",
+  startedAt: new Date(Date.now() - 12_000).toISOString(),
   startMessageIndex: 1,
   endMessageIndex: 3,
   events: [

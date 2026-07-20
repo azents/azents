@@ -9,12 +9,18 @@ import {
   Text,
   UnstyledButton,
 } from "@mantine/core";
-import { useDisclosure, useElementSize } from "@mantine/hooks";
+import { useDisclosure } from "@mantine/hooks";
 import { IconCheck, IconChevronRight } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
+import { useEffect, useState } from "react";
 import { AgentRunIndicator } from "./AgentRunIndicator";
 import inlineControlClasses from "./ChatInlineControl.module.css";
 import { CompactionDivider } from "./CompactionDivider";
+import {
+  formatElapsedDuration,
+  startElapsedDurationTimer,
+  visibleElapsedDurationSeconds,
+} from "./elapsedDuration";
 import { MessageBubble } from "./MessageBubble";
 import { ProviderToolCallCard } from "./ProviderToolCallCard";
 import { ToolCallCard } from "./ToolCallCard";
@@ -35,6 +41,38 @@ interface ToolActivityGroupProps {
 
 interface CategorySummary extends ActivityCategory {
   count: number;
+}
+
+const ACTIVITY_DURATION_VISIBILITY_THRESHOLD_SECONDS = 10;
+const MODEL_WAITING_VISIBILITY_THRESHOLD_SECONDS = 10;
+const MAX_VISIBLE_CATEGORIES = 5;
+
+function useVisibleElapsedDuration(
+  startedAt: string | null,
+  visibilityThresholdSeconds: number,
+  enabled: boolean,
+): number | null {
+  const [, setTick] = useState(0);
+
+  useEffect(() => {
+    if (!enabled) {
+      return;
+    }
+    return startElapsedDurationTimer(
+      startedAt,
+      () => setTick((tick) => tick + 1),
+      (callback, delay) => window.setInterval(callback, delay),
+      (timerId) => window.clearInterval(timerId),
+    );
+  }, [enabled, startedAt]);
+
+  return enabled
+    ? visibleElapsedDurationSeconds(
+        startedAt,
+        Date.now(),
+        visibilityThresholdSeconds,
+      )
+    : null;
 }
 
 function categorySummaries(events: ActivityEvent[]): CategorySummary[] {
@@ -113,7 +151,16 @@ export function ToolActivityGroup({
 }: ToolActivityGroupProps): React.ReactElement {
   const t = useTranslations("chat.toolActivity");
   const [opened, { toggle }] = useDisclosure(false);
-  const { ref, width } = useElementSize();
+  const groupDurationSeconds = useVisibleElapsedDuration(
+    activity.startedAt,
+    ACTIVITY_DURATION_VISIBILITY_THRESHOLD_SECONDS,
+    active,
+  );
+  const modelWaitingDurationSeconds = useVisibleElapsedDuration(
+    modelCallStartedAt,
+    MODEL_WAITING_VISIBILITY_THRESHOLD_SECONDS,
+    active,
+  );
   const categories = categorySummaries(activity.events);
   const failedCount = activity.events.filter(
     (event) => event.status === "failed",
@@ -126,71 +173,107 @@ export function ToolActivityGroup({
     ...categoryLabels,
     ...(failedCount > 0 ? [t("failedCount", { count: failedCount })] : []),
   ];
-  const maxVisibleCategories = Math.max(1, Math.floor(width / 96));
-  const hiddenCategoryCount = Math.max(0, labels.length - maxVisibleCategories);
-  const visibleLabels = labels.slice(0, maxVisibleCategories);
+  const hiddenCategoryCount = Math.max(
+    0,
+    labels.length - MAX_VISIBLE_CATEGORIES,
+  );
+  const visibleLabels = labels.slice(0, MAX_VISIBLE_CATEGORIES);
   const summary = [
     ...visibleLabels,
     ...(hiddenCategoryCount > 0
       ? [t("overflowCategories", { count: hiddenCategoryCount })]
       : []),
   ].join(" · ");
+  const groupDuration =
+    groupDurationSeconds === null
+      ? null
+      : formatElapsedDuration(groupDurationSeconds);
+  const modelWaitingDuration =
+    modelWaitingDurationSeconds === null
+      ? null
+      : formatElapsedDuration(modelWaitingDurationSeconds);
   const accessibilitySummary = labels.join(" · ");
   const stateSummary = authorizationAction
     ? t("approvalNeeded")
     : active
       ? t("working")
       : t("complete");
-  const ariaLabel = [t("title"), accessibilitySummary, stateSummary]
-    .filter((value) => value.length > 0)
+  const ariaLabel = [
+    t("title"),
+    accessibilitySummary,
+    stateSummary,
+    groupDuration,
+    modelWaitingDuration === null
+      ? ""
+      : t("modelResponseWaiting", { duration: modelWaitingDuration }),
+  ]
+    .filter((value): value is string => value !== null && value.length > 0)
     .join(": ");
   const hasDetails = activity.events.length > 0;
 
   const header = (
-    <Group
-      gap={rem(6)}
-      wrap="nowrap"
-      miw={0}
-      className={inlineControlClasses.root}
-    >
-      {hasDetails ? (
-        <IconChevronRight
-          aria-hidden="true"
-          size={rem(14)}
-          color="var(--mantine-color-dimmed)"
-          style={{
-            flexShrink: 0,
-            transform: opened ? "rotate(90deg)" : "none",
-            transition: "transform 120ms ease",
-          }}
-        />
-      ) : null}
-      {active ? (
-        <AgentRunIndicator modelCallStartedAt={modelCallStartedAt} />
-      ) : (
-        <IconCheck
-          aria-label={t("complete")}
-          size={rem(14)}
-          color="var(--mantine-color-dimmed)"
-          style={{ flexShrink: 0 }}
-        />
-      )}
-      {summary.length > 0 ? (
-        <Text size="xs" c="dimmed" fw={500} truncate>
-          {summary}
+    <Stack gap={rem(2)} miw={0} w="100%">
+      <Group
+        gap={rem(6)}
+        wrap="nowrap"
+        miw={0}
+        className={inlineControlClasses.root}
+      >
+        {hasDetails ? (
+          <IconChevronRight
+            aria-hidden="true"
+            size={rem(14)}
+            color="var(--mantine-color-dimmed)"
+            style={{
+              flexShrink: 0,
+              transform: opened ? "rotate(90deg)" : "none",
+              transition: "transform 120ms ease",
+            }}
+          />
+        ) : null}
+        {active ? (
+          <AgentRunIndicator />
+        ) : (
+          <IconCheck
+            aria-label={t("complete")}
+            size={rem(14)}
+            color="var(--mantine-color-dimmed)"
+            style={{ flexShrink: 0 }}
+          />
+        )}
+        {summary.length > 0 ? (
+          <Text size="xs" c="dimmed" fw={500} truncate flex={1} miw={0}>
+            {summary}
+          </Text>
+        ) : null}
+        {groupDuration !== null ? (
+          <Text
+            size="xs"
+            c="dimmed"
+            ff="monospace"
+            style={{ flexShrink: 0, fontVariantNumeric: "tabular-nums" }}
+          >
+            ({groupDuration})
+          </Text>
+        ) : null}
+      </Group>
+      {modelWaitingDuration !== null ? (
+        <Text
+          size="xs"
+          c="dimmed"
+          pl={rem(hasDetails ? 46 : 26)}
+          ff="monospace"
+          style={{ fontVariantNumeric: "tabular-nums" }}
+        >
+          {t("modelResponseWaiting", { duration: modelWaitingDuration })}
         </Text>
       ) : null}
-    </Group>
+    </Stack>
   );
 
   return (
     <Box mb="xs" opacity={dimmed ? 0.45 : 1} style={{ minWidth: 0 }}>
-      <Group
-        gap="xs"
-        wrap="nowrap"
-        ref={ref}
-        data-tool-activity-id={activity.id}
-      >
+      <Group gap="xs" wrap="nowrap" data-tool-activity-id={activity.id}>
         {hasDetails ? (
           <UnstyledButton
             flex={1}
