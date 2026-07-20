@@ -301,6 +301,28 @@ class RunnerOperations:
         except Exception as exc:
             await self._final_error(operation, "RUNNER_OPERATION_ERROR", str(exc))
 
+    async def cancel(self, operation: RunnerOperationEnvelope) -> None:
+        """Publish terminal cancellation for work that has not started."""
+        if operation.operation_type == "file.apply_patch":
+            await self._file_apply_patch_error(
+                operation,
+                ApplyPatchFailure(
+                    phase="preflight",
+                    reason="cancelled",
+                    message="Patch was cancelled before commit",
+                    applied=(),
+                    failed=None,
+                    not_attempted=(),
+                    exact=True,
+                ),
+            )
+            return
+        await self._final_error(
+            operation,
+            "RUNNER_OPERATION_CANCELLED",
+            "Runner operation was cancelled before execution",
+        )
+
     async def close(self) -> None:
         """Stop filesystem work and terminate processes before reconnecting."""
         self._file_operation_executor.shutdown(wait=False, cancel_futures=True)

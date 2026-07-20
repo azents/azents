@@ -32,6 +32,7 @@ message RunnerControlMessage {
     RunnerHeartbeatAck heartbeat_ack = 11;
     RunnerOperationRequest operation_request = 20;
     RunnerOperationStartAck operation_start_ack = 21;
+    RunnerOperationCancel operation_cancel = 22;
     RunnerError error = 40;
   }
 }
@@ -70,6 +71,11 @@ message RunnerOperationStart {
 
 message RunnerOperationStartAck {
   bool allowed = 1;
+}
+
+message RunnerOperationCancel {
+  string runtime_id = 1;
+  string operation_id = 2;
 }
 
 message RunnerStateReport {

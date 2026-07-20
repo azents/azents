@@ -842,12 +842,13 @@ class AgentRunExecution[
     ) -> None:
         """Run foreground calls in parallel and durably complete each one."""
         completed_call_ids: set[str] = set()
-        tasks = [
-            asyncio.create_task(
+        tasks_by_call_id = {
+            call.call_id: asyncio.create_task(
                 self._execute_tool_with_call(call, tool_executor=tool_executor)
             )
             for call in tool_calls
-        ]
+        }
+        tasks = list(tasks_by_call_id.values())
         try:
             for completed in asyncio.as_completed(tasks):
                 outcome = await completed
@@ -864,13 +865,29 @@ class AgentRunExecution[
             ]
             for call in unresolved:
                 tool_executor.request_cancel(call)
-            for task in tasks:
+            for call in unresolved:
+                task = tasks_by_call_id[call.call_id]
                 if not task.done():
                     task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
+            settled = await asyncio.gather(
+                *(tasks_by_call_id[call.call_id] for call in unresolved),
+                return_exceptions=True,
+            )
+            cancelled: list[ClientToolCallPayload] = []
+            for call, result in zip(unresolved, settled, strict=True):
+                if isinstance(result, _ToolExecutionOutcome):
+                    await self._finalize_tool_result(
+                        run_id=run_id,
+                        session_id=session_id,
+                        call=result.call,
+                        result=result.result,
+                    )
+                    completed_call_ids.add(result.call.call_id)
+                    continue
+                cancelled.append(call)
             await self._append_cancelled_tool_results(
                 session_id,
-                unresolved,
+                cancelled,
                 run_id=run_id,
             )
             if _is_user_stop_cancellation(exc):

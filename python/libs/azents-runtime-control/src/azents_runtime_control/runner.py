@@ -111,6 +111,14 @@ class RunnerOperationEnvelope:
 
 
 @dataclasses.dataclass(frozen=True)
+class RunnerOperationCancel:
+    """Control request to cancel one pending or active Runner operation."""
+
+    runtime_id: str
+    operation_id: str
+
+
+@dataclasses.dataclass(frozen=True)
 class RunnerOperationEvent:
     """Runner operation event delivered back to Control."""
 
@@ -128,6 +136,9 @@ class RunnerConnectionRejected(RuntimeError):
 
 
 RunnerOperationHandler: TypeAlias = Callable[[RunnerOperationEnvelope], Awaitable[None]]
+RunnerOperationCancelHandler: TypeAlias = Callable[
+    [RunnerOperationCancel], Awaitable[None]
+]
 
 
 class RunnerControlClient(Protocol):
@@ -135,6 +146,13 @@ class RunnerControlClient(Protocol):
 
     def set_operation_handler(self, handler: RunnerOperationHandler) -> None:
         """Set the direct operation admission handler."""
+        ...
+
+    def set_operation_cancel_handler(
+        self,
+        handler: RunnerOperationCancelHandler,
+    ) -> None:
+        """Set the direct operation cancellation handler."""
         ...
 
     async def register_runner(
@@ -189,6 +207,10 @@ class RuntimeRunnerOperations(Protocol):
 
     async def handle(self, operation: RunnerOperationEnvelope) -> None:
         """Handle one operation and publish events through the operation envelope."""
+        ...
+
+    async def cancel(self, operation: RunnerOperationEnvelope) -> None:
+        """Publish cancellation for one operation that has not started."""
         ...
 
 
@@ -285,6 +307,7 @@ class RunnerRunLoop:
         self._pre_execution_timeout_count = 0
         self._scheduler_wake = asyncio.Event()
         self._client.set_operation_handler(self._receive_operation)
+        self._client.set_operation_cancel_handler(self._cancel_operation)
 
     @property
     def accepted(self) -> RunnerRegistrationAccepted | None:
@@ -356,6 +379,45 @@ class RunnerRunLoop:
         else:
             await self._admit_operation(operation)
         self._scheduler_wake.set()
+
+    async def _cancel_operation(self, cancel: RunnerOperationCancel) -> None:
+        """Cancel one pending or active operation by durable operation ID."""
+        accepted = self._require_accepted()
+        if cancel.runtime_id != accepted.runtime_id:
+            return
+        for task, active in (
+            *self._active_operation_tasks.items(),
+            *self._active_control_tasks.items(),
+        ):
+            if _operation_id(active.operation) == cancel.operation_id:
+                task.cancel()
+                return
+        pending = self._pop_pending_operation(cancel.operation_id)
+        if pending is None:
+            return
+        await self._operations.cancel(pending.operation)
+        await self._report_state()
+        self._scheduler_wake.set()
+
+    def _pop_pending_operation(
+        self,
+        operation_id: str,
+    ) -> _PendingOperation | None:
+        for owner, pending in tuple(self._pending_by_owner.items()):
+            for index, queued in enumerate(pending):
+                if _operation_id(queued.operation) != operation_id:
+                    continue
+                del pending[index]
+                self._pending_operation_count -= 1
+                if not pending:
+                    self._remove_empty_owner(owner)
+                return queued
+        for index, queued in enumerate(self._pending_control_operations):
+            if _operation_id(queued.operation) != operation_id:
+                continue
+            del self._pending_control_operations[index]
+            return queued
+        return None
 
     async def run_forever(self, *, block_ms: int = 500) -> None:
         """Run until cancelled."""
@@ -451,6 +513,7 @@ class RunnerRunLoop:
                 await self._report_state()
                 return True
             if not await self._client.start_runner_operation(queued.operation):
+                await self._operations.cancel(queued.operation)
                 _LOGGER.info(
                     "Runtime Runner pending operation canceled before execution",
                     extra=self._operation_log_extra(queued.operation),
@@ -800,6 +863,10 @@ def _validate_limits(
         raise ValueError(
             "max_pending_operations_per_owner must not exceed max_pending_operations"
         )
+
+
+def _operation_id(operation: RunnerOperationEnvelope) -> str:
+    return f"operation:{operation.request_id}"
 
 
 def _utc_now() -> datetime:

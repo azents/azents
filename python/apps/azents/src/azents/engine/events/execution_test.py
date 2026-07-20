@@ -870,6 +870,41 @@ class _FailingToolExecutor:
         del call
 
 
+class _SettlingToolExecutor:
+    """Return a typed terminal result after external task cancellation."""
+
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+        self.cancelled_calls: list[ClientToolCallPayload] = []
+
+    async def execute(self, call: ClientToolCallPayload) -> ClientToolResultPayload:
+        """Settle cancellation as an authoritative typed failure result."""
+        self.started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            return ClientToolResultPayload(
+                call_id=call.call_id,
+                name=call.name,
+                status="failed",
+                output=[OutputTextPart(text="Patch was not applied.")],
+                metadata={
+                    "kind": "apply_patch_failure",
+                    "phase": "preflight",
+                    "reason": "cancelled",
+                    "applied": [],
+                    "failed": None,
+                    "not_attempted": [],
+                    "exact": True,
+                },
+            )
+        raise AssertionError("settling tool unexpectedly resumed")
+
+    def request_cancel(self, call: ClientToolCallPayload) -> None:
+        """Record cancellation request before task settlement."""
+        self.cancelled_calls.append(call)
+
+
 class _CancellingToolExecutor:
     """Cancelling tool executor for tests."""
 
@@ -894,6 +929,7 @@ def _model_call_preparer(
     lowerer: _Lowerer | _RecordingLowerer | None = None,
     tool_executor: _ToolExecutor
     | _FailingToolExecutor
+    | _SettlingToolExecutor
     | _CancellingToolExecutor
     | None = None,
     system_prompt: SystemPromptAnalysisPayload | None = None,
@@ -972,7 +1008,10 @@ def _usage() -> TokenUsagePayload:
     )
 
 
-def _tool_call_event(call_id: str = "call-1") -> Event:
+def _tool_call_event(
+    call_id: str = "call-1",
+    name: str = "read_text",
+) -> Event:
     """Create client tool call event."""
     return Event(
         id="0" * 32,
@@ -980,7 +1019,7 @@ def _tool_call_event(call_id: str = "call-1") -> Event:
         kind=EventKind.CLIENT_TOOL_CALL,
         payload=ClientToolCallPayload(
             call_id=call_id,
-            name="read_text",
+            name=name,
             arguments="{}",
             native_artifact=_artifact(),
         ),
@@ -3004,6 +3043,58 @@ async def test_shutdown_tool_cancellation_repairs_before_reraising() -> None:
     assert payload.status == "cancelled"
     assert run_repo.active_tool_calls == []
     assert [call.call_id for call in tool_executor.cancelled_calls] == ["call-1"]
+
+
+async def test_tool_user_stop_preserves_settled_terminal_result() -> None:
+    """Persist an authoritative terminal result returned after task cancellation."""
+    run_repo = _RunRepo()
+    transcript_repo = _TranscriptRepo()
+    tool_executor = _SettlingToolExecutor()
+    execution = AgentRunExecution(
+        session_manager=_session_context,
+        post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_provider_integration_id=None,
+        model_stream_inference_profile=None,
+        model_adapter=_ModelAdapter(),
+        output_normalizer=_Normalizer([_tool_call_event(name="apply_patch")]),
+        model_call_preparer=_model_call_preparer(
+            lowerer=_Lowerer(), tool_executor=tool_executor
+        ),
+        run_repo=run_repo,
+        transcript_repo=transcript_repo,
+    )
+
+    task = asyncio.create_task(
+        execution.run(
+            AgentRunExecutionRequest(
+                owner_generation=1,
+                tool_admission_barrier=_OpenToolAdmissionBarrier(),
+                run_id="run-1",
+                session_id="session-1",
+                model="gpt-5.1",
+            ),
+        )
+    )
+    await tool_executor.started.wait()
+    task.cancel(USER_STOP_CANCEL_MESSAGE)
+
+    status = await task
+
+    assert status == AgentRunStatus.INTERRUPTED
+    assert [call.call_id for call in tool_executor.cancelled_calls] == ["call-1"]
+    result_events = [
+        event
+        for event in transcript_repo.events
+        if event.kind == EventKind.CLIENT_TOOL_RESULT
+    ]
+    assert len(result_events) == 1
+    payload = result_events[0].payload
+    assert isinstance(payload, ClientToolResultPayload)
+    assert payload.status == "failed"
+    assert payload.metadata["kind"] == "apply_patch_failure"
+    assert payload.metadata["reason"] == "cancelled"
 
 
 async def test_tool_user_stop_appends_cancelled_result_and_interrupts() -> None:

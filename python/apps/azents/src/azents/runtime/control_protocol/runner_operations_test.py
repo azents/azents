@@ -440,6 +440,66 @@ async def test_apply_patch_uses_body_stream_and_returns_changes() -> None:
 
 
 @pytest.mark.asyncio
+async def test_apply_patch_cancellation_waits_for_typed_runner_final() -> None:
+    """Patch cancellation requests Runner stop and preserves its typed final."""
+    harness = await _make_harness()
+    task = asyncio.create_task(
+        harness.client.apply_patch(
+            runtime_id="runtime-1",
+            runner_generation=harness.runner_generation,
+            owner_session_id="session-1",
+            base_path="/workspace/agent/project",
+            patch=b"*** Begin Patch\n*** End Patch\n",
+            schema_version=1,
+            deadline_at=_now() + timedelta(seconds=30),
+        )
+    )
+    await asyncio.sleep(0)
+    request = await harness.control.claim_next_runner_request(
+        runtime_id="runtime-1",
+        generation=harness.runner_generation,
+        consumer_id="runner-a",
+        block_ms=0,
+    )
+    assert request is not None
+
+    task.cancel()
+    await asyncio.sleep(0)
+    cancellation = await harness.control.claim_next_runner_request(
+        runtime_id="runtime-1",
+        generation=harness.runner_generation,
+        consumer_id="runner-a",
+        block_ms=0,
+    )
+    assert cancellation is not None
+    assert cancellation.operation_type == "operation.cancel"
+    assert cancellation.payload == {"operation_id": f"operation:{request.request_id}"}
+    await harness.reply(
+        request.request_id,
+        RuntimeReplyEventType.FINAL_ERROR,
+        {
+            "error_code": "FILE_APPLY_PATCH_FAILED",
+            "error_message": "Patch was cancelled before commit",
+            "file_apply_patch": {
+                "phase": "preflight",
+                "reason": "cancelled",
+                "applied": [],
+                "failed": None,
+                "not_attempted": [],
+                "exact": True,
+            },
+        },
+        final=True,
+    )
+
+    with pytest.raises(RuntimeFileApplyPatchFailedError) as error:
+        await asyncio.wait_for(task, timeout=1)
+    assert error.value.failure.reason == "cancelled"
+    assert error.value.failure.applied == ()
+    assert error.value.failure.exact is True
+
+
+@pytest.mark.asyncio
 async def test_apply_patch_preserves_typed_failure_detail() -> None:
     """File patch failure exposes the committed prefix and remaining work."""
     harness = await _make_harness()

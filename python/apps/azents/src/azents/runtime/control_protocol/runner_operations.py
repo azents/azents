@@ -534,15 +534,34 @@ class RuntimeRunnerOperationClient:
                 body_stream_id=body_stream_id,
             )
         )
-        return await self.resume_file_apply_patch(
-            reply_stream_id=dispatch.reply_stream_id,
-            after_cursor=None,
-            request_id=dispatch.request_id,
-            operation_id=dispatch.operation_id,
-            runtime_id=runtime_id,
-            generation=runner_generation,
-            deadline_at=deadline_at,
+        resume_task = asyncio.create_task(
+            self.resume_file_apply_patch(
+                reply_stream_id=dispatch.reply_stream_id,
+                after_cursor=None,
+                request_id=dispatch.request_id,
+                operation_id=dispatch.operation_id,
+                runtime_id=runtime_id,
+                generation=runner_generation,
+                deadline_at=deadline_at,
+            )
         )
+        cancel_requested = False
+        while True:
+            try:
+                return await asyncio.shield(resume_task)
+            except asyncio.CancelledError:
+                current_task = asyncio.current_task()
+                if current_task is not None:
+                    current_task.uncancel()
+                if cancel_requested:
+                    continue
+                cancel_requested = True
+                await self._control_protocol.request_runner_operation_cancel(
+                    runtime_id=runtime_id,
+                    runner_generation=runner_generation,
+                    operation_id=dispatch.operation_id,
+                    created_at=datetime.now(timezone.utc),
+                )
 
     async def delete_file(
         self,

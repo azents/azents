@@ -12,6 +12,7 @@ import pytest
 
 from azents_runtime_control.runner import (
     RunnerControlClient,
+    RunnerOperationCancel,
     RunnerOperationEnvelope,
     RunnerOperationEvent,
     RunnerRegistration,
@@ -37,6 +38,9 @@ class FakeRunnerControlClient(RunnerControlClient):
         self.operation_handler: (
             Callable[[RunnerOperationEnvelope], Awaitable[None]] | None
         ) = None
+        self.operation_cancel_handler: (
+            Callable[[RunnerOperationCancel], Awaitable[None]] | None
+        ) = None
 
     def set_operation_handler(
         self,
@@ -44,6 +48,13 @@ class FakeRunnerControlClient(RunnerControlClient):
     ) -> None:
         """Record the direct operation handler."""
         self.operation_handler = handler
+
+    def set_operation_cancel_handler(
+        self,
+        handler: Callable[[RunnerOperationCancel], Awaitable[None]],
+    ) -> None:
+        """Record the direct operation cancellation handler."""
+        self.operation_cancel_handler = handler
 
     async def register_runner(
         self,
@@ -112,14 +123,24 @@ class BlockingOperations(RuntimeRunnerOperations):
 
     started: list[str] = dataclasses.field(default_factory=list)
     finished: list[str] = dataclasses.field(default_factory=list)
+    canceled_before_start: list[str] = dataclasses.field(default_factory=list)
+    canceled_while_active: list[str] = dataclasses.field(default_factory=list)
     _release_events: dict[str, asyncio.Event] = dataclasses.field(default_factory=dict)
 
     async def handle(self, operation: RunnerOperationEnvelope) -> None:
-        """Record start and wait for release."""
+        """Record start and wait for release or active cancellation."""
         self.started.append(operation.request_id)
         event = self._release_events.setdefault(operation.request_id, asyncio.Event())
-        await event.wait()
+        try:
+            await event.wait()
+        except asyncio.CancelledError:
+            self.canceled_while_active.append(operation.request_id)
+            return
         self.finished.append(operation.request_id)
+
+    async def cancel(self, operation: RunnerOperationEnvelope) -> None:
+        """Record cancellation of work that has not started."""
+        self.canceled_before_start.append(operation.request_id)
 
     def release(self, request_id: str) -> None:
         """Release one operation."""
@@ -441,6 +462,66 @@ async def test_canceled_pending_operation_is_not_executed() -> None:
     await loop.run_once(block_ms=0)
 
     assert operations.started == ["active"]
+    assert operations.canceled_before_start == ["canceled"]
+
+
+@pytest.mark.asyncio
+async def test_cancel_command_removes_pending_operation() -> None:
+    client = FakeRunnerControlClient()
+    operations = BlockingOperations()
+    client.operations.extend(
+        (
+            _operation("active", owner="session-a"),
+            _operation("pending", owner="session-a"),
+        )
+    )
+    loop = _loop(
+        client,
+        operations,
+        max_concurrent_operations_per_session=1,
+        max_concurrent_operations=1,
+    )
+    await loop.start()
+
+    await _run(loop, 2)
+    await _wait_for(lambda: operations.started == ["active"])
+    assert client.operation_cancel_handler is not None
+    await client.operation_cancel_handler(
+        RunnerOperationCancel(
+            runtime_id="runtime-1",
+            operation_id="operation:pending",
+        )
+    )
+
+    assert operations.canceled_before_start == ["pending"]
+    assert client.reports[-1].diagnostic["runtime_pending_operations"] == "0"
+    operations.release("active")
+    await _wait_for(lambda: operations.finished == ["active"])
+    await loop.run_once(block_ms=0)
+    assert operations.started == ["active"]
+
+
+@pytest.mark.asyncio
+async def test_cancel_command_interrupts_active_operation() -> None:
+    client = FakeRunnerControlClient()
+    operations = BlockingOperations()
+    client.operations.append(_operation("active", owner="session-a"))
+    loop = _loop(client, operations, max_concurrent_operations=1)
+    await loop.start()
+
+    await loop.run_once(block_ms=0)
+    await _wait_for(lambda: operations.started == ["active"])
+    assert client.operation_cancel_handler is not None
+    await client.operation_cancel_handler(
+        RunnerOperationCancel(
+            runtime_id="runtime-1",
+            operation_id="operation:active",
+        )
+    )
+    await _wait_for(lambda: operations.canceled_while_active == ["active"])
+    await loop.run_once(block_ms=0)
+
+    assert client.reports[-1].diagnostic["runtime_active_operations"] == "0"
 
 
 @pytest.mark.asyncio

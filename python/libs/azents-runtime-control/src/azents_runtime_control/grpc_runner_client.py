@@ -20,6 +20,8 @@ from azents_runtime_control.runner import (
     JsonValue,
     RunnerBodyChunk,
     RunnerControlClient,
+    RunnerOperationCancel,
+    RunnerOperationCancelHandler,
     RunnerOperationEnvelope,
     RunnerOperationEvent,
     RunnerOperationHandler,
@@ -69,6 +71,7 @@ class GrpcRunnerControlClient(RunnerControlClient):
             asyncio.Queue()
         )
         self._operation_handler: RunnerOperationHandler | None = None
+        self._operation_cancel_handler: RunnerOperationCancelHandler | None = None
         self._pending_heartbeat_acks: dict[str, asyncio.Future[bool]] = {}
         self._pending_operation_start_acks: dict[str, asyncio.Future[bool]] = {}
         self._accepted: asyncio.Future[RunnerRegistrationAccepted] | None = None
@@ -97,6 +100,13 @@ class GrpcRunnerControlClient(RunnerControlClient):
     def set_operation_handler(self, handler: RunnerOperationHandler) -> None:
         """Set the direct operation admission handler."""
         self._operation_handler = handler
+
+    def set_operation_cancel_handler(
+        self,
+        handler: RunnerOperationCancelHandler,
+    ) -> None:
+        """Set the direct operation cancellation handler."""
+        self._operation_cancel_handler = handler
 
     async def register_runner(
         self,
@@ -282,6 +292,18 @@ class GrpcRunnerControlClient(RunnerControlClient):
                     "Runner operation handler is not registered"
                 )
             await self._operation_handler(_operation(message))
+            return
+        if payload == "operation_cancel":
+            if self._operation_cancel_handler is None:
+                raise RuntimeRunnerControlStreamClosed(
+                    "Runner operation cancellation handler is not registered"
+                )
+            await self._operation_cancel_handler(
+                RunnerOperationCancel(
+                    runtime_id=message.operation_cancel.runtime_id,
+                    operation_id=message.operation_cancel.operation_id,
+                )
+            )
             return
         if payload == "error":
             raise RuntimeRunnerControlStreamClosed(message.error.message)
