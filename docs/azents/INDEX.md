@@ -231,6 +231,7 @@ Design documents are accumulated records and are not listed individually in this
 - [ADR-0171: Add Kimi Subscription as an Integration-Scoped Provider](adr/0171-add-kimi-subscription-as-an-integration-scoped-provider.md)
 - [ADR-0171: Archived Session Retention and Durable Purge](adr/0171-archived-session-retention-and-purge.md)
 - [ADR-0172: Generalize Admin-Managed System Configuration](adr/0172-generalize-admin-managed-system-configuration.md)
+- [ADR-0172: Add GPT-aligned apply-patch alongside the existing edit tool](adr/0172-gpt-apply-patch-alongside-existing-edit.md)
 - [ADR-0172: Reset the Tool Search Working Set on Successful Compaction](adr/0172-reset-tool-search-working-set-on-compaction.md)
 - [ADR-0173: Group Chat Tool Activity in the Frontend](adr/0173-group-chat-tool-activity-in-the-frontend.md)
 - [ADR-0174: Present Chat Activity as an Ordered Event Stream](adr/0174-present-chat-activity-as-an-ordered-event-stream.md)
