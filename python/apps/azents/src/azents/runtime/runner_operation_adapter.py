@@ -225,17 +225,30 @@ class RuntimeRunnerOperationAdapter:
                 deadline_at=deadline_at,
             )
         )
-        return RuntimeFileListResult(
-            entries=tuple(
-                RuntimeFileListEntry(
-                    path=entry.path,
-                    type=entry.type,
-                    size_bytes=entry.size_bytes,
-                )
-                for entry in result.entries
-            ),
-            final_cursor=result.final_cursor,
+        return _file_list_result(result)
+
+    async def glob_files(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        owner_session_id: str | None,
+        pattern: str,
+        exclude_patterns: list[str] | None,
+        deadline_at: datetime,
+    ) -> RuntimeFileListResult:
+        """Run file glob operation and convert to engine result."""
+        result = await _translate_runtime_errors(
+            self._client.glob_files(
+                runtime_id=runtime_id,
+                runner_generation=runner_generation,
+                owner_session_id=owner_session_id,
+                pattern=pattern,
+                exclude_patterns=exclude_patterns,
+                deadline_at=deadline_at,
+            )
         )
+        return _file_list_result(result)
 
     async def stat_file(
         self,
@@ -320,6 +333,23 @@ class RuntimeRunnerOperationAdapter:
             stopped_reason=result.stopped_reason,
             final_cursor=result.final_cursor,
         )
+
+
+def _file_list_result(
+    result: control_runner_operations.RuntimeFileListResult,
+) -> RuntimeFileListResult:
+    """Convert control file entries to the engine result type."""
+    return RuntimeFileListResult(
+        entries=tuple(
+            RuntimeFileListEntry(
+                path=entry.path,
+                type=entry.type,
+                size_bytes=entry.size_bytes,
+            )
+            for entry in result.entries
+        ),
+        final_cursor=result.final_cursor,
+    )
 
 
 async def _translate_runtime_errors(awaitable: Awaitable[_T]) -> _T:

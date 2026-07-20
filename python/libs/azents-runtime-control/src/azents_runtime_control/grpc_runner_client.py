@@ -466,6 +466,12 @@ def _operation_payload(
             "recursive": payload.recursive,
             "exclude_patterns": list(payload.exclude_patterns),
         }
+    if payload_kind == "file_glob":
+        payload = operation.file_glob
+        return {
+            "pattern": payload.pattern,
+            "exclude_patterns": list(payload.exclude_patterns),
+        }
     if payload_kind == "file_grep":
         payload = operation.file_grep
         result = {
@@ -615,6 +621,11 @@ def _copy_final_success(
     if "bytes_written" in payload:
         message.file_write.bytes_written = _int_payload(payload, "bytes_written")
         return
+    if "matches" in payload:
+        message.file_glob.entries.extend(
+            _file_list_entries(payload, field_name="matches")
+        )
+        return
     if "entries" in payload:
         message.file_list.entries.extend(_file_list_entries(payload))
         return
@@ -729,21 +740,9 @@ def _final_success_payload(
     if result_kind == "file_write":
         return {"bytes_written": message.file_write.bytes_written}
     if result_kind == "file_list":
-        return {
-            "entries": [
-                {
-                    "path": entry.path,
-                    "type": entry.type,
-                    "size_bytes": (
-                        entry.size_bytes if entry.HasField("size_bytes") else None
-                    ),
-                    "modified_at": (
-                        entry.modified_at if entry.HasField("modified_at") else None
-                    ),
-                }
-                for entry in message.file_list.entries
-            ]
-        }
+        return {"entries": _file_list_entry_payloads(message.file_list.entries)}
+    if result_kind == "file_glob":
+        return {"entries": _file_list_entry_payloads(message.file_glob.entries)}
     if result_kind == "file_grep":
         return {
             "files": [
@@ -897,10 +896,33 @@ def _move_entries(
     return entries
 
 
+def _file_list_entry_payloads(
+    entries: Sequence[runtime_runner_control_pb2.RuntimeFileListEntry],
+) -> list[JsonValue]:
+    """Convert protobuf file entries to JSON payload values."""
+    payloads: list[JsonValue] = []
+    for entry in entries:
+        payloads.append(
+            {
+                "path": entry.path,
+                "type": entry.type,
+                "size_bytes": (
+                    entry.size_bytes if entry.HasField("size_bytes") else None
+                ),
+                "modified_at": (
+                    entry.modified_at if entry.HasField("modified_at") else None
+                ),
+            }
+        )
+    return payloads
+
+
 def _file_list_entries(
     payload: Mapping[str, JsonValue],
+    *,
+    field_name: str = "entries",
 ) -> list[runtime_runner_control_pb2.RuntimeFileListEntry]:
-    raw_entries = payload.get("entries")
+    raw_entries = payload.get(field_name)
     if not isinstance(raw_entries, list):
         return []
     entries: list[runtime_runner_control_pb2.RuntimeFileListEntry] = []

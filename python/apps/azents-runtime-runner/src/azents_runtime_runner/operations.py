@@ -16,6 +16,7 @@ from collections.abc import Callable, Iterator, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from functools import lru_cache
 from pathlib import Path
 from typing import Literal, Protocol, TypeVar
 
@@ -35,6 +36,7 @@ _MAX_FILE_READ_BYTES = 8 * 1024 * 1024
 _DEFAULT_MAX_FILE_OPERATION_WORKERS = 8
 _DEFAULT_MAX_GREP_SEARCHED_FILES = 10_000
 _DEFAULT_MAX_GREP_SCANNED_BYTES = 128 * 1024 * 1024
+_MAX_BRACE_EXPANSIONS = 256
 _DEFAULT_PROCESS_YIELD_TIME_MS = 1_000
 _DEFAULT_PROCESS_MAX_OUTPUT_BYTES = 64 * 1024
 _DEFAULT_PROCESS_MAX_UNREAD_BYTES = 256 * 1024
@@ -219,6 +221,9 @@ class RunnerOperations:
                 return
             if operation.operation_type == "file.list":
                 await self._file_list(operation)
+                return
+            if operation.operation_type == "file.glob":
+                await self._file_glob(operation)
                 return
             if operation.operation_type == "file.grep":
                 await self._file_grep(operation)
@@ -463,6 +468,27 @@ class RunnerOperations:
             ),
         )
         await self._final_success(operation, {"entries": entries})
+
+    async def _file_glob(self, operation: RunnerOperationEnvelope) -> None:
+        pattern = _str_payload(operation.payload, "pattern")
+        if not pattern:
+            await self._final_error(operation, "INVALID_PATTERN", "pattern is required")
+            return
+        exclude_patterns = _str_list_payload(operation.payload, "exclude_patterns")
+        try:
+            entries = await self._run_file_operation(
+                operation,
+                lambda cancellation: _glob_file_entries(
+                    pattern,
+                    workspace=self._workspace,
+                    exclude_patterns=exclude_patterns,
+                    cancellation=cancellation,
+                ),
+            )
+        except _FileOperationSemanticError as exc:
+            await self._final_error(operation, exc.code, exc.message)
+            return
+        await self._final_success(operation, {"matches": entries})
 
     async def _file_stat(self, operation: RunnerOperationEnvelope) -> None:
         try:
@@ -2010,6 +2036,180 @@ def _list_file_entries(
             }
         )
     return entries
+
+
+def _glob_file_entries(
+    pattern: str,
+    *,
+    workspace: Workspace,
+    exclude_patterns: list[str],
+    cancellation: threading.Event,
+) -> list[JsonValue]:
+    """Build a file.glob response in a filesystem worker."""
+    if pattern.startswith("~"):
+        raise _FileOperationSemanticError(
+            "INVALID_PATTERN",
+            "Tilde expansion is not supported. Use an absolute runtime path.",
+        )
+    expanded_patterns = _expand_braces(pattern)
+    prefix = workspace.resolve(_extract_glob_dir_prefix(pattern))
+    entries: list[JsonValue] = []
+    for child in _iter_list_entries(
+        prefix,
+        workspace=workspace,
+        recursive=_requires_recursive_glob_list(pattern),
+        exclude_patterns=exclude_patterns,
+        cancellation=cancellation,
+    ):
+        if cancellation.is_set():
+            break
+        display_path = workspace.display_path(child)
+        if not _match_glob_path(display_path, expanded_patterns):
+            continue
+        entries.append(
+            {
+                "path": display_path,
+                "type": _entry_type(child),
+                "size_bytes": _file_size(child),
+                "modified_at": _modified_at(child),
+            }
+        )
+    return entries
+
+
+def _extract_glob_dir_prefix(pattern: str) -> str:
+    """Extract the directory prefix before the first glob segment."""
+    parts: list[str] = []
+    for segment in pattern.split("/"):
+        if _has_glob_meta(segment):
+            break
+        parts.append(segment)
+    prefix = "/".join(parts)
+    if prefix:
+        return prefix
+    return "/" if pattern.startswith("/") else "."
+
+
+def _requires_recursive_glob_list(pattern: str) -> bool:
+    """Return whether a glob needs nested paths below its fixed prefix."""
+    prefix = _extract_glob_dir_prefix(pattern)
+    if prefix == "/":
+        suffix = pattern.lstrip("/")
+    elif prefix == ".":
+        suffix = pattern
+    else:
+        suffix = pattern[len(prefix) :].strip("/")
+    return "/" in suffix or "**" in suffix
+
+
+def _match_glob_path(path: str, expanded_patterns: tuple[str, ...]) -> bool:
+    """Match expanded glob patterns while preserving path segment boundaries."""
+    path_segments = path.strip("/").split("/") if path != "/" else []
+    for expanded_pattern in expanded_patterns:
+        pattern_segments = (
+            expanded_pattern.strip("/").split("/") if expanded_pattern != "/" else []
+        )
+        if _match_glob_segments(path_segments, pattern_segments):
+            return True
+    return False
+
+
+def _match_glob_segments(
+    path_segments: list[str],
+    pattern_segments: list[str],
+) -> bool:
+    """Match path segments with support for the recursive `**` segment."""
+
+    @lru_cache(maxsize=None)
+    def match(path_index: int, pattern_index: int) -> bool:
+        if pattern_index == len(pattern_segments):
+            return path_index == len(path_segments)
+        pattern_segment = pattern_segments[pattern_index]
+        if pattern_segment == "**":
+            if match(path_index, pattern_index + 1):
+                return True
+            return path_index < len(path_segments) and match(
+                path_index + 1, pattern_index
+            )
+        if path_index == len(path_segments):
+            return False
+        return fnmatch.fnmatchcase(
+            path_segments[path_index], pattern_segment
+        ) and match(path_index + 1, pattern_index + 1)
+
+    return match(0, 0)
+
+
+def _expand_braces(pattern: str) -> tuple[str, ...]:
+    """Expand a bounded number of comma-separated brace alternatives."""
+    pending = [pattern]
+    expansions: list[str] = []
+    while pending:
+        candidate = pending.pop()
+        expandable = _find_expandable_brace(candidate)
+        if expandable is None:
+            expansions.append(candidate)
+            continue
+
+        opening, closing, alternatives = expandable
+        prefix = candidate[:opening]
+        suffix = candidate[closing + 1 :]
+        pending.extend(
+            f"{prefix}{alternative}{suffix}" for alternative in reversed(alternatives)
+        )
+        if len(expansions) + len(pending) > _MAX_BRACE_EXPANSIONS:
+            raise _FileOperationSemanticError(
+                "INVALID_PATTERN",
+                f"Brace expansion exceeds the maximum of {_MAX_BRACE_EXPANSIONS} "
+                "alternatives.",
+            )
+    return tuple(expansions)
+
+
+def _find_expandable_brace(
+    pattern: str,
+) -> tuple[int, int, tuple[str, ...]] | None:
+    """Find the first balanced brace containing top-level alternatives."""
+    for opening, opening_char in enumerate(pattern):
+        if opening_char != "{":
+            continue
+        depth = 0
+        for closing in range(opening, len(pattern)):
+            char = pattern[closing]
+            if char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    alternatives = _split_brace_alternatives(
+                        pattern[opening + 1 : closing]
+                    )
+                    if len(alternatives) >= 2:
+                        return opening, closing, alternatives
+                    break
+    return None
+
+
+def _split_brace_alternatives(value: str) -> tuple[str, ...]:
+    """Split brace contents on commas outside nested braces."""
+    alternatives: list[str] = []
+    depth = 0
+    start = 0
+    for index, char in enumerate(value):
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+        elif char == "," and depth == 0:
+            alternatives.append(value[start:index])
+            start = index + 1
+    alternatives.append(value[start:])
+    return tuple(alternatives)
+
+
+def _has_glob_meta(segment: str) -> bool:
+    """Return whether a path segment contains glob metacharacters."""
+    return any(char in segment for char in ("*", "?", "[", "{"))
 
 
 def _grep_files(

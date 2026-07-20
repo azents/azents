@@ -115,6 +115,7 @@ message RunnerOperationRequest {
     GitCreateWorktreeOperationPayload git_create_worktree = 35;
     GitRemoveWorktreeOperationPayload git_remove_worktree = 36;
     GitDeleteBranchOperationPayload git_delete_branch = 37;
+    FileGlobOperationPayload file_glob = 38;
   }
 }
 
@@ -139,6 +140,11 @@ message FileListOperationPayload {
   string path = 1;
   bool recursive = 2;
   repeated string exclude_patterns = 3;
+}
+
+message FileGlobOperationPayload {
+  string pattern = 1;
+  repeated string exclude_patterns = 2;
 }
 
 message FileGrepOperationPayload {
@@ -292,6 +298,7 @@ message RunnerOperationFinalSuccessPayload {
     GitCreateWorktreeFinalSuccess git_create_worktree = 14;
     GitRemoveWorktreeFinalSuccess git_remove_worktree = 15;
     GitDeleteBranchFinalSuccess git_delete_branch = 16;
+    FileGlobFinalSuccess file_glob = 17;
   }
 }
 
@@ -313,6 +320,10 @@ message FileWriteFinalSuccess {
 }
 
 message FileListFinalSuccess {
+  repeated RuntimeFileListEntry entries = 1;
+}
+
+message FileGlobFinalSuccess {
   repeated RuntimeFileListEntry entries = 1;
 }
 

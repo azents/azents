@@ -16,7 +16,10 @@ from azents_runtime_control.runner import (
     RuntimeRunnerEventType,
 )
 
-from azents_runtime_runner.operations import RunnerOperations
+from azents_runtime_runner.operations import (
+    RunnerOperations,
+    _extract_glob_dir_prefix,  # pyright: ignore[reportPrivateUsage] -- Validate root-prefix parsing without traversing the host root.
+)
 from azents_runtime_runner.workspace import Workspace
 
 
@@ -165,6 +168,138 @@ async def test_file_list_recursive_with_excludes(tmp_path: Path) -> None:
     assert f"{tmp_path}/src/app.txt" in paths
     assert f"{tmp_path}/src/nested/report.txt" in paths
     assert all("node_modules" not in path for path in paths)
+
+
+@pytest.mark.asyncio
+async def test_file_glob_matches_runtime_entries_with_braces_and_excludes(
+    tmp_path: Path,
+) -> None:
+    """Runner-native glob matches files in the Runtime filesystem."""
+    (tmp_path / "src" / "nested").mkdir(parents=True)
+    (tmp_path / "src" / "app.py").write_text("print('ok')")
+    (tmp_path / "src" / "nested" / "report.txt").write_text("report")
+    (tmp_path / "src" / "nested" / "image.png").write_bytes(b"png")
+    (tmp_path / "node_modules" / "pkg").mkdir(parents=True)
+    (tmp_path / "node_modules" / "pkg" / "ignored.py").write_text("ignored")
+    client = _FakeClient()
+    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+
+    await operations.handle(
+        _operation(
+            operation_type="file.glob",
+            payload={
+                "pattern": f"{tmp_path}/**/*.{{py,txt}}",
+                "exclude_patterns": ["node_modules"],
+            },
+        )
+    )
+
+    assert client.events[-1].event_type == RuntimeRunnerEventType.FINAL_SUCCESS
+    raw_matches = client.events[-1].payload.get("matches")
+    assert isinstance(raw_matches, list)
+    assert [match["path"] for match in raw_matches if isinstance(match, dict)] == [
+        f"{tmp_path}/src/app.py",
+        f"{tmp_path}/src/nested/report.txt",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_file_glob_supports_question_mark_and_character_classes(
+    tmp_path: Path,
+) -> None:
+    """Runner-native glob supports segment-local `?` and `[]` matching."""
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "app1.py").write_text("one")
+    (tmp_path / "src" / "appA.py").write_text("alpha")
+    (tmp_path / "src" / "app-long.py").write_text("long")
+    client = _FakeClient()
+    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+
+    await operations.handle(
+        _operation(
+            operation_type="file.glob",
+            payload={"pattern": f"{tmp_path}/src/app?.[p]y"},
+        )
+    )
+
+    raw_matches = client.events[-1].payload.get("matches")
+    assert isinstance(raw_matches, list)
+    assert [match["path"] for match in raw_matches if isinstance(match, dict)] == [
+        f"{tmp_path}/src/app1.py",
+        f"{tmp_path}/src/appA.py",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_file_glob_rejects_excessive_brace_expansion(tmp_path: Path) -> None:
+    """Runner-native glob rejects brace expansions above the bounded limit."""
+    client = _FakeClient()
+    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+
+    await operations.handle(
+        _operation(
+            operation_type="file.glob",
+            payload={"pattern": f"{tmp_path}/" + "{a,b}" * 9},
+        )
+    )
+
+    assert client.events[-1].event_type == RuntimeRunnerEventType.FINAL_ERROR
+    assert client.events[-1].payload == {
+        "error_code": "INVALID_PATTERN",
+        "error_message": "Brace expansion exceeds the maximum of 256 alternatives.",
+    }
+
+
+@pytest.mark.asyncio
+async def test_file_glob_returns_matching_directories(tmp_path: Path) -> None:
+    """Runner-native glob returns directory entries as well as files."""
+    (tmp_path / "skills" / "search").mkdir(parents=True)
+    (tmp_path / "skills" / "search" / "SKILL.md").write_text("search")
+    client = _FakeClient()
+    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+
+    await operations.handle(
+        _operation(
+            operation_type="file.glob",
+            payload={"pattern": f"{tmp_path}/skills/*"},
+        )
+    )
+
+    raw_matches = client.events[-1].payload.get("matches")
+    assert isinstance(raw_matches, list)
+    match = raw_matches[0]
+    assert isinstance(match, dict)
+    assert match["path"] == f"{tmp_path}/skills/search"
+    assert match["type"] == "directory"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("pattern", ["~", "~/*.txt", "~alice/*.txt"])
+async def test_file_glob_rejects_tilde_expansion(
+    tmp_path: Path,
+    pattern: str,
+) -> None:
+    """Runner-native glob rejects process-dependent home expansion."""
+    client = _FakeClient()
+    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+
+    await operations.handle(
+        _operation(operation_type="file.glob", payload={"pattern": pattern})
+    )
+
+    assert client.events[-1].event_type == RuntimeRunnerEventType.FINAL_ERROR
+    assert client.events[-1].payload == {
+        "error_code": "INVALID_PATTERN",
+        "error_message": (
+            "Tilde expansion is not supported. Use an absolute runtime path."
+        ),
+    }
+
+
+def test_glob_root_pattern_uses_filesystem_root_prefix() -> None:
+    """A glob in the first absolute segment scans from the filesystem root."""
+    assert _extract_glob_dir_prefix("/*.txt") == "/"
+    assert _extract_glob_dir_prefix("/**/report.txt") == "/"
 
 
 @pytest.mark.asyncio

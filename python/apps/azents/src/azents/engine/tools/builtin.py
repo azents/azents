@@ -1320,6 +1320,48 @@ class RuntimeRunnerFileStorage:
             )
         ]
 
+    async def glob(
+        self,
+        pattern: str,
+        *,
+        agent_id: str,
+        exclude_patterns: list[str] | None,
+    ) -> list[RuntimeAttachment]:
+        """Match Runtime file entries through one native Runner operation."""
+        runtime = await self._ready_runtime(agent_id)
+        try:
+            self._count_runtime_operation()
+            result = await self.runner_operations.glob_files(
+                runtime_id=runtime.id,
+                runner_generation=runtime.runner_generation,
+                owner_session_id=self.owner_session_id,
+                pattern=pattern,
+                exclude_patterns=exclude_patterns,
+                deadline_at=_runtime_file_operation_deadline(),
+            )
+        except RuntimeRunnerOperationFailedError as exc:
+            _raise_storage_error(exc)
+        except (
+            RuntimeRunnerOperationUnavailable,
+            RuntimeRunnerOperationGenerationError,
+        ) as exc:
+            raise RuntimeStorageError(str(exc)) from exc
+        return [
+            RuntimeAttachment(
+                uri=entry.path,
+                media_type=(
+                    "inode/directory"
+                    if entry.type == "directory"
+                    else guess_media_type(entry.path)
+                ),
+                size=entry.size_bytes or 0,
+                name=PurePosixPath(entry.path).name,
+                text_preview=None,
+            )
+            for entry in result.entries
+            if entry.type in {"file", "directory"}
+        ]
+
     async def list_dirs(self, path: str, *, agent_id: str) -> list[str]:
         """List directory names below a Runtime directory."""
         runtime = await self._ready_runtime(agent_id)

@@ -5,10 +5,13 @@ Provides helpers reused in tests, such as fake storage.
 
 import fnmatch
 import re
+from functools import lru_cache
 
 from azents.engine.io.attachments import RuntimeAttachment
 from azents.services.file_storage import GrepFileMatch, GrepLineMatch, GrepResult
 from azents.services.session_storage import guess_media_type
+
+_MAX_BRACE_EXPANSIONS = 256
 
 
 class FakeSharedStorage:
@@ -121,6 +124,31 @@ class FakeSharedStorage:
             if recursive or "/" not in remainder:
                 by_uri[key] = _file_attachment(key, data)
         return [by_uri[uri] for uri in sorted(by_uri)]
+
+    async def glob(
+        self,
+        pattern: str,
+        *,
+        agent_id: str = "",
+        user_id: str = "",
+        exclude_patterns: list[str] | None,
+    ) -> list[RuntimeAttachment]:
+        """Return entries matching the Runtime-native glob contract."""
+        del user_id
+        prefix = _extract_glob_dir_prefix(pattern)
+        attachments = await self.list(
+            prefix,
+            agent_id=agent_id,
+            recursive=_requires_recursive_glob_list(pattern),
+            exclude_patterns=exclude_patterns,
+            include_directories=True,
+        )
+        expanded_patterns = _expand_braces(pattern)
+        return [
+            attachment
+            for attachment in attachments
+            if _match_glob_path(attachment.uri, expanded_patterns)
+        ]
 
     async def list_dirs(
         self,
@@ -238,6 +266,139 @@ class FakeSharedStorage:
         """Delete file."""
         if path in self._files:
             del self._files[path]
+
+
+def _extract_glob_dir_prefix(pattern: str) -> str:
+    """Extract the directory prefix before the first glob segment."""
+    parts: list[str] = []
+    for segment in pattern.split("/"):
+        if _has_glob_meta(segment):
+            break
+        parts.append(segment)
+    prefix = "/".join(parts)
+    if prefix:
+        return prefix
+    return "/" if pattern.startswith("/") else "."
+
+
+def _requires_recursive_glob_list(pattern: str) -> bool:
+    """Return whether a glob needs nested paths below its fixed prefix."""
+    prefix = _extract_glob_dir_prefix(pattern)
+    if prefix == "/":
+        suffix = pattern.lstrip("/")
+    elif prefix == ".":
+        suffix = pattern
+    else:
+        suffix = pattern[len(prefix) :].strip("/")
+    return "/" in suffix or "**" in suffix
+
+
+def _match_glob_path(path: str, expanded_patterns: tuple[str, ...]) -> bool:
+    """Match expanded glob patterns while preserving path segment boundaries."""
+    path_segments = path.strip("/").split("/") if path != "/" else []
+    for expanded_pattern in expanded_patterns:
+        pattern_segments = (
+            expanded_pattern.strip("/").split("/") if expanded_pattern != "/" else []
+        )
+        if _match_glob_segments(path_segments, pattern_segments):
+            return True
+    return False
+
+
+def _match_glob_segments(
+    path_segments: list[str],
+    pattern_segments: list[str],
+) -> bool:
+    """Match path segments with support for the recursive `**` segment."""
+
+    @lru_cache(maxsize=None)
+    def match(path_index: int, pattern_index: int) -> bool:
+        if pattern_index == len(pattern_segments):
+            return path_index == len(path_segments)
+        pattern_segment = pattern_segments[pattern_index]
+        if pattern_segment == "**":
+            if match(path_index, pattern_index + 1):
+                return True
+            return path_index < len(path_segments) and match(
+                path_index + 1, pattern_index
+            )
+        if path_index == len(path_segments):
+            return False
+        return fnmatch.fnmatchcase(
+            path_segments[path_index], pattern_segment
+        ) and match(path_index + 1, pattern_index + 1)
+
+    return match(0, 0)
+
+
+def _expand_braces(pattern: str) -> tuple[str, ...]:
+    """Expand a bounded number of comma-separated brace alternatives."""
+    pending = [pattern]
+    expansions: list[str] = []
+    while pending:
+        candidate = pending.pop()
+        expandable = _find_expandable_brace(candidate)
+        if expandable is None:
+            expansions.append(candidate)
+            continue
+        opening, closing, alternatives = expandable
+        prefix = candidate[:opening]
+        suffix = candidate[closing + 1 :]
+        pending.extend(
+            f"{prefix}{alternative}{suffix}" for alternative in reversed(alternatives)
+        )
+        if len(expansions) + len(pending) > _MAX_BRACE_EXPANSIONS:
+            raise ValueError(
+                f"Brace expansion exceeds the maximum of {_MAX_BRACE_EXPANSIONS} "
+                "alternatives."
+            )
+    return tuple(expansions)
+
+
+def _find_expandable_brace(
+    pattern: str,
+) -> tuple[int, int, tuple[str, ...]] | None:
+    """Find the first balanced brace containing top-level alternatives."""
+    for opening, opening_char in enumerate(pattern):
+        if opening_char != "{":
+            continue
+        depth = 0
+        for closing in range(opening, len(pattern)):
+            char = pattern[closing]
+            if char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    alternatives = _split_brace_alternatives(
+                        pattern[opening + 1 : closing]
+                    )
+                    if len(alternatives) >= 2:
+                        return opening, closing, alternatives
+                    break
+    return None
+
+
+def _split_brace_alternatives(value: str) -> tuple[str, ...]:
+    """Split brace contents on commas outside nested braces."""
+    alternatives: list[str] = []
+    depth = 0
+    start = 0
+    for index, char in enumerate(value):
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+        elif char == "," and depth == 0:
+            alternatives.append(value[start:index])
+            start = index + 1
+    alternatives.append(value[start:])
+    return tuple(alternatives)
+
+
+def _has_glob_meta(segment: str) -> bool:
+    """Return whether a path segment contains glob metacharacters."""
+    return any(char in segment for char in ("*", "?", "[", "{"))
 
 
 def _excluded(relative_path: str, patterns: list[str]) -> bool:

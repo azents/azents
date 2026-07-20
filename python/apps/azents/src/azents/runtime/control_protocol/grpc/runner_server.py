@@ -677,6 +677,12 @@ def _copy_operation_payload(
             _str_list_payload(payload, "exclude_patterns")
         )
         return
+    if operation_type == "file.glob":
+        message.file_glob.pattern = _str_payload(payload, "pattern")
+        message.file_glob.exclude_patterns.extend(
+            _str_list_payload(payload, "exclude_patterns")
+        )
+        return
     if operation_type == "file.grep":
         message.file_grep.path = _str_payload(payload, "path")
         message.file_grep.pattern = _str_payload(payload, "pattern")

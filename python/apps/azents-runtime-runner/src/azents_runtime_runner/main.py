@@ -22,7 +22,7 @@ from azents_runtime_control.runner import (
 from azents_runtime_runner.operations import RunnerOperations
 from azents_runtime_runner.workspace import Workspace
 
-_PROTOCOL_VERSION = "2026-05-25"
+_PROTOCOL_VERSION = "2026-07-20"
 _CAPABILITIES = (
     "bash",
     "file.read",
@@ -30,6 +30,7 @@ _CAPABILITIES = (
     "file.upload",
     "file.download",
     "file.list",
+    "file.glob",
     "file.grep",
     "file.stat",
     "process.start",

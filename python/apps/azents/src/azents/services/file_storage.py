@@ -71,6 +71,14 @@ class FileStorage(Protocol):
         include_directories: bool = False,
     ) -> list[RuntimeAttachment]: ...
 
+    async def glob(
+        self,
+        pattern: str,
+        *,
+        agent_id: str,
+        exclude_patterns: list[str] | None,
+    ) -> list[RuntimeAttachment]: ...
+
     async def list_dirs(self, path: str, *, agent_id: str) -> list[str]: ...
 
     async def grep(

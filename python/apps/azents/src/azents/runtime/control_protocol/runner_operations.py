@@ -648,6 +648,41 @@ class RuntimeRunnerOperationClient:
             deadline_at=deadline_at,
         )
 
+    async def glob_files(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        owner_session_id: str | None,
+        pattern: str,
+        exclude_patterns: list[str] | None,
+        deadline_at: datetime,
+    ) -> RuntimeFileListResult:
+        """Run a foreground file glob operation and wait for final result."""
+        payload: dict[str, JsonValue] = {"pattern": pattern}
+        if exclude_patterns is not None:
+            payload["exclude_patterns"] = list(exclude_patterns)
+        dispatch = await self._dispatch_runner_operation(
+            RuntimeRunnerOperation(
+                runtime_id=runtime_id,
+                runner_generation=runner_generation,
+                operation_type="file.glob",
+                owner_session_id=owner_session_id,
+                payload=payload,
+                deadline_at=deadline_at,
+                body_stream_id=None,
+            )
+        )
+        return await self.resume_file_glob(
+            reply_stream_id=dispatch.reply_stream_id,
+            after_cursor=None,
+            request_id=dispatch.request_id,
+            operation_id=dispatch.operation_id,
+            runtime_id=runtime_id,
+            generation=runner_generation,
+            deadline_at=deadline_at,
+        )
+
     async def stat_file(
         self,
         *,
@@ -1080,6 +1115,28 @@ class RuntimeRunnerOperationClient:
         )
         entries = tuple(_file_list_entries(final.event.payload))
         return RuntimeFileListResult(entries=entries, final_cursor=final.cursor)
+
+    async def resume_file_glob(
+        self,
+        *,
+        reply_stream_id: str,
+        after_cursor: str | None,
+        request_id: str | None = None,
+        operation_id: str | None = None,
+        runtime_id: str | None = None,
+        generation: int | None = None,
+        deadline_at: datetime,
+    ) -> RuntimeFileListResult:
+        """Resume reading a file glob reply stream until final result."""
+        return await self.resume_file_list(
+            reply_stream_id=reply_stream_id,
+            after_cursor=after_cursor,
+            request_id=request_id,
+            operation_id=operation_id,
+            runtime_id=runtime_id,
+            generation=generation,
+            deadline_at=deadline_at,
+        )
 
     async def resume_file_stat(
         self,

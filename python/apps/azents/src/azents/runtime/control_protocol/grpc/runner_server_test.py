@@ -595,6 +595,93 @@ async def test_runner_grpc_relays_git_operation_payload() -> None:
 
 
 @pytest.mark.asyncio
+async def test_runner_grpc_round_trips_file_glob_payload_and_result() -> None:
+    """The gRPC bridge preserves file.glob request and result entries."""
+    store = InMemoryRuntimeCoordinationStore()
+    service = RuntimeControlProtocolService(
+        store,
+        request_id_factory=lambda: "req-glob",
+    )
+    servicer = _servicer(service, store, FakeStateSink())
+    inbound = QueueIterator()
+    await inbound.put(_register_message())
+
+    stream = servicer.ConnectRunner(inbound, FakeGrpcContext())
+    accepted = await anext(stream)
+    result = await service.dispatch_runner_operation(
+        RuntimeRunnerOperation(
+            runtime_id="runtime-1",
+            runner_generation=accepted.register_accepted.generation,
+            operation_type="file.glob",
+            owner_session_id="session-1",
+            payload={
+                "pattern": "/workspace/agent/**/*.py",
+                "exclude_patterns": [".git", "node_modules"],
+            },
+            deadline_at=datetime.now(UTC) + timedelta(seconds=30),
+            body_stream_id=None,
+        ),
+        created_at=_now(),
+    )
+
+    command = await anext(stream)
+    assert command.operation_request.WhichOneof("payload") == "file_glob"
+    assert command.operation_request.file_glob.pattern == ("/workspace/agent/**/*.py")
+    assert list(command.operation_request.file_glob.exclude_patterns) == [
+        ".git",
+        "node_modules",
+    ]
+
+    await inbound.put(
+        runtime_runner_control_pb2.RunnerMessage(
+            connection_id="connection-1",
+            request_id="req-glob",
+            generation=accepted.register_accepted.generation,
+            operation_event=runtime_runner_control_pb2.RunnerOperationEvent(
+                runtime_id="runtime-1",
+                operation_id=result.operation_id,
+                generation=accepted.register_accepted.generation,
+                event_type="final_success",
+                created_at=_timestamp(_now()),
+                final=True,
+                final_success=(
+                    runtime_runner_control_pb2.RunnerOperationFinalSuccessPayload(
+                        file_glob=runtime_runner_control_pb2.FileGlobFinalSuccess(
+                            entries=[
+                                runtime_runner_control_pb2.RuntimeFileListEntry(
+                                    path="/workspace/agent/src/app.py",
+                                    type="file",
+                                    size_bytes=12,
+                                )
+                            ]
+                        )
+                    )
+                ),
+            ),
+        )
+    )
+    await asyncio.sleep(0)
+    replies = await service.read_replies(
+        reply_stream_id=result.reply_stream_id,
+        after_cursor=None,
+        limit=10,
+    )
+
+    assert replies[-1].event.event_type is RuntimeReplyEventType.FINAL_SUCCESS
+    assert replies[-1].event.payload == {
+        "entries": [
+            {
+                "path": "/workspace/agent/src/app.py",
+                "type": "file",
+                "size_bytes": 12,
+                "modified_at": None,
+            }
+        ]
+    }
+    await stream.aclose()
+
+
+@pytest.mark.asyncio
 async def test_runner_grpc_rejects_missing_control_token() -> None:
     store = InMemoryRuntimeCoordinationStore()
     servicer = _servicer(

@@ -247,6 +247,19 @@ class RuntimeRunnerOperationClient(Protocol):
         """Run file list operation and return result."""
         ...
 
+    async def glob_files(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        owner_session_id: str | None,
+        pattern: str,
+        exclude_patterns: list[str] | None,
+        deadline_at: datetime,
+    ) -> RuntimeFileListResult:
+        """Run file glob operation and return result."""
+        ...
+
     async def stat_file(
         self,
         *,
