@@ -101,7 +101,7 @@ api_routes:
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-07-20
-spec_version: 119
+spec_version: 120
 ---
 
 # Conversation & Events
@@ -594,13 +594,34 @@ output uses native output identity or response/content indices, reasoning uses n
 projection root, client tool call/result pairs use `call_id`, and each provider tool call uses its own
 `call_id`. A durable provider call replaces the matching live call without result-merge state.
 Provider-tool calls render provider-neutral running, completed, failed, or historical fallback states
-from canonical status. Semantic names such as `web_search` and `image_generation` select presentation
-labels without branching on provider identity or execution ownership. Provider projection reads text
-and references from `semantic.output` and projects only `AttachmentOutputPart` values as UI files;
-`FileOutputPart` remains model-only. Client-tool results preserve their own completion/failure status
-and canonical output parts. An available `image_generation` attachment renders directly in the owning
-provider-tool or client-tool card without requiring diagnostic details to expand; preview and download
-continue through the Exchange attachment surface.
+from canonical status. Provider projection reads text and references from `semantic.output` and
+projects only `AttachmentOutputPart` values as UI files; `FileOutputPart` remains model-only.
+Client-tool results preserve their own completion/failure status and canonical output parts.
+
+The chat presentation layer groups consecutive client and provider tool projections into one frontend-only
+activity without changing event, API, or tool payload ownership. A model-turn marker, reasoning-only
+assistant projection, or compaction occurring between tool calls remains inside the current activity.
+A user message, visible assistant content or attachment delivery, promoted tool deliverable, terminal run
+marker, or explicit action-execution placement closes the activity before later tool work. Mixed client
+and provider calls retain transcript order. Authorization requests do not change activity boundaries; the
+first pending request is rendered as a compact action on the latest activity when one exists, while any
+additional requests remain standalone.
+
+Each activity is a monochrome `Activity` row that is collapsed by default and summarizes turn, call,
+running, failed, and approval state. Expanding it reveals reasoning/compaction context and consecutive
+semantic phases; expanding a phase reveals the existing raw tool cards. Validated `read`, `grep`, `glob`,
+`web_search`, and `file_search` payloads use the inspection phase; `exec_command`, `write_stdin`, and
+`code_interpreter` use execution; `write` and `edit` use changes; and validated `image_generation` uses
+generation. Client aliases prefixed with `functions.` are normalized before matching. Unknown tool names,
+malformed arguments, schema mismatches, adapter failures, and terminal outputs that do not match the
+known string projection use the Generic phase and retain the raw card rather than attempting specialized
+presentation.
+
+A completed, validated client- or provider-owned `image_generation` call promotes its available Exchange
+image attachments to a standalone deliverable immediately after the activity. The promoted deliverable
+closes that activity, uses the ordinary Exchange preview/download surface, and hides only the same image
+URIs from the nested raw tool card to prevent duplicate presentation. Non-image and otherwise
+non-promoted operational attachments remain available in raw tool details.
 Live `agent_message` events use the same source-labeled internal-agent row as their durable form. When
 a live entity and durable event describe the same semantic output, the durable projection replaces
 the live projection without a duplicate or disappearance.
@@ -865,6 +886,7 @@ Current verification:
 
 ## 11. Changelog
 
+- **2026-07-20** — v120. Added frontend-only continuous tool activity grouping, validated semantic phases with Generic fallback, compact authorization placement, and standalone generated-image deliverables without duplicate nested attachments.
 - **2026-07-20** — v119. Swapped the context-window and subscription-usage affordance locations, restored automatic context-detail scrolling, and kept subagent pickers context-only.
 - **2026-07-20** — v118. Moved context-window usage details from the session header into the model picker, made subscription usage an independent composer popover, and removed model/effort picker exposure from read-only subagent composers.
 - **2026-07-20** — v117. Replaced policy-aware archive confirmation with concise delete-style session-removal copy while preserving archive-backed retention behavior.

@@ -16,7 +16,7 @@ Design documents are accumulated records and are not listed individually in this
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
 | [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-07-18 | 50 |
-| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-20 | 119 |
+| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-20 | 120 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-16 | 9 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-17 | 5 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-07-19 | 16 |
@@ -35,7 +35,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-19 | 36 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-07-19 | 17 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-07-20 | 29 |
-| [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-07-20 | 21 |
+| [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-07-20 | 22 |
 | [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-07-19 | 1 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
 | [OpenRouter API Key Provider Flow](spec/flow/openrouter-api-key.md) | @Hardtack | 2026-07-19 | 3 |

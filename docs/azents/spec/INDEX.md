@@ -13,7 +13,7 @@ Details of all living specs. Synchronized from frontmatter.
 | Domain | Title | Owner | Last Verified | Version |
 |---|---|---|---|---|
 | agent | [Agent Domain Spec](domain/agent.md) | @Hardtack | 2026-07-18 | 50 |
-| conversation | [Conversation & Events](domain/conversation.md) | @Hardtack | 2026-07-20 | 119 |
+| conversation | [Conversation & Events](domain/conversation.md) | @Hardtack | 2026-07-20 | 120 |
 | goal | [Goal Domain Spec](domain/goal.md) | - | 2026-07-16 | 9 |
 | memory | [Memory](domain/memory.md) | @Hardtack | 2026-07-17 | 5 |
 | model-catalog | [Model Catalog Domain Spec](domain/model-catalog.md) | - | 2026-07-19 | 16 |
@@ -32,7 +32,7 @@ Details of all living specs. Synchronized from frontmatter.
 | [Chat Session Resync](flow/chat-session-resync.md) | @Hardtack | 2026-07-19 | 36 |
 | [ChatGPT OAuth Flow](flow/chatgpt-oauth.md) | @Hardtack | 2026-07-19 | 17 |
 | [Context Compaction](flow/context-compaction.md) | @Hardtack | 2026-07-20 | 29 |
-| [File Exchange Storage](flow/file-exchange-storage.md) | @Hardtack | 2026-07-20 | 21 |
+| [File Exchange Storage](flow/file-exchange-storage.md) | @Hardtack | 2026-07-20 | 22 |
 | [Kimi OAuth Flow](flow/kimi-oauth.md) | @Hardtack | 2026-07-19 | 1 |
 | [MCP OAuth Flow](flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
 | [OpenRouter API Key Provider Flow](flow/openrouter-api-key.md) | @Hardtack | 2026-07-19 | 3 |
