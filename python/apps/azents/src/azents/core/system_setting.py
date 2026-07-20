@@ -298,14 +298,14 @@ class SystemSettingGenerationHasher:
         return hmac.new(self.key, canonical, hashlib.sha256).hexdigest()
 
 
-@dataclass(frozen=True)
+@dataclass
 class SystemSettingSectionNotRegistered(Exception):
     """Requested Section is not compiled into this process."""
 
     section: SystemSettingSection
 
 
-@dataclass(frozen=True)
+@dataclass
 class SystemSettingNewerSchemaVersion(Exception):
     """Persisted Section schema is newer than the compiled definition."""
 
@@ -314,7 +314,7 @@ class SystemSettingNewerSchemaVersion(Exception):
     compiled_version: int
 
 
-@dataclass(frozen=True)
+@dataclass
 class SystemSettingMissingSchemaMigration(Exception):
     """No registered migration can read an older persisted payload."""
 
@@ -324,7 +324,7 @@ class SystemSettingMissingSchemaMigration(Exception):
     missing_from_version: int
 
 
-@dataclass(frozen=True)
+@dataclass
 class SystemSettingVersionConflict(Exception):
     """Mutation expected a stale Admin base version."""
 
@@ -333,7 +333,7 @@ class SystemSettingVersionConflict(Exception):
     current_version: int
 
 
-@dataclass(frozen=True)
+@dataclass
 class SystemSettingEnvironmentFieldReadOnly(Exception):
     """Mutation attempted to write an environment-owned field."""
 
@@ -342,7 +342,7 @@ class SystemSettingEnvironmentFieldReadOnly(Exception):
     environment_variable: str
 
 
-@dataclass(frozen=True)
+@dataclass
 class SystemSettingEffectiveGenerationChanged(Exception):
     """Effective Section changed while an external operation was in flight."""
 
@@ -351,14 +351,14 @@ class SystemSettingEffectiveGenerationChanged(Exception):
     current_generation: str
 
 
-@dataclass(frozen=True)
+@dataclass
 class SystemSettingCandidateNotFound(Exception):
     """Requested candidate does not exist."""
 
     section: SystemSettingSection
 
 
-@dataclass(frozen=True)
+@dataclass
 class SystemSettingCandidateExpired(Exception):
     """Requested candidate has expired."""
 

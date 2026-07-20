@@ -240,7 +240,7 @@ class SystemSettingRepository:
                 code=write.code,
                 message=write.message,
                 action_hint=write.action_hint,
-                metadata=write.metadata,
+                result_metadata=write.metadata,
                 checked_by_user_id=write.checked_by_user_id,
                 checked_at=write.checked_at,
             )
@@ -252,7 +252,7 @@ class SystemSettingRepository:
                     "code": write.code,
                     "message": write.message,
                     "action_hint": write.action_hint,
-                    "metadata": write.metadata,
+                    RDBSystemSettingHealth.result_metadata: write.metadata,
                     "checked_by_user_id": write.checked_by_user_id,
                     "checked_at": write.checked_at,
                 },
