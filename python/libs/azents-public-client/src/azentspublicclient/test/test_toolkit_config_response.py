@@ -51,6 +51,10 @@ class TestToolkitConfigResponse(unittest.TestCase):
                     resource = '', 
                     scope = '', 
                     expires_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), ),
+                authorization_state = azentspublicclient.models.git_hub_platform_authorization_state_response.GitHubPlatformAuthorizationStateResponse(
+                    type = 'github_platform_app',
+                    status = 'reconnect_required',
+                    reason = 'app_identity_changed', ),
                 created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
                 updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f')
             )

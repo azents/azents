@@ -88,12 +88,6 @@ class Settings(BaseSettings):
     model_stream_absolute_timeout_seconds: float = 1_800.0
     model_stream_close_grace_seconds: float = 5.0
 
-    # GitHub Platform App (JWT)
-    github_platform_app_id: str | None = None
-    github_platform_private_key: str | None = None
-    # GitHub Platform App; for OAuth installation list lookup
-    github_platform_client_id: str | None = None
-    github_platform_client_secret: str | None = None
     # OAuth2 for per-user MCP authentication
     oauth_secret_key: str = ""
 
@@ -277,15 +271,6 @@ class SystemBootstrapConfig(BaseModel):
     setup_token: str | None
 
 
-class GitHubConfig(BaseModel):
-    """GitHub Platform settings."""
-
-    platform_app_id: str | None = None
-    platform_private_key: str | None = None
-    platform_client_id: str | None = None
-    platform_client_secret: str | None = None
-
-
 class CredentialEncryptionConfig(BaseModel):
     """Credential encryption settings."""
 
@@ -370,7 +355,6 @@ class Config(BaseModel):
     runtime: RuntimeConfig
     model_stream_timeout: ModelStreamTimeoutConfig
     openai_responses_websocket_enabled: bool
-    github: GitHubConfig | None = None
     web_url: str = ""
     api_url: str = ""
     oauth_secret_key: str = ""
@@ -452,17 +436,6 @@ class Config(BaseModel):
             openai_responses_websocket_enabled=(
                 settings.openai_responses_websocket_enabled
             ),
-            github=GitHubConfig(
-                platform_app_id=settings.github_platform_app_id,
-                platform_private_key=settings.github_platform_private_key,
-                platform_client_id=settings.github_platform_client_id,
-                platform_client_secret=settings.github_platform_client_secret,
-            )
-            if (
-                settings.github_platform_app_id is not None
-                or settings.github_platform_client_id is not None
-            )
-            else None,
             web_url=settings.web_url or "",
             api_url=settings.api_url or "",
             oauth_secret_key=settings.oauth_secret_key,

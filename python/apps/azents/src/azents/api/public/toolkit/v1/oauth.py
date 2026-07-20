@@ -57,6 +57,9 @@ from azents.repos.github_user_installation import (
 )
 from azents.repos.mcp_oauth_connection import MCPOAuthConnectionRepository
 from azents.repos.toolkit import ToolkitRepository
+from azents.services.github_platform_system_setting.runtime import (
+    PlatformGitHubAppRuntimeService,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +123,7 @@ class GitHubPlatformInstallUrlResponse(BaseModel):
 @router.get("/workspaces/{handle}/github/platform-install-url")
 async def get_github_platform_install_url(
     member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
-    config: Annotated[Config, Depends(get_config)],
+    platform_runtime: Annotated[PlatformGitHubAppRuntimeService, Depends()],
     *,
     handle: str,
 ) -> GitHubPlatformInstallUrlResponse:
@@ -135,12 +138,8 @@ async def get_github_platform_install_url(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Toolkit write permission required.",
         )
-    github_config = config.github
-    if (
-        github_config is None
-        or github_config.platform_app_id is None
-        or github_config.platform_private_key is None
-    ):
+    platform = await platform_runtime.resolve()
+    if platform.app_id is None or platform.private_key is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="GitHub Platform App is not configured.",
@@ -148,8 +147,8 @@ async def get_github_platform_install_url(
 
     try:
         jwt_token = create_github_app_jwt(
-            github_config.platform_app_id,
-            github_config.platform_private_key,
+            platform.app_id,
+            platform.private_key,
         )
         slug = await get_app_slug(jwt_token)
     except httpx.HTTPStatusError as exc:
@@ -180,6 +179,7 @@ class GitHubPlatformOAuthUrlResponse(BaseModel):
 async def get_github_platform_oauth_url(
     member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
     config: Annotated[Config, Depends(get_config)],
+    platform_runtime: Annotated[PlatformGitHubAppRuntimeService, Depends()],
     *,
     handle: str,
 ) -> GitHubPlatformOAuthUrlResponse:
@@ -193,18 +193,21 @@ async def get_github_platform_oauth_url(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Toolkit write permission required.",
         )
-    github_config = config.github
-    if github_config is None or github_config.platform_client_id is None:
+    platform = await platform_runtime.resolve()
+    if platform.client_id is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="GitHub Platform App OAuth is not configured.",
         )
 
     redirect_uri = f"{config.web_url}/oauth/github/callback" if config.web_url else ""
-    state = create_platform_oauth_state(config.credential_encryption.key)
+    state = create_platform_oauth_state(
+        config.credential_encryption.key,
+        effective_generation=platform.effective_generation,
+    )
     oauth_url = (
         "https://github.com/login/oauth/authorize"
-        f"?client_id={github_config.platform_client_id}"
+        f"?client_id={platform.client_id}"
         f"&redirect_uri={redirect_uri}"
         f"&state={state}"
     )
@@ -228,6 +231,7 @@ class GitHubPlatformInstallationsResponse(BaseModel):
 async def get_github_platform_installations(
     member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
     config: Annotated[Config, Depends(get_config)],
+    platform_runtime: Annotated[PlatformGitHubAppRuntimeService, Depends()],
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
     ],
@@ -247,19 +251,29 @@ async def get_github_platform_installations(
             detail="Toolkit write permission required.",
         )
 
-    # Prevent CSRF by validating state
-    if not verify_platform_oauth_state(body.state, config.credential_encryption.key):
+    oauth_state = verify_platform_oauth_state(
+        body.state,
+        config.credential_encryption.key,
+    )
+    if oauth_state is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid state parameter.",
         )
 
-    github_config = config.github
+    platform = await platform_runtime.resolve()
+    if oauth_state.effective_generation != platform.effective_generation:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "system_setting_changed",
+                "message": "Platform GitHub App settings changed. Restart OAuth.",
+            },
+        )
     if (
-        github_config is None
-        or github_config.platform_app_id is None
-        or github_config.platform_client_id is None
-        or github_config.platform_client_secret is None
+        platform.app_id is None
+        or platform.client_id is None
+        or platform.client_secret is None
     ):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -269,8 +283,8 @@ async def get_github_platform_installations(
     # Exchange OAuth code for access token
     try:
         user_token = await exchange_oauth_code(
-            github_config.platform_client_id,
-            github_config.platform_client_secret,
+            platform.client_id,
+            platform.client_secret,
             body.code,
         )
     except ValueError as exc:
@@ -297,14 +311,14 @@ async def get_github_platform_installations(
         await install_repo.sync(
             session,
             member.user_id,
-            github_config.platform_app_id,
+            platform.app_id,
             raw_installations,
         )
 
     # Immediately revoke the temporary token after use
     await revoke_oauth_token(
-        github_config.platform_client_id,
-        github_config.platform_client_secret,
+        platform.client_id,
+        platform.client_secret,
         user_token,
     )
 

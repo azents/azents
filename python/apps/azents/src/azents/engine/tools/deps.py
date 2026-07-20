@@ -25,6 +25,9 @@ from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.mcp_oauth_connection import MCPOAuthConnectionRepository
 from azents.services.artifact import ArtifactService
+from azents.services.github_platform_system_setting.runtime import (
+    PlatformGitHubAppRuntimeService,
+)
 from azents.testing.runtime_hooks import TestenvRuntimeHookQAProvider
 
 
@@ -35,16 +38,17 @@ def get_toolkit_registry(
     ],
     config: Annotated[Config, Depends(get_config)],
     artifact_service: Annotated[ArtifactService, Depends(ArtifactService)],
+    github_runtime: Annotated[PlatformGitHubAppRuntimeService, Depends()],
 ) -> dict[str, ToolkitProvider[Any]]:
     """Create the Toolkit registry.
 
     :param cipher: Credential encryption/decryption for the MCP toolkit repo
     :param session_manager: DB session manager for MCP toolkits
-    :param config: Application settings for GitHub Platform App settings
+    :param config: Process-wide application settings
     :param artifact_service: Service that stores MCP binary output
+    :param github_runtime: Operation-boundary Platform GitHub App resolver
     :return: Mapping from toolkit_type to ToolkitProvider instances
     """
-    github_config = config.github
     registry: dict[str, ToolkitProvider[Any]] = {
         "mcp": McpToolkitProvider(
             connection_repo=MCPOAuthConnectionRepository(cipher=cipher),
@@ -52,10 +56,7 @@ def get_toolkit_registry(
             artifact_service=artifact_service,
         ),
         "github": GitHubToolkitProvider(
-            platform_app_id=(github_config.platform_app_id if github_config else None),
-            platform_private_key=(
-                github_config.platform_private_key if github_config else None
-            ),
+            platform_runtime=github_runtime,
             session_manager=session_manager,
         ),
         "notion": NotionToolkitProvider(

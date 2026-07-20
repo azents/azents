@@ -12468,6 +12468,31 @@
         "title": "GitHubInstallationItem",
         "description": "GitHub App installation item."
       },
+      "GitHubPlatformAuthorizationStateResponse": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "github_platform_app",
+            "title": "Type"
+          },
+          "status": {
+            "type": "string",
+            "const": "reconnect_required",
+            "title": "Status"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/PlatformGitHubAppAuthorizationReason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "status",
+          "reason"
+        ],
+        "title": "GitHubPlatformAuthorizationStateResponse",
+        "description": "Redacted reconnect state for a Platform GitHub Toolkit."
+      },
       "GitHubPlatformInstallUrlResponse": {
         "properties": {
           "install_url": {
@@ -15067,6 +15092,15 @@
         "title": "PasswordLoginResponse",
         "description": "Password login response."
       },
+      "PlatformGitHubAppAuthorizationReason": {
+        "type": "string",
+        "enum": [
+          "app_identity_changed",
+          "legacy_binding_unbound"
+        ],
+        "title": "PlatformGitHubAppAuthorizationReason",
+        "description": "Stable Public reason for a Platform Toolkit reconnect requirement."
+      },
       "PreviewPasswordResetTokenRequest": {
         "properties": {
           "token": {
@@ -17435,6 +17469,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/MCPOAuthConnectionSummaryResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "authorization_state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GitHubPlatformAuthorizationStateResponse"
               },
               {
                 "type": "null"

@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.crypto import CredentialCipher
 from azents.core.deps import get_credential_cipher
 from azents.core.enums import ToolkitScopeType
-from azents.core.github_credentials import GitHubSecrets
+from azents.core.github_credentials import GitHubSecrets, GitHubSecretsAppPlatform
 from azents.core.mcp_credentials import McpSecrets
 from azents.core.tools import McpToolkitConfig, ToolkitProvider, ToolkitType
 from azents.engine.tools.deps import get_toolkit_registry
@@ -37,6 +37,9 @@ from azents.repos.toolkit.data import (
 )
 from azents.repos.toolkit.data import (
     DuplicateSlug as RepoDuplicateSlug,
+)
+from azents.services.github_platform_system_setting.runtime import (
+    PlatformGitHubAppRuntimeService,
 )
 
 from .data import (
@@ -111,6 +114,7 @@ class ToolkitService:
     toolkit_registry: Annotated[
         dict[str, ToolkitProvider[Any]], Depends(get_toolkit_registry)
     ]
+    github_runtime: Annotated[PlatformGitHubAppRuntimeService, Depends()]
 
     # ------------------------------------------------------------------ #
     # Toolkit CRUD (for Manager)
@@ -581,11 +585,54 @@ class ToolkitService:
     # ------------------------------------------------------------------ #
 
     async def _attach_oauth_connection(self, toolkit: ToolkitOutput) -> ToolkitOutput:
-        """Attach MCP OAuth connection summary to Toolkit output.
+        """Attach redacted authorization state to one Toolkit output.
 
         :param toolkit: Toolkit output
-        :return: Toolkit output with OAuth connection summary
+        :return: Toolkit output with public authorization state
         """
+        result = await self._attach_mcp_oauth_connection(toolkit)
+        platform_credentials = self._platform_credentials(result)
+        if platform_credentials is None:
+            return result
+        platform = await self.github_runtime.resolve()
+        authorization_state = self.github_runtime.authorization_state(
+            platform_credentials,
+            effective_app_id=platform.app_id,
+        )
+        return result.model_copy(update={"authorization_state": authorization_state})
+
+    async def _attach_oauth_connections(
+        self, toolkits: list[ToolkitOutput]
+    ) -> list[ToolkitOutput]:
+        """Attach public authorization states using one Platform snapshot."""
+        results = [
+            await self._attach_mcp_oauth_connection(toolkit) for toolkit in toolkits
+        ]
+        platform_items = [
+            (toolkit, self._platform_credentials(toolkit)) for toolkit in results
+        ]
+        if not any(credentials is not None for _, credentials in platform_items):
+            return results
+        platform = await self.github_runtime.resolve()
+        return [
+            toolkit.model_copy(
+                update={
+                    "authorization_state": self.github_runtime.authorization_state(
+                        credentials,
+                        effective_app_id=platform.app_id,
+                    )
+                }
+            )
+            if credentials is not None
+            else toolkit
+            for toolkit, credentials in platform_items
+        ]
+
+    async def _attach_mcp_oauth_connection(
+        self,
+        toolkit: ToolkitOutput,
+    ) -> ToolkitOutput:
+        """Attach an MCP OAuth connection summary when applicable."""
         mcp_config = _resolve_mcp_config(
             toolkit.toolkit_type, toolkit.config, self.toolkit_registry
         )
@@ -597,14 +644,17 @@ class ToolkitService:
             )
         return toolkit.model_copy(update={"oauth_connection": summary})
 
-    async def _attach_oauth_connections(
-        self, toolkits: list[ToolkitOutput]
-    ) -> list[ToolkitOutput]:
-        """Attach OAuth connection summaries to Toolkit outputs."""
-        result: list[ToolkitOutput] = []
-        for toolkit in toolkits:
-            result.append(await self._attach_oauth_connection(toolkit))
-        return result
+    @staticmethod
+    def _platform_credentials(
+        toolkit: ToolkitOutput,
+    ) -> GitHubSecretsAppPlatform | None:
+        """Parse persisted Platform credentials for redacted projection."""
+        if toolkit.toolkit_type != "github" or toolkit.credentials is None:
+            return None
+        credentials = _github_secrets_adapter.validate_json(toolkit.credentials)
+        if isinstance(credentials, GitHubSecretsAppPlatform):
+            return credentials
+        return None
 
     def _validate_toolkit_type(self, toolkit_type: str) -> InvalidToolkitType | None:
         """Check whether toolkit type exists in toolkit_registry.

@@ -1,11 +1,14 @@
 """Toolkit v1 Public API data models."""
 
 import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
 from azents.core.enums import MCPOAuthConnectionStatus, ToolkitScopeType
+from azents.services.github_platform_system_setting.runtime import (
+    PlatformGitHubAppAuthorizationReason,
+)
 from azents.services.toolkit.data import ToolkitSlug, ToolkitUpdateInput
 
 
@@ -17,6 +20,14 @@ class MCPOAuthConnectionSummaryResponse(BaseModel):
     resource: str | None = None
     scope: str | None = None
     expires_at: datetime.datetime | None = None
+
+
+class GitHubPlatformAuthorizationStateResponse(BaseModel):
+    """Redacted reconnect state for a Platform GitHub Toolkit."""
+
+    type: Literal["github_platform_app"]
+    status: Literal["reconnect_required"]
+    reason: PlatformGitHubAppAuthorizationReason
 
 
 class ToolkitConfigResponse(BaseModel):
@@ -36,6 +47,7 @@ class ToolkitConfigResponse(BaseModel):
     )
     enabled: bool
     oauth_connection: MCPOAuthConnectionSummaryResponse | None = None
+    authorization_state: GitHubPlatformAuthorizationStateResponse | None = None
     created_at: datetime.datetime
     updated_at: datetime.datetime
 
