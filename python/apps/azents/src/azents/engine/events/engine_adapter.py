@@ -99,6 +99,7 @@ from azents.engine.events.tools import (
     ToolCatalogClientToolExecutor,
     build_tool_catalog,
     extend_tool_catalog,
+    project_tool_catalog_for_client_profiles,
 )
 from azents.engine.events.types import (
     AssistantMessagePayload,
@@ -134,6 +135,9 @@ from azents.engine.model_stream import ModelStreamWatchdog, get_model_stream_wat
 from azents.engine.run.builtin_tools import (
     ClientBuiltinToolImplementationUnavailableError,
     resolve_builtin_tools,
+)
+from azents.engine.run.client_tool_compatibility import (
+    resolve_client_tool_profiles,
 )
 from azents.engine.run.contracts import RunContext, RunRequest, ToolkitBinding
 from azents.engine.run.emit import Emit, durable, ephemeral
@@ -539,7 +543,29 @@ class AgentEngineAdapter:
             transcript: Sequence[Event],
             model: str,
         ) -> PreparedModelCall[NativeModelRequest | OpenAIResponsesRequest]:
-            catalog = await build_tool_catalog(
+            model_selection = (
+                request.inference_state.model_selection
+                if request.inference_state is not None
+                else None
+            )
+            model_family = (
+                model_selection.model_family if model_selection is not None else None
+            )
+            model_developer = (
+                model_selection.model_developer
+                if model_selection is not None
+                else request.model_developer
+            )
+            client_tool_profiles = resolve_client_tool_profiles(
+                model_identifier=(
+                    model_selection.model_identifier
+                    if model_selection is not None
+                    else model
+                ),
+                model_developer=model_developer,
+                model_family=model_family,
+            )
+            candidate_catalog = await build_tool_catalog(
                 toolkit_bindings=request.toolkits,
                 context=TurnContext(
                     user_id=context.user_id,
@@ -551,6 +577,26 @@ class AgentEngineAdapter:
                     publish_event=context.publish_event,
                     check_stop=check_stop,
                 ),
+            )
+            catalog = project_tool_catalog_for_client_profiles(
+                candidate_catalog,
+                client_tool_profiles,
+            )
+            logger.info(
+                "Projected client tools for model compatibility",
+                extra={
+                    "session_id": request.session_id,
+                    "run_id": context.run_id,
+                    "model_developer": (
+                        model_developer.value if model_developer is not None else None
+                    ),
+                    "model_family": model_family,
+                    "client_tool_profiles": sorted(
+                        profile.value for profile in client_tool_profiles
+                    ),
+                    "candidate_tool_count": len(candidate_catalog.tools),
+                    "projected_tool_count": len(catalog.tools),
+                },
             )
             hook_providers = _runtime_hook_provider_refs(
                 catalog.active_toolkit_bindings
@@ -600,11 +646,6 @@ class AgentEngineAdapter:
                 if _uses_openai_sdk(request.provider)
                 else LiteLLMResponsesLowerer
             )
-            model_family = (
-                request.inference_state.model_selection.model_family
-                if request.inference_state is not None
-                else None
-            )
             provider_visible_tool_names: tuple[str, ...]
             deferred_tool_names: frozenset[str]
             if request.tool_search_enabled:
@@ -615,7 +656,7 @@ class AgentEngineAdapter:
                         adapter=lowerer_type.adapter,
                         native_format=lowerer_type.native_format,
                         model_identifier=model,
-                        model_developer=request.model_developer,
+                        model_developer=model_developer,
                         model_family=model_family,
                     ),
                     provider_hosted=ProviderHostedToolDeclarationCounts(

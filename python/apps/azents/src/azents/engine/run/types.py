@@ -18,6 +18,7 @@ from pydantic import (
 from azents.engine.events.generated_files import GeneratedFileOutput
 from azents.engine.io.attachments import RuntimeAttachment
 from azents.engine.io.user_input import RunUserMessage
+from azents.engine.run.client_tool_compatibility import ClientToolProfile
 
 # ---------------------------------------------------------------------------
 # Internal helper: raw passthrough dict fields.
@@ -144,6 +145,7 @@ class FunctionTool:
     spec: FunctionToolSpec
     handler: FunctionToolHandler
     cancel_handler: FunctionToolCancelHandler | None = None
+    required_client_tool_profile: ClientToolProfile | None = None
 
     def with_prefix(self, prefix: str) -> "FunctionTool":
         """Return shallow copy with prefix added to name.
@@ -162,7 +164,15 @@ class FunctionTool:
             ),
             handler=self.handler,
             cancel_handler=self.cancel_handler,
+            required_client_tool_profile=self.required_client_tool_profile,
         )
+
+    def with_required_client_tool_profile(
+        self,
+        profile: ClientToolProfile,
+    ) -> "FunctionTool":
+        """Return a copy gated by one client tool compatibility profile."""
+        return dataclasses.replace(self, required_client_tool_profile=profile)
 
 
 class FunctionToolError(Exception):
