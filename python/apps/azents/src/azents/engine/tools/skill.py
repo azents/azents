@@ -146,6 +146,14 @@ class SkillSourceRoot:
     project_path: str | None = None
 
 
+@dataclass(frozen=True)
+class _SkillPathCandidate:
+    """Discovered Skill path associated with its requested source root."""
+
+    source: SkillSourceRoot
+    skill_path: str
+
+
 class SkillStateStore:
     """Skill projection store based on Toolkit State."""
 
@@ -350,7 +358,7 @@ class SkillProjectionService:
     ) -> list[SkillProjectionItem]:
         """Scan all Skill source roots through Runtime Runner file operations."""
         roots = _skill_source_roots(projects)
-        items: list[SkillProjectionItem] = []
+        candidates: list[_SkillPathCandidate] = []
         for root in roots:
             paths = await self._skill_paths_in_root(
                 runner_operations=runner_operations,
@@ -359,17 +367,34 @@ class SkillProjectionService:
                 owner_session_id=owner_session_id,
                 root_path=root.root_path,
             )
-            for skill_path in paths:
-                item = await self._read_skill_item(
-                    runner_operations=runner_operations,
-                    runtime_id=runtime_id,
-                    runner_generation=runner_generation,
-                    owner_session_id=owner_session_id,
-                    source=root,
-                    skill_path=skill_path,
-                )
-                if item is not None:
-                    items.append(item)
+            candidates.extend(
+                _SkillPathCandidate(source=root, skill_path=skill_path)
+                for skill_path in paths
+            )
+        unique_candidates = _dedupe_skill_path_candidates(candidates)
+        duplicate_count = len(candidates) - len(unique_candidates)
+        if duplicate_count:
+            logger.debug(
+                "Duplicate Skill source paths collapsed",
+                extra={
+                    "session_id": owner_session_id,
+                    "duplicate_count": duplicate_count,
+                    "candidate_count": len(candidates),
+                    "unique_path_count": len(unique_candidates),
+                },
+            )
+        items: list[SkillProjectionItem] = []
+        for candidate in unique_candidates:
+            item = await self._read_skill_item(
+                runner_operations=runner_operations,
+                runtime_id=runtime_id,
+                runner_generation=runner_generation,
+                owner_session_id=owner_session_id,
+                source=candidate.source,
+                skill_path=candidate.skill_path,
+            )
+            if item is not None:
+                items.append(item)
         return sorted(
             items,
             key=lambda item: (
@@ -725,6 +750,37 @@ def resolve_active_skill(
         if _normalize_path(item.skill_path) == normalized:
             return item
     return None
+
+
+def _dedupe_skill_path_candidates(
+    candidates: Sequence[_SkillPathCandidate],
+) -> list[_SkillPathCandidate]:
+    """Keep one candidate per normalized path, preferring direct source roots."""
+    deduped: dict[str, _SkillPathCandidate] = {}
+    ordered = sorted(
+        candidates,
+        key=lambda candidate: (
+            _normalize_path(candidate.skill_path),
+            not _path_is_within(
+                candidate.skill_path,
+                candidate.source.root_path,
+            ),
+            _source_priority(candidate.source.source_kind),
+            candidate.source.project_path or "",
+            _normalize_path(candidate.source.root_path),
+        ),
+    )
+    for candidate in ordered:
+        normalized = _normalize_path(candidate.skill_path)
+        deduped.setdefault(normalized, candidate)
+    return list(deduped.values())
+
+
+def _path_is_within(path: str, root_path: str) -> bool:
+    """Return whether a normalized path is inside a normalized source root."""
+    normalized_path = PurePosixPath(_normalize_path(path))
+    normalized_root = PurePosixPath(_normalize_path(root_path))
+    return normalized_path.is_relative_to(normalized_root)
 
 
 def _skill_source_roots(
