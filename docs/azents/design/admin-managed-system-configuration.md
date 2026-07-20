@@ -2,6 +2,7 @@
 title: "Admin-Managed System Configuration Design"
 created: 2026-07-20
 updated: 2026-07-20
+implemented: 2026-07-20
 tags: [architecture, backend, frontend, admin, configuration, security, infra, testenv]
 ---
 

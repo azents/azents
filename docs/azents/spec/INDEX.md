@@ -17,9 +17,9 @@ Details of all living specs. Synchronized from frontmatter.
 | goal | [Goal Domain Spec](domain/goal.md) | - | 2026-07-16 | 9 |
 | memory | [Memory](domain/memory.md) | @Hardtack | 2026-07-17 | 5 |
 | model-catalog | [Model Catalog Domain Spec](domain/model-catalog.md) | - | 2026-07-19 | 16 |
-| system-settings | [System Settings](domain/system-settings.md) | @Hardtack | 2026-07-19 | 1 |
+| system-settings | [System Settings](domain/system-settings.md) | @Hardtack | 2026-07-20 | 2 |
 | toolkit | [Toolkit](domain/toolkit.md) | @Hardtack | 2026-07-20 | 61 |
-| user-auth | [User & Authentication](domain/user-auth.md) | @Hardtack | 2026-07-13 | 7 |
+| user-auth | [User & Authentication](domain/user-auth.md) | @Hardtack | 2026-07-20 | 8 |
 | workspace | [Workspace & Membership](domain/workspace.md) | @Hardtack | 2026-07-19 | 41 |
 
 ## Flow Specs
