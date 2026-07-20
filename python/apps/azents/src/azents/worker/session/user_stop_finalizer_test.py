@@ -170,6 +170,24 @@ class _EventTranscriptRepository:
         """Record append request."""
         del session
         self.appended.append(create)
+        if create.kind == EventKind.INTERRUPTED:
+            return Event(
+                id="cccccccccccccccccccccccccccccccc",
+                session_id=create.session_id,
+                kind=create.kind,
+                payload=InterruptedPayload.model_validate(create.payload),
+                external_id=create.external_id,
+                created_at=datetime.now(UTC),
+            )
+        if create.kind == EventKind.RUN_MARKER:
+            return Event(
+                id="dddddddddddddddddddddddddddddddd",
+                session_id=create.session_id,
+                kind=create.kind,
+                payload=RunMarkerPayload.model_validate(create.payload),
+                external_id=create.external_id,
+                created_at=datetime.now(UTC),
+            )
         return object()
 
 
@@ -413,9 +431,22 @@ async def test_finalize_persists_live_events_and_marks_run_terminal() -> None:
     assert run_repository.running_run.active_tool_calls == []
     assert session_repository.cleared_stop_request_session_ids == [session_id]
     assert broker.cleared_session_ids == [session_id]
-    assert len(event_publisher.dispatched) == 1
-    assert event_publisher.dispatched[0][0] == session_id
-    stopped_event = event_publisher.dispatched[0][1]
+    published_durable_events = [
+        event for _, event in event_publisher.dispatched[:2] if isinstance(event, Event)
+    ]
+    assert [event.kind for event in published_durable_events] == [
+        EventKind.INTERRUPTED,
+        EventKind.RUN_MARKER,
+    ]
+    published_session_ids = [
+        published_session_id for published_session_id, _ in event_publisher.dispatched
+    ]
+    assert published_session_ids == [
+        session_id,
+        session_id,
+        session_id,
+    ]
+    stopped_event = event_publisher.dispatched[2][1]
     assert isinstance(stopped_event, RunStopped)
     assert stopped_event.run_id == "11111111111111111111111111111111"
 
@@ -448,8 +479,8 @@ async def test_finalize_preserves_retry_state_when_terminal_persistence_fails() 
 
 
 @pytest.mark.asyncio
-async def test_record_interrupted_run_only_records_marker_and_stopped_event() -> None:
-    """CancelledError path records only marker and RunStopped as before."""
+async def test_record_interrupted_run_publishes_durable_history_before_stop() -> None:
+    """CancelledError path publishes durable User stop history before RunStopped."""
     session_id = "session-001"
     (
         finalizer,
@@ -474,8 +505,14 @@ async def test_record_interrupted_run_only_records_marker_and_stopped_event() ->
         EventKind.INTERRUPTED,
         EventKind.RUN_MARKER,
     ]
-    assert event_publisher.dispatched
-    stopped_event = event_publisher.dispatched[0][1]
+    published_durable_events = [
+        event for _, event in event_publisher.dispatched[:2] if isinstance(event, Event)
+    ]
+    assert [event.kind for event in published_durable_events] == [
+        EventKind.INTERRUPTED,
+        EventKind.RUN_MARKER,
+    ]
+    stopped_event = event_publisher.dispatched[2][1]
     assert isinstance(stopped_event, RunStopped)
     assert stopped_event.run_id == "22222222222222222222222222222222"
     assert session_repository.cleared_stop_request_session_ids == [session_id]

@@ -734,12 +734,14 @@ must create run-sensitive handlers from this current turn context instead of ret
 stale constructor state. Schedule and background task tool handlers follow this rule.
 
 If the run is stopped while tools are active, the loop records deterministic cancelled results for calls that
-did not produce a result. User-requested stop also appends an `interrupted` durable event before the
-terminal `run_marker(status=interrupted)` so the next model input can receive the interruption
-reminder and the UI can show a non-chat timeline divider. After user stop, the session runner starts
-another turn only when pending `wake_session` input remains. Queue-only mailbox rows do not resume
-execution. If no wake-producing input exists, queued wake-up messages for the same session are
-discarded so reconnect or duplicate signals do not resume model execution by themselves.
+did not produce a result. After the User stop closes the Run, it persists and publishes an `interrupted`
+durable event followed by terminal `run_marker(status=interrupted)`. The UI renders its non-chat timeline
+divider only when it receives that persisted `interrupted` history event, never from a Stop request,
+RunStopped control event, or live projection. The next model input receives the interruption reminder.
+After user stop, the session runner starts another turn only when pending `wake_session` input remains.
+Queue-only mailbox rows do not resume execution. If no wake-producing input exists, queued wake-up
+messages for the same session are discarded so reconnect or duplicate signals do not resume model
+execution by themselves.
 
 ## 6. Compaction
 

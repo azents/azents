@@ -38,6 +38,14 @@ SessionManagerFactory = Callable[[], AbstractAsyncContextManager[AsyncSession]]
 
 
 @dataclasses.dataclass(frozen=True)
+class UserStopDurableEvents:
+    """Durable transcript events emitted for a completed User stop."""
+
+    interrupted: Event
+    run_marker: Event
+
+
+@dataclasses.dataclass(frozen=True)
 class UserStopFinalizer:
     """Clean up run observation state after receiving User stop."""
 
@@ -81,8 +89,6 @@ class UserStopFinalizer:
             [],
             removed_call_ids={call.call_id for call in effective_tool_calls},
         )
-        if effective_run_id is not None:
-            await self._append_user_stop_events(session_id, effective_run_id)
         if effective_run_id is None:
             await self._mark_session_agent_runs_terminal(
                 session_id,
@@ -93,6 +99,18 @@ class UserStopFinalizer:
                 session_id,
                 run_id=effective_run_id,
                 status=AgentRunStatus.STOPPED,
+            )
+            durable_events = await self._append_user_stop_events(
+                session_id,
+                effective_run_id,
+            )
+            await self.event_publisher.dispatch_event(
+                session_id,
+                durable_events.interrupted,
+            )
+            await self.event_publisher.dispatch_event(
+                session_id,
+                durable_events.run_marker,
             )
             await self.event_publisher.dispatch_event(
                 session_id,
@@ -107,12 +125,20 @@ class UserStopFinalizer:
         *,
         run_id: str,
     ) -> None:
-        """Record run marker stopped by User stop and RunStopped event."""
-        await self._append_user_stop_events(session_id, run_id)
+        """Record and publish durable User stop history after terminal state."""
         await self._mark_agent_run_terminal_if_running(
             session_id,
             run_id=run_id,
             status=AgentRunStatus.STOPPED,
+        )
+        durable_events = await self._append_user_stop_events(session_id, run_id)
+        await self.event_publisher.dispatch_event(
+            session_id,
+            durable_events.interrupted,
+        )
+        await self.event_publisher.dispatch_event(
+            session_id,
+            durable_events.run_marker,
         )
         await self.event_publisher.dispatch_event(
             session_id,
@@ -196,46 +222,30 @@ class UserStopFinalizer:
         self,
         session_id: str,
         run_id: str,
-    ) -> None:
+    ) -> UserStopDurableEvents:
         """Record User stop event and run marker to durable history."""
         interrupted_external_id = f"interrupted:{run_id}:user_requested"
         marker_external_id = f"run-marker:{run_id}:interrupted"
 
-        async def append(db_session: AsyncSession) -> None:
-            interrupted_existing = (
-                await self.event_transcript_repository.get_by_external_id(
-                    db_session,
-                    session_id,
-                    interrupted_external_id,
-                )
+        async with self.session_manager() as db_session:
+            interrupted_payload = InterruptedPayload(
+                run_id=run_id,
+                reason="user_requested",
             )
-            if interrupted_existing is None:
-                interrupted_payload = InterruptedPayload(
-                    run_id=run_id,
-                    reason="user_requested",
-                )
-                await self.event_transcript_repository.append(
-                    db_session,
-                    EventCreate(
-                        session_id=session_id,
-                        kind=EventKind.INTERRUPTED,
-                        payload=interrupted_payload.model_dump(
-                            mode="json",
-                            exclude_none=True,
-                        ),
-                        external_id=interrupted_external_id,
-                    ),
-                )
-
-            marker_existing = await self.event_transcript_repository.get_by_external_id(
+            interrupted = await self.event_transcript_repository.append(
                 db_session,
-                session_id,
-                marker_external_id,
+                EventCreate(
+                    session_id=session_id,
+                    kind=EventKind.INTERRUPTED,
+                    payload=interrupted_payload.model_dump(
+                        mode="json",
+                        exclude_none=True,
+                    ),
+                    external_id=interrupted_external_id,
+                ),
             )
-            if marker_existing is not None:
-                return
             payload = RunMarkerPayload(run_id=run_id, status="interrupted")
-            await self.event_transcript_repository.append(
+            run_marker = await self.event_transcript_repository.append(
                 db_session,
                 EventCreate(
                     session_id=session_id,
@@ -244,8 +254,10 @@ class UserStopFinalizer:
                     external_id=marker_external_id,
                 ),
             )
-
-        await self._run_short_db(append)
+        return UserStopDurableEvents(
+            interrupted=interrupted,
+            run_marker=run_marker,
+        )
 
     async def _clear_stop_request(self, session_id: str) -> None:
         """Remove consumed durable stop intent."""
