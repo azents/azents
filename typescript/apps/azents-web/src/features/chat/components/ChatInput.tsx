@@ -623,6 +623,9 @@ export const ChatInput = memo(function ChatInput({
     restoredInferenceProfile,
   );
   const [profilePickerOpened, setProfilePickerOpened] = useState(false);
+  const [scrollToSubscriptionUsageOnOpen, setScrollToSubscriptionUsageOnOpen] =
+    useState(false);
+  const subscriptionUsageDetailsRef = useRef<HTMLDivElement>(null);
   const [desktopProfileSection, setDesktopProfileSection] = useState<
     "model" | "effort" | null
   >(null);
@@ -1070,9 +1073,23 @@ export const ChatInput = memo(function ChatInput({
   );
 
   const handleOpenSubscriptionUsage = useCallback((): void => {
+    if (isMobile) {
+      setScrollToSubscriptionUsageOnOpen(true);
+    }
     setProfilePickerOpened(true);
     setDesktopProfileSection(null);
-  }, []);
+  }, [isMobile]);
+
+  const handleProfilePickerEnterTransitionEnd = useCallback((): void => {
+    if (!scrollToSubscriptionUsageOnOpen) {
+      return;
+    }
+    setScrollToSubscriptionUsageOnOpen(false);
+    subscriptionUsageDetailsRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+  }, [scrollToSubscriptionUsageOnOpen]);
 
   const profileTrigger = (
     <Button
@@ -1210,11 +1227,13 @@ export const ChatInput = memo(function ChatInput({
         </Stack>
       )}
       {subscriptionSelection !== null ? (
-        <ComposerSubscriptionUsageDetailsContainer
-          handle={handle}
-          integrationId={subscriptionSelection.integrationId}
-          provider={subscriptionSelection.provider}
-        />
+        <Box ref={subscriptionUsageDetailsRef}>
+          <ComposerSubscriptionUsageDetailsContainer
+            handle={handle}
+            integrationId={subscriptionSelection.integrationId}
+            provider={subscriptionSelection.provider}
+          />
+        </Box>
       ) : null}
     </Stack>
   );
@@ -1584,7 +1603,13 @@ export const ChatInput = memo(function ChatInput({
                   ) : null}
                   <Drawer
                     opened={profilePickerOpened}
-                    onClose={() => setProfilePickerOpened(false)}
+                    onClose={() => {
+                      setProfilePickerOpened(false);
+                      setScrollToSubscriptionUsageOnOpen(false);
+                    }}
+                    transitionProps={{
+                      onEntered: handleProfilePickerEnterTransitionEnd,
+                    }}
                     title={
                       <Group
                         justify="space-between"
@@ -1600,7 +1625,10 @@ export const ChatInput = memo(function ChatInput({
                           color="blue"
                           size="compact-sm"
                           px="xs"
-                          onClick={() => setProfilePickerOpened(false)}
+                          onClick={() => {
+                            setProfilePickerOpened(false);
+                            setScrollToSubscriptionUsageOnOpen(false);
+                          }}
                         >
                           {t("composerProfile.done")}
                         </Button>

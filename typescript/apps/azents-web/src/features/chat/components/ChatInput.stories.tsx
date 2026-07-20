@@ -2,7 +2,7 @@ import { rem } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { observable } from "@trpc/server/observable";
 import { useState } from "react";
-import { expect, userEvent, waitFor, within } from "storybook/test";
+import { expect, spyOn, userEvent, waitFor, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { trpc } from "@/trpc/client";
 import { pendingFiles } from "../story-fixtures";
@@ -682,10 +682,26 @@ export const MobileSubscriptionUsage = {
         page.getByRole("button", { name: /Subscription usage:.*73%/ }),
       ).toBeVisible(),
     );
-    await userEvent.click(page.getByRole("button", { name: /^Model$/ }));
-    await waitFor(() => expect(page.getByText("5 hour limit")).toBeVisible());
-    await expect(page.getByText("73%")).toBeVisible();
-    await expect(page.queryByText("must-not-render")).not.toBeInTheDocument();
+    const scrollIntoView = spyOn(
+      Element.prototype,
+      "scrollIntoView",
+    ).mockImplementation(() => null);
+    try {
+      await userEvent.click(
+        page.getByRole("button", { name: /Subscription usage:.*73%/ }),
+      );
+      await waitFor(() => expect(page.getByText("5 hour limit")).toBeVisible());
+      await waitFor(() =>
+        expect(scrollIntoView).toHaveBeenCalledWith({
+          behavior: "smooth",
+          block: "start",
+        }),
+      );
+      await expect(page.getByText("73%")).toBeVisible();
+      await expect(page.queryByText("must-not-render")).not.toBeInTheDocument();
+    } finally {
+      scrollIntoView.mockRestore();
+    }
   },
 } satisfies Story;
 
