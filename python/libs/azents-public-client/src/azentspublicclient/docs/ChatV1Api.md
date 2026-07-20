@@ -4,6 +4,7 @@ All URIs are relative to *http://localhost*
 
 Method | HTTP request | Description
 ------------- | ------------- | -------------
+[**chat_v1_acknowledge_agent_session_unread_terminal_run**](ChatV1Api.md#chat_v1_acknowledge_agent_session_unread_terminal_run) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/read | Acknowledge Agent Session Unread Terminal Run
 [**chat_v1_archive_agent_session**](ChatV1Api.md#chat_v1_archive_agent_session) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/archive | Archive Agent Session
 [**chat_v1_bulk_delete_agent_workspace_paths**](ChatV1Api.md#chat_v1_bulk_delete_agent_workspace_paths) | **DELETE** /chat/v1/agents/{agent_id}/workspace/files/bulk | Bulk Delete Agent Workspace Paths
 [**chat_v1_bulk_move_agent_workspace_paths**](ChatV1Api.md#chat_v1_bulk_move_agent_workspace_paths) | **POST** /chat/v1/agents/{agent_id}/workspace/move/bulk | Bulk Move Agent Workspace Paths
@@ -49,6 +50,87 @@ Method | HTTP request | Description
 [**chat_v1_update_session_goal_status**](ChatV1Api.md#chat_v1_update_session_goal_status) | **PATCH** /chat/v1/sessions/{session_id}/goal/status | Update Session Goal Status
 [**chat_v1_upload_file_for_agent**](ChatV1Api.md#chat_v1_upload_file_for_agent) | **POST** /chat/v1/agents/{agent_id}/upload | Upload File For Agent
 
+
+# **chat_v1_acknowledge_agent_session_unread_terminal_run**
+> chat_v1_acknowledge_agent_session_unread_terminal_run(agent_id, session_id, agent_session_unread_terminal_run_acknowledge_request)
+
+Acknowledge Agent Session Unread Terminal Run
+
+Acknowledge an observed terminal Run as reviewed.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.agent_session_unread_terminal_run_acknowledge_request import AgentSessionUnreadTerminalRunAcknowledgeRequest
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.ChatV1Api(api_client)
+    agent_id = 'agent_id_example' # str | 
+    session_id = 'session_id_example' # str | 
+    agent_session_unread_terminal_run_acknowledge_request = azentspublicclient.AgentSessionUnreadTerminalRunAcknowledgeRequest() # AgentSessionUnreadTerminalRunAcknowledgeRequest | 
+
+    try:
+        # Acknowledge Agent Session Unread Terminal Run
+        api_instance.chat_v1_acknowledge_agent_session_unread_terminal_run(agent_id, session_id, agent_session_unread_terminal_run_acknowledge_request)
+    except Exception as e:
+        print("Exception when calling ChatV1Api->chat_v1_acknowledge_agent_session_unread_terminal_run: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **agent_id** | **str**|  | 
+ **session_id** | **str**|  | 
+ **agent_session_unread_terminal_run_acknowledge_request** | [**AgentSessionUnreadTerminalRunAcknowledgeRequest**](AgentSessionUnreadTerminalRunAcknowledgeRequest.md)|  | 
+
+### Return type
+
+void (empty response body)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**204** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **chat_v1_archive_agent_session**
 > chat_v1_archive_agent_session(agent_id, session_id)

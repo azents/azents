@@ -46,6 +46,7 @@ from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import (
     AgentSession,
     AgentSessionCreate,
+    AgentSessionUnreadTerminalRunProjection,
     SessionAgent,
 )
 from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
@@ -67,6 +68,7 @@ from azents.services.session_workspace_project import (
 )
 
 from .data import (
+    AcknowledgeUnreadTerminalRunError,
     AgentNotFound,
     ArchiveSessionError,
     ArchiveSessionResult,
@@ -96,6 +98,7 @@ from .data import (
     SubagentSessionReadOnly,
     SubagentTreeNode,
     SubagentTreeProjection,
+    UnreadTerminalRunNotTerminal,
     UpdateGoalError,
     UpdateGoalResult,
     UpdateGoalStatusInput,
@@ -415,6 +418,88 @@ class ChatSessionService:
                 return Failure(SessionNotFound())
             return Success(agent_session)
 
+    async def get_agent_session_with_unread_terminal_run(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        user_id: str,
+    ) -> Result[AgentSessionUnreadTerminalRunProjection, SessionNotFound]:
+        """Fetch an AgentSession and its shared unread Run projection."""
+        async with self.session_manager() as session:
+            projection = (
+                await self.agent_session_repository.get_with_unread_terminal_run_by_id(
+                    session,
+                    session_id,
+                )
+            )
+            if (
+                projection is None
+                or projection.session.agent_id != agent_id
+                or projection.session.status != AgentSessionStatus.ACTIVE
+            ):
+                return Failure(SessionNotFound())
+            workspace_user = (
+                await self.workspace_user_repository.get_by_workspace_and_user(
+                    session,
+                    workspace_id=projection.session.workspace_id,
+                    user_id=user_id,
+                )
+            )
+            if workspace_user is None:
+                return Failure(SessionNotFound())
+            return Success(projection)
+
+    async def acknowledge_agent_session_unread_terminal_run(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        user_id: str,
+        through_run_id: str,
+    ) -> Result[None, AcknowledgeUnreadTerminalRunError]:
+        """Acknowledge an observed terminal Run for an active root Session."""
+        async with self.session_manager() as session:
+            projection = (
+                await self.agent_session_repository.get_with_unread_terminal_run_by_id(
+                    session,
+                    session_id,
+                )
+            )
+            if (
+                projection is None
+                or projection.session.agent_id != agent_id
+                or projection.session.status != AgentSessionStatus.ACTIVE
+                or projection.session.session_kind != AgentSessionKind.ROOT
+            ):
+                return Failure(SessionNotFound())
+            workspace_user = (
+                await self.workspace_user_repository.get_by_workspace_and_user(
+                    session,
+                    workspace_id=projection.session.workspace_id,
+                    user_id=user_id,
+                )
+            )
+            if workspace_user is None:
+                return Failure(SessionNotFound())
+            run = await self.agent_run_repository.acknowledge_unread_terminal_run(
+                session,
+                session_id=session_id,
+                run_id=through_run_id,
+            )
+            if run is None or run.session_id != session_id:
+                return Failure(SessionNotFound())
+            if run.status not in {
+                AgentRunStatus.COMPLETED,
+                AgentRunStatus.FAILED,
+                AgentRunStatus.STOPPED,
+                AgentRunStatus.INTERRUPTED,
+                AgentRunStatus.CANCELLED,
+            }:
+                return Failure(UnreadTerminalRunNotTerminal())
+            await session.commit()
+            return Success(None)
+
     async def get_subagent_tree(
         self,
         *,
@@ -526,6 +611,40 @@ class ChatSessionService:
             sessions = await self.agent_session_repository.list_active_by_agent_id(
                 session,
                 agent_id,
+            )
+            return Success(sessions)
+
+    async def list_agent_sessions_with_unread_terminal_run(
+        self,
+        *,
+        agent_id: str,
+        user_id: str,
+    ) -> Result[list[AgentSessionUnreadTerminalRunProjection], EnsureSessionError]:
+        """Fetch active root Sessions and their shared unread Run boundaries."""
+        async with self.session_manager() as session:
+            agent = await self.agent_repository.get_by_id(session, agent_id)
+            if agent is None:
+                return Failure(AgentNotFound())
+            workspace_user = (
+                await self.workspace_user_repository.get_by_workspace_and_user(
+                    session,
+                    workspace_id=agent.workspace_id,
+                    user_id=user_id,
+                )
+            )
+            if workspace_user is None:
+                return Failure(NotWorkspaceMember())
+            ensure_primary = self.agent_session_repository.ensure_team_primary_for_agent
+            await ensure_primary(
+                session,
+                workspace_id=agent.workspace_id,
+                agent_id=agent_id,
+            )
+            sessions = await (
+                self.agent_session_repository.list_active_unread_by_agent_id(
+                    session,
+                    agent_id,
+                )
             )
             return Success(sessions)
 

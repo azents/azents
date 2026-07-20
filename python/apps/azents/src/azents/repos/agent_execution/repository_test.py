@@ -38,6 +38,7 @@ from azents.engine.run.failure import FailedRunAttempt, FailedRunRetryState
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.agent_session import RDBAgentSession
+from azents.rdb.models.agent_session_unread_run import RDBAgentSessionUnreadRun
 from azents.rdb.models.event import RDBEvent
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
@@ -1093,6 +1094,110 @@ class TestEventExecutionRepositories:
 
         assert after_fallback is not None
         assert after_fallback.status == AgentRunStatus.INTERRUPTED
+
+    async def test_terminal_transition_records_and_idempotently_acknowledges_unread_run(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """A terminal Run creates one boundary that replay cannot recreate."""
+        workspace_id, agent_id, __runtime_id = await _create_agent_runtime(rdb_session)
+        agent_session = await _agent_session_repository().create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        repo = AgentRunRepository()
+        run = await repo.create(
+            rdb_session,
+            AgentRunCreate(
+                session_id=agent_session.id,
+                parent_agent_run_id=None,
+            ),
+        )
+
+        await repo.mark_terminal(
+            rdb_session,
+            run.id,
+            AgentRunStatus.COMPLETED,
+            ended_at=datetime.datetime.now(datetime.UTC),
+        )
+
+        boundary = await rdb_session.get(RDBAgentSessionUnreadRun, agent_session.id)
+        assert boundary is not None
+        assert boundary.run_id == run.id
+        assert boundary.run_index == run.run_index
+
+        acknowledged = await repo.acknowledge_unread_terminal_run(
+            rdb_session,
+            session_id=agent_session.id,
+            run_id=run.id,
+        )
+        assert acknowledged is not None
+        assert await rdb_session.get(RDBAgentSessionUnreadRun, agent_session.id) is None
+
+        await repo.mark_terminal(
+            rdb_session,
+            run.id,
+            AgentRunStatus.COMPLETED,
+            ended_at=datetime.datetime.now(datetime.UTC),
+        )
+        assert await rdb_session.get(RDBAgentSessionUnreadRun, agent_session.id) is None
+
+    async def test_acknowledging_older_run_preserves_newer_unread_boundary(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Acknowledgement through Run N cannot clear terminal Run N+1."""
+        workspace_id, agent_id, __runtime_id = await _create_agent_runtime(rdb_session)
+        agent_session = await _agent_session_repository().create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        repo = AgentRunRepository()
+        first = await repo.create(
+            rdb_session,
+            AgentRunCreate(
+                session_id=agent_session.id,
+                parent_agent_run_id=None,
+            ),
+        )
+        await repo.mark_terminal(
+            rdb_session,
+            first.id,
+            AgentRunStatus.COMPLETED,
+            ended_at=datetime.datetime.now(datetime.UTC),
+        )
+        second = await repo.create(
+            rdb_session,
+            AgentRunCreate(
+                session_id=agent_session.id,
+                parent_agent_run_id=None,
+            ),
+        )
+        await repo.mark_terminal(
+            rdb_session,
+            second.id,
+            AgentRunStatus.CANCELLED,
+            ended_at=datetime.datetime.now(datetime.UTC),
+        )
+
+        await repo.acknowledge_unread_terminal_run(
+            rdb_session,
+            session_id=agent_session.id,
+            run_id=first.id,
+        )
+
+        boundary = await rdb_session.get(RDBAgentSessionUnreadRun, agent_session.id)
+        assert boundary is not None
+        assert boundary.run_id == second.id
+        assert boundary.run_index == second.run_index
 
     async def test_agent_run_index_increments_per_session(
         self,

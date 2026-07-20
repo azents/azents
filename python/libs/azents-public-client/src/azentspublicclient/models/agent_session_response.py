@@ -41,13 +41,14 @@ class AgentSessionResponse(BaseModel):
     status: AgentSessionStatus = Field(description="Session status")
     primary_kind: Optional[AgentSessionPrimaryKind] = None
     run_state: AgentSessionRunState = Field(description="Session execution state")
+    unread_terminal_run_id: Optional[StrictStr]
     archived_at: Optional[datetime]
     purge_after: Optional[datetime]
     archive_retention_days_snapshot: Optional[StrictInt]
     created_at: datetime = Field(description="Created time")
     updated_at: datetime = Field(description="Updated time")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "agent_id", "current_model_target_label", "current_reasoning_effort", "title", "title_source", "status", "primary_kind", "run_state", "archived_at", "purge_after", "archive_retention_days_snapshot", "created_at", "updated_at"]
+    __properties: ClassVar[List[str]] = ["id", "agent_id", "current_model_target_label", "current_reasoning_effort", "title", "title_source", "status", "primary_kind", "run_state", "unread_terminal_run_id", "archived_at", "purge_after", "archive_retention_days_snapshot", "created_at", "updated_at"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -120,6 +121,11 @@ class AgentSessionResponse(BaseModel):
         if self.primary_kind is None and "primary_kind" in self.model_fields_set:
             _dict['primary_kind'] = None
 
+        # set to None if unread_terminal_run_id (nullable) is None
+        # and model_fields_set contains the field
+        if self.unread_terminal_run_id is None and "unread_terminal_run_id" in self.model_fields_set:
+            _dict['unread_terminal_run_id'] = None
+
         # set to None if archived_at (nullable) is None
         # and model_fields_set contains the field
         if self.archived_at is None and "archived_at" in self.model_fields_set:
@@ -156,6 +162,7 @@ class AgentSessionResponse(BaseModel):
             "status": obj.get("status"),
             "primary_kind": obj.get("primary_kind"),
             "run_state": obj.get("run_state"),
+            "unread_terminal_run_id": obj.get("unread_terminal_run_id"),
             "archived_at": obj.get("archived_at"),
             "purge_after": obj.get("purge_after"),
             "archive_retention_days_snapshot": obj.get("archive_retention_days_snapshot"),

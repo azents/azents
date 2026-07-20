@@ -87,7 +87,10 @@ from azents.engine.tools.goal import GoalStateSnapshot
 from azents.engine.tools.skill import SkillProjectionState
 from azents.rdb.models.chat_write_request import ChatWriteRequestType
 from azents.rdb.models.event import JSONValue
-from azents.repos.agent_session.data import AgentSession
+from azents.repos.agent_session.data import (
+    AgentSession,
+    AgentSessionUnreadTerminalRunProjection,
+)
 from azents.repos.chat_write_request.data import ChatWriteRequest
 from azents.repos.input_buffer.data import InputBuffer
 from azents.services.agent_session_input import (
@@ -969,6 +972,28 @@ class _AgentSessionRouteChatService:
         self.agent_id = agent_id
         return Success([self.primary_session, self.secondary_session])
 
+    async def list_agent_sessions_with_unread_terminal_run(
+        self,
+        *,
+        agent_id: str,
+        user_id: str,
+    ) -> Result[list[AgentSessionUnreadTerminalRunProjection], SessionNotFound]:
+        """Return active session rows with their unread boundaries."""
+        del user_id
+        self.agent_id = agent_id
+        return Success(
+            [
+                AgentSessionUnreadTerminalRunProjection(
+                    session=self.primary_session,
+                    unread_terminal_run_id=None,
+                ),
+                AgentSessionUnreadTerminalRunProjection(
+                    session=self.secondary_session,
+                    unread_terminal_run_id="3123456789abcdef0123456789abcdef",
+                ),
+            ]
+        )
+
     async def list_archived_agent_sessions(
         self,
         *,
@@ -1030,6 +1055,31 @@ class _AgentSessionRouteChatService:
         self.session_id = session_id
         return self.result
 
+    async def get_agent_session_with_unread_terminal_run(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        user_id: str,
+    ) -> Result[AgentSessionUnreadTerminalRunProjection, SessionNotFound]:
+        """Return an AgentSession with its unread boundary."""
+        del user_id
+        self.agent_id = agent_id
+        self.session_id = session_id
+        if isinstance(self.result, Failure):
+            return Failure(self.result.error)
+        session = (
+            self.primary_session
+            if session_id == self.primary_session.id
+            else self.secondary_session
+        )
+        return Success(
+            AgentSessionUnreadTerminalRunProjection(
+                session=session,
+                unread_terminal_run_id="3123456789abcdef0123456789abcdef",
+            )
+        )
+
     async def archive_agent_session(
         self,
         *,
@@ -1059,7 +1109,8 @@ class _AgentSessionRouteChatService:
         self.title = title
         if title == "invalid":
             return Failure(InvalidSessionTitle(reason="Invalid title."))
-        return Success(self.primary_session.model_copy(update={"title": title}))
+        self.primary_session = self.primary_session.model_copy(update={"title": title})
+        return Success(self.primary_session)
 
 
 class _RouteWorktreeCleanupService:

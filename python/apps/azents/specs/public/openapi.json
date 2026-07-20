@@ -3157,6 +3157,66 @@
         }
       }
     },
+    "/chat/v1/agents/{agent_id}/sessions/{session_id}/read": {
+      "post": {
+        "tags": [
+          "Chat v1"
+        ],
+        "summary": "Acknowledge Agent Session Unread Terminal Run",
+        "description": "Acknowledge an observed terminal Run as reviewed.",
+        "operationId": "chat_v1_acknowledge_agent_session_unread_terminal_run",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentSessionUnreadTerminalRunAcknowledgeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/chat/v1/agents/{agent_id}/sessions/{session_id}/subagents/tree": {
       "get": {
         "tags": [
@@ -9519,6 +9579,18 @@
             "$ref": "#/components/schemas/AgentSessionRunState",
             "description": "Session execution state"
           },
+          "unread_terminal_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unread Terminal Run Id",
+            "description": "Shared terminal AgentRun boundary awaiting review, or null"
+          },
           "archived_at": {
             "anyOf": [
               {
@@ -9580,6 +9652,7 @@
           "title_source",
           "status",
           "run_state",
+          "unread_terminal_run_id",
           "archived_at",
           "purge_after",
           "archive_retention_days_snapshot",
@@ -9638,6 +9711,21 @@
         ],
         "title": "AgentSessionTitleUpdateRequest",
         "description": "AgentSession title update request."
+      },
+      "AgentSessionUnreadTerminalRunAcknowledgeRequest": {
+        "properties": {
+          "through_run_id": {
+            "type": "string",
+            "title": "Through Run Id",
+            "description": "Observed terminal AgentRun ID"
+          }
+        },
+        "type": "object",
+        "required": [
+          "through_run_id"
+        ],
+        "title": "AgentSessionUnreadTerminalRunAcknowledgeRequest",
+        "description": "Observed terminal Run boundary acknowledged as reviewed."
       },
       "AgentToolkitAttachRequest": {
         "properties": {

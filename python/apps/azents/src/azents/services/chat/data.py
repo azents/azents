@@ -230,6 +230,11 @@ class SubagentSessionReadOnly:
 
 
 @dataclasses.dataclass(frozen=True)
+class UnreadTerminalRunNotTerminal:
+    """Observed Run is not terminal and cannot acknowledge review."""
+
+
+@dataclasses.dataclass(frozen=True)
 class InvalidGoalStatusTransition:
     """Disallowed Goal status transition."""
 
@@ -259,6 +264,7 @@ class InvalidSessionTitle:
 EnsureSessionError = AgentNotFound | NotWorkspaceMember | SessionAccessDenied
 SessionAccessError = SessionNotFound | SessionAccessDenied
 DeleteInputBufferError = SessionNotFound | SessionAccessDenied | SubagentSessionReadOnly
+AcknowledgeUnreadTerminalRunError = SessionNotFound | UnreadTerminalRunNotTerminal
 UpdateGoalError = (
     SessionNotFound
     | SessionAccessDenied

@@ -80,6 +80,7 @@ __all__ = [
     "AgentSessionStatus",
     "AgentSessionTitleSource",
     "AgentSessionTitleUpdateRequest",
+    "AgentSessionUnreadTerminalRunAcknowledgeRequest",
     "AgentToolkitAttachRequest",
     "AgentToolkitListResponse",
     "AgentToolkitResponse",
@@ -399,6 +400,7 @@ from azentspublicclient.models.agent_session_run_state import AgentSessionRunSta
 from azentspublicclient.models.agent_session_status import AgentSessionStatus as AgentSessionStatus
 from azentspublicclient.models.agent_session_title_source import AgentSessionTitleSource as AgentSessionTitleSource
 from azentspublicclient.models.agent_session_title_update_request import AgentSessionTitleUpdateRequest as AgentSessionTitleUpdateRequest
+from azentspublicclient.models.agent_session_unread_terminal_run_acknowledge_request import AgentSessionUnreadTerminalRunAcknowledgeRequest as AgentSessionUnreadTerminalRunAcknowledgeRequest
 from azentspublicclient.models.agent_toolkit_attach_request import AgentToolkitAttachRequest as AgentToolkitAttachRequest
 from azentspublicclient.models.agent_toolkit_list_response import AgentToolkitListResponse as AgentToolkitListResponse
 from azentspublicclient.models.agent_toolkit_response import AgentToolkitResponse as AgentToolkitResponse

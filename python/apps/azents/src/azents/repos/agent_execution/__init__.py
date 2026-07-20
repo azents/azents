@@ -13,6 +13,8 @@ from azents.core.enums import (
     AgentRunParentResultDeliveryState,
     AgentRunPhase,
     AgentRunStatus,
+    AgentSessionKind,
+    AgentSessionStatus,
     EventKind,
     SessionAgentKind,
 )
@@ -30,6 +32,7 @@ from azents.engine.run.failure import FailedRunRetryState
 from azents.rdb.models.agent_run import RDBAgentRun
 from azents.rdb.models.agent_run_input_event import RDBAgentRunInputEvent
 from azents.rdb.models.agent_session import RDBAgentSession
+from azents.rdb.models.agent_session_unread_run import RDBAgentSessionUnreadRun
 from azents.rdb.models.event import JSONValue, RDBEvent
 from azents.rdb.models.session_agent import RDBSessionAgent
 
@@ -41,6 +44,15 @@ from .data import (
 
 _JSON_OBJECT_ADAPTER = TypeAdapter[dict[str, JSONValue]](dict[str, JSONValue])
 _MODEL_ORDER_STEP = 1000
+_TERMINAL_RUN_STATUSES = frozenset(
+    {
+        AgentRunStatus.COMPLETED,
+        AgentRunStatus.FAILED,
+        AgentRunStatus.STOPPED,
+        AgentRunStatus.INTERRUPTED,
+        AgentRunStatus.CANCELLED,
+    }
+)
 
 
 def _validate_payload(
@@ -646,8 +658,10 @@ class AgentRunRepository:
         status: AgentRunStatus,
         ended_at: datetime.datetime,
     ) -> None:
-        """Close remaining running run projection in session as terminal state."""
-        await session.execute(
+        """Close remaining running Run projections and mark the latest unread."""
+        if status not in _TERMINAL_RUN_STATUSES:
+            raise ValueError("AgentRun terminal status is required")
+        result = await session.execute(
             sa.update(RDBAgentRun)
             .where(
                 RDBAgentRun.session_id == session_id,
@@ -661,7 +675,12 @@ class AgentRunRepository:
                 retry_state=None,
                 ended_at=ended_at,
             )
+            .returning(RDBAgentRun)
         )
+        transitioned_runs = list(result.scalars())
+        if transitioned_runs:
+            latest_run = max(transitioned_runs, key=lambda run: run.run_index)
+            await self._upsert_unread_terminal_run(session, latest_run)
         await session.flush()
 
     async def next_run_index(
@@ -953,22 +972,28 @@ class AgentRunRepository:
         terminal_result_event_id: str | None = None,
         terminal_result_message: str | None = None,
     ) -> AgentRunState:
-        """Transition Run to terminal state."""
-        return await self.update(
-            session,
-            run_id,
-            AgentRunPatch(
-                status=status,
-                phase=AgentRunPhase.IDLE,
-                active_tool_calls=[],
-                model_call_started_at=None,
-                retry_state=None,
-                ended_at=ended_at,
-                last_completed_event_id=last_completed_event_id,
-                terminal_result_event_id=terminal_result_event_id,
-                terminal_result_message=terminal_result_message,
-            ),
+        """Transition a nonterminal Run and atomically record unread state."""
+        if status not in _TERMINAL_RUN_STATUSES:
+            raise ValueError("AgentRun terminal status is required")
+        rdb = await session.scalar(
+            sa.select(RDBAgentRun).where(RDBAgentRun.id == run_id).with_for_update()
         )
+        if rdb is None:
+            raise ValueError("Agent run not found")
+        if rdb.status in _TERMINAL_RUN_STATUSES:
+            return self._build(rdb)
+        self._apply_terminal_values(
+            rdb,
+            status=status,
+            ended_at=ended_at,
+            last_completed_event_id=last_completed_event_id,
+            terminal_result_event_id=terminal_result_event_id,
+            terminal_result_message=terminal_result_message,
+        )
+        await session.flush()
+        await self._upsert_unread_terminal_run(session, rdb)
+        await session.refresh(rdb)
+        return self._build(rdb)
 
     async def mark_terminal_if_running(
         self,
@@ -981,12 +1006,67 @@ class AgentRunRepository:
         terminal_result_event_id: str | None = None,
         terminal_result_message: str | None = None,
     ) -> AgentRunState | None:
-        """Close Run as terminal state if it is still running."""
-        rdb = await session.get(RDBAgentRun, run_id)
+        """Close a running Run and atomically record unread state."""
+        if status not in _TERMINAL_RUN_STATUSES:
+            raise ValueError("AgentRun terminal status is required")
+        rdb = await session.scalar(
+            sa.select(RDBAgentRun).where(RDBAgentRun.id == run_id).with_for_update()
+        )
         if rdb is None:
             return None
         if rdb.status != AgentRunStatus.RUNNING:
             return self._build(rdb)
+        self._apply_terminal_values(
+            rdb,
+            status=status,
+            ended_at=ended_at,
+            last_completed_event_id=last_completed_event_id,
+            terminal_result_event_id=terminal_result_event_id,
+            terminal_result_message=terminal_result_message,
+        )
+        await session.flush()
+        await self._upsert_unread_terminal_run(session, rdb)
+        await session.refresh(rdb)
+        return self._build(rdb)
+
+    async def acknowledge_unread_terminal_run(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        run_id: str,
+    ) -> AgentRunState | None:
+        """Acknowledge a terminal Run through its observed session Run index."""
+        rdb = await session.scalar(
+            sa.select(RDBAgentRun).where(
+                RDBAgentRun.id == run_id,
+                RDBAgentRun.session_id == session_id,
+            )
+        )
+        if rdb is None:
+            return None
+        if rdb.status not in _TERMINAL_RUN_STATUSES:
+            return self._build(rdb)
+        await session.execute(
+            sa.delete(RDBAgentSessionUnreadRun).where(
+                RDBAgentSessionUnreadRun.session_id == session_id,
+                RDBAgentSessionUnreadRun.run_index <= rdb.run_index,
+            )
+        )
+        await session.flush()
+        return self._build(rdb)
+
+    @staticmethod
+    def _apply_terminal_values(
+        rdb: RDBAgentRun,
+        *,
+        status: AgentRunStatus,
+        ended_at: datetime.datetime,
+        last_completed_event_id: str | None,
+        terminal_result_event_id: str | None,
+        terminal_result_message: str | None,
+    ) -> None:
+        """Apply the canonical terminal fields to a locked Run row."""
         rdb.status = status
         rdb.phase = AgentRunPhase.IDLE
         rdb.active_tool_calls = []
@@ -996,9 +1076,37 @@ class AgentRunRepository:
         rdb.last_completed_event_id = last_completed_event_id
         rdb.terminal_result_event_id = terminal_result_event_id
         rdb.terminal_result_message = terminal_result_message
-        await session.flush()
-        await session.refresh(rdb)
-        return self._build(rdb)
+
+    async def _upsert_unread_terminal_run(
+        self,
+        session: AsyncSession,
+        run: RDBAgentRun,
+    ) -> None:
+        """Record the latest unread boundary for an eligible root Session."""
+        eligible_session_id = await session.scalar(
+            sa.select(RDBAgentSession.id).where(
+                RDBAgentSession.id == run.session_id,
+                RDBAgentSession.session_kind == AgentSessionKind.ROOT,
+                RDBAgentSession.status == AgentSessionStatus.ACTIVE,
+            )
+        )
+        if eligible_session_id is None:
+            return
+        insert_stmt = insert(RDBAgentSessionUnreadRun).values(
+            session_id=run.session_id,
+            run_id=run.id,
+            run_index=run.run_index,
+        )
+        stmt = insert_stmt.on_conflict_do_update(
+            index_elements=[RDBAgentSessionUnreadRun.session_id],
+            set_={
+                "run_id": insert_stmt.excluded.run_id,
+                "run_index": insert_stmt.excluded.run_index,
+                "updated_at": sa.func.now(),
+            },
+            where=(RDBAgentSessionUnreadRun.run_index < insert_stmt.excluded.run_index),
+        )
+        await session.execute(stmt)
 
     def _build(self, rdb: RDBAgentRun) -> AgentRunState:
         """Convert RDB row to domain model."""

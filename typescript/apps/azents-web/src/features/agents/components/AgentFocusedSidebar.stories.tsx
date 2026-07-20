@@ -49,6 +49,7 @@ const sessions: AgentSessionResponse[] = [
     archive_retention_days_snapshot: null,
     primary_kind: "team_primary",
     run_state: "idle",
+    unread_terminal_run_id: null,
     created_at: "2026-06-24T08:00:00Z",
     updated_at: "2026-06-26T04:30:00Z",
   },
@@ -65,6 +66,7 @@ const sessions: AgentSessionResponse[] = [
     archive_retention_days_snapshot: null,
     primary_kind: null,
     run_state: "running",
+    unread_terminal_run_id: null,
     created_at: "2026-06-25T09:00:00Z",
     updated_at: "2026-06-25T11:45:00Z",
   },
@@ -81,6 +83,7 @@ const sessions: AgentSessionResponse[] = [
     archive_retention_days_snapshot: null,
     primary_kind: null,
     run_state: "idle",
+    unread_terminal_run_id: null,
     created_at: "2026-06-25T01:00:00Z",
     updated_at: "2026-06-25T03:10:00Z",
   },
@@ -97,6 +100,7 @@ const archivedSessions: AgentSessionResponse[] = [
     status: "archived",
     primary_kind: null,
     run_state: "idle",
+    unread_terminal_run_id: null,
     archived_at: "2026-07-18T04:30:00Z",
     purge_after: "2026-08-17T04:30:00Z",
     archive_retention_days_snapshot: 30,
@@ -113,6 +117,7 @@ const archivedSessions: AgentSessionResponse[] = [
     status: "archived",
     primary_kind: null,
     run_state: "idle",
+    unread_terminal_run_id: null,
     archived_at: "2026-07-10T01:00:00Z",
     purge_after: null,
     archive_retention_days_snapshot: null,
@@ -155,6 +160,40 @@ const meta = {
 export default meta;
 
 type Story = StoryObj<typeof meta>;
+
+export const Read = {
+  args: {
+    sessions: sessions.filter((session) => session.id === "sess_primary"),
+  },
+} satisfies Story;
+
+export const Unread = {
+  args: {
+    sessions: sessions
+      .filter((session) => session.id === "sess_primary")
+      .map((session) => ({
+        ...session,
+        unread_terminal_run_id: "3123456789abcdef0123456789abcdef",
+      })),
+  },
+} satisfies Story;
+
+export const Running = {
+  args: {
+    sessions: sessions.filter((session) => session.id === "sess_release"),
+  },
+} satisfies Story;
+
+export const RunningAndUnread = {
+  args: {
+    sessions: sessions
+      .filter((session) => session.id === "sess_release")
+      .map((session) => ({
+        ...session,
+        unread_terminal_run_id: "3123456789abcdef0123456789abcdef",
+      })),
+  },
+} satisfies Story;
 
 export const Loaded = {} satisfies Story;
 

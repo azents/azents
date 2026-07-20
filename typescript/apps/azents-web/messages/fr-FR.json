@@ -712,6 +712,7 @@
           "session": "Session",
           "primaryBadge": "Principal",
           "running": "En cours…",
+          "unreadTerminalRun": "Résultat final non lu",
           "actions": "Session actions",
           "rename": "Rename",
           "renameTitle": "Rename session",

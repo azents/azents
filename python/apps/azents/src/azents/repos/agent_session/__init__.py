@@ -27,11 +27,18 @@ from azents.core.inference_profile import SessionInferenceState
 from azents.core.session_handle import generate_session_handle
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.agent_session import RDBAgentSession
+from azents.rdb.models.agent_session_unread_run import RDBAgentSessionUnreadRun
 from azents.rdb.models.event import RDBEvent
 from azents.rdb.models.session_agent import RDBSessionAgent
 from azents.rdb.models.session_agent_context import RDBSessionAgentContext
 
-from .data import AgentSession, AgentSessionCreate, PendingSessionCommand, SessionAgent
+from .data import (
+    AgentSession,
+    AgentSessionCreate,
+    AgentSessionUnreadTerminalRunProjection,
+    PendingSessionCommand,
+    SessionAgent,
+)
 
 SESSION_HANDLE_INSERT_ATTEMPTS = 10
 _ROOT_SESSION_AGENT_NAME = "root"
@@ -485,6 +492,64 @@ class AgentSessionRepository:
             )
         )
         return [self._build(rdb) for rdb in result.scalars()]
+
+    async def list_active_unread_by_agent_id(
+        self,
+        session: AsyncSession,
+        agent_id: str,
+    ) -> list[AgentSessionUnreadTerminalRunProjection]:
+        """Fetch active root Sessions and their shared unread Run boundaries."""
+        primary_order = sa.case(
+            (RDBAgentSession.primary_kind == AgentSessionPrimaryKind.TEAM_PRIMARY, 0),
+            else_=1,
+        )
+        result = await session.execute(
+            sa.select(RDBAgentSession, RDBAgentSessionUnreadRun.run_id)
+            .outerjoin(
+                RDBAgentSessionUnreadRun,
+                RDBAgentSessionUnreadRun.session_id == RDBAgentSession.id,
+            )
+            .where(
+                RDBAgentSession.agent_id == agent_id,
+                RDBAgentSession.session_kind == AgentSessionKind.ROOT,
+                RDBAgentSession.status == AgentSessionStatus.ACTIVE,
+            )
+            .order_by(
+                primary_order,
+                RDBAgentSession.last_user_input_at.desc(),
+                RDBAgentSession.updated_at.desc(),
+            )
+        )
+        return [
+            AgentSessionUnreadTerminalRunProjection(
+                session=self._build(agent_session),
+                unread_terminal_run_id=unread_terminal_run_id,
+            )
+            for agent_session, unread_terminal_run_id in result.tuples()
+        ]
+
+    async def get_with_unread_terminal_run_by_id(
+        self,
+        session: AsyncSession,
+        agent_session_id: str,
+    ) -> AgentSessionUnreadTerminalRunProjection | None:
+        """Fetch one Session with its shared unread Run boundary."""
+        result = await session.execute(
+            sa.select(RDBAgentSession, RDBAgentSessionUnreadRun.run_id)
+            .outerjoin(
+                RDBAgentSessionUnreadRun,
+                RDBAgentSessionUnreadRun.session_id == RDBAgentSession.id,
+            )
+            .where(RDBAgentSession.id == agent_session_id)
+        )
+        row = result.tuples().one_or_none()
+        if row is None:
+            return None
+        agent_session, unread_terminal_run_id = row
+        return AgentSessionUnreadTerminalRunProjection(
+            session=self._build(agent_session),
+            unread_terminal_run_id=unread_terminal_run_id,
+        )
 
     async def list_archived_by_agent_id(
         self,

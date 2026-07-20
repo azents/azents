@@ -20,6 +20,7 @@ code_paths:
   - python/apps/azents/src/azents/worker/scheduler.py
   - python/apps/azents/src/azents/worker/live/**
   - python/apps/azents/src/azents/rdb/models/agent_session.py
+  - python/apps/azents/src/azents/rdb/models/agent_session_unread_run.py
   - python/apps/azents/src/azents/rdb/models/session_agent.py
   - python/apps/azents/src/azents/rdb/models/session_agent_context.py
   - python/apps/azents/src/azents/rdb/models/agent_run.py
@@ -101,7 +102,7 @@ api_routes:
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-07-20
-spec_version: 120
+spec_version: 121
 ---
 
 # Conversation & Events
@@ -399,6 +400,8 @@ before destructive cleanup can remove a path or branch.
 | `parent_result_input_buffer_id` | `str(32)` \| null | Durable identity of the terminal result buffer even after promotion deletes the buffer row. |
 | `parent_result_enqueued_at` | timestamptz \| null | Time the terminal result and delivery marker committed atomically. |
 | `created_at` / `updated_at` | timestamptz | Durable lifecycle timestamps |
+
+`agent_session_unread_runs` is a sparse shared review projection for active root Sessions. Its primary key is `session_id`; it records one terminal `run_id` and the monotonic session-local `run_index`. A row means the Session is unread through that terminal Run, while no row means read. Every first transition from a nonterminal Run to `completed`, `failed`, `stopped`, `interrupted`, or `cancelled` upserts the boundary in the same transaction, retaining only the greatest `run_index`. Subagent and archived Sessions do not create this projection. The public active Session list and detail responses expose nullable `unread_terminal_run_id`. `POST /chat/v1/agents/{agent_id}/sessions/{session_id}/read` validates an observed terminal Run and conditionally clears the boundary only when its stored run index is not newer, so acknowledgement of Run N cannot clear concurrent Run N+1.
 
 Phase values are `idle`, `preparing_input`, `waiting_for_model`, `streaming_model`,
 `normalizing_output`, `executing_tools`, `appending_events`, `compacting`, and `stopping`.

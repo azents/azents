@@ -36,7 +36,10 @@ from azents.repos.action_execution.data import (
     ActionExecutionProjection,
 )
 from azents.repos.agent_project_preset.data import AgentProjectPreset
-from azents.repos.agent_session.data import AgentSession
+from azents.repos.agent_session.data import (
+    AgentSession,
+    AgentSessionUnreadTerminalRunProjection,
+)
 from azents.repos.session_workspace_project.data import SessionWorkspaceProject
 from azents.services.chat.context import (
     SessionContext,
@@ -1923,6 +1926,12 @@ class AgentSessionTitleUpdateRequest(BaseModel):
     )
 
 
+class AgentSessionUnreadTerminalRunAcknowledgeRequest(BaseModel):
+    """Observed terminal Run boundary acknowledged as reviewed."""
+
+    through_run_id: str = Field(description="Observed terminal AgentRun ID")
+
+
 class AgentSessionResponse(BaseModel):
     """Conversation session response."""
 
@@ -1946,6 +1955,9 @@ class AgentSessionResponse(BaseModel):
     run_state: AgentSessionRunState = Field(
         description="Session execution state",
     )
+    unread_terminal_run_id: str | None = Field(
+        description="Shared terminal AgentRun boundary awaiting review, or null",
+    )
     archived_at: datetime.datetime | None = Field(
         description="Archive boundary timestamp",
     )
@@ -1959,8 +1971,13 @@ class AgentSessionResponse(BaseModel):
     updated_at: datetime.datetime = Field(description="Updated time")
 
     @classmethod
-    def from_domain(cls, session: AgentSession) -> Self:
-        """Convert from domain model."""
+    def from_domain(
+        cls,
+        session: AgentSession,
+        *,
+        unread_terminal_run_id: str | None,
+    ) -> Self:
+        """Convert from domain model and shared unread boundary."""
         return cls(
             id=session.id,
             agent_id=session.agent_id,
@@ -1979,11 +1996,23 @@ class AgentSessionResponse(BaseModel):
             status=session.status,
             primary_kind=session.primary_kind,
             run_state=session.run_state,
+            unread_terminal_run_id=unread_terminal_run_id,
             archived_at=session.archived_at,
             purge_after=session.purge_after,
             archive_retention_days_snapshot=(session.archive_retention_days_snapshot),
             created_at=session.created_at,
             updated_at=session.updated_at,
+        )
+
+    @classmethod
+    def from_projection(
+        cls,
+        projection: AgentSessionUnreadTerminalRunProjection,
+    ) -> Self:
+        """Convert from Session projection with sparse unread state."""
+        return cls.from_domain(
+            projection.session,
+            unread_terminal_run_id=projection.unread_terminal_run_id,
         )
 
 
