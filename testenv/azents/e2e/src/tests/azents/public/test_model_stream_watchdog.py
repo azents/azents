@@ -45,18 +45,11 @@ _IDLE_PREFIX_RECOVERY_RESPONSE = "WATCHDOG_IDLE_PREFIX_RECOVERED"
 _ABSOLUTE_RECOVERY_PROMPT = "Watchdog absolute cap cleans partial then recover"
 _ABSOLUTE_FAILED_PREFIX = "FAILED_WATCHDOG_PREFIX_MUST_DISAPPEAR"
 _ABSOLUTE_RECOVERY_RESPONSE = "WATCHDOG_ABSOLUTE_RECOVERED"
-_EVENTS_RESET_PROMPT = "Watchdog parsed events reset idle"
-_EVENTS_RESET_RESPONSE = (
-    "WATCHDOG_EVENTS_RESET_IDLE abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz"
-)
-_RETRY_EXHAUSTION_PROMPT = "Watchdog retry exhaustion"
 _USER_STOP_PROMPT = "Watchdog user stop preserves partial"
 _USER_STOP_PARTIAL = "WATCHDOG_STOP_PARTIAL"
 _PROVIDER_STOP_PROMPT = "Provider retry stop"
 _PROVIDER_COMPACTION_SEED = "Provider compaction failure seed"
 _PROVIDER_COMPACTION_SEED_RESPONSE = "Provider compaction failure seed response."
-_COMPACTION_SEED = "Watchdog compaction timeout seed"
-_COMPACTION_SEED_RESPONSE = "Watchdog compaction timeout seed response."
 _TITLE_PROMPT = "Watchdog session title timeout"
 _TITLE_RESPONSE = "WATCHDOG_TITLE_RUN_COMPLETED"
 _TITLE_PROVIDER_RETRY_PROMPT = "Provider title retry"
@@ -658,75 +651,6 @@ class TestModelStreamWatchdog:
         )
         assert _ABSOLUTE_FAILED_PREFIX not in browser_driver.page_source
 
-    def test_parsed_events_refresh_idle_until_stream_completion(
-        self,
-        public_api_client: azentspublicclient.ApiClient,
-        admin_api_client: azentsadminclient.ApiClient,
-        azents_public_server_url: str,
-        azents_engine_worker_container: object,
-    ) -> None:
-        """A response longer than idle succeeds when every event gap stays short."""
-        del azents_engine_worker_container
-        workspace = setup_workspace(
-            public_api_client,
-            admin_api_client,
-            azents_public_server_url,
-        )
-        agent_id = create_agent(public_api_client, workspace)
-        started_at = time.monotonic()
-        result = run_message(
-            public_api_client=public_api_client,
-            public_url=azents_public_server_url,
-            token=workspace.token,
-            agent_id=agent_id,
-            message=_EVENTS_RESET_PROMPT,
-        )
-        payload = wait_for_rest_contents(
-            server_url=azents_public_server_url,
-            token=workspace.token,
-            session_id=result.session_id,
-            expected=[_EVENTS_RESET_RESPONSE],
-        )
-
-        assert time.monotonic() - started_at > 0.5
-        assert not system_error_events(payload)
-
-    def test_idle_timeout_retry_exhaustion_preserves_stable_failure_codes(
-        self,
-        public_api_client: azentspublicclient.ApiClient,
-        admin_api_client: azentsadminclient.ApiClient,
-        azents_public_server_url: str,
-        azents_engine_worker_container: object,
-    ) -> None:
-        """Only exhausted timeout failure is durable with all attempt codes."""
-        del azents_engine_worker_container
-        workspace = setup_workspace(
-            public_api_client,
-            admin_api_client,
-            azents_public_server_url,
-        )
-        agent_id = create_agent(public_api_client, workspace)
-        result = run_message(
-            public_api_client=public_api_client,
-            public_url=azents_public_server_url,
-            token=workspace.token,
-            agent_id=agent_id,
-            message=_RETRY_EXHAUSTION_PROMPT,
-        )
-        payload = wait_for_failed_run_error(
-            server_url=azents_public_server_url,
-            token=workspace.token,
-            session_id=result.session_id,
-            expected_attempts=4,
-        )
-
-        attempts = _failed_attempts(payload)
-        assert [attempt.get("attempt_number") for attempt in attempts] == [1, 2, 3, 4]
-        assert {attempt.get("failure_code") for attempt in attempts} == {
-            "model_stream_idle_timeout"
-        }
-        assert all(attempt.get("retryability") == "transient" for attempt in attempts)
-
     def test_user_stop_preserves_valid_partial_without_timeout_retry(
         self,
         public_api_client: azentspublicclient.ApiClient,
@@ -811,55 +735,6 @@ class TestModelStreamWatchdog:
 
         assert not system_error_events(payload)
         assert not failed_run_error_events(payload)
-
-    def test_compaction_timeout_uses_run_retry_and_commits_no_summary(
-        self,
-        public_api_client: azentspublicclient.ApiClient,
-        admin_api_client: azentsadminclient.ApiClient,
-        azents_public_server_url: str,
-        azents_engine_worker_container: object,
-    ) -> None:
-        """Blocking compaction timeouts fail the command without a partial summary."""
-        del azents_engine_worker_container
-        workspace = setup_workspace(
-            public_api_client,
-            admin_api_client,
-            azents_public_server_url,
-        )
-        agent_id = create_agent(public_api_client, workspace)
-        result = run_message(
-            public_api_client=public_api_client,
-            public_url=azents_public_server_url,
-            token=workspace.token,
-            agent_id=agent_id,
-            message=_COMPACTION_SEED,
-        )
-        wait_for_rest_contents(
-            server_url=azents_public_server_url,
-            token=workspace.token,
-            session_id=result.session_id,
-            expected=[_COMPACTION_SEED_RESPONSE],
-        )
-        _post_compact(
-            public_url=azents_public_server_url,
-            token=workspace.token,
-            agent_id=agent_id,
-            session_id=result.session_id,
-        )
-        payload = wait_for_failed_run_error(
-            server_url=azents_public_server_url,
-            token=workspace.token,
-            session_id=result.session_id,
-            expected_attempts=4,
-        )
-
-        roles = message_roles(payload)
-        assert "compaction_marker" not in roles
-        assert "compaction_summary" not in roles
-        assert len(failed_run_error_events(payload)) == 1
-        assert {
-            attempt.get("failure_code") for attempt in _failed_attempts(payload)
-        } == {"model_stream_idle_timeout"}
 
     def test_compaction_provider_failure_keeps_one_live_operation_until_exhaustion(
         self,

@@ -56,7 +56,9 @@ from azents.engine.run.commands import CommandHandler
 from azents.engine.run.contracts import AgentEngineProtocol, RunContext, RunRequest
 from azents.engine.run.emit import Emit, durable, ephemeral
 from azents.engine.run.errors import (
+    CompactionModelStreamTimeoutError,
     ModelCallError,
+    ModelStreamTimeoutError,
     NonRetryableModelCallError,
     TransientModelCallError,
     UserVisibleRuntimeError,
@@ -898,6 +900,9 @@ class _CommandHandler:
 class _FailingCommandHandler:
     """Command handler that raises a user-visible failure."""
 
+    def __init__(self, error: Exception | None = None) -> None:
+        self.error = error or UserVisibleRuntimeError("command failed")
+
     async def execute(
         self,
         engine: AgentEngineProtocol,
@@ -906,7 +911,7 @@ class _FailingCommandHandler:
     ) -> AsyncIterator[Emit]:
         """Fail command execution."""
         del engine, request, context
-        raise UserVisibleRuntimeError("command failed")
+        raise self.error
         yield  # pragma: no cover
 
 
@@ -2872,6 +2877,54 @@ async def test_execute_finalizes_command_error_through_failed_run_finalizer(
 
 
 @pytest.mark.asyncio
+async def test_execute_preserves_compaction_timeout_failure_code(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Manual compaction timeouts retain their stable retry classification."""
+    _patch_successful_resolution(monkeypatch)
+    timeout = ModelStreamTimeoutError(
+        timeout_kind="parsed_event_idle",
+        deadline_seconds=5,
+        elapsed_seconds=5,
+        call_kind="compaction",
+        provider="openai",
+        model="gpt-test",
+    )
+    finalizer = _FailedRunFinalizer()
+    executor = _executor(
+        command_registry={
+            "compact": cast(
+                CommandHandler,
+                _FailingCommandHandler(CompactionModelStreamTimeoutError(timeout)),
+            )
+        },
+        failed_run_finalizer=finalizer,
+        failed_run_max_retries=0,
+    )
+
+    result = await executor.execute(
+        _message(),
+        poll_fn=None,
+        check_stop=None,
+        prepare_toolkits=None,
+        shutdown_event=asyncio.Event(),
+        dispatch_event=_noop_dispatch_event,
+        owner_generation=1,
+        tool_admission_barrier=ToolAdmissionBarrier(),
+        model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
+        command=_pending_command(),
+    )
+
+    assert result.terminal_run_status is AgentRunStatus.FAILED
+    assert len(finalizer.inputs) == 1
+    attempt = finalizer.inputs[0].retry_state.attempts[0]
+    assert attempt.source == "model"
+    assert attempt.retryability == "transient"
+    assert attempt.failure_code == "model_stream_idle_timeout"
+    assert finalizer.inputs[0].reason == "retry_exhausted"
+
+
+@pytest.mark.asyncio
 async def test_execute_clears_activity_after_run_complete(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -3118,6 +3171,45 @@ async def test_provider_failure_uses_full_budget_despite_retryability() -> None:
     assert retry_state.provider_failure is not None
     assert [attempt.backoff_seconds for attempt in retry_state.attempts] == [1, 2, 4]
     assert finalization_reasons == [None, None, "retry_exhausted"]
+
+
+@pytest.mark.asyncio
+async def test_timeout_failure_uses_full_budget_with_stable_attempt_codes() -> None:
+    """Timeout attempts retain their stable code through retry exhaustion."""
+    executor = _executor(failed_run_max_retries=3)
+    failure = ModelStreamTimeoutError(
+        timeout_kind="parsed_event_idle",
+        deadline_seconds=5,
+        elapsed_seconds=5,
+        call_kind="sampling",
+        provider="openai",
+        model="gpt-test",
+    )
+    retry_state: FailedRunRetryState | None = None
+
+    for attempt_number in range(1, 5):
+        attempt = executor._failed_run_attempt_from_user_visible_error(  # pyright: ignore[reportPrivateUsage]  # Exercise timeout classification at the retry boundary.
+            failure,
+            attempt_number=attempt_number,
+            source="model",
+        )
+        retry_state = await executor._record_failed_run_attempt(  # pyright: ignore[reportPrivateUsage]  # Exercise durable timeout history directly.
+            session_id="session-001",
+            run_id="run-001",
+            attempt=attempt,
+            previous_retry_state=retry_state,
+        )
+
+    assert retry_state is not None
+    assert [attempt.attempt_number for attempt in retry_state.attempts] == [1, 2, 3, 4]
+    assert {attempt.failure_code for attempt in retry_state.attempts} == {
+        "model_stream_idle_timeout"
+    }
+    assert all(attempt.retryability == "transient" for attempt in retry_state.attempts)
+    assert (
+        run_executor_module._failed_run_finalization_reason(retry_state)  # pyright: ignore[reportPrivateUsage]  # Verify the terminal retry boundary.
+        == "retry_exhausted"
+    )
 
 
 @pytest.mark.asyncio
