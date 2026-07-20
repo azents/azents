@@ -7,7 +7,13 @@ from fastapi import Depends
 from azents.core.crypto import CredentialCipher
 from azents.utils.appctx import AppContext
 
-from .config import AuthConfig, Config, EmailConfig, SystemBootstrapConfig
+from .config import (
+    AuthConfig,
+    Config,
+    CredentialEncryptionConfig,
+    EmailConfig,
+    SystemBootstrapConfig,
+)
 
 
 def get_appctx() -> AppContext[Config]:
@@ -43,6 +49,13 @@ def get_email_config(
     Returns None when email_sender is not configured.
     """
     return config.email
+
+
+def get_credential_encryption_config(
+    config: Annotated[Config, Depends(get_config)],
+) -> CredentialEncryptionConfig:
+    """Return deployment-controlled credential encryption configuration."""
+    return config.credential_encryption
 
 
 def get_credential_cipher(
