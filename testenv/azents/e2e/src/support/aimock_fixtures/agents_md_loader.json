@@ -980,102 +980,19 @@
       "response": {
         "toolCalls": [
           {
-            "id": "call_subagent_mailbox_idle_hold_1",
-            "name": "list_agents",
-            "arguments": {}
+            "id": "call_subagent_mailbox_idle_barrier",
+            "name": "subagentqa__runtime_hook_qa_probe",
+            "arguments": {
+              "marker": "mailbox idle child"
+            }
           }
         ]
-      },
-      "streamingProfile": {
-        "ttft": 0,
-        "tps": 5,
-        "jitter": 0
       }
     },
     {
       "match": {
         "endpoint": "chat",
-        "toolCallId": "call_subagent_mailbox_idle_hold_1"
-      },
-      "response": {
-        "toolCalls": [
-          {
-            "id": "call_subagent_mailbox_idle_hold_2",
-            "name": "list_agents",
-            "arguments": {}
-          }
-        ]
-      },
-      "streamingProfile": {
-        "ttft": 0,
-        "tps": 5,
-        "jitter": 0
-      }
-    },
-    {
-      "match": {
-        "endpoint": "chat",
-        "toolCallId": "call_subagent_mailbox_idle_hold_2"
-      },
-      "response": {
-        "toolCalls": [
-          {
-            "id": "call_subagent_mailbox_idle_hold_3",
-            "name": "list_agents",
-            "arguments": {}
-          }
-        ]
-      },
-      "streamingProfile": {
-        "ttft": 0,
-        "tps": 5,
-        "jitter": 0
-      }
-    },
-    {
-      "match": {
-        "endpoint": "chat",
-        "toolCallId": "call_subagent_mailbox_idle_hold_3"
-      },
-      "response": {
-        "toolCalls": [
-          {
-            "id": "call_subagent_mailbox_idle_hold_4",
-            "name": "list_agents",
-            "arguments": {}
-          }
-        ]
-      },
-      "streamingProfile": {
-        "ttft": 0,
-        "tps": 5,
-        "jitter": 0
-      }
-    },
-    {
-      "match": {
-        "endpoint": "chat",
-        "toolCallId": "call_subagent_mailbox_idle_hold_4"
-      },
-      "response": {
-        "toolCalls": [
-          {
-            "id": "call_subagent_mailbox_idle_hold_5",
-            "name": "list_agents",
-            "arguments": {}
-          }
-        ]
-      },
-      "streamingProfile": {
-        "ttft": 0,
-        "tps": 5,
-        "jitter": 0
-      }
-    },
-    {
-      "match": {
-        "endpoint": "chat",
-        "toolCallId": "call_subagent_mailbox_idle_hold_5"
+        "toolCallId": "call_subagent_mailbox_idle_barrier"
       },
       "response": {
         "content": "Subagent idle child completed."
@@ -1108,102 +1025,19 @@
       "response": {
         "toolCalls": [
           {
-            "id": "call_subagent_mailbox_sender_hold_1",
-            "name": "list_agents",
-            "arguments": {}
+            "id": "call_subagent_mailbox_sender_barrier",
+            "name": "subagentqa__runtime_hook_qa_probe",
+            "arguments": {
+              "marker": "mailbox sender child"
+            }
           }
         ]
-      },
-      "streamingProfile": {
-        "ttft": 0,
-        "tps": 5,
-        "jitter": 0
       }
     },
     {
       "match": {
         "endpoint": "chat",
-        "toolCallId": "call_subagent_mailbox_sender_hold_1"
-      },
-      "response": {
-        "toolCalls": [
-          {
-            "id": "call_subagent_mailbox_sender_hold_2",
-            "name": "list_agents",
-            "arguments": {}
-          }
-        ]
-      },
-      "streamingProfile": {
-        "ttft": 0,
-        "tps": 5,
-        "jitter": 0
-      }
-    },
-    {
-      "match": {
-        "endpoint": "chat",
-        "toolCallId": "call_subagent_mailbox_sender_hold_2"
-      },
-      "response": {
-        "toolCalls": [
-          {
-            "id": "call_subagent_mailbox_sender_hold_3",
-            "name": "list_agents",
-            "arguments": {}
-          }
-        ]
-      },
-      "streamingProfile": {
-        "ttft": 0,
-        "tps": 5,
-        "jitter": 0
-      }
-    },
-    {
-      "match": {
-        "endpoint": "chat",
-        "toolCallId": "call_subagent_mailbox_sender_hold_3"
-      },
-      "response": {
-        "toolCalls": [
-          {
-            "id": "call_subagent_mailbox_sender_hold_4",
-            "name": "list_agents",
-            "arguments": {}
-          }
-        ]
-      },
-      "streamingProfile": {
-        "ttft": 0,
-        "tps": 5,
-        "jitter": 0
-      }
-    },
-    {
-      "match": {
-        "endpoint": "chat",
-        "toolCallId": "call_subagent_mailbox_sender_hold_4"
-      },
-      "response": {
-        "toolCalls": [
-          {
-            "id": "call_subagent_mailbox_sender_hold_5",
-            "name": "list_agents",
-            "arguments": {}
-          }
-        ]
-      },
-      "streamingProfile": {
-        "ttft": 0,
-        "tps": 5,
-        "jitter": 0
-      }
-    },
-    {
-      "match": {
-        "endpoint": "chat",
-        "toolCallId": "call_subagent_mailbox_sender_hold_5"
+        "toolCallId": "call_subagent_mailbox_sender_barrier"
       },
       "response": {
         "content": "Subagent sender child completed."
@@ -1301,102 +1135,19 @@
       "response": {
         "toolCalls": [
           {
-            "id": "call_subagent_timeout_child_hold_1",
-            "name": "list_agents",
-            "arguments": {}
+            "id": "call_subagent_timeout_child_barrier",
+            "name": "subagentqa__runtime_hook_qa_probe",
+            "arguments": {
+              "marker": "timeout child"
+            }
           }
         ]
-      },
-      "streamingProfile": {
-        "ttft": 0,
-        "tps": 5,
-        "jitter": 0
       }
     },
     {
       "match": {
         "endpoint": "chat",
-        "toolCallId": "call_subagent_timeout_child_hold_1"
-      },
-      "response": {
-        "toolCalls": [
-          {
-            "id": "call_subagent_timeout_child_hold_2",
-            "name": "list_agents",
-            "arguments": {}
-          }
-        ]
-      },
-      "streamingProfile": {
-        "ttft": 0,
-        "tps": 5,
-        "jitter": 0
-      }
-    },
-    {
-      "match": {
-        "endpoint": "chat",
-        "toolCallId": "call_subagent_timeout_child_hold_2"
-      },
-      "response": {
-        "toolCalls": [
-          {
-            "id": "call_subagent_timeout_child_hold_3",
-            "name": "list_agents",
-            "arguments": {}
-          }
-        ]
-      },
-      "streamingProfile": {
-        "ttft": 0,
-        "tps": 5,
-        "jitter": 0
-      }
-    },
-    {
-      "match": {
-        "endpoint": "chat",
-        "toolCallId": "call_subagent_timeout_child_hold_3"
-      },
-      "response": {
-        "toolCalls": [
-          {
-            "id": "call_subagent_timeout_child_hold_4",
-            "name": "list_agents",
-            "arguments": {}
-          }
-        ]
-      },
-      "streamingProfile": {
-        "ttft": 0,
-        "tps": 5,
-        "jitter": 0
-      }
-    },
-    {
-      "match": {
-        "endpoint": "chat",
-        "toolCallId": "call_subagent_timeout_child_hold_4"
-      },
-      "response": {
-        "toolCalls": [
-          {
-            "id": "call_subagent_timeout_child_hold_5",
-            "name": "list_agents",
-            "arguments": {}
-          }
-        ]
-      },
-      "streamingProfile": {
-        "ttft": 0,
-        "tps": 5,
-        "jitter": 0
-      }
-    },
-    {
-      "match": {
-        "endpoint": "chat",
-        "toolCallId": "call_subagent_timeout_child_hold_5"
+        "toolCallId": "call_subagent_timeout_child_barrier"
       },
       "response": {
         "content": "Subagent timeout child completed."

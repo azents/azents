@@ -7,15 +7,20 @@ from typing import cast
 
 import azentsadminclient
 import azentspublicclient
+import pytest
 import requests
 from azentspublicclient.api.agent_v1_api import AgentV1Api
 from azentspublicclient.api.llm_provider_integration_v1_api import (
     LLMProviderIntegrationV1Api,
 )
+from azentspublicclient.api.toolkit_v1_api import ToolkitV1Api
 from azentspublicclient.api.workspace_v1_api import WorkspaceV1Api
 from azentspublicclient.models.agent_create_request import AgentCreateRequest
 from azentspublicclient.models.agent_model_selection_input import (
     AgentModelSelectionInput,
+)
+from azentspublicclient.models.agent_toolkit_attach_request import (
+    AgentToolkitAttachRequest,
 )
 from azentspublicclient.models.agent_type import AgentType
 from azentspublicclient.models.api_key_secrets import ApiKeySecrets
@@ -25,7 +30,11 @@ from azentspublicclient.models.llm_provider_integration_create_request import (
     LLMProviderIntegrationCreateRequest,
 )
 from azentspublicclient.models.secrets import Secrets
+from azentspublicclient.models.toolkit_config_create_request import (
+    ToolkitConfigCreateRequest,
+)
 from pydantic import TypeAdapter, ValidationError
+from testcontainers.core.container import DockerContainer
 
 from support.utils import (
     authenticate_user,
@@ -174,8 +183,10 @@ def _setup_workspace(
 def _create_agent(
     public_api_client: azentspublicclient.ApiClient,
     workspace: _Workspace,
+    *,
+    release_file_path: str | None = None,
 ) -> str:
-    """Create an Agent that receives the auto-bound subagent toolkit."""
+    """Create an Agent with subagent tools and an optional release barrier."""
     agent = AgentV1Api(public_api_client).agent_v1_create_agent(
         handle=workspace.handle,
         agent_create_request=AgentCreateRequest(
@@ -187,6 +198,31 @@ def _create_agent(
         ),
         _headers=_headers(workspace.token),
     )
+    if release_file_path is not None:
+        toolkit_api = ToolkitV1Api(public_api_client)
+        toolkit = toolkit_api.toolkit_v1_create_toolkit_config(
+            handle=workspace.handle,
+            toolkit_config_create_request=ToolkitConfigCreateRequest(
+                toolkit_type="runtime_hook_qa",
+                slug="subagentqa",
+                name="Subagent Release Barrier",
+                config={
+                    "mode": "observe",
+                    "delay_seconds": 0.0,
+                    "release_file_path": release_file_path,
+                },
+                enabled=True,
+            ),
+            _headers=_headers(workspace.token),
+        )
+        toolkit_api.toolkit_v1_attach_toolkit_to_agent(
+            handle=workspace.handle,
+            agent_id=agent.id,
+            agent_toolkit_attach_request=AgentToolkitAttachRequest(
+                toolkit_id=toolkit.id
+            ),
+            _headers=_headers(workspace.token),
+        )
     return agent.id
 
 
@@ -373,6 +409,51 @@ def _wait_for_mock_openai_journal_content(
     raise TimeoutError(
         f"mock provider journal did not include {content!r}: {last_journal}"
     )
+
+
+def _container_logs(container: DockerContainer) -> str:
+    """Return combined container stdout and stderr."""
+    stdout, stderr = container.get_logs()
+    return stdout.decode(errors="replace") + stderr.decode(errors="replace")
+
+
+def _wait_for_release_barriers(
+    container: DockerContainer,
+    release_file_path: str,
+    *,
+    expected_count: int,
+    timeout: float = 120,
+) -> None:
+    """Wait until the expected child tools are blocked on a release file."""
+    deadline = time.monotonic() + timeout
+    last_logs = ""
+    while time.monotonic() < deadline:
+        last_logs = _container_logs(container)
+        if last_logs.count(release_file_path) >= expected_count:
+            return
+        time.sleep(0.25)
+    raise TimeoutError(
+        f"release barriers were not observed: {release_file_path}, "
+        f"expected={expected_count}\n{last_logs[-4000:]}"
+    )
+
+
+def _set_release_file(
+    container: DockerContainer,
+    release_file_path: str,
+    *,
+    present: bool,
+) -> None:
+    """Create or remove a release file inside the worker container."""
+    command = (
+        ["touch", release_file_path] if present else ["rm", "-f", release_file_path]
+    )
+    result = container.get_wrapped_container().exec_run(command)
+    if result.exit_code != 0:
+        output = result.output.decode(errors="replace")
+        raise AssertionError(
+            f"failed to update release file {release_file_path}: {output}"
+        )
 
 
 def _tool_result_output_text(event: dict[str, object]) -> str | None:
@@ -835,21 +916,38 @@ class TestSubagents:
 
     def test_targetless_wait_observes_any_child_mailbox_message(
         self,
+        request: pytest.FixtureRequest,
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
-        azents_engine_worker_container: object,
+        azents_engine_worker_container: DockerContainer,
         mock_openai_url: str,
     ) -> None:
         """Observe one child message while every descendant remains active."""
-        del azents_engine_worker_container
         _reset_mock_openai(mock_openai_url)
+        release_file_path = f"/tmp/azents-subagent-mailbox-{unique()}"
+        _set_release_file(
+            azents_engine_worker_container,
+            release_file_path,
+            present=False,
+        )
+        request.addfinalizer(
+            lambda: _set_release_file(
+                azents_engine_worker_container,
+                release_file_path,
+                present=True,
+            )
+        )
         workspace = _setup_workspace(
             public_api_client,
             admin_api_client,
             azents_public_server_url,
         )
-        agent_id = _create_agent(public_api_client, workspace)
+        agent_id = _create_agent(
+            public_api_client,
+            workspace,
+            release_file_path=release_file_path,
+        )
         root_session_id = _team_primary_session(
             public_url=azents_public_server_url,
             token=workspace.token,
@@ -909,6 +1007,11 @@ class TestSubagents:
             call_id=_MAILBOX_SENDER_CALL_ID,
             expected="queued",
         )
+        _wait_for_release_barriers(
+            azents_engine_worker_container,
+            release_file_path,
+            expected_count=2,
+        )
         wait_event = _wait_for_tool_result_content(
             public_url=azents_public_server_url,
             token=workspace.token,
@@ -921,6 +1024,11 @@ class TestSubagents:
             token=workspace.token,
             session_id=root_session_id,
             expected=_MAILBOX_RESPONSE,
+        )
+        _set_release_file(
+            azents_engine_worker_container,
+            release_file_path,
+            present=True,
         )
         _wait_for_child_node(
             public_url=azents_public_server_url,
@@ -1081,19 +1189,36 @@ class TestSubagents:
 
     def test_targetless_wait_timeout_reports_active_descendant(
         self,
+        request: pytest.FixtureRequest,
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
-        azents_engine_worker_container: object,
+        azents_engine_worker_container: DockerContainer,
     ) -> None:
         """Report an active descendant when a zero-duration wait expires."""
-        del azents_engine_worker_container
+        release_file_path = f"/tmp/azents-subagent-timeout-{unique()}"
+        _set_release_file(
+            azents_engine_worker_container,
+            release_file_path,
+            present=False,
+        )
+        request.addfinalizer(
+            lambda: _set_release_file(
+                azents_engine_worker_container,
+                release_file_path,
+                present=True,
+            )
+        )
         workspace = _setup_workspace(
             public_api_client,
             admin_api_client,
             azents_public_server_url,
         )
-        agent_id = _create_agent(public_api_client, workspace)
+        agent_id = _create_agent(
+            public_api_client,
+            workspace,
+            release_file_path=release_file_path,
+        )
         root_session_id = _team_primary_session(
             public_url=azents_public_server_url,
             token=workspace.token,
@@ -1122,6 +1247,11 @@ class TestSubagents:
             expected_status="running",
             expected_unread=False,
         )
+        _wait_for_release_barriers(
+            azents_engine_worker_container,
+            release_file_path,
+            expected_count=1,
+        )
 
         _run_message(
             public_url=azents_public_server_url,
@@ -1142,6 +1272,11 @@ class TestSubagents:
             token=workspace.token,
             session_id=root_session_id,
             expected=_ACTIVE_TIMEOUT_RESPONSE,
+        )
+        _set_release_file(
+            azents_engine_worker_container,
+            release_file_path,
+            present=True,
         )
         _wait_for_child_node(
             public_url=azents_public_server_url,
