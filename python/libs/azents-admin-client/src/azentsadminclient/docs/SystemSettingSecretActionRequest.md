@@ -6,8 +6,8 @@ Explicit secret replacement or clearing action.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**action** | [**SystemSettingSecretActionType**](SystemSettingSecretActionType.md) |  |
-**value** | **str** |  | [optional]
+**action** | [**SystemSettingSecretActionType**](SystemSettingSecretActionType.md) |  | 
+**value** | **str** |  | [optional] 
 
 ## Example
 
@@ -27,3 +27,5 @@ system_setting_secret_action_request_dict = system_setting_secret_action_request
 system_setting_secret_action_request_from_dict = SystemSettingSecretActionRequest.from_dict(system_setting_secret_action_request_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

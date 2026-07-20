@@ -6,21 +6,21 @@ Metadata-only System Settings audit event.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**id** | **str** |  |
-**section** | **str** |  |
-**event_type** | [**SystemSettingAuditEventType**](SystemSettingAuditEventType.md) |  |
-**source** | [**SystemSettingAuditSource**](SystemSettingAuditSource.md) |  |
-**previous_version** | **int** |  |
-**new_version** | **int** |  |
-**actor_user_id** | **str** |  |
-**changed_fields** | **List[str]** |  |
-**secret_actions** | **Dict[str, str]** |  |
-**validation_status** | [**SystemSettingValidationStatus**](SystemSettingValidationStatus.md) |  |
-**candidate_id** | **str** |  |
-**impact_confirmed** | **bool** |  |
-**confirmation_action** | **str** |  |
-**metadata** | **Dict[str, object]** |  |
-**created_at** | **datetime** |  |
+**id** | **str** |  | 
+**section** | **str** |  | 
+**event_type** | [**SystemSettingAuditEventType**](SystemSettingAuditEventType.md) |  | 
+**source** | [**SystemSettingAuditSource**](SystemSettingAuditSource.md) |  | 
+**previous_version** | **int** |  | 
+**new_version** | **int** |  | 
+**actor_user_id** | **str** |  | 
+**changed_fields** | **List[str]** |  | 
+**secret_actions** | **Dict[str, str]** |  | 
+**validation_status** | [**SystemSettingValidationStatus**](SystemSettingValidationStatus.md) |  | 
+**candidate_id** | **str** |  | 
+**impact_confirmed** | **bool** |  | 
+**confirmation_action** | **str** |  | 
+**metadata** | **Dict[str, object]** |  | 
+**created_at** | **datetime** |  | 
 
 ## Example
 
@@ -40,3 +40,5 @@ system_setting_audit_event_response_dict = system_setting_audit_event_response_i
 system_setting_audit_event_response_from_dict = SystemSettingAuditEventResponse.from_dict(system_setting_audit_event_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

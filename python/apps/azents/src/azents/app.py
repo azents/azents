@@ -14,9 +14,6 @@ from azents.api import admin, internal, public, testenv
 from azents.consts import PROJECT_ROOT
 from azents.core.config import Config
 from azents.core.deps import get_appctx
-from azents.services.github_platform_system_setting.binding import (
-    PlatformGitHubAppBindingMigration,
-)
 from azents.services.system_bootstrap.service import SystemBootstrapService
 from azents.utils.appctx import AppContext
 from azents.utils.fastapi.route import as_route_mounter, generate_short_operation_id
@@ -82,7 +79,6 @@ def create_public_api_app(config: Config) -> FastAPI:
         title="Azents Public API",
         description="Public read-only API server for Azents",
         initialize_system_bootstrap=False,
-        initialize_platform_github_binding=True,
     )
     public.mount(as_route_mounter(app))
     internal_app = _create_internal_sub_app(app)
@@ -121,7 +117,6 @@ def create_admin_api_app(config: Config) -> FastAPI:
         title="Azents Admin API",
         description="Admin CRUD API server for Azents",
         initialize_system_bootstrap=True,
-        initialize_platform_github_binding=True,
     )
     admin.mount(as_route_mounter(app))
     return app
@@ -141,7 +136,6 @@ def create_testenv_api_app(config: Config) -> FastAPI:
         title="Azents Testenv API",
         description="Testenv-only devtools API for Azents",
         initialize_system_bootstrap=False,
-        initialize_platform_github_binding=False,
     )
     testenv.mount(as_route_mounter(app))
     return app
@@ -153,7 +147,6 @@ def _create_fastapi_instance(
     title: str = "Azents API",
     description: str = "Azents API Server",
     initialize_system_bootstrap: bool,
-    initialize_platform_github_binding: bool,
 ) -> FastAPI:
     """Create a FastAPI instance.
 
@@ -168,7 +161,6 @@ def _create_fastapi_instance(
         appctx,
         container,
         initialize_system_bootstrap=initialize_system_bootstrap,
-        initialize_platform_github_binding=initialize_platform_github_binding,
     )
 
     app = FastAPI(
@@ -204,16 +196,12 @@ def _create_fastapi_lifespan(
     container: di.Container,
     *,
     initialize_system_bootstrap: bool,
-    initialize_platform_github_binding: bool,
 ) -> Lifespan[FastAPI]:
     """Create a lifespan function that binds the app context lifecycle to FastAPI."""
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         async with appctx, container:
-            if initialize_platform_github_binding:
-                migration = await container.solve(PlatformGitHubAppBindingMigration)
-                await migration.run()
             if initialize_system_bootstrap:
                 service = await container.solve(SystemBootstrapService)
                 await service.initialize()

@@ -291,39 +291,3 @@ class TestGithubUserInstallationRepository:
         assert len(rows) == 1
         assert rows[0].platform_app_id == "222"
         assert rows[0].installation_id == 9001
-
-    async def test_sync_replaces_matching_unbound_legacy_row(
-        self,
-        rdb_session: AsyncSession,
-    ) -> None:
-        """A verified reconnect removes the matching unbound legacy row."""
-        user_id = await _create_user(rdb_session, email="gh-reconnect@example.com")
-        rdb_session.add(
-            RDBGithubUserInstallation(
-                user_id=user_id,
-                platform_app_id=None,
-                installation_id=9101,
-                account_login="legacy-org",
-                account_type="Organization",
-                account_avatar_url="",
-            )
-        )
-        await rdb_session.flush()
-        repo = GithubUserInstallationRepository()
-
-        await repo.sync(
-            rdb_session,
-            user_id,
-            "333",
-            [_make_installation(9101, login="reconnected-org")],
-        )
-
-        result = await rdb_session.execute(
-            select(RDBGithubUserInstallation).where(
-                RDBGithubUserInstallation.user_id == user_id,
-            )
-        )
-        rows = result.scalars().all()
-        assert len(rows) == 1
-        assert rows[0].platform_app_id == "333"
-        assert rows[0].account_login == "reconnected-org"

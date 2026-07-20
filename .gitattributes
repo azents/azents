@@ -1,0 +1,4 @@
+python/libs/azents-admin-client/azentsadminclient_README.md whitespace=-trailing-space
+python/libs/azents-admin-client/src/** whitespace=-trailing-space
+python/libs/azents-public-client/azentspublicclient_README.md whitespace=-trailing-space
+python/libs/azents-public-client/src/** whitespace=-trailing-space

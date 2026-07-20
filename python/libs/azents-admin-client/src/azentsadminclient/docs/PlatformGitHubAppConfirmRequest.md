@@ -6,9 +6,9 @@ Confirmation for an unchanged validated candidate impact.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**candidate_id** | **str** |  |
-**expected_version** | **int** |  |
-**confirmation_action** | **str** |  |
+**candidate_id** | **str** |  | 
+**expected_version** | **int** |  | 
+**confirmation_action** | **str** |  | 
 
 ## Example
 
@@ -28,3 +28,5 @@ platform_git_hub_app_confirm_request_dict = platform_git_hub_app_confirm_request
 platform_git_hub_app_confirm_request_from_dict = PlatformGitHubAppConfirmRequest.from_dict(platform_git_hub_app_confirm_request_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

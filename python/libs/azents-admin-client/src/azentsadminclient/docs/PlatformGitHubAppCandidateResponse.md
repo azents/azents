@@ -6,16 +6,16 @@ Redacted candidate lifecycle response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**id** | **str** |  |
-**base_version** | **int** |  |
-**validation_status** | [**SystemSettingValidationStatus**](SystemSettingValidationStatus.md) |  |
-**validation_code** | **str** |  |
-**validation_message** | **str** |  |
-**action_hint** | **str** |  |
-**impact** | **Dict[str, object]** |  |
-**created_at** | **datetime** |  |
-**updated_at** | **datetime** |  |
-**expires_at** | **datetime** |  |
+**id** | **str** |  | 
+**base_version** | **int** |  | 
+**validation_status** | [**SystemSettingValidationStatus**](SystemSettingValidationStatus.md) |  | 
+**validation_code** | **str** |  | 
+**validation_message** | **str** |  | 
+**action_hint** | **str** |  | 
+**impact** | **Dict[str, object]** |  | 
+**created_at** | **datetime** |  | 
+**updated_at** | **datetime** |  | 
+**expires_at** | **datetime** |  | 
 
 ## Example
 
@@ -35,3 +35,5 @@ platform_git_hub_app_candidate_response_dict = platform_git_hub_app_candidate_re
 platform_git_hub_app_candidate_response_from_dict = PlatformGitHubAppCandidateResponse.from_dict(platform_git_hub_app_candidate_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

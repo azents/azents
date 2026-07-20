@@ -6,9 +6,9 @@ Redacted reconnect state for a Platform GitHub Toolkit.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**type** | **str** |  |
-**status** | **str** |  |
-**reason** | [**PlatformGitHubAppAuthorizationReason**](PlatformGitHubAppAuthorizationReason.md) |  |
+**type** | **str** |  | 
+**status** | **str** |  | 
+**reason** | [**PlatformGitHubAppAuthorizationReason**](PlatformGitHubAppAuthorizationReason.md) |  | 
 
 ## Example
 
@@ -28,3 +28,5 @@ git_hub_platform_authorization_state_response_dict = git_hub_platform_authorizat
 git_hub_platform_authorization_state_response_from_dict = GitHubPlatformAuthorizationStateResponse.from_dict(git_hub_platform_authorization_state_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

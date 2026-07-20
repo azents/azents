@@ -6,12 +6,12 @@ Generic System Settings inventory item.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**section** | **str** |  |
-**display_name** | **str** |  |
-**effective_status** | [**PlatformGitHubAppEffectiveStatus**](PlatformGitHubAppEffectiveStatus.md) |  |
-**admin_version** | **int** |  |
-**environment_managed_field_count** | **int** |  |
-**candidate_status** | [**SystemSettingValidationStatus**](SystemSettingValidationStatus.md) |  |
+**section** | **str** |  | 
+**display_name** | **str** |  | 
+**effective_status** | [**PlatformGitHubAppEffectiveStatus**](PlatformGitHubAppEffectiveStatus.md) |  | 
+**admin_version** | **int** |  | 
+**environment_managed_field_count** | **int** |  | 
+**candidate_status** | [**SystemSettingValidationStatus**](SystemSettingValidationStatus.md) |  | 
 
 ## Example
 
@@ -31,3 +31,5 @@ system_setting_inventory_item_response_dict = system_setting_inventory_item_resp
 system_setting_inventory_item_response_from_dict = SystemSettingInventoryItemResponse.from_dict(system_setting_inventory_item_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

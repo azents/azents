@@ -17,6 +17,7 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/system_setting.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/ec609e0da8ab_add_system_settings_foundation.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/8842bd30d5c6_bind_github_resources_to_platform_app_.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/725b487eaaca_require_platform_github_app_identity.py
   - typescript/apps/azents-admin-web/src/app/system-settings/**
   - typescript/apps/azents-admin-web/src/features/system-settings/**
   - typescript/apps/azents-admin-web/src/trpc/routers/systemSettings.ts
@@ -46,7 +47,7 @@ api_routes:
   - /system/v1/settings/file-lifecycle/archive-retention/preview
   - /system/v1/settings/file-lifecycle/retention-applications/{application_id}
 last_verified_at: 2026-07-20
-spec_version: 2
+spec_version: 3
 ---
 
 # System Settings
@@ -153,11 +154,10 @@ The App ID must contain ASCII digits. The private key must be an unencrypted RSA
 validation verifies the App identity and OAuth client credentials. The redacted detail status is
 `not_configured`, `incomplete`, `invalid`, `ready`, `unavailable`, or `reconnect_required`.
 
-A Platform App identity change reports only aggregate counts for affected Users, installations,
-Toolkits, and Agents. On upgrade, the durable application migration binds previously unbound legacy
-installations and Platform Toolkits only when `AZ_GITHUB_PLATFORM_APP_ID` is present. When the first
-Admin-managed App ID encounters remaining unbound legacy resources, confirmation can either atomically
-claim them for that App or leave them unbound. A later App ID change preserves existing resources and
+A Platform App identity is mandatory for every persisted installation row and Platform Toolkit
+credential. The database enforces `github_user_installations.platform_app_id NOT NULL` and unique
+`(user_id, platform_app_id, installation_id)` ownership. The application does not normalize retired
+unbound records or expose a claim path. A later App ID change preserves existing resources and
 activates only after explicit impact confirmation; affected Toolkits then require reconnect.
 
 Changing only the private key, client ID, or client secret while retaining the same App ID preserves
@@ -275,6 +275,7 @@ page resumes the application returned by the settings endpoint.
 
 ## Changelog
 
+- **2026-07-20** — v3. Retired the legacy unbound Platform GitHub App transition state, required App IDs for persisted installation rows and Platform Toolkits, and retained impact confirmation only for actual App identity changes.
 - **2026-07-20** — v2. Added the provider-neutral typed Section lifecycle, encrypted current/candidate
   persistence, field-level environment precedence, Platform GitHub App validation and impact
   confirmation, metadata-only health/audit projections, Admin Web contract, and dedicated Helm Secret

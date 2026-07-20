@@ -1015,7 +1015,6 @@
         "installationsLinked": "Installations GitHub App liées",
         "reconnectRequiredTitle": "Reconnexion GitHub requise",
         "reconnectReasonAppIdentityChanged": "L’application GitHub de la plateforme a changé. Reconnectez cette boîte à outils et enregistrez les installations actualisées avant de la réutiliser.",
-        "reconnectReasonLegacyBindingUnbound": "Cette boîte à outils est antérieure à la liaison d’identité de l’application. Reconnectez-la une fois pour lier ses installations à l’application GitHub actuelle de la plateforme.",
         "reconnectGithub": "Se reconnecter avec GitHub"
       },
       "envvar": {

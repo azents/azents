@@ -30,10 +30,8 @@ class PlatformGitHubAppBindingResponse(BaseModel):
     affected_installation_count: StrictInt
     affected_toolkit_count: StrictInt
     affected_agent_count: StrictInt
-    unbound_installation_count: StrictInt
-    unbound_toolkit_count: StrictInt
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["affected_user_count", "affected_installation_count", "affected_toolkit_count", "affected_agent_count", "unbound_installation_count", "unbound_toolkit_count"]
+    __properties: ClassVar[List[str]] = ["affected_user_count", "affected_installation_count", "affected_toolkit_count", "affected_agent_count"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -96,9 +94,7 @@ class PlatformGitHubAppBindingResponse(BaseModel):
             "affected_user_count": obj.get("affected_user_count"),
             "affected_installation_count": obj.get("affected_installation_count"),
             "affected_toolkit_count": obj.get("affected_toolkit_count"),
-            "affected_agent_count": obj.get("affected_agent_count"),
-            "unbound_installation_count": obj.get("unbound_installation_count"),
-            "unbound_toolkit_count": obj.get("unbound_toolkit_count")
+            "affected_agent_count": obj.get("affected_agent_count")
         })
         # store additional fields in additional_properties
         for _key in obj.keys():
@@ -106,3 +102,5 @@ class PlatformGitHubAppBindingResponse(BaseModel):
                 _obj.additional_properties[_key] = obj.get(_key)
 
         return _obj
+
+

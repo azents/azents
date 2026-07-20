@@ -532,11 +532,7 @@ export function GithubConfigFields({
               title={t("reconnectRequiredTitle")}
             >
               <Stack gap="xs">
-                <Text size="sm">
-                  {authorizationState.reason === "app_identity_changed"
-                    ? t("reconnectReasonAppIdentityChanged")
-                    : t("reconnectReasonLegacyBindingUnbound")}
-                </Text>
+                <Text size="sm">{t("reconnectReasonAppIdentityChanged")}</Text>
                 <Button
                   variant="light"
                   color="red"

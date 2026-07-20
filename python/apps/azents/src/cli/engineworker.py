@@ -13,9 +13,6 @@ from azcommon.logging import configure_logging_for_runtime
 
 from azents.app import run_with_container
 from azents.core.config import Config
-from azents.services.github_platform_system_setting.binding import (
-    PlatformGitHubAppBindingMigration,
-)
 from azents.worker.deps import get_health_server
 from azents.worker.worker import AgentWorker
 
@@ -35,8 +32,6 @@ async def main() -> None:
     shutdown_event = asyncio.Event()
 
     async with run_with_container(config) as container:
-        migration = await container.solve(PlatformGitHubAppBindingMigration)
-        await migration.run()
         worker = await container.solve(AgentWorker)
         health = await container.solve(get_health_server)
 

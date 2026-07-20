@@ -6,11 +6,11 @@ Optimistic partial update for the Platform GitHub App Admin base.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**expected_version** | **int** |  |
-**app_id** | **str** |  | [optional]
-**client_id** | **str** |  | [optional]
-**private_key** | [**SystemSettingSecretActionRequest**](SystemSettingSecretActionRequest.md) |  | [optional]
-**client_secret** | [**SystemSettingSecretActionRequest**](SystemSettingSecretActionRequest.md) |  | [optional]
+**expected_version** | **int** |  | 
+**app_id** | **str** |  | [optional] 
+**client_id** | **str** |  | [optional] 
+**private_key** | [**SystemSettingSecretActionRequest**](SystemSettingSecretActionRequest.md) |  | [optional] 
+**client_secret** | [**SystemSettingSecretActionRequest**](SystemSettingSecretActionRequest.md) |  | [optional] 
 
 ## Example
 
@@ -30,3 +30,5 @@ platform_git_hub_app_patch_request_dict = platform_git_hub_app_patch_request_ins
 platform_git_hub_app_patch_request_from_dict = PlatformGitHubAppPatchRequest.from_dict(platform_git_hub_app_patch_request_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

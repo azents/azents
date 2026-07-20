@@ -27,9 +27,10 @@ class PlatformGitHubAppAuthorizationReason(str, Enum):
     allowed enum values
     """
     APP_IDENTITY_CHANGED = 'app_identity_changed'
-    LEGACY_BINDING_UNBOUND = 'legacy_binding_unbound'
 
     @classmethod
     def from_json(cls, json_str: str) -> Self:
         """Create an instance of PlatformGitHubAppAuthorizationReason from a JSON string"""
         return cls(json.loads(json_str))
+
+

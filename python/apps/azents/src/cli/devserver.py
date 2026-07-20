@@ -27,9 +27,6 @@ from azents.app import (
 )
 from azents.core.config import Config
 from azents.scheduler.service import SchedulerService
-from azents.services.github_platform_system_setting.binding import (
-    PlatformGitHubAppBindingMigration,
-)
 from azents.worker.worker import AgentWorker
 
 _SRC_DIR = str(Path(__file__).resolve().parent.parent)
@@ -136,8 +133,6 @@ async def main(*, reload: bool = False) -> None:
         loop.add_signal_handler(sig, _on_shutdown, sig)
 
     async with run_with_container(config) as container:
-        migration = await container.solve(PlatformGitHubAppBindingMigration)
-        await migration.run()
         worker = await container.solve(AgentWorker)
         scheduler = await container.solve(SchedulerService)
 

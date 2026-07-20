@@ -20,7 +20,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-16 | 9 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-17 | 5 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-07-19 | 16 |
-| [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-20 | 2 |
+| [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-20 | 3 |
 | [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-07-20 | 62 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-07-20 | 8 |
 | [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-07-19 | 41 |
@@ -235,6 +235,7 @@ Design documents are accumulated records and are not listed individually in this
 - [ADR-0173: Group Chat Tool Activity in the Frontend](adr/0173-group-chat-tool-activity-in-the-frontend.md)
 - [ADR-0174: Present Chat Activity as an Ordered Event Stream](adr/0174-present-chat-activity-as-an-ordered-event-stream.md)
 - [ADR-0174: Model Unread Run Results as Session-Shared State](adr/0174-session-shared-unread-run-result-state.md)
+- [ADR-0175: Retire Legacy Platform GitHub App Bindings](adr/0175-retire-legacy-platform-github-bindings.md)
 
 ## Issues (Bug Tracking)
 

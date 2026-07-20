@@ -74,8 +74,6 @@ class PlatformGitHubAppBindingState:
     affected_installation_count: int
     affected_toolkit_count: int
     affected_agent_count: int
-    unbound_installation_count: int
-    unbound_toolkit_count: int
 
     @property
     def reconnect_required(self) -> bool:

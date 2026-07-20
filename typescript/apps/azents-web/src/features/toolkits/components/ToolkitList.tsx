@@ -169,9 +169,7 @@ function ToolkitCard({
               title={t("github.reconnectRequiredTitle")}
             >
               <Text size="sm">
-                {toolkit.authorization_state.reason === "app_identity_changed"
-                  ? t("github.reconnectReasonAppIdentityChanged")
-                  : t("github.reconnectReasonLegacyBindingUnbound")}
+                {t("github.reconnectReasonAppIdentityChanged")}
               </Text>
             </Alert>
           )}
