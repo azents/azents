@@ -81,7 +81,7 @@ class PlatformGitHubAppValidationClient:
 
         try:
             oauth_response = await self.http_client.post(
-                "https://github.com/login/oauth/access_token",
+                self.oauth_token_url,
                 headers={"Accept": "application/json"},
                 json={
                     "client_id": effective.client_id,
