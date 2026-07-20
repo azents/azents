@@ -28,6 +28,7 @@ from azents.core.system_setting import (
     SystemSettingCandidateExpired,
     SystemSettingCandidateNotFound,
     SystemSettingCandidateNotValidated,
+    SystemSettingCandidateReplaced,
     SystemSettingDefinition,
     SystemSettingEffectiveGenerationChanged,
     SystemSettingEnvironment,
@@ -359,6 +360,8 @@ class SystemSettingsService:
     async def prepare_candidate_validation(
         self,
         section: SystemSettingSection,
+        *,
+        candidate_id: str | None,
     ) -> SystemSettingCandidateValidationSnapshot:
         """Return a stable current/candidate snapshot for external validation."""
         definition = self.registry.get(section)
@@ -369,7 +372,17 @@ class SystemSettingsService:
             await self.repository.acquire_section_lock(session, section=section)
             candidate = await self.repository.get_candidate(session, section=section)
             if candidate is None:
+                if candidate_id is not None:
+                    raise SystemSettingCandidateReplaced(
+                        section=section,
+                        candidate_id=candidate_id,
+                    )
                 raise SystemSettingCandidateNotFound(section=section)
+            if candidate_id is not None and candidate.id != candidate_id:
+                raise SystemSettingCandidateReplaced(
+                    section=section,
+                    candidate_id=candidate_id,
+                )
             if candidate.expires_at <= now:
                 await self.repository.delete_candidate(
                     session,
@@ -410,10 +423,14 @@ class SystemSettingsService:
         self,
         *,
         section: SystemSettingSection,
+        candidate_id: str | None,
         validator: SystemSettingCandidateValidator,
     ) -> SystemSettingMutationResult:
         """Validate a candidate externally and activate when confirmation is absent."""
-        snapshot = await self.prepare_candidate_validation(section)
+        snapshot = await self.prepare_candidate_validation(
+            section,
+            candidate_id=candidate_id,
+        )
         result = await validator(snapshot)
         return await self._record_candidate_validation(
             snapshot=snapshot,
@@ -668,8 +685,16 @@ class SystemSettingsService:
         async with self.session_manager() as session:
             await self.repository.acquire_section_lock(session, section=section)
             candidate = await self.repository.get_candidate(session, section=section)
-            if candidate is None or candidate.id != snapshot.candidate.id:
-                raise SystemSettingCandidateNotFound(section=section)
+            if candidate is None:
+                raise SystemSettingCandidateReplaced(
+                    section=section,
+                    candidate_id=snapshot.candidate.id,
+                )
+            if candidate.id != snapshot.candidate.id:
+                raise SystemSettingCandidateReplaced(
+                    section=section,
+                    candidate_id=snapshot.candidate.id,
+                )
             if candidate.expires_at <= now:
                 await self.repository.delete_candidate(
                     session,

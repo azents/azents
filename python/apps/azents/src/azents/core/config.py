@@ -94,9 +94,10 @@ class Settings(BaseSettings):
     # MCP egress proxy; forward proxy for SSRF blocking
     mcp_proxy_url: str | None = None
 
-    # Testenv-only flags; startup fails when enabled in production
+    # Testenv-only flags and deterministic external-service boundaries
     testenv_api_enabled: bool = False
     testenv_runtime_hook_qa_enabled: bool = False
+    testenv_github_platform_validation_base_url: str | None = None
 
     # Session data S3 storage; unified file storage
     workspace_s3_bucket: str = ""
@@ -362,9 +363,10 @@ class Config(BaseModel):
     workspace_s3: WorkspaceS3Config
     file_lifecycle: FileLifecycleConfig = FileLifecycleConfig()
     avatar_cdn_base_url: str | None = None
-    # Testenv-only flags
+    # Testenv-only flags and deterministic external-service boundaries
     testenv_api_enabled: bool = False
     testenv_runtime_hook_qa_enabled: bool = False
+    testenv_github_platform_validation_base_url: str | None = None
 
     @classmethod
     def from_settings(cls, settings: Settings) -> Self:
@@ -461,6 +463,9 @@ class Config(BaseModel):
             avatar_cdn_base_url=settings.avatar_cdn_base_url,
             testenv_api_enabled=settings.testenv_api_enabled,
             testenv_runtime_hook_qa_enabled=settings.testenv_runtime_hook_qa_enabled,
+            testenv_github_platform_validation_base_url=(
+                settings.testenv_github_platform_validation_base_url
+            ),
         )
 
     @classmethod

@@ -42,6 +42,10 @@ _IMAGE_GENERATION_PROXY = (
 _IMAGE_GENERATION_FIXTURE_DIR = (
     REPOSITORY_ROOT / "testenv/azents/e2e/src/support/fixtures"
 )
+_GITHUB_VALIDATION_PROXY = (
+    REPOSITORY_ROOT / "testenv/azents/e2e/src/support/github_validation_proxy.py"
+)
+_GITHUB_VALIDATION_INTERNAL_URL = "http://github-validation-proxy:8082"
 _DOCKER_CLIENT_TIMEOUT_SECONDS = 300
 _RUNTIME_PROVIDER_ID = "system-docker"
 _RUNTIME_CONTAINER_NAME_RE = re.compile(r"^azents-runtime-[0-9a-f]{32}$")
@@ -252,6 +256,48 @@ def openai_proxy_container(
         else:
             pytest.fail("OpenAI image-generation proxy did not start in time")
         yield container
+
+
+@pytest.fixture(scope="session")
+def github_validation_proxy_container(
+    container_network: Network,
+) -> Generator[DockerContainer, None, None]:
+    """Run the deterministic GitHub App validation boundary."""
+    python_image = get_docker_hub_image("python:3.14-alpine")
+    with (
+        DockerContainer(
+            python_image,
+            docker_client_kw={"timeout": _DOCKER_CLIENT_TIMEOUT_SECONDS},
+        )
+        .with_volume_mapping(str(_GITHUB_VALIDATION_PROXY), "/app/proxy.py", "ro")
+        .with_command(["python", "/app/proxy.py"])
+        .with_exposed_ports(8082)
+        .with_network(container_network)
+        .with_network_aliases("github-validation-proxy") as container
+    ):
+        host = container.get_container_host_ip()
+        port = container.get_exposed_port(8082)
+        for _ in range(30):
+            try:
+                response = requests.get(f"http://{host}:{port}/health", timeout=2)
+                if response.status_code == 200:
+                    break
+            except requests.exceptions.RequestException:
+                pass
+            time.sleep(1)
+        else:
+            pytest.fail("GitHub validation proxy did not start in time")
+        yield container
+
+
+@pytest.fixture(scope="session")
+def github_validation_proxy_url(
+    github_validation_proxy_container: DockerContainer,
+) -> str:
+    """Return the host-visible deterministic GitHub validation URL."""
+    host = github_validation_proxy_container.get_container_host_ip()
+    port = github_validation_proxy_container.get_exposed_port(8082)
+    return f"http://{host}:{port}"
 
 
 @pytest.fixture(scope="session")
@@ -696,9 +742,10 @@ def azents_admin_server_container(
     credential_encryption_key: str,
     system_bootstrap_setup_token: str,
     openai_proxy_container: DockerContainer,
+    github_validation_proxy_container: DockerContainer,
 ) -> Generator[DockerContainer, None, None]:
     """azents Admin API server container (port 8011)."""
-    del openai_proxy_container
+    del openai_proxy_container, github_validation_proxy_container
     base_container = (
         DockerContainer(
             image=azents_server_image,
@@ -720,6 +767,9 @@ def azents_admin_server_container(
         auth_jwt_secret_key,
         credential_encryption_key,
         system_bootstrap_setup_token,
+    ).with_env(
+        "AZ_TESTENV_GITHUB_PLATFORM_VALIDATION_BASE_URL",
+        _GITHUB_VALIDATION_INTERNAL_URL,
     )
 
     with container:

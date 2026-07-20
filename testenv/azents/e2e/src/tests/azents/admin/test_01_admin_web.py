@@ -282,6 +282,54 @@ def test_dual_web_auth_link_logout_self_revoke_and_path_routing(
 
 
 @pytest.mark.web_surface
+def test_admin_system_settings_page_renders_redacted_platform_fields(
+    browser_driver: WebDriver,
+    azents_admin_web_url: str,
+    system_bootstrap_evidence: SystemBootstrapEvidence,
+) -> None:
+    """Admin Web exposes System Settings without rendering secret plaintext."""
+    _login_admin_web(
+        browser_driver,
+        base_url=azents_admin_web_url,
+        email=system_bootstrap_evidence.email,
+        password=_BOOTSTRAP_PASSWORD,
+    )
+    _wait(browser_driver).until(
+        ec.element_to_be_clickable((By.LINK_TEXT, "System Settings"))
+    ).click()
+    _wait(browser_driver).until(ec.url_contains("/system-settings"))
+    for text in (
+        "System Settings",
+        "Platform GitHub App",
+        "App ID",
+        "Client ID",
+        "Private key replacement",
+        "Client secret replacement",
+        "Effective health",
+        "Audit events",
+    ):
+        _wait(browser_driver).until(
+            ec.visibility_of_element_located(
+                (By.XPATH, f"//*[contains(normalize-space(), '{text}')]")
+            )
+        )
+
+    private_key_input = browser_driver.find_element(
+        By.XPATH,
+        "//label[contains(normalize-space(), 'Private key replacement')]"
+        "/following::input[1]",
+    )
+    client_secret_input = browser_driver.find_element(
+        By.XPATH,
+        "//label[contains(normalize-space(), 'Client secret replacement')]"
+        "/following::input[1]",
+    )
+    assert private_key_input.get_attribute("value") == ""
+    assert client_secret_input.get_attribute("value") == ""
+    assert "effective_generation" not in browser_driver.page_source
+
+
+@pytest.mark.web_surface
 def test_admin_retention_page_updates_future_archive_policy(
     browser_driver: WebDriver,
     azents_admin_web_url: str,

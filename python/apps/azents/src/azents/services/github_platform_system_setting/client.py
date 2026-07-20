@@ -24,8 +24,16 @@ class PlatformGitHubAppExternalValidation:
 class PlatformGitHubAppValidationClient:
     """Validate App JWT identity and OAuth client credentials."""
 
-    def __init__(self, http_client: httpx.AsyncClient) -> None:
+    def __init__(
+        self,
+        http_client: httpx.AsyncClient,
+        *,
+        app_url: str,
+        oauth_token_url: str,
+    ) -> None:
         self.http_client = http_client
+        self.app_url = app_url
+        self.oauth_token_url = oauth_token_url
 
     async def validate(
         self,
@@ -35,7 +43,7 @@ class PlatformGitHubAppValidationClient:
         jwt_token = create_github_app_jwt(effective.app_id, effective.private_key)
         try:
             app_response = await self.http_client.get(
-                "https://api.github.com/app",
+                self.app_url,
                 headers={
                     "Authorization": f"Bearer {jwt_token}",
                     "Accept": "application/vnd.github+json",
@@ -73,7 +81,7 @@ class PlatformGitHubAppValidationClient:
 
         try:
             oauth_response = await self.http_client.post(
-                "https://github.com/login/oauth/access_token",
+                self.oauth_token_url,
                 headers={"Accept": "application/json"},
                 json={
                     "client_id": effective.client_id,

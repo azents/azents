@@ -25,11 +25,13 @@ def _effective() -> PlatformGitHubAppEffective:
     )
 
 
-async def test_validate_accepts_expected_bad_verification_code() -> None:
-    """GitHub's bad-code response proves the OAuth client was authenticated."""
+async def test_validate_uses_injected_urls_and_accepts_bad_verification_code() -> None:
+    """Injected provider URLs support deterministic OAuth credential validation."""
+    requested_urls: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.host == "api.github.com":
+        requested_urls.append(str(request.url))
+        if request.url.path == "/app":
             return httpx.Response(
                 200,
                 json={"id": 123, "client_id": "Iv1.client", "slug": "azents-test"},
@@ -37,8 +39,16 @@ async def test_validate_accepts_expected_bad_verification_code() -> None:
         return httpx.Response(200, json={"error": "bad_verification_code"})
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        result = await PlatformGitHubAppValidationClient(client).validate(_effective())
+        result = await PlatformGitHubAppValidationClient(
+            client,
+            app_url="https://validation.example/app",
+            oauth_token_url="https://validation.example/login/oauth/access_token",
+        ).validate(_effective())
 
+    assert requested_urls == [
+        "https://validation.example/app",
+        "https://validation.example/login/oauth/access_token",
+    ]
     assert result.status is SystemSettingValidationStatus.VALID
     assert result.metadata == {"app_slug": "azents-test"}
 
@@ -61,7 +71,11 @@ async def test_validate_classifies_oauth_credentials_without_raw_response() -> N
         )
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        result = await PlatformGitHubAppValidationClient(client).validate(_effective())
+        result = await PlatformGitHubAppValidationClient(
+            client,
+            app_url="https://api.github.com/app",
+            oauth_token_url="https://github.com/login/oauth/access_token",
+        ).validate(_effective())
 
     assert result.status is SystemSettingValidationStatus.INVALID
     assert result.code == "github_oauth_credentials_invalid"
@@ -76,7 +90,11 @@ async def test_validate_classifies_provider_outage_as_unavailable() -> None:
         return httpx.Response(503, json={"message": "secret provider diagnostics"})
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        result = await PlatformGitHubAppValidationClient(client).validate(_effective())
+        result = await PlatformGitHubAppValidationClient(
+            client,
+            app_url="https://api.github.com/app",
+            oauth_token_url="https://github.com/login/oauth/access_token",
+        ).validate(_effective())
 
     assert result.status is SystemSettingValidationStatus.UNAVAILABLE
     assert result.code == "github_unavailable"
