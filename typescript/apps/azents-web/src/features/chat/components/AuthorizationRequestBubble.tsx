@@ -15,6 +15,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 interface AuthorizationRequestBubbleProps {
   toolkitName: string;
   authorizationUrl: string;
+  variant?: "card" | "compact";
   /** authorizationUrl event to absent when click time to authorization URL fetches.. */
   getAuthorizationUrl?: () => Promise<string | null>;
   /** auth complete when callback called */
@@ -24,6 +25,7 @@ interface AuthorizationRequestBubbleProps {
 export function AuthorizationRequestBubble({
   toolkitName,
   authorizationUrl,
+  variant = "card",
   getAuthorizationUrl,
   onAuthorized,
 }: AuthorizationRequestBubbleProps): React.ReactElement {
@@ -89,6 +91,21 @@ export function AuthorizationRequestBubble({
     window.addEventListener("message", handleMessage);
     return () => window.removeEventListener("message", handleMessage);
   }, [onAuthorized]);
+
+  if (variant === "compact") {
+    return (
+      <Button
+        size="compact-xs"
+        variant="default"
+        leftSection={<IconLock size={14} />}
+        onClick={() => void handleClick()}
+        loading={isOpening}
+        aria-label={t("authorizationRequestMessage", { toolkitName })}
+      >
+        {t("reviewButton")}
+      </Button>
+    );
+  }
 
   return (
     <Group

@@ -308,6 +308,119 @@ export const MultiTurnToolActivity = {
   },
 } satisfies Story;
 
+export const SpecializedDeliverableAndApproval = {
+  args: {
+    ...baseArgs,
+    messages: [
+      createChatMessage({
+        id: "specialized-user",
+        role: "user",
+        content: "Inspect the project, generate a preview, then continue.",
+      }),
+      createChatMessage({
+        id: "specialized-read",
+        content: null,
+        toolCalls: [
+          {
+            id: "specialized-read-call",
+            callId: "specialized-read-call",
+            name: "read",
+            arguments: JSON.stringify({
+              path: "/workspace/agent/project/a.ts",
+            }),
+            result: "file content",
+            status: "completed",
+          },
+        ],
+      }),
+      createChatMessage({
+        id: "specialized-turn-1",
+        role: "turn_complete",
+        content: null,
+      }),
+      createChatMessage({
+        id: "specialized-image",
+        content: null,
+        providerToolCalls: [
+          {
+            id: "specialized-image-call",
+            callId: "specialized-image-call",
+            name: "image_generation",
+            arguments: JSON.stringify({ prompt: "A calm activity timeline" }),
+            output: "Generated one image.",
+            status: "completed",
+            attachments: [
+              {
+                attachmentId: "specialized-image-file",
+                uri: "exchange://generated/specialized-image-file",
+                mediaType: "image/png",
+                name: "activity.png",
+              },
+              {
+                attachmentId: "specialized-image-log",
+                uri: "exchange://generated/specialized-image-log",
+                mediaType: "text/plain",
+                name: "generation.log",
+              },
+            ],
+          },
+        ],
+      }),
+      createChatMessage({
+        id: "specialized-exec",
+        content: null,
+        toolCalls: [
+          {
+            id: "specialized-exec-call",
+            callId: "specialized-exec-call",
+            name: "exec_command",
+            arguments: JSON.stringify({ command: "pnpm test" }),
+            result: "58 tests passed",
+            status: "completed",
+          },
+        ],
+      }),
+    ],
+    authorizationRequests: [
+      {
+        toolkitId: "github",
+        toolkitName: "GitHub",
+        authorizationUrl: "https://example.com/oauth",
+      },
+    ],
+    onAuthorizationComplete: fn(),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const activityButtons = canvas.getAllByRole("button", {
+      name: "Show activity",
+    });
+    await expect(activityButtons).toHaveLength(2);
+    await expect(
+      canvas.getByRole("button", { name: "activity.png" }),
+    ).toBeVisible();
+    await expect(canvas.getByText("Review")).toBeVisible();
+
+    const firstActivity = activityButtons.at(0);
+    if (!firstActivity) {
+      throw new Error("Expected the first activity disclosure");
+    }
+    await userEvent.click(firstActivity);
+    const generationPhase = canvas
+      .getByText("Generated media")
+      .closest("button");
+    if (!generationPhase) {
+      throw new Error("Expected the generated media phase disclosure");
+    }
+    await userEvent.click(generationPhase);
+    await expect(generationPhase).toHaveAttribute("aria-expanded", "true");
+    await expect(canvas.getByText("generation.log")).toBeInTheDocument();
+    await expect(
+      canvas.getAllByRole("button", { name: "activity.png" }),
+    ).toHaveLength(1);
+  },
+} satisfies Story;
+
 export const LongMobileConversation = {
   args: {
     ...baseArgs,

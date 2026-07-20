@@ -50,6 +50,7 @@ import { AuthorizationRequestBubble } from "./AuthorizationRequestBubble";
 import { ChatInput } from "./ChatInput";
 import { CompactionDivider } from "./CompactionDivider";
 import { CompactionIndicator } from "./CompactionIndicator";
+import { FileAttachmentList } from "./FileAttachmentList";
 import { MessageBubble } from "./MessageBubble";
 import { OptimisticInputBubble } from "./OptimisticInputBubble";
 import { PendingInputBufferBubble } from "./PendingInputBufferBubble";
@@ -534,6 +535,21 @@ export function ChatView({
     () => projectChatPresentationItems(messages, actionBoundaryMessageIds),
     [actionBoundaryMessageIds, messages],
   );
+  const latestActivityId = useMemo(() => {
+    for (let index = chatPresentationItems.length - 1; index >= 0; index -= 1) {
+      const item = chatPresentationItems[index];
+      if (item?.type === "activity") {
+        return item.id;
+      }
+    }
+    return null;
+  }, [chatPresentationItems]);
+  const attachedAuthorizationRequest =
+    latestActivityId === null ? null : (authorizationRequests[0] ?? null);
+  const unattachedAuthorizationRequests =
+    attachedAuthorizationRequest === null
+      ? authorizationRequests
+      : authorizationRequests.slice(1);
   const hasTimelineItems =
     messages.length > 0 ||
     pendingInputBuffers.length > 0 ||
@@ -1269,9 +1285,43 @@ export function ChatView({
                         <ToolActivityGroup
                           activity={item.activity}
                           dimmed={dimmedByEdit}
+                          authorizationAction={
+                            item.id === latestActivityId &&
+                            attachedAuthorizationRequest !== null ? (
+                              <AuthorizationRequestBubble
+                                variant="compact"
+                                toolkitName={
+                                  attachedAuthorizationRequest.toolkitName
+                                }
+                                authorizationUrl={
+                                  attachedAuthorizationRequest.authorizationUrl
+                                }
+                                onAuthorized={() =>
+                                  onAuthorizationComplete(
+                                    attachedAuthorizationRequest.toolkitId,
+                                  )
+                                }
+                              />
+                            ) : null
+                          }
                         />
                         <TurnDivider usage={item.activity.usage} />
                       </Fragment>
+                    );
+                  }
+
+                  if (item.type === "deliverable") {
+                    const dimmedByEdit =
+                      editingMessageIndex !== null &&
+                      item.messageIndex >= editingMessageIndex;
+                    return (
+                      <Box
+                        key={item.id}
+                        mb="md"
+                        opacity={dimmedByEdit ? 0.45 : 1}
+                      >
+                        <FileAttachmentList files={item.files} />
+                      </Box>
                     );
                   }
 
@@ -1359,7 +1409,7 @@ export function ChatView({
                     actionExecution={actionExecution}
                   />
                 ))}
-                {authorizationRequests.map((req) => (
+                {unattachedAuthorizationRequests.map((req) => (
                   <AuthorizationRequestBubble
                     key={req.toolkitId}
                     toolkitName={req.toolkitName}

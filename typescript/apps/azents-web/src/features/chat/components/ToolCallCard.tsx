@@ -41,6 +41,7 @@ function formatJson(value: string): string {
 
 interface ToolCallCardProps {
   toolCall: ActiveToolCall;
+  hiddenAttachmentUris?: readonly string[];
 }
 
 function toolCallBadgeColor(status: ActiveToolCall["status"]): string {
@@ -78,11 +79,15 @@ function toolCallStatusIcon(
 
 export function ToolCallCard({
   toolCall,
+  hiddenAttachmentUris = [],
 }: ToolCallCardProps): React.ReactElement {
   const t = useTranslations("chat.toolCall");
   const [openedToolCallId, setOpenedToolCallId] = useState<string | null>(null);
   const isPreparing = toolCall.status === "preparing";
   const isOpened = openedToolCallId === toolCall.id;
+  const visibleAttachments = (toolCall.attachments ?? []).filter(
+    (attachment) => !hiddenAttachmentUris.includes(attachment.uri),
+  );
 
   if (isPreparing) {
     return (
@@ -160,9 +165,9 @@ export function ToolCallCard({
         </Accordion.Item>
       </Accordion>
       {/* attachment file accordion outside to display — always expanded status with user totext exposed */}
-      {toolCall.attachments && toolCall.attachments.length > 0 && (
-        <FileAttachmentList files={toolCall.attachments} />
-      )}
+      {visibleAttachments.length > 0 ? (
+        <FileAttachmentList files={visibleAttachments} />
+      ) : null}
     </>
   );
 }

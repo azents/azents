@@ -26,6 +26,7 @@ import type { ProviderToolCall } from "../types";
 
 interface ProviderToolCallCardProps {
   toolCall: ProviderToolCall;
+  hiddenAttachmentUris?: readonly string[];
 }
 
 function statusColor(status: ProviderToolCall["status"]): string {
@@ -43,13 +44,17 @@ function statusColor(status: ProviderToolCall["status"]): string {
 
 export function ProviderToolCallCard({
   toolCall,
+  hiddenAttachmentUris = [],
 }: ProviderToolCallCardProps): React.ReactElement {
   const [opened, { toggle }] = useDisclosure(false);
   const displayName = providerToolDisplayName(toolCall.name);
   const activityLabel = providerToolActivityLabel(toolCall);
   const hasArguments = toolCall.arguments.trim().length > 0;
   const hasOutput = (toolCall.output?.trim().length ?? 0) > 0;
-  const hasAttachments = (toolCall.attachments?.length ?? 0) > 0;
+  const visibleAttachments = (toolCall.attachments ?? []).filter(
+    (attachment) => !hiddenAttachmentUris.includes(attachment.uri),
+  );
+  const hasAttachments = visibleAttachments.length > 0;
   const showAttachmentsDirectly =
     toolCall.name === "image_generation" && hasAttachments;
   const hasDetails =
@@ -111,8 +116,8 @@ export function ProviderToolCallCard({
             ) : null}
           </Group>
         </Group>
-        {showAttachmentsDirectly && toolCall.attachments ? (
-          <FileAttachmentList files={toolCall.attachments} />
+        {showAttachmentsDirectly ? (
+          <FileAttachmentList files={visibleAttachments} />
         ) : null}
         {opened ? (
           <Stack gap="xs">
@@ -132,10 +137,8 @@ export function ProviderToolCallCard({
                 <Code block>{toolCall.output}</Code>
               </Box>
             ) : null}
-            {hasAttachments &&
-            !showAttachmentsDirectly &&
-            toolCall.attachments ? (
-              <FileAttachmentList files={toolCall.attachments} />
+            {hasAttachments && !showAttachmentsDirectly ? (
+              <FileAttachmentList files={visibleAttachments} />
             ) : null}
           </Stack>
         ) : null}

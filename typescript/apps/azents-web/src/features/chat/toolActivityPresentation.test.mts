@@ -116,6 +116,38 @@ void test("message-owned delivery renders after its tool activity", () => {
   assert.ok(!("toolCalls" in delivery.message));
 });
 
+void test("validated deliverables close activity before later tool work", () => {
+  const items = projectChatPresentationItems([
+    toolMessage("tool-1", "call-1"),
+    message("image", {
+      providerToolCalls: [
+        {
+          id: "image-call",
+          callId: "image-call",
+          name: "image_generation",
+          arguments: JSON.stringify({ prompt: "A calm activity timeline" }),
+          status: "completed",
+          output: "Generated one image.",
+          attachments: [
+            {
+              attachmentId: "image-1",
+              uri: "exchange://generated/image-1",
+              mediaType: "image/png",
+              name: "activity.png",
+            },
+          ],
+        },
+      ],
+    }),
+    toolMessage("tool-2", "call-2"),
+  ]);
+
+  assert.deepEqual(
+    items.map((item) => item.type),
+    ["activity", "deliverable", "activity"],
+  );
+});
+
 void test("compaction and reasoning do not split activity", () => {
   const items = projectChatPresentationItems([
     toolMessage("tool-1", "call-1"),

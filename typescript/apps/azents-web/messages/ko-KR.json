@@ -1401,7 +1401,12 @@
       "callCount": "도구 호출 {count}개",
       "failedCount": "실패 {count}개",
       "runningCount": "실행 중 {count}개",
-      "genericPhase": "도구 작업",
+      "genericPhase": "기타 도구 작업",
+      "phaseInspection": "리소스 확인",
+      "phaseExecution": "명령 실행",
+      "phaseChanges": "파일 변경",
+      "phaseGeneration": "미디어 생성",
+      "approvalNeeded": "승인 필요",
       "reasoning": "사고 과정 {count}개",
       "compactionCount": "컨텍스트 요약 {count}회",
       "expandActivity": "작업 내역 보기",
@@ -1412,7 +1417,8 @@
     "authorization": {
       "authorizationRequired": "인증 필요",
       "authorizationRequestMessage": "{toolkitName}의 도구에 접근하려면 인증이 필요합니다.",
-      "authorizeButton": "연결"
+      "authorizeButton": "연결",
+      "reviewButton": "검토"
     },
     "agentFallback": "에이전트",
     "attachment": {
