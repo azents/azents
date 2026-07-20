@@ -1395,6 +1395,20 @@
       "arguments": "Arguments",
       "result": "Résultat"
     },
+    "toolActivity": {
+      "title": "Activité",
+      "turnCount": "{count, plural, one {# tour de modèle} other {# tours de modèle}}",
+      "callCount": "{count, plural, one {# appel d’outil} other {# appels d’outil}}",
+      "failedCount": "{count} en échec",
+      "runningCount": "{count} en cours",
+      "genericPhase": "Activité des outils",
+      "reasoning": "{count, plural, one {Réflexion} other {Réflexion · # mises à jour}}",
+      "compactionCount": "{count, plural, one {Contexte résumé une fois} other {Contexte résumé # fois}}",
+      "expandActivity": "Afficher l’activité",
+      "collapseActivity": "Masquer l’activité",
+      "expandPhase": "Afficher les appels d’outil",
+      "collapsePhase": "Masquer les appels d’outil"
+    },
     "authorization": {
       "authorizationRequired": "Autorisation requise",
       "authorizationRequestMessage": "{toolkitName} nécessite une autorisation pour accéder à ses outils.",

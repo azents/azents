@@ -1395,6 +1395,20 @@
       "arguments": "引数",
       "result": "結果"
     },
+    "toolActivity": {
+      "title": "アクティビティ",
+      "turnCount": "モデルターン {count} 回",
+      "callCount": "ツール呼び出し {count} 件",
+      "failedCount": "失敗 {count} 件",
+      "runningCount": "実行中 {count} 件",
+      "genericPhase": "ツールアクティビティ",
+      "reasoning": "思考 {count} 件",
+      "compactionCount": "コンテキスト要約 {count} 回",
+      "expandActivity": "アクティビティを表示",
+      "collapseActivity": "アクティビティを非表示",
+      "expandPhase": "ツール呼び出しを表示",
+      "collapsePhase": "ツール呼び出しを非表示"
+    },
     "authorization": {
       "authorizationRequired": "認証が必要",
       "authorizationRequestMessage": "{toolkitName}のツールにアクセスするには認証が必要です。",

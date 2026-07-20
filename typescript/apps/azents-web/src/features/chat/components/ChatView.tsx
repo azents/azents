@@ -42,6 +42,7 @@ import {
   useState,
 } from "react";
 import { type UploadedFile, useFileUpload } from "../hooks/useFileUpload";
+import { projectChatPresentationItems } from "../toolActivityPresentation";
 import { WorkspacePanel } from "../workspace/components/WorkspacePanel";
 import { ActionExecutionTimelineCard } from "./ActionExecutionTimelineCard";
 import { AgentRunIndicator } from "./AgentRunIndicator";
@@ -53,6 +54,7 @@ import { MessageBubble } from "./MessageBubble";
 import { OptimisticInputBubble } from "./OptimisticInputBubble";
 import { PendingInputBufferBubble } from "./PendingInputBufferBubble";
 import { RunRetryCard } from "./RunRetryCard";
+import { ToolActivityGroup } from "./ToolActivityGroup";
 import { TurnDivider } from "./TurnDivider";
 import type {
   ActionExecutionProjection,
@@ -523,6 +525,14 @@ export function ChatView({
   const actionExecutionPlacement = useMemo(
     () => placeActionExecutions(messages, visibleActionExecutions),
     [messages, visibleActionExecutions],
+  );
+  const actionBoundaryMessageIds = useMemo(
+    () => new Set<string>(actionExecutionPlacement.durableBeforeMessage.keys()),
+    [actionExecutionPlacement.durableBeforeMessage],
+  );
+  const chatPresentationItems = useMemo(
+    () => projectChatPresentationItems(messages, actionBoundaryMessageIds),
+    [actionBoundaryMessageIds, messages],
   );
   const hasTimelineItems =
     messages.length > 0 ||
@@ -1239,13 +1249,40 @@ export function ChatView({
               </Center>
             ) : (
               <Stack gap={0}>
-                {messages.map((msg, index) => {
+                {chatPresentationItems.map((item) => {
+                  if (item.type === "activity") {
+                    const durableBefore =
+                      actionExecutionPlacement.durableBeforeMessage.get(
+                        item.activity.firstMessageId,
+                      ) ?? [];
+                    const dimmedByEdit =
+                      editingMessageIndex !== null &&
+                      item.activity.endMessageIndex >= editingMessageIndex;
+                    return (
+                      <Fragment key={item.id}>
+                        {durableBefore.map((actionExecution) => (
+                          <ActionExecutionTimelineCard
+                            key={actionExecution.execution.id}
+                            actionExecution={actionExecution}
+                          />
+                        ))}
+                        <ToolActivityGroup
+                          activity={item.activity}
+                          dimmed={dimmedByEdit}
+                        />
+                        <TurnDivider usage={item.activity.usage} />
+                      </Fragment>
+                    );
+                  }
+
+                  const msg = item.message;
+                  const index = item.messageIndex;
                   const durableBefore =
                     actionExecutionPlacement.durableBeforeMessage.get(msg.id) ??
                     [];
                   if (msg.role === "compaction") {
                     return (
-                      <Fragment key={msg.id}>
+                      <Fragment key={item.id}>
                         {durableBefore.map((actionExecution) => (
                           <ActionExecutionTimelineCard
                             key={actionExecution.execution.id}
@@ -1261,7 +1298,7 @@ export function ChatView({
                     isBoundaryMessage(msg)
                   ) {
                     return durableBefore.length > 0 ? (
-                      <Fragment key={msg.id}>
+                      <Fragment key={item.id}>
                         {durableBefore.map((actionExecution) => (
                           <ActionExecutionTimelineCard
                             key={actionExecution.execution.id}
@@ -1298,7 +1335,7 @@ export function ChatView({
                       }
                     : null;
                   return (
-                    <Fragment key={msg.id}>
+                    <Fragment key={item.id}>
                       {durableBefore.map((actionExecution) => (
                         <ActionExecutionTimelineCard
                           key={actionExecution.execution.id}
