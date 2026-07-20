@@ -15,6 +15,10 @@ from azents.engine.context.compaction import (
     enforce_summary_char_budget,
     summarize_text_with_model,
 )
+from azents.engine.run.errors import (
+    CompactionModelStreamTimeoutError,
+    ModelStreamTimeoutError,
+)
 from azents.engine.run.provider_failure import (
     ModelProviderFailure,
     ModelProviderFailureCategory,
@@ -135,6 +139,46 @@ class TestSummaryPrompt:
 
 
 class TestSummarizeTextWithModel:
+    async def test_converts_stream_timeout_to_compaction_failure(
+        self,
+        monkeypatch: MonkeyPatch,
+    ) -> None:
+        """Preserve timeout classification across the compaction boundary."""
+        timeout = ModelStreamTimeoutError(
+            timeout_kind="parsed_event_idle",
+            deadline_seconds=5,
+            elapsed_seconds=5,
+            call_kind="compaction",
+            provider="openai",
+            model="gpt-test",
+        )
+
+        async def raise_timeout(**kwargs: object) -> str:
+            del kwargs
+            raise timeout
+
+        monkeypatch.setattr(
+            "azents.engine.context.compaction.call_openai_responses_text",
+            raise_timeout,
+        )
+
+        with pytest.raises(CompactionModelStreamTimeoutError) as raised:
+            await summarize_text_with_model(
+                watchdog=make_test_model_stream_watchdog(),
+                provider=LLMProvider.OPENAI,
+                provider_integration_id=None,
+                model="gpt-test",
+                credential_kwargs={"api_key": "test-key"},
+                system_prompt="summarize system",
+                user_prompt="summarize user\n",
+                conversation_text="[User]: hello",
+                max_output_tokens=4000,
+                session_id="session-1",
+            )
+
+        assert raised.value.failure_code == "model_stream_idle_timeout"
+        assert raised.value.timeout_kind == "parsed_event_idle"
+
     async def test_sends_summary_prompt_as_top_level_instructions(
         self,
         monkeypatch: MonkeyPatch,
