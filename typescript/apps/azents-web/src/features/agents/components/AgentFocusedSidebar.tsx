@@ -8,7 +8,6 @@
  */
 import {
   ActionIcon,
-  Alert,
   Avatar,
   Badge,
   Box,
@@ -83,7 +82,6 @@ interface AgentFocusedSidebarProps {
   archivedSessions?: AgentSessionResponse[];
   archivedSessionsLoading?: boolean;
   archivedSessionsError?: string | null;
-  currentArchiveRetentionDays?: number | null;
   activeSessionId?: string | null;
   creatingSession?: boolean;
   renamingSessionId?: string | null;
@@ -199,7 +197,6 @@ export function AgentFocusedSidebar({
   archivedSessions = [],
   archivedSessionsLoading = false,
   archivedSessionsError = null,
-  currentArchiveRetentionDays,
   activeSessionId = null,
   creatingSession = false,
   renamingSessionId = null,
@@ -249,16 +246,6 @@ export function AgentFocusedSidebar({
   const userName =
     currentUser?.name.trim() || currentUser?.email || tAppBar("account");
   const userEmail = currentUser?.email ?? null;
-  const archivePolicyDescription =
-    typeof currentArchiveRetentionDays === "undefined"
-      ? null
-      : currentArchiveRetentionDays === null
-        ? t("sessions.archivePolicyUnlimited")
-        : currentArchiveRetentionDays === 0
-          ? t("sessions.archivePolicyZero")
-          : t("sessions.archivePolicyDays", {
-              days: currentArchiveRetentionDays,
-            });
 
   const handleOpenRename = useCallback(
     (session: AgentSessionResponse): void => {
@@ -357,11 +344,6 @@ export function AgentFocusedSidebar({
       >
         <Stack gap="md">
           <Text size="sm">{t("sessions.archiveConfirmDescription")}</Text>
-          {archivePolicyDescription && (
-            <Alert color="orange" icon={<IconArchive size={rem(16)} />}>
-              {archivePolicyDescription}
-            </Alert>
-          )}
           <Group justify="flex-end">
             <Button variant="default" onClick={() => setArchiveTarget(null)}>
               {t("sessions.archiveCancel")}
@@ -586,7 +568,7 @@ export function AgentFocusedSidebar({
                             {!running && !isPrimary && onArchiveSession && (
                               <Menu.Item
                                 color="red"
-                                leftSection={<IconArchive size={rem(16)} />}
+                                leftSection={<IconTrash size={rem(16)} />}
                                 onClick={(event) => {
                                   event.preventDefault();
                                   event.stopPropagation();

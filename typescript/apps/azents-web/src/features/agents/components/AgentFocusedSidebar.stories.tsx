@@ -144,7 +144,6 @@ const meta = {
     onLogout: () => {},
     sessions,
     archivedSessions,
-    currentArchiveRetentionDays: 30,
     activeSessionId: "sess_primary",
     onCreateSession: () => {},
     onRenameSession: async () => {},

@@ -212,9 +212,6 @@ export function AgentFocusedShell({
             restoreSessionMutation.error?.message ??
             null
           }
-          currentArchiveRetentionDays={
-            sessionsQuery.data?.current_archive_retention_days
-          }
           activeSessionId={activeSessionId}
           creatingSession={false}
           renamingSessionId={
@@ -269,9 +266,6 @@ export function AgentFocusedShell({
               archivedSessionsQuery.error?.message ??
               restoreSessionMutation.error?.message ??
               null
-            }
-            currentArchiveRetentionDays={
-              sessionsQuery.data?.current_archive_retention_days
             }
             activeSessionId={activeSessionId}
             creatingSession={false}

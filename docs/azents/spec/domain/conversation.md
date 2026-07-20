@@ -100,8 +100,8 @@ api_routes:
   - /chat/v1/exchange-files/{file_id}/download
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
-last_verified_at: 2026-07-19
-spec_version: 116
+last_verified_at: 2026-07-20
+spec_version: 117
 ---
 
 # Conversation & Events
@@ -259,17 +259,21 @@ Azents-owned worktree allocations.
 
 `GET /chat/v1/agents/{agent_id}/sessions/archived` returns archived roots separately from the active
 session list. Each item includes `archived_at`, `purge_after`, and the immutable retention snapshot;
-the list response also includes the current instance retention value for archive confirmation copy.
+the list response also includes the current instance retention value as policy metadata. Main Web does
+not expose that value in session-removal confirmation copy.
 `POST /chat/v1/agents/{agent_id}/sessions/{session_id}/restore` restores the complete tree only while
 the root purge job has not started fencing. Restore cancels eligible unstarted purge work, clears the
 root archive snapshot, marks every linked session active, and returns the root session. A root that
 has crossed the purge fence returns a conflict and cannot become active again.
 
-The Agent rail keeps rename and archive in the existing session action menu. Archive is available
-only for inactive non-primary roots and opens policy-aware confirmation copy. If the selected session
-is archived, Main Web navigates to `/w/{handle}/agents/{agent_id}/sessions/new`. The collapsible
-Archived section shows title fallback, archive time, immutable retention snapshot, scheduled deletion
-or Unlimited state, and Restore. It exposes no permanent-delete action.
+The Agent rail keeps rename and the archive-backed removal action in the existing session action
+menu. The action is available only for inactive non-primary roots. Main Web labels it Delete, uses a
+trash icon, and confirms only that the session will be removed from the list; the confirmation omits
+retention, preservation, restoration, and permanent-deletion claims. The mutation still archives the
+root tree. If the selected session is archived, Main Web navigates to
+`/w/{handle}/agents/{agent_id}/sessions/new`. The collapsible Archived section shows title fallback,
+archive time, immutable retention snapshot, scheduled deletion or Unlimited state, and Restore. It
+exposes no permanent-delete action.
 
 The public `DELETE /chat/v1/sessions/{session_id}` route is absent. Permanent deletion is owned only
 by durable purge after fencing. Purge deletes subtree ModelFile, Artifact, bound ExchangeFile and
@@ -856,6 +860,7 @@ Current verification:
 
 ## 11. Changelog
 
+- **2026-07-20** — v117. Replaced policy-aware archive confirmation with concise delete-style session-removal copy while preserving archive-backed retention behavior.
 - **2026-07-19** — v115. Added explicit input scheduling intent, queue-only terminal `agent_result` delivery with durable Run idempotency, and promotion-time direct-parent observation acknowledgment.
 - **2026-07-19** — v114. Added root-session archive and restore, immutable retention snapshots, scheduled durable purge state, archived-session listing, and public archived-session UI behavior.
 - **2026-07-19** — v113. Added selected-model OpenRouter bounded credit usage while keeping `null` key limits completely hidden from composer surfaces.
