@@ -1406,7 +1406,7 @@
       "failed": "실패",
       "failedCount": "실패 {count}",
       "approvalNeeded": "승인 필요",
-      "overflowCategories": "외 {count}",
+      "overflowCategories": "+{count}",
       "categoryReasoning": "추론",
       "categorySkill": "Skill",
       "categoryExplore": "탐색",
