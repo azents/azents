@@ -19,6 +19,7 @@ from azents.core.deps import (
     get_credential_cipher,
     get_credential_encryption_config,
 )
+from azents.core.github_system_setting import get_platform_github_app_definition
 from azents.core.system_setting import (
     ResolvedSystemSetting,
     SystemSettingActivationMode,
@@ -26,6 +27,7 @@ from azents.core.system_setting import (
     SystemSettingAuditSource,
     SystemSettingCandidateExpired,
     SystemSettingCandidateNotFound,
+    SystemSettingCandidateNotValidated,
     SystemSettingDefinition,
     SystemSettingEffectiveGenerationChanged,
     SystemSettingEnvironment,
@@ -33,6 +35,7 @@ from azents.core.system_setting import (
     SystemSettingFieldSource,
     SystemSettingFieldTarget,
     SystemSettingGenerationHasher,
+    SystemSettingImpactChanged,
     SystemSettingRegistry,
     SystemSettingSecretActionType,
     SystemSettingSection,
@@ -60,22 +63,36 @@ from .data import (
     SystemDataMigrationResult,
     SystemSettingActivated,
     SystemSettingCandidatePending,
+    SystemSettingCandidateValidationResult,
+    SystemSettingCandidateValidationSnapshot,
     SystemSettingHealthResult,
     SystemSettingMutation,
     SystemSettingMutationResult,
+    SystemSettingState,
 )
 
 SystemDataMigrationOperation = Callable[
     [AsyncSession], Awaitable[SystemDataMigrationResult]
 ]
+SystemSettingCandidateValidator = Callable[
+    [SystemSettingCandidateValidationSnapshot],
+    Awaitable[SystemSettingCandidateValidationResult],
+]
+SystemSettingImpactResolver = Callable[
+    [AsyncSession, ResolvedSystemSetting, ResolvedSystemSetting],
+    Awaitable[dict[str, Any] | None],
+]
+SystemSettingConfirmationHandler = Callable[
+    [AsyncSession, str, ResolvedSystemSetting],
+    Awaitable[None],
+]
 
 
 def get_system_setting_registry() -> SystemSettingRegistry:
-    """Return the compiled Section registry.
-
-    The Platform GitHub App definition is added in the Admin API phase.
-    """
-    return SystemSettingRegistry(definitions=())
+    """Return the compiled System Settings Section registry."""
+    return SystemSettingRegistry(
+        definitions=(get_platform_github_app_definition(),),
+    )
 
 
 def get_system_setting_environment() -> SystemSettingEnvironment:
@@ -309,6 +326,202 @@ class SystemSettingsService:
             )
             return await self.repository.get_candidate(session, section=section)
 
+    async def get_state(
+        self,
+        section: SystemSettingSection,
+    ) -> SystemSettingState:
+        """Return current internal state for a redacted domain projection."""
+        definition = self.registry.get(section)
+        now = tznow()
+        async with self.session_manager() as session:
+            await self.repository.acquire_section_lock(session, section=section)
+            await self._delete_expired_candidate(
+                session=session,
+                definition=definition,
+                now=now,
+            )
+            current = await self.repository.get_current(session, section=section)
+            candidate = await self.repository.get_candidate(session, section=section)
+            health = await self.repository.get_health(session, section=section)
+            resolved = self._resolve_current(definition=definition, current=current)
+            if (
+                health is not None
+                and health.effective_generation != resolved.effective_generation
+            ):
+                health = None
+        return SystemSettingState(
+            current=current,
+            candidate=candidate,
+            resolved=resolved,
+            health=health,
+        )
+
+    async def prepare_candidate_validation(
+        self,
+        section: SystemSettingSection,
+    ) -> SystemSettingCandidateValidationSnapshot:
+        """Return a stable current/candidate snapshot for external validation."""
+        definition = self.registry.get(section)
+        now = tznow()
+        expired_candidate_id: str | None = None
+        snapshot: SystemSettingCandidateValidationSnapshot | None = None
+        async with self.session_manager() as session:
+            await self.repository.acquire_section_lock(session, section=section)
+            candidate = await self.repository.get_candidate(session, section=section)
+            if candidate is None:
+                raise SystemSettingCandidateNotFound(section=section)
+            if candidate.expires_at <= now:
+                await self.repository.delete_candidate(
+                    session,
+                    section=section,
+                    candidate_id=candidate.id,
+                )
+                expired_candidate_id = candidate.id
+            else:
+                current = await self.repository.get_current(session, section=section)
+                current_version = current.version if current is not None else 0
+                if candidate.base_version != current_version:
+                    raise SystemSettingVersionConflict(
+                        section=section,
+                        expected_version=candidate.base_version,
+                        current_version=current_version,
+                    )
+                snapshot = SystemSettingCandidateValidationSnapshot(
+                    candidate=candidate,
+                    current_resolved=self._resolve_current(
+                        definition=definition,
+                        current=current,
+                    ),
+                    candidate_resolved=self._resolve_candidate(
+                        definition=definition,
+                        candidate=candidate,
+                    ),
+                )
+        if expired_candidate_id is not None:
+            raise SystemSettingCandidateExpired(
+                section=section,
+                candidate_id=expired_candidate_id,
+            )
+        if snapshot is None:
+            raise RuntimeError("Candidate validation snapshot was not produced.")
+        return snapshot
+
+    async def validate_candidate(
+        self,
+        *,
+        section: SystemSettingSection,
+        validator: SystemSettingCandidateValidator,
+    ) -> SystemSettingMutationResult:
+        """Validate a candidate externally and activate when confirmation is absent."""
+        snapshot = await self.prepare_candidate_validation(section)
+        result = await validator(snapshot)
+        return await self._record_candidate_validation(
+            snapshot=snapshot,
+            result=result,
+        )
+
+    async def confirm_candidate(
+        self,
+        *,
+        section: SystemSettingSection,
+        candidate_id: str,
+        expected_version: int,
+        confirmation_action: str,
+        actor_user_id: str | None,
+        impact_resolver: SystemSettingImpactResolver,
+        confirmation_handler: SystemSettingConfirmationHandler,
+    ) -> SystemSettingActivated:
+        """Activate a valid candidate after rechecking generation and impact."""
+        definition = self.registry.get(section)
+        now = tznow()
+        expired_candidate_id: str | None = None
+        activated: SystemSettingActivated | None = None
+        async with self.session_manager() as session:
+            await self.repository.acquire_section_lock(session, section=section)
+            candidate = await self.repository.get_candidate(session, section=section)
+            if candidate is None or candidate.id != candidate_id:
+                raise SystemSettingCandidateNotFound(section=section)
+            if candidate.expires_at <= now:
+                await self.repository.delete_candidate(
+                    session,
+                    section=section,
+                    candidate_id=candidate.id,
+                )
+                expired_candidate_id = candidate.id
+            else:
+                current = await self.repository.get_current(session, section=section)
+                current_version = current.version if current is not None else 0
+                if expected_version != current_version:
+                    raise SystemSettingVersionConflict(
+                        section=section,
+                        expected_version=expected_version,
+                        current_version=current_version,
+                    )
+                if candidate.base_version != current_version:
+                    raise SystemSettingVersionConflict(
+                        section=section,
+                        expected_version=candidate.base_version,
+                        current_version=current_version,
+                    )
+                if (
+                    candidate.validation_status != SystemSettingValidationStatus.VALID
+                    or candidate.validated_generation is None
+                ):
+                    raise SystemSettingCandidateNotValidated(
+                        section=section,
+                        candidate_id=candidate.id,
+                    )
+                current_resolved = self._resolve_current(
+                    definition=definition,
+                    current=current,
+                )
+                candidate_resolved = self._resolve_candidate(
+                    definition=definition,
+                    candidate=candidate,
+                )
+                if (
+                    candidate_resolved.effective_generation
+                    != candidate.validated_generation
+                ):
+                    raise SystemSettingEffectiveGenerationChanged(
+                        section=section,
+                        expected_generation=candidate.validated_generation,
+                        current_generation=(candidate_resolved.effective_generation),
+                    )
+                current_impact = await impact_resolver(
+                    session,
+                    current_resolved,
+                    candidate_resolved,
+                )
+                if current_impact != candidate.impact:
+                    raise SystemSettingImpactChanged(
+                        section=section,
+                        candidate_id=candidate.id,
+                        current_impact=current_impact,
+                    )
+                await confirmation_handler(
+                    session,
+                    confirmation_action,
+                    candidate_resolved,
+                )
+                activated = await self._activate_candidate(
+                    session=session,
+                    candidate=candidate,
+                    resolved=candidate_resolved,
+                    actor_user_id=actor_user_id,
+                    impact_confirmed=True,
+                    confirmation_action=confirmation_action,
+                    now=now,
+                )
+        if expired_candidate_id is not None:
+            raise SystemSettingCandidateExpired(
+                section=section,
+                candidate_id=expired_candidate_id,
+            )
+        if activated is None:
+            raise RuntimeError("Candidate confirmation did not activate a setting.")
+        return activated
+
     async def cancel_candidate(
         self,
         *,
@@ -432,6 +645,214 @@ class SystemSettingsService:
                 ),
             )
         return CurrentSystemSettingHealth(resolved=resolved, health=health)
+
+    async def _record_candidate_validation(
+        self,
+        *,
+        snapshot: SystemSettingCandidateValidationSnapshot,
+        result: SystemSettingCandidateValidationResult,
+    ) -> SystemSettingMutationResult:
+        if result.status == SystemSettingValidationStatus.PENDING:
+            raise ValueError("External validation cannot return pending status.")
+        if (
+            result.confirmation_required
+            and result.status != SystemSettingValidationStatus.VALID
+        ):
+            raise ValueError("Only a valid candidate can require confirmation.")
+        section = snapshot.candidate.section
+        definition = self.registry.get(section)
+        now = tznow()
+        expired_candidate_id: str | None = None
+        output: SystemSettingMutationResult | None = None
+        async with self.session_manager() as session:
+            await self.repository.acquire_section_lock(session, section=section)
+            candidate = await self.repository.get_candidate(session, section=section)
+            if candidate is None or candidate.id != snapshot.candidate.id:
+                raise SystemSettingCandidateNotFound(section=section)
+            if candidate.expires_at <= now:
+                await self.repository.delete_candidate(
+                    session,
+                    section=section,
+                    candidate_id=candidate.id,
+                )
+                expired_candidate_id = candidate.id
+            else:
+                current = await self.repository.get_current(session, section=section)
+                current_version = current.version if current is not None else 0
+                if candidate.base_version != current_version:
+                    raise SystemSettingVersionConflict(
+                        section=section,
+                        expected_version=candidate.base_version,
+                        current_version=current_version,
+                    )
+                resolved = self._resolve_candidate(
+                    definition=definition,
+                    candidate=candidate,
+                )
+                if (
+                    resolved.effective_generation
+                    != snapshot.candidate_resolved.effective_generation
+                ):
+                    raise SystemSettingEffectiveGenerationChanged(
+                        section=section,
+                        expected_generation=(
+                            snapshot.candidate_resolved.effective_generation
+                        ),
+                        current_generation=resolved.effective_generation,
+                    )
+                updated = await self.repository.update_candidate_validation(
+                    session,
+                    candidate_id=candidate.id,
+                    status=result.status,
+                    validated_generation=(
+                        resolved.effective_generation
+                        if result.status == SystemSettingValidationStatus.VALID
+                        else None
+                    ),
+                    validation_code=result.code,
+                    validation_message=result.message,
+                    action_hint=result.action_hint,
+                    validation_metadata=result.metadata,
+                    impact=result.impact,
+                    updated_at=now,
+                )
+                if updated is None:
+                    raise SystemSettingCandidateNotFound(section=section)
+                await self.repository.append_audit_event(
+                    session,
+                    create=SystemSettingAuditEventCreate(
+                        section=section,
+                        event_type=SystemSettingAuditEventType.CANDIDATE_VALIDATED,
+                        source=SystemSettingAuditSource.ADMIN_API,
+                        previous_version=current_version,
+                        new_version=None,
+                        actor_user_id=candidate.created_by_user_id,
+                        changed_fields=[],
+                        secret_actions={},
+                        validation_status=result.status,
+                        candidate_id=candidate.id,
+                        impact_confirmed=False,
+                        confirmation_action=None,
+                        metadata=(
+                            {"code": result.code} if result.code is not None else None
+                        ),
+                        created_at=now,
+                    ),
+                )
+                if (
+                    result.status == SystemSettingValidationStatus.VALID
+                    and not result.confirmation_required
+                ):
+                    output = await self._activate_candidate(
+                        session=session,
+                        candidate=updated,
+                        resolved=resolved,
+                        actor_user_id=candidate.created_by_user_id,
+                        impact_confirmed=False,
+                        confirmation_action=None,
+                        now=now,
+                    )
+                else:
+                    output = SystemSettingCandidatePending(
+                        candidate=updated,
+                        resolved=resolved,
+                    )
+        if expired_candidate_id is not None:
+            raise SystemSettingCandidateExpired(
+                section=section,
+                candidate_id=expired_candidate_id,
+            )
+        if output is None:
+            raise RuntimeError("Candidate validation result was not persisted.")
+        return output
+
+    async def _activate_candidate(
+        self,
+        *,
+        session: AsyncSession,
+        candidate: StoredSystemSettingCandidate,
+        resolved: ResolvedSystemSetting,
+        actor_user_id: str | None,
+        impact_confirmed: bool,
+        confirmation_action: str | None,
+        now: datetime.datetime,
+    ) -> SystemSettingActivated:
+        new_version = candidate.base_version + 1
+        current = await self.repository.write_current(
+            session,
+            write=SystemSettingCurrentWrite(
+                section=candidate.section,
+                schema_version=candidate.schema_version,
+                version=new_version,
+                config=candidate.config,
+                encrypted_secrets=candidate.encrypted_secrets,
+                secret_metadata=candidate.secret_metadata,
+                validation_status=SystemSettingValidationStatus.VALID,
+                validated_generation=resolved.effective_generation,
+                validation_metadata=candidate.validation_metadata,
+                validated_at=now,
+                updated_by_user_id=actor_user_id,
+            ),
+        )
+        await self.repository.delete_candidate(
+            session,
+            section=candidate.section,
+            candidate_id=candidate.id,
+        )
+        await self.repository.append_audit_event(
+            session,
+            create=SystemSettingAuditEventCreate(
+                section=candidate.section,
+                event_type=SystemSettingAuditEventType.ACTIVATED,
+                source=SystemSettingAuditSource.ADMIN_API,
+                previous_version=candidate.base_version,
+                new_version=new_version,
+                actor_user_id=actor_user_id,
+                changed_fields=[],
+                secret_actions={},
+                validation_status=SystemSettingValidationStatus.VALID,
+                candidate_id=candidate.id,
+                impact_confirmed=impact_confirmed,
+                confirmation_action=confirmation_action,
+                metadata=None,
+                created_at=now,
+            ),
+        )
+        return SystemSettingActivated(
+            current=current,
+            resolved=dataclasses.replace(resolved, admin_version=new_version),
+        )
+
+    def _resolve_candidate(
+        self,
+        *,
+        definition: SystemSettingDefinition,
+        candidate: StoredSystemSettingCandidate,
+    ) -> ResolvedSystemSetting:
+        config, secrets = self._load_base_payload(
+            definition=definition,
+            current=StoredSystemSetting(
+                section=candidate.section,
+                schema_version=candidate.schema_version,
+                version=candidate.base_version,
+                config=candidate.config,
+                encrypted_secrets=candidate.encrypted_secrets,
+                secret_metadata=candidate.secret_metadata,
+                validation_status=candidate.validation_status,
+                validated_generation=candidate.validated_generation,
+                validation_metadata=candidate.validation_metadata,
+                validated_at=None,
+                updated_by_user_id=candidate.created_by_user_id,
+                created_at=candidate.created_at,
+                updated_at=candidate.updated_at,
+            ),
+        )
+        return self._resolve_payload(
+            definition=definition,
+            admin_version=candidate.base_version,
+            config=config,
+            secrets=secrets,
+        )
 
     def _resolve_current(
         self,

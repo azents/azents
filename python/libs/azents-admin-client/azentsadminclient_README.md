@@ -55,7 +55,7 @@ configuration = azentsadminclient.Configuration(
 with azentsadminclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentsadminclient.AuthV1Api(api_client)
-    create_password_reset_token_request = azentsadminclient.CreatePasswordResetTokenRequest() # CreatePasswordResetTokenRequest | 
+    create_password_reset_token_request = azentsadminclient.CreatePasswordResetTokenRequest() # CreatePasswordResetTokenRequest |
 
     try:
         # Create Password Reset Token
@@ -94,6 +94,14 @@ Class | Method | HTTP request | Description
 *ModelCatalogV1Api* | [**model_catalog_v1_refresh_system_model_catalogs**](azentsadminclient/docs/ModelCatalogV1Api.md#model_catalog_v1_refresh_system_model_catalogs) | **POST** /model-catalog/v1/system-catalogs/refresh | Refresh System Model Catalogs
 *SystemBootstrapV1Api* | [**system_bootstrap_v1_bootstrap_first_system_admin**](azentsadminclient/docs/SystemBootstrapV1Api.md#system_bootstrap_v1_bootstrap_first_system_admin) | **POST** /system/v1/bootstrap/first-admin | Bootstrap First System Admin
 *SystemBootstrapV1Api* | [**system_bootstrap_v1_get_system_bootstrap_status**](azentsadminclient/docs/SystemBootstrapV1Api.md#system_bootstrap_v1_get_system_bootstrap_status) | **GET** /system/v1/bootstrap/status | Get System Bootstrap Status
+*SystemSettingsV1Api* | [**system_settings_v1_cancel_platform_github_app_candidate**](azentsadminclient/docs/SystemSettingsV1Api.md#system_settings_v1_cancel_platform_github_app_candidate) | **DELETE** /system-setting/v1/sections/platform-github-app/candidate | Cancel Platform Github App Candidate
+*SystemSettingsV1Api* | [**system_settings_v1_check_platform_github_app_health**](azentsadminclient/docs/SystemSettingsV1Api.md#system_settings_v1_check_platform_github_app_health) | **POST** /system-setting/v1/sections/platform-github-app/health-check | Check Platform Github App Health
+*SystemSettingsV1Api* | [**system_settings_v1_confirm_platform_github_app_candidate**](azentsadminclient/docs/SystemSettingsV1Api.md#system_settings_v1_confirm_platform_github_app_candidate) | **POST** /system-setting/v1/sections/platform-github-app/candidate/confirm | Confirm Platform Github App Candidate
+*SystemSettingsV1Api* | [**system_settings_v1_get_platform_github_app_setting**](azentsadminclient/docs/SystemSettingsV1Api.md#system_settings_v1_get_platform_github_app_setting) | **GET** /system-setting/v1/sections/platform-github-app | Get Platform Github App Setting
+*SystemSettingsV1Api* | [**system_settings_v1_list_system_setting_audit_events**](azentsadminclient/docs/SystemSettingsV1Api.md#system_settings_v1_list_system_setting_audit_events) | **GET** /system-setting/v1/audit-events | List System Setting Audit Events
+*SystemSettingsV1Api* | [**system_settings_v1_list_system_setting_sections**](azentsadminclient/docs/SystemSettingsV1Api.md#system_settings_v1_list_system_setting_sections) | **GET** /system-setting/v1/sections | List System Setting Sections
+*SystemSettingsV1Api* | [**system_settings_v1_patch_platform_github_app_setting**](azentsadminclient/docs/SystemSettingsV1Api.md#system_settings_v1_patch_platform_github_app_setting) | **PATCH** /system-setting/v1/sections/platform-github-app | Patch Platform Github App Setting
+*SystemSettingsV1Api* | [**system_settings_v1_validate_platform_github_app_candidate**](azentsadminclient/docs/SystemSettingsV1Api.md#system_settings_v1_validate_platform_github_app_candidate) | **POST** /system-setting/v1/sections/platform-github-app/candidate/validate | Validate Platform Github App Candidate
 *SystemV1Api* | [**system_v1_get_archive_retention_application**](azentsadminclient/docs/SystemV1Api.md#system_v1_get_archive_retention_application) | **GET** /system/v1/settings/file-lifecycle/retention-applications/{application_id} | Get Archive Retention Application
 *SystemV1Api* | [**system_v1_get_file_lifecycle_settings**](azentsadminclient/docs/SystemV1Api.md#system_v1_get_file_lifecycle_settings) | **GET** /system/v1/settings/file-lifecycle | Get File Lifecycle Settings
 *SystemV1Api* | [**system_v1_get_system_admin_me**](azentsadminclient/docs/SystemV1Api.md#system_v1_get_system_admin_me) | **GET** /system/v1/me | Get System Admin Me
@@ -147,6 +155,13 @@ Class | Method | HTTP request | Description
  - [InvitationStatus](azentsadminclient/docs/InvitationStatus.md)
  - [PasswordResetTokenListResponse](azentsadminclient/docs/PasswordResetTokenListResponse.md)
  - [PasswordResetTokenResponse](azentsadminclient/docs/PasswordResetTokenResponse.md)
+ - [PlatformGitHubAppCandidateResponse](azentsadminclient/docs/PlatformGitHubAppCandidateResponse.md)
+ - [PlatformGitHubAppConfirmRequest](azentsadminclient/docs/PlatformGitHubAppConfirmRequest.md)
+ - [PlatformGitHubAppDetailResponse](azentsadminclient/docs/PlatformGitHubAppDetailResponse.md)
+ - [PlatformGitHubAppEffectiveStatus](azentsadminclient/docs/PlatformGitHubAppEffectiveStatus.md)
+ - [PlatformGitHubAppFieldResponse](azentsadminclient/docs/PlatformGitHubAppFieldResponse.md)
+ - [PlatformGitHubAppHealthResponse](azentsadminclient/docs/PlatformGitHubAppHealthResponse.md)
+ - [PlatformGitHubAppPatchRequest](azentsadminclient/docs/PlatformGitHubAppPatchRequest.md)
  - [SentryDiagnostics](azentsadminclient/docs/SentryDiagnostics.md)
  - [SignupTokenDeliveryMethod](azentsadminclient/docs/SignupTokenDeliveryMethod.md)
  - [SignupTokenListResponse](azentsadminclient/docs/SignupTokenListResponse.md)
@@ -161,6 +176,17 @@ Class | Method | HTTP request | Description
  - [SystemModelCatalogRefreshResponse](azentsadminclient/docs/SystemModelCatalogRefreshResponse.md)
  - [SystemModelCatalogResponse](azentsadminclient/docs/SystemModelCatalogResponse.md)
  - [SystemModelCatalogSyncAttemptResponse](azentsadminclient/docs/SystemModelCatalogSyncAttemptResponse.md)
+ - [SystemSettingAuditEventListResponse](azentsadminclient/docs/SystemSettingAuditEventListResponse.md)
+ - [SystemSettingAuditEventResponse](azentsadminclient/docs/SystemSettingAuditEventResponse.md)
+ - [SystemSettingAuditEventType](azentsadminclient/docs/SystemSettingAuditEventType.md)
+ - [SystemSettingAuditSource](azentsadminclient/docs/SystemSettingAuditSource.md)
+ - [SystemSettingFieldSource](azentsadminclient/docs/SystemSettingFieldSource.md)
+ - [SystemSettingHealthStatus](azentsadminclient/docs/SystemSettingHealthStatus.md)
+ - [SystemSettingInventoryItemResponse](azentsadminclient/docs/SystemSettingInventoryItemResponse.md)
+ - [SystemSettingInventoryResponse](azentsadminclient/docs/SystemSettingInventoryResponse.md)
+ - [SystemSettingSecretActionRequest](azentsadminclient/docs/SystemSettingSecretActionRequest.md)
+ - [SystemSettingSecretActionType](azentsadminclient/docs/SystemSettingSecretActionType.md)
+ - [SystemSettingValidationStatus](azentsadminclient/docs/SystemSettingValidationStatus.md)
  - [SystemUserRole](azentsadminclient/docs/SystemUserRole.md)
  - [SystemUserRoleAssignmentListResponse](azentsadminclient/docs/SystemUserRoleAssignmentListResponse.md)
  - [SystemUserRoleAssignmentResponse](azentsadminclient/docs/SystemUserRoleAssignmentResponse.md)
@@ -195,7 +221,3 @@ Authentication schemes defined for the API:
 
 
 ## Author
-
-
-
-

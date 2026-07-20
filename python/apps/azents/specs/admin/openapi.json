@@ -1290,6 +1290,306 @@
         }
       }
     },
+    "/system-setting/v1/sections": {
+      "get": {
+        "tags": [
+          "System Settings v1"
+        ],
+        "summary": "List System Setting Sections",
+        "description": "List the redacted System Settings inventory.",
+        "operationId": "system_settings_v1_list_system_setting_sections",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemSettingInventoryResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/system-setting/v1/sections/platform-github-app": {
+      "get": {
+        "tags": [
+          "System Settings v1"
+        ],
+        "summary": "Get Platform Github App Setting",
+        "description": "Return the redacted Platform GitHub App detail.",
+        "operationId": "system_settings_v1_get_platform_github_app_setting",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformGitHubAppDetailResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "System Settings v1"
+        ],
+        "summary": "Patch Platform Github App Setting",
+        "description": "Patch the Admin base and validate the resulting candidate.",
+        "operationId": "system_settings_v1_patch_platform_github_app_setting",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlatformGitHubAppPatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformGitHubAppDetailResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/system-setting/v1/sections/platform-github-app/candidate/validate": {
+      "post": {
+        "tags": [
+          "System Settings v1"
+        ],
+        "summary": "Validate Platform Github App Candidate",
+        "description": "Retry external validation for the current candidate.",
+        "operationId": "system_settings_v1_validate_platform_github_app_candidate",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformGitHubAppDetailResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/system-setting/v1/sections/platform-github-app/candidate/confirm": {
+      "post": {
+        "tags": [
+          "System Settings v1"
+        ],
+        "summary": "Confirm Platform Github App Candidate",
+        "description": "Confirm unchanged impact and activate a valid candidate.",
+        "operationId": "system_settings_v1_confirm_platform_github_app_candidate",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlatformGitHubAppConfirmRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformGitHubAppDetailResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/system-setting/v1/sections/platform-github-app/candidate": {
+      "delete": {
+        "tags": [
+          "System Settings v1"
+        ],
+        "summary": "Cancel Platform Github App Candidate",
+        "description": "Cancel the current candidate and delete its ciphertext.",
+        "operationId": "system_settings_v1_cancel_platform_github_app_candidate",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "candidate_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Candidate Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/system-setting/v1/sections/platform-github-app/health-check": {
+      "post": {
+        "tags": [
+          "System Settings v1"
+        ],
+        "summary": "Check Platform Github App Health",
+        "description": "Run an explicit health check for the current effective setting.",
+        "operationId": "system_settings_v1_check_platform_github_app_health",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformGitHubAppDetailResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/system-setting/v1/audit-events": {
+      "get": {
+        "tags": [
+          "System Settings v1"
+        ],
+        "summary": "List System Setting Audit Events",
+        "description": "List metadata-only System Settings audit events.",
+        "operationId": "system_settings_v1_list_system_setting_audit_events",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemSettingAuditEventListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/user/v1/users": {
       "get": {
         "tags": [
@@ -3010,6 +3310,402 @@
         "title": "PasswordResetTokenResponse",
         "description": "Password reset token metadata response."
       },
+      "PlatformGitHubAppCandidateResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "base_version": {
+            "type": "integer",
+            "title": "Base Version"
+          },
+          "validation_status": {
+            "$ref": "#/components/schemas/SystemSettingValidationStatus"
+          },
+          "validation_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validation Code"
+          },
+          "validation_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validation Message"
+          },
+          "action_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Action Hint"
+          },
+          "impact": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Impact"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "base_version",
+          "validation_status",
+          "validation_code",
+          "validation_message",
+          "action_hint",
+          "impact",
+          "created_at",
+          "updated_at",
+          "expires_at"
+        ],
+        "title": "PlatformGitHubAppCandidateResponse",
+        "description": "Redacted candidate lifecycle response."
+      },
+      "PlatformGitHubAppConfirmRequest": {
+        "properties": {
+          "candidate_id": {
+            "type": "string",
+            "title": "Candidate Id"
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Expected Version"
+          },
+          "confirmation_action": {
+            "type": "string",
+            "title": "Confirmation Action"
+          }
+        },
+        "type": "object",
+        "required": [
+          "candidate_id",
+          "expected_version",
+          "confirmation_action"
+        ],
+        "title": "PlatformGitHubAppConfirmRequest",
+        "description": "Confirmation for an unchanged validated candidate impact."
+      },
+      "PlatformGitHubAppDetailResponse": {
+        "properties": {
+          "section": {
+            "type": "string",
+            "title": "Section"
+          },
+          "schema_version": {
+            "type": "integer",
+            "title": "Schema Version"
+          },
+          "admin_version": {
+            "type": "integer",
+            "title": "Admin Version"
+          },
+          "effective_status": {
+            "$ref": "#/components/schemas/PlatformGitHubAppEffectiveStatus"
+          },
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/PlatformGitHubAppFieldResponse"
+            },
+            "type": "array",
+            "title": "Fields"
+          },
+          "candidate": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PlatformGitHubAppCandidateResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "health": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PlatformGitHubAppHealthResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "activation_validation_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SystemSettingValidationStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "app_slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "App Slug"
+          }
+        },
+        "type": "object",
+        "required": [
+          "section",
+          "schema_version",
+          "admin_version",
+          "effective_status",
+          "fields",
+          "candidate",
+          "health",
+          "activation_validation_status",
+          "app_slug"
+        ],
+        "title": "PlatformGitHubAppDetailResponse",
+        "description": "Redacted Platform GitHub App detail response."
+      },
+      "PlatformGitHubAppEffectiveStatus": {
+        "type": "string",
+        "enum": [
+          "not_configured",
+          "incomplete",
+          "invalid",
+          "ready",
+          "unavailable"
+        ],
+        "title": "PlatformGitHubAppEffectiveStatus",
+        "description": "Redacted effective configuration status."
+      },
+      "PlatformGitHubAppFieldResponse": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "secret": {
+            "type": "boolean",
+            "title": "Secret"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          },
+          "configured": {
+            "type": "boolean",
+            "title": "Configured"
+          },
+          "source": {
+            "$ref": "#/components/schemas/SystemSettingFieldSource"
+          },
+          "environment_variable": {
+            "type": "string",
+            "title": "Environment Variable"
+          },
+          "fallback_configured": {
+            "type": "boolean",
+            "title": "Fallback Configured"
+          },
+          "fallback_last_changed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fallback Last Changed At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "secret",
+          "value",
+          "configured",
+          "source",
+          "environment_variable",
+          "fallback_configured",
+          "fallback_last_changed_at"
+        ],
+        "title": "PlatformGitHubAppFieldResponse",
+        "description": "Redacted field response."
+      },
+      "PlatformGitHubAppHealthResponse": {
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/SystemSettingHealthStatus"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "action_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Action Hint"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata"
+          },
+          "checked_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Checked At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "code",
+          "message",
+          "action_hint",
+          "metadata",
+          "checked_at"
+        ],
+        "title": "PlatformGitHubAppHealthResponse",
+        "description": "Current-effective explicit health response."
+      },
+      "PlatformGitHubAppPatchRequest": {
+        "properties": {
+          "expected_version": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Expected Version"
+          },
+          "app_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "App Id"
+          },
+          "client_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Id"
+          },
+          "private_key": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SystemSettingSecretActionRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "client_secret": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SystemSettingSecretActionRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "expected_version"
+        ],
+        "title": "PlatformGitHubAppPatchRequest",
+        "description": "Optimistic partial update for the Platform GitHub App Admin base."
+      },
       "SentryDiagnostics": {
         "properties": {
           "initialized": {
@@ -3513,6 +4209,313 @@
         ],
         "title": "SystemModelCatalogSyncAttemptResponse",
         "description": "Latest model catalog sync attempt response."
+      },
+      "SystemSettingAuditEventListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SystemSettingAuditEventResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total"
+        ],
+        "title": "SystemSettingAuditEventListResponse",
+        "description": "Paginated metadata-only System Settings audit events."
+      },
+      "SystemSettingAuditEventResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "section": {
+            "type": "string",
+            "title": "Section"
+          },
+          "event_type": {
+            "$ref": "#/components/schemas/SystemSettingAuditEventType"
+          },
+          "source": {
+            "$ref": "#/components/schemas/SystemSettingAuditSource"
+          },
+          "previous_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Version"
+          },
+          "new_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "New Version"
+          },
+          "actor_user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actor User Id"
+          },
+          "changed_fields": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Changed Fields"
+          },
+          "secret_actions": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Secret Actions"
+          },
+          "validation_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SystemSettingValidationStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "candidate_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Candidate Id"
+          },
+          "impact_confirmed": {
+            "type": "boolean",
+            "title": "Impact Confirmed"
+          },
+          "confirmation_action": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmation Action"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "section",
+          "event_type",
+          "source",
+          "previous_version",
+          "new_version",
+          "actor_user_id",
+          "changed_fields",
+          "secret_actions",
+          "validation_status",
+          "candidate_id",
+          "impact_confirmed",
+          "confirmation_action",
+          "metadata",
+          "created_at"
+        ],
+        "title": "SystemSettingAuditEventResponse",
+        "description": "Metadata-only System Settings audit event."
+      },
+      "SystemSettingAuditEventType": {
+        "type": "string",
+        "enum": [
+          "candidate_replaced",
+          "candidate_validated",
+          "candidate_cancelled",
+          "activated",
+          "health_checked"
+        ],
+        "title": "SystemSettingAuditEventType",
+        "description": "Metadata-only System Settings audit event type."
+      },
+      "SystemSettingAuditSource": {
+        "type": "string",
+        "enum": [
+          "admin_api",
+          "application_migration",
+          "system"
+        ],
+        "title": "SystemSettingAuditSource",
+        "description": "Authority that produced a System Settings audit event."
+      },
+      "SystemSettingFieldSource": {
+        "type": "string",
+        "enum": [
+          "admin",
+          "environment",
+          "unset"
+        ],
+        "title": "SystemSettingFieldSource",
+        "description": "Effective field source."
+      },
+      "SystemSettingHealthStatus": {
+        "type": "string",
+        "enum": [
+          "healthy",
+          "invalid",
+          "unavailable"
+        ],
+        "title": "SystemSettingHealthStatus",
+        "description": "Persisted explicit health-check result."
+      },
+      "SystemSettingInventoryItemResponse": {
+        "properties": {
+          "section": {
+            "type": "string",
+            "title": "Section"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name"
+          },
+          "effective_status": {
+            "$ref": "#/components/schemas/PlatformGitHubAppEffectiveStatus"
+          },
+          "admin_version": {
+            "type": "integer",
+            "title": "Admin Version"
+          },
+          "environment_managed_field_count": {
+            "type": "integer",
+            "title": "Environment Managed Field Count"
+          },
+          "candidate_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SystemSettingValidationStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "section",
+          "display_name",
+          "effective_status",
+          "admin_version",
+          "environment_managed_field_count",
+          "candidate_status"
+        ],
+        "title": "SystemSettingInventoryItemResponse",
+        "description": "Generic System Settings inventory item."
+      },
+      "SystemSettingInventoryResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SystemSettingInventoryItemResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "SystemSettingInventoryResponse",
+        "description": "System Settings inventory response."
+      },
+      "SystemSettingSecretActionRequest": {
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/SystemSettingSecretActionType"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "type": "object",
+        "required": [
+          "action"
+        ],
+        "title": "SystemSettingSecretActionRequest",
+        "description": "Explicit secret replacement or clearing action."
+      },
+      "SystemSettingSecretActionType": {
+        "type": "string",
+        "enum": [
+          "replace",
+          "clear"
+        ],
+        "title": "SystemSettingSecretActionType",
+        "description": "Explicit secret mutation action."
+      },
+      "SystemSettingValidationStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "valid",
+          "invalid",
+          "unavailable"
+        ],
+        "title": "SystemSettingValidationStatus",
+        "description": "Persisted candidate or activation validation state."
       },
       "SystemUserRole": {
         "type": "string",
@@ -4063,6 +5066,10 @@
     {
       "name": "System v1",
       "description": "\nSystem API (Admin)\n\nInstance-wide administrator role management.\n"
+    },
+    {
+      "name": "System Settings v1",
+      "description": "\nSystem Settings API (Admin)\n\nRedacted instance-wide operational configuration management.\n"
     },
     {
       "name": "User v1",

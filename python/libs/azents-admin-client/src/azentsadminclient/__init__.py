@@ -24,6 +24,7 @@ __all__ = [
     "InvitationV1Api",
     "ModelCatalogV1Api",
     "SystemBootstrapV1Api",
+    "SystemSettingsV1Api",
     "SystemV1Api",
     "UserEmailV1Api",
     "UserV1Api",
@@ -61,6 +62,13 @@ __all__ = [
     "InvitationStatus",
     "PasswordResetTokenListResponse",
     "PasswordResetTokenResponse",
+    "PlatformGitHubAppCandidateResponse",
+    "PlatformGitHubAppConfirmRequest",
+    "PlatformGitHubAppDetailResponse",
+    "PlatformGitHubAppEffectiveStatus",
+    "PlatformGitHubAppFieldResponse",
+    "PlatformGitHubAppHealthResponse",
+    "PlatformGitHubAppPatchRequest",
     "SentryDiagnostics",
     "SignupTokenDeliveryMethod",
     "SignupTokenListResponse",
@@ -75,6 +83,17 @@ __all__ = [
     "SystemModelCatalogRefreshResponse",
     "SystemModelCatalogResponse",
     "SystemModelCatalogSyncAttemptResponse",
+    "SystemSettingAuditEventListResponse",
+    "SystemSettingAuditEventResponse",
+    "SystemSettingAuditEventType",
+    "SystemSettingAuditSource",
+    "SystemSettingFieldSource",
+    "SystemSettingHealthStatus",
+    "SystemSettingInventoryItemResponse",
+    "SystemSettingInventoryResponse",
+    "SystemSettingSecretActionRequest",
+    "SystemSettingSecretActionType",
+    "SystemSettingValidationStatus",
     "SystemUserRole",
     "SystemUserRoleAssignmentListResponse",
     "SystemUserRoleAssignmentResponse",
@@ -104,6 +123,7 @@ from azentsadminclient.api.health_v1_api import HealthV1Api as HealthV1Api
 from azentsadminclient.api.invitation_v1_api import InvitationV1Api as InvitationV1Api
 from azentsadminclient.api.model_catalog_v1_api import ModelCatalogV1Api as ModelCatalogV1Api
 from azentsadminclient.api.system_bootstrap_v1_api import SystemBootstrapV1Api as SystemBootstrapV1Api
+from azentsadminclient.api.system_settings_v1_api import SystemSettingsV1Api as SystemSettingsV1Api
 from azentsadminclient.api.system_v1_api import SystemV1Api as SystemV1Api
 from azentsadminclient.api.user_email_v1_api import UserEmailV1Api as UserEmailV1Api
 from azentsadminclient.api.user_v1_api import UserV1Api as UserV1Api
@@ -145,6 +165,13 @@ from azentsadminclient.models.invitation_response import InvitationResponse as I
 from azentsadminclient.models.invitation_status import InvitationStatus as InvitationStatus
 from azentsadminclient.models.password_reset_token_list_response import PasswordResetTokenListResponse as PasswordResetTokenListResponse
 from azentsadminclient.models.password_reset_token_response import PasswordResetTokenResponse as PasswordResetTokenResponse
+from azentsadminclient.models.platform_git_hub_app_candidate_response import PlatformGitHubAppCandidateResponse as PlatformGitHubAppCandidateResponse
+from azentsadminclient.models.platform_git_hub_app_confirm_request import PlatformGitHubAppConfirmRequest as PlatformGitHubAppConfirmRequest
+from azentsadminclient.models.platform_git_hub_app_detail_response import PlatformGitHubAppDetailResponse as PlatformGitHubAppDetailResponse
+from azentsadminclient.models.platform_git_hub_app_effective_status import PlatformGitHubAppEffectiveStatus as PlatformGitHubAppEffectiveStatus
+from azentsadminclient.models.platform_git_hub_app_field_response import PlatformGitHubAppFieldResponse as PlatformGitHubAppFieldResponse
+from azentsadminclient.models.platform_git_hub_app_health_response import PlatformGitHubAppHealthResponse as PlatformGitHubAppHealthResponse
+from azentsadminclient.models.platform_git_hub_app_patch_request import PlatformGitHubAppPatchRequest as PlatformGitHubAppPatchRequest
 from azentsadminclient.models.sentry_diagnostics import SentryDiagnostics as SentryDiagnostics
 from azentsadminclient.models.signup_token_delivery_method import SignupTokenDeliveryMethod as SignupTokenDeliveryMethod
 from azentsadminclient.models.signup_token_list_response import SignupTokenListResponse as SignupTokenListResponse
@@ -159,6 +186,17 @@ from azentsadminclient.models.system_model_catalog_refresh_list_response import 
 from azentsadminclient.models.system_model_catalog_refresh_response import SystemModelCatalogRefreshResponse as SystemModelCatalogRefreshResponse
 from azentsadminclient.models.system_model_catalog_response import SystemModelCatalogResponse as SystemModelCatalogResponse
 from azentsadminclient.models.system_model_catalog_sync_attempt_response import SystemModelCatalogSyncAttemptResponse as SystemModelCatalogSyncAttemptResponse
+from azentsadminclient.models.system_setting_audit_event_list_response import SystemSettingAuditEventListResponse as SystemSettingAuditEventListResponse
+from azentsadminclient.models.system_setting_audit_event_response import SystemSettingAuditEventResponse as SystemSettingAuditEventResponse
+from azentsadminclient.models.system_setting_audit_event_type import SystemSettingAuditEventType as SystemSettingAuditEventType
+from azentsadminclient.models.system_setting_audit_source import SystemSettingAuditSource as SystemSettingAuditSource
+from azentsadminclient.models.system_setting_field_source import SystemSettingFieldSource as SystemSettingFieldSource
+from azentsadminclient.models.system_setting_health_status import SystemSettingHealthStatus as SystemSettingHealthStatus
+from azentsadminclient.models.system_setting_inventory_item_response import SystemSettingInventoryItemResponse as SystemSettingInventoryItemResponse
+from azentsadminclient.models.system_setting_inventory_response import SystemSettingInventoryResponse as SystemSettingInventoryResponse
+from azentsadminclient.models.system_setting_secret_action_request import SystemSettingSecretActionRequest as SystemSettingSecretActionRequest
+from azentsadminclient.models.system_setting_secret_action_type import SystemSettingSecretActionType as SystemSettingSecretActionType
+from azentsadminclient.models.system_setting_validation_status import SystemSettingValidationStatus as SystemSettingValidationStatus
 from azentsadminclient.models.system_user_role import SystemUserRole as SystemUserRole
 from azentsadminclient.models.system_user_role_assignment_list_response import SystemUserRoleAssignmentListResponse as SystemUserRoleAssignmentListResponse
 from azentsadminclient.models.system_user_role_assignment_response import SystemUserRoleAssignmentResponse as SystemUserRoleAssignmentResponse
@@ -179,4 +217,3 @@ from azentsadminclient.models.workspace_user_list_response import WorkspaceUserL
 from azentsadminclient.models.workspace_user_response import WorkspaceUserResponse as WorkspaceUserResponse
 from azentsadminclient.models.workspace_user_role import WorkspaceUserRole as WorkspaceUserRole
 from azentsadminclient.models.workspace_user_update_request import WorkspaceUserUpdateRequest as WorkspaceUserUpdateRequest
-
