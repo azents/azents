@@ -41,6 +41,11 @@ import {
   useRef,
   useState,
 } from "react";
+import {
+  captureChatScrollAnchor,
+  type ChatScrollAnchor,
+  restorePrependScrollTop,
+} from "../hooks/chatScrollAnchor";
 import { type UploadedFile, useFileUpload } from "../hooks/useFileUpload";
 import {
   projectChatPresentationItems,
@@ -650,10 +655,7 @@ export function ChatView({
   // older messages prepend when preserve scroll position
   const isLoadingMoreRef = useRef(false);
   const lastAutoLoadAttemptKeyRef = useRef<string | null>(null);
-  const savedScrollRef = useRef<{
-    scrollHeight: number;
-    scrollTop: number;
-  } | null>(null);
+  const savedScrollRef = useRef<ChatScrollAnchor | null>(null);
 
   const markProgrammaticScroll = useCallback((): void => {
     programmaticScrollUntilRef.current =
@@ -665,7 +667,6 @@ export function ChatView({
     detachedScrollRestoreUntilRef.current = 0;
     userScrollIntentGenerationRef.current += 1;
     pendingInitialScrollRestoreRef.current = null;
-    savedScrollRef.current = null;
   }, []);
 
   const persistScrollState = useCallback(
@@ -760,10 +761,7 @@ export function ChatView({
     if (isLoadingMore && !isLoadingMoreRef.current) {
       const viewport = viewportRef.current;
       if (viewport) {
-        savedScrollRef.current = {
-          scrollHeight: viewport.scrollHeight,
-          scrollTop: viewport.scrollTop,
-        };
+        savedScrollRef.current = captureChatScrollAnchor(viewport);
       }
     }
     isLoadingMoreRef.current = isLoadingMore;
@@ -826,8 +824,10 @@ export function ChatView({
           pendingInitialScrollRestoreRef.current = null;
         }
       } else {
-        const diff = viewport.scrollHeight - saved.scrollHeight;
-        viewport.scrollTop = saved.scrollTop + diff;
+        viewport.scrollTop = restorePrependScrollTop(
+          saved,
+          viewport.scrollHeight,
+        );
       }
       savedScrollRef.current = null;
       prevMessageIdsRef.current = new Set(
@@ -879,10 +879,7 @@ export function ChatView({
       return;
     }
     lastAutoLoadAttemptKeyRef.current = autoLoadAttemptKey;
-    savedScrollRef.current = {
-      scrollHeight: viewport.scrollHeight,
-      scrollTop: viewport.scrollTop,
-    };
+    savedScrollRef.current = captureChatScrollAnchor(viewport);
     onLoadMore({
       detachFromLatest: !isFollowingLatestRef.current,
     });
@@ -1064,6 +1061,10 @@ export function ChatView({
     const handleScroll = (): void => {
       const scrollTop = viewport.scrollTop;
 
+      if (isLoadingMore && savedScrollRef.current !== null) {
+        savedScrollRef.current = captureChatScrollAnchor(viewport);
+      }
+
       // (1) follow detection update
       const distanceFromBottom = scrollDistanceFromBottom(viewport);
       const atFollowBoundary = distanceFromBottom <= BOTTOM_FOLLOW_THRESHOLD;
@@ -1113,10 +1114,7 @@ export function ChatView({
         const lastLoadMoreTriggerAt = lastLoadMoreTriggerAtRef.current;
         if (now - lastLoadMoreTriggerAt >= LOAD_MORE_COOLDOWN_MS) {
           lastLoadMoreTriggerAtRef.current = now;
-          savedScrollRef.current = {
-            scrollHeight: viewport.scrollHeight,
-            scrollTop: viewport.scrollTop,
-          };
+          savedScrollRef.current = captureChatScrollAnchor(viewport);
           onLoadMore();
         }
       }
