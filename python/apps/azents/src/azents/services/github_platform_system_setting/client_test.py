@@ -37,7 +37,11 @@ async def test_validate_accepts_expected_bad_verification_code() -> None:
         return httpx.Response(200, json={"error": "bad_verification_code"})
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        result = await PlatformGitHubAppValidationClient(client).validate(_effective())
+        result = await PlatformGitHubAppValidationClient(
+            client,
+            app_url="https://api.github.com/app",
+            oauth_token_url="https://github.com/login/oauth/access_token",
+        ).validate(_effective())
 
     assert result.status is SystemSettingValidationStatus.VALID
     assert result.metadata == {"app_slug": "azents-test"}
@@ -61,7 +65,11 @@ async def test_validate_classifies_oauth_credentials_without_raw_response() -> N
         )
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        result = await PlatformGitHubAppValidationClient(client).validate(_effective())
+        result = await PlatformGitHubAppValidationClient(
+            client,
+            app_url="https://api.github.com/app",
+            oauth_token_url="https://github.com/login/oauth/access_token",
+        ).validate(_effective())
 
     assert result.status is SystemSettingValidationStatus.INVALID
     assert result.code == "github_oauth_credentials_invalid"
@@ -76,7 +84,11 @@ async def test_validate_classifies_provider_outage_as_unavailable() -> None:
         return httpx.Response(503, json={"message": "secret provider diagnostics"})
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        result = await PlatformGitHubAppValidationClient(client).validate(_effective())
+        result = await PlatformGitHubAppValidationClient(
+            client,
+            app_url="https://api.github.com/app",
+            oauth_token_url="https://github.com/login/oauth/access_token",
+        ).validate(_effective())
 
     assert result.status is SystemSettingValidationStatus.UNAVAILABLE
     assert result.code == "github_unavailable"

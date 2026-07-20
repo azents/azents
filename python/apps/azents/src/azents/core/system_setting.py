@@ -359,6 +359,14 @@ class SystemSettingCandidateNotFound(Exception):
 
 
 @dataclass
+class SystemSettingCandidateReplaced(Exception):
+    """Candidate was replaced while an external operation was in flight."""
+
+    section: SystemSettingSection
+    candidate_id: str
+
+
+@dataclass
 class SystemSettingCandidateExpired(Exception):
     """Requested candidate has expired."""
 

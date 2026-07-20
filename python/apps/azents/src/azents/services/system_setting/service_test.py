@@ -14,6 +14,7 @@ from azents.core.system_setting import (
     SystemDataMigrationOutcome,
     SystemSettingActivationMode,
     SystemSettingCandidateExpired,
+    SystemSettingCandidateReplaced,
     SystemSettingDefinition,
     SystemSettingEnvironment,
     SystemSettingEnvironmentBinding,
@@ -296,6 +297,7 @@ async def test_valid_candidate_auto_activates_without_confirmation(
 
     result = await service.validate_candidate(
         section=SystemSettingSection.PLATFORM_GITHUB_APP,
+        candidate_id=pending.candidate.id,
         validator=validator,
     )
 
@@ -303,6 +305,56 @@ async def test_valid_candidate_auto_activates_without_confirmation(
     assert result.current.version == 1
     assert result.current.validation_status is SystemSettingValidationStatus.VALID
     assert result.current.validation_metadata == {"slug": "example"}
+
+
+async def test_replaced_candidate_fails_in_flight_validation_as_conflict(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """An in-flight mutation cannot validate a later replacement candidate."""
+    service = _service(
+        rdb_session_manager,
+        activation_mode=SystemSettingActivationMode.VALIDATED,
+    )
+    first = await service.mutate(_initial_mutation())
+    assert isinstance(first, SystemSettingCandidatePending)
+    replacement_id: str | None = None
+
+    async def validator(
+        _snapshot: SystemSettingCandidateValidationSnapshot,
+    ) -> SystemSettingCandidateValidationResult:
+        nonlocal replacement_id
+        replacement = await service.mutate(
+            SystemSettingMutation(
+                section=SystemSettingSection.PLATFORM_GITHUB_APP,
+                expected_version=0,
+                config_patch={"label": "replacement"},
+                secret_actions={},
+                actor_user_id=None,
+            )
+        )
+        assert isinstance(replacement, SystemSettingCandidatePending)
+        replacement_id = replacement.candidate.id
+        return SystemSettingCandidateValidationResult(
+            status=SystemSettingValidationStatus.VALID,
+            code=None,
+            message=None,
+            action_hint=None,
+            metadata=None,
+            impact=None,
+            confirmation_required=False,
+        )
+
+    with pytest.raises(SystemSettingCandidateReplaced) as exc_info:
+        await service.validate_candidate(
+            section=SystemSettingSection.PLATFORM_GITHUB_APP,
+            candidate_id=first.candidate.id,
+            validator=validator,
+        )
+
+    assert exc_info.value.candidate_id == first.candidate.id
+    candidate = await service.get_candidate(SystemSettingSection.PLATFORM_GITHUB_APP)
+    assert candidate is not None
+    assert candidate.id == replacement_id
 
 
 async def test_confirmation_rechecks_impact_before_activation(
@@ -331,6 +383,7 @@ async def test_confirmation_rechecks_impact_before_activation(
 
     validated = await service.validate_candidate(
         section=SystemSettingSection.PLATFORM_GITHUB_APP,
+        candidate_id=pending.candidate.id,
         validator=validator,
     )
     assert isinstance(validated, SystemSettingCandidatePending)

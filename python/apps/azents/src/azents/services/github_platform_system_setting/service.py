@@ -9,6 +9,8 @@ from fastapi import Depends
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.config import Config
+from azents.core.deps import get_config
 from azents.core.github_system_setting import (
     PlatformGitHubAppConfig,
     PlatformGitHubAppEffective,
@@ -66,9 +68,22 @@ def get_platform_github_validation_client(
         httpx.AsyncClient,
         Depends(get_platform_github_validation_http_client),
     ],
+    config: Annotated[Config, Depends(get_config)],
 ) -> PlatformGitHubAppValidationClient:
     """Return the Platform GitHub App external validation client."""
-    return PlatformGitHubAppValidationClient(http_client)
+    base_url = config.testenv_github_platform_validation_base_url
+    if base_url is None:
+        app_url = "https://api.github.com/app"
+        oauth_token_url = "https://github.com/login/oauth/access_token"
+    else:
+        normalized_base_url = base_url.rstrip("/")
+        app_url = f"{normalized_base_url}/app"
+        oauth_token_url = f"{normalized_base_url}/login/oauth/access_token"
+    return PlatformGitHubAppValidationClient(
+        http_client,
+        app_url=app_url,
+        oauth_token_url=oauth_token_url,
+    )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -129,6 +144,7 @@ class PlatformGitHubAppSystemSettingService:
             return result
         return await self.system_settings.validate_candidate(
             section=SystemSettingSection.PLATFORM_GITHUB_APP,
+            candidate_id=result.candidate.id,
             validator=self._validate_candidate,
         )
 
@@ -136,6 +152,7 @@ class PlatformGitHubAppSystemSettingService:
         """Retry external validation for the current candidate."""
         return await self.system_settings.validate_candidate(
             section=SystemSettingSection.PLATFORM_GITHUB_APP,
+            candidate_id=None,
             validator=self._validate_candidate,
         )
 

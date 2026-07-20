@@ -8,6 +8,7 @@ from fastapi import HTTPException
 
 from azents.core.auth.deps import SystemAdmin
 from azents.core.system_setting import (
+    SystemSettingCandidateReplaced,
     SystemSettingEnvironmentFieldReadOnly,
     SystemSettingFieldSource,
     SystemSettingSection,
@@ -124,6 +125,13 @@ async def test_patch_rejects_null_secret_field_without_action() -> None:
                 environment_variable="AZ_GITHUB_PLATFORM_APP_ID",
             ),
             "environment_managed_system_setting_field",
+        ),
+        (
+            SystemSettingCandidateReplaced(
+                section=SystemSettingSection.PLATFORM_GITHUB_APP,
+                candidate_id="candidate-1",
+            ),
+            "system_setting_candidate_replaced",
         ),
     ],
 )

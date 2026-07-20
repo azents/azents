@@ -11,6 +11,7 @@ from azents.core.system_setting import (
     SystemSettingCandidateExpired,
     SystemSettingCandidateNotFound,
     SystemSettingCandidateNotValidated,
+    SystemSettingCandidateReplaced,
     SystemSettingEffectiveGenerationChanged,
     SystemSettingEnvironmentFieldReadOnly,
     SystemSettingImpactChanged,
@@ -67,6 +68,14 @@ def _raise_system_setting_error(error: Exception) -> Never:
                 detail={
                     "code": "system_setting_candidate_not_found",
                     "message": "System Settings candidate not found.",
+                },
+            ) from error
+        case SystemSettingCandidateReplaced():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "system_setting_candidate_replaced",
+                    "message": "The candidate was replaced. Reload and try again.",
                 },
             ) from error
         case SystemSettingCandidateExpired():
@@ -176,6 +185,7 @@ async def patch_platform_github_app_setting(
         SystemSettingVersionConflict,
         SystemSettingEnvironmentFieldReadOnly,
         SystemSettingCandidateNotFound,
+        SystemSettingCandidateReplaced,
         SystemSettingCandidateExpired,
         SystemSettingEffectiveGenerationChanged,
     ) as error:
@@ -193,6 +203,7 @@ async def validate_platform_github_app_candidate(
     except (
         SystemSettingVersionConflict,
         SystemSettingCandidateNotFound,
+        SystemSettingCandidateReplaced,
         SystemSettingCandidateExpired,
         SystemSettingEffectiveGenerationChanged,
     ) as error:
