@@ -229,10 +229,10 @@ def test_system_settings_authorization_lifecycle_redaction_and_audit(
     assert fields["client_secret"].configured is True
     assert fields["client_secret"].value is None
 
-    activated_json = activated.to_json()
-    assert private_key not in activated_json
-    assert _CLIENT_SECRET_SENTINEL not in activated_json
-    assert "effective_generation" not in activated_json
+    activated_projection = repr(activated.to_dict())
+    assert private_key not in activated_projection
+    assert _CLIENT_SECRET_SENTINEL not in activated_projection
+    assert "effective_generation" not in activated_projection
 
     with pytest.raises(azentsadminclient.ApiException) as stale_patch:
         settings_api.system_settings_v1_patch_platform_github_app_setting(
@@ -263,7 +263,7 @@ def test_system_settings_authorization_lifecycle_redaction_and_audit(
     assert invalid.candidate.id == candidate_id
     assert invalid.candidate.validation_status is SystemSettingValidationStatus.INVALID
     assert invalid.candidate.validation_code == "github_oauth_credentials_invalid"
-    assert _PROVIDER_PRIVATE_DIAGNOSTIC not in invalid.to_json()
+    assert _PROVIDER_PRIVATE_DIAGNOSTIC not in repr(invalid.to_dict())
 
     with pytest.raises(azentsadminclient.ApiException) as unvalidated_confirmation:
         settings_api.system_settings_v1_confirm_platform_github_app_candidate(
@@ -299,7 +299,7 @@ def test_system_settings_authorization_lifecycle_redaction_and_audit(
     assert provider_state["oauth_request_count"] == 1
 
     audit = settings_api.system_settings_v1_list_system_setting_audit_events(limit=100)
-    audit_json = audit.to_json()
+    audit_projection = repr(audit.to_dict())
     assert audit.total >= 7
     assert {
         "candidate_replaced",
@@ -319,7 +319,7 @@ def test_system_settings_authorization_lifecycle_redaction_and_audit(
         _PROVIDER_PRIVATE_DIAGNOSTIC,
         "effective_generation",
     ):
-        assert sentinel not in audit_json
+        assert sentinel not in audit_projection
 
     stdout, stderr = azents_admin_server_container.get_logs()
     server_logs = stdout.decode(errors="replace") + stderr.decode(errors="replace")
