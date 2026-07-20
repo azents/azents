@@ -1,4 +1,10 @@
-import type { ActiveToolCall, ChatMessage, ProviderToolCall } from "./types";
+import { toolCallPresentation } from "./toolPresentationRegistry.ts";
+import type {
+  ActiveToolCall,
+  ChatMessage,
+  FileAttachment,
+  ProviderToolCall,
+} from "./types";
 
 export interface ClientToolActivityCall {
   type: "client";
@@ -41,9 +47,17 @@ export interface MessagePresentationItem {
   messageIndex: number;
 }
 
+export interface ToolDeliverablePresentationItem {
+  type: "deliverable";
+  id: string;
+  files: FileAttachment[];
+  messageIndex: number;
+}
+
 export type ChatPresentationItem =
   | ToolActivityPresentationItem
-  | MessagePresentationItem;
+  | MessagePresentationItem
+  | ToolDeliverablePresentationItem;
 
 interface MutableToolActivityGroup extends ToolActivityGroup {
   pendingNextTurn: boolean;
@@ -204,7 +218,19 @@ export function projectChatPresentationItems(
 
     const calls = messageToolCalls(message);
     if (calls.length > 0) {
-      appendCalls(calls, message, messageIndex);
+      for (const call of calls) {
+        appendCalls([call], message, messageIndex);
+        const presentation = toolCallPresentation(call);
+        if (presentation.deliverables.length > 0) {
+          flushActivity();
+          items.push({
+            type: "deliverable",
+            id: `tool-deliverable:${call.toolCall.callId ?? call.toolCall.id}`,
+            files: presentation.deliverables,
+            messageIndex,
+          });
+        }
+      }
       if (hasVisibleDelivery(message)) {
         flushActivity();
         appendMessage(withoutToolActivity(message), messageIndex);

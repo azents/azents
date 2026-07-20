@@ -1401,7 +1401,12 @@
       "callCount": "ツール呼び出し {count} 件",
       "failedCount": "失敗 {count} 件",
       "runningCount": "実行中 {count} 件",
-      "genericPhase": "ツールアクティビティ",
+      "genericPhase": "その他のツールアクティビティ",
+      "phaseInspection": "リソースを確認",
+      "phaseExecution": "コマンドを実行",
+      "phaseChanges": "ファイルを変更",
+      "phaseGeneration": "メディアを生成",
+      "approvalNeeded": "承認が必要",
       "reasoning": "思考 {count} 件",
       "compactionCount": "コンテキスト要約 {count} 回",
       "expandActivity": "アクティビティを表示",
@@ -1412,7 +1417,8 @@
     "authorization": {
       "authorizationRequired": "認証が必要",
       "authorizationRequestMessage": "{toolkitName}のツールにアクセスするには認証が必要です。",
-      "authorizeButton": "接続"
+      "authorizeButton": "接続",
+      "reviewButton": "確認"
     },
     "agentFallback": "エージェント",
     "attachment": {

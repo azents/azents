@@ -20,6 +20,10 @@ import {
   IconTool,
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
+import {
+  groupToolActivityPhases,
+  toolCallPresentation,
+} from "../toolPresentationRegistry";
 import { MarkdownContent } from "./MarkdownContent";
 import { ProviderToolCallCard } from "./ProviderToolCallCard";
 import { ToolCallCard } from "./ToolCallCard";
@@ -27,15 +31,29 @@ import type {
   ToolActivityCall,
   ToolActivityGroup as ToolActivityGroupModel,
 } from "../toolActivityPresentation";
+import type {
+  ToolActivityPhase,
+  ToolActivityPhaseKind,
+} from "../toolPresentationRegistry";
+import type { ReactNode } from "react";
 
 interface ToolActivityGroupProps {
   activity: ToolActivityGroupModel;
+  authorizationAction?: ReactNode;
   dimmed?: boolean;
 }
 
 interface ActivityStatusCounts {
   failed: number;
   running: number;
+}
+
+interface ToolActivityPhaseRowProps {
+  phase: ToolActivityPhase;
+  label: string;
+  callCountLabel: string;
+  expandLabel: string;
+  collapseLabel: string;
 }
 
 function activityStatusCounts(calls: ToolActivityCall[]): ActivityStatusCounts {
@@ -57,14 +75,81 @@ function activityStatusCounts(calls: ToolActivityCall[]): ActivityStatusCounts {
   return { failed, running };
 }
 
+function ToolActivityPhaseRow({
+  phase,
+  label,
+  callCountLabel,
+  expandLabel,
+  collapseLabel,
+}: ToolActivityPhaseRowProps): React.ReactElement {
+  const [opened, { toggle }] = useDisclosure(false);
+
+  return (
+    <Box>
+      <UnstyledButton
+        w="100%"
+        py="sm"
+        px={rem(2)}
+        onClick={toggle}
+        aria-expanded={opened}
+        aria-label={`${opened ? collapseLabel : expandLabel}: ${label}`}
+      >
+        <Group justify="space-between" gap="sm" wrap="nowrap">
+          <Box miw={0}>
+            <Text size="sm" fw={550}>
+              {label}
+            </Text>
+            <Text size="xs" c="dimmed">
+              {callCountLabel}
+            </Text>
+          </Box>
+          <IconChevronRight
+            aria-hidden="true"
+            size={rem(15)}
+            color="var(--mantine-color-dimmed)"
+            style={{
+              transform: opened ? "rotate(90deg)" : "none",
+              transition: "transform 120ms ease",
+            }}
+          />
+        </Group>
+      </UnstyledButton>
+      <Collapse expanded={opened}>
+        <Stack gap="xs">
+          {phase.calls.map((call) => {
+            const presentation = toolCallPresentation(call);
+            const hiddenAttachmentUris = presentation.deliverables.map(
+              (attachment) => attachment.uri,
+            );
+            return call.type === "client" ? (
+              <ToolCallCard
+                key={`${call.type}:${call.toolCall.id}`}
+                toolCall={call.toolCall}
+                hiddenAttachmentUris={hiddenAttachmentUris}
+              />
+            ) : (
+              <ProviderToolCallCard
+                key={`${call.type}:${call.toolCall.id}`}
+                toolCall={call.toolCall}
+                hiddenAttachmentUris={hiddenAttachmentUris}
+              />
+            );
+          })}
+        </Stack>
+      </Collapse>
+    </Box>
+  );
+}
+
 export function ToolActivityGroup({
   activity,
+  authorizationAction,
   dimmed = false,
 }: ToolActivityGroupProps): React.ReactElement {
   const t = useTranslations("chat.toolActivity");
   const [opened, { toggle }] = useDisclosure(false);
-  const [phaseOpened, { toggle: togglePhase }] = useDisclosure(false);
   const counts = activityStatusCounts(activity.calls);
+  const phases = groupToolActivityPhases(activity.calls);
   const summaryParts = [
     t("turnCount", { count: activity.turnCount }),
     t("callCount", { count: activity.calls.length }),
@@ -76,6 +161,24 @@ export function ToolActivityGroup({
   if (counts.running > 0) {
     summaryParts.push(t("runningCount", { count: counts.running }));
   }
+  if (authorizationAction) {
+    summaryParts.push(t("approvalNeeded"));
+  }
+
+  function phaseLabel(kind: ToolActivityPhaseKind): string {
+    switch (kind) {
+      case "inspection":
+        return t("phaseInspection");
+      case "execution":
+        return t("phaseExecution");
+      case "changes":
+        return t("phaseChanges");
+      case "generation":
+        return t("phaseGeneration");
+      case "generic":
+        return t("genericPhase");
+    }
+  }
 
   return (
     <Box mb="md" opacity={dimmed ? 0.45 : 1} style={{ minWidth: 0 }}>
@@ -86,54 +189,57 @@ export function ToolActivityGroup({
         bg="var(--mantine-color-body)"
         data-tool-activity-id={activity.id}
       >
-        <UnstyledButton
-          w="100%"
-          py="sm"
-          onClick={toggle}
-          aria-expanded={opened}
-          aria-label={opened ? t("collapseActivity") : t("expandActivity")}
-        >
-          <Group justify="space-between" gap="sm" wrap="nowrap">
-            <Group gap="sm" wrap="nowrap" miw={0}>
-              <ThemeIcon size={rem(22)} variant="transparent" color="gray">
-                <IconTool size={rem(15)} />
-              </ThemeIcon>
-              <Box miw={0}>
-                <Text size="sm" fw={550} lh={1.3}>
-                  {t("title")}
-                </Text>
-                <Text size="xs" c="dimmed" lh={1.45} truncate>
-                  {summaryParts.join(" · ")}
-                </Text>
-              </Box>
-            </Group>
-            <Group gap="xs" wrap="nowrap">
-              {counts.failed > 0 ? (
-                <IconAlertCircle
-                  aria-label={t("failedCount", { count: counts.failed })}
+        <Group gap="sm" wrap="nowrap" py="sm">
+          <UnstyledButton
+            flex={1}
+            miw={0}
+            onClick={toggle}
+            aria-expanded={opened}
+            aria-label={opened ? t("collapseActivity") : t("expandActivity")}
+          >
+            <Group justify="space-between" gap="sm" wrap="nowrap">
+              <Group gap="sm" wrap="nowrap" miw={0}>
+                <ThemeIcon size={rem(22)} variant="transparent" color="gray">
+                  <IconTool size={rem(15)} />
+                </ThemeIcon>
+                <Box miw={0}>
+                  <Text size="sm" fw={550} lh={1.3}>
+                    {t("title")}
+                  </Text>
+                  <Text size="xs" c="dimmed" lh={1.45} truncate>
+                    {summaryParts.join(" · ")}
+                  </Text>
+                </Box>
+              </Group>
+              <Group gap="xs" wrap="nowrap">
+                {counts.failed > 0 ? (
+                  <IconAlertCircle
+                    aria-label={t("failedCount", { count: counts.failed })}
+                    size={rem(15)}
+                    color="var(--mantine-color-dimmed)"
+                  />
+                ) : null}
+                {counts.running > 0 ? (
+                  <Loader
+                    size={rem(14)}
+                    color="gray"
+                    aria-label={t("runningCount", { count: counts.running })}
+                  />
+                ) : null}
+                <IconChevronRight
+                  aria-hidden="true"
                   size={rem(15)}
                   color="var(--mantine-color-dimmed)"
+                  style={{
+                    transform: opened ? "rotate(90deg)" : "none",
+                    transition: "transform 120ms ease",
+                  }}
                 />
-              ) : null}
-              {counts.running > 0 ? (
-                <Loader
-                  size={rem(14)}
-                  color="gray"
-                  aria-label={t("runningCount", { count: counts.running })}
-                />
-              ) : null}
-              <IconChevronRight
-                aria-hidden="true"
-                size={rem(15)}
-                color="var(--mantine-color-dimmed)"
-                style={{
-                  transform: opened ? "rotate(90deg)" : "none",
-                  transition: "transform 120ms ease",
-                }}
-              />
+              </Group>
             </Group>
-          </Group>
-        </UnstyledButton>
+          </UnstyledButton>
+          {authorizationAction}
+        </Group>
 
         <Collapse expanded={opened}>
           <Divider />
@@ -163,51 +269,20 @@ export function ToolActivityGroup({
                 {t("compactionCount", { count: activity.compactionCount })}
               </Text>
             ) : null}
-            <UnstyledButton
-              w="100%"
-              py="sm"
-              px={rem(2)}
-              onClick={togglePhase}
-              aria-expanded={phaseOpened}
-              aria-label={phaseOpened ? t("collapsePhase") : t("expandPhase")}
-            >
-              <Group justify="space-between" gap="sm" wrap="nowrap">
-                <Box miw={0}>
-                  <Text size="sm" fw={550}>
-                    {t("genericPhase")}
-                  </Text>
-                  <Text size="xs" c="dimmed">
-                    {t("callCount", { count: activity.calls.length })}
-                  </Text>
-                </Box>
-                <IconChevronRight
-                  aria-hidden="true"
-                  size={rem(15)}
-                  color="var(--mantine-color-dimmed)"
-                  style={{
-                    transform: phaseOpened ? "rotate(90deg)" : "none",
-                    transition: "transform 120ms ease",
-                  }}
+            {phases.map((phase, index) => (
+              <Box key={phase.id}>
+                {index > 0 ? <Divider /> : null}
+                <ToolActivityPhaseRow
+                  phase={phase}
+                  label={phaseLabel(phase.kind)}
+                  callCountLabel={t("callCount", {
+                    count: phase.calls.length,
+                  })}
+                  expandLabel={t("expandPhase")}
+                  collapseLabel={t("collapsePhase")}
                 />
-              </Group>
-            </UnstyledButton>
-            <Collapse expanded={phaseOpened}>
-              <Stack gap="xs">
-                {activity.calls.map((call) =>
-                  call.type === "client" ? (
-                    <ToolCallCard
-                      key={`${call.type}:${call.toolCall.id}`}
-                      toolCall={call.toolCall}
-                    />
-                  ) : (
-                    <ProviderToolCallCard
-                      key={`${call.type}:${call.toolCall.id}`}
-                      toolCall={call.toolCall}
-                    />
-                  ),
-                )}
-              </Stack>
-            </Collapse>
+              </Box>
+            ))}
           </Stack>
         </Collapse>
       </Paper>
