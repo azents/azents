@@ -230,6 +230,7 @@ Design documents are accumulated records and are not listed individually in this
 - [ADR-0170: Project Subscription Usage from the Selected Composer Model](adr/0170-project-subscription-usage-from-selected-model.md)
 - [ADR-0171: Add Kimi Subscription as an Integration-Scoped Provider](adr/0171-add-kimi-subscription-as-an-integration-scoped-provider.md)
 - [ADR-0171: Archived Session Retention and Durable Purge](adr/0171-archived-session-retention-and-purge.md)
+- [ADR-0172: Generalize Admin-Managed System Configuration](adr/0172-generalize-admin-managed-system-configuration.md)
 - [ADR-0172: Reset the Tool Search Working Set on Successful Compaction](adr/0172-reset-tool-search-working-set-on-compaction.md)
 - [ADR-0173: Group Chat Tool Activity in the Frontend](adr/0173-group-chat-tool-activity-in-the-frontend.md)
 
