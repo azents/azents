@@ -84,7 +84,7 @@ server:
       targetCPUUtilizationPercentage: 70
     pdb:
       enabled: true
-      maxUnavailable: 1
+      minAvailable: 1
   mcpEgressProxy:
     enabled: false
     image:

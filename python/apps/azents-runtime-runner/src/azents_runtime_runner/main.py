@@ -42,6 +42,7 @@ _CAPABILITIES = (
     "file.bulk_move",
 )
 _CONTROL_RECONNECT_DELAY_SECONDS = 1.0
+_CONTROL_CLIENT_CLOSE_TIMEOUT_SECONDS = 5.0
 _DEFAULT_MAX_CONCURRENT_OPERATIONS_PER_SESSION = 10
 _DEFAULT_MAX_CONCURRENT_SYSTEM_OPERATIONS = 10
 _DEFAULT_MAX_CONCURRENT_OPERATIONS = 50
@@ -195,10 +196,23 @@ async def run_runtime_runner() -> None:
                 exc_info=True,
                 extra={"runtime_id": runtime_id, "runner_id": runner_id},
             )
-            await asyncio.sleep(_CONTROL_RECONNECT_DELAY_SECONDS)
         finally:
             await operations.close()
-            await client.close()
+            try:
+                await asyncio.wait_for(
+                    client.close(),
+                    timeout=_CONTROL_CLIENT_CLOSE_TIMEOUT_SECONDS,
+                )
+            except TimeoutError:
+                _LOGGER.warning(
+                    "Runtime Runner Control client close timed out",
+                    extra={
+                        "runtime_id": runtime_id,
+                        "runner_id": runner_id,
+                        "timeout_seconds": _CONTROL_CLIENT_CLOSE_TIMEOUT_SECONDS,
+                    },
+                )
+        await asyncio.sleep(_CONTROL_RECONNECT_DELAY_SECONDS)
 
 
 def runner_limit_config_from_env() -> RunnerLimitConfig:

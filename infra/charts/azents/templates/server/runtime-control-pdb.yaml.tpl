@@ -7,7 +7,7 @@ metadata:
   labels:
     {{- include "azents.componentLabels" (dict "root" . "component" "runtime-control") | nindent 4 }}
 spec:
-  maxUnavailable: {{ .Values.server.runtimeControl.pdb.maxUnavailable }}
+  minAvailable: {{ .Values.server.runtimeControl.pdb.minAvailable }}
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ include "azents.name" . | quote }}
