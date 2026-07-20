@@ -44,14 +44,17 @@ class ToolkitBinding(NamedTuple):
         DB-registered MCP toolkits where the same user can connect multiple
         instances use True to prevent namespace collisions.
     :param toolkit_type: ``toolkit_type`` of DB-registered toolkit
-        (``at.toolkit_type``). Builtin,
-        schedule and other worker dynamic or auto-bound toolkits use None.
+        (``at.toolkit_type``). Builtin, schedule and other worker dynamic or
+        auto-bound toolkits use None.
+    :param toolkit_config_id: Stable ToolkitConfig ID for DB-attached toolkit
+        source snapshots. Builtin and auto-bound toolkits use None.
     """
 
     toolkit: Toolkit[Any]
     slug: str
     use_prefix: bool
     toolkit_type: str | None = None
+    toolkit_config_id: str | None = None
 
 
 @dataclasses.dataclass(frozen=True)

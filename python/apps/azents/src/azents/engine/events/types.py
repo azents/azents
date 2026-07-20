@@ -351,6 +351,17 @@ class ReasoningPayload(BaseModel):
     native_artifact: NativeArtifact = Field(description="Native artifact")
 
 
+class ToolkitSourceSnapshot(BaseModel):
+    """Immutable DB-attached Toolkit source captured for one client call."""
+
+    model_config = ConfigDict(frozen=True)
+
+    toolkit_config_id: str = Field(min_length=1)
+    toolkit_type: str = Field(min_length=1)
+    toolkit_name: str = Field(min_length=1)
+    toolkit_slug: str = Field(min_length=1)
+
+
 class ClientToolCallPayload(BaseModel):
     """Client tool call payload executed by Azents."""
 
@@ -359,6 +370,7 @@ class ClientToolCallPayload(BaseModel):
     call_id: str = Field(min_length=1)
     name: str = Field(min_length=1)
     arguments: str = Field(description="JSON string arguments")
+    toolkit_source: ToolkitSourceSnapshot | None = Field(default=None)
     native_artifact: NativeArtifact = Field(description="Native artifact")
 
 
@@ -707,6 +719,7 @@ class ActiveToolCall(BaseModel):
     call_id: str = Field(min_length=1)
     name: str = Field(min_length=1)
     arguments: str | None = Field(default=None)
+    toolkit_source: ToolkitSourceSnapshot | None = Field(default=None)
     started_at: datetime.datetime
     owner_generation: int = Field(ge=1)
 

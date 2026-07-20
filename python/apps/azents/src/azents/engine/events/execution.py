@@ -89,6 +89,7 @@ class TerminalResult:
 InputPoller = Callable[[str], Awaitable[InputPollResult]]
 TurnEndReason = Literal["completed", "error", "cancelled", "unknown"]
 TurnEndCallback = Callable[[TurnEndReason], Awaitable[None]]
+ClientToolCallEnricher = Callable[[ClientToolCallPayload], ClientToolCallPayload]
 
 
 class PreparedProviderOutputProtocol(Protocol):
@@ -155,6 +156,13 @@ class PreModelLowerHook(Protocol):
         ...
 
 
+def _preserve_client_tool_call(
+    call: ClientToolCallPayload,
+) -> ClientToolCallPayload:
+    """Keep call data unchanged for preparers without a catalog source."""
+    return call
+
+
 @dataclass(frozen=True)
 class PreparedModelCall[TNativeRequest]:
     """Turn-local model call dependencies."""
@@ -164,6 +172,7 @@ class PreparedModelCall[TNativeRequest]:
     system_prompt_analysis: SystemPromptAnalysisPayload | None
     tool_executor: ClientToolExecutor
     on_turn_end: TurnEndCallback | None
+    enrich_client_tool_call: ClientToolCallEnricher = _preserve_client_tool_call
 
 
 class ModelCallPreparer[TNativeRequest](Protocol):
@@ -463,7 +472,10 @@ class AgentRunExecution[
                         request.run_id,
                         AgentRunPhase.NORMALIZING_OUTPUT,
                     )
-                    normalized = output_stream.complete()
+                    normalized = _enrich_client_tool_calls(
+                        output_stream.complete(),
+                        prepared.enrich_client_tool_call,
+                    )
                     _log_model_token_usage(
                         request=request,
                         usage=normalized.usage,
@@ -1412,6 +1424,20 @@ def _is_user_stop_cancellation(exc: asyncio.CancelledError) -> bool:
     return any(arg == USER_STOP_CANCEL_MESSAGE for arg in exc.args)
 
 
+def _enrich_client_tool_calls(
+    normalized: NormalizedAdapterOutput,
+    enrich_call: Callable[[ClientToolCallPayload], ClientToolCallPayload],
+) -> NormalizedAdapterOutput:
+    """Attach catalog-owned source snapshots before call events become durable."""
+    events = [
+        event.model_copy(update={"payload": enrich_call(event.payload)})
+        if isinstance(event.payload, ClientToolCallPayload)
+        else event
+        for event in normalized.events
+    ]
+    return normalized.model_copy(update={"events": events})
+
+
 def _has_durable_model_output(events: Sequence[Event]) -> bool:
     """Check whether model turn contains at least one durable output."""
     for event in events:
@@ -1452,6 +1478,7 @@ def _active_tool_call(
         call_id=call.call_id,
         name=call.name,
         arguments=call.arguments,
+        toolkit_source=call.toolkit_source,
         started_at=datetime.datetime.now(datetime.UTC),
         owner_generation=owner_generation,
     )

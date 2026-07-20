@@ -10,80 +10,48 @@ import type { ToolActivityGroup as ToolActivityGroupModel } from "../toolActivit
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
 const activity: ToolActivityGroupModel = {
-  id: "tool-activity:story-call",
+  id: "activity:story-call",
   firstMessageId: "story-tool-message-1",
   startMessageIndex: 1,
-  endMessageIndex: 5,
-  calls: [
-    {
-      type: "client",
-      messageId: "story-tool-message-1",
-      toolCall: completedToolCall,
-    },
-    {
-      type: "client",
-      messageId: "story-tool-message-2",
-      toolCall: failedToolCall,
-    },
-    {
-      type: "client",
-      messageId: "story-tool-message-3",
-      toolCall: runningToolCall,
-    },
-  ],
-  turnCount: 3,
-  reasoningSummaries: [],
-  compactionCount: 0,
-  usage: null,
-};
-
-const specializedActivity: ToolActivityGroupModel = {
-  id: "tool-activity:specialized-story",
-  firstMessageId: "specialized-message-1",
-  startMessageIndex: 1,
   endMessageIndex: 3,
-  calls: [
+  events: [
     {
-      type: "client",
-      messageId: "specialized-message-1",
+      id: "story:explore",
+      kind: "tool",
+      message: null,
       toolCall: {
-        id: "read-call",
-        name: "read",
-        arguments: JSON.stringify({ path: "/workspace/agent/project/a.ts" }),
-        result: "file content",
-        status: "completed",
+        type: "client",
+        messageId: "story-tool-message-1",
+        toolCall: completedToolCall,
       },
+      category: { key: "explore", label: "explore" },
+      status: "complete",
     },
     {
-      type: "client",
-      messageId: "specialized-message-2",
+      id: "story:edit",
+      kind: "tool",
+      message: null,
       toolCall: {
-        id: "exec-call",
-        name: "exec_command",
-        arguments: JSON.stringify({ command: "pnpm test" }),
-        result: "52 tests passed",
-        status: "completed",
+        type: "client",
+        messageId: "story-tool-message-2",
+        toolCall: failedToolCall,
       },
+      category: { key: "edit", label: "edit" },
+      status: "failed",
     },
     {
-      type: "client",
-      messageId: "specialized-message-3",
+      id: "story:shell",
+      kind: "tool",
+      message: null,
       toolCall: {
-        id: "edit-call",
-        name: "edit",
-        arguments: JSON.stringify({
-          path: "/workspace/agent/project/a.ts",
-          old_string: "before",
-          new_string: "after",
-        }),
-        result: "updated",
-        status: "completed",
+        type: "client",
+        messageId: "story-tool-message-3",
+        toolCall: runningToolCall,
       },
+      category: { key: "shell", label: "shell" },
+      status: "running",
     },
   ],
-  turnCount: 2,
-  reasoningSummaries: [],
-  compactionCount: 0,
   usage: null,
 };
 
@@ -102,45 +70,22 @@ export default meta;
 
 type Story = StoryObj<typeof meta>;
 
-export const Collapsed = {
+export const CollapsedWithAttention = {
   args: { activity },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(canvas.getByText("Activity")).toBeVisible();
-    await expect(
-      canvas.getByText("3 model turns · 3 tool calls · 1 failed · 1 running"),
-    ).toBeVisible();
-    await expect(canvas.queryByText("Tool activity")).toBeNull();
+    await expect(canvas.getByLabelText("Failed")).toBeVisible();
   },
 } satisfies Story;
 
-export const ExpandedGenericDetails = {
+export const OrderedDetails = {
   args: { activity },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await userEvent.click(
-      canvas.getByRole("button", { name: "Show activity" }),
-    );
-    await expect(canvas.getByText("Other tool activity")).toBeVisible();
-    await userEvent.click(
-      canvas.getByRole("button", {
-        name: "Show tool calls: Other tool activity",
-      }),
-    );
+    await userEvent.click(canvas.getByRole("button", { name: /Activity/ }));
     await expect(canvas.getByText(completedToolCall.name)).toBeVisible();
     await expect(canvas.getByText(failedToolCall.name)).toBeVisible();
-  },
-} satisfies Story;
-
-export const SpecializedPhaseSummaries = {
-  args: { activity: specializedActivity },
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
-    await userEvent.click(
-      canvas.getByRole("button", { name: "Show activity" }),
-    );
-    await expect(canvas.getByText("Inspected resources")).toBeVisible();
-    await expect(canvas.getByText("Ran commands")).toBeVisible();
-    await expect(canvas.getByText("Changed files")).toBeVisible();
+    await expect(canvas.getByText(runningToolCall.name)).toBeVisible();
   },
 } satisfies Story;

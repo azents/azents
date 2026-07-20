@@ -14,6 +14,7 @@ import type {
   WorkspacePanelState,
   WorkspaceProjectPanelState,
 } from "../workspace/types";
+import type { ChatEventResponse } from "@azents/public-client";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 import type { ReactElement } from "react";
 
@@ -23,6 +24,27 @@ const closedProjectPickerState: ProjectDirectoryPickerState = {
   type: "CLOSED",
 };
 const sendMessage = (): Promise<boolean> => Promise.resolve(true);
+
+function timelineEvent(
+  id: string,
+  kind: ChatEventResponse["kind"],
+  payload: ChatEventResponse["payload"],
+): ChatEventResponse {
+  return {
+    id,
+    session_id: storySessionId,
+    kind,
+    payload,
+    model_order: 1,
+    external_id: null,
+    adapter: null,
+    provider: null,
+    model: null,
+    native_format: null,
+    schema_version: "1",
+    created_at: "2026-05-01T10:00:00.000Z",
+  };
+}
 
 const readyWorkspaceState: WorkspacePanelState = {
   type: "SERVER",
@@ -197,6 +219,7 @@ type Story = StoryObj<typeof meta>;
 const baseArgs = {
   chatViewState: { type: "READY" },
   chatTimelineState: { type: "LATEST_FOLLOWING" },
+  timelineEvents: [],
   messages: [
     createChatMessage({
       id: "user-question",
@@ -265,6 +288,38 @@ export const WithWorkspaceBrowser = {
 export const MultiTurnToolActivity = {
   args: {
     ...baseArgs,
+    timelineEvents: [
+      timelineEvent("activity-user", "user_message", {
+        content: "Inspect the implementation and run the checks.",
+      }),
+      timelineEvent("activity-tool-1", "client_tool_call", {
+        call_id: completedToolCall.id,
+        name: completedToolCall.name,
+        arguments: completedToolCall.arguments,
+      }),
+      timelineEvent("activity-tool-1-result", "client_tool_result", {
+        call_id: completedToolCall.id,
+        status: "completed",
+        output: completedToolCall.result,
+      }),
+      timelineEvent("activity-turn-1", "turn_marker", { usage: {} }),
+      timelineEvent("activity-tool-2", "client_tool_call", {
+        call_id: failedToolCall.id,
+        name: failedToolCall.name,
+        arguments: failedToolCall.arguments,
+      }),
+      timelineEvent("activity-tool-2-result", "client_tool_result", {
+        call_id: failedToolCall.id,
+        status: "failed",
+        output: failedToolCall.result,
+      }),
+      timelineEvent("activity-turn-2", "turn_marker", { usage: {} }),
+      timelineEvent("activity-tool-3", "client_tool_call", {
+        call_id: runningToolCall.id,
+        name: runningToolCall.name,
+        arguments: runningToolCall.arguments,
+      }),
+    ],
     messages: [
       createChatMessage({
         id: "activity-user",
@@ -301,16 +356,41 @@ export const MultiTurnToolActivity = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(canvas.getByText("Activity")).toBeVisible();
-    await expect(
-      canvas.getByText("3 model turns · 3 tool calls · 1 failed · 1 running"),
-    ).toBeVisible();
+    await expect(canvas.getByLabelText("Failed")).toBeVisible();
     await expect(canvas.queryByText(completedToolCall.name)).toBeNull();
+
+    await userEvent.click(canvas.getByRole("button", { name: /Activity/ }));
+    await expect(canvas.getByText(completedToolCall.name)).toBeVisible();
+    await expect(canvas.getByText(failedToolCall.name)).toBeVisible();
+    await expect(canvas.getByText(runningToolCall.name)).toBeVisible();
   },
 } satisfies Story;
 
 export const SpecializedDeliverableAndApproval = {
   args: {
     ...baseArgs,
+    timelineEvents: [
+      timelineEvent("specialized-user", "user_message", {
+        content: "Inspect the project, generate a preview, then continue.",
+      }),
+      timelineEvent("specialized-read", "client_tool_call", {
+        call_id: "specialized-read-call",
+        name: "read",
+        arguments: JSON.stringify({ path: "/workspace/agent/project/a.ts" }),
+      }),
+      timelineEvent("specialized-turn-1", "turn_marker", { usage: {} }),
+      timelineEvent("specialized-image", "provider_tool_call", {
+        call_id: "specialized-image-call",
+        name: "image_generation",
+        arguments: JSON.stringify({ prompt: "A calm activity timeline" }),
+        status: "completed",
+      }),
+      timelineEvent("specialized-exec", "client_tool_call", {
+        call_id: "specialized-exec-call",
+        name: "exec_command",
+        arguments: JSON.stringify({ command: "pnpm test" }),
+      }),
+    ],
     messages: [
       createChatMessage({
         id: "specialized-user",
@@ -392,9 +472,7 @@ export const SpecializedDeliverableAndApproval = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    const activityButtons = canvas.getAllByRole("button", {
-      name: "Show activity",
-    });
+    const activityButtons = canvas.getAllByRole("button", { name: /Activity/ });
     await expect(activityButtons).toHaveLength(2);
     await expect(
       canvas.getByRole("button", { name: "activity.png" }),
@@ -406,18 +484,8 @@ export const SpecializedDeliverableAndApproval = {
       throw new Error("Expected the first activity disclosure");
     }
     await userEvent.click(firstActivity);
-    const generationPhase = canvas
-      .getByText("Generated media")
-      .closest("button");
-    if (!generationPhase) {
-      throw new Error("Expected the generated media phase disclosure");
-    }
-    await userEvent.click(generationPhase);
-    await expect(generationPhase).toHaveAttribute("aria-expanded", "true");
-    await expect(canvas.getByText("generation.log")).toBeInTheDocument();
-    await expect(
-      canvas.getAllByRole("button", { name: "activity.png" }),
-    ).toHaveLength(1);
+    await expect(canvas.getByText("read")).toBeVisible();
+    await expect(canvas.getByText("generation.log")).toBeVisible();
   },
 } satisfies Story;
 

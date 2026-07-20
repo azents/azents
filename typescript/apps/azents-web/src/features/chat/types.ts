@@ -156,10 +156,18 @@ export interface ReasoningPayload {
   summary?: string | null;
 }
 
+export interface ToolkitSourceSnapshot {
+  toolkit_config_id: string;
+  toolkit_type: string;
+  toolkit_name: string;
+  toolkit_slug: string;
+}
+
 export interface ClientToolCallPayload {
   call_id: string;
   name: string;
   arguments: string;
+  toolkit_source?: ToolkitSourceSnapshot | null;
 }
 
 export type ToolResultStatus =
@@ -739,6 +747,7 @@ export interface ActiveToolCall {
   callId?: string;
   name: string;
   arguments: string;
+  toolkitSource?: ToolkitSourceSnapshot | null;
   result?: string;
   status: "preparing" | "running" | ToolResultStatus;
   attachments?: FileAttachment[];

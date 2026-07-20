@@ -50,7 +50,6 @@ import { AuthorizationRequestBubble } from "./AuthorizationRequestBubble";
 import { ChatInput } from "./ChatInput";
 import { CompactionDivider } from "./CompactionDivider";
 import { CompactionIndicator } from "./CompactionIndicator";
-import { FileAttachmentList } from "./FileAttachmentList";
 import { MessageBubble } from "./MessageBubble";
 import { OptimisticInputBubble } from "./OptimisticInputBubble";
 import { PendingInputBufferBubble } from "./PendingInputBufferBubble";
@@ -74,6 +73,7 @@ import type {
 import type { WorkspacePanelContainerOutput } from "../workspace/containers/useWorkspacePanelContainer";
 import type {
   AgentResponse,
+  ChatEventResponse,
   RequestedInferenceProfile,
 } from "@azents/public-client";
 
@@ -327,6 +327,8 @@ interface ChatViewProps {
   chatViewState: ChatViewState;
   chatTimelineState: ChatTimelineState;
   messages: ChatMessage[];
+  /** canonical durable and latest-following live event stream */
+  timelineEvents: ChatEventResponse[];
   /** not yet model turn  to not injected pending input buffers */
   pendingInputBuffers: PendingInputBuffer[];
   activeAgent: AgentResponse | null;
@@ -410,6 +412,7 @@ export function ChatView({
   chatViewState,
   chatTimelineState,
   messages,
+  timelineEvents,
   pendingInputBuffers,
   activeAgent,
   defaultInferenceProfile,
@@ -532,8 +535,13 @@ export function ChatView({
     [actionExecutionPlacement.durableBeforeMessage],
   );
   const chatPresentationItems = useMemo(
-    () => projectChatPresentationItems(messages, actionBoundaryMessageIds),
-    [actionBoundaryMessageIds, messages],
+    () =>
+      projectChatPresentationItems(
+        timelineEvents,
+        messages,
+        actionBoundaryMessageIds,
+      ),
+    [actionBoundaryMessageIds, messages, timelineEvents],
   );
   const latestActivityId = useMemo(() => {
     for (let index = chatPresentationItems.length - 1; index >= 0; index -= 1) {
@@ -1307,21 +1315,6 @@ export function ChatView({
                         />
                         <TurnDivider usage={item.activity.usage} />
                       </Fragment>
-                    );
-                  }
-
-                  if (item.type === "deliverable") {
-                    const dimmedByEdit =
-                      editingMessageIndex !== null &&
-                      item.messageIndex >= editingMessageIndex;
-                    return (
-                      <Box
-                        key={item.id}
-                        mb="md"
-                        opacity={dimmedByEdit ? 0.45 : 1}
-                      >
-                        <FileAttachmentList files={item.files} />
-                      </Box>
                     );
                   }
 

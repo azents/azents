@@ -601,30 +601,33 @@ from canonical status. Provider projection reads text and references from `seman
 projects only `AttachmentOutputPart` values as UI files; `FileOutputPart` remains model-only.
 Client-tool results preserve their own completion/failure status and canonical output parts.
 
-The chat presentation layer groups consecutive client and provider tool projections into one frontend-only
-activity without changing event, API, or tool payload ownership. A model-turn marker, reasoning-only
-assistant projection, or compaction occurring between tool calls remains inside the current activity.
-A user message, visible assistant content or attachment delivery, promoted tool deliverable, terminal run
-marker, or explicit action-execution placement closes the activity before later tool work. Mixed client
-and provider calls retain transcript order. Authorization requests do not change activity boundaries; the
-first pending request is rendered as a compact action on the latest activity when one exists, while any
-additional requests remain standalone.
+Before a client-tool call becomes durable, the resolved Tool Catalog snapshots the source of a
+DB-attached Toolkit onto the call as `toolkit_config_id`, `toolkit_type`, `toolkit_name`, and
+`toolkit_slug`. The same immutable snapshot is copied to the active client-tool call and its live
+projection. Built-in, auto-bound, and otherwise source-less calls retain `toolkit_source = null`.
+Presentation never infers Toolkit ownership from a model-visible tool-name prefix; historical calls
+without a snapshot remain source-less.
 
-Each activity is a monochrome `Activity` row that is collapsed by default and summarizes turn, call,
-running, failed, and approval state. Expanding it reveals reasoning/compaction context and consecutive
-semantic phases; expanding a phase reveals the existing raw tool cards. Validated `read`, `grep`, `glob`,
-`web_search`, and `file_search` payloads use the inspection phase; `exec_command`, `write_stdin`, and
-`code_interpreter` use execution; `write` and `edit` use changes; and validated `image_generation` uses
-generation. Client aliases prefixed with `functions.` are normalized before matching. Unknown tool names,
-malformed arguments, schema mismatches, adapter failures, and terminal outputs that do not match the
-known string projection use the Generic phase and retain the raw card rather than attempting specialized
-presentation.
+The chat presentation layer consumes the ordered durable event stream plus the latest live partial
+stream, rather than regrouping rendered messages into semantic phases. It preserves the transcript order
+of reasoning, client-tool calls, provider-tool calls, skill loads, compaction markers, and goal controls
+inside one frontend-only Activity. A user message, visible assistant delivery, attachment-bearing tool
+output, terminal run marker, or explicit action-execution placement closes the Activity before later
+work. Mixed client and provider calls retain their raw diagnostic order. Authorization requests do not
+change boundaries; the first pending request is a compact action on the latest Activity when one exists,
+while additional requests remain standalone.
 
-A completed, validated client- or provider-owned `image_generation` call promotes its available Exchange
-image attachments to a standalone deliverable immediately after the activity. The promoted deliverable
-closes that activity, uses the ordinary Exchange preview/download surface, and hides only the same image
-URIs from the nested raw tool card to prevent duplicate presentation. Non-image and otherwise
-non-promoted operational attachments remain available in raw tool details.
+An Activity is collapsed by default. Its compact summary shows ordered-work categories, product identity
+from the backend Toolkit snapshot when available, and running, failed, or approval attention state; category
+overflow is summarized without hiding detail from assistive technology. Expanding the row reveals the
+existing raw tool cards and contextual event renderers in event order. The frontend may use stable generic
+categories for source-less built-in and provider tools, but does not use tool-name prefixes as a Toolkit
+identity heuristic.
+
+A tool result or provider call with visible attachments closes the preceding Activity and renders through
+the normal standalone message attachment surface. The raw tool card is not duplicated inside Activity, so
+images and non-image files share the same attachment, preview, and download behavior without a
+payload-validation or image-only promotion path.
 Live `agent_message` events use the same source-labeled internal-agent row as their durable form. When
 a live entity and durable event describe the same semantic output, the durable projection replaces
 the live projection without a duplicate or disappearance.
@@ -889,6 +892,7 @@ Current verification:
 
 ## 11. Changelog
 
+- **2026-07-20** — v121. Replaced phase-based Activity grouping with ordered durable/live event projection, persisted Toolkit source snapshots for client-tool identity, and rendered all attachment-bearing tool outputs as standalone deliveries.
 - **2026-07-20** — v120. Added frontend-only continuous tool activity grouping, validated semantic phases with Generic fallback, compact authorization placement, and standalone generated-image deliverables without duplicate nested attachments.
 - **2026-07-20** — v119. Swapped the context-window and subscription-usage affordance locations, restored automatic context-detail scrolling, and kept subagent pickers context-only.
 - **2026-07-20** — v118. Moved context-window usage details from the session header into the model picker, made subscription usage an independent composer popover, and removed model/effort picker exposure from read-only subagent composers.

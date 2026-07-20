@@ -42,9 +42,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ToolActivityGroup.tsx
   - typescript/apps/azents-web/src/features/chat/components/ToolCallCard.tsx
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
-  - typescript/apps/azents-web/src/features/chat/toolPresentationRegistry.ts
 last_verified_at: 2026-07-20
-spec_version: 22
+spec_version: 23
 ---
 
 # File Exchange Storage
@@ -151,8 +150,8 @@ reference before external deletion succeeds.
 - Composer attachments and user-originated sent attachments, including images, render as fixed-width compact tiles in a non-wrapping horizontal strip. Input-buffer projections use the same compact presentation.
 - Attachment strips expose horizontal overflow with a dynamic 40px transparency mask: right edge at the start, both edges in the middle, left edge at the end, and no mask without overflow. Dragging a strip does not activate a tile.
 - Agent-originated image-only output renders as an adaptive gallery whenever the original images are available; generated thumbnail metadata is optional. A single image preserves its aspect ratio with a 480px maximum height. Multiple images use square two-column cells, and sets larger than four expose a `+N` count on the fourth visible cell.
-- A completed client- or provider-owned `image_generation` call promotes available image attachments to a standalone Agent deliverable after its activity only when the tool name, arguments, completion state, and terminal output match the validated frontend presentation schema. The promoted Exchange images use the ordinary adaptive gallery and preview/download behavior, close the preceding activity before later tool work, and do not expose Base64.
-- The raw tool card remains available under the activity's generation phase for diagnostics, but it hides only attachment URIs already shown by the promoted deliverable. Unknown or malformed image-generation payloads use Generic tool presentation without promotion; non-image and other operational attachments remain in raw tool details.
+- Any client- or provider-tool result with visible Exchange attachments closes the preceding Activity and renders as the ordinary standalone Agent attachment group. Images use the adaptive gallery and non-image files use the compact strip; neither path exposes Base64.
+- The attachment-bearing tool call is not duplicated inside Activity. Raw diagnostic cards remain available for non-delivery tool activity, while the standalone attachment group owns preview/download interaction for every visible delivery file.
 - Agent-originated non-image files use the compact strip. Mixed Agent output groups the image gallery and compact file strip inside one bordered attachment group.
 - Every available sent attachment opens `AttachmentPreviewViewer` from its tile body or gallery cell. The trailing tile download action downloads the original without opening the viewer.
 - Exchange-file creation stores a bounded `preview_summary` for safe UTF-8 text. Supported payloads include `text/*`, common textual `application/*` media types, structured media types ending in `+json`, `+xml`, or `+yaml`, and `application/octet-stream` content that decodes as UTF-8 without binary control characters. Invalid UTF-8 and binary-control content do not receive a text preview. User uploads and Agent-presented files use this same preview path while retaining the complete original for download.
@@ -171,6 +170,7 @@ reference before external deletion succeeds.
 
 ## Changelog
 
+- **2026-07-20** — v23. Unified attachment-bearing client and provider tool output as standalone deliveries that close ordered Activity without nested duplication.
 - **2026-07-20** — v22. Promoted validated generated-image attachments to standalone Agent deliverables, preserved raw diagnostic ownership, and suppressed only duplicate nested image URIs.
 - **2026-07-20** — v21. Extended attachment text previews to Markdown, common textual application media types, and safe UTF-8 files with unknown media types while excluding invalid UTF-8 and binary-control content.
 - **2026-07-20** — v20. Added attachment preview navigation through gallery overflow, pointer and keyboard gestures, and modal-aware browser history behavior.

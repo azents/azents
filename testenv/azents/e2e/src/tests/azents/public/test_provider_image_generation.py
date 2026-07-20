@@ -291,15 +291,15 @@ def _image_projection_counts(driver: WebDriver) -> tuple[int, int, int, int, int
     )
 
 
-def _has_single_completed_image_projection(driver: WebDriver) -> bool:
-    """Return whether one activity promotes one image without a card duplicate."""
-    return _image_projection_counts(driver) == (1, 1, 1, 1, 0)
+def _has_promoted_image_without_activity(driver: WebDriver) -> bool:
+    """Return whether an attachment result stays outside the final Activity."""
+    return _image_projection_counts(driver) == (0, 0, 0, 1, 0)
 
 
-def _wait_for_single_completed_image_projection(driver: WebDriver) -> None:
-    """Wait for strict grouped activity and promoted-image ownership."""
+def _wait_for_promoted_image_without_activity(driver: WebDriver) -> None:
+    """Wait for a standalone image without a completed Activity duplicate."""
     try:
-        WebDriverWait(driver, 30).until(_has_single_completed_image_projection)
+        WebDriverWait(driver, 30).until(_has_promoted_image_without_activity)
     except TimeoutException as exc:
         (
             activities,
@@ -309,8 +309,8 @@ def _wait_for_single_completed_image_projection(driver: WebDriver) -> None:
             nested_attachments,
         ) = _image_projection_counts(driver)
         raise AssertionError(
-            "expected one grouped completed provider image call with one promoted "
-            "Exchange image and no nested duplicate; "
+            "expected one promoted Exchange image outside Activity without a nested "
+            "duplicate; "
             f"observed activities={activities}, cards={cards}, "
             f"completed_cards={completed_cards}, "
             f"promoted_images={promoted_attachments}, "
@@ -538,7 +538,7 @@ class TestProviderImageGeneration:
         )
 
     @pytest.mark.web_surface
-    def test_renders_one_activity_and_promoted_attachment_across_refresh(
+    def test_renders_promoted_attachment_without_activity_across_refresh(
         self,
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
@@ -548,7 +548,7 @@ class TestProviderImageGeneration:
         browser_driver: WebDriver,
         azents_main_web_url: str,
     ) -> None:
-        """Live projection and reload keep one grouped call and promoted image."""
+        """Live projection and reload keep one standalone promoted image."""
         del azents_engine_worker_container
         requests.delete(
             f"{openai_proxy_url}{_PROXY_JOURNAL_PATH}",
@@ -580,6 +580,6 @@ class TestProviderImageGeneration:
             session_id=session_id,
         )
 
-        _wait_for_single_completed_image_projection(browser_driver)
+        _wait_for_promoted_image_without_activity(browser_driver)
         browser_driver.refresh()
-        _wait_for_single_completed_image_projection(browser_driver)
+        _wait_for_promoted_image_without_activity(browser_driver)
