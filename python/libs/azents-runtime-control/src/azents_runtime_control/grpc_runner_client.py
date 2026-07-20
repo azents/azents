@@ -459,6 +459,12 @@ def _operation_payload(
             "path": operation.file_write.path,
             "total_bytes": operation.file_write.total_bytes,
         }
+    if payload_kind == "file_apply_patch":
+        return {
+            "base_path": operation.file_apply_patch.base_path,
+            "total_bytes": operation.file_apply_patch.total_bytes,
+            "schema_version": operation.file_apply_patch.schema_version,
+        }
     if payload_kind == "file_list":
         payload = operation.file_list
         return {
@@ -589,6 +595,12 @@ def _copy_event_payload(
         case RuntimeRunnerEventType.FINAL_ERROR:
             message.final_error.error_code = _str_payload(payload, "error_code")
             message.final_error.error_message = _str_payload(payload, "error_message")
+            patch_failure = payload.get("file_apply_patch")
+            if isinstance(patch_failure, dict):
+                _copy_file_apply_patch_failure(
+                    message.final_error.file_apply_patch,
+                    patch_failure,
+                )
         case _:
             pass
 
@@ -624,6 +636,11 @@ def _copy_final_success(
     if "matches" in payload:
         message.file_glob.entries.extend(
             _file_list_entries(payload, field_name="matches")
+        )
+        return
+    if "changes" in payload:
+        message.file_apply_patch.changes.extend(
+            _file_patch_change_entries(payload, "changes")
         )
         return
     if "entries" in payload:
@@ -720,10 +737,15 @@ def _event_payload(
             "omitted_bytes": message.process_output.omitted_bytes,
         }
     if payload_kind == "final_error":
-        return {
+        payload: dict[str, JsonValue] = {
             "error_code": message.final_error.error_code,
             "error_message": message.final_error.error_message,
         }
+        if message.final_error.WhichOneof("detail") == "file_apply_patch":
+            payload["file_apply_patch"] = _file_apply_patch_failure_payload(
+                message.final_error.file_apply_patch
+            )
+        return payload
     if payload_kind == "final_success":
         return _final_success_payload(message.final_success)
     return {}
@@ -739,6 +761,13 @@ def _final_success_payload(
         return {"bytes_read": message.file_read.bytes_read}
     if result_kind == "file_write":
         return {"bytes_written": message.file_write.bytes_written}
+    if result_kind == "file_apply_patch":
+        return {
+            "changes": [
+                _file_patch_change_payload(change)
+                for change in message.file_apply_patch.changes
+            ]
+        }
     if result_kind == "file_list":
         return {"entries": _file_list_entry_payloads(message.file_list.entries)}
     if result_kind == "file_glob":
@@ -840,6 +869,112 @@ def _final_success_payload(
     if result_kind == "git_delete_branch":
         return {"deleted_branch_name": message.git_delete_branch.branch_name}
     return {}
+
+
+def _copy_file_apply_patch_failure(
+    message: runtime_runner_control_pb2.FileApplyPatchFailure,
+    payload: Mapping[str, JsonValue],
+) -> None:
+    message.phase = _str_payload(payload, "phase")
+    message.reason = _str_payload(payload, "reason")
+    message.applied.extend(_file_patch_change_entries(payload, "applied"))
+    failed = payload.get("failed")
+    if isinstance(failed, dict):
+        message.failed.path = _str_payload(failed, "path")
+        message.failed.action = _str_payload(failed, "action")
+    message.not_attempted.extend(
+        _file_patch_operation_entries(payload, "not_attempted")
+    )
+    message.exact = _bool_payload(payload, "exact")
+
+
+def _file_apply_patch_failure_payload(
+    message: runtime_runner_control_pb2.FileApplyPatchFailure,
+) -> dict[str, JsonValue]:
+    payload: dict[str, JsonValue] = {
+        "phase": message.phase,
+        "reason": message.reason,
+        "applied": [_file_patch_change_payload(change) for change in message.applied],
+        "not_attempted": [
+            _file_patch_operation_payload(operation)
+            for operation in message.not_attempted
+        ],
+        "exact": message.exact,
+    }
+    if message.HasField("failed"):
+        payload["failed"] = _file_patch_operation_payload(message.failed)
+    return payload
+
+
+def _file_patch_change_entries(
+    payload: Mapping[str, JsonValue],
+    key: str,
+) -> list[runtime_runner_control_pb2.RuntimeFilePatchChange]:
+    raw_entries = payload.get(key)
+    if not isinstance(raw_entries, list):
+        return []
+    entries: list[runtime_runner_control_pb2.RuntimeFilePatchChange] = []
+    for raw_entry in raw_entries:
+        if not isinstance(raw_entry, dict):
+            continue
+        path = raw_entry.get("path")
+        action = raw_entry.get("action")
+        if not isinstance(path, str) or not isinstance(action, str):
+            continue
+        entry = runtime_runner_control_pb2.RuntimeFilePatchChange(
+            path=path,
+            action=action,
+            added_lines=_int_payload(raw_entry, "added_lines"),
+            removed_lines=_int_payload(raw_entry, "removed_lines"),
+        )
+        content_sha256 = _optional_str_payload(raw_entry, "content_sha256")
+        if content_sha256 is not None:
+            entry.content_sha256 = content_sha256
+        entries.append(entry)
+    return entries
+
+
+def _file_patch_operation_entries(
+    payload: Mapping[str, JsonValue],
+    key: str,
+) -> list[runtime_runner_control_pb2.RuntimeFilePatchOperation]:
+    raw_entries = payload.get(key)
+    if not isinstance(raw_entries, list):
+        return []
+    entries: list[runtime_runner_control_pb2.RuntimeFilePatchOperation] = []
+    for raw_entry in raw_entries:
+        if not isinstance(raw_entry, dict):
+            continue
+        path = raw_entry.get("path")
+        action = raw_entry.get("action")
+        if isinstance(path, str) and isinstance(action, str):
+            entries.append(
+                runtime_runner_control_pb2.RuntimeFilePatchOperation(
+                    path=path,
+                    action=action,
+                )
+            )
+    return entries
+
+
+def _file_patch_change_payload(
+    message: runtime_runner_control_pb2.RuntimeFilePatchChange,
+) -> dict[str, JsonValue]:
+    payload: dict[str, JsonValue] = {
+        "path": message.path,
+        "action": message.action,
+        "added_lines": message.added_lines,
+        "removed_lines": message.removed_lines,
+    }
+    if message.HasField("content_sha256"):
+        payload["content_sha256"] = message.content_sha256
+    return payload
+
+
+def _file_patch_operation_payload(
+    message: runtime_runner_control_pb2.RuntimeFilePatchOperation,
+) -> dict[str, JsonValue]:
+    return {"path": message.path, "action": message.action}
 
 
 def _git_ref_entries(

@@ -13,6 +13,8 @@ from azents.runtime.control_protocol.data import (
 )
 from azents.runtime.control_protocol.runner_operations import (
     RuntimeBashResult,
+    RuntimeFileApplyPatchFailedError,
+    RuntimeFileApplyPatchResult,
     RuntimeFileDeleteResult,
     RuntimeFileListResult,
     RuntimeFileMkdirResult,
@@ -362,6 +364,140 @@ async def test_write_file_uses_body_stream_chunks() -> None:
     )
     result = await asyncio.wait_for(task, timeout=1)
     assert result.bytes_written == 7
+
+
+@pytest.mark.asyncio
+async def test_apply_patch_uses_body_stream_and_returns_changes() -> None:
+    """File patch sends the patch body and decodes ordered changes."""
+    harness = await _make_harness(body_chunk_size_bytes=5)
+    patch = b"*** Begin Patch\n*** End Patch\n"
+    task = asyncio.create_task(
+        harness.client.apply_patch(
+            runtime_id="runtime-1",
+            runner_generation=harness.runner_generation,
+            owner_session_id="session-1",
+            base_path="/workspace/agent/project",
+            patch=patch,
+            schema_version=1,
+            deadline_at=_now() + timedelta(seconds=30),
+        )
+    )
+    await asyncio.sleep(0)
+    request = await harness.control.claim_next_runner_request(
+        runtime_id="runtime-1",
+        generation=harness.runner_generation,
+        consumer_id="runner-a",
+        block_ms=0,
+    )
+    assert request is not None
+    assert request.operation_type == "file.apply_patch"
+    assert request.payload["owner_session_id"] == "session-1"
+    assert request.payload["payload"] == {
+        "base_path": "/workspace/agent/project",
+        "total_bytes": len(patch),
+        "schema_version": 1,
+    }
+    assert request.body_stream_id is not None
+    chunks = await harness.store.read_body_chunks(
+        request.body_stream_id,
+        after_cursor=None,
+        limit=20,
+    )
+    assert b"".join(chunk.chunk.data for chunk in chunks) == patch
+    assert chunks[-1].chunk.final is True
+
+    await harness.reply(
+        request.request_id,
+        RuntimeReplyEventType.FINAL_SUCCESS,
+        {
+            "changes": [
+                {
+                    "path": "src/app.py",
+                    "action": "update",
+                    "added_lines": 2,
+                    "removed_lines": 1,
+                    "content_sha256": "abc123",
+                },
+                {
+                    "path": "src/legacy.py",
+                    "action": "delete",
+                    "added_lines": 0,
+                    "removed_lines": 4,
+                },
+            ]
+        },
+        final=True,
+    )
+
+    result = await asyncio.wait_for(task, timeout=1)
+    assert isinstance(result, RuntimeFileApplyPatchResult)
+    assert [change.path for change in result.changes] == [
+        "src/app.py",
+        "src/legacy.py",
+    ]
+    assert result.changes[0].content_sha256 == "abc123"
+    assert result.changes[1].content_sha256 is None
+
+
+@pytest.mark.asyncio
+async def test_apply_patch_preserves_typed_failure_detail() -> None:
+    """File patch failure exposes the committed prefix and remaining work."""
+    harness = await _make_harness()
+    task = asyncio.create_task(
+        harness.client.apply_patch(
+            runtime_id="runtime-1",
+            runner_generation=harness.runner_generation,
+            owner_session_id="session-1",
+            base_path="/workspace/agent/project",
+            patch=b"*** Begin Patch\n*** End Patch\n",
+            schema_version=1,
+            deadline_at=_now() + timedelta(seconds=30),
+        )
+    )
+    await asyncio.sleep(0)
+    request = await harness.control.claim_next_runner_request(
+        runtime_id="runtime-1",
+        generation=harness.runner_generation,
+        consumer_id="runner-a",
+        block_ms=0,
+    )
+    assert request is not None
+    await harness.reply(
+        request.request_id,
+        RuntimeReplyEventType.FINAL_ERROR,
+        {
+            "error_code": "PATCH_COMMIT_FAILED",
+            "error_message": "Source changed before delete",
+            "file_apply_patch": {
+                "phase": "commit",
+                "reason": "source_changed",
+                "applied": [
+                    {
+                        "path": "src/app.py",
+                        "action": "update",
+                        "added_lines": 2,
+                        "removed_lines": 1,
+                        "content_sha256": "abc123",
+                    }
+                ],
+                "failed": {"path": "src/legacy.py", "action": "delete"},
+                "not_attempted": [{"path": "src/after.py", "action": "add"}],
+                "exact": True,
+            },
+        },
+        final=True,
+    )
+
+    with pytest.raises(RuntimeFileApplyPatchFailedError) as error:
+        await asyncio.wait_for(task, timeout=1)
+
+    assert error.value.failure.phase == "commit"
+    assert error.value.failure.reason == "source_changed"
+    assert error.value.failure.applied[0].path == "src/app.py"
+    assert error.value.failure.failed is not None
+    assert error.value.failure.failed.path == "src/legacy.py"
+    assert error.value.failure.not_attempted[0].path == "src/after.py"
+    assert error.value.failure.exact is True
 
 
 @pytest.mark.asyncio

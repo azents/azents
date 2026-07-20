@@ -8,10 +8,12 @@ from collections.abc import AsyncIterator, Sequence
 from datetime import UTC, datetime
 
 import pytest
+from google.protobuf import timestamp_pb2
 
 from azents_runtime_control.grpc_runner_client import (
     GrpcRunnerControlClient,
     RuntimeRunnerControlStreamClosed,
+    runner_event_from_message,
 )
 from azents_runtime_control.proto import runtime_runner_control_pb2
 from azents_runtime_control.runner import (
@@ -376,6 +378,186 @@ async def test_grpc_client_sends_control_token_metadata() -> None:
     await client.close()
 
     assert ("authorization", "Bearer control-token") in observed_metadata
+
+
+@pytest.mark.asyncio
+async def test_grpc_client_maps_file_apply_patch_request_and_success() -> None:
+    """Patch request metadata, body chunks, and success changes round-trip."""
+    sent: list[runtime_runner_control_pb2.RunnerMessage] = []
+    received: list[RunnerOperationEnvelope] = []
+    operation_received = asyncio.Event()
+
+    async def handle_operation(operation: RunnerOperationEnvelope) -> None:
+        received.append(operation)
+        operation_received.set()
+
+    async def stream(
+        requests: AsyncIterator[runtime_runner_control_pb2.RunnerMessage],
+        *,
+        metadata: Sequence[tuple[str, str]] | None = None,
+    ) -> AsyncIterator[runtime_runner_control_pb2.RunnerControlMessage]:
+        del metadata
+        register = await anext(requests)
+        yield runtime_runner_control_pb2.RunnerControlMessage(
+            request_id=register.request_id,
+            register_accepted=runtime_runner_control_pb2.RunnerRegisterAccepted(
+                runtime_id=register.register.runtime_id,
+                runner_id=register.register.runner_id,
+                connection_id=register.connection_id,
+                generation=7,
+                heartbeat_interval_seconds=20,
+            ),
+        )
+        yield runtime_runner_control_pb2.RunnerControlMessage(
+            request_id="req-patch",
+            operation_request=runtime_runner_control_pb2.RunnerOperationRequest(
+                runtime_id="runtime-1",
+                runner_generation=7,
+                operation_type="file.apply_patch",
+                owner_session_id="session-1",
+                file_apply_patch=(
+                    runtime_runner_control_pb2.FileApplyPatchOperationPayload(
+                        base_path="/workspace/agent/project",
+                        total_bytes=12,
+                        schema_version=1,
+                    )
+                ),
+                body_chunks=[
+                    runtime_runner_control_pb2.RunnerBodyChunk(
+                        chunk_id=1,
+                        data=b"patch-body",
+                        final=True,
+                    )
+                ],
+                reply_stream_id="reply:req-patch",
+                body_stream_id="body:req-patch",
+            ),
+        )
+        event = await anext(requests)
+        sent.append(event)
+
+    client = GrpcRunnerControlClient(stream)
+    client.set_operation_handler(handle_operation)
+    accepted = await client.register_runner(
+        _registration(),
+        connection_id="connection-1",
+        registered_at=_now(),
+    )
+    await asyncio.wait_for(operation_received.wait(), timeout=1)
+    operation = received[0]
+
+    assert operation.operation_type == "file.apply_patch"
+    assert operation.payload == {
+        "base_path": "/workspace/agent/project",
+        "total_bytes": 12,
+        "schema_version": 1,
+    }
+    assert operation.body_chunks[0].data == b"patch-body"
+
+    await client.append_runner_event(
+        RunnerOperationEvent(
+            request_id="req-patch",
+            runtime_id="runtime-1",
+            generation=accepted.generation,
+            event_type=RuntimeRunnerEventType.FINAL_SUCCESS,
+            payload={
+                "changes": [
+                    {
+                        "path": "src/app.py",
+                        "action": "update",
+                        "added_lines": 2,
+                        "removed_lines": 1,
+                        "content_sha256": "abc123",
+                    }
+                ]
+            },
+            created_at=_now(),
+            final=True,
+        )
+    )
+    for _ in range(10):
+        if sent:
+            break
+        await asyncio.sleep(0)
+
+    event = sent[0].operation_event
+    assert event.final_success.WhichOneof("result") == "file_apply_patch"
+    change = event.final_success.file_apply_patch.changes[0]
+    assert change.path == "src/app.py"
+    assert change.action == "update"
+    assert change.added_lines == 2
+    assert change.removed_lines == 1
+    assert change.content_sha256 == "abc123"
+    await client.close()
+
+
+def test_grpc_client_maps_file_apply_patch_failure_detail() -> None:
+    """Patch failure details survive protobuf-to-domain conversion."""
+    message = runtime_runner_control_pb2.RunnerOperationEvent(
+        runtime_id="runtime-1",
+        operation_id="operation:req-patch",
+        generation=7,
+        event_type="final_error",
+        created_at=_timestamp(_now()),
+        final=True,
+        final_error=runtime_runner_control_pb2.RunnerOperationFinalErrorPayload(
+            error_code="PATCH_COMMIT_FAILED",
+            error_message="Source changed before delete",
+            file_apply_patch=runtime_runner_control_pb2.FileApplyPatchFailure(
+                phase="commit",
+                reason="source_changed",
+                applied=[
+                    runtime_runner_control_pb2.RuntimeFilePatchChange(
+                        path="src/app.py",
+                        action="update",
+                        added_lines=2,
+                        removed_lines=1,
+                        content_sha256="abc123",
+                    )
+                ],
+                failed=runtime_runner_control_pb2.RuntimeFilePatchOperation(
+                    path="src/legacy.py",
+                    action="delete",
+                ),
+                not_attempted=[
+                    runtime_runner_control_pb2.RuntimeFilePatchOperation(
+                        path="src/after.py",
+                        action="add",
+                    )
+                ],
+                exact=True,
+            ),
+        ),
+    )
+
+    event = runner_event_from_message(message, request_id="req-patch")
+
+    assert event.payload == {
+        "error_code": "PATCH_COMMIT_FAILED",
+        "error_message": "Source changed before delete",
+        "file_apply_patch": {
+            "phase": "commit",
+            "reason": "source_changed",
+            "applied": [
+                {
+                    "path": "src/app.py",
+                    "action": "update",
+                    "added_lines": 2,
+                    "removed_lines": 1,
+                    "content_sha256": "abc123",
+                }
+            ],
+            "failed": {"path": "src/legacy.py", "action": "delete"},
+            "not_attempted": [{"path": "src/after.py", "action": "add"}],
+            "exact": True,
+        },
+    }
+
+
+def _timestamp(value: datetime) -> timestamp_pb2.Timestamp:
+    timestamp = timestamp_pb2.Timestamp()
+    timestamp.FromDatetime(value)
+    return timestamp
 
 
 def _operation_message(
