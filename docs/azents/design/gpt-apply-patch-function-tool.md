@@ -2,6 +2,7 @@
 title: "GPT Apply-Patch Function Tool Design"
 created: 2026-07-20
 updated: 2026-07-20
+implemented: 2026-07-20
 tags: [backend, engine, runtime, tools, testing]
 ---
 

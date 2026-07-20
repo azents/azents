@@ -11,6 +11,7 @@ code_paths:
   - python/apps/azents/src/azents/engine/run/errors.py
   - python/apps/azents/src/azents/engine/run/model_transport.py
   - python/apps/azents/src/azents/engine/run/tool_budget.py
+  - python/apps/azents/src/azents/engine/run/client_tool_compatibility.py
   - python/apps/azents/src/azents/engine/tooling/tool_search.py
   - python/apps/azents/src/azents/engine/io/user_input.py
   - python/apps/azents/src/azents/engine/events/**
@@ -62,7 +63,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
 last_verified_at: 2026-07-20
-spec_version: 114
+spec_version: 115
 ---
 
 # Agent Execution Loop
@@ -650,6 +651,10 @@ non-null deadline and pass that deadline through the reply-stream wait path. If 
 operation times out into a failed/cancelled tool result path instead of leaving a durable
 `client_tool_call` without a corresponding `client_tool_result` forever.
 
+GPT-compatible prepared calls may expose the ordinary `apply_patch({base_path, patch})` function tool alongside the unchanged `edit` tool. The Engine admits only one completed JSON function call; it does not execute streamed patch fragments or provider custom/freeform tool input. `apply_patch` delegates one complete strict V4A document to the Runner-owned `file.apply_patch` operation and does not compose Engine file-storage writes. Its result metadata records exact success changes or failure `phase`, `reason`, committed `applied` changes, the `failed` operation, `not_attempted` operations, and whether the reported delta is exact. Model-visible result text and structured logs do not repeat raw patch, source, or replacement content.
+
+When User Stop cancels a running patch, the tool cancellation handler requests ordered Runner operation cancellation. The execution loop cancels the local wait only to begin settlement, then preserves a typed terminal result returned by the Runner instead of overwriting it with a generic cancelled result. Cancellation before commit reports no applied changes. Once commit begins, the Runner settles to success or an exact partial-failure result; already committed paths are not rolled back. Tool-result finalization still appends one deterministic `client_tool_result` and removes the call from PostgreSQL-backed `active_tool_calls`.
+
 Tool result output is `str | content part list`, and client tool results may also carry a generic JSON-object `metadata` payload. The engine preserves metadata on `client_tool_result` events without branching on toolkit-specific keys. Runtime process tools use metadata for process status/session id/exit code/truncation/missing facts, while model-visible output remains normal tool-result text. Text-only tools may return a string. Multipart
 output uses semantic event parts: `text`, `attachment`, `artifact`, and `file`, with legacy
 `output_image`/`output_file`/audio/video parts accepted only through compatibility paths. Consumers
@@ -689,7 +694,11 @@ fragments.
 
 Every model step builds a fresh immutable executable Tool Catalog after current Toolkit context and client-executed built-ins are resolved. `RunRequest.tool_search_enabled` carries the current Agent setting into that immutable preparation boundary.
 
-When Tool Search is disabled, preparation exposes the complete executable client-tool catalog in canonical final-name order. It does not inject `tool_search`, apply direct/deferred membership, resolve a compatibility budget, load or mutate working-set state, or wrap execution with deferred recency tracking.
+Toolkits may contribute candidate tools and static prompt fragments with an optional required client-tool profile. Preparation resolves the profile set from the immutable selected-model snapshot using normalized developer, family, and exact model identifier rules; exact-model rules take precedence over family rules. Provider hosting and raw substring checks are not compatibility inputs. Profile names are derived preparation policy and are not persisted in `TurnContext`, the Session snapshot, or transcript history.
+
+Preparation projects candidate tool schemas, executable handlers, catalog entries, and prompt fragments through the same resolved profile set before Tool Search indexing, declaration-budget accounting, lowerer construction, or executor freezing. A model switch therefore re-evaluates compatibility on the next prepared call while historical calls and results remain durable. The `gpt_v4a_apply_patch` profile admits `apply_patch` for identified OpenAI GPT families; incompatible models omit both the declaration and handler. The existing `edit` tool remains unconditional.
+
+When Tool Search is disabled, preparation exposes the complete projected executable client-tool catalog in canonical final-name order. It does not inject `tool_search`, apply direct/deferred membership, resolve a compatibility budget, load or mutate working-set state, or wrap execution with deferred recency tracking.
 
 When Tool Search is enabled, the catalog classifies core tools as pinned direct functions and attached service operations as deferred. When deferred entries exist, the engine adds the direct `tool_search` function backed by a search index over that exact catalog snapshot.
 
@@ -890,6 +899,7 @@ Primary checks:
 - `cd python/apps/azents && uv run pytest src/azents/engine/events/execution_test.py src/azents/engine/events/filters_test.py src/azents/engine/events/engine_adapter_test.py`
 - `cd python/apps/azents && uv run pytest src/azents/engine/run/tool_budget_test.py src/azents/engine/tooling/tool_search_test.py src/azents/engine/events/tools_test.py src/azents/engine/events/engine_adapter_test.py src/azents/engine/events/litellm_responses_test.py src/azents/engine/events/openai_responses_test.py src/azents/engine/tools/mcp_base_test.py src/azents/engine/tooling/toolkit_state_test.py`
 - `cd testenv/azents/e2e && uv run pytest -q src/tests/azents/public/test_runtime_hooks.py -k tool_search`
+- `cd testenv/azents/e2e && uv run pytest -q src/tests/azents/public/test_runtime_exec_process_tools.py -k apply_patch`
 - `cd python/apps/azents && uv run pyright`
 - deterministic azents E2E CI for text/tool/UI projection behavior
 - deterministic action-based Git worktree lifecycle E2E coverage, including existing-session Register Project actions, durable buffer-keyed execution recovery, and terminal success/failure history
@@ -997,6 +1007,7 @@ updated by the user.
 
 ## Changelog
 
+- **2026-07-20** (spec_version 115) — Added selected-model client tool profile projection, GPT-only ordinary `apply_patch` exposure alongside unchanged `edit`, typed patch result metadata, and commit-sensitive cancellation settlement.
 - **2026-07-20** (spec_version 114) — Snapshotted DB-attached Toolkit source identity onto durable, active, and live client-tool calls before execution.
 - **2026-07-20** (spec_version 113) — Reset the shared Tool Search working set in the successful context-compaction transaction and require deferred tools to be activated again afterward.
 - **2026-07-19** (spec_version 111) — Added explicit wake versus queue-only input scheduling, idempotent direct-parent terminal mailbox delivery and repair, targetless mailbox activity waiting, and promotion-time observation acknowledgment.
