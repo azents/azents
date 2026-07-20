@@ -483,6 +483,38 @@ class _FakeRunnerOperations:
             final_cursor="0-1",
         )
 
+    async def glob_files(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        owner_session_id: str | None = None,
+        pattern: str,
+        exclude_patterns: list[str] | None,
+        deadline_at: datetime,
+    ) -> RuntimeFileListResult:
+        del runtime_id, runner_generation, deadline_at
+        self.file_operation_calls.append(("glob", owner_session_id))
+        attachments = await FakeSharedStorage(self.files).glob(
+            pattern,
+            exclude_patterns=exclude_patterns,
+        )
+        return RuntimeFileListResult(
+            entries=tuple(
+                RuntimeFileListEntry(
+                    path=attachment.uri,
+                    type=(
+                        "directory"
+                        if attachment.media_type == "inode/directory"
+                        else "file"
+                    ),
+                    size_bytes=attachment.size,
+                )
+                for attachment in attachments
+            ),
+            final_cursor="0-1",
+        )
+
     async def grep_files(
         self,
         *,
@@ -788,6 +820,11 @@ class TestRuntimeToolkitUpdateContext:
             agent_id="agent-1",
         )
         await storage.list("/workspace/agent", agent_id="agent-1")
+        globbed = await storage.glob(
+            "/workspace/agent/**/*.txt",
+            agent_id="agent-1",
+            exclude_patterns=["node_modules"],
+        )
         await storage.list_dirs("/workspace/agent", agent_id="agent-1")
         await storage.grep(
             "/workspace/agent/dir",
@@ -796,12 +833,18 @@ class TestRuntimeToolkitUpdateContext:
         )
         await storage.delete("/workspace/agent/new.txt", agent_id="agent-1")
 
+        assert [attachment.uri for attachment in globbed] == [
+            "/workspace/agent/dir/item.txt",
+            "/workspace/agent/file.txt",
+            "/workspace/agent/new.txt",
+        ]
         assert runner_operations.file_operation_calls == [
             ("read", "session-1"),
             ("stat", "session-1"),
             ("write", "session-1"),
             ("stat", "session-1"),
             ("list", "session-1"),
+            ("glob", "session-1"),
             ("list", "session-1"),
             ("grep", "session-1"),
             ("run_bash", "session-1"),

@@ -18,7 +18,7 @@ Details of all living specs. Synchronized from frontmatter.
 | memory | [Memory](domain/memory.md) | @Hardtack | 2026-07-17 | 5 |
 | model-catalog | [Model Catalog Domain Spec](domain/model-catalog.md) | - | 2026-07-19 | 16 |
 | system-settings | [System Settings](domain/system-settings.md) | @Hardtack | 2026-07-19 | 1 |
-| toolkit | [Toolkit](domain/toolkit.md) | @Hardtack | 2026-07-19 | 59 |
+| toolkit | [Toolkit](domain/toolkit.md) | @Hardtack | 2026-07-20 | 60 |
 | user-auth | [User & Authentication](domain/user-auth.md) | @Hardtack | 2026-07-13 | 7 |
 | workspace | [Workspace & Membership](domain/workspace.md) | @Hardtack | 2026-07-19 | 41 |
 
@@ -27,7 +27,7 @@ Details of all living specs. Synchronized from frontmatter.
 | Title | Owner | Last Verified | Version |
 |---|---|---|---|
 | [Agent Execution Loop](flow/agent-execution-loop.md) | @Hardtack | 2026-07-19 | 112 |
-| [Agent Runtime Control](flow/agent-runtime-control.md) | @Hardtack | 2026-07-20 | 19 |
+| [Agent Runtime Control](flow/agent-runtime-control.md) | @Hardtack | 2026-07-20 | 20 |
 | [Agent Runtime Persistence](flow/agent-runtime-persistence.md) | @Hardtack | 2026-07-03 | 3 |
 | [Chat Session Resync](flow/chat-session-resync.md) | @Hardtack | 2026-07-19 | 36 |
 | [ChatGPT OAuth Flow](flow/chatgpt-oauth.md) | @Hardtack | 2026-07-19 | 17 |

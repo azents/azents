@@ -407,6 +407,54 @@ async def test_list_files_returns_final_entries() -> None:
 
 
 @pytest.mark.asyncio
+async def test_glob_files_dispatches_native_operation_and_returns_matches() -> None:
+    """File glob uses one native Runner operation and decodes its entries."""
+    harness = await _make_harness()
+    task = asyncio.create_task(
+        harness.client.glob_files(
+            runtime_id="runtime-1",
+            runner_generation=harness.runner_generation,
+            owner_session_id="session-1",
+            pattern="/workspace/agent/**/*.py",
+            exclude_patterns=[".git", "node_modules"],
+            deadline_at=_now() + timedelta(seconds=30),
+        )
+    )
+    await asyncio.sleep(0)
+    request = await harness.control.claim_next_runner_request(
+        runtime_id="runtime-1",
+        generation=harness.runner_generation,
+        consumer_id="runner-a",
+        block_ms=0,
+    )
+    assert request is not None
+    assert request.operation_type == "file.glob"
+    assert request.payload["payload"] == {
+        "pattern": "/workspace/agent/**/*.py",
+        "exclude_patterns": [".git", "node_modules"],
+    }
+    await harness.reply(
+        request.request_id,
+        RuntimeReplyEventType.FINAL_SUCCESS,
+        {
+            "entries": [
+                {
+                    "path": "/workspace/agent/src/app.py",
+                    "type": "file",
+                    "size_bytes": 12,
+                }
+            ]
+        },
+        final=True,
+    )
+
+    result = await asyncio.wait_for(task, timeout=1)
+    assert isinstance(result, RuntimeFileListResult)
+    assert result.entries[0].path == "/workspace/agent/src/app.py"
+    assert result.entries[0].size_bytes == 12
+
+
+@pytest.mark.asyncio
 async def test_stat_file_returns_final_metadata() -> None:
     """Decode File stat final payload as metadata."""
     harness = await _make_harness()

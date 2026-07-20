@@ -2,8 +2,10 @@
 
 import json
 
+import pytest
+
 from azents.engine.io.attachments import RuntimeAttachment
-from azents.engine.run.types import FunctionTool
+from azents.engine.run.types import FunctionTool, FunctionToolError
 from azents.engine.tools.glob import make_glob_tool
 from azents.engine.tools.testing import FakeSharedStorage
 
@@ -65,6 +67,122 @@ class TestGlob:
         )
         assert isinstance(result, str)
         assert "SKILL.md" in result
+
+    async def test_recursive_brace_pattern_matches_current_and_nested_directories(
+        self,
+    ) -> None:
+        """Match brace alternatives with `**` consuming zero or more directories."""
+        tool, _ = _make_tool(
+            files={
+                "/foo/bar/baz.jpg": b"jpg",
+                "/foo/bar/baz.png": b"png",
+                "/foo/bar/images/baz.jpg": b"nested-jpg",
+                "/foo/bar/images/baz.png": b"nested-png",
+                "/foo/bar/baz.gif": b"gif",
+                "/foo/bar/images/other.jpg": b"other",
+            }
+        )
+
+        result = await tool.handler(
+            json.dumps({"pattern": "/foo/bar/**/baz.{jpg,png}"})
+        )
+
+        assert isinstance(result, str)
+        assert "/foo/bar/baz.jpg" in result
+        assert "/foo/bar/baz.png" in result
+        assert "/foo/bar/images/baz.jpg" in result
+        assert "/foo/bar/images/baz.png" in result
+        assert "/foo/bar/baz.gif" not in result
+        assert "/foo/bar/images/other.jpg" not in result
+
+    async def test_nested_brace_alternatives(self) -> None:
+        """Expand nested comma-separated brace alternatives."""
+        tool, _ = _make_tool(
+            files={
+                "/foo/baz.jpg": b"jpg",
+                "/foo/baz.jpeg": b"jpeg",
+                "/foo/baz.png": b"png",
+                "/foo/baz.gif": b"gif",
+            }
+        )
+
+        result = await tool.handler(
+            json.dumps({"pattern": "/foo/baz.{jpg,{jpeg,png}}"})
+        )
+
+        assert isinstance(result, str)
+        assert "/foo/baz.jpg" in result
+        assert "/foo/baz.jpeg" in result
+        assert "/foo/baz.png" in result
+        assert "/foo/baz.gif" not in result
+
+    async def test_unbalanced_braces_remain_literal(self) -> None:
+        """Keep an unbalanced brace expression literal like Bash."""
+        tool, _ = _make_tool(
+            files={
+                "/foo/baz.{jpg,png": b"literal",
+                "/foo/baz.jpg": b"jpg",
+                "/foo/baz.png": b"png",
+            }
+        )
+
+        result = await tool.handler(json.dumps({"pattern": "/foo/baz.{jpg,png"}))
+
+        assert isinstance(result, str)
+        assert "/foo/baz.{jpg,png" in result
+        assert "/foo/baz.jpg" not in result
+        assert "/foo/baz.png" not in result
+
+    async def test_later_balanced_brace_expands_after_unmatched_opening(self) -> None:
+        """Expand a later balanced group after an unmatched opening brace."""
+        tool, _ = _make_tool(
+            files={
+                "/foo/{literal/baz.jpg": b"jpg",
+                "/foo/{literal/baz.png": b"png",
+            }
+        )
+
+        result = await tool.handler(
+            json.dumps({"pattern": "/foo/{literal/baz.{jpg,png}"})
+        )
+
+        assert isinstance(result, str)
+        assert "/foo/{literal/baz.jpg" in result
+        assert "/foo/{literal/baz.png" in result
+
+    async def test_later_brace_expands_after_literal_braces(self) -> None:
+        """Continue searching after a balanced brace without alternatives."""
+        tool, _ = _make_tool(
+            files={
+                "/foo/{literal}/baz.jpg": b"jpg",
+                "/foo/{literal}/baz.png": b"png",
+            }
+        )
+
+        result = await tool.handler(
+            json.dumps({"pattern": "/foo/{literal}/baz.{jpg,png}"})
+        )
+
+        assert isinstance(result, str)
+        assert "/foo/{literal}/baz.jpg" in result
+        assert "/foo/{literal}/baz.png" in result
+
+    async def test_brace_pattern_in_directory_segment(self) -> None:
+        """List from the non-glob prefix when braces select directories."""
+        tool, _ = _make_tool(
+            files={
+                "/foo/bar/report.txt": b"bar",
+                "/foo/baz/report.txt": b"baz",
+                "/foo/qux/report.txt": b"qux",
+            }
+        )
+
+        result = await tool.handler(json.dumps({"pattern": "/foo/{bar,baz}/*.txt"}))
+
+        assert isinstance(result, str)
+        assert "/foo/bar/report.txt" in result
+        assert "/foo/baz/report.txt" in result
+        assert "/foo/qux/report.txt" not in result
 
     async def test_match_recursive_hidden_directory_pattern(self) -> None:
         """Find recursive patterns under hidden directories."""
@@ -202,6 +320,23 @@ class TestGlob:
 
 class TestGlobErrors:
     """Error case tests."""
+
+    @pytest.mark.parametrize("group_count", [9, 1000])
+    async def test_brace_expansion_limit_is_rejected(self, group_count: int) -> None:
+        """Reject excessive alternatives without recursive parser failure."""
+        tool, _ = _make_tool()
+        pattern = "/foo/" + "{a,b}" * group_count
+
+        with pytest.raises(FunctionToolError, match="maximum of 256 alternatives"):
+            await tool.handler(json.dumps({"pattern": pattern}))
+
+    @pytest.mark.parametrize("pattern", ["~", "~/*.txt", "~alice/*.txt"])
+    async def test_tilde_expansion_is_rejected(self, pattern: str) -> None:
+        """Reject shell-dependent home-directory expansion."""
+        tool, _ = _make_tool()
+
+        with pytest.raises(FunctionToolError, match="Tilde expansion is not supported"):
+            await tool.handler(json.dumps({"pattern": pattern}))
 
     async def test_no_matches_for_invalid_prefix(self) -> None:
         """Nonexistent path prefix pattern has no matches."""

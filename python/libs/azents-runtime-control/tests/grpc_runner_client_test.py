@@ -156,6 +156,99 @@ async def test_grpc_client_registers_heartbeats_claims_and_appends_events() -> N
 
 
 @pytest.mark.asyncio
+async def test_grpc_client_maps_file_glob_payload_and_result() -> None:
+    """File glob requests and final matches round-trip through protobuf."""
+    sent: list[runtime_runner_control_pb2.RunnerMessage] = []
+    received: list[RunnerOperationEnvelope] = []
+    operation_received = asyncio.Event()
+
+    async def handle_operation(operation: RunnerOperationEnvelope) -> None:
+        received.append(operation)
+        operation_received.set()
+
+    async def stream(
+        requests: AsyncIterator[runtime_runner_control_pb2.RunnerMessage],
+        *,
+        metadata: Sequence[tuple[str, str]] | None = None,
+    ) -> AsyncIterator[runtime_runner_control_pb2.RunnerControlMessage]:
+        del metadata
+        register = await anext(requests)
+        yield runtime_runner_control_pb2.RunnerControlMessage(
+            request_id=register.request_id,
+            register_accepted=runtime_runner_control_pb2.RunnerRegisterAccepted(
+                runtime_id=register.register.runtime_id,
+                runner_id=register.register.runner_id,
+                connection_id=register.connection_id,
+                generation=7,
+                heartbeat_interval_seconds=20,
+            ),
+        )
+        yield runtime_runner_control_pb2.RunnerControlMessage(
+            request_id="req-glob",
+            operation_request=runtime_runner_control_pb2.RunnerOperationRequest(
+                runtime_id="runtime-1",
+                runner_generation=7,
+                operation_type="file.glob",
+                file_glob=runtime_runner_control_pb2.FileGlobOperationPayload(
+                    pattern="/workspace/agent/**/*.py",
+                    exclude_patterns=[".git", "node_modules"],
+                ),
+                reply_stream_id="reply:req-glob",
+            ),
+        )
+        event = await anext(requests)
+        sent.append(event)
+
+    client = GrpcRunnerControlClient(stream)
+    client.set_operation_handler(handle_operation)
+    accepted = await client.register_runner(
+        _registration(),
+        connection_id="connection-1",
+        registered_at=_now(),
+    )
+    await asyncio.wait_for(operation_received.wait(), timeout=1)
+
+    assert received[0].operation_type == "file.glob"
+    assert received[0].payload == {
+        "pattern": "/workspace/agent/**/*.py",
+        "exclude_patterns": [".git", "node_modules"],
+    }
+
+    await client.append_runner_event(
+        RunnerOperationEvent(
+            request_id="req-glob",
+            runtime_id="runtime-1",
+            generation=accepted.generation,
+            event_type=RuntimeRunnerEventType.FINAL_SUCCESS,
+            payload={
+                "matches": [
+                    {
+                        "path": "/workspace/agent/src/app.py",
+                        "type": "file",
+                        "size_bytes": 12,
+                        "modified_at": "2026-07-20T00:00:00+00:00",
+                    }
+                ]
+            },
+            created_at=_now(),
+            final=True,
+        )
+    )
+    for _ in range(10):
+        if sent:
+            break
+        await asyncio.sleep(0)
+
+    event = sent[0].operation_event
+    assert event.final_success.WhichOneof("result") == "file_glob"
+    assert event.final_success.file_glob.entries[0].path == (
+        "/workspace/agent/src/app.py"
+    )
+    assert event.final_success.file_glob.entries[0].type == "file"
+    await client.close()
+
+
+@pytest.mark.asyncio
 async def test_grpc_client_backpressures_operation_delivery() -> None:
     """The stream waits for scheduler admission before reading another operation."""
     first_received = asyncio.Event()
