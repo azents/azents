@@ -815,6 +815,82 @@ async def test_runner_grpc_relays_file_apply_patch_and_preserves_failure() -> No
 
 
 @pytest.mark.asyncio
+async def test_runner_grpc_relays_file_edit_and_replacement_count() -> None:
+    """The bridge serializes native edit parameters and final count."""
+    store = InMemoryRuntimeCoordinationStore()
+    service = RuntimeControlProtocolService(
+        store, request_id_factory=lambda: "req-edit"
+    )
+    servicer = _servicer(service, store, FakeStateSink())
+    inbound = QueueIterator()
+    await inbound.put(_register_message())
+
+    stream = servicer.ConnectRunner(inbound, FakeGrpcContext())
+    accepted = await anext(stream)
+    result = await service.dispatch_runner_operation(
+        RuntimeRunnerOperation(
+            runtime_id="runtime-1",
+            runner_generation=accepted.register_accepted.generation,
+            operation_type="file.edit",
+            owner_session_id="session-1",
+            payload={
+                "path": "/workspace/agent/note.txt",
+                "old_string": "before",
+                "new_string": "after",
+                "replace_all": True,
+            },
+            deadline_at=datetime.now(UTC) + timedelta(seconds=30),
+            body_stream_id=None,
+        ),
+        created_at=_now(),
+    )
+
+    command = await anext(stream)
+    assert isinstance(result, RuntimeDispatchResult)
+    assert command.operation_request.WhichOneof("payload") == "file_edit"
+    assert command.operation_request.file_edit.path == "/workspace/agent/note.txt"
+    assert command.operation_request.file_edit.old_string == "before"
+    assert command.operation_request.file_edit.new_string == "after"
+    assert command.operation_request.file_edit.replace_all is True
+
+    await inbound.put(
+        runtime_runner_control_pb2.RunnerMessage(
+            connection_id="connection-1",
+            request_id="req-edit",
+            generation=accepted.register_accepted.generation,
+            operation_event=runtime_runner_control_pb2.RunnerOperationEvent(
+                runtime_id="runtime-1",
+                operation_id="operation:req-edit",
+                generation=accepted.register_accepted.generation,
+                event_type="final_success",
+                created_at=_timestamp(_now()),
+                final=True,
+                final_success=(
+                    runtime_runner_control_pb2.RunnerOperationFinalSuccessPayload(
+                        file_edit=runtime_runner_control_pb2.FileEditFinalSuccess(
+                            replacements=3
+                        )
+                    )
+                ),
+            ),
+        )
+    )
+    replies = []
+    for _ in range(10):
+        replies = await service.read_replies(
+            reply_stream_id=result.reply_stream_id,
+            after_cursor=None,
+            limit=10,
+        )
+        if replies:
+            break
+        await asyncio.sleep(0)
+
+    assert replies[0].event.payload == {"replacements": 3}
+    await stream.aclose()
+
+
+@pytest.mark.asyncio
 async def test_runner_grpc_rejects_missing_control_token() -> None:
     store = InMemoryRuntimeCoordinationStore()
     servicer = _servicer(

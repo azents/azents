@@ -611,6 +611,91 @@ def test_grpc_client_maps_file_apply_patch_failure_detail() -> None:
     }
 
 
+@pytest.mark.asyncio
+async def test_grpc_client_maps_file_edit_request_and_success() -> None:
+    """Native edit request fields and replacement count round-trip through gRPC."""
+    sent: list[runtime_runner_control_pb2.RunnerMessage] = []
+    received: list[RunnerOperationEnvelope] = []
+    operation_received = asyncio.Event()
+
+    async def handle_operation(operation: RunnerOperationEnvelope) -> None:
+        received.append(operation)
+        operation_received.set()
+
+    async def stream(
+        requests: AsyncIterator[runtime_runner_control_pb2.RunnerMessage],
+        *,
+        metadata: Sequence[tuple[str, str]] | None = None,
+    ) -> AsyncIterator[runtime_runner_control_pb2.RunnerControlMessage]:
+        del metadata
+        register = await anext(requests)
+        yield runtime_runner_control_pb2.RunnerControlMessage(
+            request_id=register.request_id,
+            register_accepted=runtime_runner_control_pb2.RunnerRegisterAccepted(
+                runtime_id=register.register.runtime_id,
+                runner_id=register.register.runner_id,
+                connection_id=register.connection_id,
+                generation=7,
+                heartbeat_interval_seconds=20,
+            ),
+        )
+        yield runtime_runner_control_pb2.RunnerControlMessage(
+            request_id="req-edit",
+            operation_request=runtime_runner_control_pb2.RunnerOperationRequest(
+                runtime_id="runtime-1",
+                runner_generation=7,
+                operation_type="file.edit",
+                owner_session_id="session-1",
+                file_edit=runtime_runner_control_pb2.FileEditOperationPayload(
+                    path="/workspace/agent/note.txt",
+                    old_string="before",
+                    new_string="after",
+                    replace_all=True,
+                ),
+                reply_stream_id="reply:req-edit",
+            ),
+        )
+        sent.append(await anext(requests))
+
+    client = GrpcRunnerControlClient(stream)
+    client.set_operation_handler(handle_operation)
+    accepted = await client.register_runner(
+        _registration(),
+        connection_id="connection-1",
+        registered_at=_now(),
+    )
+    await asyncio.wait_for(operation_received.wait(), timeout=1)
+
+    assert received[0].operation_type == "file.edit"
+    assert received[0].payload == {
+        "path": "/workspace/agent/note.txt",
+        "old_string": "before",
+        "new_string": "after",
+        "replace_all": True,
+    }
+
+    await client.append_runner_event(
+        RunnerOperationEvent(
+            request_id="req-edit",
+            runtime_id="runtime-1",
+            generation=accepted.generation,
+            event_type=RuntimeRunnerEventType.FINAL_SUCCESS,
+            payload={"replacements": 3},
+            created_at=_now(),
+            final=True,
+        )
+    )
+    for _ in range(10):
+        if sent:
+            break
+        await asyncio.sleep(0)
+
+    event = sent[0].operation_event
+    assert event.final_success.WhichOneof("result") == "file_edit"
+    assert event.final_success.file_edit.replacements == 3
+    await client.close()
+
+
 def _timestamp(value: datetime) -> timestamp_pb2.Timestamp:
     timestamp = timestamp_pb2.Timestamp()
     timestamp.FromDatetime(value)

@@ -1,51 +1,93 @@
-"""edit tool tests."""
+"""Runtime-native edit tool tests."""
 
 import json
+from datetime import UTC, datetime
 
 import pytest
 
 from azents.engine.run.types import FunctionTool, FunctionToolError
-from azents.engine.tools.edit import make_edit_tool
-from azents.engine.tools.testing import FakeSharedStorage
+from azents.engine.tools.edit import RuntimeEditTarget, make_edit_tool
+from azents.engine.tools.runtime_io import (
+    RuntimeFileEditResult,
+    RuntimeRunnerOperationFailedError,
+)
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+
+class _FakeRunnerOperations:
+    """Capture native edit requests and return a configured result."""
+
+    def __init__(
+        self,
+        *,
+        replacements: int = 1,
+        error: RuntimeRunnerOperationFailedError | None = None,
+    ) -> None:
+        self.replacements = replacements
+        self.error = error
+        self.calls: list[dict[str, object]] = []
+
+    async def edit_file(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        owner_session_id: str | None,
+        path: str,
+        old_string: str,
+        new_string: str,
+        replace_all: bool,
+        deadline_at: datetime,
+    ) -> RuntimeFileEditResult:
+        self.calls.append(
+            {
+                "runtime_id": runtime_id,
+                "runner_generation": runner_generation,
+                "owner_session_id": owner_session_id,
+                "path": path,
+                "old_string": old_string,
+                "new_string": new_string,
+                "replace_all": replace_all,
+                "deadline_at": deadline_at,
+            }
+        )
+        if self.error is not None:
+            raise self.error
+        return RuntimeFileEditResult(
+            replacements=self.replacements,
+            final_cursor="cursor-1",
+        )
 
 
 def _make_tool(
     *,
-    files: dict[str, bytes] | None = None,
-    raise_permission_on_put: bool = False,
-    agent_id: str = "agent-1",
-    user_id: str = "user-1",
-) -> tuple[FunctionTool, FakeSharedStorage]:
-    """Create edit tool and fake storage for tests."""
-    storage = FakeSharedStorage(files, raise_permission_on_put=raise_permission_on_put)
-    tool = make_edit_tool(
-        session_storage=storage,
-        agent_id=agent_id,
-        user_id=user_id,
+    replacements: int = 1,
+    error: RuntimeRunnerOperationFailedError | None = None,
+) -> tuple[FunctionTool, _FakeRunnerOperations]:
+    """Create edit tool with one Runner-native operation fake."""
+    runner_operations = _FakeRunnerOperations(
+        replacements=replacements,
+        error=error,
     )
-    return tool, storage
 
+    async def resolve_runtime_target() -> RuntimeEditTarget:
+        return RuntimeEditTarget(runtime_id="runtime-1", runner_generation=7)
 
-# ---------------------------------------------------------------------------
-# TestEditFile
-# ---------------------------------------------------------------------------
+    tool = make_edit_tool(
+        runner_operations=runner_operations,
+        resolve_runtime_target=resolve_runtime_target,
+        owner_session_id="session-1",
+        agent_id="agent-1",
+    )
+    return tool, runner_operations
 
 
 class TestEditFile:
-    """File edit tests."""
+    """Native file edit tests."""
 
     async def test_replace_single_occurrence(self) -> None:
-        """Replace single occurrence."""
-        # Given
-        tool, storage = _make_tool(
-            files={"/workspace/agent/note.txt": b"Hello, world!"}
-        )
+        """Replace one occurrence through one Runner operation."""
+        tool, runner_operations = _make_tool()
 
-        # When
         result = await tool.handler(
             json.dumps(
                 {
@@ -56,21 +98,29 @@ class TestEditFile:
             )
         )
 
-        # Then
-        assert isinstance(result, str)
-        assert "replaced 1 occurrence(s)" in result
-        assert len(storage.put_calls) == 1
-        _, data = storage.put_calls[0]
-        assert data == b"Hello, Python!"
+        assert result == (
+            "Edited /workspace/agent/note.txt: replaced 1 occurrence(s) "
+            "of old_string with new_string."
+        )
+        assert len(runner_operations.calls) == 1
+        assert runner_operations.calls[0] == {
+            "runtime_id": "runtime-1",
+            "runner_generation": 7,
+            "owner_session_id": "session-1",
+            "path": "/workspace/agent/note.txt",
+            "old_string": "world",
+            "new_string": "Python",
+            "replace_all": False,
+            "deadline_at": runner_operations.calls[0]["deadline_at"],
+        }
+        deadline_at = runner_operations.calls[0]["deadline_at"]
+        assert isinstance(deadline_at, datetime)
+        assert deadline_at.tzinfo is UTC
 
     async def test_replace_all_occurrences(self) -> None:
-        """Replace all occurrences (replace_all=true)."""
-        # Given
-        tool, storage = _make_tool(
-            files={"/workspace/agent/data.txt": b"foo bar foo baz foo"}
-        )
+        """Return the Runner-reported all-occurrence replacement count."""
+        tool, runner_operations = _make_tool(replacements=3)
 
-        # When
         result = await tool.handler(
             json.dumps(
                 {
@@ -82,124 +132,61 @@ class TestEditFile:
             )
         )
 
-        # Then
         assert isinstance(result, str)
         assert "replaced 3 occurrence(s)" in result
-        _, data = storage.put_calls[0]
-        assert data == b"qux bar qux baz qux"
-
-    async def test_replace_multiline(self) -> None:
-        """Replace multiline text."""
-        # Given
-        original = b"line1\nline2\nline3\n"
-        tool, storage = _make_tool(files={"/workspace/agent/multi.txt": original})
-
-        # When
-        await tool.handler(
-            json.dumps(
-                {
-                    "path": "/workspace/agent/multi.txt",
-                    "old_string": "line2",
-                    "new_string": "replaced",
-                }
-            )
-        )
-
-        # Then
-        _, data = storage.put_calls[0]
-        assert data == b"line1\nreplaced\nline3\n"
-
-
-# ---------------------------------------------------------------------------
-# TestEditErrors
-# ---------------------------------------------------------------------------
+        assert runner_operations.calls[0]["replace_all"] is True
 
 
 class TestEditErrors:
-    """Error case tests."""
+    """Model-visible native edit failure mappings."""
 
-    async def test_file_not_found(self) -> None:
-        """Nonexistent file raises FunctionToolError."""
-        tool, _ = _make_tool()
-        with pytest.raises(FunctionToolError, match="File not found"):
-            await tool.handler(
-                json.dumps(
-                    {
-                        "path": "/workspace/agent/missing.txt",
-                        "old_string": "x",
-                        "new_string": "y",
-                    }
-                )
-            )
+    @pytest.mark.parametrize(
+        ("error", "message"),
+        [
+            (
+                RuntimeRunnerOperationFailedError(
+                    "FILE_EDIT_NOT_FOUND: File does not exist"
+                ),
+                "File not found",
+            ),
+            (
+                RuntimeRunnerOperationFailedError(
+                    "FILE_EDIT_OLD_STRING_NOT_FOUND: old_string was not found"
+                ),
+                "old_string not found",
+            ),
+            (
+                RuntimeRunnerOperationFailedError("FILE_EDIT_MULTIPLE_MATCHES: 3"),
+                "found 3 times",
+            ),
+            (
+                RuntimeRunnerOperationFailedError(
+                    "FILE_EDIT_INVALID_UTF8: File is not valid UTF-8 text"
+                ),
+                "not valid UTF-8",
+            ),
+            (
+                RuntimeRunnerOperationFailedError(
+                    "FILE_EDIT_PERMISSION_DENIED: Permission denied while saving file"
+                ),
+                "read-only scope",
+            ),
+        ],
+    )
+    async def test_preserves_existing_error_messages(
+        self,
+        error: RuntimeRunnerOperationFailedError,
+        message: str,
+    ) -> None:
+        """Map safe native operation codes to existing edit guidance."""
+        tool, _runner_operations = _make_tool(error=error)
 
-    async def test_old_string_not_found(self) -> None:
-        """Missing old_string raises FunctionToolError."""
-        tool, _ = _make_tool(files={"/workspace/agent/note.txt": b"Hello, world!"})
-        with pytest.raises(FunctionToolError, match="old_string not found"):
+        with pytest.raises(FunctionToolError, match=message):
             await tool.handler(
                 json.dumps(
                     {
                         "path": "/workspace/agent/note.txt",
-                        "old_string": "missing text",
-                        "new_string": "replacement",
-                    }
-                )
-            )
-
-    async def test_multiple_occurrences_without_replace_all(self) -> None:
-        """Multiple occurrences raise FunctionToolError when replace_all=false."""
-        tool, _ = _make_tool(files={"/workspace/agent/dup.txt": b"foo foo foo"})
-        with pytest.raises(FunctionToolError, match="found 3 times"):
-            await tool.handler(
-                json.dumps(
-                    {
-                        "path": "/workspace/agent/dup.txt",
-                        "old_string": "foo",
-                        "new_string": "bar",
-                    }
-                )
-            )
-
-    async def test_binary_file(self) -> None:
-        """Non-UTF-8 file raises FunctionToolError."""
-        tool, _ = _make_tool(files={"/workspace/agent/bin.dat": b"\xff\xfe\x00\x01"})
-        with pytest.raises(FunctionToolError, match="not valid UTF-8"):
-            await tool.handler(
-                json.dumps(
-                    {
-                        "path": "/workspace/agent/bin.dat",
-                        "old_string": "x",
-                        "new_string": "y",
-                    }
-                )
-            )
-
-    async def test_unsupported_path(self) -> None:
-        """Disallowed path raises FunctionToolError."""
-        tool, _ = _make_tool()
-        with pytest.raises(FunctionToolError, match="File not found"):
-            await tool.handler(
-                json.dumps(
-                    {
-                        "path": "/tmp/f.txt",
-                        "old_string": "x",
-                        "new_string": "y",
-                    }
-                )
-            )
-
-    async def test_read_only_scope_write_error(self) -> None:
-        """Writing read-only path raises FunctionToolError."""
-        tool, _ = _make_tool(
-            files={"/workspace/agent/data.txt": b"content"},
-            raise_permission_on_put=True,
-        )
-        with pytest.raises(FunctionToolError, match="read-only scope"):
-            await tool.handler(
-                json.dumps(
-                    {
-                        "path": "/workspace/agent/data.txt",
-                        "old_string": "content",
+                        "old_string": "old",
                         "new_string": "new",
                     }
                 )

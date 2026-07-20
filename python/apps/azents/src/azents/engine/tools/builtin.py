@@ -62,7 +62,7 @@ from azents.engine.tools.builtin_agents import (
     AgentsAppendixMixin,
 )
 from azents.engine.tools.delete_file import make_delete_file_tool
-from azents.engine.tools.edit import make_edit_tool
+from azents.engine.tools.edit import RuntimeEditTarget, make_edit_tool
 from azents.engine.tools.glob import make_glob_tool
 from azents.engine.tools.grep import make_grep_tool
 from azents.engine.tools.import_file import make_import_file_tool
@@ -728,9 +728,26 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
                 runner_generation=runtime.runner_generation,
             )
 
+        async def resolve_edit_target() -> RuntimeEditTarget:
+            runtime = await _ready_runtime_for_agent(
+                agent_runtime_repo=self.agent_runtime_repo,
+                session_manager=self.session_manager,
+                agent_id=runtime_agent_id,
+            )
+            return RuntimeEditTarget(
+                runtime_id=runtime.id,
+                runner_generation=runtime.runner_generation,
+            )
+
         apply_patch_tool = make_apply_patch_tool(
             runner_operations=self.runner_operations,
             resolve_runtime_target=resolve_patch_target,
+            owner_session_id=self._runtime_session_id,
+            agent_id=runtime_agent_id,
+        )
+        edit_tool = make_edit_tool(
+            runner_operations=self.runner_operations,
+            resolve_runtime_target=resolve_edit_target,
             owner_session_id=self._runtime_session_id,
             agent_id=runtime_agent_id,
         )
@@ -773,11 +790,6 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
                 agent_id=agent_id,
                 user_id=user_id or "",
             ),
-            make_edit_tool(
-                session_storage=file_ss,
-                agent_id=agent_id,
-                user_id=user_id or "",
-            ),
             make_glob_tool(
                 session_storage=file_ss,
                 agent_id=agent_id,
@@ -808,6 +820,11 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
                 owner_session_id=self._session_id,
             ),
             apply_patch_tool,
+            _with_runtime_native_file_tool_diagnostics(
+                edit_tool,
+                agent_id=runtime_agent_id,
+                owner_session_id=self._runtime_session_id,
+            ),
             *[
                 _with_runtime_file_tool_diagnostics(
                     tool,
@@ -1552,6 +1569,42 @@ def _with_runtime_file_tool_diagnostics(
                     "tool_status": status,
                     "tool_duration_ms": (time.perf_counter() - started_at) * 1000,
                     "runtime_operation_count": operation_count,
+                },
+            )
+
+    return dataclasses.replace(tool, handler=handler)
+
+
+def _with_runtime_native_file_tool_diagnostics(
+    tool: FunctionTool,
+    *,
+    agent_id: str,
+    owner_session_id: str | None,
+) -> FunctionTool:
+    """Wrap a one-shot Runner-native file tool with latency diagnostics."""
+    original_handler = tool.handler
+
+    async def handler(args_json: str) -> str | FunctionToolResult:
+        started_at = time.perf_counter()
+        status = "completed"
+        try:
+            return await original_handler(args_json)
+        except asyncio.CancelledError:
+            status = "cancelled"
+            raise
+        except Exception:
+            status = "failed"
+            raise
+        finally:
+            logger.info(
+                "Processed Runtime native file tool",
+                extra={
+                    "agent_id": agent_id,
+                    "session_id": owner_session_id,
+                    "tool_name": tool.spec.name,
+                    "tool_status": status,
+                    "tool_duration_ms": (time.perf_counter() - started_at) * 1000,
+                    "runtime_operation_count": 1,
                 },
             )
 

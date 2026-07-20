@@ -123,6 +123,7 @@ message RunnerOperationRequest {
     GitDeleteBranchOperationPayload git_delete_branch = 37;
     FileGlobOperationPayload file_glob = 38;
     FileApplyPatchOperationPayload file_apply_patch = 39;
+    FileEditOperationPayload file_edit = 40;
   }
 }
 
@@ -247,6 +248,13 @@ message FileApplyPatchOperationPayload {
   uint32 schema_version = 3;
 }
 
+message FileEditOperationPayload {
+  string path = 1;
+  string old_string = 2;
+  string new_string = 3;
+  bool replace_all = 4;
+}
+
 message RunnerBodyChunk {
   uint64 chunk_id = 1;
   bytes data = 2;
@@ -313,6 +321,7 @@ message RunnerOperationFinalSuccessPayload {
     GitDeleteBranchFinalSuccess git_delete_branch = 16;
     FileGlobFinalSuccess file_glob = 17;
     FileApplyPatchFinalSuccess file_apply_patch = 18;
+    FileEditFinalSuccess file_edit = 19;
   }
 }
 
@@ -352,6 +361,10 @@ message RuntimeFilePatchChange {
 
 message FileApplyPatchFinalSuccess {
   repeated RuntimeFilePatchChange changes = 1;
+}
+
+message FileEditFinalSuccess {
+  uint64 replacements = 1;
 }
 
 message FileApplyPatchFailure {

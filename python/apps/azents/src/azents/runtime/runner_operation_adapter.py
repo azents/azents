@@ -10,6 +10,7 @@ from azents.engine.tools.runtime_io import (
     RuntimeFileApplyPatchFailedError,
     RuntimeFileApplyPatchFailure,
     RuntimeFileApplyPatchResult,
+    RuntimeFileEditResult,
     RuntimeFileListEntry,
     RuntimeFileListResult,
     RuntimeFilePatchChange,
@@ -241,6 +242,36 @@ class RuntimeRunnerOperationAdapter:
                 )
                 for change in result.changes
             ),
+            final_cursor=result.final_cursor,
+        )
+
+    async def edit_file(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        owner_session_id: str | None,
+        path: str,
+        old_string: str,
+        new_string: str,
+        replace_all: bool,
+        deadline_at: datetime,
+    ) -> RuntimeFileEditResult:
+        """Run one Runtime text replacement and convert its result."""
+        result = await _translate_runtime_errors(
+            self._client.edit_file(
+                runtime_id=runtime_id,
+                runner_generation=runner_generation,
+                owner_session_id=owner_session_id,
+                path=path,
+                old_string=old_string,
+                new_string=new_string,
+                replace_all=replace_all,
+                deadline_at=deadline_at,
+            )
+        )
+        return RuntimeFileEditResult(
+            replacements=result.replacements,
             final_cursor=result.final_cursor,
         )
 

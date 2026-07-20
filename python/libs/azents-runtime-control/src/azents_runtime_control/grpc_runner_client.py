@@ -487,6 +487,13 @@ def _operation_payload(
             "total_bytes": operation.file_apply_patch.total_bytes,
             "schema_version": operation.file_apply_patch.schema_version,
         }
+    if payload_kind == "file_edit":
+        return {
+            "path": operation.file_edit.path,
+            "old_string": operation.file_edit.old_string,
+            "new_string": operation.file_edit.new_string,
+            "replace_all": operation.file_edit.replace_all,
+        }
     if payload_kind == "file_list":
         payload = operation.file_list
         return {
@@ -665,6 +672,9 @@ def _copy_final_success(
             _file_patch_change_entries(payload, "changes")
         )
         return
+    if "replacements" in payload:
+        message.file_edit.replacements = _int_payload(payload, "replacements")
+        return
     if "entries" in payload:
         message.file_list.entries.extend(_file_list_entries(payload))
         return
@@ -790,6 +800,8 @@ def _final_success_payload(
                 for change in message.file_apply_patch.changes
             ]
         }
+    if result_kind == "file_edit":
+        return {"replacements": message.file_edit.replacements}
     if result_kind == "file_list":
         return {"entries": _file_list_entry_payloads(message.file_list.entries)}
     if result_kind == "file_glob":

@@ -696,6 +696,12 @@ def _copy_operation_payload(
             payload, "schema_version"
         )
         return
+    if operation_type == "file.edit":
+        message.file_edit.path = _str_payload(payload, "path")
+        message.file_edit.old_string = _str_payload(payload, "old_string")
+        message.file_edit.new_string = _str_payload(payload, "new_string")
+        message.file_edit.replace_all = _bool_payload(payload, "replace_all")
+        return
     if operation_type == "file.list":
         message.file_list.path = _str_payload(payload, "path")
         message.file_list.recursive = _bool_payload(payload, "recursive")

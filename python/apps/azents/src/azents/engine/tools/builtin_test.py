@@ -49,10 +49,10 @@ from azents.engine.tools.builtin import (
     RuntimeToolkit,
 )
 from azents.engine.tools.builtin_agents import AgentsAppendixDedupeState
-from azents.engine.tools.edit import make_edit_tool
 from azents.engine.tools.read_text import make_read_text_tool
 from azents.engine.tools.runtime_io import (
     RuntimeBashResult,
+    RuntimeFileEditResult,
     RuntimeFileListEntry,
     RuntimeFileListResult,
     RuntimeFileReadResult,
@@ -451,6 +451,32 @@ class _FakeRunnerOperations:
         self.file_operation_calls.append(("write", owner_session_id))
         self.files[path] = data
         return RuntimeFileWriteResult(bytes_written=len(data), final_cursor="0-1")
+
+    async def edit_file(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        owner_session_id: str | None,
+        path: str,
+        old_string: str,
+        new_string: str,
+        replace_all: bool,
+        deadline_at: datetime,
+    ) -> RuntimeFileEditResult:
+        del runtime_id, runner_generation, deadline_at
+        self.file_operation_calls.append(("edit", owner_session_id))
+        text = self.files[path].decode("utf-8")
+        count = text.count(old_string)
+        self.files[path] = text.replace(
+            old_string,
+            new_string,
+            -1 if replace_all else 1,
+        ).encode("utf-8")
+        return RuntimeFileEditResult(
+            replacements=count if replace_all else 1,
+            final_cursor="0-1",
+        )
 
     async def list_files(
         self,
@@ -1973,17 +1999,18 @@ class TestWriteHandler:
 
 
 class TestEditHandler:
-    """Test edit tool handler edits file content."""
+    """Test edit tool handler delegates to a native operation."""
 
     @pytest.mark.asyncio
     async def test_edit_replaces_text(self) -> None:
-        """File content is replaced on handler call."""
+        """File content is replaced by the Runner-native edit operation."""
         files = {"/workspace/agent/config.txt": b"old_value"}
-        storage = FakeSharedStorage(files=files)
-        tool = make_edit_tool(
-            session_storage=storage,
-            agent_id="agent-1",
-            user_id="",
+        toolkit = _make_toolkit(storage_files=files)
+        state = await toolkit.update_context(_make_context())
+        tool = _find_tool(state.tools, "edit")
+        runner_operations = cast(
+            _FakeRunnerOperations,
+            cast(Any, toolkit)._test_runner_operations,
         )
 
         result = await tool.handler(
@@ -1996,6 +2023,5 @@ class TestEditHandler:
             )
         )
         assert isinstance(result, str)
-        # Check file content after edit
-        data = await storage.get("/workspace/agent/config.txt")
-        assert b"new_value" in data
+        assert runner_operations.files["/workspace/agent/config.txt"] == b"new_value"
+        assert runner_operations.file_operation_calls == [("edit", "session-1")]

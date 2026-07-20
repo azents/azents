@@ -143,6 +143,14 @@ class RuntimeFileWriteResult:
     final_cursor: str
 
 
+@dataclasses.dataclass(frozen=True)
+class RuntimeFileEditResult:
+    """Completed file edit operation result."""
+
+    replacements: int
+    final_cursor: str
+
+
 type RuntimeFilePatchAction = Literal["add", "update", "delete"]
 type RuntimeFilePatchPhase = Literal[
     "parse",
@@ -348,6 +356,7 @@ type RuntimeForegroundResult = (
     | RuntimeFileStatResult
     | RuntimeGrepResult
     | RuntimeFileWriteResult
+    | RuntimeFileEditResult
     | RuntimeFileApplyPatchResult
     | RuntimeProcessResult
     | RuntimeFileDeleteResult
@@ -562,6 +571,45 @@ class RuntimeRunnerOperationClient:
                     operation_id=dispatch.operation_id,
                     created_at=datetime.now(timezone.utc),
                 )
+
+    async def edit_file(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        owner_session_id: str | None,
+        path: str,
+        old_string: str,
+        new_string: str,
+        replace_all: bool,
+        deadline_at: datetime,
+    ) -> RuntimeFileEditResult:
+        """Run one atomic text replacement in the Runtime Runner."""
+        dispatch = await self._dispatch_runner_operation(
+            RuntimeRunnerOperation(
+                runtime_id=runtime_id,
+                runner_generation=runner_generation,
+                operation_type="file.edit",
+                owner_session_id=owner_session_id,
+                payload={
+                    "path": path,
+                    "old_string": old_string,
+                    "new_string": new_string,
+                    "replace_all": replace_all,
+                },
+                deadline_at=deadline_at,
+                body_stream_id=None,
+            )
+        )
+        return await self.resume_file_edit(
+            reply_stream_id=dispatch.reply_stream_id,
+            after_cursor=None,
+            request_id=dispatch.request_id,
+            operation_id=dispatch.operation_id,
+            runtime_id=runtime_id,
+            generation=runner_generation,
+            deadline_at=deadline_at,
+        )
 
     async def delete_file(
         self,
@@ -1334,6 +1382,37 @@ class RuntimeRunnerOperationClient:
         )
         return RuntimeFileApplyPatchResult(
             changes=tuple(_file_patch_changes(final.event.payload, "changes")),
+            final_cursor=final.cursor,
+        )
+
+    async def resume_file_edit(
+        self,
+        *,
+        reply_stream_id: str,
+        after_cursor: str | None,
+        request_id: str | None = None,
+        operation_id: str | None = None,
+        runtime_id: str | None = None,
+        generation: int | None = None,
+        deadline_at: datetime,
+    ) -> RuntimeFileEditResult:
+        """Resume reading a file edit reply stream until final result."""
+        folder = _ReplyFolder(after_cursor=after_cursor)
+        final = await self._read_until_final(
+            reply_stream_id,
+            folder,
+            request_id=request_id,
+            operation_id=operation_id,
+            runtime_id=runtime_id,
+            generation=generation,
+            deadline_at=deadline_at,
+        )
+        return RuntimeFileEditResult(
+            replacements=_int_payload(
+                final.event.payload,
+                "replacements",
+                default=0,
+            ),
             final_cursor=final.cursor,
         )
 
