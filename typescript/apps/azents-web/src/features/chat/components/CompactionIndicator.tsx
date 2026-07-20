@@ -15,7 +15,7 @@ export function CompactionIndicator(): React.ReactElement {
     <Group gap="xs" align="center" mb="md" role="status">
       <Box style={dashedLineStyle} />
       <Group gap="xs" align="center">
-        <Loader size="xs" color="gray" />
+        <Loader size="xs" color="var(--mantine-color-dimmed)" />
         <Text size="xs" c="dimmed">
           {t("compaction.inProgress")}
         </Text>
