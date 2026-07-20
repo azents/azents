@@ -1407,6 +1407,7 @@
       "failedCount": "失敗 {count}",
       "approvalNeeded": "承認が必要",
       "overflowCategories": "他 {count}",
+      "modelResponseWaiting": "モデルの応答を待機中 ({duration})",
       "categoryReasoning": "推論",
       "categorySkill": "Skill",
       "categoryExplore": "探索",

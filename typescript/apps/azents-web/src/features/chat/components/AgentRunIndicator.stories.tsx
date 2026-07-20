@@ -11,18 +11,9 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-export const Starting: Story = {
-  args: {
-    modelCallStartedAt: new Date(Date.now() - 5_000).toISOString(),
-  },
-};
-
-export const LongRunning: Story = {
-  args: {
-    modelCallStartedAt: new Date(Date.now() - 12_000).toISOString(),
-  },
+export const Running: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await expect(canvas.getByText(/^\d+s$/)).toBeVisible();
+    await expect(canvas.getByRole("status")).toBeVisible();
   },
 };

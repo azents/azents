@@ -109,6 +109,7 @@ void test("preserves reasoning and client tool chronology from raw events", () =
     activityAt(items, 0).events.map((activityEvent) => activityEvent.kind),
     ["reasoning", "tool", "reasoning"],
   );
+  assert.equal(activityAt(items, 0).startedAt, createdAt);
 });
 
 void test("matches native reasoning identity from the raw event", () => {

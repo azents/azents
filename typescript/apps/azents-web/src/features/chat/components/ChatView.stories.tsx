@@ -29,6 +29,7 @@ function timelineEvent(
   id: string,
   kind: ChatEventResponse["kind"],
   payload: ChatEventResponse["payload"],
+  createdAt = "2026-05-01T10:00:00.000Z",
 ): ChatEventResponse {
   return {
     id,
@@ -42,7 +43,7 @@ function timelineEvent(
     model: null,
     native_format: null,
     schema_version: "1",
-    created_at: "2026-05-01T10:00:00.000Z",
+    created_at: createdAt,
   };
 }
 
@@ -569,11 +570,31 @@ export const WithPreparingContext = {
 export const StreamingModelWithPartialOutput = {
   args: {
     ...baseArgs,
+    timelineEvents: [
+      timelineEvent("streaming-user-input", "user_message", {
+        content: "Explain the current model call state.",
+      }),
+      timelineEvent(
+        "streaming-reasoning",
+        "reasoning",
+        { summary: "Inspect the current model call state." },
+        new Date(Date.now() - 12_000).toISOString(),
+      ),
+      timelineEvent("streaming-assistant-output", "assistant_message", {
+        content: "The model is still streaming this response",
+      }),
+    ],
     messages: [
       createChatMessage({
         id: "streaming-user-input",
         role: "user",
         content: "Explain the current model call state.",
+      }),
+      createChatMessage({
+        id: "streaming-reasoning",
+        content: null,
+        reasoningSummary: "Inspect the current model call state.",
+        metadata: { event_render_key: "reasoning:event:streaming-reasoning" },
       }),
       createChatMessage({
         id: "streaming-assistant-output",
@@ -597,13 +618,21 @@ export const StreamingModelWithPartialOutput = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await expect(
-      canvas.getByText("The model is still streaming this response"),
-    ).toBeVisible();
+    const activity = canvas.getByRole("button", { name: /Activity/ });
+    const output = canvas.getByText(
+      "The model is still streaming this response",
+    );
+    await expect(output).toBeVisible();
     await expect(
       canvas.getByRole("status", { name: "Agent is working" }),
     ).toBeVisible();
-    await expect(canvas.getByText(/^\d+s$/)).toBeVisible();
+    await expect(
+      canvas.getByText(/Waiting for model response \(\d+s\)/),
+    ).toBeVisible();
+    await expect(
+      activity.compareDocumentPosition(output) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   },
 } satisfies Story;
 

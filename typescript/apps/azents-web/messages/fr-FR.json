@@ -1407,6 +1407,7 @@
       "failedCount": "Échec {count}",
       "approvalNeeded": "Approbation requise",
       "overflowCategories": "+{count}",
+      "modelResponseWaiting": "En attente de la réponse du modèle ({duration})",
       "categoryReasoning": "Raisonnement",
       "categorySkill": "Skill",
       "categoryExplore": "Explorer",

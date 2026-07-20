@@ -1407,6 +1407,7 @@
       "failedCount": "실패 {count}",
       "approvalNeeded": "승인 필요",
       "overflowCategories": "+{count}",
+      "modelResponseWaiting": "모델 응답 대기중 ({duration})",
       "categoryReasoning": "추론",
       "categorySkill": "Skill",
       "categoryExplore": "탐색",
