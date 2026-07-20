@@ -187,11 +187,6 @@ class PlatformGitHubAppSystemSettingService:
             )
             if action not in allowed_actions:
                 raise ValueError("Unsupported Platform GitHub App confirmation action.")
-            if action == "claim_unbound_legacy":
-                app_id = self._config(candidate).app_id
-                if app_id is None:
-                    raise ValueError("Platform GitHub App ID is required for claim.")
-                await self.binding_service.bind_unbound(session, app_id=app_id)
 
         return await self.system_settings.confirm_candidate(
             section=SystemSettingSection.PLATFORM_GITHUB_APP,
@@ -340,54 +335,44 @@ class PlatformGitHubAppSystemSettingService:
         current_config = self._config(current)
         candidate_config = self._config(candidate)
         app_id_changed = current_config.app_id != candidate_config.app_id
-        installation_impact = await self.impact_repository.get_installation_impact(
-            session,
-            current_app_id=current_config.app_id,
-        )
-        toolkit_impact = await self.binding_service.inspect_toolkit_impact(
-            session,
-            current_app_id=current_config.app_id,
-        )
-        affected_toolkit_ids = set(toolkit_impact.affected_toolkit_ids)
+        if current_config.app_id is None:
+            affected_user_count = 0
+            affected_installation_count = 0
+            affected_toolkit_ids: set[str] = set()
+        else:
+            installation_impact = await self.impact_repository.get_installation_impact(
+                session,
+                app_id=current_config.app_id,
+            )
+            toolkit_impact = await self.binding_service.inspect_toolkits_bound_to(
+                session,
+                app_id=current_config.app_id,
+            )
+            affected_user_count = installation_impact.affected_user_count
+            affected_installation_count = (
+                installation_impact.affected_installation_count
+            )
+            affected_toolkit_ids = set(toolkit_impact.affected_toolkit_ids)
         affected_agent_count = await self.impact_repository.count_agents_for_toolkits(
             session,
             toolkit_ids=affected_toolkit_ids,
         )
-        has_unbound_legacy = (
-            installation_impact.unbound_installation_count > 0
-            or toolkit_impact.unbound_toolkit_count > 0
+        has_current_bindings = affected_installation_count > 0 or bool(
+            affected_toolkit_ids
         )
-        has_current_bindings = (
-            installation_impact.affected_installation_count > 0
-            or bool(affected_toolkit_ids)
-        )
-        if (
-            current_config.app_id is None
-            and candidate_config.app_id is not None
-            and has_unbound_legacy
-        ):
-            confirmation_actions = (
-                "claim_unbound_legacy",
-                "leave_unbound",
-            )
-        elif (
-            current_config.app_id is not None
+        confirmation_actions = (
+            ("activate",)
+            if current_config.app_id is not None
             and app_id_changed
             and has_current_bindings
-        ):
-            confirmation_actions = ("activate",)
-        else:
-            confirmation_actions = ()
+            else ()
+        )
         impact = PlatformGitHubAppImpact(
             app_id_changed=app_id_changed,
-            affected_user_count=installation_impact.affected_user_count,
-            affected_installation_count=(
-                installation_impact.affected_installation_count
-            ),
+            affected_user_count=affected_user_count,
+            affected_installation_count=affected_installation_count,
             affected_toolkit_count=len(affected_toolkit_ids),
             affected_agent_count=affected_agent_count,
-            unbound_installation_count=(installation_impact.unbound_installation_count),
-            unbound_toolkit_count=toolkit_impact.unbound_toolkit_count,
             current_app_id_source=current.field_sources["app_id"].value,
             confirmation_actions=confirmation_actions,
         )
@@ -409,9 +394,11 @@ class PlatformGitHubAppSystemSettingService:
                     effective_app_id=app_id,
                 )
             )
-            toolkit_impact = await self.binding_service.inspect_current_toolkit_impact(
-                session,
-                effective_app_id=app_id,
+            toolkit_impact = (
+                await self.binding_service.inspect_toolkits_mismatched_with(
+                    session,
+                    effective_app_id=app_id,
+                )
             )
             affected_toolkit_ids = set(toolkit_impact.affected_toolkit_ids)
             affected_agent_count = (
@@ -427,8 +414,6 @@ class PlatformGitHubAppSystemSettingService:
             ),
             affected_toolkit_count=len(affected_toolkit_ids),
             affected_agent_count=affected_agent_count,
-            unbound_installation_count=(installation_impact.unbound_installation_count),
-            unbound_toolkit_count=toolkit_impact.unbound_toolkit_count,
         )
 
     @classmethod

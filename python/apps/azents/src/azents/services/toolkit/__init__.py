@@ -140,7 +140,10 @@ class ToolkitService:
         if config_error is not None:
             return Failure(config_error)
 
-        cred_error = self._validate_credentials(create.toolkit_type, create.credentials)
+        credentials = await self._bind_platform_app_identity(create.credentials)
+        if isinstance(credentials, InvalidCredentials):
+            return Failure(credentials)
+        cred_error = self._validate_credentials(create.toolkit_type, credentials)
         if cred_error is not None:
             return Failure(cred_error)
 
@@ -149,7 +152,7 @@ class ToolkitService:
         if provider is not None:
             async with self.session_manager() as session:
                 cred_err_msg = await provider.validate_credentials(
-                    session, user_id, create.credentials
+                    session, user_id, credentials
                 )
             if cred_err_msg is not None:
                 return Failure(InvalidCredentials(cred_err_msg))
@@ -158,8 +161,8 @@ class ToolkitService:
         slug = create.slug if create.slug is not None else create.toolkit_type
 
         credentials_json: str | None = None
-        if create.credentials is not None:
-            credentials_json = json.dumps(create.credentials)
+        if credentials is not None:
+            credentials_json = json.dumps(credentials)
 
         repo_create = ToolkitCreate(
             workspace_id=create.workspace_id,
@@ -262,22 +265,32 @@ class ToolkitService:
             if config_error is not None:
                 return Failure(config_error)
 
-        if "credentials" in update and update["credentials"] is not None:
-            cred_error = self._validate_credentials(
-                existing.toolkit_type, update["credentials"]
-            )
-            if cred_error is not None:
-                return Failure(cred_error)
-
-        if "credentials" in update and update["credentials"] is not None:
-            provider = self.toolkit_registry.get(existing.toolkit_type)
-            if provider is not None:
-                async with self.session_manager() as session:
-                    cred_err_msg = await provider.validate_credentials(
-                        session, user_id, update["credentials"]
-                    )
-                if cred_err_msg is not None:
-                    return Failure(InvalidCredentials(cred_err_msg))
+        normalized_credentials: dict[str, object] | None = None
+        if "credentials" in update:
+            update_credentials = update["credentials"]
+            if update_credentials is not None:
+                bound_credentials = await self._bind_platform_app_identity(
+                    update_credentials
+                )
+                if isinstance(bound_credentials, InvalidCredentials):
+                    return Failure(bound_credentials)
+                normalized_credentials = bound_credentials
+                cred_error = self._validate_credentials(
+                    existing.toolkit_type,
+                    normalized_credentials,
+                )
+                if cred_error is not None:
+                    return Failure(cred_error)
+                provider = self.toolkit_registry.get(existing.toolkit_type)
+                if provider is not None:
+                    async with self.session_manager() as session:
+                        cred_err_msg = await provider.validate_credentials(
+                            session,
+                            user_id,
+                            normalized_credentials,
+                        )
+                    if cred_err_msg is not None:
+                        return Failure(InvalidCredentials(cred_err_msg))
 
         repo_update = ToolkitUpdate()
         if "slug" in update:
@@ -291,9 +304,10 @@ class ToolkitService:
         if "prompt" in update:
             repo_update["prompt"] = update["prompt"]
         if "credentials" in update:
-            creds = update["credentials"]
             repo_update["credentials"] = (
-                json.dumps(creds) if creds is not None else None
+                json.dumps(normalized_credentials)
+                if normalized_credentials is not None
+                else None
             )
         if "enabled" in update:
             repo_update["enabled"] = update["enabled"]
@@ -643,6 +657,18 @@ class ToolkitService:
                 session, toolkit.id
             )
         return toolkit.model_copy(update={"oauth_connection": summary})
+
+    async def _bind_platform_app_identity(
+        self,
+        credentials: dict[str, object] | None,
+    ) -> dict[str, object] | None | InvalidCredentials:
+        """Bind Platform GitHub credentials to the current server App identity."""
+        if credentials is None or credentials.get("type") != "github_app_platform":
+            return credentials
+        platform = await self.github_runtime.resolve()
+        if platform.app_id is None:
+            return InvalidCredentials("Platform GitHub App is not configured.")
+        return {**credentials, "app_id": platform.app_id}
 
     @staticmethod
     def _platform_credentials(

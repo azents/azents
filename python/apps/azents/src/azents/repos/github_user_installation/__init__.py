@@ -19,12 +19,7 @@ class GithubUserInstallationRepository:
         platform_app_id: str,
         installations: list[dict[str, object]],
     ) -> None:
-        """Synchronize one user's installation list for one Platform App.
-
-        A verified reconnect replaces matching unbound legacy rows. Deletion is
-        scoped to the same Platform App, so a reconnect never removes rows that
-        belong to another App identity.
-        """
+        """Synchronize one user's installation list for one Platform App."""
         if not platform_app_id:
             raise ValueError("Platform GitHub App ID is required.")
 
@@ -64,7 +59,6 @@ class GithubUserInstallationRepository:
                     RDBGithubUserInstallation.platform_app_id,
                     RDBGithubUserInstallation.installation_id,
                 ],
-                index_where=RDBGithubUserInstallation.platform_app_id.is_not(None),
                 set_={
                     "account_login": login,
                     "account_type": account_type,
@@ -75,13 +69,6 @@ class GithubUserInstallationRepository:
             await session.execute(stmt)
 
         if api_installation_ids:
-            await session.execute(
-                delete(RDBGithubUserInstallation).where(
-                    RDBGithubUserInstallation.user_id == user_id,
-                    RDBGithubUserInstallation.platform_app_id.is_(None),
-                    RDBGithubUserInstallation.installation_id.in_(api_installation_ids),
-                )
-            )
             await session.execute(
                 delete(RDBGithubUserInstallation).where(
                     RDBGithubUserInstallation.user_id == user_id,

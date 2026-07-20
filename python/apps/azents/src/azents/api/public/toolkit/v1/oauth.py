@@ -804,6 +804,7 @@ async def test_connection_unsaved(
     member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
     cipher: Annotated[CredentialCipher, Depends(get_credential_cipher)],
     config: Annotated[Config, Depends(get_config)],
+    platform_runtime: Annotated[PlatformGitHubAppRuntimeService, Depends()],
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
     ],
@@ -835,6 +836,10 @@ async def test_connection_unsaved(
     credentials_json = await _resolve_test_credentials(
         body, cipher, session_manager, member.workspace_id
     )
+    credentials_json = await _bind_platform_app_test_credentials(
+        credentials_json,
+        platform_runtime,
+    )
 
     result = await provider.test_connection(
         validated_config, credentials_json, proxy_url=config.mcp_proxy_url
@@ -851,6 +856,25 @@ async def test_connection_unsaved(
 # ---------------------------------------------------------------------------
 # Test connection helpers
 # ---------------------------------------------------------------------------
+
+
+async def _bind_platform_app_test_credentials(
+    credentials_json: str | None,
+    platform_runtime: PlatformGitHubAppRuntimeService,
+) -> str | None:
+    """Bind unsaved Platform GitHub credentials to the server App identity."""
+    if credentials_json is None:
+        return None
+    parsed: object = json.loads(credentials_json)
+    if not isinstance(parsed, dict) or parsed.get("type") != "github_app_platform":
+        return credentials_json
+    platform = await platform_runtime.resolve()
+    if platform.app_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="GitHub Platform App is not configured.",
+        )
+    return json.dumps({**parsed, "app_id": platform.app_id})
 
 
 async def _resolve_test_credentials(

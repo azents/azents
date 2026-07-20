@@ -6,12 +6,10 @@ Redacted resources that require reconnect for the effective App.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**affected_user_count** | **int** |  |
-**affected_installation_count** | **int** |  |
-**affected_toolkit_count** | **int** |  |
-**affected_agent_count** | **int** |  |
-**unbound_installation_count** | **int** |  |
-**unbound_toolkit_count** | **int** |  |
+**affected_user_count** | **int** |  | 
+**affected_installation_count** | **int** |  | 
+**affected_toolkit_count** | **int** |  | 
+**affected_agent_count** | **int** |  | 
 
 ## Example
 
@@ -31,3 +29,5 @@ platform_git_hub_app_binding_response_dict = platform_git_hub_app_binding_respon
 platform_git_hub_app_binding_response_from_dict = PlatformGitHubAppBindingResponse.from_dict(platform_git_hub_app_binding_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

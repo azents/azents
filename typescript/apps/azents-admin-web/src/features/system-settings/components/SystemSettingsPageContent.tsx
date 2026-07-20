@@ -171,11 +171,6 @@ function CandidatePanel({
     ["Installations", impactNumber(candidate, "affected_installation_count")],
     ["Toolkits", impactNumber(candidate, "affected_toolkit_count")],
     ["Agents", impactNumber(candidate, "affected_agent_count")],
-    [
-      "Unbound installations",
-      impactNumber(candidate, "unbound_installation_count"),
-    ],
-    ["Unbound toolkits", impactNumber(candidate, "unbound_toolkit_count")],
   ].filter((row): row is [string, number] => row[1] !== null);
 
   return (
@@ -228,7 +223,7 @@ function CandidatePanel({
         {confirmationActions.length > 0 && (
           <Radio.Group
             label="Activation action"
-            description="Choose how existing unbound or App-bound resources should be handled."
+            description="Confirm activation that changes the Platform GitHub App identity."
             value={confirmationAction ?? ""}
             onChange={onConfirmationActionChange}
           >
@@ -592,14 +587,6 @@ export function SystemSettingsPageContent({
                 ],
                 ["Toolkits", detail.binding_impact.affected_toolkit_count],
                 ["Agents", detail.binding_impact.affected_agent_count],
-                [
-                  "Unbound installations",
-                  detail.binding_impact.unbound_installation_count,
-                ],
-                [
-                  "Unbound toolkits",
-                  detail.binding_impact.unbound_toolkit_count,
-                ],
               ].map(([label, value]) => (
                 <Paper key={label} withBorder p="sm">
                   <Text size="xs" c="dimmed">

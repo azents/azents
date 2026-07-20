@@ -39,10 +39,10 @@ class TestPlatformGitHubAppPatchRequest(unittest.TestCase):
                 app_id = '',
                 client_id = '',
                 private_key = azentsadminclient.models.system_setting_secret_action_request.SystemSettingSecretActionRequest(
-                    action = 'replace',
+                    action = 'replace', 
                     value = '', ),
                 client_secret = azentsadminclient.models.system_setting_secret_action_request.SystemSettingSecretActionRequest(
-                    action = 'replace',
+                    action = 'replace', 
                     value = '', )
             )
         else:

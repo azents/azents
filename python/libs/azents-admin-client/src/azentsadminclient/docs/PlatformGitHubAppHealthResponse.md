@@ -6,12 +6,12 @@ Current-effective explicit health response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**status** | [**SystemSettingHealthStatus**](SystemSettingHealthStatus.md) |  |
-**code** | **str** |  |
-**message** | **str** |  |
-**action_hint** | **str** |  |
-**metadata** | **Dict[str, object]** |  |
-**checked_at** | **datetime** |  |
+**status** | [**SystemSettingHealthStatus**](SystemSettingHealthStatus.md) |  | 
+**code** | **str** |  | 
+**message** | **str** |  | 
+**action_hint** | **str** |  | 
+**metadata** | **Dict[str, object]** |  | 
+**checked_at** | **datetime** |  | 
 
 ## Example
 
@@ -31,3 +31,5 @@ platform_git_hub_app_health_response_dict = platform_git_hub_app_health_response
 platform_git_hub_app_health_response_from_dict = PlatformGitHubAppHealthResponse.from_dict(platform_git_hub_app_health_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

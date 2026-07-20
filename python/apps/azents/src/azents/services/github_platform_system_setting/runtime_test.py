@@ -11,7 +11,7 @@ from .runtime import (
 )
 
 
-def _credentials(app_id: str | None) -> GitHubSecretsAppPlatform:
+def _credentials(app_id: str) -> GitHubSecretsAppPlatform:
     return GitHubSecretsAppPlatform(
         app_id=app_id,
         installations=[
@@ -23,19 +23,6 @@ def _credentials(app_id: str | None) -> GitHubSecretsAppPlatform:
             )
         ],
     )
-
-
-def test_unbound_legacy_credentials_require_reconnect() -> None:
-    """Null legacy identity produces only the stable Public reason."""
-    state = PlatformGitHubAppRuntimeService.authorization_state(
-        _credentials(None),
-        effective_app_id="123",
-    )
-
-    assert state is not None
-    assert state.type == "github_platform_app"
-    assert state.status == "reconnect_required"
-    assert state.reason is (PlatformGitHubAppAuthorizationReason.LEGACY_BINDING_UNBOUND)
 
 
 def test_changed_app_identity_requires_reconnect() -> None:

@@ -50,7 +50,7 @@ configuration = azentsadminclient.Configuration(
 with azentsadminclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentsadminclient.SystemSettingsV1Api(api_client)
-    candidate_id = 'candidate_id_example' # str |
+    candidate_id = 'candidate_id_example' # str | 
 
     try:
         # Cancel Platform Github App Candidate
@@ -66,7 +66,7 @@ with azentsadminclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **candidate_id** | **str**|  |
+ **candidate_id** | **str**|  | 
 
 ### Return type
 
@@ -202,7 +202,7 @@ configuration = azentsadminclient.Configuration(
 with azentsadminclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentsadminclient.SystemSettingsV1Api(api_client)
-    platform_git_hub_app_confirm_request = azentsadminclient.PlatformGitHubAppConfirmRequest() # PlatformGitHubAppConfirmRequest |
+    platform_git_hub_app_confirm_request = azentsadminclient.PlatformGitHubAppConfirmRequest() # PlatformGitHubAppConfirmRequest | 
 
     try:
         # Confirm Platform Github App Candidate
@@ -220,7 +220,7 @@ with azentsadminclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **platform_git_hub_app_confirm_request** | [**PlatformGitHubAppConfirmRequest**](PlatformGitHubAppConfirmRequest.md)|  |
+ **platform_git_hub_app_confirm_request** | [**PlatformGitHubAppConfirmRequest**](PlatformGitHubAppConfirmRequest.md)|  | 
 
 ### Return type
 
@@ -511,7 +511,7 @@ configuration = azentsadminclient.Configuration(
 with azentsadminclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentsadminclient.SystemSettingsV1Api(api_client)
-    platform_git_hub_app_patch_request = azentsadminclient.PlatformGitHubAppPatchRequest() # PlatformGitHubAppPatchRequest |
+    platform_git_hub_app_patch_request = azentsadminclient.PlatformGitHubAppPatchRequest() # PlatformGitHubAppPatchRequest | 
 
     try:
         # Patch Platform Github App Setting
@@ -529,7 +529,7 @@ with azentsadminclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **platform_git_hub_app_patch_request** | [**PlatformGitHubAppPatchRequest**](PlatformGitHubAppPatchRequest.md)|  |
+ **platform_git_hub_app_patch_request** | [**PlatformGitHubAppPatchRequest**](PlatformGitHubAppPatchRequest.md)|  | 
 
 ### Return type
 
@@ -626,3 +626,4 @@ This endpoint does not need any parameter.
 **200** | Successful Response |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+

@@ -15183,8 +15183,7 @@
       "PlatformGitHubAppAuthorizationReason": {
         "type": "string",
         "enum": [
-          "app_identity_changed",
-          "legacy_binding_unbound"
+          "app_identity_changed"
         ],
         "title": "PlatformGitHubAppAuthorizationReason",
         "description": "Stable Public reason for a Platform Toolkit reconnect requirement."

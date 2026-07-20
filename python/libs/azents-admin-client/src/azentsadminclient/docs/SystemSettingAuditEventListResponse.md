@@ -6,8 +6,8 @@ Paginated metadata-only System Settings audit events.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**items** | [**List[SystemSettingAuditEventResponse]**](SystemSettingAuditEventResponse.md) |  |
-**total** | **int** |  |
+**items** | [**List[SystemSettingAuditEventResponse]**](SystemSettingAuditEventResponse.md) |  | 
+**total** | **int** |  | 
 
 ## Example
 
@@ -27,3 +27,5 @@ system_setting_audit_event_list_response_dict = system_setting_audit_event_list_
 system_setting_audit_event_list_response_from_dict = SystemSettingAuditEventListResponse.from_dict(system_setting_audit_event_list_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

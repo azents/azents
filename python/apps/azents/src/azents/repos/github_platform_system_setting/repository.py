@@ -2,7 +2,6 @@
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import aliased
 
 from azents.rdb.models.github_user_installation import RDBGithubUserInstallation
 from azents.rdb.models.toolkit import RDBAgentToolkit, RDBToolkitConfig
@@ -27,33 +26,22 @@ class PlatformGitHubAppSystemSettingRepository:
         self,
         session: AsyncSession,
         *,
-        current_app_id: str | None,
+        app_id: str,
     ) -> PlatformGitHubAppInstallationImpact:
-        """Return bound-current and unbound installation counts."""
-        affected_filter = (
-            RDBGithubUserInstallation.platform_app_id == current_app_id
-            if current_app_id is not None
-            else RDBGithubUserInstallation.platform_app_id.is_(None)
-        )
+        """Return installations bound to one App identity."""
         affected_user_count = await session.scalar(
             sa.select(sa.func.count(sa.distinct(RDBGithubUserInstallation.user_id)))
             .select_from(RDBGithubUserInstallation)
-            .where(affected_filter)
+            .where(RDBGithubUserInstallation.platform_app_id == app_id)
         )
         affected_installation_count = await session.scalar(
             sa.select(sa.func.count())
             .select_from(RDBGithubUserInstallation)
-            .where(affected_filter)
-        )
-        unbound_installation_count = await session.scalar(
-            sa.select(sa.func.count())
-            .select_from(RDBGithubUserInstallation)
-            .where(RDBGithubUserInstallation.platform_app_id.is_(None))
+            .where(RDBGithubUserInstallation.platform_app_id == app_id)
         )
         return PlatformGitHubAppInstallationImpact(
             affected_user_count=affected_user_count or 0,
             affected_installation_count=affected_installation_count or 0,
-            unbound_installation_count=unbound_installation_count or 0,
         )
 
     async def get_current_binding_installation_impact(
@@ -62,11 +50,8 @@ class PlatformGitHubAppSystemSettingRepository:
         *,
         effective_app_id: str,
     ) -> PlatformGitHubAppInstallationImpact:
-        """Return installation rows that cannot use the effective App identity."""
-        affected_filter = sa.or_(
-            RDBGithubUserInstallation.platform_app_id.is_(None),
-            RDBGithubUserInstallation.platform_app_id != effective_app_id,
-        )
+        """Return installations bound to a different App identity."""
+        affected_filter = RDBGithubUserInstallation.platform_app_id != effective_app_id
         affected_user_count = await session.scalar(
             sa.select(sa.func.count(sa.distinct(RDBGithubUserInstallation.user_id)))
             .select_from(RDBGithubUserInstallation)
@@ -77,15 +62,9 @@ class PlatformGitHubAppSystemSettingRepository:
             .select_from(RDBGithubUserInstallation)
             .where(affected_filter)
         )
-        unbound_installation_count = await session.scalar(
-            sa.select(sa.func.count())
-            .select_from(RDBGithubUserInstallation)
-            .where(RDBGithubUserInstallation.platform_app_id.is_(None))
-        )
         return PlatformGitHubAppInstallationImpact(
             affected_user_count=affected_user_count or 0,
             affected_installation_count=affected_installation_count or 0,
-            unbound_installation_count=unbound_installation_count or 0,
         )
 
     async def list_platform_toolkit_credentials(
@@ -126,38 +105,6 @@ class PlatformGitHubAppSystemSettingRepository:
             )
         )
         return count or 0
-
-    async def bind_unbound_installations(
-        self,
-        session: AsyncSession,
-        *,
-        app_id: str,
-    ) -> int:
-        """Bind every unbound legacy installation row to one App identity."""
-        unbound = aliased(RDBGithubUserInstallation)
-        bound = aliased(RDBGithubUserInstallation)
-        duplicate_ids = sa.select(unbound.id).where(
-            unbound.platform_app_id.is_(None),
-            sa.exists(
-                sa.select(bound.id).where(
-                    bound.user_id == unbound.user_id,
-                    bound.installation_id == unbound.installation_id,
-                    bound.platform_app_id == app_id,
-                )
-            ),
-        )
-        deleted = await session.execute(
-            sa.delete(RDBGithubUserInstallation)
-            .where(RDBGithubUserInstallation.id.in_(duplicate_ids))
-            .returning(RDBGithubUserInstallation.id)
-        )
-        updated = await session.execute(
-            sa.update(RDBGithubUserInstallation)
-            .where(RDBGithubUserInstallation.platform_app_id.is_(None))
-            .values(platform_app_id=app_id)
-            .returning(RDBGithubUserInstallation.id)
-        )
-        return len(deleted.scalars().all()) + len(updated.scalars().all())
 
     async def update_platform_toolkit_credentials(
         self,

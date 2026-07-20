@@ -268,9 +268,9 @@ class SystemSettingsV1Api:
         # process the path parameters
         # process the query parameters
         if candidate_id is not None:
-
+            
             _query_params.append(('candidate_id', candidate_id))
-
+            
         # process the header parameters
         # process the form parameters
         # process the body parameter
@@ -1316,13 +1316,13 @@ class SystemSettingsV1Api:
         # process the path parameters
         # process the query parameters
         if offset is not None:
-
+            
             _query_params.append(('offset', offset))
-
+            
         if limit is not None:
-
+            
             _query_params.append(('limit', limit))
-
+            
         # process the header parameters
         # process the form parameters
         # process the body parameter
@@ -2125,3 +2125,5 @@ class SystemSettingsV1Api:
             _host=_host,
             _request_auth=_request_auth
         )
+
+

@@ -37,24 +37,24 @@ class TestSystemSettingAuditEventListResponse(unittest.TestCase):
             return SystemSettingAuditEventListResponse(
                 items = [
                     azentsadminclient.models.system_setting_audit_event_response.SystemSettingAuditEventResponse(
-                        id = '',
-                        section = '',
-                        event_type = 'candidate_replaced',
-                        source = 'admin_api',
-                        previous_version = 56,
-                        new_version = 56,
-                        actor_user_id = '',
+                        id = '', 
+                        section = '', 
+                        event_type = 'candidate_replaced', 
+                        source = 'admin_api', 
+                        previous_version = 56, 
+                        new_version = 56, 
+                        actor_user_id = '', 
                         changed_fields = [
                             ''
-                            ],
+                            ], 
                         secret_actions = {
                             'key' : ''
-                            },
-                        validation_status = 'pending',
-                        candidate_id = '',
-                        impact_confirmed = True,
-                        confirmation_action = '',
-                        metadata = { },
+                            }, 
+                        validation_status = 'pending', 
+                        candidate_id = '', 
+                        impact_confirmed = True, 
+                        confirmation_action = '', 
+                        metadata = { }, 
                         created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
                     ],
                 total = 56
@@ -63,24 +63,24 @@ class TestSystemSettingAuditEventListResponse(unittest.TestCase):
             return SystemSettingAuditEventListResponse(
                 items = [
                     azentsadminclient.models.system_setting_audit_event_response.SystemSettingAuditEventResponse(
-                        id = '',
-                        section = '',
-                        event_type = 'candidate_replaced',
-                        source = 'admin_api',
-                        previous_version = 56,
-                        new_version = 56,
-                        actor_user_id = '',
+                        id = '', 
+                        section = '', 
+                        event_type = 'candidate_replaced', 
+                        source = 'admin_api', 
+                        previous_version = 56, 
+                        new_version = 56, 
+                        actor_user_id = '', 
                         changed_fields = [
                             ''
-                            ],
+                            ], 
                         secret_actions = {
                             'key' : ''
-                            },
-                        validation_status = 'pending',
-                        candidate_id = '',
-                        impact_confirmed = True,
-                        confirmation_action = '',
-                        metadata = { },
+                            }, 
+                        validation_status = 'pending', 
+                        candidate_id = '', 
+                        impact_confirmed = True, 
+                        confirmation_action = '', 
+                        metadata = { }, 
                         created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
                     ],
                 total = 56,

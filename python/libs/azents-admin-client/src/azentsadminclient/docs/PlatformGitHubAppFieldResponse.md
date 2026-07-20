@@ -6,14 +6,14 @@ Redacted field response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**name** | **str** |  |
-**secret** | **bool** |  |
-**value** | **str** |  |
-**configured** | **bool** |  |
-**source** | [**SystemSettingFieldSource**](SystemSettingFieldSource.md) |  |
-**environment_variable** | **str** |  |
-**fallback_configured** | **bool** |  |
-**fallback_last_changed_at** | **datetime** |  |
+**name** | **str** |  | 
+**secret** | **bool** |  | 
+**value** | **str** |  | 
+**configured** | **bool** |  | 
+**source** | [**SystemSettingFieldSource**](SystemSettingFieldSource.md) |  | 
+**environment_variable** | **str** |  | 
+**fallback_configured** | **bool** |  | 
+**fallback_last_changed_at** | **datetime** |  | 
 
 ## Example
 
@@ -33,3 +33,5 @@ platform_git_hub_app_field_response_dict = platform_git_hub_app_field_response_i
 platform_git_hub_app_field_response_from_dict = PlatformGitHubAppFieldResponse.from_dict(platform_git_hub_app_field_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

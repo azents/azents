@@ -37,11 +37,11 @@ class TestSystemSettingInventoryResponse(unittest.TestCase):
             return SystemSettingInventoryResponse(
                 items = [
                     azentsadminclient.models.system_setting_inventory_item_response.SystemSettingInventoryItemResponse(
-                        section = '',
-                        display_name = '',
-                        effective_status = 'not_configured',
-                        admin_version = 56,
-                        environment_managed_field_count = 56,
+                        section = '', 
+                        display_name = '', 
+                        effective_status = 'not_configured', 
+                        admin_version = 56, 
+                        environment_managed_field_count = 56, 
                         candidate_status = 'pending', )
                     ]
             )
@@ -49,11 +49,11 @@ class TestSystemSettingInventoryResponse(unittest.TestCase):
             return SystemSettingInventoryResponse(
                 items = [
                     azentsadminclient.models.system_setting_inventory_item_response.SystemSettingInventoryItemResponse(
-                        section = '',
-                        display_name = '',
-                        effective_status = 'not_configured',
-                        admin_version = 56,
-                        environment_managed_field_count = 56,
+                        section = '', 
+                        display_name = '', 
+                        effective_status = 'not_configured', 
+                        admin_version = 56, 
+                        environment_managed_field_count = 56, 
                         candidate_status = 'pending', )
                     ],
         )

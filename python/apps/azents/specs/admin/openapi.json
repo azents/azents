@@ -3327,14 +3327,6 @@
           "affected_agent_count": {
             "type": "integer",
             "title": "Affected Agent Count"
-          },
-          "unbound_installation_count": {
-            "type": "integer",
-            "title": "Unbound Installation Count"
-          },
-          "unbound_toolkit_count": {
-            "type": "integer",
-            "title": "Unbound Toolkit Count"
           }
         },
         "type": "object",
@@ -3342,9 +3334,7 @@
           "affected_user_count",
           "affected_installation_count",
           "affected_toolkit_count",
-          "affected_agent_count",
-          "unbound_installation_count",
-          "unbound_toolkit_count"
+          "affected_agent_count"
         ],
         "title": "PlatformGitHubAppBindingResponse",
         "description": "Redacted resources that require reconnect for the effective App."

@@ -6,7 +6,7 @@ System Settings inventory response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**items** | [**List[SystemSettingInventoryItemResponse]**](SystemSettingInventoryItemResponse.md) |  |
+**items** | [**List[SystemSettingInventoryItemResponse]**](SystemSettingInventoryItemResponse.md) |  | 
 
 ## Example
 
@@ -26,3 +26,5 @@ system_setting_inventory_response_dict = system_setting_inventory_response_insta
 system_setting_inventory_response_from_dict = SystemSettingInventoryResponse.from_dict(system_setting_inventory_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

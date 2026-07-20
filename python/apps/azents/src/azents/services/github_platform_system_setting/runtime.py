@@ -1,4 +1,4 @@
-"""Operation-boundary Platform GitHub App settings resolution."""
+"""Operation-bound Platform GitHub App settings resolution."""
 
 import dataclasses
 import enum
@@ -30,7 +30,6 @@ class PlatformGitHubAppAuthorizationReason(enum.StrEnum):
     """Stable Public reason for a Platform Toolkit reconnect requirement."""
 
     APP_IDENTITY_CHANGED = "app_identity_changed"
-    LEGACY_BINDING_UNBOUND = "legacy_binding_unbound"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -71,13 +70,7 @@ class PlatformGitHubAppRuntimeService:
         *,
         effective_app_id: str | None,
     ) -> PlatformGitHubAppAuthorizationState | None:
-        """Project only reconnect status and a stable reason."""
-        if credentials.app_id is None:
-            return PlatformGitHubAppAuthorizationState(
-                type="github_platform_app",
-                status="reconnect_required",
-                reason=(PlatformGitHubAppAuthorizationReason.LEGACY_BINDING_UNBOUND),
-            )
+        """Project reconnect status for a changed Platform App identity."""
         if credentials.app_id != effective_app_id:
             return PlatformGitHubAppAuthorizationState(
                 type="github_platform_app",

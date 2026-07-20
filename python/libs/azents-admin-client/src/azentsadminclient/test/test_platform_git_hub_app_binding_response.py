@@ -38,9 +38,7 @@ class TestPlatformGitHubAppBindingResponse(unittest.TestCase):
                 affected_user_count = 56,
                 affected_installation_count = 56,
                 affected_toolkit_count = 56,
-                affected_agent_count = 56,
-                unbound_installation_count = 56,
-                unbound_toolkit_count = 56
+                affected_agent_count = 56
             )
         else:
             return PlatformGitHubAppBindingResponse(
@@ -48,8 +46,6 @@ class TestPlatformGitHubAppBindingResponse(unittest.TestCase):
                 affected_installation_count = 56,
                 affected_toolkit_count = 56,
                 affected_agent_count = 56,
-                unbound_installation_count = 56,
-                unbound_toolkit_count = 56,
         )
         """
 

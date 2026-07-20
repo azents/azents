@@ -6,16 +6,16 @@ Redacted Platform GitHub App detail response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**section** | **str** |  |
-**schema_version** | **int** |  |
-**admin_version** | **int** |  |
-**effective_status** | [**PlatformGitHubAppEffectiveStatus**](PlatformGitHubAppEffectiveStatus.md) |  |
-**fields** | [**List[PlatformGitHubAppFieldResponse]**](PlatformGitHubAppFieldResponse.md) |  |
-**candidate** | [**PlatformGitHubAppCandidateResponse**](PlatformGitHubAppCandidateResponse.md) |  |
-**health** | [**PlatformGitHubAppHealthResponse**](PlatformGitHubAppHealthResponse.md) |  |
-**binding_impact** | [**PlatformGitHubAppBindingResponse**](PlatformGitHubAppBindingResponse.md) |  |
-**activation_validation_status** | [**SystemSettingValidationStatus**](SystemSettingValidationStatus.md) |  |
-**app_slug** | **str** |  |
+**section** | **str** |  | 
+**schema_version** | **int** |  | 
+**admin_version** | **int** |  | 
+**effective_status** | [**PlatformGitHubAppEffectiveStatus**](PlatformGitHubAppEffectiveStatus.md) |  | 
+**fields** | [**List[PlatformGitHubAppFieldResponse]**](PlatformGitHubAppFieldResponse.md) |  | 
+**candidate** | [**PlatformGitHubAppCandidateResponse**](PlatformGitHubAppCandidateResponse.md) |  | 
+**health** | [**PlatformGitHubAppHealthResponse**](PlatformGitHubAppHealthResponse.md) |  | 
+**binding_impact** | [**PlatformGitHubAppBindingResponse**](PlatformGitHubAppBindingResponse.md) |  | 
+**activation_validation_status** | [**SystemSettingValidationStatus**](SystemSettingValidationStatus.md) |  | 
+**app_slug** | **str** |  | 
 
 ## Example
 
@@ -35,3 +35,5 @@ platform_git_hub_app_detail_response_dict = platform_git_hub_app_detail_response
 platform_git_hub_app_detail_response_from_dict = PlatformGitHubAppDetailResponse.from_dict(platform_git_hub_app_detail_response_dict)
 ```
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

@@ -131,8 +131,6 @@ class PlatformGitHubAppBindingResponse(BaseModel):
     affected_installation_count: int
     affected_toolkit_count: int
     affected_agent_count: int
-    unbound_installation_count: int
-    unbound_toolkit_count: int
 
     @classmethod
     def from_domain(cls, impact: PlatformGitHubAppBindingState) -> Self:

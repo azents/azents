@@ -1015,7 +1015,6 @@
         "installationsLinked": "GitHub Appインストール連携済み",
         "reconnectRequiredTitle": "GitHubの再接続が必要です",
         "reconnectReasonAppIdentityChanged": "インスタンスのPlatform GitHub Appが変更されました。再利用する前に、このツールキットを再接続して更新されたインストール情報を保存してください。",
-        "reconnectReasonLegacyBindingUnbound": "このツールキットはApp ID連携の導入前に作成されています。一度再接続して、インストールを現在のPlatform GitHub Appに紐付けてください。",
         "reconnectGithub": "GitHubに再接続"
       },
       "envvar": {

@@ -941,7 +941,7 @@ class GitHubToolkitProvider(ToolkitProvider[GitHubToolkitConfig]):
                 platform = await self.platform_runtime.resolve()
                 if platform.app_id is None or platform.private_key is None:
                     raise ValueError("GitHub Platform App is not configured.")
-                if secrets.app_id is not None and secrets.app_id != platform.app_id:
+                if secrets.app_id != platform.app_id:
                     raise ValueError("GitHub Platform App reconnect is required.")
                 first = secrets.installations[0]
                 return await _exchange_app_token(
@@ -999,8 +999,6 @@ class GitHubToolkitProvider(ToolkitProvider[GitHubToolkitConfig]):
                 installation_id = int(installation_id_raw)
             except ValueError:
                 return "GitHub installation is not accessible to this user."
-            if secrets.app_id is None:
-                return "GitHub Platform App identity is not bound."
             has_access = await repo.has_access(
                 session,
                 user_id,
@@ -1187,7 +1185,7 @@ class GitHubToolkitProvider(ToolkitProvider[GitHubToolkitConfig]):
         platform = await self.platform_runtime.resolve()
         if platform.app_id is None or platform.private_key is None:
             raise ValueError("GitHub Platform App is not configured.")
-        if secrets.app_id is None or secrets.app_id != platform.app_id:
+        if secrets.app_id != platform.app_id:
             raise ValueError("GitHub Platform App reconnect is required.")
 
         mcp_config = _build_mcp_config(config)

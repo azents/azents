@@ -51,8 +51,7 @@ class GitHubSecretsAppPlatform(BaseModel):
     """
 
     type: Literal["github_app_platform"] = "github_app_platform"
-    app_id: str | None = Field(
-        default=None,
+    app_id: str = Field(
         description="Internal Platform GitHub App identity binding",
     )
     installations: list[GitHubInstallationTarget] = Field(

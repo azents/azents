@@ -13,11 +13,10 @@ class PlatformGitHubAppToolkitCredential:
 
 @dataclass(frozen=True)
 class PlatformGitHubAppInstallationImpact:
-    """Redacted installation binding counts for one current App identity."""
+    """Redacted installation counts for one App identity comparison."""
 
     affected_user_count: int
     affected_installation_count: int
-    unbound_installation_count: int
 
 
 @dataclass(frozen=True)
@@ -29,8 +28,6 @@ class PlatformGitHubAppImpact:
     affected_installation_count: int
     affected_toolkit_count: int
     affected_agent_count: int
-    unbound_installation_count: int
-    unbound_toolkit_count: int
     current_app_id_source: str
     confirmation_actions: tuple[str, ...]
 
