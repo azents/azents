@@ -42,6 +42,7 @@ function message(id: string, overrides: Partial<ChatMessage>): ChatMessage {
 function clientToolMessage(
   id: string,
   callId: string,
+  toolName = "github__issue_write",
   toolkitSource?: NonNullable<
     ChatMessage["toolCalls"]
   >[number]["toolkitSource"],
@@ -51,7 +52,7 @@ function clientToolMessage(
       {
         id: callId,
         callId,
-        name: "github__issue_write",
+        name: toolName,
         arguments: "{}",
         status: "completed",
         result: "ok",
@@ -145,7 +146,14 @@ void test("uses immutable Toolkit source identity as the summary category", () =
         toolkit_source: toolkitSource,
       }),
     ],
-    [clientToolMessage("tool-message", "call-1", toolkitSource)],
+    [
+      clientToolMessage(
+        "tool-message",
+        "call-1",
+        "github__issue_write",
+        toolkitSource,
+      ),
+    ],
   );
 
   const activityEvent = activityAt(items, 0).events[0];
@@ -154,6 +162,24 @@ void test("uses immutable Toolkit source identity as the summary category", () =
     key: "toolkit:toolkit-config-1",
     label: "GitHub",
   });
+});
+
+void test("groups apply_patch with file-edit activity", () => {
+  const tool = clientToolMessage("tool-message", "call-1", "apply_patch");
+  const items = projectChatPresentationItems(
+    [
+      event("call-1", "client_tool_call", {
+        call_id: "call-1",
+        name: "apply_patch",
+        arguments: "{}",
+      }),
+    ],
+    [tool],
+  );
+
+  const activityEvent = activityAt(items, 0).events[0];
+  assert.ok(activityEvent);
+  assert.deepEqual(activityEvent.category, { key: "edit", label: "edit" });
 });
 
 void test("closes Activity at an action-execution message boundary", () => {
