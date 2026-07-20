@@ -366,7 +366,7 @@ class SystemSettingCandidateExpired(Exception):
     candidate_id: str
 
 
-@dataclass(frozen=True)
+@dataclass
 class SystemSettingCandidateNotValidated(Exception):
     """Candidate is not valid for confirmation."""
 
@@ -374,7 +374,7 @@ class SystemSettingCandidateNotValidated(Exception):
     candidate_id: str
 
 
-@dataclass(frozen=True)
+@dataclass
 class SystemSettingImpactChanged(Exception):
     """Candidate impact changed after external validation."""
 
