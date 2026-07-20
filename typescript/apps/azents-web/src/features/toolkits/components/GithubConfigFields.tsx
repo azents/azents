@@ -30,6 +30,7 @@ import {
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { trpc } from "@/trpc/client";
+import type { GitHubPlatformAuthorizationStateResponse } from "@azents/public-client";
 
 type GithubConfig = Record<string, unknown>;
 type GithubCredentials = Record<string, unknown> | null;
@@ -67,6 +68,7 @@ interface GithubConfigFieldsProps {
   credentials: GithubCredentials;
   onCredentialsChange: (credentials: GithubCredentials) => void;
   hasCredentials: boolean;
+  authorizationState: GitHubPlatformAuthorizationStateResponse | null;
   handle?: string;
   toolkitConfigId?: string;
 }
@@ -138,6 +140,7 @@ export function GithubConfigFields({
   credentials,
   onCredentialsChange,
   hasCredentials,
+  authorizationState,
   handle,
   toolkitConfigId,
 }: GithubConfigFieldsProps): React.ReactElement {
@@ -521,6 +524,33 @@ export function GithubConfigFields({
 
       {githubAuthType === "github_app_platform" && (
         <>
+          {authorizationState?.status === "reconnect_required" && (
+            <Alert
+              color="red"
+              variant="light"
+              icon={<IconAlertTriangle size={16} />}
+              title={t("reconnectRequiredTitle")}
+            >
+              <Stack gap="xs">
+                <Text size="sm">
+                  {authorizationState.reason === "app_identity_changed"
+                    ? t("reconnectReasonAppIdentityChanged")
+                    : t("reconnectReasonLegacyBindingUnbound")}
+                </Text>
+                <Button
+                  variant="light"
+                  color="red"
+                  leftSection={<IconBrandGithub size={16} />}
+                  onClick={() => void startOAuthFlow()}
+                  loading={loadingInstallations}
+                  w="fit-content"
+                >
+                  {t("reconnectGithub")}
+                </Button>
+              </Stack>
+            </Alert>
+          )}
+
           <Alert color="blue" variant="light">
             <Text size="sm">{t("platformDescription")}</Text>
           </Alert>
@@ -665,6 +695,7 @@ export function GithubConfigFields({
           leftSection={<IconPlugConnected size={16} />}
           onClick={() => void handleTestConnection()}
           loading={testing}
+          disabled={authorizationState?.status === "reconnect_required"}
           w="fit-content"
         >
           {t("testConnection")}

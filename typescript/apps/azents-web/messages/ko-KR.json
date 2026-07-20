@@ -1011,7 +1011,11 @@
         "addInstallation": "설치 추가",
         "removeInstallation": "삭제",
         "refreshInstallations": "설치 목록 새로고침",
-        "installationsLinked": "GitHub App 설치 연동 완료"
+        "installationsLinked": "GitHub App 설치 연동 완료",
+        "reconnectRequiredTitle": "GitHub 재연결이 필요합니다",
+        "reconnectReasonAppIdentityChanged": "인스턴스의 플랫폼 GitHub App이 변경되었습니다. 다시 사용하기 전에 이 툴킷을 재연결하고 갱신된 설치 정보를 저장하세요.",
+        "reconnectReasonLegacyBindingUnbound": "이 툴킷은 App ID 바인딩 도입 전에 생성되었습니다. 한 번 재연결하여 설치 정보를 현재 플랫폼 GitHub App에 연결하세요.",
+        "reconnectGithub": "GitHub에 다시 연결"
       },
       "envvar": {
         "warningTitle": "장기 credential 경고",

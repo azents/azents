@@ -45,6 +45,7 @@ spec:
             - name: AZ_WORKER_HEALTH_PORT
               value: "8012"
             {{- include "azents.serverAuthSecretEnv" . | nindent 12 }}
+            {{- include "azents.platformGitHubAppSecretEnv" . | nindent 12 }}
             {{- include "azents.externalServiceSecretEnv" . | nindent 12 }}
           livenessProbe:
             httpGet:

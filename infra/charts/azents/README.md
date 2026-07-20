@@ -42,7 +42,7 @@ Chart consumers create Kubernetes Secrets with the keys below and reference thei
 | `server.systemBootstrap.existingSecret` | `setup-token`, or the key selected by `server.systemBootstrap.tokenKey` | `adminserver` during zero-user bootstrap |
 | `server.runtimeControl.auth.existingSecret` | `runtime-control-token`, or the key selected by `server.runtimeControl.auth.tokenKey` | `server.runtimeControl`, `runtimeProviderKubernetes` when Runtime Control auth is enabled |
 
-The bootstrap Secret is optional. Without it, a zero-user installation generates a setup token and logs the plaintext once after persisting only its hash. With it, the configured token is never logged. Runtime Control auth is disabled by default; installations that enable it must provide an existing Secret reference through `server.runtimeControl.auth.existingSecret`.
+The bootstrap Secret is optional. Without it, a zero-user installation generates a setup token and logs the plaintext once after persisting only its hash. With it, the configured token is never logged. The Platform GitHub App Secret is also optional; when configured, each referenced field permanently overrides the Admin-managed database fallback, including empty Secret values, and is intentionally not injected into `scheduler`. Runtime Control auth is disabled by default; installations that enable it must provide an existing Secret reference through `server.runtimeControl.auth.existingSecret`.
 
 ## External Service Policy
 

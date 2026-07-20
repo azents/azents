@@ -47,6 +47,7 @@ spec:
             - name: AZ_ADMIN_PORT
               value: "8011"
             {{- include "azents.serverAuthSecretEnv" . | nindent 12 }}
+            {{- include "azents.platformGitHubAppSecretEnv" . | nindent 12 }}
             {{- include "azents.systemBootstrapSecretEnv" . | nindent 12 }}
             {{- include "azents.externalServiceSecretEnv" . | nindent 12 }}
           readinessProbe:

@@ -22,7 +22,12 @@ import {
   Title,
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
-import { IconEdit, IconPlus, IconTrash } from "@tabler/icons-react";
+import {
+  IconAlertTriangle,
+  IconEdit,
+  IconPlus,
+  IconTrash,
+} from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useCallback, useState } from "react";
@@ -156,11 +161,29 @@ function ToolkitCard({
               {toolkit.description}
             </Text>
           )}
+          {toolkit.authorization_state?.status === "reconnect_required" && (
+            <Alert
+              color="red"
+              variant="light"
+              icon={<IconAlertTriangle size={16} />}
+              title={t("github.reconnectRequiredTitle")}
+            >
+              <Text size="sm">
+                {toolkit.authorization_state.reason === "app_identity_changed"
+                  ? t("github.reconnectReasonAppIdentityChanged")
+                  : t("github.reconnectReasonLegacyBindingUnbound")}
+              </Text>
+            </Alert>
+          )}
         </Stack>
 
         <Group gap="xs" wrap="nowrap">
           <Switch
             checked={toolkit.enabled}
+            disabled={
+              toolkit.authorization_state?.status === "reconnect_required" &&
+              !toolkit.enabled
+            }
             onChange={(e) => onToggleEnabled(toolkit, e.currentTarget.checked)}
             size="sm"
           />
