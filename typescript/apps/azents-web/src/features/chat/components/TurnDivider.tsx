@@ -8,7 +8,7 @@
  */
 
 import { Box, Group, rem, Stack, Text, UnstyledButton } from "@mantine/core";
-import { IconChartArcs3, IconChevronRight } from "@tabler/icons-react";
+import { IconChartArcs3 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { memo, useState } from "react";
 import inlineControlClasses from "./ChatInlineControl.module.css";
@@ -59,13 +59,6 @@ export const TurnDivider = memo(function TurnDivider({
             gap: rem(6),
           }}
         >
-          <IconChevronRight
-            size={rem(14)}
-            style={{
-              transform: opened ? "rotate(90deg)" : "rotate(0deg)",
-              transition: "transform 120ms ease",
-            }}
-          />
           <IconChartArcs3 aria-hidden="true" size={rem(14)} stroke={1.8} />
           <Text size="xs" c="dimmed" className={inlineControlClasses.label}>
             {t("turnUsage.tokens", { count: formatNumber(totalTokens) })}

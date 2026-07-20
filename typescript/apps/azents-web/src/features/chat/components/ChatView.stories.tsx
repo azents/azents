@@ -239,7 +239,6 @@ const baseArgs = {
   },
   isResponsePending: false,
   isWritePending: false,
-  isModelResponsePending: false,
   liveRun: null,
   onSendInput: sendMessage,
   onDeletePendingInputBuffer: noop,
@@ -355,8 +354,8 @@ export const MultiTurnToolActivity = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await expect(canvas.getByText("Activity")).toBeVisible();
-    await expect(canvas.getByLabelText("Failed")).toBeVisible();
+    await expect(canvas.getByText("Failed 1")).toBeVisible();
+    await expect(canvas.getByLabelText("Completed")).toBeVisible();
     await expect(canvas.queryByText(completedToolCall.name)).toBeNull();
 
     await userEvent.click(canvas.getByRole("button", { name: /Activity/ }));
@@ -534,7 +533,6 @@ export const WithLiveRunRetry = {
         ],
       },
     },
-    isModelResponsePending: true,
   },
 } satisfies Story;
 
@@ -584,7 +582,6 @@ export const StreamingModelWithPartialOutput = {
       }),
     ],
     isResponsePending: true,
-    isModelResponsePending: true,
     liveRun: {
       run_id: "run-streaming-story",
       phase: "streaming_model",

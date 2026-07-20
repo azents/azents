@@ -74,8 +74,8 @@ export const CollapsedWithAttention = {
   args: { activity },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await expect(canvas.getByText("Activity")).toBeVisible();
-    await expect(canvas.getByLabelText("Failed")).toBeVisible();
+    await expect(canvas.getByText("Failed 1")).toBeVisible();
+    await expect(canvas.getByLabelText("Completed")).toBeVisible();
   },
 } satisfies Story;
 

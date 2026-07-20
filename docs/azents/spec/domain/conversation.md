@@ -617,12 +617,14 @@ work. Mixed client and provider calls retain their raw diagnostic order. Authori
 change boundaries; the first pending request is a compact action on the latest Activity when one exists,
 while additional requests remain standalone.
 
-An Activity is collapsed by default. Its compact summary shows ordered-work categories, product identity
-from the backend Toolkit snapshot when available, and running, failed, or approval attention state; category
-overflow is summarized without hiding detail from assistive technology. Expanding the row reveals the
-existing raw tool cards and contextual event renderers in event order. The frontend may use stable generic
-categories for source-less built-in and provider tools, but does not use tool-name prefixes as a Toolkit
-identity heuristic.
+An Activity is collapsed by default. Its compact row uses the standard Run state indicator rather than a
+tool-specific icon or title: the active Activity shows the shared animated Run indicator for the full live
+Run lifetime, and a completed Activity shows a check icon after the Run closes. Ordered-work categories,
+including Reasoning, remain dimmed summary text; failed events are counted in the same tone as the final
+summary item. Category overflow is summarized without hiding detail from assistive technology. Expanding
+the row reveals the existing raw tool cards and contextual event renderers in event order. The frontend may
+use stable generic categories for source-less built-in and provider tools, but does not use tool-name
+prefixes as a Toolkit identity heuristic.
 
 A tool result or provider call with visible attachments closes the preceding Activity and renders through
 the normal standalone message attachment surface. The raw tool card is not duplicated inside Activity, so

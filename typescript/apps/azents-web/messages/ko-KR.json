@@ -1403,9 +1403,12 @@
     "toolActivity": {
       "title": "작업",
       "working": "진행 중",
+      "complete": "완료",
       "failed": "실패",
+      "failedCount": "실패 {count}",
       "approvalNeeded": "승인 필요",
       "overflowCategories": "외 {count}",
+      "categoryReasoning": "추론",
       "categorySkill": "Skill",
       "categoryExplore": "탐색",
       "categoryShell": "Shell",

@@ -4,20 +4,15 @@ import {
   Box,
   Collapse,
   Group,
-  Loader,
   rem,
   Stack,
   Text,
-  ThemeIcon,
   UnstyledButton,
 } from "@mantine/core";
 import { useDisclosure, useElementSize } from "@mantine/hooks";
-import {
-  IconAlertCircle,
-  IconChevronRight,
-  IconTool,
-} from "@tabler/icons-react";
+import { IconCheck, IconChevronRight } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
+import { AgentRunIndicator } from "./AgentRunIndicator";
 import { CompactionDivider } from "./CompactionDivider";
 import { MessageBubble } from "./MessageBubble";
 import { ProviderToolCallCard } from "./ProviderToolCallCard";
@@ -33,6 +28,8 @@ interface ToolActivityGroupProps {
   activity: ToolActivityGroupModel;
   authorizationAction?: ReactNode;
   dimmed?: boolean;
+  active?: boolean;
+  modelCallStartedAt?: string | null;
 }
 
 interface CategorySummary extends ActivityCategory {
@@ -62,6 +59,8 @@ function categoryLabel(
   t: ReturnType<typeof useTranslations<"chat.toolActivity">>,
 ): string {
   switch (category.key) {
+    case "reasoning":
+      return t("categoryReasoning");
     case "skill":
       return t("categorySkill");
     case "explore":
@@ -108,17 +107,24 @@ export function ToolActivityGroup({
   activity,
   authorizationAction,
   dimmed = false,
+  active = false,
+  modelCallStartedAt = null,
 }: ToolActivityGroupProps): React.ReactElement {
   const t = useTranslations("chat.toolActivity");
   const [opened, { toggle }] = useDisclosure(false);
   const { ref, width } = useElementSize();
   const categories = categorySummaries(activity.events);
-  const running = activity.events.some((event) => event.status === "running");
-  const failed = activity.events.some((event) => event.status === "failed");
-  const labels = categories.map((category) => {
+  const failedCount = activity.events.filter(
+    (event) => event.status === "failed",
+  ).length;
+  const categoryLabels = categories.map((category) => {
     const label = categoryLabel(category, t);
     return category.count > 1 ? `${label} ${category.count}` : label;
   });
+  const labels = [
+    ...categoryLabels,
+    ...(failedCount > 0 ? [t("failedCount", { count: failedCount })] : []),
+  ];
   const maxVisibleCategories = Math.max(1, Math.floor(width / 96));
   const hiddenCategoryCount = Math.max(0, labels.length - maxVisibleCategories);
   const visibleLabels = labels.slice(0, maxVisibleCategories);
@@ -129,16 +135,47 @@ export function ToolActivityGroup({
       : []),
   ].join(" · ");
   const accessibilitySummary = labels.join(" · ");
-  const stateSummary = failed
-    ? t("failed")
-    : authorizationAction
-      ? t("approvalNeeded")
-      : running
-        ? t("working")
-        : "";
+  const stateSummary = authorizationAction
+    ? t("approvalNeeded")
+    : active
+      ? t("working")
+      : t("complete");
   const ariaLabel = [t("title"), accessibilitySummary, stateSummary]
     .filter((value) => value.length > 0)
     .join(": ");
+  const hasDetails = activity.events.length > 0;
+
+  const header = (
+    <Group gap="xs" wrap="nowrap" miw={0}>
+      {hasDetails ? (
+        <IconChevronRight
+          aria-hidden="true"
+          size={rem(14)}
+          color="var(--mantine-color-dimmed)"
+          style={{
+            flexShrink: 0,
+            transform: opened ? "rotate(90deg)" : "none",
+            transition: "transform 120ms ease",
+          }}
+        />
+      ) : null}
+      {active ? (
+        <AgentRunIndicator modelCallStartedAt={modelCallStartedAt} />
+      ) : (
+        <IconCheck
+          aria-label={t("complete")}
+          size={rem(14)}
+          color="var(--mantine-color-green-6)"
+          style={{ flexShrink: 0 }}
+        />
+      )}
+      {summary.length > 0 ? (
+        <Text size="xs" c="dimmed" fw={500} truncate>
+          {summary}
+        </Text>
+      ) : null}
+    </Group>
+  );
 
   return (
     <Box mb="xs" opacity={dimmed ? 0.45 : 1} style={{ minWidth: 0 }}>
@@ -148,58 +185,26 @@ export function ToolActivityGroup({
         ref={ref}
         data-tool-activity-id={activity.id}
       >
-        <UnstyledButton
-          flex={1}
-          miw={0}
-          onClick={toggle}
-          aria-expanded={opened}
-          aria-label={ariaLabel}
-        >
-          <Group gap="xs" wrap="nowrap" miw={0}>
-            <IconChevronRight
-              aria-hidden="true"
-              size={rem(14)}
-              color="var(--mantine-color-dimmed)"
-              style={{
-                flexShrink: 0,
-                transform: opened ? "rotate(90deg)" : "none",
-                transition: "transform 120ms ease",
-              }}
-            />
-            <ThemeIcon size={rem(20)} variant="transparent" color="gray">
-              <IconTool size={rem(14)} />
-            </ThemeIcon>
-            <Text size="xs" fw={550} style={{ flexShrink: 0 }}>
-              {t("title")}
-            </Text>
-            {running && !failed && !authorizationAction ? (
-              <Group gap={rem(4)} wrap="nowrap" style={{ flexShrink: 0 }}>
-                <Loader size={rem(12)} color="gray" />
-                <Text size="xs" c="dimmed">
-                  {t("working")}
-                </Text>
-              </Group>
-            ) : null}
-            {summary.length > 0 ? (
-              <Text size="xs" c="dimmed" truncate>
-                {summary}
-              </Text>
-            ) : null}
-            {failed ? (
-              <IconAlertCircle
-                aria-label={t("failed")}
-                size={rem(15)}
-                color="var(--mantine-color-red-6)"
-                style={{ flexShrink: 0 }}
-              />
-            ) : null}
-          </Group>
-        </UnstyledButton>
+        {hasDetails ? (
+          <UnstyledButton
+            flex={1}
+            miw={0}
+            onClick={toggle}
+            aria-expanded={opened}
+            aria-label={ariaLabel}
+          >
+            {header}
+          </UnstyledButton>
+        ) : (
+          <Box flex={1} miw={0} aria-label={ariaLabel}>
+            {header}
+          </Box>
+        )}
         {authorizationAction}
       </Group>
 
       <Collapse expanded={opened}>
-        <Stack gap="xs" mt="xs" pl="md">
+        <Stack gap="xs" mt="xs" pl="lg">
           {activity.events.map((event) => (
             <Box key={event.id}>{eventDetail(event)}</Box>
           ))}

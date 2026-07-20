@@ -42,10 +42,12 @@ import {
   useState,
 } from "react";
 import { type UploadedFile, useFileUpload } from "../hooks/useFileUpload";
-import { projectChatPresentationItems } from "../toolActivityPresentation";
+import {
+  projectChatPresentationItems,
+  type ToolActivityGroup as ToolActivityGroupModel,
+} from "../toolActivityPresentation";
 import { WorkspacePanel } from "../workspace/components/WorkspacePanel";
 import { ActionExecutionTimelineCard } from "./ActionExecutionTimelineCard";
-import { AgentRunIndicator } from "./AgentRunIndicator";
 import { AuthorizationRequestBubble } from "./AuthorizationRequestBubble";
 import { ChatInput } from "./ChatInput";
 import { CompactionDivider } from "./CompactionDivider";
@@ -161,6 +163,17 @@ function latestVisibleMessageId(messages: ChatMessage[]): string | null {
     }
   }
   return null;
+}
+
+function activeRunActivity(runId: string): ToolActivityGroupModel {
+  return {
+    id: `activity:run:${runId}`,
+    firstMessageId: `run:${runId}`,
+    startMessageIndex: 0,
+    endMessageIndex: 0,
+    events: [],
+    usage: null,
+  };
 }
 
 function hasLiveRetry(
@@ -336,7 +349,6 @@ interface ChatViewProps {
   sessionId?: string | null;
   isResponsePending: boolean;
   isWritePending: boolean;
-  isModelResponsePending: boolean;
   /** current live run snapshot with retry recovery state */
   liveRun: ChatLiveRunState | null;
   /** latest context-window usage snapshot */
@@ -419,7 +431,6 @@ export function ChatView({
   sessionId = null,
   isResponsePending,
   isWritePending,
-  isModelResponsePending,
   liveRun,
   tokenUsage = null,
   onComposerInferenceProfileChange,
@@ -517,6 +528,8 @@ export function ChatView({
       : null;
   const liveRetryVisible = liveRetryRun !== null;
   const liveOperationVisible = liveOperationRun !== null;
+  const activeRun =
+    chatTimelineState.type === "LATEST_FOLLOWING" ? liveRun : null;
   const visibleActionExecutions = useMemo(
     () =>
       chatTimelineState.type === "LATEST_FOLLOWING"
@@ -552,6 +565,10 @@ export function ChatView({
     }
     return null;
   }, [chatPresentationItems]);
+  const standaloneActiveActivity =
+    activeRun === null || latestActivityId !== null
+      ? null
+      : activeRunActivity(activeRun.run_id);
   const attachedAuthorizationRequest =
     latestActivityId === null ? null : (authorizationRequests[0] ?? null);
   const unattachedAuthorizationRequests =
@@ -563,6 +580,7 @@ export function ChatView({
     pendingInputBuffers.length > 0 ||
     liveRetryVisible ||
     liveOperationVisible ||
+    activeRun !== null ||
     visibleActionExecutions.length > 0;
   const editingMessageIndex = useMemo(() => {
     if (!editingMessage) {
@@ -1293,6 +1311,14 @@ export function ChatView({
                         <ToolActivityGroup
                           activity={item.activity}
                           dimmed={dimmedByEdit}
+                          active={
+                            activeRun !== null && item.id === latestActivityId
+                          }
+                          modelCallStartedAt={
+                            activeRun !== null && item.id === latestActivityId
+                              ? activeRun.modelCallStartedAt
+                              : null
+                          }
                           authorizationAction={
                             item.id === latestActivityId &&
                             attachedAuthorizationRequest !== null ? (
@@ -1396,6 +1422,13 @@ export function ChatView({
                     </Fragment>
                   );
                 })}
+                {standaloneActiveActivity !== null && activeRun !== null && (
+                  <ToolActivityGroup
+                    activity={standaloneActiveActivity}
+                    active
+                    modelCallStartedAt={activeRun.modelCallStartedAt}
+                  />
+                )}
                 {actionExecutionPlacement.durableTail.map((actionExecution) => (
                   <ActionExecutionTimelineCard
                     key={actionExecution.execution.id}
@@ -1418,14 +1451,6 @@ export function ChatView({
                   />
                 )}
                 {liveOperationRun !== null && <CompactionIndicator />}
-                {chatTimelineState.type === "LATEST_FOLLOWING" &&
-                  !liveRetryVisible &&
-                  !liveOperationVisible &&
-                  isModelResponsePending && (
-                    <AgentRunIndicator
-                      modelCallStartedAt={liveRun?.modelCallStartedAt ?? null}
-                    />
-                  )}
                 {actionExecutionPlacement.liveTail.map((actionExecution) => (
                   <ActionExecutionTimelineCard
                     key={actionExecution.execution.id}
