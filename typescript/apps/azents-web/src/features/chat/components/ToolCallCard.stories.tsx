@@ -1,3 +1,4 @@
+import { expect, userEvent, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import {
   attachmentToolCall,
@@ -58,5 +59,59 @@ export const Interrupted = {
 export const CompletedWithAttachments = {
   args: {
     toolCall: attachmentToolCall,
+  },
+} satisfies Story;
+
+export const KnownReadWithRawData = {
+  args: {
+    toolCall: {
+      id: "known-read-story",
+      callId: "known-read-story",
+      name: "read",
+      arguments:
+        '{"path":"/workspace/agent/azents/src/features/chat/types.ts","offset":1200}',
+      status: "completed",
+      result: "export interface ActiveToolCall {\n  id: string;\n}",
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByText("Read")).toBeVisible();
+    await expect(
+      canvas.getByText("azents/src/features/chat/types.ts"),
+    ).toBeVisible();
+    await userEvent.click(canvas.getByRole("button", { name: /Read/ }));
+    await expect(
+      canvas.getByText("export interface ActiveToolCall"),
+    ).toBeVisible();
+    await userEvent.click(
+      canvas.getByRole("button", { name: "View raw data for Read" }),
+    );
+    await expect(within(document.body).getByText("Raw data")).toBeVisible();
+  },
+} satisfies Story;
+
+export const KnownPatch = {
+  args: {
+    toolCall: {
+      id: "known-patch-story",
+      callId: "known-patch-story",
+      name: "apply_patch",
+      arguments:
+        '{"base_path":"/workspace/agent/azents","patch":"*** Begin Patch"}',
+      status: "completed",
+      result: "Applied patch under /workspace/agent/azents.",
+      resultMetadata: {
+        kind: "apply_patch_result",
+        changes: [
+          {
+            action: "update",
+            path: "/workspace/agent/azents/src/features/chat/ToolCallCard.tsx",
+            added_lines: 12,
+            removed_lines: 4,
+          },
+        ],
+      },
+    },
   },
 } satisfies Story;

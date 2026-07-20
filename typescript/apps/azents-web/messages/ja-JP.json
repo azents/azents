@@ -1397,7 +1397,29 @@
       "cancelled": "キャンセル済み",
       "interrupted": "中断済み",
       "arguments": "引数",
-      "result": "結果"
+      "result": "結果",
+      "rawData": "生データ",
+      "viewRawDataFor": "{action} の生データを表示",
+      "fromCharacter": "{offset} 文字目から",
+      "filesChanged": "{count} 件のファイルを変更",
+      "exitCode": "終了コード {code}",
+      "outputTruncated": "出力は省略されました。",
+      "action": {
+        "read": "ファイルを読み取り",
+        "search": "ファイルを検索",
+        "list": "ファイルを一覧表示",
+        "write": "ファイルに書き込み",
+        "edit": "ファイルを編集",
+        "patch": "パッチを適用",
+        "delete": "ファイルを削除",
+        "command": "コマンドを実行",
+        "process": "プロセスを更新"
+      },
+      "changeAction": {
+        "add": "追加",
+        "update": "更新",
+        "delete": "削除"
+      }
     },
     "toolActivity": {
       "title": "アクティビティ",

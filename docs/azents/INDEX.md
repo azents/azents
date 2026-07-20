@@ -16,7 +16,7 @@ Design documents are accumulated records and are not listed individually in this
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
 | [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-07-18 | 50 |
-| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-20 | 121 |
+| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-20 | 122 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-16 | 9 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-17 | 5 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-07-19 | 16 |
@@ -237,6 +237,7 @@ Design documents are accumulated records and are not listed individually in this
 - [ADR-0174: Present Chat Activity as an Ordered Event Stream](adr/0174-present-chat-activity-as-an-ordered-event-stream.md)
 - [ADR-0174: Model Unread Run Results as Session-Shared State](adr/0174-session-shared-unread-run-result-state.md)
 - [ADR-0175: Retire Legacy Platform GitHub App Bindings](adr/0175-retire-legacy-platform-github-bindings.md)
+- [ADR-0176: Render Known Tools Through Validated Frontend Adapters](adr/0176-render-known-tools-through-validated-frontend-adapters.md)
 
 ## Issues (Bug Tracking)
 

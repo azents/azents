@@ -204,7 +204,12 @@ function messageHasAttachments(message: ChatMessage | null): boolean {
 }
 
 function activityCategoryForTool(call: ToolActivityCall): ActivityCategory {
-  if (call.type === "client" && call.toolCall.toolkitSource) {
+  if (
+    call.type === "client" &&
+    call.toolCall.toolkitSource !== null &&
+    typeof call.toolCall.toolkitSource !== "undefined" &&
+    "toolkit_config_id" in call.toolCall.toolkitSource
+  ) {
     return {
       key: `toolkit:${call.toolCall.toolkitSource.toolkit_config_id}`,
       label: call.toolCall.toolkitSource.toolkit_name,

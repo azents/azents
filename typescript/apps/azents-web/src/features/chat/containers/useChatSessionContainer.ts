@@ -25,6 +25,7 @@ import {
 import {
   applyFunctionCallItem,
   applyFunctionCallOutput,
+  toolkitSourceFromValue,
 } from "../hooks/toolCallMerge";
 import { shouldRenderIncompleteDurableToolCalls } from "../hooks/toolCallVisibility";
 import { useChatWebSocket } from "../hooks/useChatWebSocket";
@@ -52,7 +53,6 @@ import type {
   PendingInputBuffer,
   TodoStateSnapshot,
   TokenUsageSummary,
-  ToolkitSourceSnapshot,
   ToolResultStatus,
 } from "../types";
 import type {
@@ -750,32 +750,6 @@ function contentAttachments(value: unknown): FileAttachment[] {
   });
 }
 
-function toolkitSourceSnapshotFromValue(
-  value: unknown,
-): ToolkitSourceSnapshot | null {
-  if (!isRecord(value)) {
-    return null;
-  }
-  const toolkitConfigId = stringField(value, "toolkit_config_id");
-  const toolkitType = stringField(value, "toolkit_type");
-  const toolkitName = stringField(value, "toolkit_name");
-  const toolkitSlug = stringField(value, "toolkit_slug");
-  if (
-    toolkitConfigId === null ||
-    toolkitType === null ||
-    toolkitName === null ||
-    toolkitSlug === null
-  ) {
-    return null;
-  }
-  return {
-    toolkit_config_id: toolkitConfigId,
-    toolkit_type: toolkitType,
-    toolkit_name: toolkitName,
-    toolkit_slug: toolkitSlug,
-  };
-}
-
 function contentText(value: unknown): string {
   if (typeof value === "string") {
     return value;
@@ -1035,9 +1009,7 @@ function mapEvents(
             callId,
             name,
             arguments: stringField(payload, "arguments") ?? "",
-            toolkitSource: toolkitSourceSnapshotFromValue(
-              payload.toolkit_source,
-            ),
+            toolkitSource: toolkitSourceFromValue(payload.toolkit_source),
             status: "running",
           },
           event.id,
@@ -1071,6 +1043,7 @@ function mapEvents(
           content: contentText(payload.output),
           status: toolResultStatusFromPayload(payload),
           attachments: contentAttachments(payload.output),
+          ...(isRecord(payload.metadata) ? { metadata: payload.metadata } : {}),
         });
       }
       case "turn_marker": {
