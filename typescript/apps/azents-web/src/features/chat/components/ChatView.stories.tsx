@@ -567,6 +567,33 @@ export const WithPreparingContext = {
   },
 } satisfies Story;
 
+export const EmptyStreamingModelHidesWaitingRow = {
+  args: {
+    ...baseArgs,
+    timelineEvents: [],
+    messages: [],
+    isResponsePending: true,
+    liveRun: {
+      run_id: "run-empty-streaming-story",
+      phase: "streaming_model",
+      status: "running",
+      inferenceProfile: {
+        model_target_label: "default",
+        model_display_name: "GPT 5.5",
+        reasoning_effort: null,
+      },
+      modelCallStartedAt: new Date(Date.now() - 12_000).toISOString(),
+      retry: null,
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.queryByText(/Waiting for model response \(\d+s\)/),
+    ).toBeNull();
+  },
+} satisfies Story;
+
 export const StreamingModelWithPartialOutput = {
   args: {
     ...baseArgs,

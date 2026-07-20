@@ -151,15 +151,16 @@ export function ToolActivityGroup({
 }: ToolActivityGroupProps): React.ReactElement {
   const t = useTranslations("chat.toolActivity");
   const [opened, { toggle }] = useDisclosure(false);
+  const hasDetails = activity.events.length > 0;
   const groupDurationSeconds = useVisibleElapsedDuration(
     activity.startedAt,
     ACTIVITY_DURATION_VISIBILITY_THRESHOLD_SECONDS,
-    active,
+    active && hasDetails,
   );
   const modelWaitingDurationSeconds = useVisibleElapsedDuration(
     modelCallStartedAt,
     MODEL_WAITING_VISIBILITY_THRESHOLD_SECONDS,
-    active,
+    active && hasDetails,
   );
   const categories = categorySummaries(activity.events);
   const failedCount = activity.events.filter(
@@ -209,7 +210,6 @@ export function ToolActivityGroup({
   ]
     .filter((value): value is string => value !== null && value.length > 0)
     .join(": ");
-  const hasDetails = activity.events.length > 0;
 
   const header = (
     <Stack gap={rem(2)} miw={0} w="100%">
@@ -257,11 +257,11 @@ export function ToolActivityGroup({
           </Text>
         ) : null}
       </Group>
-      {modelWaitingDuration !== null ? (
+      {hasDetails && modelWaitingDuration !== null ? (
         <Text
           size="xs"
           c="dimmed"
-          pl={rem(hasDetails ? 46 : 26)}
+          pl={rem(46)}
           ff="monospace"
           style={{ fontVariantNumeric: "tabular-nums" }}
         >
