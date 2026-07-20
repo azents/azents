@@ -6,7 +6,7 @@
     "dev": "next dev --port 3003",
     "build": "next build",
     "start": "next start",
-    "test": "node --experimental-strip-types --test src/shared/lib/admin-access.test.mts src/features/agents/model-selection.test.mts src/features/llm-settings/subscriptionUsage.test.mts src/features/chat/composerSubscriptionUsage.test.mts src/features/chat/components/modelCallDuration.test.mts src/features/chat/hooks/chatStopProjection.test.mts src/features/chat/hooks/liveRetryVisibility.test.mts src/features/chat/hooks/providerToolCallProjection.test.mts src/features/chat/hooks/toolCallVisibility.test.mts",
+    "test": "node --experimental-strip-types --test src/shared/lib/admin-access.test.mts src/features/agents/model-selection.test.mts src/features/llm-settings/subscriptionUsage.test.mts src/features/chat/composerSubscriptionUsage.test.mts src/features/chat/components/modelCallDuration.test.mts src/features/chat/hooks/chatStopProjection.test.mts src/features/chat/hooks/liveRetryVisibility.test.mts src/features/chat/hooks/providerToolCallProjection.test.mts src/features/chat/hooks/toolCallVisibility.test.mts src/features/chat/toolActivityPresentation.test.mts",
     "storybook": "STORYBOOK_DISABLE_TELEMETRY=1 storybook dev -p 6006",
     "build-storybook": "STORYBOOK_DISABLE_TELEMETRY=1 storybook build",
     "lint": "eslint src .storybook --max-warnings 0 --cache --cache-strategy content",

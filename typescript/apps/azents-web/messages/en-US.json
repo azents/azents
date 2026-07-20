@@ -1395,6 +1395,20 @@
       "arguments": "Arguments",
       "result": "Result"
     },
+    "toolActivity": {
+      "title": "Activity",
+      "turnCount": "{count, plural, one {# model turn} other {# model turns}}",
+      "callCount": "{count, plural, one {# tool call} other {# tool calls}}",
+      "failedCount": "{count} failed",
+      "runningCount": "{count} running",
+      "genericPhase": "Tool activity",
+      "reasoning": "{count, plural, one {Thinking} other {Thinking · # updates}}",
+      "compactionCount": "{count, plural, one {Context summarized once} other {Context summarized # times}}",
+      "expandActivity": "Show activity",
+      "collapseActivity": "Hide activity",
+      "expandPhase": "Show tool calls",
+      "collapsePhase": "Hide tool calls"
+    },
     "authorization": {
       "authorizationRequired": "Authorization required",
       "authorizationRequestMessage": "{toolkitName} requires authorization to access its tools.",

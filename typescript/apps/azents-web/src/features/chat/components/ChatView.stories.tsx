@@ -1,6 +1,12 @@
 import { Box, rem } from "@mantine/core";
 import { expect, fn, userEvent, within } from "storybook/test";
-import { createChatMessage, storySessionId } from "../story-fixtures";
+import {
+  completedToolCall,
+  createChatMessage,
+  failedToolCall,
+  runningToolCall,
+  storySessionId,
+} from "../story-fixtures";
 import { ChatView } from "./ChatView";
 import type { ProjectDirectoryPickerState } from "../workspace/components/WorkspaceDirectoryPickerModal";
 import type { WorkspacePanelContainerOutput } from "../workspace/containers/useWorkspacePanelContainer";
@@ -254,6 +260,52 @@ const longConversationMessages = Array.from({ length: 28 }, (_, index) =>
 
 export const WithWorkspaceBrowser = {
   args: baseArgs,
+} satisfies Story;
+
+export const MultiTurnToolActivity = {
+  args: {
+    ...baseArgs,
+    messages: [
+      createChatMessage({
+        id: "activity-user",
+        role: "user",
+        content: "Inspect the implementation and run the checks.",
+      }),
+      createChatMessage({
+        id: "activity-tool-1",
+        content: null,
+        toolCalls: [completedToolCall],
+      }),
+      createChatMessage({
+        id: "activity-turn-1",
+        role: "turn_complete",
+        content: null,
+      }),
+      createChatMessage({
+        id: "activity-tool-2",
+        content: null,
+        toolCalls: [failedToolCall],
+      }),
+      createChatMessage({
+        id: "activity-turn-2",
+        role: "turn_complete",
+        content: null,
+      }),
+      createChatMessage({
+        id: "activity-tool-3",
+        content: null,
+        toolCalls: [runningToolCall],
+      }),
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByText("Activity")).toBeVisible();
+    await expect(
+      canvas.getByText("3 model turns · 3 tool calls · 1 failed · 1 running"),
+    ).toBeVisible();
+    await expect(canvas.queryByText(completedToolCall.name)).toBeNull();
+  },
 } satisfies Story;
 
 export const LongMobileConversation = {
