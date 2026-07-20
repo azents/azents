@@ -9,6 +9,8 @@ from azents.repos.user.data import UserCreate
 
 from . import GithubUserInstallationRepository
 
+_PLATFORM_APP_ID = "123"
+
 
 async def _create_user(
     session: AsyncSession, email: str = "gh-install@example.com"
@@ -47,6 +49,7 @@ class TestGithubUserInstallationRepository:
         await repo.sync(
             rdb_session,
             user_id,
+            _PLATFORM_APP_ID,
             [_make_installation(1001, login="my-org")],
         )
 
@@ -59,6 +62,7 @@ class TestGithubUserInstallationRepository:
         row = result.scalar_one()
         assert row.id is not None
         assert len(row.id) == 32
+        assert row.platform_app_id == _PLATFORM_APP_ID
         assert row.installation_id == 1001
         assert row.account_login == "my-org"
         assert row.account_type == "Organization"
@@ -72,6 +76,7 @@ class TestGithubUserInstallationRepository:
         await repo.sync(
             rdb_session,
             user_id,
+            _PLATFORM_APP_ID,
             [_make_installation(2001, login="old-name")],
         )
         result = await rdb_session.execute(
@@ -86,6 +91,7 @@ class TestGithubUserInstallationRepository:
         await repo.sync(
             rdb_session,
             user_id,
+            _PLATFORM_APP_ID,
             [_make_installation(2001, login="new-name")],
         )
 
@@ -111,6 +117,7 @@ class TestGithubUserInstallationRepository:
         await repo.sync(
             rdb_session,
             user_id,
+            _PLATFORM_APP_ID,
             [
                 _make_installation(3001, login="org-a"),
                 _make_installation(3002, login="org-b"),
@@ -121,6 +128,7 @@ class TestGithubUserInstallationRepository:
         await repo.sync(
             rdb_session,
             user_id,
+            _PLATFORM_APP_ID,
             [_make_installation(3001, login="org-a")],
         )
 
@@ -143,11 +151,12 @@ class TestGithubUserInstallationRepository:
         await repo.sync(
             rdb_session,
             user_id,
+            _PLATFORM_APP_ID,
             [_make_installation(4001)],
         )
 
         # When: sync empty list
-        await repo.sync(rdb_session, user_id, [])
+        await repo.sync(rdb_session, user_id, _PLATFORM_APP_ID, [])
 
         # Then: all deleted
         result = await rdb_session.execute(
@@ -165,6 +174,7 @@ class TestGithubUserInstallationRepository:
         await repo.sync(
             rdb_session,
             user_id,
+            _PLATFORM_APP_ID,
             [
                 _make_installation(5001, login="org-1"),
                 _make_installation(5002, login="org-2"),
@@ -192,6 +202,7 @@ class TestGithubUserInstallationRepository:
         await repo.sync(
             rdb_session,
             user_id,
+            _PLATFORM_APP_ID,
             [
                 {"id": "not-int", "account": {"login": "x", "type": "User"}},
                 {"id": 6001},  # account missing
@@ -218,11 +229,16 @@ class TestGithubUserInstallationRepository:
         await repo.sync(
             rdb_session,
             user_id,
+            _PLATFORM_APP_ID,
             [_make_installation(7001)],
         )
 
-        assert await repo.has_access(rdb_session, user_id, 7001) is True
-        assert await repo.has_access(rdb_session, user_id, 9999) is False
+        assert (
+            await repo.has_access(rdb_session, user_id, _PLATFORM_APP_ID, 7001) is True
+        )
+        assert (
+            await repo.has_access(rdb_session, user_id, _PLATFORM_APP_ID, 9999) is False
+        )
 
     async def test_has_access_different_user(self, rdb_session: AsyncSession) -> None:
         """Cannot access installation of another user."""
@@ -233,8 +249,81 @@ class TestGithubUserInstallationRepository:
         await repo.sync(
             rdb_session,
             user_a,
+            _PLATFORM_APP_ID,
             [_make_installation(8001)],
         )
 
-        assert await repo.has_access(rdb_session, user_a, 8001) is True
-        assert await repo.has_access(rdb_session, user_b, 8001) is False
+        assert (
+            await repo.has_access(rdb_session, user_a, _PLATFORM_APP_ID, 8001) is True
+        )
+        assert (
+            await repo.has_access(rdb_session, user_b, _PLATFORM_APP_ID, 8001) is False
+        )
+
+    async def test_sync_scopes_rows_to_platform_app(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """The same installation may be synchronized by different Apps."""
+        user_id = await _create_user(rdb_session, email="gh-app-scope@example.com")
+        repo = GithubUserInstallationRepository()
+
+        await repo.sync(
+            rdb_session,
+            user_id,
+            "111",
+            [_make_installation(9001)],
+        )
+        await repo.sync(
+            rdb_session,
+            user_id,
+            "222",
+            [_make_installation(9001)],
+        )
+        await repo.sync(rdb_session, user_id, "111", [])
+
+        result = await rdb_session.execute(
+            select(RDBGithubUserInstallation).where(
+                RDBGithubUserInstallation.user_id == user_id,
+            )
+        )
+        rows = result.scalars().all()
+        assert len(rows) == 1
+        assert rows[0].platform_app_id == "222"
+        assert rows[0].installation_id == 9001
+
+    async def test_sync_replaces_matching_unbound_legacy_row(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """A verified reconnect removes the matching unbound legacy row."""
+        user_id = await _create_user(rdb_session, email="gh-reconnect@example.com")
+        rdb_session.add(
+            RDBGithubUserInstallation(
+                user_id=user_id,
+                platform_app_id=None,
+                installation_id=9101,
+                account_login="legacy-org",
+                account_type="Organization",
+                account_avatar_url="",
+            )
+        )
+        await rdb_session.flush()
+        repo = GithubUserInstallationRepository()
+
+        await repo.sync(
+            rdb_session,
+            user_id,
+            "333",
+            [_make_installation(9101, login="reconnected-org")],
+        )
+
+        result = await rdb_session.execute(
+            select(RDBGithubUserInstallation).where(
+                RDBGithubUserInstallation.user_id == user_id,
+            )
+        )
+        rows = result.scalars().all()
+        assert len(rows) == 1
+        assert rows[0].platform_app_id == "333"
+        assert rows[0].account_login == "reconnected-org"

@@ -16,6 +16,13 @@ from azents.core.system_setting import (
 )
 
 
+def validate_platform_github_app_id(value: str) -> str:
+    """Validate the durable numeric GitHub App identity."""
+    if not value or not value.isascii() or not value.isdigit():
+        raise ValueError("Platform GitHub App ID must contain only ASCII digits.")
+    return value
+
+
 class PlatformGitHubAppConfig(BaseModel):
     """Raw non-secret Admin base fields for the Platform GitHub App."""
 

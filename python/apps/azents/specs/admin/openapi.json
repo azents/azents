@@ -3310,6 +3310,45 @@
         "title": "PasswordResetTokenResponse",
         "description": "Password reset token metadata response."
       },
+      "PlatformGitHubAppBindingResponse": {
+        "properties": {
+          "affected_user_count": {
+            "type": "integer",
+            "title": "Affected User Count"
+          },
+          "affected_installation_count": {
+            "type": "integer",
+            "title": "Affected Installation Count"
+          },
+          "affected_toolkit_count": {
+            "type": "integer",
+            "title": "Affected Toolkit Count"
+          },
+          "affected_agent_count": {
+            "type": "integer",
+            "title": "Affected Agent Count"
+          },
+          "unbound_installation_count": {
+            "type": "integer",
+            "title": "Unbound Installation Count"
+          },
+          "unbound_toolkit_count": {
+            "type": "integer",
+            "title": "Unbound Toolkit Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "affected_user_count",
+          "affected_installation_count",
+          "affected_toolkit_count",
+          "affected_agent_count",
+          "unbound_installation_count",
+          "unbound_toolkit_count"
+        ],
+        "title": "PlatformGitHubAppBindingResponse",
+        "description": "Redacted resources that require reconnect for the effective App."
+      },
       "PlatformGitHubAppCandidateResponse": {
         "properties": {
           "id": {
@@ -3469,6 +3508,16 @@
               }
             ]
           },
+          "binding_impact": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PlatformGitHubAppBindingResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "activation_validation_status": {
             "anyOf": [
               {
@@ -3500,6 +3549,7 @@
           "fields",
           "candidate",
           "health",
+          "binding_impact",
           "activation_validation_status",
           "app_slug"
         ],
@@ -3513,7 +3563,8 @@
           "incomplete",
           "invalid",
           "ready",
-          "unavailable"
+          "unavailable",
+          "reconnect_required"
         ],
         "title": "PlatformGitHubAppEffectiveStatus",
         "description": "Redacted effective configuration status."

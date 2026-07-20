@@ -83,7 +83,7 @@ SystemSettingImpactResolver = Callable[
     Awaitable[dict[str, Any] | None],
 ]
 SystemSettingConfirmationHandler = Callable[
-    [AsyncSession, str, ResolvedSystemSetting],
+    [AsyncSession, str, ResolvedSystemSetting, dict[str, Any] | None],
     Awaitable[None],
 ]
 
@@ -503,6 +503,7 @@ class SystemSettingsService:
                     session,
                     confirmation_action,
                     candidate_resolved,
+                    current_impact,
                 )
                 activated = await self._activate_candidate(
                     session=session,

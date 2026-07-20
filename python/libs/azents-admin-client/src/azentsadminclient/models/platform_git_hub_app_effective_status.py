@@ -31,6 +31,7 @@ class PlatformGitHubAppEffectiveStatus(str, Enum):
     INVALID = 'invalid'
     READY = 'ready'
     UNAVAILABLE = 'unavailable'
+    RECONNECT_REQUIRED = 'reconnect_required'
 
     @classmethod
     def from_json(cls, json_str: str) -> Self:

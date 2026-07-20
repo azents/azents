@@ -257,6 +257,7 @@ async def get_github_platform_installations(
     github_config = config.github
     if (
         github_config is None
+        or github_config.platform_app_id is None
         or github_config.platform_client_id is None
         or github_config.platform_client_secret is None
     ):
@@ -293,7 +294,12 @@ async def get_github_platform_installations(
     # Sync user installation list to DB for ownership validation
     install_repo = GithubUserInstallationRepository()
     async with session_manager() as session:
-        await install_repo.sync(session, member.user_id, raw_installations)
+        await install_repo.sync(
+            session,
+            member.user_id,
+            github_config.platform_app_id,
+            raw_installations,
+        )
 
     # Immediately revoke the temporary token after use
     await revoke_oauth_token(

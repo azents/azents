@@ -24,6 +24,7 @@ from azents.core.system_setting import (
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.repos.github_platform_system_setting.data import PlatformGitHubAppImpact
 from azents.repos.github_platform_system_setting.repository import (
     PlatformGitHubAppSystemSettingRepository,
 )
@@ -38,9 +39,11 @@ from azents.services.system_setting.data import (
 )
 from azents.services.system_setting.service import SystemSettingsService
 
+from .binding import PlatformGitHubAppBindingService
 from .client import PlatformGitHubAppValidationClient
 from .data import (
     PlatformGitHubAppAuditPage,
+    PlatformGitHubAppBindingState,
     PlatformGitHubAppCandidateState,
     PlatformGitHubAppDetail,
     PlatformGitHubAppEffectiveStatus,
@@ -81,6 +84,7 @@ class PlatformGitHubAppSystemSettingService:
         PlatformGitHubAppSystemSettingRepository,
         Depends(PlatformGitHubAppSystemSettingRepository),
     ]
+    binding_service: Annotated[PlatformGitHubAppBindingService, Depends()]
     session_manager: Annotated[
         SessionManager[AsyncSession],
         Depends(get_session_manager),
@@ -112,7 +116,8 @@ class PlatformGitHubAppSystemSettingService:
         state = await self.system_settings.get_state(
             SystemSettingSection.PLATFORM_GITHUB_APP
         )
-        return self._project_detail(state)
+        binding_impact = await self._resolve_current_binding_impact(state.resolved)
+        return self._project_detail(state, binding_impact)
 
     async def patch(
         self,
@@ -152,12 +157,24 @@ class PlatformGitHubAppSystemSettingService:
             return await self._resolve_impact(session, current, candidate)
 
         async def confirmation_handler(
-            _session: AsyncSession,
+            session: AsyncSession,
             action: str,
-            _candidate: ResolvedSystemSetting,
+            candidate: ResolvedSystemSetting,
+            impact: dict[str, Any] | None,
         ) -> None:
-            if action != "activate":
+            raw_actions = impact.get("confirmation_actions") if impact else None
+            allowed_actions = (
+                tuple(item for item in raw_actions if isinstance(item, str))
+                if isinstance(raw_actions, (list, tuple))
+                else ()
+            )
+            if action not in allowed_actions:
                 raise ValueError("Unsupported Platform GitHub App confirmation action.")
+            if action == "claim_unbound_legacy":
+                app_id = self._config(candidate).app_id
+                if app_id is None:
+                    raise ValueError("Platform GitHub App ID is required for claim.")
+                await self.binding_service.bind_unbound(session, app_id=app_id)
 
         return await self.system_settings.confirm_candidate(
             section=SystemSettingSection.PLATFORM_GITHUB_APP,
@@ -306,16 +323,103 @@ class PlatformGitHubAppSystemSettingService:
         current_config = self._config(current)
         candidate_config = self._config(candidate)
         app_id_changed = current_config.app_id != candidate_config.app_id
-        impact = await self.impact_repository.get_impact(
+        installation_impact = await self.impact_repository.get_installation_impact(
             session,
+            current_app_id=current_config.app_id,
+        )
+        toolkit_impact = await self.binding_service.inspect_toolkit_impact(
+            session,
+            current_app_id=current_config.app_id,
+        )
+        affected_toolkit_ids = set(toolkit_impact.affected_toolkit_ids)
+        affected_agent_count = await self.impact_repository.count_agents_for_toolkits(
+            session,
+            toolkit_ids=affected_toolkit_ids,
+        )
+        has_unbound_legacy = (
+            installation_impact.unbound_installation_count > 0
+            or toolkit_impact.unbound_toolkit_count > 0
+        )
+        has_current_bindings = (
+            installation_impact.affected_installation_count > 0
+            or bool(affected_toolkit_ids)
+        )
+        if (
+            current_config.app_id is None
+            and candidate_config.app_id is not None
+            and has_unbound_legacy
+        ):
+            confirmation_actions = (
+                "claim_unbound_legacy",
+                "leave_unbound",
+            )
+        elif (
+            current_config.app_id is not None
+            and app_id_changed
+            and has_current_bindings
+        ):
+            confirmation_actions = ("activate",)
+        else:
+            confirmation_actions = ()
+        impact = PlatformGitHubAppImpact(
             app_id_changed=app_id_changed,
+            affected_user_count=installation_impact.affected_user_count,
+            affected_installation_count=(
+                installation_impact.affected_installation_count
+            ),
+            affected_toolkit_count=len(affected_toolkit_ids),
+            affected_agent_count=affected_agent_count,
+            unbound_installation_count=(installation_impact.unbound_installation_count),
+            unbound_toolkit_count=toolkit_impact.unbound_toolkit_count,
+            current_app_id_source=current.field_sources["app_id"].value,
+            confirmation_actions=confirmation_actions,
         )
         metadata = impact.to_metadata()
         metadata["confirmation_required"] = impact.confirmation_required
         return metadata
 
+    async def _resolve_current_binding_impact(
+        self,
+        resolved: ResolvedSystemSetting,
+    ) -> PlatformGitHubAppBindingState | None:
+        app_id = self._config(resolved).app_id
+        if app_id is None:
+            return None
+        async with self.session_manager() as session:
+            installation_impact = (
+                await self.impact_repository.get_current_binding_installation_impact(
+                    session,
+                    effective_app_id=app_id,
+                )
+            )
+            toolkit_impact = await self.binding_service.inspect_current_toolkit_impact(
+                session,
+                effective_app_id=app_id,
+            )
+            affected_toolkit_ids = set(toolkit_impact.affected_toolkit_ids)
+            affected_agent_count = (
+                await self.impact_repository.count_agents_for_toolkits(
+                    session,
+                    toolkit_ids=affected_toolkit_ids,
+                )
+            )
+        return PlatformGitHubAppBindingState(
+            affected_user_count=installation_impact.affected_user_count,
+            affected_installation_count=(
+                installation_impact.affected_installation_count
+            ),
+            affected_toolkit_count=len(affected_toolkit_ids),
+            affected_agent_count=affected_agent_count,
+            unbound_installation_count=(installation_impact.unbound_installation_count),
+            unbound_toolkit_count=toolkit_impact.unbound_toolkit_count,
+        )
+
     @classmethod
-    def _project_detail(cls, state: SystemSettingState) -> PlatformGitHubAppDetail:
+    def _project_detail(
+        cls,
+        state: SystemSettingState,
+        binding_impact: PlatformGitHubAppBindingState | None,
+    ) -> PlatformGitHubAppDetail:
         config = cls._config(state.resolved)
         secrets = cls._secrets(state.resolved)
         current = state.current
@@ -371,6 +475,12 @@ class PlatformGitHubAppSystemSettingService:
                     effective_status = PlatformGitHubAppEffectiveStatus.UNAVAILABLE
                 else:
                     effective_status = PlatformGitHubAppEffectiveStatus.READY
+        if (
+            effective_status is PlatformGitHubAppEffectiveStatus.READY
+            and binding_impact is not None
+            and binding_impact.reconnect_required
+        ):
+            effective_status = PlatformGitHubAppEffectiveStatus.RECONNECT_REQUIRED
         candidate = (
             PlatformGitHubAppCandidateState(
                 id=state.candidate.id,
@@ -415,6 +525,7 @@ class PlatformGitHubAppSystemSettingService:
             fields=fields,
             candidate=candidate,
             health=health,
+            binding_impact=binding_impact,
             activation_validation_status=(
                 current.validation_status
                 if activation_current and current is not None

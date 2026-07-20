@@ -155,6 +155,7 @@ Class | Method | HTTP request | Description
  - [InvitationStatus](azentsadminclient/docs/InvitationStatus.md)
  - [PasswordResetTokenListResponse](azentsadminclient/docs/PasswordResetTokenListResponse.md)
  - [PasswordResetTokenResponse](azentsadminclient/docs/PasswordResetTokenResponse.md)
+ - [PlatformGitHubAppBindingResponse](azentsadminclient/docs/PlatformGitHubAppBindingResponse.md)
  - [PlatformGitHubAppCandidateResponse](azentsadminclient/docs/PlatformGitHubAppCandidateResponse.md)
  - [PlatformGitHubAppConfirmRequest](azentsadminclient/docs/PlatformGitHubAppConfirmRequest.md)
  - [PlatformGitHubAppDetailResponse](azentsadminclient/docs/PlatformGitHubAppDetailResponse.md)

@@ -21,6 +21,7 @@ class PlatformGitHubAppEffectiveStatus(enum.StrEnum):
     INVALID = "invalid"
     READY = "ready"
     UNAVAILABLE = "unavailable"
+    RECONNECT_REQUIRED = "reconnect_required"
 
 
 @dataclass(frozen=True)
@@ -66,6 +67,23 @@ class PlatformGitHubAppHealthState:
 
 
 @dataclass(frozen=True)
+class PlatformGitHubAppBindingState:
+    """Redacted resources that require reconnect for the effective App."""
+
+    affected_user_count: int
+    affected_installation_count: int
+    affected_toolkit_count: int
+    affected_agent_count: int
+    unbound_installation_count: int
+    unbound_toolkit_count: int
+
+    @property
+    def reconnect_required(self) -> bool:
+        """Return whether any persisted resource has an incompatible identity."""
+        return self.affected_installation_count > 0 or self.affected_toolkit_count > 0
+
+
+@dataclass(frozen=True)
 class PlatformGitHubAppDetail:
     """Redacted Admin detail projection."""
 
@@ -76,6 +94,7 @@ class PlatformGitHubAppDetail:
     fields: tuple[PlatformGitHubAppFieldState, ...]
     candidate: PlatformGitHubAppCandidateState | None
     health: PlatformGitHubAppHealthState | None
+    binding_impact: PlatformGitHubAppBindingState | None
     activation_validation_status: SystemSettingValidationStatus | None
     app_slug: str | None
 

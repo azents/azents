@@ -16,17 +16,18 @@ class GithubUserInstallationRepository:
         self,
         session: AsyncSession,
         user_id: str,
+        platform_app_id: str,
         installations: list[dict[str, object]],
     ) -> None:
-        """Synchronize user installation list with DB.
+        """Synchronize one user's installation list for one Platform App.
 
-        Perform upsert + delete based on list returned by API.
-
-        :param session: DB session
-        :param user_id: User ID
-        :param installations: Installation list returned by GitHub API
+        A verified reconnect replaces matching unbound legacy rows. Deletion is
+        scoped to the same Platform App, so a reconnect never removes rows that
+        belong to another App identity.
         """
-        # Collect installation_id from API result
+        if not platform_app_id:
+            raise ValueError("Platform GitHub App ID is required.")
+
         api_installation_ids: set[int] = set()
 
         for inst in installations:
@@ -48,18 +49,22 @@ class GithubUserInstallationRepository:
                 avatar_url = ""
 
             api_installation_ids.add(inst_id)
-
-            # Upsert (PostgreSQL ON CONFLICT)
             stmt = insert(RDBGithubUserInstallation).values(
                 id=uuid7().hex,
                 user_id=user_id,
+                platform_app_id=platform_app_id,
                 installation_id=inst_id,
                 account_login=login,
                 account_type=account_type,
                 account_avatar_url=avatar_url,
             )
             stmt = stmt.on_conflict_do_update(
-                constraint="uq_github_user_installations_user_installation",
+                index_elements=[
+                    RDBGithubUserInstallation.user_id,
+                    RDBGithubUserInstallation.platform_app_id,
+                    RDBGithubUserInstallation.installation_id,
+                ],
+                index_where=RDBGithubUserInstallation.platform_app_id.is_not(None),
                 set_={
                     "account_login": login,
                     "account_type": account_type,
@@ -69,21 +74,28 @@ class GithubUserInstallationRepository:
             )
             await session.execute(stmt)
 
-        # Delete installation absent from API result, e.g. user left org
         if api_installation_ids:
             await session.execute(
                 delete(RDBGithubUserInstallation).where(
                     RDBGithubUserInstallation.user_id == user_id,
+                    RDBGithubUserInstallation.platform_app_id.is_(None),
+                    RDBGithubUserInstallation.installation_id.in_(api_installation_ids),
+                )
+            )
+            await session.execute(
+                delete(RDBGithubUserInstallation).where(
+                    RDBGithubUserInstallation.user_id == user_id,
+                    RDBGithubUserInstallation.platform_app_id == platform_app_id,
                     RDBGithubUserInstallation.installation_id.notin_(
                         api_installation_ids
                     ),
                 )
             )
         else:
-            # If API result is empty, delete all installations for user
             await session.execute(
                 delete(RDBGithubUserInstallation).where(
                     RDBGithubUserInstallation.user_id == user_id,
+                    RDBGithubUserInstallation.platform_app_id == platform_app_id,
                 )
             )
 
@@ -91,18 +103,14 @@ class GithubUserInstallationRepository:
         self,
         session: AsyncSession,
         user_id: str,
+        platform_app_id: str,
         installation_id: int,
     ) -> bool:
-        """Check whether user can access that installation.
-
-        :param session: DB session
-        :param user_id: User ID
-        :param installation_id: GitHub Installation ID
-        :return: Access availability
-        """
+        """Check App-scoped installation ownership."""
         result = await session.execute(
             select(RDBGithubUserInstallation.id).where(
                 RDBGithubUserInstallation.user_id == user_id,
+                RDBGithubUserInstallation.platform_app_id == platform_app_id,
                 RDBGithubUserInstallation.installation_id == installation_id,
             )
         )

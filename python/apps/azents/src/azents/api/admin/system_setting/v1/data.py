@@ -15,6 +15,7 @@ from azents.core.system_setting import (
 )
 from azents.repos.system_setting.data import StoredSystemSettingAuditEvent
 from azents.services.github_platform_system_setting.data import (
+    PlatformGitHubAppBindingState,
     PlatformGitHubAppCandidateState,
     PlatformGitHubAppDetail,
     PlatformGitHubAppEffectiveStatus,
@@ -121,6 +122,24 @@ class PlatformGitHubAppHealthResponse(BaseModel):
         return cls.model_validate(health)
 
 
+class PlatformGitHubAppBindingResponse(BaseModel):
+    """Redacted resources that require reconnect for the effective App."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    affected_user_count: int
+    affected_installation_count: int
+    affected_toolkit_count: int
+    affected_agent_count: int
+    unbound_installation_count: int
+    unbound_toolkit_count: int
+
+    @classmethod
+    def from_domain(cls, impact: PlatformGitHubAppBindingState) -> Self:
+        """Convert current identity-binding impact counts."""
+        return cls.model_validate(impact)
+
+
 class PlatformGitHubAppDetailResponse(BaseModel):
     """Redacted Platform GitHub App detail response."""
 
@@ -131,6 +150,7 @@ class PlatformGitHubAppDetailResponse(BaseModel):
     fields: list[PlatformGitHubAppFieldResponse]
     candidate: PlatformGitHubAppCandidateResponse | None
     health: PlatformGitHubAppHealthResponse | None
+    binding_impact: PlatformGitHubAppBindingResponse | None
     activation_validation_status: SystemSettingValidationStatus | None
     app_slug: str | None
 
@@ -154,6 +174,11 @@ class PlatformGitHubAppDetailResponse(BaseModel):
             health=(
                 PlatformGitHubAppHealthResponse.from_domain(detail.health)
                 if detail.health is not None
+                else None
+            ),
+            binding_impact=(
+                PlatformGitHubAppBindingResponse.from_domain(detail.binding_impact)
+                if detail.binding_impact is not None
                 else None
             ),
             activation_validation_status=detail.activation_validation_status,
