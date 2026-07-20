@@ -9,6 +9,7 @@ from azents.core.system_setting import (
     SystemSettingHealthStatus,
     SystemSettingSecretAction,
     SystemSettingSection,
+    SystemSettingValidationStatus,
 )
 from azents.repos.system_setting.data import (
     StoredSystemSetting,
@@ -45,6 +46,38 @@ class SystemSettingCandidatePending:
 
 
 SystemSettingMutationResult = SystemSettingActivated | SystemSettingCandidatePending
+
+
+@dataclass(frozen=True)
+class SystemSettingCandidateValidationSnapshot:
+    """Current and candidate effective payloads prepared for validation."""
+
+    candidate: StoredSystemSettingCandidate
+    current_resolved: ResolvedSystemSetting
+    candidate_resolved: ResolvedSystemSetting
+
+
+@dataclass(frozen=True)
+class SystemSettingCandidateValidationResult:
+    """Sanitized external validation and confirmation requirement."""
+
+    status: SystemSettingValidationStatus
+    code: str | None
+    message: str | None
+    action_hint: str | None
+    metadata: dict[str, Any] | None
+    impact: dict[str, Any] | None
+    confirmation_required: bool
+
+
+@dataclass(frozen=True)
+class SystemSettingState:
+    """Current internal Section state for a redacted domain projection."""
+
+    current: StoredSystemSetting | None
+    candidate: StoredSystemSettingCandidate | None
+    resolved: ResolvedSystemSetting
+    health: StoredSystemSettingHealth | None
 
 
 @dataclass(frozen=True)

@@ -22,10 +22,12 @@ from azents.core.system_setting import (
     SystemSettingFieldTarget,
     SystemSettingGenerationHasher,
     SystemSettingHealthStatus,
+    SystemSettingImpactChanged,
     SystemSettingRegistry,
     SystemSettingSecretAction,
     SystemSettingSecretActionType,
     SystemSettingSection,
+    SystemSettingValidationStatus,
     SystemSettingVersionConflict,
 )
 from azents.rdb.session import SessionManager
@@ -37,6 +39,8 @@ from azents.services.system_setting.data import (
     SystemDataMigrationResult,
     SystemSettingActivated,
     SystemSettingCandidatePending,
+    SystemSettingCandidateValidationResult,
+    SystemSettingCandidateValidationSnapshot,
     SystemSettingHealthResult,
     SystemSettingMutation,
 )
@@ -264,6 +268,98 @@ async def test_health_is_visible_only_for_the_current_effective_generation(
     assert isinstance(changed, SystemSettingActivated)
     stale = await service.get_current_health(SystemSettingSection.PLATFORM_GITHUB_APP)
     assert stale.health is None
+
+
+async def test_valid_candidate_auto_activates_without_confirmation(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """A valid candidate with no impact activates in the validation transaction."""
+    service = _service(
+        rdb_session_manager,
+        activation_mode=SystemSettingActivationMode.VALIDATED,
+    )
+    pending = await service.mutate(_initial_mutation())
+    assert isinstance(pending, SystemSettingCandidatePending)
+
+    async def validator(
+        _snapshot: SystemSettingCandidateValidationSnapshot,
+    ) -> SystemSettingCandidateValidationResult:
+        return SystemSettingCandidateValidationResult(
+            status=SystemSettingValidationStatus.VALID,
+            code=None,
+            message=None,
+            action_hint=None,
+            metadata={"slug": "example"},
+            impact=None,
+            confirmation_required=False,
+        )
+
+    result = await service.validate_candidate(
+        section=SystemSettingSection.PLATFORM_GITHUB_APP,
+        validator=validator,
+    )
+
+    assert isinstance(result, SystemSettingActivated)
+    assert result.current.version == 1
+    assert result.current.validation_status is SystemSettingValidationStatus.VALID
+    assert result.current.validation_metadata == {"slug": "example"}
+
+
+async def test_confirmation_rechecks_impact_before_activation(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """Confirmation fails closed when resource impact changed after validation."""
+    service = _service(
+        rdb_session_manager,
+        activation_mode=SystemSettingActivationMode.CONFIRMED,
+    )
+    pending = await service.mutate(_initial_mutation())
+    assert isinstance(pending, SystemSettingCandidatePending)
+
+    async def validator(
+        _snapshot: SystemSettingCandidateValidationSnapshot,
+    ) -> SystemSettingCandidateValidationResult:
+        return SystemSettingCandidateValidationResult(
+            status=SystemSettingValidationStatus.VALID,
+            code=None,
+            message=None,
+            action_hint=None,
+            metadata=None,
+            impact={"affected_count": 1},
+            confirmation_required=True,
+        )
+
+    validated = await service.validate_candidate(
+        section=SystemSettingSection.PLATFORM_GITHUB_APP,
+        validator=validator,
+    )
+    assert isinstance(validated, SystemSettingCandidatePending)
+
+    async def changed_impact(
+        _session: AsyncSession,
+        _current: object,
+        _candidate: object,
+    ) -> dict[str, object]:
+        return {"affected_count": 2}
+
+    async def confirm(
+        _session: AsyncSession,
+        _action: str,
+        _candidate: object,
+    ) -> None:
+        return None
+
+    with pytest.raises(SystemSettingImpactChanged) as exc_info:
+        await service.confirm_candidate(
+            section=SystemSettingSection.PLATFORM_GITHUB_APP,
+            candidate_id=validated.candidate.id,
+            expected_version=0,
+            confirmation_action="activate",
+            actor_user_id=None,
+            impact_resolver=changed_impact,
+            confirmation_handler=confirm,
+        )
+    assert exc_info.value.current_impact == {"affected_count": 2}
 
 
 async def test_application_data_migration_runner_is_idempotent(

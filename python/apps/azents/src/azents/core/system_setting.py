@@ -364,3 +364,20 @@ class SystemSettingCandidateExpired(Exception):
 
     section: SystemSettingSection
     candidate_id: str
+
+
+@dataclass(frozen=True)
+class SystemSettingCandidateNotValidated(Exception):
+    """Candidate is not valid for confirmation."""
+
+    section: SystemSettingSection
+    candidate_id: str
+
+
+@dataclass(frozen=True)
+class SystemSettingImpactChanged(Exception):
+    """Candidate impact changed after external validation."""
+
+    section: SystemSettingSection
+    candidate_id: str
+    current_impact: dict[str, Any] | None
