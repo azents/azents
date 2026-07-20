@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 import azentsadminclient
 import azentspublicclient
+import pytest
 import requests
 from azentspublicclient.api.agent_v1_api import AgentV1Api
 from azentspublicclient.api.llm_provider_integration_v1_api import (
@@ -784,15 +785,28 @@ class TestChatInputBuffer:
 
     def test_running_follow_ups_are_buffered_then_promoted_in_fifo_order(
         self,
+        request: pytest.FixtureRequest,
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
-        azents_engine_worker_container: object,
+        azents_engine_worker_container: DockerContainer,
         mock_openai_url: str,
     ) -> None:
         """Promote multiple running-session follow-ups in FIFO order."""
-        del azents_engine_worker_container
         _reset_mock_openai(mock_openai_url)
+        release_file_path = f"/tmp/azents-input-buffer-fifo-{unique()}"
+        _set_release_file(
+            azents_engine_worker_container,
+            release_file_path,
+            present=False,
+        )
+        request.addfinalizer(
+            lambda: _set_release_file(
+                azents_engine_worker_container,
+                release_file_path,
+                present=True,
+            )
+        )
         workspace = _setup_workspace(
             public_api_client,
             admin_api_client,
@@ -801,8 +815,8 @@ class TestChatInputBuffer:
         agent_id = _create_agent(
             public_api_client,
             workspace,
-            delay_seconds=5.0,
-            release_file_path=None,
+            delay_seconds=0.0,
+            release_file_path=release_file_path,
         )
 
         initial_response = _write_new_session_message(
@@ -817,6 +831,10 @@ class TestChatInputBuffer:
             server_url=azents_public_server_url,
             token=workspace.token,
             session_id=session_id,
+        )
+        _wait_for_tool_release_barrier(
+            azents_engine_worker_container,
+            release_file_path,
         )
         _wait_for_running_rest_state(
             server_url=azents_public_server_url,
@@ -879,6 +897,11 @@ class TestChatInputBuffer:
         assert _FOLLOW_UP_MESSAGE not in _message_contents(history_payload)
         assert _SECOND_FOLLOW_UP_MESSAGE not in _message_contents(history_payload)
 
+        _set_release_file(
+            azents_engine_worker_container,
+            release_file_path,
+            present=True,
+        )
         final_payload = _wait_for_rest_state(
             server_url=azents_public_server_url,
             token=workspace.token,
@@ -1006,13 +1029,26 @@ class TestChatInputBuffer:
 
     def test_rest_stop_interrupts_running_session(
         self,
+        request: pytest.FixtureRequest,
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
-        azents_engine_worker_container: object,
+        azents_engine_worker_container: DockerContainer,
     ) -> None:
         """REST stop endpoint t running session t interrupted t t."""
-        del azents_engine_worker_container
+        release_file_path = f"/tmp/azents-input-buffer-stop-{unique()}"
+        _set_release_file(
+            azents_engine_worker_container,
+            release_file_path,
+            present=False,
+        )
+        request.addfinalizer(
+            lambda: _set_release_file(
+                azents_engine_worker_container,
+                release_file_path,
+                present=True,
+            )
+        )
         workspace = _setup_workspace(
             public_api_client,
             admin_api_client,
@@ -1021,8 +1057,8 @@ class TestChatInputBuffer:
         agent_id = _create_agent(
             public_api_client,
             workspace,
-            delay_seconds=30.0,
-            release_file_path=None,
+            delay_seconds=0.0,
+            release_file_path=release_file_path,
         )
         initial_response = _write_new_session_message(
             server_url=azents_public_server_url,
@@ -1032,6 +1068,10 @@ class TestChatInputBuffer:
             client_request_id=f"initial-stop-{unique()}",
         )
         session_id = _session_id_from_write(initial_response)
+        _wait_for_tool_release_barrier(
+            azents_engine_worker_container,
+            release_file_path,
+        )
         _wait_for_running_rest_state(
             server_url=azents_public_server_url,
             token=workspace.token,
@@ -1071,7 +1111,7 @@ class TestChatInputBuffer:
         agent_id = _create_agent(
             public_api_client,
             workspace,
-            delay_seconds=3.0,
+            delay_seconds=0.0,
             release_file_path=None,
         )
         initial_response = _write_new_session_message(
