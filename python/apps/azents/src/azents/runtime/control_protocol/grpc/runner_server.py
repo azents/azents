@@ -670,6 +670,13 @@ def _copy_operation_payload(
         message.file_write.path = _str_payload(payload, "path")
         message.file_write.total_bytes = _int_payload(payload, "total_bytes")
         return
+    if operation_type == "file.apply_patch":
+        message.file_apply_patch.base_path = _str_payload(payload, "base_path")
+        message.file_apply_patch.total_bytes = _int_payload(payload, "total_bytes")
+        message.file_apply_patch.schema_version = _int_payload(
+            payload, "schema_version"
+        )
+        return
     if operation_type == "file.list":
         message.file_list.path = _str_payload(payload, "path")
         message.file_list.recursive = _bool_payload(payload, "recursive")

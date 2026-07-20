@@ -143,6 +143,64 @@ class RuntimeFileWriteResult:
     final_cursor: str
 
 
+type RuntimeFilePatchAction = Literal["add", "update", "delete"]
+type RuntimeFilePatchPhase = Literal[
+    "parse",
+    "preflight",
+    "stage",
+    "revalidate",
+    "commit",
+]
+
+
+@dataclasses.dataclass(frozen=True)
+class RuntimeFilePatchOperation:
+    """One file operation referenced by a patch result."""
+
+    path: str
+    action: RuntimeFilePatchAction
+
+
+@dataclasses.dataclass(frozen=True)
+class RuntimeFilePatchChange:
+    """One file change committed by a patch operation."""
+
+    path: str
+    action: RuntimeFilePatchAction
+    added_lines: int
+    removed_lines: int
+    content_sha256: str | None
+
+
+@dataclasses.dataclass(frozen=True)
+class RuntimeFileApplyPatchFailure:
+    """Typed patch failure detail returned by Runtime Runner."""
+
+    phase: RuntimeFilePatchPhase
+    reason: str
+    applied: tuple[RuntimeFilePatchChange, ...]
+    failed: RuntimeFilePatchOperation | None
+    not_attempted: tuple[RuntimeFilePatchOperation, ...]
+    exact: bool
+
+
+@dataclasses.dataclass(frozen=True)
+class RuntimeFileApplyPatchResult:
+    """Completed file patch operation result."""
+
+    changes: tuple[RuntimeFilePatchChange, ...]
+    final_cursor: str
+
+
+class RuntimeFileApplyPatchFailedError(RuntimeRunnerOperationFailedError):
+    """Runtime Runner returned a typed file patch failure."""
+
+    def __init__(self, message: str, *, failure: RuntimeFileApplyPatchFailure) -> None:
+        """Initialize the patch failure with its committed-delta detail."""
+        super().__init__(message)
+        self.failure = failure
+
+
 @dataclasses.dataclass(frozen=True)
 class RuntimeOperationTextDelta:
     """Live stdout or stderr text delta returned by Runner protocol."""
@@ -290,6 +348,7 @@ type RuntimeForegroundResult = (
     | RuntimeFileStatResult
     | RuntimeGrepResult
     | RuntimeFileWriteResult
+    | RuntimeFileApplyPatchResult
     | RuntimeProcessResult
     | RuntimeFileDeleteResult
     | RuntimeFileMkdirResult
@@ -433,6 +492,49 @@ class RuntimeRunnerOperationClient:
             )
         )
         return await self.resume_file_write(
+            reply_stream_id=dispatch.reply_stream_id,
+            after_cursor=None,
+            request_id=dispatch.request_id,
+            operation_id=dispatch.operation_id,
+            runtime_id=runtime_id,
+            generation=runner_generation,
+            deadline_at=deadline_at,
+        )
+
+    async def apply_patch(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        owner_session_id: str | None,
+        base_path: str,
+        patch: bytes,
+        schema_version: int,
+        deadline_at: datetime,
+    ) -> RuntimeFileApplyPatchResult:
+        """Run a file patch operation through a request body stream."""
+        body_stream_id = f"body:{runtime_id}:{datetime.now(timezone.utc).timestamp()}"
+        await self._append_body_chunks(
+            body_stream_id=body_stream_id,
+            request_id=body_stream_id,
+            data=patch,
+        )
+        dispatch = await self._dispatch_runner_operation(
+            RuntimeRunnerOperation(
+                runtime_id=runtime_id,
+                runner_generation=runner_generation,
+                operation_type="file.apply_patch",
+                owner_session_id=owner_session_id,
+                payload={
+                    "base_path": base_path,
+                    "total_bytes": len(patch),
+                    "schema_version": schema_version,
+                },
+                deadline_at=deadline_at,
+                body_stream_id=body_stream_id,
+            )
+        )
+        return await self.resume_file_apply_patch(
             reply_stream_id=dispatch.reply_stream_id,
             after_cursor=None,
             request_id=dispatch.request_id,
@@ -1189,6 +1291,33 @@ class RuntimeRunnerOperationClient:
             final_cursor=final.cursor,
         )
 
+    async def resume_file_apply_patch(
+        self,
+        *,
+        reply_stream_id: str,
+        after_cursor: str | None,
+        request_id: str | None = None,
+        operation_id: str | None = None,
+        runtime_id: str | None = None,
+        generation: int | None = None,
+        deadline_at: datetime,
+    ) -> RuntimeFileApplyPatchResult:
+        """Resume reading a file patch reply stream until final result."""
+        folder = _ReplyFolder(after_cursor=after_cursor)
+        final = await self._read_until_final(
+            reply_stream_id,
+            folder,
+            request_id=request_id,
+            operation_id=operation_id,
+            runtime_id=runtime_id,
+            generation=generation,
+            deadline_at=deadline_at,
+        )
+        return RuntimeFileApplyPatchResult(
+            changes=tuple(_file_patch_changes(final.event.payload, "changes")),
+            final_cursor=final.cursor,
+        )
+
     async def resume_file_delete(
         self,
         *,
@@ -1650,6 +1779,14 @@ class RuntimeRunnerOperationClient:
                     await folder.apply(record)
                     if record.event.final:
                         if record.event.event_type == RuntimeReplyEventType.FINAL_ERROR:
+                            patch_failure = _file_apply_patch_failure(
+                                record.event.payload
+                            )
+                            if patch_failure is not None:
+                                raise RuntimeFileApplyPatchFailedError(
+                                    _error_message(record.event.payload),
+                                    failure=patch_failure,
+                                )
                             raise RuntimeRunnerOperationFailedError(
                                 _error_message(record.event.payload)
                             )
@@ -1806,6 +1943,102 @@ def _error_message(payload: dict[str, JsonValue]) -> str:
     if code and message:
         return f"{code}: {message}"
     return message or code or "Runner operation failed"
+
+
+def _file_apply_patch_failure(
+    payload: dict[str, JsonValue],
+) -> RuntimeFileApplyPatchFailure | None:
+    value = payload.get("file_apply_patch")
+    if not isinstance(value, dict):
+        return None
+    phase = _file_patch_phase(value.get("phase"))
+    if phase is None:
+        return None
+    return RuntimeFileApplyPatchFailure(
+        phase=phase,
+        reason=_str_payload(value, "reason"),
+        applied=tuple(_file_patch_changes(value, "applied")),
+        failed=_optional_file_patch_operation(value.get("failed")),
+        not_attempted=tuple(_file_patch_operations(value, "not_attempted")),
+        exact=_bool_payload(value, "exact", default=False),
+    )
+
+
+def _file_patch_changes(
+    payload: dict[str, JsonValue],
+    key: str,
+) -> list[RuntimeFilePatchChange]:
+    raw_changes = payload.get(key)
+    if not isinstance(raw_changes, list):
+        return []
+    changes: list[RuntimeFilePatchChange] = []
+    for raw_change in raw_changes:
+        if not isinstance(raw_change, dict):
+            continue
+        operation = _optional_file_patch_operation(raw_change)
+        if operation is None:
+            continue
+        changes.append(
+            RuntimeFilePatchChange(
+                path=operation.path,
+                action=operation.action,
+                added_lines=_int_payload(raw_change, "added_lines", default=0),
+                removed_lines=_int_payload(raw_change, "removed_lines", default=0),
+                content_sha256=_optional_str_payload(raw_change, "content_sha256"),
+            )
+        )
+    return changes
+
+
+def _file_patch_operations(
+    payload: dict[str, JsonValue],
+    key: str,
+) -> list[RuntimeFilePatchOperation]:
+    raw_operations = payload.get(key)
+    if not isinstance(raw_operations, list):
+        return []
+    operations: list[RuntimeFilePatchOperation] = []
+    for raw_operation in raw_operations:
+        operation = _optional_file_patch_operation(raw_operation)
+        if operation is not None:
+            operations.append(operation)
+    return operations
+
+
+def _optional_file_patch_operation(
+    value: object,
+) -> RuntimeFilePatchOperation | None:
+    if not isinstance(value, dict):
+        return None
+    path = value.get("path")
+    action = _file_patch_action(value.get("action"))
+    if not isinstance(path, str) or action is None:
+        return None
+    return RuntimeFilePatchOperation(path=path, action=action)
+
+
+def _file_patch_action(value: object) -> RuntimeFilePatchAction | None:
+    if value == "add":
+        return "add"
+    if value == "update":
+        return "update"
+    if value == "delete":
+        return "delete"
+    return None
+
+
+def _file_patch_phase(value: object) -> RuntimeFilePatchPhase | None:
+    if value == "parse":
+        return "parse"
+    if value == "preflight":
+        return "preflight"
+    if value == "stage":
+        return "stage"
+    if value == "revalidate":
+        return "revalidate"
+    if value == "commit":
+        return "commit"
+    return None
 
 
 def _file_list_entries(

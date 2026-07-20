@@ -116,6 +116,7 @@ message RunnerOperationRequest {
     GitRemoveWorktreeOperationPayload git_remove_worktree = 36;
     GitDeleteBranchOperationPayload git_delete_branch = 37;
     FileGlobOperationPayload file_glob = 38;
+    FileApplyPatchOperationPayload file_apply_patch = 39;
   }
 }
 
@@ -234,6 +235,12 @@ message GitDeleteBranchOperationPayload {
   string branch_name = 2;
 }
 
+message FileApplyPatchOperationPayload {
+  string base_path = 1;
+  uint64 total_bytes = 2;
+  uint32 schema_version = 3;
+}
+
 message RunnerBodyChunk {
   uint64 chunk_id = 1;
   bytes data = 2;
@@ -299,12 +306,17 @@ message RunnerOperationFinalSuccessPayload {
     GitRemoveWorktreeFinalSuccess git_remove_worktree = 15;
     GitDeleteBranchFinalSuccess git_delete_branch = 16;
     FileGlobFinalSuccess file_glob = 17;
+    FileApplyPatchFinalSuccess file_apply_patch = 18;
   }
 }
 
 message RunnerOperationFinalErrorPayload {
   string error_code = 1;
   string error_message = 2;
+
+  oneof detail {
+    FileApplyPatchFailure file_apply_patch = 3;
+  }
 }
 
 message BashFinalSuccess {
@@ -317,6 +329,32 @@ message FileReadFinalSuccess {
 
 message FileWriteFinalSuccess {
   uint64 bytes_written = 1;
+}
+
+message RuntimeFilePatchOperation {
+  string path = 1;
+  string action = 2;
+}
+
+message RuntimeFilePatchChange {
+  string path = 1;
+  string action = 2;
+  uint32 added_lines = 3;
+  uint32 removed_lines = 4;
+  optional string content_sha256 = 5;
+}
+
+message FileApplyPatchFinalSuccess {
+  repeated RuntimeFilePatchChange changes = 1;
+}
+
+message FileApplyPatchFailure {
+  string phase = 1;
+  string reason = 2;
+  repeated RuntimeFilePatchChange applied = 3;
+  optional RuntimeFilePatchOperation failed = 4;
+  repeated RuntimeFilePatchOperation not_attempted = 5;
+  bool exact = 6;
 }
 
 message FileListFinalSuccess {

@@ -28,6 +28,7 @@ from azents.runtime.control_protocol.service import (
     RuntimeControlProtocolService,
 )
 from azents.runtime.coordination.data import (
+    RuntimeBodyChunk,
     RuntimeCoordinationTarget,
     RuntimeOperationStatus,
     RuntimeReplyEvent,
@@ -678,6 +679,138 @@ async def test_runner_grpc_round_trips_file_glob_payload_and_result() -> None:
             }
         ]
     }
+    await stream.aclose()
+
+
+@pytest.mark.asyncio
+async def test_runner_grpc_relays_file_apply_patch_and_preserves_failure() -> None:
+    """The bridge relays patch bodies and stores typed partial-failure detail."""
+    store = InMemoryRuntimeCoordinationStore()
+    service = RuntimeControlProtocolService(
+        store, request_id_factory=lambda: "req-patch"
+    )
+    sink = FakeStateSink()
+    servicer = _servicer(service, store, sink)
+    inbound = QueueIterator()
+    await inbound.put(_register_message())
+
+    stream = servicer.ConnectRunner(inbound, FakeGrpcContext())
+    accepted = await anext(stream)
+    body_stream_id = "body:req-patch"
+    patch = b"*** Begin Patch\n*** End Patch\n"
+    await store.append_body_chunk(
+        body_stream_id,
+        RuntimeBodyChunk(
+            request_id=body_stream_id,
+            chunk_id=1,
+            data=patch,
+            created_at=_now(),
+            final=True,
+        ),
+    )
+    result = await service.dispatch_runner_operation(
+        RuntimeRunnerOperation(
+            runtime_id="runtime-1",
+            runner_generation=accepted.register_accepted.generation,
+            operation_type="file.apply_patch",
+            owner_session_id="session-1",
+            payload={
+                "base_path": "/workspace/agent/project",
+                "total_bytes": len(patch),
+                "schema_version": 1,
+            },
+            deadline_at=datetime.now(UTC) + timedelta(seconds=30),
+            body_stream_id=body_stream_id,
+        ),
+        created_at=_now(),
+    )
+
+    command = await anext(stream)
+    assert isinstance(result, RuntimeDispatchResult)
+    assert command.operation_request.WhichOneof("payload") == "file_apply_patch"
+    assert (
+        command.operation_request.file_apply_patch.base_path
+        == "/workspace/agent/project"
+    )
+    assert command.operation_request.file_apply_patch.total_bytes == len(patch)
+    assert command.operation_request.file_apply_patch.schema_version == 1
+    assert command.operation_request.body_chunks[0].data == patch
+
+    await inbound.put(
+        runtime_runner_control_pb2.RunnerMessage(
+            connection_id="connection-1",
+            request_id="req-patch",
+            generation=accepted.register_accepted.generation,
+            operation_event=runtime_runner_control_pb2.RunnerOperationEvent(
+                runtime_id="runtime-1",
+                operation_id="operation:req-patch",
+                generation=accepted.register_accepted.generation,
+                event_type="final_error",
+                created_at=_timestamp(_now()),
+                final=True,
+                final_error=(
+                    runtime_runner_control_pb2.RunnerOperationFinalErrorPayload(
+                        error_code="PATCH_COMMIT_FAILED",
+                        error_message="Source changed before delete",
+                        file_apply_patch=(
+                            runtime_runner_control_pb2.FileApplyPatchFailure(
+                                phase="commit",
+                                reason="source_changed",
+                                applied=[
+                                    runtime_runner_control_pb2.RuntimeFilePatchChange(
+                                        path="src/app.py",
+                                        action="update",
+                                        added_lines=2,
+                                        removed_lines=1,
+                                        content_sha256="abc123",
+                                    )
+                                ],
+                                failed=(
+                                    runtime_runner_control_pb2.RuntimeFilePatchOperation(
+                                        path="src/legacy.py",
+                                        action="delete",
+                                    )
+                                ),
+                                not_attempted=[
+                                    runtime_runner_control_pb2.RuntimeFilePatchOperation(
+                                        path="src/after.py",
+                                        action="add",
+                                    )
+                                ],
+                                exact=True,
+                            )
+                        ),
+                    )
+                ),
+            ),
+        )
+    )
+    replies = []
+    for _ in range(10):
+        replies = await service.read_replies(
+            reply_stream_id=result.reply_stream_id,
+            after_cursor=None,
+            limit=10,
+        )
+        if replies:
+            break
+        await asyncio.sleep(0)
+
+    detail = replies[0].event.payload["file_apply_patch"]
+    assert isinstance(detail, dict)
+    assert detail["phase"] == "commit"
+    assert detail["applied"] == [
+        {
+            "path": "src/app.py",
+            "action": "update",
+            "added_lines": 2,
+            "removed_lines": 1,
+            "content_sha256": "abc123",
+        }
+    ]
+    assert detail["failed"] == {"path": "src/legacy.py", "action": "delete"}
+    assert detail["not_attempted"] == [{"path": "src/after.py", "action": "add"}]
+    assert detail["exact"] is True
     await stream.aclose()
 
 
