@@ -41,7 +41,7 @@ api_routes:
   - /toolkit/v1
   - /shell-environment/v1
 last_verified_at: 2026-07-20
-spec_version: 61
+spec_version: 62
 ---
 
 # Toolkit
@@ -213,6 +213,8 @@ Snapshot-backed GitHub tool handlers resolve installation authorization at execu
 Each Agent stores a `tool_search_enabled` setting that defaults to `false` and is managed from the Agent Capabilities API/UI. When disabled, the complete executable client-tool catalog remains model-visible in canonical final-name order. The engine does not inject `tool_search`, defer attached service operations, apply compatibility-budget projection, or update Tool Search working-set recency.
 
 When `tool_search_enabled` is enabled, the executable Tool Catalog retains every currently available client function with its final model-visible name, current schema and handler, Toolkit source metadata, and an exposure class. The final name is both the executor routing key and the persisted working-set identity.
+
+For each DB-attached catalog entry, the catalog source retains the ToolkitConfig ID, type, display name, and slug independently of the final model-visible name. When the model invokes that entry, the engine snapshots those source facts onto the durable `client_tool_call` and the matching active/live client-tool projection. UI consumers use this snapshot for product identity and must not infer Toolkit ownership from a tool-name prefix. Built-in and auto-bound entries have no ToolkitConfig source snapshot.
 
 Auto-bound core execution and session-control capabilities are direct and remain pinned in every prepared model call. DB-attached service Toolkit operations are deferred by default, including MCP, GitHub, GCP, AWS, Sentry, Notion, Kubernetes, and Google Analytics operations. A service control tool required to operate its integration may be explicitly direct; the current registered exception is GitHub `switch_installation`.
 
@@ -601,6 +603,7 @@ OpenAPI spec is authoritative for all endpoints. Major operations:
 
 ## Changelog
 
+- **2026-07-20** (spec_version 62) — Persisted immutable DB-attached Toolkit source snapshots on client-tool calls and prohibited UI ownership inference from final tool names.
 - **2026-07-20** (spec_version 61) — Bound Platform GitHub App installations and Toolkits to durable App identity, moved OAuth and Worker token operations to System Settings resolution, and added the redacted Public reconnect-required projection.
 - **2026-07-20** (spec_version 61) — Reset only `tool_search/working_set` after successful context compaction while preserving all other Session Toolkit State.
 - **2026-07-20** (spec_version 60) — Defined Shell `glob` as a shell-style pathname matching subset with zero-or-more-segment `**`, bounded comma-separated brace alternatives, explicit rejection of tilde expansion, and no shell quoting or backslash interpretation.

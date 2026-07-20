@@ -60,8 +60,9 @@ code_paths:
   - python/apps/azents/src/azents/worker/session/**
   - typescript/apps/azents-web/src/features/chat/components/ChatView.tsx
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
+  - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
 last_verified_at: 2026-07-20
-spec_version: 113
+spec_version: 114
 ---
 
 # Agent Execution Loop
@@ -94,8 +95,9 @@ Main steps:
    provider-neutral UI stream projections while retaining only the state needed to build durable
    output at completion. Provider-native hosted-tool stages are adapter-local and become canonical
    provider-tool activity snapshots when observed.
-10. Foreground client tools execute in parallel and results are appended as event `client_tool_result`.
-11. When no foreground client tool call or pending follow-up remains, the runner observes the
+10. Before a normalized client-tool call is appended or admitted for execution, the immutable prepared Tool Catalog snapshots its DB-attached Toolkit source (`toolkit_config_id`, `toolkit_type`, `toolkit_name`, and `toolkit_slug`) onto the call. The same snapshot is retained by `active_tool_calls` and their live projections; built-in and auto-bound calls remain source-less.
+11. Foreground client tools execute in parallel and results are appended as event `client_tool_result`.
+12. When no foreground client tool call or pending follow-up remains, the runner observes the
     terminal `RunComplete` boundary and then transitions `AgentSession.run_state` to idle.
 
 Streaming text, reasoning, function-call deltas, and provider-tool activity are UI projections only.
@@ -995,6 +997,7 @@ updated by the user.
 
 ## Changelog
 
+- **2026-07-20** (spec_version 114) — Snapshotted DB-attached Toolkit source identity onto durable, active, and live client-tool calls before execution.
 - **2026-07-20** (spec_version 113) — Reset the shared Tool Search working set in the successful context-compaction transaction and require deferred tools to be activated again afterward.
 - **2026-07-19** (spec_version 111) — Added explicit wake versus queue-only input scheduling, idempotent direct-parent terminal mailbox delivery and repair, targetless mailbox activity waiting, and promotion-time observation acknowledgment.
 - **2026-07-19** — v110. Added archived-tree execution rejection, worker/recovery active-state filtering, irreversible purge owner fencing, stop signaling, and pre-fence restore semantics.

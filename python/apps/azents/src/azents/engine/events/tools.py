@@ -20,6 +20,7 @@ from azents.engine.events.types import (
     ClientToolCallPayload,
     ClientToolResultPayload,
     OutputTextPart,
+    ToolkitSourceSnapshot,
     ToolOutput,
 )
 from azents.engine.run.contracts import ToolkitBinding
@@ -82,6 +83,27 @@ class ToolCatalog:
     def native_tools(self) -> list[dict[str, object]]:
         """Return every executable tool schema in canonical order."""
         return self.native_tools_for(tuple(self.tools))
+
+    def enrich_client_tool_call(
+        self,
+        call: ClientToolCallPayload,
+    ) -> ClientToolCallPayload:
+        """Copy the exact catalog entry's immutable Toolkit source onto a call."""
+        entry = self.entries.get(call.name)
+        if entry is None or entry.source.toolkit_config_id is None:
+            return call.model_copy(update={"toolkit_source": None})
+        if entry.source.toolkit_type is None:
+            raise ValueError("DB-attached Toolkit source requires toolkit_type")
+        return call.model_copy(
+            update={
+                "toolkit_source": ToolkitSourceSnapshot(
+                    toolkit_config_id=entry.source.toolkit_config_id,
+                    toolkit_type=entry.source.toolkit_type,
+                    toolkit_name=entry.source.label,
+                    toolkit_slug=entry.source.slug,
+                )
+            }
+        )
 
     def native_tools_for(
         self,
@@ -230,6 +252,7 @@ def _tool_catalog_source(binding: ToolkitBinding) -> ToolCatalogSource:
         toolkit_class=binding.toolkit.__class__.__name__,
         display_name=binding.toolkit.display_name.strip(),
         use_prefix=binding.use_prefix,
+        toolkit_config_id=binding.toolkit_config_id,
         routing_metadata=tuple(routing_metadata),
     )
 

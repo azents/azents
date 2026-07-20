@@ -765,6 +765,7 @@ class AgentEngineAdapter:
                 inference_state=request.inference_state,
                 system_prompt_analysis=system_prompt_result.analysis,
                 tool_executor=prepared_tool_executor,
+                enrich_client_tool_call=catalog.enrich_client_tool_call,
                 on_turn_end=on_turn_end,
             )
 

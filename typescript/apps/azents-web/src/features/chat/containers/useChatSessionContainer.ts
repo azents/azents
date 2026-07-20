@@ -59,6 +59,7 @@ import type {
   PendingInputBuffer,
   TodoStateSnapshot,
   TokenUsageSummary,
+  ToolkitSourceSnapshot,
   ToolResultStatus,
 } from "../types";
 import type {
@@ -112,6 +113,8 @@ export interface ChatSessionContainerOutput {
   chatTimelineState: ChatTimelineState;
   /** chat message list */
   messages: ChatMessage[];
+  /** canonical durable and latest-following live event stream for chat presentation */
+  timelineEvents: ChatEventResponse[];
   /** not yet model turn  to not injected pending input buffers */
   pendingInputBuffers: PendingInputBuffer[];
   /** WebSocket connection status */
@@ -754,6 +757,32 @@ function contentAttachments(value: unknown): FileAttachment[] {
   });
 }
 
+function toolkitSourceSnapshotFromValue(
+  value: unknown,
+): ToolkitSourceSnapshot | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const toolkitConfigId = stringField(value, "toolkit_config_id");
+  const toolkitType = stringField(value, "toolkit_type");
+  const toolkitName = stringField(value, "toolkit_name");
+  const toolkitSlug = stringField(value, "toolkit_slug");
+  if (
+    toolkitConfigId === null ||
+    toolkitType === null ||
+    toolkitName === null ||
+    toolkitSlug === null
+  ) {
+    return null;
+  }
+  return {
+    toolkit_config_id: toolkitConfigId,
+    toolkit_type: toolkitType,
+    toolkit_name: toolkitName,
+    toolkit_slug: toolkitSlug,
+  };
+}
+
 function contentText(value: unknown): string {
   if (typeof value === "string") {
     return value;
@@ -1013,6 +1042,9 @@ function mapEvents(
             callId,
             name,
             arguments: stringField(payload, "arguments") ?? "",
+            toolkitSource: toolkitSourceSnapshotFromValue(
+              payload.toolkit_source,
+            ),
             status: "running",
           },
           event.id,
@@ -2004,6 +2036,20 @@ export function useChatSessionContainer(
       }),
     [historyEvents, renderIncompleteDurableToolCalls],
   );
+  const timelineEvents = useMemo((): ChatEventResponse[] => {
+    if (chatTimelineState.type === "DETACHED_HISTORY_BROWSING") {
+      return historyEvents;
+    }
+    const visiblePartialEvents = orderedPartialHistoryEvents(
+      managedLiveState.partialHistory,
+    ).filter(
+      (partialEvent) =>
+        !historyEvents.some((durableEvent) =>
+          partialHistoryEventMatchesDurableEvent(partialEvent, durableEvent),
+        ),
+    );
+    return [...historyEvents, ...visiblePartialEvents];
+  }, [chatTimelineState.type, historyEvents, managedLiveState.partialHistory]);
   const messages = useMemo(() => {
     const durableAndTransient = [
       ...durableHistoryMessages,
@@ -3276,6 +3322,7 @@ export function useChatSessionContainer(
     chatViewState,
     chatTimelineState,
     messages,
+    timelineEvents,
     pendingInputBuffers,
     connectionStatus,
     isResponsePending,

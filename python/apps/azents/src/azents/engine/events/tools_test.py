@@ -222,6 +222,47 @@ async def test_build_tool_catalog_classifies_direct_and_deferred_tools() -> None
     assert catalog.entries["azents__echo"].source.toolkit_type == "github"
 
 
+async def test_catalog_enriches_registered_tool_call_with_source_snapshot() -> None:
+    """Use the selected catalog entry instead of parsing a tool name prefix."""
+    toolkit = _Toolkit()
+    toolkit.display_name = "GitHub"
+    catalog = await build_tool_catalog(
+        toolkit_bindings=[
+            ToolkitBinding(
+                toolkit=toolkit,
+                slug="github",
+                use_prefix=True,
+                toolkit_type="github",
+                toolkit_config_id="toolkit-config-1",
+            )
+        ],
+        context=TurnContext(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id="run-1",
+            publish_event=_noop_publish,
+        ),
+    )
+
+    enriched = catalog.enrich_client_tool_call(
+        ClientToolCallPayload(
+            call_id="call-1",
+            name="github__echo",
+            arguments="{}",
+            native_artifact=_artifact(),
+        )
+    )
+
+    assert enriched.toolkit_source is not None
+    assert enriched.toolkit_source.model_dump() == {
+        "toolkit_config_id": "toolkit-config-1",
+        "toolkit_type": "github",
+        "toolkit_name": "GitHub",
+        "toolkit_slug": "github",
+    }
+
+
 async def test_extend_tool_catalog_marks_runtime_builtin_direct() -> None:
     """Client-executed runtime builtins remain pinned direct tools."""
     catalog = await build_tool_catalog(

@@ -59,6 +59,7 @@ class ToolCatalogSource:
     toolkit_class: str
     display_name: str
     use_prefix: bool
+    toolkit_config_id: str | None = None
     routing_metadata: tuple[tuple[str, str], ...] = ()
 
     @property

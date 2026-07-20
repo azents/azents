@@ -3,38 +3,30 @@
 import {
   Box,
   Collapse,
-  Divider,
   Group,
   Loader,
-  Paper,
   rem,
   Stack,
   Text,
   ThemeIcon,
   UnstyledButton,
 } from "@mantine/core";
-import { useDisclosure } from "@mantine/hooks";
+import { useDisclosure, useElementSize } from "@mantine/hooks";
 import {
   IconAlertCircle,
   IconChevronRight,
   IconTool,
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
-import {
-  groupToolActivityPhases,
-  toolCallPresentation,
-} from "../toolPresentationRegistry";
-import { MarkdownContent } from "./MarkdownContent";
+import { CompactionDivider } from "./CompactionDivider";
+import { MessageBubble } from "./MessageBubble";
 import { ProviderToolCallCard } from "./ProviderToolCallCard";
 import { ToolCallCard } from "./ToolCallCard";
 import type {
-  ToolActivityCall,
+  ActivityCategory,
+  ActivityEvent,
   ToolActivityGroup as ToolActivityGroupModel,
 } from "../toolActivityPresentation";
-import type {
-  ToolActivityPhase,
-  ToolActivityPhaseKind,
-} from "../toolPresentationRegistry";
 import type { ReactNode } from "react";
 
 interface ToolActivityGroupProps {
@@ -43,102 +35,73 @@ interface ToolActivityGroupProps {
   dimmed?: boolean;
 }
 
-interface ActivityStatusCounts {
-  failed: number;
-  running: number;
+interface CategorySummary extends ActivityCategory {
+  count: number;
 }
 
-interface ToolActivityPhaseRowProps {
-  phase: ToolActivityPhase;
-  label: string;
-  callCountLabel: string;
-  expandLabel: string;
-  collapseLabel: string;
-}
-
-function activityStatusCounts(calls: ToolActivityCall[]): ActivityStatusCounts {
-  let failed = 0;
-  let running = 0;
-
-  for (const call of calls) {
-    if (call.toolCall.status === "failed") {
-      failed += 1;
+function categorySummaries(events: ActivityEvent[]): CategorySummary[] {
+  const categories: CategorySummary[] = [];
+  for (const event of events) {
+    if (event.category === null) {
+      continue;
     }
-    if (
-      call.toolCall.status === "running" ||
-      (call.type === "client" && call.toolCall.status === "preparing")
-    ) {
-      running += 1;
+    const previous = categories.find(
+      (category) => category.key === event.category?.key,
+    );
+    if (previous) {
+      previous.count += 1;
+      continue;
     }
+    categories.push({ ...event.category, count: 1 });
   }
-
-  return { failed, running };
+  return categories;
 }
 
-function ToolActivityPhaseRow({
-  phase,
-  label,
-  callCountLabel,
-  expandLabel,
-  collapseLabel,
-}: ToolActivityPhaseRowProps): React.ReactElement {
-  const [opened, { toggle }] = useDisclosure(false);
+function categoryLabel(
+  category: CategorySummary,
+  t: ReturnType<typeof useTranslations<"chat.toolActivity">>,
+): string {
+  switch (category.key) {
+    case "skill":
+      return t("categorySkill");
+    case "explore":
+      return t("categoryExplore");
+    case "shell":
+      return t("categoryShell");
+    case "edit":
+      return t("categoryEdit");
+    case "file":
+      return t("categoryFile");
+    case "image":
+      return t("categoryImage");
+    case "memory":
+      return t("categoryMemory");
+    case "organize":
+      return t("categoryOrganize");
+    case "subagent":
+      return t("categorySubagent");
+    case "other":
+      return t("categoryOther");
+    default:
+      return category.label;
+  }
+}
 
-  return (
-    <Box>
-      <UnstyledButton
-        w="100%"
-        py="sm"
-        px={rem(2)}
-        onClick={toggle}
-        aria-expanded={opened}
-        aria-label={`${opened ? collapseLabel : expandLabel}: ${label}`}
-      >
-        <Group justify="space-between" gap="sm" wrap="nowrap">
-          <Box miw={0}>
-            <Text size="sm" fw={550}>
-              {label}
-            </Text>
-            <Text size="xs" c="dimmed">
-              {callCountLabel}
-            </Text>
-          </Box>
-          <IconChevronRight
-            aria-hidden="true"
-            size={rem(15)}
-            color="var(--mantine-color-dimmed)"
-            style={{
-              transform: opened ? "rotate(90deg)" : "none",
-              transition: "transform 120ms ease",
-            }}
-          />
-        </Group>
-      </UnstyledButton>
-      <Collapse expanded={opened}>
-        <Stack gap="xs">
-          {phase.calls.map((call) => {
-            const presentation = toolCallPresentation(call);
-            const hiddenAttachmentUris = presentation.deliverables.map(
-              (attachment) => attachment.uri,
-            );
-            return call.type === "client" ? (
-              <ToolCallCard
-                key={`${call.type}:${call.toolCall.id}`}
-                toolCall={call.toolCall}
-                hiddenAttachmentUris={hiddenAttachmentUris}
-              />
-            ) : (
-              <ProviderToolCallCard
-                key={`${call.type}:${call.toolCall.id}`}
-                toolCall={call.toolCall}
-                hiddenAttachmentUris={hiddenAttachmentUris}
-              />
-            );
-          })}
-        </Stack>
-      </Collapse>
-    </Box>
-  );
+function eventDetail(event: ActivityEvent): React.ReactElement | null {
+  if (event.kind === "tool" && event.toolCall) {
+    return event.toolCall.type === "client" ? (
+      <ToolCallCard toolCall={event.toolCall.toolCall} />
+    ) : (
+      <ProviderToolCallCard toolCall={event.toolCall.toolCall} />
+    );
+  }
+  if (event.kind === "compaction" && event.message?.content) {
+    return <CompactionDivider content={event.message.content} />;
+  }
+  if (event.message) {
+    return <MessageBubble message={event.message} />;
+  }
+  return null;
 }
 
 export function ToolActivityGroup({
@@ -148,144 +111,100 @@ export function ToolActivityGroup({
 }: ToolActivityGroupProps): React.ReactElement {
   const t = useTranslations("chat.toolActivity");
   const [opened, { toggle }] = useDisclosure(false);
-  const counts = activityStatusCounts(activity.calls);
-  const phases = groupToolActivityPhases(activity.calls);
-  const summaryParts = [
-    t("turnCount", { count: activity.turnCount }),
-    t("callCount", { count: activity.calls.length }),
-  ];
-
-  if (counts.failed > 0) {
-    summaryParts.push(t("failedCount", { count: counts.failed }));
-  }
-  if (counts.running > 0) {
-    summaryParts.push(t("runningCount", { count: counts.running }));
-  }
-  if (authorizationAction) {
-    summaryParts.push(t("approvalNeeded"));
-  }
-
-  function phaseLabel(kind: ToolActivityPhaseKind): string {
-    switch (kind) {
-      case "inspection":
-        return t("phaseInspection");
-      case "execution":
-        return t("phaseExecution");
-      case "changes":
-        return t("phaseChanges");
-      case "generation":
-        return t("phaseGeneration");
-      case "generic":
-        return t("genericPhase");
-    }
-  }
+  const { ref, width } = useElementSize();
+  const categories = categorySummaries(activity.events);
+  const running = activity.events.some((event) => event.status === "running");
+  const failed = activity.events.some((event) => event.status === "failed");
+  const labels = categories.map((category) => {
+    const label = categoryLabel(category, t);
+    return category.count > 1 ? `${label} ${category.count}` : label;
+  });
+  const maxVisibleCategories = Math.max(1, Math.floor(width / 96));
+  const hiddenCategoryCount = Math.max(0, labels.length - maxVisibleCategories);
+  const visibleLabels = labels.slice(0, maxVisibleCategories);
+  const summary = [
+    ...visibleLabels,
+    ...(hiddenCategoryCount > 0
+      ? [t("overflowCategories", { count: hiddenCategoryCount })]
+      : []),
+  ].join(" · ");
+  const accessibilitySummary = labels.join(" · ");
+  const stateSummary = failed
+    ? t("failed")
+    : authorizationAction
+      ? t("approvalNeeded")
+      : running
+        ? t("working")
+        : "";
+  const ariaLabel = [t("title"), accessibilitySummary, stateSummary]
+    .filter((value) => value.length > 0)
+    .join(": ");
 
   return (
-    <Box mb="md" opacity={dimmed ? 0.45 : 1} style={{ minWidth: 0 }}>
-      <Paper
-        withBorder
-        radius="md"
-        px="sm"
-        bg="var(--mantine-color-body)"
+    <Box mb="xs" opacity={dimmed ? 0.45 : 1} style={{ minWidth: 0 }}>
+      <Group
+        gap="xs"
+        wrap="nowrap"
+        ref={ref}
         data-tool-activity-id={activity.id}
       >
-        <Group gap="sm" wrap="nowrap" py="sm">
-          <UnstyledButton
-            flex={1}
-            miw={0}
-            onClick={toggle}
-            aria-expanded={opened}
-            aria-label={opened ? t("collapseActivity") : t("expandActivity")}
-          >
-            <Group justify="space-between" gap="sm" wrap="nowrap">
-              <Group gap="sm" wrap="nowrap" miw={0}>
-                <ThemeIcon size={rem(22)} variant="transparent" color="gray">
-                  <IconTool size={rem(15)} />
-                </ThemeIcon>
-                <Box miw={0}>
-                  <Text size="sm" fw={550} lh={1.3}>
-                    {t("title")}
-                  </Text>
-                  <Text size="xs" c="dimmed" lh={1.45} truncate>
-                    {summaryParts.join(" · ")}
-                  </Text>
-                </Box>
-              </Group>
-              <Group gap="xs" wrap="nowrap">
-                {counts.failed > 0 ? (
-                  <IconAlertCircle
-                    aria-label={t("failedCount", { count: counts.failed })}
-                    size={rem(15)}
-                    color="var(--mantine-color-dimmed)"
-                  />
-                ) : null}
-                {counts.running > 0 ? (
-                  <Loader
-                    size={rem(14)}
-                    color="gray"
-                    aria-label={t("runningCount", { count: counts.running })}
-                  />
-                ) : null}
-                <IconChevronRight
-                  aria-hidden="true"
-                  size={rem(15)}
-                  color="var(--mantine-color-dimmed)"
-                  style={{
-                    transform: opened ? "rotate(90deg)" : "none",
-                    transition: "transform 120ms ease",
-                  }}
-                />
-              </Group>
-            </Group>
-          </UnstyledButton>
-          {authorizationAction}
-        </Group>
-
-        <Collapse expanded={opened}>
-          <Divider />
-          <Stack gap={0} pb="sm">
-            {activity.reasoningSummaries.length > 0 ? (
-              <Box py="sm" px={rem(2)}>
-                <Text size="xs" fw={600} c="dimmed" mb="xs">
-                  {t("reasoning", {
-                    count: activity.reasoningSummaries.length,
-                  })}
+        <UnstyledButton
+          flex={1}
+          miw={0}
+          onClick={toggle}
+          aria-expanded={opened}
+          aria-label={ariaLabel}
+        >
+          <Group gap="xs" wrap="nowrap" miw={0}>
+            <IconChevronRight
+              aria-hidden="true"
+              size={rem(14)}
+              color="var(--mantine-color-dimmed)"
+              style={{
+                flexShrink: 0,
+                transform: opened ? "rotate(90deg)" : "none",
+                transition: "transform 120ms ease",
+              }}
+            />
+            <ThemeIcon size={rem(20)} variant="transparent" color="gray">
+              <IconTool size={rem(14)} />
+            </ThemeIcon>
+            <Text size="xs" fw={550} style={{ flexShrink: 0 }}>
+              {t("title")}
+            </Text>
+            {running && !failed && !authorizationAction ? (
+              <Group gap={rem(4)} wrap="nowrap" style={{ flexShrink: 0 }}>
+                <Loader size={rem(12)} color="gray" />
+                <Text size="xs" c="dimmed">
+                  {t("working")}
                 </Text>
-                <Stack gap="xs">
-                  {activity.reasoningSummaries.map((summary, index) => (
-                    <Box
-                      key={`${activity.id}:reasoning:${index}`}
-                      c="dimmed"
-                      style={{ overflowWrap: "anywhere" }}
-                    >
-                      <MarkdownContent>{summary}</MarkdownContent>
-                    </Box>
-                  ))}
-                </Stack>
-              </Box>
+              </Group>
             ) : null}
-            {activity.compactionCount > 0 ? (
-              <Text size="xs" c="dimmed" py="xs" px={rem(2)}>
-                {t("compactionCount", { count: activity.compactionCount })}
+            {summary.length > 0 ? (
+              <Text size="xs" c="dimmed" truncate>
+                {summary}
               </Text>
             ) : null}
-            {phases.map((phase, index) => (
-              <Box key={phase.id}>
-                {index > 0 ? <Divider /> : null}
-                <ToolActivityPhaseRow
-                  phase={phase}
-                  label={phaseLabel(phase.kind)}
-                  callCountLabel={t("callCount", {
-                    count: phase.calls.length,
-                  })}
-                  expandLabel={t("expandPhase")}
-                  collapseLabel={t("collapsePhase")}
-                />
-              </Box>
-            ))}
-          </Stack>
-        </Collapse>
-      </Paper>
+            {failed ? (
+              <IconAlertCircle
+                aria-label={t("failed")}
+                size={rem(15)}
+                color="var(--mantine-color-red-6)"
+                style={{ flexShrink: 0 }}
+              />
+            ) : null}
+          </Group>
+        </UnstyledButton>
+        {authorizationAction}
+      </Group>
+
+      <Collapse expanded={opened}>
+        <Stack gap="xs" mt="xs" pl="md">
+          {activity.events.map((event) => (
+            <Box key={event.id}>{eventDetail(event)}</Box>
+          ))}
+        </Stack>
+      </Collapse>
     </Box>
   );
 }

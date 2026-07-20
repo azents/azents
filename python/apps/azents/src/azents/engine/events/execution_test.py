@@ -46,6 +46,7 @@ from azents.engine.events.types import (
     SystemPromptAnalysisPayload,
     SystemPromptFragmentPayload,
     TokenUsagePayload,
+    ToolkitSourceSnapshot,
     TurnMarkerPayload,
     UserMessagePayload,
     build_native_compat_key,
@@ -897,10 +898,18 @@ def _model_call_preparer(
     | None = None,
     system_prompt: SystemPromptAnalysisPayload | None = None,
     inference_state: SessionInferenceState | None = None,
+    enrich_client_tool_call: Callable[[ClientToolCallPayload], ClientToolCallPayload]
+    | None = None,
 ) -> ModelCallPreparer[NativeModelRequest]:
     """Create a turn-local model call preparer for tests."""
     resolved_lowerer = lowerer or _Lowerer()
     resolved_tool_executor = tool_executor or _ToolExecutor()
+
+    def preserve_call(call: ClientToolCallPayload) -> ClientToolCallPayload:
+        """Keep test calls source-less unless a test explicitly enriches them."""
+        return call
+
+    resolved_enricher = enrich_client_tool_call or preserve_call
 
     async def prepare_model_call(
         *,
@@ -913,6 +922,7 @@ def _model_call_preparer(
             system_prompt_analysis=system_prompt,
             tool_executor=resolved_tool_executor,
             on_turn_end=None,
+            enrich_client_tool_call=resolved_enricher,
         )
 
     return prepare_model_call
@@ -1925,6 +1935,63 @@ async def test_unlimited_tool_run_executes_tool_then_completes() -> None:
     assert any(
         event.kind == EventKind.CLIENT_TOOL_RESULT for event in transcript_repo.events
     )
+
+
+async def test_client_tool_source_snapshot_is_shared_by_durable_and_active() -> None:
+    """Enrich the call before durable append and active-call projection."""
+    source = ToolkitSourceSnapshot(
+        toolkit_config_id="toolkit-config-1",
+        toolkit_type="github",
+        toolkit_name="GitHub",
+        toolkit_slug="github",
+    )
+    run_repo = _RunRepo()
+    transcript_repo = _TranscriptRepo()
+    tool_executor = _ToolExecutor()
+    execution = AgentRunExecution(
+        session_manager=_session_context,
+        post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_provider_integration_id=None,
+        model_stream_inference_profile=None,
+        model_adapter=_ModelAdapter(),
+        output_normalizer=_SequenceNormalizer(
+            [
+                [_tool_call_event()],
+                [_assistant_event()],
+            ]
+        ),
+        model_call_preparer=_model_call_preparer(
+            lowerer=_Lowerer(),
+            tool_executor=tool_executor,
+            enrich_client_tool_call=lambda call: call.model_copy(
+                update={"toolkit_source": source}
+            ),
+        ),
+        run_repo=run_repo,
+        transcript_repo=transcript_repo,
+    )
+
+    status = await execution.run(
+        AgentRunExecutionRequest(
+            owner_generation=1,
+            tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            run_id="run-1",
+            session_id="session-1",
+            model="gpt-5.1",
+        )
+    )
+
+    assert status == AgentRunStatus.COMPLETED
+    durable_call = next(
+        event.payload
+        for event in transcript_repo.events
+        if isinstance(event.payload, ClientToolCallPayload)
+    )
+    assert durable_call.toolkit_source == source
+    assert tool_executor.executed_calls[0].toolkit_source == source
+    assert run_repo.active_tool_call_snapshots[0][0].toolkit_source == source
 
 
 async def test_generated_client_result_materializes_in_result_transaction() -> None:

@@ -299,6 +299,7 @@ export function ChatSessionView({
           chatViewState={output.chatViewState}
           chatTimelineState={output.chatTimelineState}
           messages={output.messages}
+          timelineEvents={output.timelineEvents}
           pendingInputBuffers={output.pendingInputBuffers}
           activeAgent={agent}
           sessionId={output.sessionId}

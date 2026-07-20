@@ -31,6 +31,7 @@ from azents.engine.events.types import (
     OutputTextPart,
     ProviderToolCallPayload,
     ReasoningPayload,
+    ToolkitSourceSnapshot,
     UserContentPart,
     UserMessagePayload,
 )
@@ -179,6 +180,7 @@ def _tool_call_live_event(
     arguments: str,
     source: str,
     created_at: datetime.datetime,
+    toolkit_source: ToolkitSourceSnapshot | None = None,
 ) -> Event:
     return Event(
         id=event_id,
@@ -188,6 +190,7 @@ def _tool_call_live_event(
             call_id=call_id,
             name=name,
             arguments=arguments,
+            toolkit_source=toolkit_source,
             native_artifact=_live_native_artifact(
                 projection="client_tool_call",
                 source=source,
@@ -265,6 +268,7 @@ def active_tool_call_to_live_event(
         arguments=active_tool_call.arguments or "",
         source="active_tool_call",
         created_at=active_tool_call.started_at,
+        toolkit_source=active_tool_call.toolkit_source,
     )
 
 

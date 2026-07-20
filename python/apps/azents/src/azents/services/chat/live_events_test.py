@@ -22,6 +22,7 @@ from azents.engine.events.types import (
     ClientToolCallPayload,
     ProviderToolCallPayload,
     ReasoningPayload,
+    ToolkitSourceSnapshot,
     UserMessagePayload,
 )
 from azents.repos.input_buffer.data import InputBuffer
@@ -413,6 +414,12 @@ def test_active_tool_call_projection_has_stable_live_shape() -> None:
             call_id="call-1",
             name="bash",
             arguments='{"cmd":"sleep"}',
+            toolkit_source=ToolkitSourceSnapshot(
+                toolkit_config_id="toolkit-config-1",
+                toolkit_type="github",
+                toolkit_name="GitHub",
+                toolkit_slug="github",
+            ),
             started_at=now,
             owner_generation=1,
         ),
@@ -422,4 +429,6 @@ def test_active_tool_call_projection_has_stable_live_shape() -> None:
     assert isinstance(event.payload, ClientToolCallPayload)
     assert event.payload.call_id == "call-1"
     assert event.payload.arguments == '{"cmd":"sleep"}'
+    assert event.payload.toolkit_source is not None
+    assert event.payload.toolkit_source.toolkit_config_id == "toolkit-config-1"
     assert event.created_at == now
