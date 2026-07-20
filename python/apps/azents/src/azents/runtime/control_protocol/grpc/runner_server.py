@@ -382,6 +382,25 @@ class RuntimeRunnerControlGrpcServicer(
             if envelope is None:
                 await asyncio.sleep(max(self._operation_block_ms, 1) / 1000)
                 continue
+            if envelope.operation_type == "operation.cancel":
+                operation_id = envelope.payload.get("operation_id")
+                if not isinstance(operation_id, str):
+                    raise ValueError("Runner cancellation operation_id is required")
+                await outbound.put(
+                    _RunnerOutboundItem(
+                        message=runtime_runner_control_pb2.RunnerControlMessage(
+                            request_id=envelope.request_id,
+                            operation_cancel=(
+                                runtime_runner_control_pb2.RunnerOperationCancel(
+                                    runtime_id=runtime_id,
+                                    operation_id=operation_id,
+                                )
+                            ),
+                        ),
+                        ack_envelope=envelope,
+                    )
+                )
+                continue
             if _deadline_expired(envelope, datetime.now(UTC)):
                 await self._expire_runner_operation(
                     envelope,

@@ -210,6 +210,11 @@ class InMemoryRuntimeCoordinationStore:
                 metadata,
                 status=status,
                 updated_at=updated_at,
+                cancel_requested_at=(
+                    updated_at
+                    if status is RuntimeOperationStatus.CANCEL_REQUESTED
+                    else metadata.cancel_requested_at
+                ),
                 final_event_cursor=final_event_cursor,
             )
             self._operation_metadata[operation_id] = updated

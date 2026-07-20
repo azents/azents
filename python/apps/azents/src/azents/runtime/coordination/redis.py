@@ -89,6 +89,9 @@ if decoded['status'] == 'final' then
 end
 decoded['status'] = ARGV[1]
 decoded['updated_at'] = ARGV[2]
+if ARGV[1] == 'cancel_requested' then
+  decoded['cancel_requested_at'] = ARGV[2]
+end
 if ARGV[3] ~= '' then
   decoded['final_event_cursor'] = ARGV[3]
 end

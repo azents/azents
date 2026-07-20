@@ -278,6 +278,75 @@ class RuntimeControlProtocolService:
             created_at=created_at,
         )
 
+    async def request_runner_operation_cancel(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        operation_id: str,
+        created_at: datetime,
+    ) -> (
+        RuntimeDispatchResult
+        | RuntimeProtocolRouteUnavailable
+        | RuntimeProtocolStaleGeneration
+        | None
+    ):
+        """Append an ordered cancellation command for one Runner operation."""
+        connection = await self._store.get_connection(
+            kind=RuntimeConnectionKind.RUNNER,
+            subject_id=runtime_id,
+        )
+        if connection is None:
+            return RuntimeProtocolRouteUnavailable(
+                target=RuntimeCoordinationTarget.RUNNER,
+                subject_id=runtime_id,
+            )
+        if connection.generation != runner_generation:
+            return RuntimeProtocolStaleGeneration(
+                target=RuntimeCoordinationTarget.RUNNER,
+                subject_id=runtime_id,
+                generation=runner_generation,
+            )
+        operation = await self._store.get_operation(operation_id)
+        if (
+            operation is None
+            or operation.status is RuntimeOperationStatus.FINAL
+            or operation.runtime_id != runtime_id
+            or operation.target is not RuntimeCoordinationTarget.RUNNER
+        ):
+            return None
+        cancellation = await self._store.update_operation_status(
+            operation_id,
+            status=RuntimeOperationStatus.CANCEL_REQUESTED,
+            updated_at=created_at,
+            final_event_cursor=None,
+        )
+        if (
+            cancellation is None
+            or cancellation.status is not RuntimeOperationStatus.CANCEL_REQUESTED
+        ):
+            return None
+        request_id = self._request_id_factory()
+        envelope = RuntimeRequestEnvelope(
+            request_id=request_id,
+            runtime_id=runtime_id,
+            target=RuntimeCoordinationTarget.RUNNER,
+            generation=runner_generation,
+            operation_type="operation.cancel",
+            payload={"operation_id": operation_id},
+            reply_stream_id=operation.reply_stream_id,
+            deadline_at=operation.deadline_at,
+            body_stream_id=None,
+        )
+        await self._store.append_request(operation.request_stream_id, envelope)
+        return RuntimeDispatchResult(
+            operation_id=operation_id,
+            request_id=request_id,
+            request_stream_id=operation.request_stream_id,
+            reply_stream_id=operation.reply_stream_id,
+            target=RuntimeCoordinationTarget.RUNNER,
+        )
+
     async def claim_next_provider_request(
         self,
         *,

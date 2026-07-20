@@ -326,6 +326,63 @@ async def test_runner_operations_share_generation_reply_stream() -> None:
 
 
 @pytest.mark.asyncio
+async def test_runner_cancel_marks_metadata_and_appends_ordered_command() -> None:
+    """Runner cancellation blocks new starts and follows the original request."""
+    store = InMemoryRuntimeCoordinationStore()
+    request_ids = iter(("req-operation", "req-cancel"))
+    service = RuntimeControlProtocolService(
+        store,
+        request_id_factory=lambda: next(request_ids),
+    )
+    now = _now()
+    cancel_requested_at = now + timedelta(seconds=1)
+    runner = await service.register_runner(_runner_registration(), registered_at=now)
+    operation = await service.dispatch_runner_operation(
+        _runner_operation(generation=runner.generation, now=now),
+        created_at=now,
+    )
+    assert isinstance(operation, RuntimeDispatchResult)
+
+    cancellation = await service.request_runner_operation_cancel(
+        runtime_id="runtime-1",
+        runner_generation=runner.generation,
+        operation_id=operation.operation_id,
+        created_at=cancel_requested_at,
+    )
+
+    assert isinstance(cancellation, RuntimeDispatchResult)
+    metadata = await store.get_operation(operation.operation_id)
+    assert metadata is not None
+    assert metadata.status is RuntimeOperationStatus.CANCEL_REQUESTED
+    assert metadata.cancel_requested_at == cancel_requested_at
+    assert (
+        await store.try_start_operation(
+            operation.operation_id,
+            updated_at=cancel_requested_at + timedelta(seconds=1),
+        )
+        is None
+    )
+    first = await service.claim_next_runner_request(
+        runtime_id="runtime-1",
+        generation=runner.generation,
+        consumer_id="runner-a",
+        block_ms=0,
+    )
+    second = await service.claim_next_runner_request(
+        runtime_id="runtime-1",
+        generation=runner.generation,
+        consumer_id="runner-a",
+        block_ms=0,
+    )
+    assert first is not None
+    assert first.request_id == "req-operation"
+    assert second is not None
+    assert second.request_id == "req-cancel"
+    assert second.operation_type == "operation.cancel"
+    assert second.payload == {"operation_id": operation.operation_id}
+
+
+@pytest.mark.asyncio
 async def test_runner_reconnect_does_not_replay_previous_generation_requests() -> None:
     """Runner request streams are generation-scoped to avoid replay after eviction."""
     store = InMemoryRuntimeCoordinationStore()

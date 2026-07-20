@@ -934,6 +934,57 @@ async def test_runner_grpc_start_claim_is_atomic() -> None:
 
 
 @pytest.mark.asyncio
+async def test_runner_grpc_relays_ordered_cancel_command() -> None:
+    """Control relays cancellation after the operation on the Runner stream."""
+    store = InMemoryRuntimeCoordinationStore()
+    request_ids = iter(("req-operation", "req-cancel"))
+    service = RuntimeControlProtocolService(
+        store,
+        request_id_factory=lambda: next(request_ids),
+    )
+    servicer = _servicer(service, store, FakeStateSink())
+    inbound = QueueIterator()
+    await inbound.put(_register_message())
+
+    stream = servicer.ConnectRunner(inbound, FakeGrpcContext())
+    accepted = await anext(stream)
+    operation = await service.dispatch_runner_operation(
+        RuntimeRunnerOperation(
+            runtime_id="runtime-1",
+            runner_generation=accepted.register_accepted.generation,
+            operation_type="file.apply_patch",
+            owner_session_id="session-1",
+            payload={
+                "base_path": "/workspace/agent/project",
+                "total_bytes": 0,
+                "schema_version": 1,
+            },
+            deadline_at=datetime.now(UTC) + timedelta(seconds=30),
+            body_stream_id=None,
+        ),
+        created_at=_now(),
+    )
+    assert isinstance(operation, RuntimeDispatchResult)
+    operation_message = await anext(stream)
+
+    cancellation = await service.request_runner_operation_cancel(
+        runtime_id="runtime-1",
+        runner_generation=accepted.register_accepted.generation,
+        operation_id=operation.operation_id,
+        created_at=_now() + timedelta(seconds=1),
+    )
+    cancel_message = await anext(stream)
+
+    assert isinstance(cancellation, RuntimeDispatchResult)
+    assert operation_message.WhichOneof("payload") == "operation_request"
+    assert cancel_message.WhichOneof("payload") == "operation_cancel"
+    assert cancel_message.request_id == "req-cancel"
+    assert cancel_message.operation_cancel.runtime_id == "runtime-1"
+    assert cancel_message.operation_cancel.operation_id == operation.operation_id
+    await stream.aclose()
+
+
+@pytest.mark.asyncio
 async def test_runner_grpc_rejects_late_final_after_cancel() -> None:
     """Late Runner finals must not overwrite a canceled final cursor."""
     store = InMemoryRuntimeCoordinationStore()

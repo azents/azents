@@ -17,6 +17,7 @@ from azents_runtime_control.grpc_runner_client import (
 )
 from azents_runtime_control.proto import runtime_runner_control_pb2
 from azents_runtime_control.runner import (
+    RunnerOperationCancel,
     RunnerOperationEnvelope,
     RunnerOperationEvent,
     RunnerRegistration,
@@ -305,6 +306,62 @@ async def test_grpc_client_backpressures_operation_delivery() -> None:
     await asyncio.wait_for(second_received.wait(), timeout=1)
     assert [operation.request_id for operation in received] == ["req-1", "req-2"]
 
+    release_stream.set()
+    await client.close()
+
+
+@pytest.mark.asyncio
+async def test_grpc_client_delivers_operation_cancel_command() -> None:
+    """The client dispatches typed cancellation commands from Control."""
+    received: list[RunnerOperationCancel] = []
+    cancel_received = asyncio.Event()
+    release_stream = asyncio.Event()
+
+    async def handle_cancel(cancel: RunnerOperationCancel) -> None:
+        received.append(cancel)
+        cancel_received.set()
+
+    async def stream(
+        requests: AsyncIterator[runtime_runner_control_pb2.RunnerMessage],
+        *,
+        metadata: Sequence[tuple[str, str]] | None = None,
+    ) -> AsyncIterator[runtime_runner_control_pb2.RunnerControlMessage]:
+        del metadata
+        register = await anext(requests)
+        yield runtime_runner_control_pb2.RunnerControlMessage(
+            request_id=register.request_id,
+            register_accepted=runtime_runner_control_pb2.RunnerRegisterAccepted(
+                runtime_id=register.register.runtime_id,
+                runner_id=register.register.runner_id,
+                connection_id=register.connection_id,
+                generation=7,
+                heartbeat_interval_seconds=20,
+            ),
+        )
+        yield runtime_runner_control_pb2.RunnerControlMessage(
+            request_id="req-cancel",
+            operation_cancel=runtime_runner_control_pb2.RunnerOperationCancel(
+                runtime_id="runtime-1",
+                operation_id="operation:req-patch",
+            ),
+        )
+        await release_stream.wait()
+
+    client = GrpcRunnerControlClient(stream)
+    client.set_operation_cancel_handler(handle_cancel)
+    await client.register_runner(
+        _registration(),
+        connection_id="connection-1",
+        registered_at=_now(),
+    )
+    await asyncio.wait_for(cancel_received.wait(), timeout=1)
+
+    assert received == [
+        RunnerOperationCancel(
+            runtime_id="runtime-1",
+            operation_id="operation:req-patch",
+        )
+    ]
     release_stream.set()
     await client.close()
 

@@ -375,6 +375,48 @@ async def test_try_start_operation_is_atomic(
 
 
 @pytest.mark.asyncio
+async def test_cancel_requested_status_records_timestamp_and_blocks_start(
+    store: RuntimeCoordinationStore,
+) -> None:
+    """Cancellation status preserves its request time and rejects start claims."""
+    created_at = _now()
+    cancel_requested_at = created_at + timedelta(seconds=1)
+    metadata = RuntimeOperationMetadata(
+        operation_id="op-cancel-1",
+        runtime_id="runtime-1",
+        target=RuntimeCoordinationTarget.RUNNER,
+        request_stream_id="runner:runtime-1",
+        reply_stream_id="reply:req-cancel",
+        status=RuntimeOperationStatus.ACTIVE,
+        created_at=created_at,
+        updated_at=created_at,
+        deadline_at=created_at + timedelta(seconds=30),
+        body_stream_id=None,
+        last_heartbeat_at=None,
+        last_event_at=None,
+        cancel_requested_at=None,
+        final_event_cursor=None,
+    )
+    await store.put_operation(metadata, ttl_seconds=60)
+
+    canceled = await store.update_operation_status(
+        "op-cancel-1",
+        status=RuntimeOperationStatus.CANCEL_REQUESTED,
+        updated_at=cancel_requested_at,
+        final_event_cursor=None,
+    )
+    started = await store.try_start_operation(
+        "op-cancel-1",
+        updated_at=cancel_requested_at + timedelta(seconds=1),
+    )
+
+    assert canceled is not None
+    assert canceled.status is RuntimeOperationStatus.CANCEL_REQUESTED
+    assert canceled.cancel_requested_at == cancel_requested_at
+    assert started is None
+
+
+@pytest.mark.asyncio
 async def test_append_reply_for_operation_rejects_late_final(
     store: RuntimeCoordinationStore,
 ) -> None:
