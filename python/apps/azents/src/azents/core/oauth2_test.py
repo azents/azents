@@ -138,20 +138,28 @@ class TestPlatformOAuthState:
     """GitHub Platform OAuth state tests."""
 
     def test_roundtrip(self) -> None:
-        """Verify generated platform state."""
-        state = create_platform_oauth_state("secret")
-        assert verify_platform_oauth_state(state, "secret") is True
+        """Verify generated platform state and generation."""
+        state = create_platform_oauth_state(
+            "secret",
+            effective_generation="generation-1",
+        )
+        verified = verify_platform_oauth_state(state, "secret")
+        assert verified is not None
+        assert verified.effective_generation == "generation-1"
 
     def test_invalid_key(self) -> None:
-        """Return False when verifying with wrong key."""
-        state = create_platform_oauth_state("secret")
-        assert verify_platform_oauth_state(state, "wrong") is False
+        """Return None when verifying with wrong key."""
+        state = create_platform_oauth_state(
+            "secret",
+            effective_generation="generation-1",
+        )
+        assert verify_platform_oauth_state(state, "wrong") is None
 
     def test_invalid_format(self) -> None:
-        """Return False for invalid format."""
-        assert verify_platform_oauth_state("garbage", "secret") is False
+        """Return None for invalid format."""
+        assert verify_platform_oauth_state("garbage", "secret") is None
 
     def test_toolkit_state_is_not_platform(self) -> None:
         """toolkit OAuth state is not verified as platform state."""
         state = create_oauth_state("tk", "u", "secret")
-        assert verify_platform_oauth_state(state, "secret") is False
+        assert verify_platform_oauth_state(state, "secret") is None

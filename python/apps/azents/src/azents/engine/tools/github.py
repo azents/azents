@@ -53,6 +53,9 @@ from azents.rdb.session import SessionManager
 from azents.repos.github_user_installation import (
     GithubUserInstallationRepository,
 )
+from azents.services.github_platform_system_setting.runtime import (
+    PlatformGitHubAppRuntimeService,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -860,18 +863,15 @@ class GitHubToolkitProvider(ToolkitProvider[GitHubToolkitConfig]):
     def __init__(
         self,
         *,
-        platform_app_id: str | None = None,
-        platform_private_key: str | None = None,
+        platform_runtime: PlatformGitHubAppRuntimeService,
         session_manager: SessionManager[AsyncSession] | None = None,
     ) -> None:
         """Initialize GitHubToolkitProvider.
 
-        :param platform_app_id: Platform App ID (environment variable)
-        :param platform_private_key: Platform App PEM private key (environment variable)
+        :param platform_runtime: Operation-boundary Platform App resolver
         :param session_manager: DB session manager for Toolkit State
         """
-        self._platform_app_id = platform_app_id
-        self._platform_private_key = platform_private_key
+        self.platform_runtime = platform_runtime
         self.session_manager = session_manager
 
     def to_mcp_config(self, config: GitHubToolkitConfig) -> McpToolkitConfig:
@@ -938,16 +938,15 @@ class GitHubToolkitProvider(ToolkitProvider[GitHubToolkitConfig]):
                     secrets.app_id, secrets.private_key, first.installation_id
                 )
             case GitHubSecretsAppPlatform():
-                if self._platform_app_id is None or self._platform_private_key is None:
-                    raise ValueError(
-                        "GitHub Platform App is not configured."
-                        " Set AZ_GITHUB_PLATFORM_APP_ID"
-                        " and AZ_GITHUB_PLATFORM_PRIVATE_KEY."
-                    )
+                platform = await self.platform_runtime.resolve()
+                if platform.app_id is None or platform.private_key is None:
+                    raise ValueError("GitHub Platform App is not configured.")
+                if secrets.app_id is not None and secrets.app_id != platform.app_id:
+                    raise ValueError("GitHub Platform App reconnect is required.")
                 first = secrets.installations[0]
                 return await _exchange_app_token(
-                    self._platform_app_id,
-                    self._platform_private_key,
+                    platform.app_id,
+                    platform.private_key,
                     first.installation_id,
                 )
             case _:
@@ -970,9 +969,10 @@ class GitHubToolkitProvider(ToolkitProvider[GitHubToolkitConfig]):
             return None
 
         if credentials.get("type") == "github_app_platform":
-            if self._platform_app_id is None:
+            platform = await self.platform_runtime.resolve()
+            if platform.app_id is None:
                 return "GitHub Platform App is not configured."
-            credentials["app_id"] = self._platform_app_id
+            credentials["app_id"] = platform.app_id
 
         try:
             secrets = _github_secrets_adapter.validate_python(credentials)
@@ -1176,7 +1176,7 @@ class GitHubToolkitProvider(ToolkitProvider[GitHubToolkitConfig]):
     ) -> GitHubToolkit:
         """Create GitHubToolkit with GitHub App (Platform) auth type.
 
-        Exchange installation token using app_id/private_key from server env.
+        Exchange installation tokens using current effective System Settings.
 
         :param secrets: Platform App credentials (installation_id only)
         :param config: GitHub Toolkit settings
@@ -1184,24 +1184,24 @@ class GitHubToolkitProvider(ToolkitProvider[GitHubToolkitConfig]):
         :return: GitHubToolkit instance
         :raises ValueError: When Platform App settings are absent
         """
-        if self._platform_app_id is None or self._platform_private_key is None:
-            raise ValueError(
-                "GitHub Platform App is not configured."
-                " Set AZ_GITHUB_PLATFORM_APP_ID and AZ_GITHUB_PLATFORM_PRIVATE_KEY."
-            )
+        platform = await self.platform_runtime.resolve()
+        if platform.app_id is None or platform.private_key is None:
+            raise ValueError("GitHub Platform App is not configured.")
+        if secrets.app_id is None or secrets.app_id != platform.app_id:
+            raise ValueError("GitHub Platform App reconnect is required.")
 
         mcp_config = _build_mcp_config(config)
-        bindings = _build_installation_bindings(
+        bindings = _build_platform_installation_bindings(
             config=config,
             mcp_config=mcp_config,
-            app_id=self._platform_app_id,
-            private_key=self._platform_private_key,
+            expected_app_id=secrets.app_id,
             targets=secrets.installations,
             proxy_url=proxy_url,
             session_manager=self.session_manager,
             agent_id=context.agent_id,
             session_id=context.session_id,
             toolkit_id=context.toolkit_id,
+            platform_runtime=self.platform_runtime,
         )
         logger.info(
             "GitHub github_app_platform installations resolved",
@@ -1251,6 +1251,59 @@ def _build_installation_bindings(
             return await _exchange_app_token(
                 app_id,
                 private_key,
+                captured_installation_id,
+            )
+
+        bindings.append(
+            GitHubInstallationBinding(
+                target=target,
+                mcp_toolkit=None,
+                token_provider=provide_token,
+                lazy_mcp_config=mcp_config,
+                lazy_mcp_secret_provider=provide_token,
+                lazy_mcp_proxy_url=proxy_url,
+                session_manager=session_manager,
+                agent_id=agent_id,
+                session_id=session_id,
+                state_name=_github_snapshot_state_name(
+                    toolkit_id=toolkit_id,
+                    suffix=f"installation:{target.installation_id}",
+                ),
+            )
+        )
+    return bindings
+
+
+def _build_platform_installation_bindings(
+    *,
+    config: GitHubToolkitConfig,
+    mcp_config: McpToolkitConfig,
+    expected_app_id: str,
+    targets: list[GitHubInstallationTarget],
+    proxy_url: str | None,
+    session_manager: SessionManager[AsyncSession] | None,
+    agent_id: str,
+    session_id: str,
+    toolkit_id: str,
+    platform_runtime: PlatformGitHubAppRuntimeService,
+) -> list[GitHubInstallationBinding]:
+    """Build Platform bindings that re-resolve settings per token issuance."""
+    bindings: list[GitHubInstallationBinding] = []
+    for target in targets:
+        installation_id = target.installation_id
+
+        async def provide_token(
+            *,
+            captured_installation_id: str = installation_id,
+        ) -> str:
+            platform = await platform_runtime.resolve()
+            if platform.app_id != expected_app_id:
+                raise ValueError("GitHub Platform App reconnect is required.")
+            if platform.private_key is None:
+                raise ValueError("GitHub Platform App is not configured.")
+            return await _exchange_app_token(
+                expected_app_id,
+                platform.private_key,
                 captured_installation_id,
             )
 

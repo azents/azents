@@ -4,6 +4,7 @@ Provides pure functions required for OAuth2 Authorization Code Grant flow.
 """
 
 import base64
+import dataclasses
 import datetime
 import hashlib
 import json
@@ -361,27 +362,46 @@ def verify_toolkit_oauth_state(
     return (tid, wid, uid, redirect_uri, code_verifier)
 
 
-def create_platform_oauth_state(secret_key: str) -> str:
+@dataclasses.dataclass(frozen=True)
+class PlatformOAuthState:
+    """Verified GitHub Platform OAuth protocol state."""
+
+    effective_generation: str
+
+
+def create_platform_oauth_state(
+    secret_key: str,
+    *,
+    effective_generation: str,
+) -> str:
     """Create encrypted state for GitHub Platform OAuth.
 
     :param secret_key: Encryption key
+    :param effective_generation: Effective System Setting generation at OAuth start
     :return: Encrypted state string
     """
     payload: dict[str, object] = {
         "type": "installations",
+        "generation": effective_generation,
         "n": secrets.token_urlsafe(16),
     }
     return _encrypt_state(payload, secret_key)
 
 
-def verify_platform_oauth_state(state: str, secret_key: str) -> bool:
+def verify_platform_oauth_state(
+    state: str,
+    secret_key: str,
+) -> PlatformOAuthState | None:
     """Verify GitHub Platform OAuth state.
 
     :param state: Encrypted state string
     :param secret_key: Encryption key
-    :return: Whether verification succeeded
+    :return: Verified state or None
     """
     data = _decrypt_state(state, secret_key)
-    if data is None:
-        return False
-    return data.get("type") == "installations"
+    if data is None or data.get("type") != "installations":
+        return None
+    effective_generation = data.get("generation")
+    if not isinstance(effective_generation, str):
+        return None
+    return PlatformOAuthState(effective_generation=effective_generation)

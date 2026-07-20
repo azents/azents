@@ -20,6 +20,7 @@ import json
 from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
+from azentspublicclient.models.git_hub_platform_authorization_state_response import GitHubPlatformAuthorizationStateResponse
 from azentspublicclient.models.mcpo_auth_connection_summary_response import MCPOAuthConnectionSummaryResponse
 from typing import Optional, Set
 from typing_extensions import Self
@@ -39,10 +40,11 @@ class ToolkitConfigResponse(BaseModel):
     has_credentials: Optional[StrictBool] = Field(default=False, description="Whether credentials exist")
     enabled: StrictBool
     oauth_connection: Optional[MCPOAuthConnectionSummaryResponse] = None
+    authorization_state: Optional[GitHubPlatformAuthorizationStateResponse] = None
     created_at: datetime
     updated_at: datetime
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "workspace_id", "toolkit_type", "slug", "name", "description", "config", "prompt", "has_credentials", "enabled", "oauth_connection", "created_at", "updated_at"]
+    __properties: ClassVar[List[str]] = ["id", "workspace_id", "toolkit_type", "slug", "name", "description", "config", "prompt", "has_credentials", "enabled", "oauth_connection", "authorization_state", "created_at", "updated_at"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -88,6 +90,9 @@ class ToolkitConfigResponse(BaseModel):
         # override the default output from pydantic by calling `to_dict()` of oauth_connection
         if self.oauth_connection:
             _dict['oauth_connection'] = self.oauth_connection.to_dict()
+        # override the default output from pydantic by calling `to_dict()` of authorization_state
+        if self.authorization_state:
+            _dict['authorization_state'] = self.authorization_state.to_dict()
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
@@ -107,6 +112,11 @@ class ToolkitConfigResponse(BaseModel):
         # and model_fields_set contains the field
         if self.oauth_connection is None and "oauth_connection" in self.model_fields_set:
             _dict['oauth_connection'] = None
+
+        # set to None if authorization_state (nullable) is None
+        # and model_fields_set contains the field
+        if self.authorization_state is None and "authorization_state" in self.model_fields_set:
+            _dict['authorization_state'] = None
 
         return _dict
 
@@ -131,6 +141,7 @@ class ToolkitConfigResponse(BaseModel):
             "has_credentials": obj.get("has_credentials") if obj.get("has_credentials") is not None else False,
             "enabled": obj.get("enabled"),
             "oauth_connection": MCPOAuthConnectionSummaryResponse.from_dict(obj["oauth_connection"]) if obj.get("oauth_connection") is not None else None,
+            "authorization_state": GitHubPlatformAuthorizationStateResponse.from_dict(obj["authorization_state"]) if obj.get("authorization_state") is not None else None,
             "created_at": obj.get("created_at"),
             "updated_at": obj.get("updated_at")
         })

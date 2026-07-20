@@ -8,6 +8,9 @@ from typing_extensions import TypedDict
 
 from azents.repos.mcp_oauth_connection.data import MCPOAuthConnectionSummary
 from azents.repos.toolkit.data import AgentToolkit, ToolkitConfig, ToolkitScope
+from azents.services.github_platform_system_setting.runtime import (
+    PlatformGitHubAppAuthorizationState,
+)
 
 TOOLKIT_SLUG_PATTERN = r"^[a-z0-9_]+$"
 TOOLKIT_SLUG_DESCRIPTION = (
@@ -29,6 +32,10 @@ class ToolkitOutput(ToolkitConfig):
 
     oauth_connection: MCPOAuthConnectionSummary | None = Field(
         default=None, description="MCP OAuth connection summary"
+    )
+    authorization_state: PlatformGitHubAppAuthorizationState | None = Field(
+        default=None,
+        description="Redacted provider authorization state",
     )
 
     # pyright cannot infer type for Pydantic computed_field + property combination

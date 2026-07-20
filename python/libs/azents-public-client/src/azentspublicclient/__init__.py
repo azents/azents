@@ -154,6 +154,7 @@ __all__ = [
     "GcpSecrets",
     "GetAuthMethodsResponse",
     "GitHubInstallationItem",
+    "GitHubPlatformAuthorizationStateResponse",
     "GitHubPlatformInstallUrlResponse",
     "GitHubPlatformInstallationsRequest",
     "GitHubPlatformInstallationsResponse",
@@ -228,6 +229,7 @@ __all__ = [
     "PartialHistoryResponse",
     "PasswordLoginRequest",
     "PasswordLoginResponse",
+    "PlatformGitHubAppAuthorizationReason",
     "PreviewPasswordResetTokenRequest",
     "PreviewPasswordResetTokenResponse",
     "PreviewSignupTokenRequest",
@@ -471,6 +473,7 @@ from azentspublicclient.models.gcp_config import GcpConfig as GcpConfig
 from azentspublicclient.models.gcp_secrets import GcpSecrets as GcpSecrets
 from azentspublicclient.models.get_auth_methods_response import GetAuthMethodsResponse as GetAuthMethodsResponse
 from azentspublicclient.models.git_hub_installation_item import GitHubInstallationItem as GitHubInstallationItem
+from azentspublicclient.models.git_hub_platform_authorization_state_response import GitHubPlatformAuthorizationStateResponse as GitHubPlatformAuthorizationStateResponse
 from azentspublicclient.models.git_hub_platform_install_url_response import GitHubPlatformInstallUrlResponse as GitHubPlatformInstallUrlResponse
 from azentspublicclient.models.git_hub_platform_installations_request import GitHubPlatformInstallationsRequest as GitHubPlatformInstallationsRequest
 from azentspublicclient.models.git_hub_platform_installations_response import GitHubPlatformInstallationsResponse as GitHubPlatformInstallationsResponse
@@ -545,6 +548,7 @@ from azentspublicclient.models.open_router_subscription_financial_details_respon
 from azentspublicclient.models.partial_history_response import PartialHistoryResponse as PartialHistoryResponse
 from azentspublicclient.models.password_login_request import PasswordLoginRequest as PasswordLoginRequest
 from azentspublicclient.models.password_login_response import PasswordLoginResponse as PasswordLoginResponse
+from azentspublicclient.models.platform_git_hub_app_authorization_reason import PlatformGitHubAppAuthorizationReason as PlatformGitHubAppAuthorizationReason
 from azentspublicclient.models.preview_password_reset_token_request import PreviewPasswordResetTokenRequest as PreviewPasswordResetTokenRequest
 from azentspublicclient.models.preview_password_reset_token_response import PreviewPasswordResetTokenResponse as PreviewPasswordResetTokenResponse
 from azentspublicclient.models.preview_signup_token_request import PreviewSignupTokenRequest as PreviewSignupTokenRequest
