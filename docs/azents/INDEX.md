@@ -233,8 +233,8 @@ Design documents are accumulated records and are not listed individually in this
 - [ADR-0172: Generalize Admin-Managed System Configuration](adr/0172-generalize-admin-managed-system-configuration.md)
 - [ADR-0172: Reset the Tool Search Working Set on Successful Compaction](adr/0172-reset-tool-search-working-set-on-compaction.md)
 - [ADR-0173: Group Chat Tool Activity in the Frontend](adr/0173-group-chat-tool-activity-in-the-frontend.md)
-- [ADR-0174: Model Unread Run Results as Session-Shared State](adr/0174-session-shared-unread-run-result-state.md)
 - [ADR-0174: Present Chat Activity as an Ordered Event Stream](adr/0174-present-chat-activity-as-an-ordered-event-stream.md)
+- [ADR-0174: Model Unread Run Results as Session-Shared State](adr/0174-session-shared-unread-run-result-state.md)
 
 ## Issues (Bug Tracking)
 
