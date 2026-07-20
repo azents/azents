@@ -1,12 +1,12 @@
 """Admin-managed System Settings API E2E coverage."""
 
+import json
 import subprocess
 from typing import Any, cast
 
 import azentsadminclient
 import azentspublicclient
 import pytest
-import requests
 from azentsadminclient.api.system_settings_v1_api import SystemSettingsV1Api
 from azentsadminclient.models.platform_git_hub_app_confirm_request import (
     PlatformGitHubAppConfirmRequest,
@@ -79,15 +79,63 @@ def _generate_private_key() -> str:
     return result.stdout
 
 
-def _set_provider_scenario(base_url: str, scenario: str) -> None:
-    """Select one deterministic provider response classification."""
-    response = requests.post(
-        f"{base_url}/__testenv/scenario",
-        json={"scenario": scenario},
-        timeout=5,
+def _request_provider_from_admin(
+    admin_server: DockerContainer,
+    *,
+    method: str,
+    path: str,
+    payload: dict[str, str] | None,
+) -> dict[str, Any]:
+    """Call the exact provider instance resolved by the Admin server network."""
+    script = """
+import json
+import sys
+import urllib.request
+
+method, path, raw_payload = sys.argv[1:]
+data = raw_payload.encode() if raw_payload else None
+request = urllib.request.Request(
+    "http://github-validation-proxy:8082" + path,
+    data=data,
+    headers={"Content-Type": "application/json"},
+    method=method,
+)
+with urllib.request.urlopen(request, timeout=5) as response:
+    print(json.dumps({"status": response.status, "body": json.load(response)}))
+"""
+    result = admin_server.get_wrapped_container().exec_run(
+        [
+            "python",
+            "-c",
+            script,
+            method,
+            path,
+            json.dumps(payload) if payload is not None else "",
+        ]
     )
-    assert response.status_code == 200
-    assert response.json() == {"scenario": scenario}
+    output = result.output.decode(errors="replace")
+    assert result.exit_code == 0, output
+    parsed: object = json.loads(output)
+    assert isinstance(parsed, dict)
+    response = cast(dict[str, Any], parsed)
+    assert response["status"] == 200
+    body = response["body"]
+    assert isinstance(body, dict)
+    return cast(dict[str, Any], body)
+
+
+def _set_provider_scenario(
+    admin_server: DockerContainer,
+    scenario: str,
+) -> None:
+    """Select one response scenario through the Admin server's network path."""
+    body = _request_provider_from_admin(
+        admin_server,
+        method="POST",
+        path="/__testenv/scenario",
+        payload={"scenario": scenario},
+    )
+    assert body == {"scenario": scenario}
 
 
 def _replace_secret(value: str) -> SystemSettingSecretActionRequest:
@@ -103,7 +151,6 @@ def test_system_settings_authorization_lifecycle_redaction_and_audit(
     public_api_client: azentspublicclient.ApiClient,
     azents_admin_server_url: str,
     azents_admin_server_container: DockerContainer,
-    github_validation_proxy_url: str,
 ) -> None:
     """Exercise the redacted lifecycle through deployed API and provider boundaries."""
     settings_api = SystemSettingsV1Api(admin_api_client)
@@ -159,7 +206,7 @@ def test_system_settings_authorization_lifecycle_redaction_and_audit(
     assert incomplete_health.health.code == "platform_github_app_incomplete"
 
     private_key = _generate_private_key()
-    _set_provider_scenario(github_validation_proxy_url, "valid")
+    _set_provider_scenario(azents_admin_server_container, "valid")
     activated = settings_api.system_settings_v1_patch_platform_github_app_setting(
         PlatformGitHubAppPatchRequest(
             expected_version=0,
@@ -194,7 +241,7 @@ def test_system_settings_authorization_lifecycle_redaction_and_audit(
     _assert_api_status(stale_patch.value, 409)
     assert "stale_system_setting_version" in _api_error_body(stale_patch.value)
 
-    _set_provider_scenario(github_validation_proxy_url, "unavailable")
+    _set_provider_scenario(azents_admin_server_container, "unavailable")
     unavailable = settings_api.system_settings_v1_patch_platform_github_app_setting(
         PlatformGitHubAppPatchRequest(
             expected_version=1,
@@ -210,7 +257,7 @@ def test_system_settings_authorization_lifecycle_redaction_and_audit(
     assert unavailable.candidate.validation_code == "github_unavailable"
     candidate_id = unavailable.candidate.id
 
-    _set_provider_scenario(github_validation_proxy_url, "invalid_oauth")
+    _set_provider_scenario(azents_admin_server_container, "invalid_oauth")
     invalid = settings_api.system_settings_v1_validate_platform_github_app_candidate()
     assert invalid.candidate is not None
     assert invalid.candidate.id == candidate_id
@@ -236,19 +283,20 @@ def test_system_settings_authorization_lifecycle_redaction_and_audit(
     assert after_cancel.admin_version == 1
     assert after_cancel.candidate is None
 
-    _set_provider_scenario(github_validation_proxy_url, "valid")
+    _set_provider_scenario(azents_admin_server_container, "valid")
     healthy = settings_api.system_settings_v1_check_platform_github_app_health()
     assert healthy.health is not None
     assert healthy.health.status is SystemSettingHealthStatus.HEALTHY
     assert healthy.health.metadata == {"app_slug": "azents-test"}
 
-    provider_state = requests.get(
-        f"{github_validation_proxy_url}/__testenv/state",
-        timeout=5,
+    provider_state = _request_provider_from_admin(
+        azents_admin_server_container,
+        method="GET",
+        path="/__testenv/state",
+        payload=None,
     )
-    assert provider_state.status_code == 200
-    assert provider_state.json()["app_request_count"] == 1
-    assert provider_state.json()["oauth_request_count"] == 1
+    assert provider_state["app_request_count"] == 1
+    assert provider_state["oauth_request_count"] == 1
 
     audit = settings_api.system_settings_v1_list_system_setting_audit_events(limit=100)
     audit_json = audit.to_json()
