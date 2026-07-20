@@ -1,6 +1,6 @@
 import { rem } from "@mantine/core";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
-import { TokenUsageIndicator } from "./TokenUsageIndicator";
+import { TokenUsageDetails } from "./TokenUsageIndicator";
 import type { ChatLiveRunState } from "../types";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
@@ -18,7 +18,7 @@ const activeRun = {
 } satisfies ChatLiveRunState;
 
 const meta = {
-  component: TokenUsageIndicator,
+  component: TokenUsageDetails,
   decorators: [
     (Story) => (
       <StorybookCanvas maxWidth={rem(360)}>
@@ -41,7 +41,7 @@ const meta = {
       reasoningTokens: 800,
     },
   },
-} satisfies Meta<typeof TokenUsageIndicator>;
+} satisfies Meta<typeof TokenUsageDetails>;
 
 export default meta;
 

@@ -36,7 +36,6 @@ import { useChatSessionContainer } from "../containers/useChatSessionContainer";
 import { WorkspacePanel } from "../workspace/components/WorkspacePanel";
 import { useWorkspacePanelContainer } from "../workspace/containers/useWorkspacePanelContainer";
 import { ChatView } from "./ChatView";
-import { TokenUsageIndicator } from "./TokenUsageIndicator";
 import type { ConnectionStatus } from "../types";
 import type {
   AgentResponse,
@@ -158,12 +157,6 @@ export function ChatSessionView({
         session={headerSession}
         onSessionTitleChange={setHeaderSession}
         onOpenRuntime={() => setRuntimeDrawerOpened(true)}
-        chatControls={
-          <TokenUsageIndicator
-            usage={output.tokenUsage}
-            activeRun={output.liveRun}
-          />
-        }
       />
       {subagentNavigation !== null && (
         <Box
@@ -262,6 +255,7 @@ export function ChatSessionView({
           isWritePending={output.isWritePending}
           isModelResponsePending={output.isModelResponsePending}
           liveRun={output.liveRun}
+          tokenUsage={output.tokenUsage}
           defaultInferenceProfile={output.defaultInferenceProfile}
           handle={handle}
           onSendInput={output.onSendInput}

@@ -11,6 +11,7 @@ import {
   ActionIcon,
   Box,
   Button,
+  Divider,
   Drawer,
   Group,
   Paper,
@@ -38,18 +39,18 @@ import {
   reasoningEffortLevels,
 } from "@/shared/lib/reasoning-effort";
 import { resolveComposerSubscriptionSelection } from "../composerSubscriptionUsage";
-import {
-  ComposerSubscriptionUsageDetailsContainer,
-  ComposerSubscriptionUsageIndicatorContainer,
-} from "../containers/ComposerSubscriptionUsageContainer";
+import { ComposerSubscriptionUsagePopoverContainer } from "../containers/ComposerSubscriptionUsageContainer";
 import { AttachmentPreviewBar } from "./AttachmentPreviewBar";
 import { TodoPreviewBar } from "./TodoPreviewBar";
+import { TokenUsageDetails } from "./TokenUsageIndicator";
 import type { PendingFile, UploadedFile } from "../hooks/useFileUpload";
 import type {
   ChatAction,
+  ChatLiveRunState,
   GoalStateSnapshot,
   InputActionDefinition,
   TodoStateSnapshot,
+  TokenUsageSummary,
 } from "../types";
 import type {
   AgentResponse,
@@ -87,6 +88,14 @@ interface ChatInputProps {
   defaultInferenceProfile: RequestedInferenceProfile;
   /** original profile while editing a durable user message */
   editingInferenceProfile?: RequestedInferenceProfile | null;
+  /** whether the model and reasoning-effort picker is available */
+  inferenceProfileSelectionEnabled?: boolean;
+  /** whether context-window usage is shown below the model picker */
+  contextUsageEnabled?: boolean;
+  /** latest context-window usage snapshot */
+  contextUsage?: TokenUsageSummary | null;
+  /** active run used to resolve transient inference provenance */
+  contextUsageActiveRun?: ChatLiveRunState | null;
   /** file whether uploading */
   isUploading: boolean;
   /** pending file list */
@@ -522,6 +531,10 @@ export const ChatInput = memo(function ChatInput({
   selectableModelOptions,
   defaultInferenceProfile,
   editingInferenceProfile = null,
+  inferenceProfileSelectionEnabled = true,
+  contextUsageEnabled = false,
+  contextUsage = null,
+  contextUsageActiveRun = null,
   isUploading,
   pendingFiles,
   goal,
@@ -616,16 +629,16 @@ export const ChatInput = memo(function ChatInput({
       storedLastSelectedProfile,
     ],
   );
+  const restoredComposerInferenceProfile = inferenceProfileSelectionEnabled
+    ? restoredInferenceProfile
+    : normalizedDefaultProfile;
   const [inputValue, setInputValue] = useState(
     initialInputValue ?? parsedDraft.message,
   );
   const [inferenceProfile, setInferenceProfile] = useState(
-    restoredInferenceProfile,
+    restoredComposerInferenceProfile,
   );
   const [profilePickerOpened, setProfilePickerOpened] = useState(false);
-  const [scrollToSubscriptionUsageOnOpen, setScrollToSubscriptionUsageOnOpen] =
-    useState(false);
-  const subscriptionUsageDetailsRef = useRef<HTMLDivElement>(null);
   const [desktopProfileSection, setDesktopProfileSection] = useState<
     "model" | "effort" | null
   >(null);
@@ -746,14 +759,14 @@ export const ChatInput = memo(function ChatInput({
     setSelectedAction(
       resolveActionDefinition(parsedDraft.action, inputActions),
     );
-    setInferenceProfile(restoredInferenceProfile);
+    setInferenceProfile(restoredComposerInferenceProfile);
   }, [
     editingMessageId,
     initialInputValue,
     inputActions,
     normalizedDefaultProfile,
     parsedDraft,
-    restoredInferenceProfile,
+    restoredComposerInferenceProfile,
   ]);
 
   useEffect(() => {
@@ -849,8 +862,8 @@ export const ChatInput = memo(function ChatInput({
     setSelectedAction(
       resolveActionDefinition(parsedDraft.action, inputActions),
     );
-    setInferenceProfile(restoredInferenceProfile);
-  }, [inputActions, parsedDraft, restoredInferenceProfile]);
+    setInferenceProfile(restoredComposerInferenceProfile);
+  }, [inputActions, parsedDraft, restoredComposerInferenceProfile]);
 
   const handleCancelEdit = useCallback((): void => {
     restorePersistedDraft();
@@ -1072,25 +1085,6 @@ export const ChatInput = memo(function ChatInput({
     [inferenceProfile, selectableEfforts, updateInferenceProfile],
   );
 
-  const handleOpenSubscriptionUsage = useCallback((): void => {
-    if (isMobile) {
-      setScrollToSubscriptionUsageOnOpen(true);
-    }
-    setProfilePickerOpened(true);
-    setDesktopProfileSection(null);
-  }, [isMobile]);
-
-  const handleProfilePickerEnterTransitionEnd = useCallback((): void => {
-    if (!scrollToSubscriptionUsageOnOpen) {
-      return;
-    }
-    setScrollToSubscriptionUsageOnOpen(false);
-    subscriptionUsageDetailsRef.current?.scrollIntoView({
-      behavior: "smooth",
-      block: "start",
-    });
-  }, [scrollToSubscriptionUsageOnOpen]);
-
   const profileTrigger = (
     <Button
       variant="light"
@@ -1226,12 +1220,12 @@ export const ChatInput = memo(function ChatInput({
           </Stack>
         </Stack>
       )}
-      {subscriptionSelection !== null ? (
-        <Box ref={subscriptionUsageDetailsRef}>
-          <ComposerSubscriptionUsageDetailsContainer
-            handle={handle}
-            integrationId={subscriptionSelection.integrationId}
-            provider={subscriptionSelection.provider}
+      {contextUsageEnabled ? (
+        <Box>
+          <Divider mb="sm" />
+          <TokenUsageDetails
+            activeRun={contextUsageActiveRun}
+            usage={contextUsage}
           />
         </Box>
       ) : null}
@@ -1306,12 +1300,14 @@ export const ChatInput = memo(function ChatInput({
               </Group>
             </UnstyledButton>
           )}
-          {subscriptionSelection !== null ? (
-            <ComposerSubscriptionUsageDetailsContainer
-              handle={handle}
-              integrationId={subscriptionSelection.integrationId}
-              provider={subscriptionSelection.provider}
-            />
+          {contextUsageEnabled ? (
+            <Box px={rem(10)} pb={rem(6)}>
+              <Divider my="xs" />
+              <TokenUsageDetails
+                activeRun={contextUsageActiveRun}
+                usage={contextUsage}
+              />
+            </Box>
           ) : null}
         </Stack>
       </Paper>
@@ -1591,103 +1587,96 @@ export const ChatInput = memo(function ChatInput({
               </ActionIcon>
               {isMobile ? (
                 <>
-                  {profileTrigger}
+                  {inferenceProfileSelectionEnabled ? profileTrigger : null}
                   {subscriptionSelection !== null ? (
-                    <ComposerSubscriptionUsageIndicatorContainer
+                    <ComposerSubscriptionUsagePopoverContainer
                       compact
                       handle={handle}
                       integrationId={subscriptionSelection.integrationId}
-                      onOpen={handleOpenSubscriptionUsage}
                       provider={subscriptionSelection.provider}
                     />
                   ) : null}
-                  <Drawer
-                    opened={profilePickerOpened}
-                    onClose={() => {
-                      setProfilePickerOpened(false);
-                      setScrollToSubscriptionUsageOnOpen(false);
-                    }}
-                    transitionProps={{
-                      onEntered: handleProfilePickerEnterTransitionEnd,
-                    }}
-                    title={
-                      <Group
-                        justify="space-between"
-                        gap="md"
-                        wrap="nowrap"
-                        w="100%"
-                      >
-                        <Text component="span" inherit>
-                          {t("composerProfile.model")}
-                        </Text>
-                        <Button
-                          variant="subtle"
-                          color="blue"
-                          size="compact-sm"
-                          px="xs"
-                          onClick={() => {
-                            setProfilePickerOpened(false);
-                            setScrollToSubscriptionUsageOnOpen(false);
-                          }}
+                  {inferenceProfileSelectionEnabled ? (
+                    <Drawer
+                      opened={profilePickerOpened}
+                      onClose={() => setProfilePickerOpened(false)}
+                      title={
+                        <Group
+                          justify="space-between"
+                          gap="md"
+                          wrap="nowrap"
+                          w="100%"
                         >
-                          {t("composerProfile.done")}
-                        </Button>
-                      </Group>
-                    }
-                    position="bottom"
-                    size={`min(80dvh, ${rem(720)})`}
-                    withCloseButton={false}
-                    keepMounted
-                    styles={{
-                      title: { flex: 1 },
-                      content: {
-                        borderTopLeftRadius: rem(12),
-                        borderTopRightRadius: rem(12),
-                      },
-                      body: {
-                        overflowY: "auto",
-                        paddingBottom:
-                          "max(var(--mantine-spacing-md), env(safe-area-inset-bottom))",
-                      },
-                    }}
-                  >
-                    {mobileProfilePickerContent}
-                  </Drawer>
+                          <Text component="span" inherit>
+                            {t("composerProfile.model")}
+                          </Text>
+                          <Button
+                            variant="subtle"
+                            color="blue"
+                            size="compact-sm"
+                            px="xs"
+                            onClick={() => setProfilePickerOpened(false)}
+                          >
+                            {t("composerProfile.done")}
+                          </Button>
+                        </Group>
+                      }
+                      position="bottom"
+                      size={`min(80dvh, ${rem(720)})`}
+                      withCloseButton={false}
+                      keepMounted
+                      styles={{
+                        title: { flex: 1 },
+                        content: {
+                          borderTopLeftRadius: rem(12),
+                          borderTopRightRadius: rem(12),
+                        },
+                        body: {
+                          overflowY: "auto",
+                          paddingBottom:
+                            "max(var(--mantine-spacing-md), env(safe-area-inset-bottom))",
+                        },
+                      }}
+                    >
+                      {mobileProfilePickerContent}
+                    </Drawer>
+                  ) : null}
                 </>
               ) : (
                 <>
-                  <Popover
-                    opened={profilePickerOpened}
-                    onChange={(opened) => {
-                      setProfilePickerOpened(opened);
-                      if (!opened) {
-                        setDesktopProfileSection(null);
-                      }
-                    }}
-                    position="top-start"
-                    width="auto"
-                    shadow="none"
-                    withinPortal
-                  >
-                    <Popover.Target>{profileTrigger}</Popover.Target>
-                    <Popover.Dropdown
-                      p={0}
-                      style={{
-                        background: "transparent",
-                        border: 0,
-                        boxShadow: "none",
-                        overflow: "visible",
+                  {inferenceProfileSelectionEnabled ? (
+                    <Popover
+                      opened={profilePickerOpened}
+                      onChange={(opened) => {
+                        setProfilePickerOpened(opened);
+                        if (!opened) {
+                          setDesktopProfileSection(null);
+                        }
                       }}
+                      position="top-start"
+                      width="auto"
+                      shadow="none"
+                      withinPortal
                     >
-                      {desktopProfileMenu}
-                    </Popover.Dropdown>
-                  </Popover>
+                      <Popover.Target>{profileTrigger}</Popover.Target>
+                      <Popover.Dropdown
+                        p={0}
+                        style={{
+                          background: "transparent",
+                          border: 0,
+                          boxShadow: "none",
+                          overflow: "visible",
+                        }}
+                      >
+                        {desktopProfileMenu}
+                      </Popover.Dropdown>
+                    </Popover>
+                  ) : null}
                   {subscriptionSelection !== null ? (
-                    <ComposerSubscriptionUsageIndicatorContainer
+                    <ComposerSubscriptionUsagePopoverContainer
                       compact={false}
                       handle={handle}
                       integrationId={subscriptionSelection.integrationId}
-                      onOpen={handleOpenSubscriptionUsage}
                       provider={subscriptionSelection.provider}
                     />
                   ) : null}

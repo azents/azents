@@ -101,7 +101,7 @@ api_routes:
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-07-20
-spec_version: 117
+spec_version: 118
 ---
 
 # Conversation & Events
@@ -216,13 +216,18 @@ resolves the option's stored integration ID, reuses the integration-scoped subsc
 and switches query identity when the selected model changes. Other API-key and unsupported providers
 do not render the affordance or request usage. OpenRouter participates only when its API key has a
 bounded credit limit; a successful snapshot with a `null` limit or remaining-limit value has no
-displayable limits and renders no composer affordance. Desktop shows a compact status beside the model
-selector and operational details in the model popover; mobile keeps the compact status and places the
-same details in the model bottom sheet. Available limits, loading, stale, unavailable, and trusted
-external states remain local to the usage projection and never disable model selection or message
-submission. The session surface exposes no financial details. Manual refresh, the existing 60-second
-query freshness policy, focus revalidation, no automatic retry, and last-successful stale projection
-remain shared with Workspace LLM Settings.
+displayable limits and renders no composer affordance. Desktop and mobile show a compact status beside
+the model selector and open operational details in an independent usage popover. Available limits,
+loading, stale, unavailable, and trusted external states remain local to the usage projection and never
+disable model selection or message submission. The session surface exposes no financial details.
+Manual refresh, the existing 60-second query freshness policy, focus revalidation, no automatic retry,
+and last-successful stale projection remain shared with Workspace LLM Settings.
+
+Concrete root-session composers place the latest durable or active-run context-window usage details
+below model and reasoning-effort controls in the desktop model popover and mobile model bottom sheet.
+The session header does not duplicate this context-window indicator. Subagent composers keep usage-limit
+inspection available when supported, but render neither the model selector nor the model/effort sheet,
+so read-only subagent sessions cannot expose an inference-profile mutation path.
 
 Each session may have a user-facing `title`. `PATCH /chat/v1/sessions/{session_id}/title`
 sets or clears a manual title after workspace membership validation. The request body uses `{ "title":
@@ -860,6 +865,7 @@ Current verification:
 
 ## 11. Changelog
 
+- **2026-07-20** — v118. Moved context-window usage details from the session header into the model picker, made subscription usage an independent composer popover, and removed model/effort picker exposure from read-only subagent composers.
 - **2026-07-20** — v117. Replaced policy-aware archive confirmation with concise delete-style session-removal copy while preserving archive-backed retention behavior.
 - **2026-07-19** — v115. Added explicit input scheduling intent, queue-only terminal `agent_result` delivery with durable Run idempotency, and promotion-time direct-parent observation acknowledgment.
 - **2026-07-19** — v114. Added root-session archive and restore, immutable retention snapshots, scheduled durable purge state, archived-session listing, and public archived-session UI behavior.

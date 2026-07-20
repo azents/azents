@@ -30,7 +30,7 @@ import {
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { useRouter, useSearchParams } from "next/navigation";
-import { type ReactNode, useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { trpc } from "@/trpc/client";
 import { AgentAvatar } from "./AgentAvatar";
 import { useAgentFocusedShellMobileNav } from "./AgentFocusedShell";
@@ -78,7 +78,6 @@ interface AgentSessionHeaderProps {
   session?: AgentSessionResponse;
   onSessionTitleChange?: (session: AgentSessionResponse) => void;
   onOpenRuntime?: () => void;
-  chatControls?: ReactNode;
 }
 
 export function AgentSessionHeader({
@@ -88,7 +87,6 @@ export function AgentSessionHeader({
   session: initialSession,
   onSessionTitleChange,
   onOpenRuntime,
-  chatControls,
 }: AgentSessionHeaderProps): React.ReactElement {
   const t = useTranslations("workspace.agents.detail");
   const router = useRouter();
@@ -266,9 +264,6 @@ export function AgentSessionHeader({
               <IconPencil size={rem(14)} />
             </ActionIcon>
           </Group>
-          {activeTab === "chat" && chatControls && (
-            <Box style={{ flexShrink: 0 }}>{chatControls}</Box>
-          )}
         </Group>
         <Group
           hiddenFrom="lg"
@@ -305,7 +300,6 @@ export function AgentSessionHeader({
             </ActionIcon>
           </Group>
           <Group gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>
-            {activeTab === "chat" && onOpenRuntime && chatControls}
             {activeTab === "chat" && onOpenRuntime && (
               <ActionIcon
                 variant="subtle"

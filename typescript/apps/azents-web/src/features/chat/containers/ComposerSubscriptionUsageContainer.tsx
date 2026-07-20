@@ -2,22 +2,15 @@
 
 import { Component } from "react";
 import { useSubscriptionUsageContainer } from "@/features/llm-settings/containers/useSubscriptionUsageContainer";
-import {
-  ComposerSubscriptionUsageDetails,
-  ComposerSubscriptionUsageIndicator,
-} from "../components/ComposerSubscriptionUsage";
+import { ComposerSubscriptionUsagePopover } from "../components/ComposerSubscriptionUsage";
 import type { SubscriptionUsageState } from "@/features/llm-settings/subscriptionUsage";
 import type { ReactNode } from "react";
 
-interface ComposerSubscriptionUsageBaseProps {
+interface ComposerSubscriptionUsagePopoverContainerProps {
+  compact: boolean;
   handle: string;
   integrationId: string;
   provider: string;
-}
-
-interface ComposerSubscriptionUsageIndicatorContainerProps extends ComposerSubscriptionUsageBaseProps {
-  compact: boolean;
-  onOpen: () => void;
 }
 
 interface ComposerUsageErrorBoundaryProps {
@@ -75,14 +68,13 @@ function composerUsageBoundaryResetKey(state: SubscriptionUsageState): string {
   }
 }
 
-export function ComposerSubscriptionUsageIndicatorContainer({
+export function ComposerSubscriptionUsagePopoverContainer({
   compact,
   handle,
   integrationId,
-  onOpen,
   provider,
-}: ComposerSubscriptionUsageIndicatorContainerProps): React.ReactElement | null {
-  const { state } = useSubscriptionUsageContainer({
+}: ComposerSubscriptionUsagePopoverContainerProps): React.ReactElement | null {
+  const { state, onRefresh } = useSubscriptionUsageContainer({
     enabled: true,
     handle,
     integrationId,
@@ -95,49 +87,23 @@ export function ComposerSubscriptionUsageIndicatorContainer({
   };
   return (
     <ComposerUsageErrorBoundary
-      fallback={() => (
-        <ComposerSubscriptionUsageIndicator
+      fallback={(reset) => (
+        <ComposerSubscriptionUsagePopover
           compact={compact}
-          onOpen={onOpen}
+          onRefresh={async () => {
+            reset();
+            await onRefresh();
+          }}
           state={fallbackState}
         />
       )}
       resetKey={`${integrationId}:${composerUsageBoundaryResetKey(state)}`}
     >
-      <ComposerSubscriptionUsageIndicator
+      <ComposerSubscriptionUsagePopover
         compact={compact}
-        onOpen={onOpen}
+        onRefresh={onRefresh}
         state={state}
       />
-    </ComposerUsageErrorBoundary>
-  );
-}
-
-export function ComposerSubscriptionUsageDetailsContainer({
-  handle,
-  integrationId,
-  provider,
-}: ComposerSubscriptionUsageBaseProps): React.ReactElement | null {
-  const { state, onRefresh } = useSubscriptionUsageContainer({
-    enabled: true,
-    handle,
-    integrationId,
-    provider,
-  });
-  return (
-    <ComposerUsageErrorBoundary
-      fallback={(reset) => (
-        <ComposerSubscriptionUsageDetails
-          state={{ type: "UNAVAILABLE", reason: null, retryable: true }}
-          onRefresh={async () => {
-            reset();
-            await onRefresh();
-          }}
-        />
-      )}
-      resetKey={`${integrationId}:${composerUsageBoundaryResetKey(state)}`}
-    >
-      <ComposerSubscriptionUsageDetails state={state} onRefresh={onRefresh} />
     </ComposerUsageErrorBoundary>
   );
 }

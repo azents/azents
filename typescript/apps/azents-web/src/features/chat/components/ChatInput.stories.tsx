@@ -2,7 +2,7 @@ import { rem } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { observable } from "@trpc/server/observable";
 import { useState } from "react";
-import { expect, spyOn, userEvent, waitFor, within } from "storybook/test";
+import { expect, userEvent, waitFor, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { trpc } from "@/trpc/client";
 import { pendingFiles } from "../story-fixtures";
@@ -295,6 +295,23 @@ const baseArgs = {
   defaultInferenceProfile: {
     model_target_label: "Default",
     reasoning_effort: null,
+  },
+  contextUsageEnabled: true,
+  contextUsage: {
+    runId: "run-context-usage",
+    inferenceProfile: {
+      model_target_label: "Default",
+      model_display_name: "GPT 5.5",
+      reasoning_effort: "high",
+    },
+    effectiveContextWindowTokens: 270_000,
+    effectiveAutoCompactionThresholdTokens: 243_000,
+    promptTokens: 47_043,
+    completionTokens: 1_200,
+    totalTokens: 48_243,
+    cachedTokens: 12_000,
+    cacheCreationTokens: 2_400,
+    reasoningTokens: 800,
   },
   isUploading: false,
   pendingFiles: [],
@@ -622,6 +639,10 @@ export const DesktopFullReasoningEffort = {
   play: async ({ canvasElement }) => {
     const page = within(canvasElement.ownerDocument.body);
     await userEvent.click(page.getByRole("button", { name: /^Model$/ }));
+    await expect(
+      page.getByRole("region", { name: "Token usage" }),
+    ).toBeVisible();
+    await expect(page.getByText("Effective context window")).toBeVisible();
     await userEvent.click(page.getByRole("button", { name: /Model Default/ }));
     await expect(page.getByText("gpt-5.6")).toBeVisible();
     await expect(page.getByText("gpt-5.5-mini")).toBeVisible();
@@ -682,26 +703,77 @@ export const MobileSubscriptionUsage = {
         page.getByRole("button", { name: /Subscription usage:.*73%/ }),
       ).toBeVisible(),
     );
-    const scrollIntoView = spyOn(
-      Element.prototype,
-      "scrollIntoView",
-    ).mockImplementation(() => null);
-    try {
-      await userEvent.click(
+    await userEvent.click(
+      page.getByRole("button", { name: /Subscription usage:.*73%/ }),
+    );
+    await waitFor(() => expect(page.getByText("5 hour limit")).toBeVisible());
+    await expect(page.getByText("73%")).toBeVisible();
+    await expect(page.queryByText("must-not-render")).not.toBeInTheDocument();
+    await expect(
+      page.queryByRole("dialog", { name: "Model" }),
+    ).not.toBeInTheDocument();
+  },
+} satisfies Story;
+
+export const SubagentSubscriptionUsage = {
+  args: {
+    ...baseArgs,
+    sessionId: "story-session-subagent-subscription-usage",
+    isMobile: true,
+    inputDisabled: true,
+    disabledPlaceholder: "Messages can only be sent from the root agent.",
+    inferenceProfileSelectionEnabled: false,
+    selectableModelOptions: [
+      {
+        label: "ChatGPT",
+        model_selection: subscriptionModel,
+        settings: settingsForModel(subscriptionModel),
+      },
+      {
+        label: "Fast",
+        model_selection: noEffortModel,
+        settings: settingsForModel(noEffortModel),
+      },
+    ],
+    defaultInferenceProfile: {
+      model_target_label: "ChatGPT",
+      reasoning_effort: null,
+    },
+  },
+  decorators: [
+    (Story) => {
+      clearComposerStorage("story-session-subagent-subscription-usage");
+      seedDraftProfile("story-session-subagent-subscription-usage", "", {
+        model_target_label: "Fast",
+        reasoning_effort: null,
+      });
+      return (
+        <SubscriptionUsageStoryProvider>
+          <StorybookCanvas maxWidth={rem(390)}>
+            <Story />
+          </StorybookCanvas>
+        </SubscriptionUsageStoryProvider>
+      );
+    },
+  ],
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement.ownerDocument.body);
+    await waitFor(() =>
+      expect(
         page.getByRole("button", { name: /Subscription usage:.*73%/ }),
-      );
-      await waitFor(() => expect(page.getByText("5 hour limit")).toBeVisible());
-      await waitFor(() =>
-        expect(scrollIntoView).toHaveBeenCalledWith({
-          behavior: "smooth",
-          block: "start",
-        }),
-      );
-      await expect(page.getByText("73%")).toBeVisible();
-      await expect(page.queryByText("must-not-render")).not.toBeInTheDocument();
-    } finally {
-      scrollIntoView.mockRestore();
-    }
+      ).toBeVisible(),
+    );
+    await expect(
+      page.queryByRole("button", { name: /^Model$/ }),
+    ).not.toBeInTheDocument();
+    await expect(page.queryByText("Reasoning effort")).not.toBeInTheDocument();
+    await userEvent.click(
+      page.getByRole("button", { name: /Subscription usage:.*73%/ }),
+    );
+    await expect(page.getByText("5 hour limit")).toBeVisible();
+    await expect(
+      page.queryByRole("dialog", { name: "Model" }),
+    ).not.toBeInTheDocument();
   },
 } satisfies Story;
 

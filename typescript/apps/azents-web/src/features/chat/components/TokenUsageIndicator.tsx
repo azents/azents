@@ -1,22 +1,14 @@
 "use client";
 
-/** Chat header token usage with the active turn's applied inference profile. */
+/** Context-window usage details for the active turn's applied inference profile. */
 
-import {
-  ActionIcon,
-  Box,
-  Group,
-  Popover,
-  rem,
-  Stack,
-  Text,
-} from "@mantine/core";
+import { Box, Group, Stack, Text } from "@mantine/core";
 import { useTranslations } from "next-intl";
-import { memo, useMemo, useState } from "react";
+import { memo, useMemo } from "react";
 import type { ChatLiveRunState, TokenUsageSummary } from "../types";
 import type { AppliedInferenceProfile } from "@azents/public-client";
 
-interface TokenUsageIndicatorProps {
+interface TokenUsageDetailsProps {
   usage: TokenUsageSummary | null;
   activeRun: ChatLiveRunState | null;
 }
@@ -39,19 +31,6 @@ function percentUsed(
   return Math.min(100, Math.max(0, (totalTokens / thresholdTokens) * 100));
 }
 
-function progressColor(percent: number | null): string {
-  if (percent === null) {
-    return "var(--mantine-color-gray-5)";
-  }
-  if (percent >= 90) {
-    return "var(--mantine-color-red-6)";
-  }
-  if (percent >= 70) {
-    return "var(--mantine-color-yellow-6)";
-  }
-  return "var(--mantine-color-teal-6)";
-}
-
 function resolveUsageProfile(
   usage: TokenUsageSummary | null,
   activeRun: ChatLiveRunState | null,
@@ -66,12 +45,11 @@ function resolveUsageProfile(
   return activeRun.inferenceProfile;
 }
 
-export const TokenUsageIndicator = memo(function TokenUsageIndicator({
+export const TokenUsageDetails = memo(function TokenUsageDetails({
   usage,
   activeRun,
-}: TokenUsageIndicatorProps): React.ReactElement {
+}: TokenUsageDetailsProps): React.ReactElement {
   const t = useTranslations("chat.tokenUsage");
-  const [opened, setOpened] = useState(false);
   const inferenceProfile = useMemo(
     () => resolveUsageProfile(usage, activeRun),
     [activeRun, usage],
@@ -84,138 +62,75 @@ export const TokenUsageIndicator = memo(function TokenUsageIndicator({
       ),
     [usage?.effectiveAutoCompactionThresholdTokens, usage?.totalTokens],
   );
-  const color = progressColor(percent);
-  const ringPercent = percent ?? 0;
-  const ringRadius = 7;
-  const ringCircumference = 2 * Math.PI * ringRadius;
-  const ringDashOffset = ringCircumference * (1 - ringPercent / 100);
 
   return (
-    <Popover
-      opened={opened}
-      onChange={setOpened}
-      position="bottom-end"
-      withArrow
-      shadow="md"
-      width={rem(280)}
-    >
-      <Popover.Target>
-        <ActionIcon
-          aria-label={t("ariaLabel")}
-          onClick={() => setOpened((current) => !current)}
-          radius="xl"
-          variant="subtle"
-        >
-          <Box
-            component="svg"
-            viewBox="0 0 18 18"
-            aria-hidden="true"
-            style={{
-              display: "block",
-              height: rem(18),
-              width: rem(18),
-            }}
-          >
-            <circle
-              cx="9"
-              cy="9"
-              r={ringRadius}
-              fill="none"
-              stroke="var(--mantine-color-default-border)"
-              strokeWidth="4"
-            />
-            {ringPercent > 0 && (
-              <circle
-                cx="9"
-                cy="9"
-                r={ringRadius}
-                fill="none"
-                stroke={color}
-                strokeDasharray={ringCircumference}
-                strokeDashoffset={ringDashOffset}
-                strokeLinecap="round"
-                strokeWidth="4"
-                style={{
-                  transform: "rotate(-90deg)",
-                  transformOrigin: "50% 50%",
-                }}
-              />
-            )}
-          </Box>
-        </ActionIcon>
-      </Popover.Target>
-      <Popover.Dropdown>
-        <Stack gap="xs">
-          <Box>
-            <Text fw={600} size="sm">
-              {t("title")}
-            </Text>
+    <Stack aria-label={t("title")} gap="xs" role="region">
+      <Box>
+        <Text fw={600} size="sm">
+          {t("title")}
+        </Text>
+        <Text size="xs" c="dimmed">
+          {inferenceProfile?.model_target_label ?? t("unknownModel")}
+        </Text>
+        {inferenceProfile !== null &&
+          (inferenceProfile.model_display_name !== null ||
+            inferenceProfile.reasoning_effort !== null) && (
             <Text size="xs" c="dimmed">
-              {inferenceProfile?.model_target_label ?? t("unknownModel")}
+              {[
+                inferenceProfile.model_display_name,
+                inferenceProfile.reasoning_effort,
+              ]
+                .filter((value) => value !== null)
+                .join(" · ")}
             </Text>
-            {inferenceProfile !== null &&
-              (inferenceProfile.model_display_name !== null ||
-                inferenceProfile.reasoning_effort !== null) && (
-                <Text size="xs" c="dimmed">
-                  {[
-                    inferenceProfile.model_display_name,
-                    inferenceProfile.reasoning_effort,
-                  ]
-                    .filter((value) => value !== null)
-                    .join(" · ")}
-                </Text>
-              )}
-            {usage !== null &&
-              usage.runId !== null &&
-              inferenceProfile === null && (
-                <Text size="xs" c="dimmed">
-                  {t("unknownProvenance")}
-                </Text>
-              )}
-          </Box>
-          <UsageRow
-            label={t("usedPercent")}
-            value={
-              percent === null ? "—" : t("percent", { value: percent / 100 })
-            }
-          />
-          <UsageRow
-            label={t("total")}
-            value={formatNumber(usage?.totalTokens ?? null)}
-          />
-          <UsageRow
-            label={t("effectiveContextWindow")}
-            value={formatNumber(usage?.effectiveContextWindowTokens ?? null)}
-          />
-          <UsageRow
-            label={t("autoCompactionThreshold")}
-            value={formatNumber(
-              usage?.effectiveAutoCompactionThresholdTokens ?? null,
-            )}
-          />
-          <UsageRow
-            label={t("prompt")}
-            value={formatNumber(usage?.promptTokens ?? null)}
-          />
-          <UsageRow
-            label={t("completion")}
-            value={formatNumber(usage?.completionTokens ?? null)}
-          />
-          <UsageRow
-            label={t("cached")}
-            value={formatNumber(usage?.cachedTokens ?? null)}
-          />
-          <UsageRow
-            label={t("cacheCreation")}
-            value={formatNumber(usage?.cacheCreationTokens ?? null)}
-          />
-          <UsageRow
-            label={t("reasoning")}
-            value={formatNumber(usage?.reasoningTokens ?? null)}
-          />
-        </Stack>
-      </Popover.Dropdown>
-    </Popover>
+          )}
+        {usage !== null &&
+          usage.runId !== null &&
+          inferenceProfile === null && (
+            <Text size="xs" c="dimmed">
+              {t("unknownProvenance")}
+            </Text>
+          )}
+      </Box>
+      <UsageRow
+        label={t("usedPercent")}
+        value={percent === null ? "—" : t("percent", { value: percent / 100 })}
+      />
+      <UsageRow
+        label={t("total")}
+        value={formatNumber(usage?.totalTokens ?? null)}
+      />
+      <UsageRow
+        label={t("effectiveContextWindow")}
+        value={formatNumber(usage?.effectiveContextWindowTokens ?? null)}
+      />
+      <UsageRow
+        label={t("autoCompactionThreshold")}
+        value={formatNumber(
+          usage?.effectiveAutoCompactionThresholdTokens ?? null,
+        )}
+      />
+      <UsageRow
+        label={t("prompt")}
+        value={formatNumber(usage?.promptTokens ?? null)}
+      />
+      <UsageRow
+        label={t("completion")}
+        value={formatNumber(usage?.completionTokens ?? null)}
+      />
+      <UsageRow
+        label={t("cached")}
+        value={formatNumber(usage?.cachedTokens ?? null)}
+      />
+      <UsageRow
+        label={t("cacheCreation")}
+        value={formatNumber(usage?.cacheCreationTokens ?? null)}
+      />
+      <UsageRow
+        label={t("reasoning")}
+        value={formatNumber(usage?.reasoningTokens ?? null)}
+      />
+    </Stack>
   );
 });
 

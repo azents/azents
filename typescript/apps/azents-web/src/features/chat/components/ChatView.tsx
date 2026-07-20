@@ -66,6 +66,7 @@ import type {
   InputActionDefinition,
   PendingInputBuffer,
   TodoStateSnapshot,
+  TokenUsageSummary,
 } from "../types";
 import type { WorkspacePanelContainerOutput } from "../workspace/containers/useWorkspacePanelContainer";
 import type {
@@ -333,6 +334,8 @@ interface ChatViewProps {
   isModelResponsePending: boolean;
   /** current live run snapshot with retry recovery state */
   liveRun: ChatLiveRunState | null;
+  /** latest context-window usage snapshot */
+  tokenUsage?: TokenUsageSummary | null;
   /** current workspace handle */
   handle: string;
   onSendInput: (
@@ -411,6 +414,7 @@ export function ChatView({
   isWritePending,
   isModelResponsePending,
   liveRun,
+  tokenUsage = null,
   onSendInput,
   onDeletePendingInputBuffer,
   onClearGoal,
@@ -1409,6 +1413,10 @@ export function ChatView({
                 editingInferenceProfile={
                   editingMessage?.inferenceProfile ?? null
                 }
+                inferenceProfileSelectionEnabled={readOnlyNotice === null}
+                contextUsageEnabled={sessionId !== null}
+                contextUsage={tokenUsage}
+                contextUsageActiveRun={liveRun}
                 isUploading={isUploading || isWritePending}
                 pendingFiles={readOnlyNotice === null ? pendingFiles : []}
                 goal={
