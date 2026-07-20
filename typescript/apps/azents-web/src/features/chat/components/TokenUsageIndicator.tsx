@@ -139,73 +139,73 @@ export const TokenUsageDetails = memo(function TokenUsageDetails({
     [usage?.effectiveAutoCompactionThresholdTokens, usage?.totalTokens],
   );
 
+  const profileSummary =
+    inferenceProfile === null
+      ? usage !== null && usage.runId !== null
+        ? t("unknownProvenance")
+        : null
+      : [
+          inferenceProfile.model_target_label,
+          inferenceProfile.model_display_name,
+          inferenceProfile.reasoning_effort,
+        ]
+          .filter((value) => value !== null)
+          .join(" · ");
+
   return (
-    <Stack aria-label={t("title")} gap="xs" role="region">
-      <Box>
+    <Stack aria-label={t("title")} gap={rem(8)} role="region">
+      <Stack gap={rem(2)}>
         <Text fw={600} size="sm">
           {t("title")}
         </Text>
-        <Text size="xs" c="dimmed">
-          {inferenceProfile?.model_target_label ?? t("unknownModel")}
-        </Text>
-        {inferenceProfile !== null &&
-          (inferenceProfile.model_display_name !== null ||
-            inferenceProfile.reasoning_effort !== null) && (
-            <Text size="xs" c="dimmed">
-              {[
-                inferenceProfile.model_display_name,
-                inferenceProfile.reasoning_effort,
-              ]
-                .filter((value) => value !== null)
-                .join(" · ")}
-            </Text>
+        {profileSummary !== null ? (
+          <Text c="dimmed" lineClamp={1} size="xs">
+            {profileSummary}
+          </Text>
+        ) : null}
+      </Stack>
+      <Stack gap={rem(4)}>
+        <UsageRow
+          label={t("usedPercent")}
+          value={
+            percent === null ? "—" : t("percent", { value: percent / 100 })
+          }
+        />
+        <UsageRow
+          label={t("total")}
+          value={formatNumber(usage?.totalTokens ?? null)}
+        />
+        <UsageRow
+          label={t("effectiveContextWindow")}
+          value={formatNumber(usage?.effectiveContextWindowTokens ?? null)}
+        />
+        <UsageRow
+          label={t("autoCompactionThreshold")}
+          value={formatNumber(
+            usage?.effectiveAutoCompactionThresholdTokens ?? null,
           )}
-        {usage !== null &&
-          usage.runId !== null &&
-          inferenceProfile === null && (
-            <Text size="xs" c="dimmed">
-              {t("unknownProvenance")}
-            </Text>
-          )}
-      </Box>
-      <UsageRow
-        label={t("usedPercent")}
-        value={percent === null ? "—" : t("percent", { value: percent / 100 })}
-      />
-      <UsageRow
-        label={t("total")}
-        value={formatNumber(usage?.totalTokens ?? null)}
-      />
-      <UsageRow
-        label={t("effectiveContextWindow")}
-        value={formatNumber(usage?.effectiveContextWindowTokens ?? null)}
-      />
-      <UsageRow
-        label={t("autoCompactionThreshold")}
-        value={formatNumber(
-          usage?.effectiveAutoCompactionThresholdTokens ?? null,
-        )}
-      />
-      <UsageRow
-        label={t("prompt")}
-        value={formatNumber(usage?.promptTokens ?? null)}
-      />
-      <UsageRow
-        label={t("completion")}
-        value={formatNumber(usage?.completionTokens ?? null)}
-      />
-      <UsageRow
-        label={t("cached")}
-        value={formatNumber(usage?.cachedTokens ?? null)}
-      />
-      <UsageRow
-        label={t("cacheCreation")}
-        value={formatNumber(usage?.cacheCreationTokens ?? null)}
-      />
-      <UsageRow
-        label={t("reasoning")}
-        value={formatNumber(usage?.reasoningTokens ?? null)}
-      />
+        />
+        <UsageRow
+          label={t("prompt")}
+          value={formatNumber(usage?.promptTokens ?? null)}
+        />
+        <UsageRow
+          label={t("completion")}
+          value={formatNumber(usage?.completionTokens ?? null)}
+        />
+        <UsageRow
+          label={t("cached")}
+          value={formatNumber(usage?.cachedTokens ?? null)}
+        />
+        <UsageRow
+          label={t("cacheCreation")}
+          value={formatNumber(usage?.cacheCreationTokens ?? null)}
+        />
+        <UsageRow
+          label={t("reasoning")}
+          value={formatNumber(usage?.reasoningTokens ?? null)}
+        />
+      </Stack>
     </Stack>
   );
 });
