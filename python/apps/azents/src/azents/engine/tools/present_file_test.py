@@ -35,7 +35,7 @@ def _make_artifact_file() -> ExchangeFile:
         preview_thumbnail_file_id=None,
         preview_thumbnail_uri=None,
         preview_title="result.txt",
-        preview_summary=None,
+        preview_summary="stored preview",
         preview_thumbnail_media_type=None,
         preview_thumbnail_width=None,
         preview_thumbnail_height=None,
@@ -69,7 +69,7 @@ async def test_present_file_exports_runtime_file_as_exchange_artifact() -> None:
     attachment = result.output[1]
     assert attachment["type"] == "attachment"
     assert attachment["uri"] == artifact.uri
-    assert attachment["preview_summary"] == "hello world!"
+    assert attachment["preview_summary"] == "stored preview"
     service.create_artifact.assert_awaited_once_with(
         session_id="session-1",
         user_id="user-1",
