@@ -1397,7 +1397,29 @@
       "cancelled": "취소됨",
       "interrupted": "중단됨",
       "arguments": "인자",
-      "result": "결과"
+      "result": "결과",
+      "rawData": "원본 데이터",
+      "viewRawDataFor": "{action} 원본 데이터 보기",
+      "fromCharacter": "문자 {offset}부터",
+      "filesChanged": "파일 {count}개 변경",
+      "exitCode": "종료 {code}",
+      "outputTruncated": "출력이 잘렸습니다.",
+      "action": {
+        "read": "파일 읽음",
+        "search": "파일 검색",
+        "list": "파일 목록 조회",
+        "write": "파일 작성",
+        "edit": "파일 편집",
+        "patch": "패치 적용",
+        "delete": "파일 삭제",
+        "command": "명령 실행",
+        "process": "프로세스 업데이트"
+      },
+      "changeAction": {
+        "add": "추가",
+        "update": "수정",
+        "delete": "삭제"
+      }
     },
     "toolActivity": {
       "title": "작업",

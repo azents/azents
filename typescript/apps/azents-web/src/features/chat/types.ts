@@ -163,6 +163,10 @@ export interface ToolkitSourceSnapshot {
   toolkit_slug: string;
 }
 
+export interface InvalidToolkitSource {
+  kind: "invalid";
+}
+
 export interface ClientToolCallPayload {
   call_id: string;
   name: string;
@@ -181,6 +185,7 @@ export interface ClientToolResultPayload {
   name?: string | null;
   status: ToolResultStatus;
   output: string | OutputPart[];
+  metadata?: Record<string, unknown>;
 }
 
 export interface ProviderToolReference {
@@ -747,8 +752,9 @@ export interface ActiveToolCall {
   callId?: string;
   name: string;
   arguments: string;
-  toolkitSource?: ToolkitSourceSnapshot | null;
+  toolkitSource?: ToolkitSourceSnapshot | InvalidToolkitSource | null;
   result?: string;
+  resultMetadata?: Record<string, unknown>;
   status: "preparing" | "running" | ToolResultStatus;
   attachments?: FileAttachment[];
 }

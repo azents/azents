@@ -2,6 +2,7 @@ import type {
   ActiveToolCall,
   ChatMessage,
   FileAttachment,
+  ToolkitSourceSnapshot,
   ToolResultStatus,
 } from "../types";
 
@@ -10,7 +11,49 @@ export interface FunctionCallOutputUpdate {
   callId: string;
   content: string;
   attachments: FileAttachment[];
+  metadata?: Record<string, unknown>;
   status: ToolResultStatus;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function stringField(
+  record: Record<string, unknown>,
+  key: string,
+): string | null {
+  const value = record[key];
+  return typeof value === "string" ? value : null;
+}
+
+export function toolkitSourceFromValue(
+  value: unknown,
+): ToolkitSourceSnapshot | ActiveToolCall["toolkitSource"] {
+  if (value === null || typeof value === "undefined") {
+    return null;
+  }
+  if (!isRecord(value)) {
+    return { kind: "invalid" };
+  }
+  const toolkitConfigId = stringField(value, "toolkit_config_id");
+  const toolkitType = stringField(value, "toolkit_type");
+  const toolkitName = stringField(value, "toolkit_name");
+  const toolkitSlug = stringField(value, "toolkit_slug");
+  if (
+    toolkitConfigId === null ||
+    toolkitType === null ||
+    toolkitName === null ||
+    toolkitSlug === null
+  ) {
+    return { kind: "invalid" };
+  }
+  return {
+    toolkit_config_id: toolkitConfigId,
+    toolkit_type: toolkitType,
+    toolkit_name: toolkitName,
+    toolkit_slug: toolkitSlug,
+  };
 }
 
 /**
@@ -74,6 +117,9 @@ export function applyFunctionCallOutput(
       ...tc,
       status: update.status,
       result: update.content,
+      ...(typeof update.metadata === "undefined"
+        ? {}
+        : { resultMetadata: update.metadata }),
       ...(update.attachments.length > 0
         ? { attachments: update.attachments }
         : {}),

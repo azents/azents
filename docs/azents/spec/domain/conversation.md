@@ -102,7 +102,7 @@ api_routes:
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-07-20
-spec_version: 121
+spec_version: 122
 ---
 
 # Conversation & Events
@@ -599,14 +599,20 @@ projection root, client tool call/result pairs use `call_id`, and each provider 
 Provider-tool calls render provider-neutral running, completed, failed, or historical fallback states
 from canonical status. Provider projection reads text and references from `semantic.output` and
 projects only `AttachmentOutputPart` values as UI files; `FileOutputPart` remains model-only.
-Client-tool results preserve their own completion/failure status and canonical output parts.
+Client-tool results preserve their own completion/failure status and canonical output parts. The
+client projection also retains an optional raw result `metadata` object with the matched active
+tool call; rendering may use it only through an exact first-party adapter contract.
 
 Before a client-tool call becomes durable, the resolved Tool Catalog snapshots the source of a
 DB-attached Toolkit onto the call as `toolkit_config_id`, `toolkit_type`, `toolkit_name`, and
 `toolkit_slug`. The same immutable snapshot is copied to the active client-tool call and its live
 projection. Built-in, auto-bound, and otherwise source-less calls retain `toolkit_source = null`.
 Presentation never infers Toolkit ownership from a model-visible tool-name prefix; historical calls
-without a snapshot remain source-less.
+without a snapshot remain source-less. Source-less client calls named exactly `read`, `grep`, `glob`,
+`write`, `edit`, `apply_patch`, `delete`, `exec_command`, or `write_stdin` may use a frontend-owned
+specialized renderer only after phase-aware validation of all semantic arguments and, for patch or
+process terminal detail, validated result metadata. Toolkit-owned, unknown, malformed, historical
+drifted, preparing, or incompatible calls render through the Generic card for that call only.
 
 The chat presentation layer consumes the ordered durable event stream plus the latest live partial
 stream, rather than regrouping rendered messages into semantic phases. It preserves the transcript order
@@ -622,9 +628,12 @@ tool-specific icon or title: the active Activity shows the shared animated Run i
 Run lifetime, and a completed Activity shows a check icon after the Run closes. Ordered-work categories,
 including Reasoning, remain dimmed summary text; failed events are counted in the same tone as the final
 summary item. Category overflow is summarized without hiding detail from assistive technology. Expanding
-the row reveals the existing raw tool cards and contextual event renderers in event order. The frontend may
-use stable generic categories for source-less built-in and provider tools, but does not use tool-name
-prefixes as a Toolkit identity heuristic.
+the row reveals contextual event renderers in event order. A validated specialized client tool row shows
+its localized action, reviewed subject and qualifier, and only the minimal semantic detail; raw arguments
+and result output are available from a sibling Raw data action rather than being duplicated inline.
+Generic client and provider cards continue to expose raw arguments and output as their primary expanded
+content. The frontend may use stable generic categories for source-less built-in and provider tools, but
+does not use tool-name prefixes as a Toolkit identity heuristic.
 
 A tool result or provider call with visible attachments closes the preceding Activity and renders through
 the normal standalone message attachment surface. The raw tool card is not duplicated inside Activity, so
@@ -896,6 +905,7 @@ Current verification:
 
 ## 11. Changelog
 
+- **2026-07-20** — v122. Added validated, source-aware specialized rendering for the Phase 1 Runtime client-tool set, preserved client result metadata in the frontend projection, and retained per-call Generic raw fallback with separate Raw data diagnostics.
 - **2026-07-20** — v121. Replaced phase-based Activity grouping with ordered durable/live event projection, persisted Toolkit source snapshots for client-tool identity, and rendered all attachment-bearing tool outputs as standalone deliveries.
 - **2026-07-20** — v120. Added frontend-only continuous tool activity grouping, validated semantic phases with Generic fallback, compact authorization placement, and standalone generated-image deliverables without duplicate nested attachments.
 - **2026-07-20** — v119. Swapped the context-window and subscription-usage affordance locations, restored automatic context-detail scrolling, and kept subagent pickers context-only.

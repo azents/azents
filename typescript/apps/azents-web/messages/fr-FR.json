@@ -1397,7 +1397,29 @@
       "cancelled": "Annulé",
       "interrupted": "Interrompu",
       "arguments": "Arguments",
-      "result": "Résultat"
+      "result": "Résultat",
+      "rawData": "Données brutes",
+      "viewRawDataFor": "Voir les données brutes pour {action}",
+      "fromCharacter": "à partir du caractère {offset}",
+      "filesChanged": "{count} fichier(s) modifié(s)",
+      "exitCode": "code de sortie {code}",
+      "outputTruncated": "La sortie a été tronquée.",
+      "action": {
+        "read": "Lecture du fichier",
+        "search": "Recherche de fichiers",
+        "list": "Liste des fichiers",
+        "write": "Écriture du fichier",
+        "edit": "Modification du fichier",
+        "patch": "Patch appliqué",
+        "delete": "Fichier supprimé",
+        "command": "Commande exécutée",
+        "process": "Processus mis à jour"
+      },
+      "changeAction": {
+        "add": "Ajouté",
+        "update": "Modifié",
+        "delete": "Supprimé"
+      }
     },
     "toolActivity": {
       "title": "Activité",

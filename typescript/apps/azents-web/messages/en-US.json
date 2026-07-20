@@ -1397,7 +1397,29 @@
       "cancelled": "Cancelled",
       "interrupted": "Interrupted",
       "arguments": "Arguments",
-      "result": "Result"
+      "result": "Result",
+      "rawData": "Raw data",
+      "viewRawDataFor": "View raw data for {action}",
+      "fromCharacter": "from character {offset}",
+      "filesChanged": "{count} file(s) changed",
+      "exitCode": "exit {code}",
+      "outputTruncated": "Output was truncated.",
+      "action": {
+        "read": "Read",
+        "search": "Searched files",
+        "list": "Listed files",
+        "write": "Wrote file",
+        "edit": "Edited file",
+        "patch": "Applied patch",
+        "delete": "Deleted file",
+        "command": "Ran command",
+        "process": "Updated process"
+      },
+      "changeAction": {
+        "add": "Added",
+        "update": "Updated",
+        "delete": "Deleted"
+      }
     },
     "toolActivity": {
       "title": "Activity",
