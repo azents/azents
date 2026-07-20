@@ -26,20 +26,33 @@ The frontend activity projection starts from the first internal work event, not 
 
 Reasoning does not render as a separate Thinking block when it belongs to an activity. A reasoning-only work period can create an activity without any tool call.
 
-User-visible messages and deliverables remain outside activity and separate adjacent work periods. Backend event, API, durable transcript, and live-state payloads remain unchanged.
+User-visible messages and deliverables remain outside activity and separate adjacent work periods. Existing event semantics remain canonical, but client tool-call events gain the Toolkit source snapshot required by the summary contract defined below.
 
 ### Preserve event order after expansion
 
 An expanded activity renders one ordered event stream. It does not regroup, merge, or reorder events by category.
 
-Every presented event has:
-
-- a compact summary row in transcript order; and
-- independently expandable detail for the information owned by that event.
+Every presented event reuses its existing chat event component in transcript order, including that component's current summary and detail disclosure. The activity container does not introduce another phase or event-detail hierarchy.
 
 Semantic categories are activity-summary metadata only. They never create phase sections in the expanded event list.
 
-This decision supersedes ADR-0173's three-level `Activity → phase → individual call` disclosure hierarchy. ADR-0173 remains authoritative for frontend ownership, multi-turn activity continuity, Generic fallback, and promoted user-facing deliverables unless this ADR explicitly changes them.
+This decision supersedes ADR-0173's three-level `Activity → phase → individual call` disclosure hierarchy. ADR-0173 remains authoritative for frontend ownership, multi-turn activity continuity, and Generic fallback unless this ADR explicitly changes them.
+
+### Treat attachment-bearing events as activity boundaries
+
+Any event with one or more attachments renders outside Activity through its existing event component. The whole event remains outside rather than extracting or duplicating only its attachments.
+
+An attachment-bearing event closes the preceding activity. Later internal work starts a new activity. This rule applies uniformly to message, client-tool, and provider-tool attachments without inferring whether a file is an operational artifact or a user-facing deliverable.
+
+This decision supersedes ADR-0173's selective promotion policy for validated deliverables.
+
+### Keep user-facing control and result surfaces outside Activity
+
+Activity owns internal work, not user-facing terminal results or standalone operations. Goal briefing, ActionExecution progress and results, run-level errors and retry controls, and user interruption notices render outside Activity through their existing components. Each closes the preceding Activity before it renders.
+
+A failed, cancelled, or interrupted individual tool remains inside Activity at its chronological position and contributes an attention state to the collapsed row. Authorization remains a compact action on the latest open Activity when one exists; it falls back to its existing standalone surface when there is no open Activity.
+
+This boundary keeps actionable controls and user-facing results discoverable without expanding Activity while preserving the internal event stream as one ordered process.
 
 ### Use the existing compact chat control pattern
 
@@ -52,6 +65,8 @@ The collapsed activity uses the same inline disclosure language as existing chat
 - status or approval indicators only when they require attention.
 
 The row remains collapsed by default. Expansion never occurs automatically because new events stream into the activity.
+
+The summary renders complete category segments in first-occurrence order. When all categories do not fit, it replaces the hidden categories with a final localized overflow segment: `외 N` in Korean and `+N` in English. `N` counts hidden categories, not hidden events. Attention state reserves space before category fitting, and the activity control's accessible name retains the complete category list, counts, and state.
 
 ### Use a hybrid summary taxonomy
 
@@ -77,9 +92,26 @@ The accepted category labels are:
 | Unclassified builtin fallback | `기타` | `Other` |
 | Toolkit-owned tools | Toolkit product name | Toolkit product name |
 
-Category names are one word. English action categories use verbs. Product concepts, resource types, fallback, and Toolkit proper names remain nouns.
+Curated category labels are one word. English action categories use verbs. Product concepts, resource types, and fallback labels remain nouns. Toolkit product categories preserve their canonical display names and are not forced into the one-word convention.
 
 `code_interpreter` and any other builtin that does not accurately belong to the accepted categories require explicit mapping validation before implementation; they must not be silently placed under `Shell`.
+
+### Preserve Toolkit source identity in client tool-call events
+
+A client tool call originating from a DB-attached Toolkit stores an immutable source snapshot with the call event. The snapshot contains:
+
+- the source ToolkitConfig ID as the stable product-grouping key;
+- the Toolkit type;
+- the Toolkit display name at call time; and
+- the Toolkit slug used by the execution catalog.
+
+Builtin and auto-bound tools have no ToolkitConfig source snapshot and continue to use the explicit builtin taxonomy.
+
+The engine obtains this identity from the exact `ToolCatalog` entry selected for execution. It must not reconstruct identity by parsing the model-visible tool name. Live and durable call projections expose the same snapshot, and the durable event remains sufficient after a Toolkit is renamed, detached, or deleted.
+
+Client tool-call events created before this contract have no canonical Toolkit source. The revised Activity presentation still applies to those events. A pre-contract call uses the explicit builtin registry when its name is a known builtin; every other source-less call uses `Other`. The frontend does not infer legacy Toolkit identity or retain the previous Activity UI for historical events.
+
+Installation, account, repository, and target identity are not part of the product-grouping key. Multiple installation-specific calls from one ToolkitConfig therefore contribute to one product category while retaining operation-specific context in their event summaries.
 
 ### Defer tool-specific detail designs
 
@@ -91,10 +123,11 @@ This revision defines the activity container, summary taxonomy, ordered event st
 - The summary communicates kinds of work rather than model-turn or tool-call counts.
 - Reasoning and tool execution remain understandable as one chronological process.
 - Builtin categories can be reviewed and localized deliberately, while new Toolkit tools require no per-tool frontend category registration.
+- Client tool-call event and live projection contracts must carry the immutable Toolkit source snapshot when the call comes from a DB-attached Toolkit.
 - The frontend projection must retain ordered heterogeneous activity events instead of storing tool calls and reasoning summaries in separate arrays.
 - Existing phase-grouping code and phase-specific disclosure UI must be removed.
-- Living conversation specs must be updated when the revised behavior is implemented.
-- The compact summary overflow policy remains an open design decision and is not decided by this ADR.
+- Living conversation and Toolkit specs must be updated when the revised behavior is implemented.
+- Compact-summary overflow remains deterministic without introducing a nested control.
 
 ## Alternatives Considered
 
@@ -113,3 +146,7 @@ Rejected because dynamic Toolkits would require continuous frontend taxonomy mai
 ### Group Toolkit tools by installation
 
 Rejected because installation identity creates noisy duplicate categories in the collapsed row. Installation and target information remain available in each event summary and detail.
+
+### Infer Toolkit ownership from tool names or current configuration
+
+Rejected because a model-visible prefix is a routing namespace rather than a durable product contract. Name parsing cannot reliably cover unprefixed tools, renamed or deleted ToolkitConfigs, or historical transcript rendering.
