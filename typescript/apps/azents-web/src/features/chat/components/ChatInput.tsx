@@ -38,11 +38,9 @@ import {
   normalizeReasoningEffort,
   reasoningEffortLevels,
 } from "@/shared/lib/reasoning-effort";
-import { resolveComposerSubscriptionSelection } from "../composerSubscriptionUsage";
-import { ComposerSubscriptionUsagePopoverContainer } from "../containers/ComposerSubscriptionUsageContainer";
 import { AttachmentPreviewBar } from "./AttachmentPreviewBar";
 import { TodoPreviewBar } from "./TodoPreviewBar";
-import { TokenUsageDetails } from "./TokenUsageIndicator";
+import { TokenUsageDetails, TokenUsageIndicator } from "./TokenUsageIndicator";
 import type { PendingFile, UploadedFile } from "../hooks/useFileUpload";
 import type {
   ChatAction,
@@ -74,8 +72,6 @@ function getScopedStorageKey(
 }
 
 interface ChatInputProps {
-  /** current workspace handle */
-  handle: string;
   /** current agent ID */
   agentId: string | null;
   /** current session ID */
@@ -96,6 +92,8 @@ interface ChatInputProps {
   contextUsage?: TokenUsageSummary | null;
   /** active run used to resolve transient inference provenance */
   contextUsageActiveRun?: ChatLiveRunState | null;
+  /** notifies the owning session when the effective composer profile changes */
+  onInferenceProfileChange?: (profile: RequestedInferenceProfile) => void;
   /** file whether uploading */
   isUploading: boolean;
   /** pending file list */
@@ -524,7 +522,6 @@ function HighlightedKeyword({
 }
 
 export const ChatInput = memo(function ChatInput({
-  handle,
   agentId,
   sessionId,
   isMobile,
@@ -535,6 +532,7 @@ export const ChatInput = memo(function ChatInput({
   contextUsageEnabled = false,
   contextUsage = null,
   contextUsageActiveRun = null,
+  onInferenceProfileChange,
   isUploading,
   pendingFiles,
   goal,
@@ -639,6 +637,9 @@ export const ChatInput = memo(function ChatInput({
     restoredComposerInferenceProfile,
   );
   const [profilePickerOpened, setProfilePickerOpened] = useState(false);
+  const [scrollToContextUsageOnOpen, setScrollToContextUsageOnOpen] =
+    useState(false);
+  const contextUsageDetailsRef = useRef<HTMLDivElement>(null);
   const [desktopProfileSection, setDesktopProfileSection] = useState<
     "model" | "effort" | null
   >(null);
@@ -659,14 +660,6 @@ export const ChatInput = memo(function ChatInput({
     selectableModelOptions.find(
       (option) => option.label === inferenceProfile.model_target_label,
     )?.label ?? inferenceProfile.model_target_label;
-  const subscriptionSelection = useMemo(
-    () =>
-      resolveComposerSubscriptionSelection(
-        selectableModelOptions,
-        inferenceProfile.model_target_label,
-      ),
-    [inferenceProfile.model_target_label, selectableModelOptions],
-  );
   const selectedEffortLabel = inferenceProfile.reasoning_effort ?? "";
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -695,6 +688,10 @@ export const ChatInput = memo(function ChatInput({
     editingMessageId === null &&
     ((Boolean(goal?.objective) && goal?.status !== "complete") ||
       todo.items.some((item) => item.status !== "completed"));
+
+  useEffect(() => {
+    onInferenceProfileChange?.(inferenceProfile);
+  }, [inferenceProfile, onInferenceProfileChange]);
 
   useEffect(() => {
     if (selectableModelOptions.length === 0) {
@@ -1085,6 +1082,37 @@ export const ChatInput = memo(function ChatInput({
     [inferenceProfile, selectableEfforts, updateInferenceProfile],
   );
 
+  const handleOpenContextUsage = useCallback((): void => {
+    setScrollToContextUsageOnOpen(true);
+    setProfilePickerOpened(true);
+    setDesktopProfileSection(null);
+  }, []);
+
+  const handleProfilePickerEnterTransitionEnd = useCallback((): void => {
+    if (!scrollToContextUsageOnOpen) {
+      return;
+    }
+    setScrollToContextUsageOnOpen(false);
+    contextUsageDetailsRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+  }, [scrollToContextUsageOnOpen]);
+
+  useEffect(() => {
+    if (isMobile || !profilePickerOpened || !scrollToContextUsageOnOpen) {
+      return;
+    }
+    const frame = requestAnimationFrame(() => {
+      contextUsageDetailsRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+      setScrollToContextUsageOnOpen(false);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [isMobile, profilePickerOpened, scrollToContextUsageOnOpen]);
+
   const profileTrigger = (
     <Button
       variant="light"
@@ -1112,6 +1140,9 @@ export const ChatInput = memo(function ChatInput({
       </Text>
     </Button>
   );
+  const contextUsageTrigger = contextUsageEnabled ? (
+    <TokenUsageIndicator usage={contextUsage} onOpen={handleOpenContextUsage} />
+  ) : null;
   const modelOptionRows = selectableModelOptions.map((option, index) => {
     const selected = option.label === inferenceProfile.model_target_label;
     return (
@@ -1193,21 +1224,8 @@ export const ChatInput = memo(function ChatInput({
   });
   const mobileProfilePickerContent = (
     <Stack gap="md">
-      <Stack
-        gap={0}
-        style={{
-          border: `${rem(1)} solid var(--mantine-color-default-border)`,
-          borderRadius: rem(12),
-          overflow: "hidden",
-        }}
-      >
-        {modelOptionRows}
-      </Stack>
-      {selectableEfforts.length > 0 && (
-        <Stack gap={rem(6)}>
-          <Text size="sm" fw={600}>
-            {t("composerProfile.effortLabel")}
-          </Text>
+      {inferenceProfileSelectionEnabled ? (
+        <>
           <Stack
             gap={0}
             style={{
@@ -1216,13 +1234,30 @@ export const ChatInput = memo(function ChatInput({
               overflow: "hidden",
             }}
           >
-            {effortOptionRows}
+            {modelOptionRows}
           </Stack>
-        </Stack>
-      )}
+          {selectableEfforts.length > 0 ? (
+            <Stack gap={rem(6)}>
+              <Text size="sm" fw={600}>
+                {t("composerProfile.effortLabel")}
+              </Text>
+              <Stack
+                gap={0}
+                style={{
+                  border: `${rem(1)} solid var(--mantine-color-default-border)`,
+                  borderRadius: rem(12),
+                  overflow: "hidden",
+                }}
+              >
+                {effortOptionRows}
+              </Stack>
+            </Stack>
+          ) : null}
+        </>
+      ) : null}
       {contextUsageEnabled ? (
-        <Box>
-          <Divider mb="sm" />
+        <Box ref={contextUsageDetailsRef}>
+          {inferenceProfileSelectionEnabled ? <Divider mb="sm" /> : null}
           <TokenUsageDetails
             activeRun={contextUsageActiveRun}
             usage={contextUsage}
@@ -1233,76 +1268,87 @@ export const ChatInput = memo(function ChatInput({
   );
   const desktopProfileMenu = (
     <Group gap={rem(4)} align="flex-end" wrap="nowrap">
-      <Paper withBorder radius={rem(12)} shadow="md" p={rem(6)} w={rem(260)}>
+      <Paper
+        withBorder
+        radius={rem(12)}
+        shadow="md"
+        p={rem(6)}
+        w={rem(260)}
+        style={{ maxHeight: "70dvh", overflowY: "auto" }}
+      >
         <Stack gap={rem(2)}>
-          <UnstyledButton
-            onMouseEnter={() => setDesktopProfileSection("model")}
-            onFocus={() => setDesktopProfileSection("model")}
-            onClick={() => setDesktopProfileSection("model")}
-            aria-expanded={desktopProfileSection === "model"}
-            style={{
-              background:
-                desktopProfileSection === "model"
-                  ? "var(--mantine-color-default-hover)"
-                  : "transparent",
-              borderRadius: rem(8),
-              padding: `${rem(8)} ${rem(10)}`,
-              width: "100%",
-            }}
-          >
-            <Group justify="space-between" gap="md" wrap="nowrap">
-              <Text size="sm" fw={500}>
-                {t("composerProfile.model")}
-              </Text>
-              <Group gap={rem(6)} wrap="nowrap" style={{ minWidth: 0 }}>
-                <Text size="sm" c="dimmed" truncate>
-                  {selectedModelLabel}
-                </Text>
-                <IconChevronRight
-                  aria-hidden="true"
-                  size={16}
-                  color="var(--mantine-color-dimmed)"
-                  style={{ flexShrink: 0 }}
-                />
-              </Group>
-            </Group>
-          </UnstyledButton>
-          {selectableEfforts.length > 0 && (
-            <UnstyledButton
-              onMouseEnter={() => setDesktopProfileSection("effort")}
-              onFocus={() => setDesktopProfileSection("effort")}
-              onClick={() => setDesktopProfileSection("effort")}
-              aria-expanded={desktopProfileSection === "effort"}
-              style={{
-                background:
-                  desktopProfileSection === "effort"
-                    ? "var(--mantine-color-default-hover)"
-                    : "transparent",
-                borderRadius: rem(8),
-                padding: `${rem(8)} ${rem(10)}`,
-                width: "100%",
-              }}
-            >
-              <Group justify="space-between" gap="md" wrap="nowrap">
-                <Text size="sm" fw={500}>
-                  {t("composerProfile.effortLabel")}
-                </Text>
-                <Group gap={rem(6)} wrap="nowrap">
-                  <Text size="sm" c="dimmed">
-                    {selectedEffortLabel}
+          {inferenceProfileSelectionEnabled ? (
+            <>
+              <UnstyledButton
+                onMouseEnter={() => setDesktopProfileSection("model")}
+                onFocus={() => setDesktopProfileSection("model")}
+                onClick={() => setDesktopProfileSection("model")}
+                aria-expanded={desktopProfileSection === "model"}
+                style={{
+                  background:
+                    desktopProfileSection === "model"
+                      ? "var(--mantine-color-default-hover)"
+                      : "transparent",
+                  borderRadius: rem(8),
+                  padding: `${rem(8)} ${rem(10)}`,
+                  width: "100%",
+                }}
+              >
+                <Group justify="space-between" gap="md" wrap="nowrap">
+                  <Text size="sm" fw={500}>
+                    {t("composerProfile.model")}
                   </Text>
-                  <IconChevronRight
-                    aria-hidden="true"
-                    size={16}
-                    color="var(--mantine-color-dimmed)"
-                  />
+                  <Group gap={rem(6)} wrap="nowrap" style={{ minWidth: 0 }}>
+                    <Text size="sm" c="dimmed" truncate>
+                      {selectedModelLabel}
+                    </Text>
+                    <IconChevronRight
+                      aria-hidden="true"
+                      size={16}
+                      color="var(--mantine-color-dimmed)"
+                      style={{ flexShrink: 0 }}
+                    />
+                  </Group>
                 </Group>
-              </Group>
-            </UnstyledButton>
-          )}
+              </UnstyledButton>
+              {selectableEfforts.length > 0 && (
+                <UnstyledButton
+                  onMouseEnter={() => setDesktopProfileSection("effort")}
+                  onFocus={() => setDesktopProfileSection("effort")}
+                  onClick={() => setDesktopProfileSection("effort")}
+                  aria-expanded={desktopProfileSection === "effort"}
+                  style={{
+                    background:
+                      desktopProfileSection === "effort"
+                        ? "var(--mantine-color-default-hover)"
+                        : "transparent",
+                    borderRadius: rem(8),
+                    padding: `${rem(8)} ${rem(10)}`,
+                    width: "100%",
+                  }}
+                >
+                  <Group justify="space-between" gap="md" wrap="nowrap">
+                    <Text size="sm" fw={500}>
+                      {t("composerProfile.effortLabel")}
+                    </Text>
+                    <Group gap={rem(6)} wrap="nowrap">
+                      <Text size="sm" c="dimmed">
+                        {selectedEffortLabel}
+                      </Text>
+                      <IconChevronRight
+                        aria-hidden="true"
+                        size={16}
+                        color="var(--mantine-color-dimmed)"
+                      />
+                    </Group>
+                  </Group>
+                </UnstyledButton>
+              )}
+            </>
+          ) : null}
           {contextUsageEnabled ? (
-            <Box px={rem(10)} pb={rem(6)}>
-              <Divider my="xs" />
+            <Box ref={contextUsageDetailsRef} px={rem(10)} pb={rem(6)}>
+              {inferenceProfileSelectionEnabled ? <Divider my="xs" /> : null}
               <TokenUsageDetails
                 activeRun={contextUsageActiveRun}
                 usage={contextUsage}
@@ -1311,49 +1357,58 @@ export const ChatInput = memo(function ChatInput({
           ) : null}
         </Stack>
       </Paper>
-      {desktopProfileSection === "model" && (
-        <Paper
-          withBorder
-          radius={rem(12)}
-          shadow="md"
-          w={rem(280)}
-          style={{ maxHeight: rem(280), overflowY: "auto" }}
-        >
-          <Stack gap={0}>{modelOptionRows}</Stack>
-        </Paper>
-      )}
-      {desktopProfileSection === "effort" && selectableEfforts.length > 0 && (
-        <Paper withBorder radius={rem(12)} shadow="md" p={rem(6)} w={rem(220)}>
-          <Text size="xs" c="dimmed" fw={600} px={rem(8)} py={rem(4)}>
-            {t("composerProfile.effortLabel")}
-          </Text>
-          <Stack gap={rem(2)}>
-            {selectableEfforts.map((effort) => {
-              const selected = effort === inferenceProfile.reasoning_effort;
-              return (
-                <UnstyledButton
-                  key={effort}
-                  onClick={() => handleEffortChange(effort)}
-                  aria-pressed={selected}
-                  style={{
-                    background: selected
-                      ? "var(--mantine-color-default-hover)"
-                      : "transparent",
-                    borderRadius: rem(8),
-                    padding: `${rem(8)} ${rem(10)}`,
-                    width: "100%",
-                  }}
-                >
-                  <Group justify="space-between" gap="sm" wrap="nowrap">
-                    <Text size="sm">{effort}</Text>
-                    {selected && <IconCheck aria-hidden="true" size={16} />}
-                  </Group>
-                </UnstyledButton>
-              );
-            })}
-          </Stack>
-        </Paper>
-      )}
+      {inferenceProfileSelectionEnabled &&
+        desktopProfileSection === "model" && (
+          <Paper
+            withBorder
+            radius={rem(12)}
+            shadow="md"
+            w={rem(280)}
+            style={{ maxHeight: rem(280), overflowY: "auto" }}
+          >
+            <Stack gap={0}>{modelOptionRows}</Stack>
+          </Paper>
+        )}
+      {inferenceProfileSelectionEnabled &&
+        desktopProfileSection === "effort" &&
+        selectableEfforts.length > 0 && (
+          <Paper
+            withBorder
+            radius={rem(12)}
+            shadow="md"
+            p={rem(6)}
+            w={rem(220)}
+          >
+            <Text size="xs" c="dimmed" fw={600} px={rem(8)} py={rem(4)}>
+              {t("composerProfile.effortLabel")}
+            </Text>
+            <Stack gap={rem(2)}>
+              {selectableEfforts.map((effort) => {
+                const selected = effort === inferenceProfile.reasoning_effort;
+                return (
+                  <UnstyledButton
+                    key={effort}
+                    onClick={() => handleEffortChange(effort)}
+                    aria-pressed={selected}
+                    style={{
+                      background: selected
+                        ? "var(--mantine-color-default-hover)"
+                        : "transparent",
+                      borderRadius: rem(8),
+                      padding: `${rem(8)} ${rem(10)}`,
+                      width: "100%",
+                    }}
+                  >
+                    <Group justify="space-between" gap="sm" wrap="nowrap">
+                      <Text size="sm">{effort}</Text>
+                      {selected && <IconCheck aria-hidden="true" size={16} />}
+                    </Group>
+                  </UnstyledButton>
+                );
+              })}
+            </Stack>
+          </Paper>
+        )}
     </Group>
   );
 
@@ -1588,42 +1643,38 @@ export const ChatInput = memo(function ChatInput({
               {isMobile ? (
                 <>
                   {inferenceProfileSelectionEnabled ? profileTrigger : null}
-                  {subscriptionSelection !== null ? (
-                    <ComposerSubscriptionUsagePopoverContainer
-                      compact
-                      handle={handle}
-                      integrationId={subscriptionSelection.integrationId}
-                      provider={subscriptionSelection.provider}
-                    />
-                  ) : null}
-                  {inferenceProfileSelectionEnabled ? (
+                  {contextUsageTrigger}
+                  {inferenceProfileSelectionEnabled || contextUsageEnabled ? (
                     <Drawer
                       opened={profilePickerOpened}
-                      onClose={() => setProfilePickerOpened(false)}
+                      onClose={() => {
+                        setProfilePickerOpened(false);
+                        setScrollToContextUsageOnOpen(false);
+                      }}
+                      transitionProps={{
+                        onEntered: handleProfilePickerEnterTransitionEnd,
+                      }}
                       title={
-                        <Group
-                          justify="space-between"
-                          gap="md"
-                          wrap="nowrap"
-                          w="100%"
-                        >
-                          <Text component="span" inherit>
-                            {t("composerProfile.model")}
-                          </Text>
-                          <Button
-                            variant="subtle"
-                            color="blue"
-                            size="compact-sm"
-                            px="xs"
-                            onClick={() => setProfilePickerOpened(false)}
-                          >
-                            {t("composerProfile.done")}
-                          </Button>
-                        </Group>
+                        inferenceProfileSelectionEnabled
+                          ? t("composerProfile.model")
+                          : t("tokenUsage.title")
                       }
+                      closeButtonProps={{
+                        "aria-label": t("composerProfile.done"),
+                        icon: (
+                          <Text component="span" size="sm" fw={500}>
+                            {t("composerProfile.done")}
+                          </Text>
+                        ),
+                        onClick: () => setScrollToContextUsageOnOpen(false),
+                        style: {
+                          color: "var(--mantine-color-blue-6)",
+                          paddingInline: rem(8),
+                          width: "auto",
+                        },
+                      }}
                       position="bottom"
                       size={`min(80dvh, ${rem(720)})`}
-                      withCloseButton={false}
                       keepMounted
                       styles={{
                         title: { flex: 1 },
@@ -1642,46 +1693,40 @@ export const ChatInput = memo(function ChatInput({
                     </Drawer>
                   ) : null}
                 </>
-              ) : (
-                <>
-                  {inferenceProfileSelectionEnabled ? (
-                    <Popover
-                      opened={profilePickerOpened}
-                      onChange={(opened) => {
-                        setProfilePickerOpened(opened);
-                        if (!opened) {
-                          setDesktopProfileSection(null);
-                        }
-                      }}
-                      position="top-start"
-                      width="auto"
-                      shadow="none"
-                      withinPortal
-                    >
-                      <Popover.Target>{profileTrigger}</Popover.Target>
-                      <Popover.Dropdown
-                        p={0}
-                        style={{
-                          background: "transparent",
-                          border: 0,
-                          boxShadow: "none",
-                          overflow: "visible",
-                        }}
-                      >
-                        {desktopProfileMenu}
-                      </Popover.Dropdown>
-                    </Popover>
-                  ) : null}
-                  {subscriptionSelection !== null ? (
-                    <ComposerSubscriptionUsagePopoverContainer
-                      compact={false}
-                      handle={handle}
-                      integrationId={subscriptionSelection.integrationId}
-                      provider={subscriptionSelection.provider}
-                    />
-                  ) : null}
-                </>
-              )}
+              ) : inferenceProfileSelectionEnabled || contextUsageEnabled ? (
+                <Popover
+                  opened={profilePickerOpened}
+                  onChange={(opened) => {
+                    setProfilePickerOpened(opened);
+                    if (!opened) {
+                      setDesktopProfileSection(null);
+                      setScrollToContextUsageOnOpen(false);
+                    }
+                  }}
+                  position="top-start"
+                  width="auto"
+                  shadow="none"
+                  withinPortal
+                >
+                  <Popover.Target>
+                    <Group gap="xs" wrap="nowrap">
+                      {inferenceProfileSelectionEnabled ? profileTrigger : null}
+                      {contextUsageTrigger}
+                    </Group>
+                  </Popover.Target>
+                  <Popover.Dropdown
+                    p={0}
+                    style={{
+                      background: "transparent",
+                      border: 0,
+                      boxShadow: "none",
+                      overflow: "visible",
+                    }}
+                  >
+                    {desktopProfileMenu}
+                  </Popover.Dropdown>
+                </Popover>
+              ) : null}
               <Box style={{ flex: "1 1 auto" }} />
               {isStopAvailable &&
               (inputDisabled ||

@@ -184,7 +184,7 @@ export function ComposerSubscriptionUsagePopover({
     <Popover
       opened={opened}
       onChange={setOpened}
-      position="top-end"
+      position="bottom-end"
       shadow="md"
       width={rem(320)}
       withArrow

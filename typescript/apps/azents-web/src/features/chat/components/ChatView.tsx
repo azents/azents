@@ -336,8 +336,10 @@ interface ChatViewProps {
   liveRun: ChatLiveRunState | null;
   /** latest context-window usage snapshot */
   tokenUsage?: TokenUsageSummary | null;
-  /** current workspace handle */
-  handle: string;
+  /** notifies the session header when the composer profile changes */
+  onComposerInferenceProfileChange?: (
+    profile: RequestedInferenceProfile,
+  ) => void;
   onSendInput: (
     message: string,
     action: ChatAction | null,
@@ -402,7 +404,6 @@ interface ChatViewProps {
 }
 
 export function ChatView({
-  handle,
   chatViewState,
   chatTimelineState,
   messages,
@@ -415,6 +416,7 @@ export function ChatView({
   isModelResponsePending,
   liveRun,
   tokenUsage = null,
+  onComposerInferenceProfileChange,
   onSendInput,
   onDeletePendingInputBuffer,
   onClearGoal,
@@ -1402,7 +1404,6 @@ export function ChatView({
           <Box px="md" py="sm">
             <Box maw={rem(920)} mx="auto">
               <ChatInput
-                handle={handle}
                 agentId={activeAgent?.id ?? null}
                 sessionId={sessionId}
                 isMobile={isMobile}
@@ -1417,6 +1418,7 @@ export function ChatView({
                 contextUsageEnabled={sessionId !== null}
                 contextUsage={tokenUsage}
                 contextUsageActiveRun={liveRun}
+                onInferenceProfileChange={onComposerInferenceProfileChange}
                 isUploading={isUploading || isWritePending}
                 pendingFiles={readOnlyNotice === null ? pendingFiles : []}
                 goal={

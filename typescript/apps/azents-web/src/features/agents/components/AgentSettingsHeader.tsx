@@ -5,6 +5,7 @@
 import { ActionIcon, Badge, Box, Group, rem, Stack, Text } from "@mantine/core";
 import { IconMenu2 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
+import { type ReactNode } from "react";
 import { formatModelSelectionSummary } from "../model-selection";
 import { AgentAvatar } from "./AgentAvatar";
 import { useAgentFocusedShellMobileNav } from "./AgentFocusedShell";
@@ -12,10 +13,12 @@ import type { AgentResponse } from "@azents/public-client";
 
 interface AgentSettingsHeaderProps {
   agent: AgentResponse;
+  controls?: ReactNode;
 }
 
 export function AgentSettingsHeader({
   agent,
+  controls,
 }: AgentSettingsHeaderProps): React.ReactElement {
   const t = useTranslations("workspace.agents.detail");
   const mobileNav = useAgentFocusedShellMobileNav();
@@ -72,6 +75,7 @@ export function AgentSettingsHeader({
             </Text>
           )}
         </Stack>
+        {controls ? <Box style={{ flexShrink: 0 }}>{controls}</Box> : null}
       </Group>
       <Group
         hiddenFrom="lg"
@@ -96,6 +100,7 @@ export function AgentSettingsHeader({
         <Text fw={600} size="sm" truncate style={{ flex: 1, minWidth: 0 }}>
           {agent.name}
         </Text>
+        {controls}
       </Group>
     </Box>
   );

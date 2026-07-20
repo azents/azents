@@ -29,9 +29,11 @@ import {
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AgentSessionHeader } from "@/features/agents/components/AgentSessionHeader";
 import { useSubagentTreePanelContainer } from "@/features/agents/containers/useSubagentTreePanelContainer";
+import { resolveComposerSubscriptionSelection } from "../composerSubscriptionUsage";
+import { ComposerSubscriptionUsagePopoverContainer } from "../containers/ComposerSubscriptionUsageContainer";
 import { useChatSessionContainer } from "../containers/useChatSessionContainer";
 import { WorkspacePanel } from "../workspace/components/WorkspacePanel";
 import { useWorkspacePanelContainer } from "../workspace/containers/useWorkspacePanelContainer";
@@ -40,6 +42,7 @@ import type { ConnectionStatus } from "../types";
 import type {
   AgentResponse,
   AgentSessionResponse,
+  RequestedInferenceProfile,
   SubagentTreeNodeResponse,
 } from "@azents/public-client";
 
@@ -113,6 +116,44 @@ export function ChatSessionView({
     agent,
     onConnectionStatusChange,
   });
+  const [composerInferenceProfileState, setComposerInferenceProfileState] =
+    useState<{
+      sessionId: string;
+      profile: RequestedInferenceProfile;
+    }>(() => ({
+      sessionId,
+      profile: output.defaultInferenceProfile,
+    }));
+  const composerInferenceProfile =
+    composerInferenceProfileState.sessionId === sessionId
+      ? composerInferenceProfileState.profile
+      : output.defaultInferenceProfile;
+  const handleComposerInferenceProfileChange = useCallback(
+    (profile: RequestedInferenceProfile): void => {
+      setComposerInferenceProfileState((current) => {
+        if (
+          current.sessionId === sessionId &&
+          current.profile.model_target_label === profile.model_target_label &&
+          current.profile.reasoning_effort === profile.reasoning_effort
+        ) {
+          return current;
+        }
+        return { sessionId, profile };
+      });
+    },
+    [sessionId],
+  );
+  const subscriptionSelection = useMemo(
+    () =>
+      resolveComposerSubscriptionSelection(
+        agent.selectable_model_options,
+        composerInferenceProfile.model_target_label,
+      ),
+    [
+      agent.selectable_model_options,
+      composerInferenceProfile.model_target_label,
+    ],
+  );
   const workspacePanel = useWorkspacePanelContainer({
     handle,
     agentId: agent.id,
@@ -157,6 +198,16 @@ export function ChatSessionView({
         session={headerSession}
         onSessionTitleChange={setHeaderSession}
         onOpenRuntime={() => setRuntimeDrawerOpened(true)}
+        chatControls={
+          subscriptionSelection === null ? null : (
+            <ComposerSubscriptionUsagePopoverContainer
+              compact
+              handle={handle}
+              integrationId={subscriptionSelection.integrationId}
+              provider={subscriptionSelection.provider}
+            />
+          )
+        }
       />
       {subagentNavigation !== null && (
         <Box
@@ -256,8 +307,10 @@ export function ChatSessionView({
           isModelResponsePending={output.isModelResponsePending}
           liveRun={output.liveRun}
           tokenUsage={output.tokenUsage}
+          onComposerInferenceProfileChange={
+            handleComposerInferenceProfileChange
+          }
           defaultInferenceProfile={output.defaultInferenceProfile}
-          handle={handle}
           onSendInput={output.onSendInput}
           onDeletePendingInputBuffer={output.onDeletePendingInputBuffer}
           onClearGoal={output.onClearGoal}

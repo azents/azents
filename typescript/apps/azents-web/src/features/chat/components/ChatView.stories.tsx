@@ -212,7 +212,6 @@ const baseArgs = {
   isWritePending: false,
   isModelResponsePending: false,
   liveRun: null,
-  handle: "azents",
   onSendInput: sendMessage,
   onDeletePendingInputBuffer: noop,
   onClearGoal: sendMessage,
