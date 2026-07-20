@@ -262,32 +262,59 @@ def _open_authenticated_session(
     wait.until(ec.url_contains(session_id))
 
 
-def _image_projection_counts(driver: WebDriver) -> tuple[int, int, int]:
-    """Return bounded card, completed-card, and image counts for diagnostics."""
-    card_selector = '[data-provider-tool-name="image_generation"]'
+def _image_projection_counts(driver: WebDriver) -> tuple[int, int, int, int, int]:
+    """Return bounded grouped-card and promoted-image counts for diagnostics."""
+    activity_selector = "[data-tool-activity-id]"
+    card_selector = f'{activity_selector} [data-provider-tool-name="image_generation"]'
     completed_selector = f'{card_selector}[data-provider-tool-status="completed"]'
-    attachment_selector = f'{card_selector} img[src*="/api/chat/exchange-files/"]'
+    promoted_attachment_selector = 'img[src*="/api/chat/exchange-files/"]'
+    nested_attachment_selector = (
+        f'{card_selector} img[src*="/api/chat/exchange-files/"]'
+    )
+    activities = driver.find_elements(By.CSS_SELECTOR, activity_selector)
     cards = driver.find_elements(By.CSS_SELECTOR, card_selector)
     completed_cards = driver.find_elements(By.CSS_SELECTOR, completed_selector)
-    attachments = driver.find_elements(By.CSS_SELECTOR, attachment_selector)
-    return len(cards), len(completed_cards), len(attachments)
+    promoted_attachments = driver.find_elements(
+        By.CSS_SELECTOR,
+        promoted_attachment_selector,
+    )
+    nested_attachments = driver.find_elements(
+        By.CSS_SELECTOR,
+        nested_attachment_selector,
+    )
+    return (
+        len(activities),
+        len(cards),
+        len(completed_cards),
+        len(promoted_attachments),
+        len(nested_attachments),
+    )
 
 
 def _has_single_completed_image_projection(driver: WebDriver) -> bool:
-    """Return whether one completed image card owns one rendered attachment."""
-    return _image_projection_counts(driver) == (1, 1, 1)
+    """Return whether one activity promotes one image without a card duplicate."""
+    return _image_projection_counts(driver) == (1, 1, 1, 1, 0)
 
 
 def _wait_for_single_completed_image_projection(driver: WebDriver) -> None:
-    """Wait for the strict card projection and report only bounded DOM counts."""
+    """Wait for strict grouped activity and promoted-image ownership."""
     try:
         WebDriverWait(driver, 30).until(_has_single_completed_image_projection)
     except TimeoutException as exc:
-        cards, completed_cards, attachments = _image_projection_counts(driver)
+        (
+            activities,
+            cards,
+            completed_cards,
+            promoted_attachments,
+            nested_attachments,
+        ) = _image_projection_counts(driver)
         raise AssertionError(
-            "expected one completed provider image card with one Exchange image; "
-            f"observed cards={cards}, completed_cards={completed_cards}, "
-            f"exchange_images={attachments}"
+            "expected one grouped completed provider image call with one promoted "
+            "Exchange image and no nested duplicate; "
+            f"observed activities={activities}, cards={cards}, "
+            f"completed_cards={completed_cards}, "
+            f"promoted_images={promoted_attachments}, "
+            f"nested_images={nested_attachments}"
         ) from exc
 
 
@@ -511,7 +538,7 @@ class TestProviderImageGeneration:
         )
 
     @pytest.mark.web_surface
-    def test_renders_one_card_and_attachment_across_browser_refresh(
+    def test_renders_one_activity_and_promoted_attachment_across_refresh(
         self,
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
@@ -521,7 +548,7 @@ class TestProviderImageGeneration:
         browser_driver: WebDriver,
         azents_main_web_url: str,
     ) -> None:
-        """Live projection and history reload keep one image card and attachment."""
+        """Live projection and reload keep one grouped call and promoted image."""
         del azents_engine_worker_container
         requests.delete(
             f"{openai_proxy_url}{_PROXY_JOURNAL_PATH}",

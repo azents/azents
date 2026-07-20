@@ -121,7 +121,14 @@ void test("contains adapter failures and falls back to generic", () => {
   assert.equal(toolCallPresentation(call).type, "generic");
 });
 
-void test("promotes validated completed image-generation attachments", () => {
+void test("requires a prompt for client image generation", () => {
+  assert.equal(
+    toolCallPresentation(clientCall("image", "image_generation", "{}")).type,
+    "generic",
+  );
+});
+
+void test("promotes provider images with empty canonical input", () => {
   const call: ToolActivityCall = {
     type: "provider",
     messageId: "message:image",
@@ -129,7 +136,7 @@ void test("promotes validated completed image-generation attachments", () => {
       id: "image-call",
       callId: "image-call",
       name: "image_generation",
-      arguments: JSON.stringify({ prompt: "A calm activity timeline" }),
+      arguments: "{}",
       status: "completed",
       output: "Generated one image.",
       attachments: [

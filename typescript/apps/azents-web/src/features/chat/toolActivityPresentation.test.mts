@@ -91,6 +91,28 @@ void test("visible assistant delivery closes the group", () => {
   );
 });
 
+void test("assistant attachment delivery closes the group", () => {
+  const items = projectChatPresentationItems([
+    toolMessage("tool-1", "call-1"),
+    message("attachment", {
+      attachments: [
+        {
+          attachmentId: "assistant-file",
+          uri: "exchange://assistant/file",
+          mediaType: "text/plain",
+          name: "result.txt",
+        },
+      ],
+    }),
+    toolMessage("tool-2", "call-2"),
+  ]);
+
+  assert.deepEqual(
+    items.map((item) => item.type),
+    ["activity", "message", "activity"],
+  );
+});
+
 void test("message-owned delivery renders after its tool activity", () => {
   const items = projectChatPresentationItems([
     message("combined", {
