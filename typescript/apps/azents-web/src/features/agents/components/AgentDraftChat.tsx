@@ -7,8 +7,10 @@
 import { Box, Center, rem, Stack, Text } from "@mantine/core";
 import { IconMessageCircle } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ChatInput } from "@/features/chat/components/ChatInput";
+import { resolveComposerSubscriptionSelection } from "@/features/chat/composerSubscriptionUsage";
+import { ComposerSubscriptionUsagePopoverContainer } from "@/features/chat/containers/ComposerSubscriptionUsageContainer";
 import { useFileUpload } from "@/features/chat/hooks/useFileUpload";
 import { WorkspaceDirectoryPickerModal } from "@/features/chat/workspace/components/WorkspaceDirectoryPickerModal";
 import styles from "./AgentChatTab.module.css";
@@ -90,6 +92,44 @@ export function AgentDraftChat(
     }),
     [agent.main_model_label, agent.model_parameters?.reasoning_effort],
   );
+  const [composerInferenceProfileState, setComposerInferenceProfileState] =
+    useState<{
+      agentId: string;
+      profile: RequestedInferenceProfile;
+    }>(() => ({
+      agentId: agent.id,
+      profile: defaultInferenceProfile,
+    }));
+  const composerInferenceProfile =
+    composerInferenceProfileState.agentId === agent.id
+      ? composerInferenceProfileState.profile
+      : defaultInferenceProfile;
+  const handleComposerInferenceProfileChange = useCallback(
+    (profile: RequestedInferenceProfile): void => {
+      setComposerInferenceProfileState((current) => {
+        if (
+          current.agentId === agent.id &&
+          current.profile.model_target_label === profile.model_target_label &&
+          current.profile.reasoning_effort === profile.reasoning_effort
+        ) {
+          return current;
+        }
+        return { agentId: agent.id, profile };
+      });
+    },
+    [agent.id],
+  );
+  const subscriptionSelection = useMemo(
+    () =>
+      resolveComposerSubscriptionSelection(
+        agent.selectable_model_options,
+        composerInferenceProfile.model_target_label,
+      ),
+    [
+      agent.selectable_model_options,
+      composerInferenceProfile.model_target_label,
+    ],
+  );
 
   const handleSendMessage = useCallback(
     async (
@@ -114,7 +154,19 @@ export function AgentDraftChat(
         flexDirection: "column",
       }}
     >
-      <AgentSettingsHeader agent={agent} />
+      <AgentSettingsHeader
+        agent={agent}
+        controls={
+          subscriptionSelection === null ? null : (
+            <ComposerSubscriptionUsagePopoverContainer
+              compact
+              handle={handle}
+              integrationId={subscriptionSelection.integrationId}
+              provider={subscriptionSelection.provider}
+            />
+          )
+        }
+      />
       <Center flex={1} mih={0} px="md">
         <Stack align="center" gap="sm">
           <IconMessageCircle size={48} color="var(--mantine-color-dimmed)" />
@@ -141,7 +193,6 @@ export function AgentDraftChat(
             onSetWorktreeStartingRef={onSetWorktreeStartingRef}
           />
           <ChatInput
-            handle={handle}
             agentId={agent.id}
             sessionId={null}
             isMobile={isMobile}
@@ -152,6 +203,7 @@ export function AgentDraftChat(
             uploadAll={uploadAll}
             selectableModelOptions={agent.selectable_model_options}
             defaultInferenceProfile={defaultInferenceProfile}
+            onInferenceProfileChange={handleComposerInferenceProfileChange}
             onSendInput={(message, action, inferenceProfile, attachments) =>
               action
                 ? Promise.resolve(false)

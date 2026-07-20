@@ -1,10 +1,7 @@
-import { Paper, rem, Stack } from "@mantine/core";
+import { rem } from "@mantine/core";
 import { expect, fn, userEvent, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
-import {
-  ComposerSubscriptionUsageDetails,
-  ComposerSubscriptionUsageIndicator,
-} from "./ComposerSubscriptionUsage";
+import { ComposerSubscriptionUsagePopover } from "./ComposerSubscriptionUsage";
 import type { SubscriptionUsageState } from "@/features/llm-settings/subscriptionUsage";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
@@ -47,30 +44,20 @@ const availableSnapshot = {
 
 function Preview({
   compact,
-  onOpen,
   onRefresh,
   state,
 }: {
   compact: boolean;
-  onOpen: () => void;
   onRefresh: () => Promise<void> | void;
   state: SubscriptionUsageState;
 }): React.ReactElement {
   return (
     <StorybookCanvas maxWidth={rem(360)}>
-      <Stack gap="md">
-        <ComposerSubscriptionUsageIndicator
-          compact={compact}
-          state={state}
-          onOpen={onOpen}
-        />
-        <Paper withBorder p="sm" radius="md">
-          <ComposerSubscriptionUsageDetails
-            state={state}
-            onRefresh={onRefresh}
-          />
-        </Paper>
-      </Stack>
+      <ComposerSubscriptionUsagePopover
+        compact={compact}
+        state={state}
+        onRefresh={onRefresh}
+      />
     </StorybookCanvas>
   );
 }
@@ -79,7 +66,6 @@ const meta = {
   component: Preview,
   args: {
     compact: false,
-    onOpen: fn(),
     onRefresh: fn(),
   },
 } satisfies Meta<typeof Preview>;
@@ -118,16 +104,15 @@ export const AvailableWarning = {
     },
   },
   play: async ({ canvasElement, args }) => {
-    const canvas = within(canvasElement);
-    await expect(canvas.getByText("73%")).toBeVisible();
-    await expect(canvas.getByText("5 hour limit")).toBeVisible();
-    await expect(canvas.queryByText("must-not-render")).not.toBeInTheDocument();
+    const page = within(canvasElement.ownerDocument.body);
     await userEvent.click(
-      canvas.getByRole("button", { name: /Subscription usage:.*73%/ }),
+      page.getByRole("button", { name: /Subscription usage:.*73%/ }),
     );
-    await expect(args.onOpen).toHaveBeenCalledOnce();
+    await expect(page.getByText("73%")).toBeVisible();
+    await expect(page.getByText("5 hour limit")).toBeVisible();
+    await expect(page.queryByText("must-not-render")).not.toBeInTheDocument();
     await userEvent.click(
-      canvas.getByRole("button", { name: "Refresh subscription usage" }),
+      page.getByRole("button", { name: "Refresh subscription usage" }),
     );
     await expect(args.onRefresh).toHaveBeenCalledOnce();
   },
@@ -192,8 +177,11 @@ export const External = {
     },
   },
   play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
-    const link = canvas.getByRole("link", { name: /View usage on xAI/ });
+    const page = within(canvasElement.ownerDocument.body);
+    await userEvent.click(
+      page.getByRole("button", { name: /Subscription usage:/ }),
+    );
+    const link = page.getByRole("link", { name: /View usage on xAI/ });
     await expect(link).toHaveAttribute("target", "_blank");
     await expect(link).toHaveAttribute("rel", "noopener noreferrer");
   },
@@ -208,8 +196,11 @@ export const Unavailable = {
     },
   },
   play: async ({ canvasElement, args }) => {
-    const canvas = within(canvasElement);
-    await userEvent.click(canvas.getByRole("button", { name: "Try again" }));
+    const page = within(canvasElement.ownerDocument.body);
+    await userEvent.click(
+      page.getByRole("button", { name: /Subscription usage: Unavailable/ }),
+    );
+    await userEvent.click(page.getByRole("button", { name: "Try again" }));
     await expect(args.onRefresh).toHaveBeenCalledOnce();
   },
 } satisfies Story;

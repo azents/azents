@@ -66,6 +66,7 @@ import type {
   InputActionDefinition,
   PendingInputBuffer,
   TodoStateSnapshot,
+  TokenUsageSummary,
 } from "../types";
 import type { WorkspacePanelContainerOutput } from "../workspace/containers/useWorkspacePanelContainer";
 import type {
@@ -333,8 +334,12 @@ interface ChatViewProps {
   isModelResponsePending: boolean;
   /** current live run snapshot with retry recovery state */
   liveRun: ChatLiveRunState | null;
-  /** current workspace handle */
-  handle: string;
+  /** latest context-window usage snapshot */
+  tokenUsage?: TokenUsageSummary | null;
+  /** notifies the session header when the composer profile changes */
+  onComposerInferenceProfileChange?: (
+    profile: RequestedInferenceProfile,
+  ) => void;
   onSendInput: (
     message: string,
     action: ChatAction | null,
@@ -399,7 +404,6 @@ interface ChatViewProps {
 }
 
 export function ChatView({
-  handle,
   chatViewState,
   chatTimelineState,
   messages,
@@ -411,6 +415,8 @@ export function ChatView({
   isWritePending,
   isModelResponsePending,
   liveRun,
+  tokenUsage = null,
+  onComposerInferenceProfileChange,
   onSendInput,
   onDeletePendingInputBuffer,
   onClearGoal,
@@ -1398,7 +1404,6 @@ export function ChatView({
           <Box px="md" py="sm">
             <Box maw={rem(920)} mx="auto">
               <ChatInput
-                handle={handle}
                 agentId={activeAgent?.id ?? null}
                 sessionId={sessionId}
                 isMobile={isMobile}
@@ -1409,6 +1414,11 @@ export function ChatView({
                 editingInferenceProfile={
                   editingMessage?.inferenceProfile ?? null
                 }
+                inferenceProfileSelectionEnabled={readOnlyNotice === null}
+                contextUsageEnabled={sessionId !== null}
+                contextUsage={tokenUsage}
+                contextUsageActiveRun={liveRun}
+                onInferenceProfileChange={onComposerInferenceProfileChange}
                 isUploading={isUploading || isWritePending}
                 pendingFiles={readOnlyNotice === null ? pendingFiles : []}
                 goal={

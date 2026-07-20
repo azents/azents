@@ -266,9 +266,9 @@ export function AgentSessionHeader({
               <IconPencil size={rem(14)} />
             </ActionIcon>
           </Group>
-          {activeTab === "chat" && chatControls && (
+          {activeTab === "chat" && chatControls ? (
             <Box style={{ flexShrink: 0 }}>{chatControls}</Box>
-          )}
+          ) : null}
         </Group>
         <Group
           hiddenFrom="lg"
@@ -305,7 +305,7 @@ export function AgentSessionHeader({
             </ActionIcon>
           </Group>
           <Group gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>
-            {activeTab === "chat" && onOpenRuntime && chatControls}
+            {activeTab === "chat" ? chatControls : null}
             {activeTab === "chat" && onOpenRuntime && (
               <ActionIcon
                 variant="subtle"

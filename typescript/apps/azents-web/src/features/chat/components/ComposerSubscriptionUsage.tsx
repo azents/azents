@@ -6,9 +6,9 @@ import {
   Anchor,
   Box,
   Button,
-  Divider,
   Group,
   Loader,
+  Popover,
   Progress,
   rem,
   Skeleton,
@@ -22,6 +22,7 @@ import {
   IconRefresh,
 } from "@tabler/icons-react";
 import { useFormatter, useTranslations } from "next-intl";
+import { useState } from "react";
 import { subscriptionUsageSummaryLimits } from "@/features/llm-settings/subscriptionUsage";
 import { projectComposerSubscriptionIndicator } from "../composerSubscriptionUsage";
 import type {
@@ -161,6 +162,50 @@ function UsageRing({
   );
 }
 
+interface ComposerSubscriptionUsagePopoverProps {
+  compact: boolean;
+  onRefresh: () => Promise<void> | void;
+  state: SubscriptionUsageState;
+}
+
+export function ComposerSubscriptionUsagePopover({
+  compact,
+  onRefresh,
+  state,
+}: ComposerSubscriptionUsagePopoverProps): React.ReactElement | null {
+  const [opened, setOpened] = useState(false);
+  const indicator = projectComposerSubscriptionIndicator(state);
+
+  if (indicator.type === "HIDDEN") {
+    return null;
+  }
+
+  return (
+    <Popover
+      opened={opened}
+      onChange={setOpened}
+      position="bottom-end"
+      shadow="md"
+      width={rem(320)}
+      withArrow
+      withinPortal
+    >
+      <Popover.Target>
+        <Box component="span" style={{ display: "inline-flex" }}>
+          <ComposerSubscriptionUsageIndicator
+            compact={compact}
+            onOpen={() => setOpened((current) => !current)}
+            state={state}
+          />
+        </Box>
+      </Popover.Target>
+      <Popover.Dropdown>
+        <ComposerSubscriptionUsageDetails onRefresh={onRefresh} state={state} />
+      </Popover.Dropdown>
+    </Popover>
+  );
+}
+
 interface ComposerSubscriptionUsageDetailsProps {
   onRefresh: () => Promise<void> | void;
   state: SubscriptionUsageState;
@@ -177,8 +222,7 @@ export function ComposerSubscriptionUsageDetails({
   }
 
   return (
-    <Stack aria-label={t("title")} gap="sm" role="region" pt="xs">
-      <Divider />
+    <Stack aria-label={t("title")} gap="sm" role="region">
       {state.type === "LOADING" ? <LoadingDetails /> : null}
       {state.type === "AVAILABLE" ? (
         <AvailableDetails
