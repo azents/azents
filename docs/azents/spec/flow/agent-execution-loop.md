@@ -60,8 +60,8 @@ code_paths:
   - python/apps/azents/src/azents/worker/session/**
   - typescript/apps/azents-web/src/features/chat/components/ChatView.tsx
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
-last_verified_at: 2026-07-19
-spec_version: 112
+last_verified_at: 2026-07-20
+spec_version: 113
 ---
 
 # Agent Execution Loop
@@ -703,6 +703,8 @@ An unmatched request path is unlimited. Preparation does not invent a global sof
 
 Remaining explicit capacity is filled from the AgentSession's shared deferred working set in most-recent-first order. A smaller model path hides the non-fitting tail without deleting it; a later larger or unlimited path can expose that same state. Tool Search activates only the highest-ranked results that can become visible on the next call under the current explicit deferred capacity and reports when the requested result count was reduced. With no explicit limit, all active currently available deferred names are visible.
 
+Successful manual or automatic context compaction atomically replaces the Session's shared Tool Search working set with an empty list while committing the summary and new model-input head. The reset applies even when Tool Search is disabled at that boundary, so later opt-in cannot recover pre-compaction activation. Skipped, failed, cancelled, or stale compaction preserves the existing working set. The next enabled prepared call after a successful reset contains direct tools and `tool_search`, with deferred tools requiring new activation.
+
 Provider-facing client schemas are sorted canonically by final model-visible name after membership is selected. Recency changes membership only and does not reorder an identical visible set. Provider adapters receive the already-projected functions and must not independently truncate or perform LRU selection.
 
 One `PreparedModelCall` freezes the executable catalog, deferred search index, provider-visible projection, and executor routing together. A response can invoke only handlers from the snapshot whose schemas it received; a tool that appears after preparation is not executable by that response. `tool_search` updates session state but its matches first enter schemas when the following model call is prepared. An emitted deferred call refreshes session recency before hook denial, handler error, or result normalization, while the in-flight executor remains immutable.
@@ -993,6 +995,7 @@ updated by the user.
 
 ## Changelog
 
+- **2026-07-20** (spec_version 113) — Reset the shared Tool Search working set in the successful context-compaction transaction and require deferred tools to be activated again afterward.
 - **2026-07-19** (spec_version 111) — Added explicit wake versus queue-only input scheduling, idempotent direct-parent terminal mailbox delivery and repair, targetless mailbox activity waiting, and promotion-time observation acknowledgment.
 - **2026-07-19** — v110. Added archived-tree execution rejection, worker/recovery active-state filtering, irreversible purge owner fencing, stop signaling, and pre-fence restore semantics.
 - **2026-07-19** — v109. Added Agent-level default-disabled Tool Search; the enabled path applies provider-budgeted prepared-call projection, immutable catalog/search/executor snapshots, next-call activation, and deferred recency refresh.

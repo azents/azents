@@ -491,6 +491,9 @@ class SummaryEnricher(Protocol):
         ...
 
 
+CompactionCommitAction: TypeAlias = Callable[[AsyncSession], Awaitable[None]]
+
+
 class ManualCompactor(Protocol):
     """Manual event compaction protocol."""
 
@@ -505,6 +508,7 @@ class ManualCompactor(Protocol):
         summary_context_window_tokens: int | None = None,
         reason: str | None = None,
         summary_enricher: SummaryEnricher | None = None,
+        on_committing: CompactionCommitAction | None = None,
     ) -> Event | None:
         """Run append-only compaction."""
         ...

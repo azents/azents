@@ -865,6 +865,86 @@ async def test_compactor_summary_enricher_runs_before_continuity_append() -> Non
     )
 
 
+async def test_compactor_runs_commit_action_after_head_move_before_commit() -> None:
+    events = [
+        _event(
+            "1",
+            EventKind.USER_MESSAGE,
+            UserMessagePayload(content="old request"),
+        )
+    ]
+    transcript_repo = _TranscriptRepo(events)
+    session_repo = _SessionRepo()
+    session_manager = _SessionManager()
+    commit_action_sessions: list[AsyncSession] = []
+
+    async def summarize(
+        old_events: Sequence[Event],
+        summary_budget: object,
+    ) -> str:
+        del old_events, summary_budget
+        return "summary"
+
+    async def on_committing(session: AsyncSession) -> None:
+        assert session is session_manager.sessions[-1]
+        assert session_repo.model_input_head_event_id is not None
+        assert session_manager.sessions[-1].commit_count == 0
+        commit_action_sessions.append(session)
+
+    summary = await _compactor(
+        session_manager=session_manager,
+        transcript_repo=transcript_repo,
+        session_repo=session_repo,
+    ).compact(
+        session_id="session-1",
+        transcript=events,
+        compaction_id="compact-1",
+        summarize=summarize,
+        on_committing=on_committing,
+    )
+
+    assert summary is not None
+    assert commit_action_sessions == [session_manager.sessions[-1]]
+    assert session_manager.sessions[-1].commit_count == 1
+
+
+async def test_compactor_commit_action_failure_prevents_final_commit() -> None:
+    events = [
+        _event(
+            "1",
+            EventKind.USER_MESSAGE,
+            UserMessagePayload(content="old request"),
+        )
+    ]
+    session_manager = _SessionManager()
+
+    async def summarize(
+        old_events: Sequence[Event],
+        summary_budget: object,
+    ) -> str:
+        del old_events, summary_budget
+        return "summary"
+
+    async def fail_commit_action(session: AsyncSession) -> None:
+        del session
+        raise RuntimeError("state reset failed")
+
+    with pytest.raises(RuntimeError, match="state reset failed"):
+        await _compactor(
+            session_manager=session_manager,
+            transcript_repo=_TranscriptRepo(events),
+            session_repo=_SessionRepo(),
+        ).compact(
+            session_id="session-1",
+            transcript=events,
+            compaction_id="compact-1",
+            summarize=summarize,
+            on_committing=fail_commit_action,
+        )
+
+    assert session_manager.sessions[-1].commit_count == 0
+
+
 async def test_compactor_continuity_uses_last_five_completed_turns() -> None:
     """Continuity excerpts include only the last five completed model turns."""
     events: list[Event] = [
@@ -1315,6 +1395,8 @@ async def test_auto_compaction_marks_compacted_only_when_summary_is_created() ->
     ]
     transcript_repo = _TranscriptRepo(events)
     session_repo = _SessionRepo()
+    session_manager = _SessionManager()
+    commit_action_sessions: list[AsyncSession] = []
 
     async def summarize(
         old_events: Sequence[Event],
@@ -1324,9 +1406,13 @@ async def test_auto_compaction_marks_compacted_only_when_summary_is_created() ->
         del old_events, max_output_tokens
         return "summary"
 
+    async def on_committing(session: AsyncSession) -> None:
+        commit_action_sessions.append(session)
+
     filter_ = EventAutoCompactionFilter(
         session_id="session-1",
         compactor=_compactor(
+            session_manager=session_manager,
             transcript_repo=transcript_repo,
             session_repo=session_repo,
         ),
@@ -1334,11 +1420,13 @@ async def test_auto_compaction_marks_compacted_only_when_summary_is_created() ->
         max_input_tokens=10,
         auto_compaction_threshold_tokens=None,
         compaction_id_factory=lambda: "compact-1",
+        on_committing=on_committing,
     )
 
     await filter_.compact(events)
 
     assert filter_.was_compacted is True
+    assert commit_action_sessions == [session_manager.sessions[-1]]
 
 
 async def test_auto_compaction_skips_when_threshold_is_not_exceeded() -> None:
@@ -1351,6 +1439,7 @@ async def test_auto_compaction_skips_when_threshold_is_not_exceeded() -> None:
         )
     ]
     transcript_repo = _TranscriptRepo(events)
+    commit_action_sessions: list[AsyncSession] = []
 
     async def summarize(
         old_events: Sequence[Event],
@@ -1359,6 +1448,9 @@ async def test_auto_compaction_skips_when_threshold_is_not_exceeded() -> None:
         """Summary function that should not be called."""
         del old_events, summary_budget
         raise AssertionError("summarize should not be called")
+
+    async def on_committing(session: AsyncSession) -> None:
+        commit_action_sessions.append(session)
 
     result = await EventAutoCompactionFilter(
         session_id="session-1",
@@ -1370,9 +1462,11 @@ async def test_auto_compaction_skips_when_threshold_is_not_exceeded() -> None:
         max_input_tokens=1000,
         auto_compaction_threshold_tokens=None,
         compaction_id_factory=lambda: "compact-1",
+        on_committing=on_committing,
     ).compact(events)
 
     assert result == events
+    assert commit_action_sessions == []
 
 
 async def test_auto_compaction_uses_explicit_threshold_override() -> None:

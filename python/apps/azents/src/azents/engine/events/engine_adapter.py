@@ -464,6 +464,13 @@ class AgentEngineAdapter:
                 ),
             )
 
+        async def clear_tool_working_set(session: AsyncSession) -> None:
+            await self.tool_working_set_store.clear_in_session(
+                session,
+                request.agent_id,
+                request.session_id,
+            )
+
         await self.compactor.compact(
             session_id=request.session_id,
             transcript=transcript,
@@ -481,6 +488,7 @@ class AgentEngineAdapter:
                 providers=hook_providers,
                 run_id=context.run_id,
             ),
+            on_committing=clear_tool_working_set,
         )
         yield ephemeral(CompactionComplete())
 
@@ -772,6 +780,13 @@ class AgentEngineAdapter:
                 ),
             )
 
+        async def clear_tool_working_set(session: AsyncSession) -> None:
+            await self.tool_working_set_store.clear_in_session(
+                session,
+                request.agent_id,
+                request.session_id,
+            )
+
         pre_lower_filter = EventPreLowerFilterPipeline(
             [
                 EventAttachmentAvailabilityFilter(),
@@ -795,6 +810,7 @@ class AgentEngineAdapter:
                 providers=run_hook_providers,
                 run_id=context.run_id,
             ),
+            on_committing=clear_tool_working_set,
         )
         integration_id = (
             request.inference_state.model_selection.llm_provider_integration_id

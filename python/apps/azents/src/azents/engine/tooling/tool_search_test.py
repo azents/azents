@@ -425,6 +425,19 @@ async def test_working_set_retry_reapplies_touch_to_concurrent_state() -> None:
     assert touched.tool_names == ["target", "concurrent", "old"]
 
 
+async def test_working_set_clear_uses_caller_session_and_retries_conflict() -> None:
+    repository = _MemoryToolkitStateRepository()
+    store = _working_set_store(repository)
+    await store.activate("agent-1", "session-1", ["old"])
+    repository.conflict_next_update = True
+
+    async with AsyncSession() as session:
+        cleared = await store.clear_in_session(session, "agent-1", "session-1")
+
+    assert cleared.tool_names == []
+    assert (await store.load("agent-1", "session-1")).tool_names == []
+
+
 async def test_tool_search_reports_explicit_capacity_reduction() -> None:
     repository = _MemoryToolkitStateRepository()
     store = _working_set_store(repository)
