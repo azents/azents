@@ -236,6 +236,7 @@ function activityCategoryForTool(call: ToolActivityCall): ActivityCategory {
       return { key: "shell", label: "shell" };
     case "write":
     case "edit":
+    case "apply_patch":
     case "delete":
       return { key: "edit", label: "edit" };
     case "import_file":

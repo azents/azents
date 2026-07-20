@@ -63,7 +63,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
 last_verified_at: 2026-07-20
-spec_version: 115
+spec_version: 116
 ---
 
 # Agent Execution Loop
@@ -651,7 +651,7 @@ non-null deadline and pass that deadline through the reply-stream wait path. If 
 operation times out into a failed/cancelled tool result path instead of leaving a durable
 `client_tool_call` without a corresponding `client_tool_result` forever.
 
-GPT-compatible prepared calls may expose the ordinary `apply_patch({base_path, patch})` function tool alongside the unchanged `edit` tool. The Engine admits only one completed JSON function call; it does not execute streamed patch fragments or provider custom/freeform tool input. `apply_patch` delegates one complete strict V4A document to the Runner-owned `file.apply_patch` operation and does not compose Engine file-storage writes. Its result metadata records exact success changes or failure `phase`, `reason`, committed `applied` changes, the `failed` operation, `not_attempted` operations, and whether the reported delta is exact. Model-visible result text and structured logs do not repeat raw patch, source, or replacement content.
+GPT-compatible prepared calls may expose the ordinary `apply_patch({base_path, patch})` function tool alongside the unchanged `edit` tool. The Engine admits only one completed JSON function call; it does not execute streamed patch fragments or provider custom/freeform tool input. `apply_patch` delegates one complete strict V4A document to the Runner-owned `file.apply_patch` operation and does not compose Engine file-storage writes. Its result metadata records exact success changes or failure `phase`, `reason`, committed `applied` changes, the `failed` operation, `not_attempted` operations, and whether the reported delta is exact. Model-visible result text and structured logs do not repeat raw patch, source, or replacement content. The chat activity presentation categorizes `apply_patch` with `write`, `edit`, and `delete` as edit activity.
 
 When User Stop cancels a running patch, the tool cancellation handler requests ordered Runner operation cancellation. The execution loop cancels the local wait only to begin settlement, then preserves a typed terminal result returned by the Runner instead of overwriting it with a generic cancelled result. Cancellation before commit reports no applied changes. Once commit begins, the Runner settles to success or an exact partial-failure result; already committed paths are not rolled back. Tool-result finalization still appends one deterministic `client_tool_result` and removes the call from PostgreSQL-backed `active_tool_calls`.
 
@@ -1007,6 +1007,7 @@ updated by the user.
 
 ## Changelog
 
+- **2026-07-20** (spec_version 116) — Categorized `apply_patch` with file-edit activity in the chat tool timeline.
 - **2026-07-20** (spec_version 115) — Added selected-model client tool profile projection, GPT-only ordinary `apply_patch` exposure alongside unchanged `edit`, typed patch result metadata, and commit-sensitive cancellation settlement.
 - **2026-07-20** (spec_version 114) — Snapshotted DB-attached Toolkit source identity onto durable, active, and live client-tool calls before execution.
 - **2026-07-20** (spec_version 113) — Reset the shared Tool Search working set in the successful context-compaction transaction and require deferred tools to be activated again afterward.
