@@ -1,5 +1,7 @@
 """Workspace model selection readiness E2E test."""
 
+from typing import cast
+
 import azentsadminclient
 import azentspublicclient
 import requests
@@ -81,9 +83,13 @@ def _wait_for_initial_catalog_sync(
         )
         if response.status_code != 200:
             return None
-        latest_attempt = response.json().get("latest_attempt")
-        if latest_attempt is None:
+        payload = cast("dict[str, object]", response.json())
+        if payload.get("catalog_scope") != "integration":
             return None
+        latest_attempt_payload = payload.get("latest_attempt")
+        if not isinstance(latest_attempt_payload, dict):
+            return None
+        latest_attempt = cast("dict[str, object]", latest_attempt_payload)
         if latest_attempt.get("status") not in {"succeeded", "failed"}:
             return None
         return response
