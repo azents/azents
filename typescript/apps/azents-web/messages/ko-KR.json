@@ -712,6 +712,7 @@
           "session": "세션",
           "primaryBadge": "메인",
           "running": "실행 중…",
+          "unreadTerminalRun": "읽지 않은 종료 결과",
           "actions": "세션 작업",
           "rename": "이름 변경",
           "renameTitle": "세션 이름 변경",

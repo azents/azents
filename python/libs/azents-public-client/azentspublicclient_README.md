@@ -111,6 +111,7 @@ Class | Method | HTTP request | Description
 *ChatGPTOAuthV1Api* | [**chatgpt_oauth_v1_cancel_device**](azentspublicclient/docs/ChatGPTOAuthV1Api.md#chatgpt_oauth_v1_cancel_device) | **DELETE** /llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/{session_id} | Cancel Device
 *ChatGPTOAuthV1Api* | [**chatgpt_oauth_v1_poll_device**](azentspublicclient/docs/ChatGPTOAuthV1Api.md#chatgpt_oauth_v1_poll_device) | **GET** /llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/{session_id} | Poll Device
 *ChatGPTOAuthV1Api* | [**chatgpt_oauth_v1_start_device**](azentspublicclient/docs/ChatGPTOAuthV1Api.md#chatgpt_oauth_v1_start_device) | **POST** /llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/start | Start Device
+*ChatV1Api* | [**chat_v1_acknowledge_agent_session_unread_terminal_run**](azentspublicclient/docs/ChatV1Api.md#chat_v1_acknowledge_agent_session_unread_terminal_run) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/read | Acknowledge Agent Session Unread Terminal Run
 *ChatV1Api* | [**chat_v1_archive_agent_session**](azentspublicclient/docs/ChatV1Api.md#chat_v1_archive_agent_session) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/archive | Archive Agent Session
 *ChatV1Api* | [**chat_v1_bulk_delete_agent_workspace_paths**](azentspublicclient/docs/ChatV1Api.md#chat_v1_bulk_delete_agent_workspace_paths) | **DELETE** /chat/v1/agents/{agent_id}/workspace/files/bulk | Bulk Delete Agent Workspace Paths
 *ChatV1Api* | [**chat_v1_bulk_move_agent_workspace_paths**](azentspublicclient/docs/ChatV1Api.md#chat_v1_bulk_move_agent_workspace_paths) | **POST** /chat/v1/agents/{agent_id}/workspace/move/bulk | Bulk Move Agent Workspace Paths
@@ -266,6 +267,7 @@ Class | Method | HTTP request | Description
  - [AgentSessionStatus](azentspublicclient/docs/AgentSessionStatus.md)
  - [AgentSessionTitleSource](azentspublicclient/docs/AgentSessionTitleSource.md)
  - [AgentSessionTitleUpdateRequest](azentspublicclient/docs/AgentSessionTitleUpdateRequest.md)
+ - [AgentSessionUnreadTerminalRunAcknowledgeRequest](azentspublicclient/docs/AgentSessionUnreadTerminalRunAcknowledgeRequest.md)
  - [AgentToolkitAttachRequest](azentspublicclient/docs/AgentToolkitAttachRequest.md)
  - [AgentToolkitListResponse](azentspublicclient/docs/AgentToolkitListResponse.md)
  - [AgentToolkitResponse](azentspublicclient/docs/AgentToolkitResponse.md)

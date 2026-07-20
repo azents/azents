@@ -57,6 +57,7 @@ azentspublicclient/docs/AgentSessionRunState.md
 azentspublicclient/docs/AgentSessionStatus.md
 azentspublicclient/docs/AgentSessionTitleSource.md
 azentspublicclient/docs/AgentSessionTitleUpdateRequest.md
+azentspublicclient/docs/AgentSessionUnreadTerminalRunAcknowledgeRequest.md
 azentspublicclient/docs/AgentToolkitAttachRequest.md
 azentspublicclient/docs/AgentToolkitListResponse.md
 azentspublicclient/docs/AgentToolkitResponse.md
@@ -361,6 +362,7 @@ azentspublicclient/models/agent_session_run_state.py
 azentspublicclient/models/agent_session_status.py
 azentspublicclient/models/agent_session_title_source.py
 azentspublicclient/models/agent_session_title_update_request.py
+azentspublicclient/models/agent_session_unread_terminal_run_acknowledge_request.py
 azentspublicclient/models/agent_toolkit_attach_request.py
 azentspublicclient/models/agent_toolkit_list_response.py
 azentspublicclient/models/agent_toolkit_response.py
@@ -649,6 +651,7 @@ azentspublicclient/test/test_agent_session_run_state.py
 azentspublicclient/test/test_agent_session_status.py
 azentspublicclient/test/test_agent_session_title_source.py
 azentspublicclient/test/test_agent_session_title_update_request.py
+azentspublicclient/test/test_agent_session_unread_terminal_run_acknowledge_request.py
 azentspublicclient/test/test_agent_toolkit_attach_request.py
 azentspublicclient/test/test_agent_toolkit_list_response.py
 azentspublicclient/test/test_agent_toolkit_response.py

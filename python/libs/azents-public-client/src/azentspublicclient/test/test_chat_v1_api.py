@@ -26,6 +26,13 @@ class TestChatV1Api(unittest.TestCase):
     def tearDown(self) -> None:
         pass
 
+    def test_chat_v1_acknowledge_agent_session_unread_terminal_run(self) -> None:
+        """Test case for chat_v1_acknowledge_agent_session_unread_terminal_run
+
+        Acknowledge Agent Session Unread Terminal Run
+        """
+        pass
+
     def test_chat_v1_archive_agent_session(self) -> None:
         """Test case for chat_v1_archive_agent_session
 

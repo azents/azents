@@ -1,5 +1,6 @@
 """AgentSession repository data models."""
 
+import dataclasses
 import datetime
 
 from pydantic import BaseModel, Field
@@ -15,6 +16,14 @@ from azents.core.enums import (
     SessionAgentKind,
 )
 from azents.core.inference_profile import SessionInferenceState
+
+
+@dataclasses.dataclass(frozen=True)
+class AgentSessionUnreadTerminalRunProjection:
+    """AgentSession with its sparse shared unread terminal Run boundary."""
+
+    session: "AgentSession"
+    unread_terminal_run_id: str | None
 
 
 class AgentSession(BaseModel):

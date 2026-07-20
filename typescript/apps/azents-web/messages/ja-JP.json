@@ -712,6 +712,7 @@
           "session": "セッション",
           "primaryBadge": "プライマリ",
           "running": "実行中…",
+          "unreadTerminalRun": "未確認の終了結果",
           "actions": "Session actions",
           "rename": "Rename",
           "renameTitle": "Rename session",

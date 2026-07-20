@@ -8,6 +8,7 @@ import {
   agentRuntimeV1RestartAgentRuntime,
   agentRuntimeV1StartAgentRuntime,
   agentRuntimeV1StopAgentRuntime,
+  chatV1AcknowledgeAgentSessionUnreadTerminalRun,
   chatV1ArchiveAgentSession,
   chatV1BulkDeleteAgentWorkspacePaths,
   chatV1BulkMoveAgentWorkspacePaths,
@@ -89,6 +90,31 @@ export const chatRouter = router({
         throw mapExpectedError(e, {
           401: "UNAUTHORIZED",
           404: "NOT_FOUND",
+        });
+      }
+    }),
+
+  acknowledgeAgentSessionUnreadTerminalRun: publicProcedure
+    .input(
+      z.object({
+        agentId: z.string().min(1),
+        sessionId: z.string().min(1),
+        throughRunId: z.string().min(1),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        await chatV1AcknowledgeAgentSessionUnreadTerminalRun({
+          client: ctx.apiClient,
+          path: { agent_id: input.agentId, session_id: input.sessionId },
+          body: { through_run_id: input.throughRunId },
+          throwOnError: true,
+        });
+      } catch (e) {
+        throw mapExpectedError(e, {
+          401: "UNAUTHORIZED",
+          404: "NOT_FOUND",
+          409: "CONFLICT",
         });
       }
     }),

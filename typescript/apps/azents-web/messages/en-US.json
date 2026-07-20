@@ -712,6 +712,7 @@
           "session": "Session",
           "primaryBadge": "Primary",
           "running": "Running…",
+          "unreadTerminalRun": "Unread terminal result",
           "actions": "Session actions",
           "rename": "Rename",
           "renameTitle": "Rename session",

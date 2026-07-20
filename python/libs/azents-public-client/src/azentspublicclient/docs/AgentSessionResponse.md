@@ -15,6 +15,7 @@ Name | Type | Description | Notes
 **status** | [**AgentSessionStatus**](AgentSessionStatus.md) | Session status | 
 **primary_kind** | [**AgentSessionPrimaryKind**](AgentSessionPrimaryKind.md) |  | [optional] 
 **run_state** | [**AgentSessionRunState**](AgentSessionRunState.md) | Session execution state | 
+**unread_terminal_run_id** | **str** |  | 
 **archived_at** | **datetime** |  | 
 **purge_after** | **datetime** |  | 
 **archive_retention_days_snapshot** | **int** |  | 

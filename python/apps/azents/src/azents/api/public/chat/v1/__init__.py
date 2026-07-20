@@ -98,6 +98,7 @@ from azents.services.chat.data import (
     SessionAccessDenied,
     SessionNotFound,
     SubagentSessionReadOnly,
+    UnreadTerminalRunNotTerminal,
     UpdateGoalStatusInput,
 )
 from azents.services.chat.live_events import (
@@ -180,6 +181,7 @@ from .data import (
     AgentSessionProjectDefaultsResponse,
     AgentSessionResponse,
     AgentSessionTitleUpdateRequest,
+    AgentSessionUnreadTerminalRunAcknowledgeRequest,
     AgentWorkspaceActionResponse,
     AgentWorkspaceBulkDeleteRequest,
     AgentWorkspaceBulkDeleteResponse,
@@ -532,7 +534,10 @@ async def list_sessions(
     )
     settings = await retention_service.get_settings()
     return AgentSessionListResponse(
-        items=[AgentSessionResponse.from_domain(s) for s in sessions],
+        items=[
+            AgentSessionResponse.from_domain(s, unread_terminal_run_id=None)
+            for s in sessions
+        ],
         current_archive_retention_days=settings.archived_session_retention_days,
     )
 
@@ -1564,7 +1569,20 @@ async def get_team_primary_agent_session(
     )
     match result:
         case Success(session):
-            return AgentSessionResponse.from_domain(session)
+            projection_result = (
+                await chat_service.get_agent_session_with_unread_terminal_run(
+                    agent_id=agent_id,
+                    session_id=session.id,
+                    user_id=current_user.user_id,
+                )
+            )
+            match projection_result:
+                case Success(projection):
+                    return AgentSessionResponse.from_projection(projection)
+                case Failure(SessionNotFound()):
+                    raise HTTPException(status_code=404, detail="Session not found.")
+                case _:
+                    assert_never(projection_result)
         case Failure(error):
             match error:
                 case AgentNotFound() | NotWorkspaceMember() | SessionAccessDenied():
@@ -1583,7 +1601,7 @@ async def list_agent_sessions(
     retention_service: Annotated[ArchivedSessionRetentionService, Depends()],
 ) -> AgentSessionListResponse:
     """List active team sessions for an Agent with team primary first."""
-    result = await chat_service.list_agent_sessions(
+    result = await chat_service.list_agent_sessions_with_unread_terminal_run(
         agent_id=agent_id,
         user_id=current_user.user_id,
     )
@@ -1592,7 +1610,8 @@ async def list_agent_sessions(
             settings = await retention_service.get_settings()
             return AgentSessionListResponse(
                 items=[
-                    AgentSessionResponse.from_domain(session) for session in sessions
+                    AgentSessionResponse.from_projection(projection)
+                    for projection in sessions
                 ],
                 current_archive_retention_days=(
                     settings.archived_session_retention_days
@@ -1742,7 +1761,10 @@ async def create_team_agent_session(
                         workspace_handle=None,
                     )
                 )
-            return AgentSessionResponse.from_domain(session)
+            return AgentSessionResponse.from_domain(
+                session,
+                unread_terminal_run_id=None,
+            )
         case Failure(error):
             match error:
                 case InvalidProjectPath():
@@ -1869,7 +1891,13 @@ async def list_archived_agent_sessions(
         case Success(items):
             settings = await retention_service.get_settings()
             return AgentSessionListResponse(
-                items=[AgentSessionResponse.from_domain(item) for item in items],
+                items=[
+                    AgentSessionResponse.from_domain(
+                        item,
+                        unread_terminal_run_id=None,
+                    )
+                    for item in items
+                ],
                 current_archive_retention_days=(
                     settings.archived_session_retention_days
                 ),
@@ -1897,7 +1925,20 @@ async def restore_agent_session(
     )
     match result:
         case Success(session):
-            return AgentSessionResponse.from_domain(session)
+            projection_result = (
+                await chat_service.get_agent_session_with_unread_terminal_run(
+                    agent_id=agent_id,
+                    session_id=session.id,
+                    user_id=current_user.user_id,
+                )
+            )
+            match projection_result:
+                case Success(projection):
+                    return AgentSessionResponse.from_projection(projection)
+                case Failure(SessionNotFound()):
+                    raise HTTPException(status_code=404, detail="Session not found.")
+                case _:
+                    assert_never(projection_result)
         case Failure(error):
             match error:
                 case SessionNotFound() | SessionAccessDenied():
@@ -1922,18 +1963,53 @@ async def get_agent_session(
 ) -> AgentSessionResponse:
     """Get a URL-selected AgentSession by agent/session pair."""
     _validate_session_id(session_id)
-    result = await chat_service.get_agent_session(
+    result = await chat_service.get_agent_session_with_unread_terminal_run(
         agent_id=agent_id,
         session_id=session_id,
         user_id=current_user.user_id,
     )
     match result:
-        case Success(session):
-            return AgentSessionResponse.from_domain(session)
+        case Success(projection):
+            return AgentSessionResponse.from_projection(projection)
         case Failure(error):
             match error:
                 case SessionNotFound():
                     raise HTTPException(status_code=404, detail="Session not found.")
+                case _:
+                    assert_never(error)
+        case _:
+            assert_never(result)
+
+
+@router.post("/agents/{agent_id}/sessions/{session_id}/read", status_code=204)
+async def acknowledge_agent_session_unread_terminal_run(
+    agent_id: str,
+    session_id: str,
+    request: AgentSessionUnreadTerminalRunAcknowledgeRequest,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    chat_service: Annotated[ChatSessionService, Depends()],
+) -> None:
+    """Acknowledge an observed terminal Run as reviewed."""
+    _validate_session_id(session_id)
+    _validate_session_id(request.through_run_id)
+    result = await chat_service.acknowledge_agent_session_unread_terminal_run(
+        agent_id=agent_id,
+        session_id=session_id,
+        user_id=current_user.user_id,
+        through_run_id=request.through_run_id,
+    )
+    match result:
+        case Success():
+            return
+        case Failure(error):
+            match error:
+                case SessionNotFound():
+                    raise HTTPException(status_code=404, detail="Session not found.")
+                case UnreadTerminalRunNotTerminal():
+                    raise HTTPException(
+                        status_code=409,
+                        detail="AgentRun is not terminal.",
+                    )
                 case _:
                     assert_never(error)
         case _:
@@ -1984,7 +2060,20 @@ async def update_agent_session_title(
     )
     match result:
         case Success(session):
-            return AgentSessionResponse.from_domain(session)
+            projection_result = (
+                await chat_service.get_agent_session_with_unread_terminal_run(
+                    agent_id=session.agent_id,
+                    session_id=session.id,
+                    user_id=current_user.user_id,
+                )
+            )
+            match projection_result:
+                case Success(projection):
+                    return AgentSessionResponse.from_projection(projection)
+                case Failure(SessionNotFound()):
+                    raise HTTPException(status_code=404, detail="Session not found.")
+                case _:
+                    assert_never(projection_result)
         case Failure(error):
             match error:
                 case InvalidSessionTitle():

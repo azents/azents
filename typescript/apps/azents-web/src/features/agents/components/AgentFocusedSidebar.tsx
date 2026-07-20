@@ -500,6 +500,7 @@ export function AgentFocusedSidebar({
               const href = `${basePath}/sessions/${session.id}`;
               const isPrimary = session.primary_kind === "team_primary";
               const running = session.run_state === "running";
+              const unread = session.unread_terminal_run_id !== null;
               const archiving = archivingSessionId === session.id;
               const showActions =
                 onRenameSession != null ||
@@ -515,6 +516,17 @@ export function AgentFocusedSidebar({
                       <Text size="sm" truncate style={{ flex: 1, minWidth: 0 }}>
                         {getSessionDisplayTitle(session, t)}
                       </Text>
+                      {unread && (
+                        <Box
+                          component="span"
+                          w={rem(8)}
+                          h={rem(8)}
+                          bg="var(--mantine-primary-color-filled)"
+                          style={{ borderRadius: "50%", flexShrink: 0 }}
+                          role="img"
+                          aria-label={t("sessions.unreadTerminalRun")}
+                        />
+                      )}
                       {running && (
                         <Tooltip label={t("sessions.running")}>
                           <Loader

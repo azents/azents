@@ -9,6 +9,7 @@
  * previous session of WebSocket/buffer new session to ensures it does not leak.
  */
 
+import { useDocumentVisibility } from "@mantine/hooks";
 import * as Sentry from "@sentry/nextjs";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { trpc } from "@/trpc/client";
@@ -1890,6 +1891,7 @@ export function useChatSessionContainer(
   props: ChatSessionContainerProps,
 ): ChatSessionContainerOutput {
   const { sessionId, agent, onConnectionStatusChange } = props;
+  const documentVisibility = useDocumentVisibility();
   const agentSessionQuery = trpc.chat.getAgentSession.useQuery({
     agentId: agent.id,
     sessionId,
@@ -1921,6 +1923,7 @@ export function useChatSessionContainer(
   );
   const chatTimelineStateRef = useRef(chatTimelineState);
   chatTimelineStateRef.current = chatTimelineState;
+  const [freshBaselineVersion, setFreshBaselineVersion] = useState(0);
   const [hasMore, setHasMore] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const loadMoreInFlightRef = useRef(false);
@@ -2062,10 +2065,56 @@ export function useChatSessionContainer(
   );
 
   const utils = trpc.useUtils();
+  const acknowledgedUnreadTerminalRunIdRef = useRef<string | null>(null);
+  const acknowledgeUnreadTerminalRun =
+    trpc.chat.acknowledgeAgentSessionUnreadTerminalRun.useMutation({
+      onSuccess: (_data, variables): void => {
+        acknowledgedUnreadTerminalRunIdRef.current = variables.throughRunId;
+        void utils.chat.getAgentSession.invalidate({
+          agentId: agent.id,
+          sessionId,
+        });
+        void utils.chat.listAgentSessions.invalidate({ agentId: agent.id });
+      },
+    });
 
   useEffect(() => {
+    void utils.chat.getAgentSession.invalidate({
+      agentId: agent.id,
+      sessionId,
+    });
     void utils.chat.listAgentSessions.invalidate({ agentId: agent.id });
-  }, [agent.id, sessionRunState, utils.chat.listAgentSessions]);
+  }, [agent.id, sessionId, sessionRunState, utils.chat]);
+
+  useEffect(() => {
+    const throughRunId = agentSessionQuery.data?.unread_terminal_run_id;
+    if (
+      throughRunId === null ||
+      typeof throughRunId === "undefined" ||
+      chatViewState.type !== "READY" ||
+      chatTimelineState.type !== "LATEST_FOLLOWING" ||
+      documentVisibility !== "visible" ||
+      freshBaselineVersion === 0 ||
+      acknowledgeUnreadTerminalRun.isPending ||
+      acknowledgedUnreadTerminalRunIdRef.current === throughRunId
+    ) {
+      return;
+    }
+    acknowledgeUnreadTerminalRun.mutate({
+      agentId: agent.id,
+      sessionId,
+      throughRunId,
+    });
+  }, [
+    acknowledgeUnreadTerminalRun,
+    agent.id,
+    agentSessionQuery.data?.unread_terminal_run_id,
+    chatTimelineState.type,
+    chatViewState.type,
+    documentVisibility,
+    freshBaselineVersion,
+    sessionId,
+  ]);
 
   const batchReloadRef = useRef<(reason: "periodic" | "resume") => boolean>(
     () => false,
@@ -2625,6 +2674,7 @@ export function useChatSessionContainer(
           setChatTimelineState({ type: "LATEST_FOLLOWING" });
         }
         setChatViewState({ type: "READY" });
+        setFreshBaselineVersion((version) => version + 1);
         replayBufferedLiveEvents();
       })();
       return true;
