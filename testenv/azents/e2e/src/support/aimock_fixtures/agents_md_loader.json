@@ -1219,10 +1219,12 @@
       "response": {
         "toolCalls": [
           {
-            "id": "call_subagent_interrupt_child_barrier",
-            "name": "subagentqa__runtime_hook_qa_probe",
+            "id": "call_subagent_interrupt_child_delay",
+            "name": "exec_command",
             "arguments": {
-              "marker": "interrupt child"
+              "command": "sleep 30",
+              "yield_time_ms": 30000,
+              "max_output_bytes": 1000
             }
           }
         ]

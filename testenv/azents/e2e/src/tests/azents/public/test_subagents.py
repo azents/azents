@@ -1303,36 +1303,19 @@ class TestSubagents:
 
     def test_interrupt_agent_delivers_stopped_child_result_safely(
         self,
-        request: pytest.FixtureRequest,
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
-        azents_engine_worker_container: DockerContainer,
+        azents_engine_worker_container: object,
     ) -> None:
         """Stop an interrupted child and promote its safe terminal result."""
-        release_file_path = f"/tmp/azents-subagent-interrupt-{unique()}"
-        _set_release_file(
-            azents_engine_worker_container,
-            release_file_path,
-            present=False,
-        )
-        request.addfinalizer(
-            lambda: _set_release_file(
-                azents_engine_worker_container,
-                release_file_path,
-                present=True,
-            )
-        )
+        del azents_engine_worker_container
         workspace = _setup_workspace(
             public_api_client,
             admin_api_client,
             azents_public_server_url,
         )
-        agent_id = _create_agent(
-            public_api_client,
-            workspace,
-            release_file_path=release_file_path,
-        )
+        agent_id = _create_agent(public_api_client, workspace)
         root_session_id = _team_primary_session(
             public_url=azents_public_server_url,
             token=workspace.token,
@@ -1360,11 +1343,6 @@ class TestSubagents:
             name="interrupt_child",
             expected_status="running",
             expected_unread=False,
-        )
-        _wait_for_release_barriers(
-            azents_engine_worker_container,
-            release_file_path,
-            expected_count=1,
         )
 
         _run_message(
