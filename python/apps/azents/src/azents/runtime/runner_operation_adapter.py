@@ -7,8 +7,13 @@ from typing import TypeVar
 from azents.engine.tools import runtime_io as engine_runtime_io
 from azents.engine.tools.runtime_io import (
     RuntimeBashResult,
+    RuntimeFileApplyPatchFailedError,
+    RuntimeFileApplyPatchFailure,
+    RuntimeFileApplyPatchResult,
     RuntimeFileListEntry,
     RuntimeFileListResult,
+    RuntimeFilePatchChange,
+    RuntimeFilePatchOperation,
     RuntimeFileReadResult,
     RuntimeFileStatResult,
     RuntimeFileWriteResult,
@@ -202,6 +207,43 @@ class RuntimeRunnerOperationAdapter:
             final_cursor=result.final_cursor,
         )
 
+    async def apply_patch(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        owner_session_id: str | None,
+        base_path: str,
+        patch: bytes,
+        schema_version: int,
+        deadline_at: datetime,
+    ) -> RuntimeFileApplyPatchResult:
+        """Run one Runtime patch operation and preserve typed failure detail."""
+        result = await _translate_runtime_errors(
+            self._client.apply_patch(
+                runtime_id=runtime_id,
+                runner_generation=runner_generation,
+                owner_session_id=owner_session_id,
+                base_path=base_path,
+                patch=patch,
+                schema_version=schema_version,
+                deadline_at=deadline_at,
+            )
+        )
+        return RuntimeFileApplyPatchResult(
+            changes=tuple(
+                RuntimeFilePatchChange(
+                    path=change.path,
+                    action=change.action,
+                    added_lines=change.added_lines,
+                    removed_lines=change.removed_lines,
+                    content_sha256=change.content_sha256,
+                )
+                for change in result.changes
+            ),
+            final_cursor=result.final_cursor,
+        )
+
     async def list_files(
         self,
         *,
@@ -356,12 +398,53 @@ async def _translate_runtime_errors(awaitable: Awaitable[_T]) -> _T:
     """Convert Runtime control error to engine protocol error."""
     try:
         return await awaitable
+    except control_runner_operations.RuntimeFileApplyPatchFailedError as exc:
+        raise RuntimeFileApplyPatchFailedError(
+            str(exc),
+            failure=_patch_failure(exc.failure),
+        ) from exc
     except control_runner_operations.RuntimeRunnerOperationUnavailable as exc:
         raise engine_runtime_io.RuntimeRunnerOperationUnavailable(str(exc)) from exc
     except control_runner_operations.RuntimeRunnerOperationGenerationError as exc:
         raise engine_runtime_io.RuntimeRunnerOperationGenerationError(str(exc)) from exc
     except control_runner_operations.RuntimeRunnerOperationFailedError as exc:
         raise engine_runtime_io.RuntimeRunnerOperationFailedError(str(exc)) from exc
+
+
+def _patch_failure(
+    failure: control_runner_operations.RuntimeFileApplyPatchFailure,
+) -> RuntimeFileApplyPatchFailure:
+    """Convert typed Runtime patch failure detail to the engine protocol."""
+    return RuntimeFileApplyPatchFailure(
+        phase=failure.phase,
+        reason=failure.reason,
+        applied=tuple(
+            RuntimeFilePatchChange(
+                path=change.path,
+                action=change.action,
+                added_lines=change.added_lines,
+                removed_lines=change.removed_lines,
+                content_sha256=change.content_sha256,
+            )
+            for change in failure.applied
+        ),
+        failed=(
+            RuntimeFilePatchOperation(
+                path=failure.failed.path,
+                action=failure.failed.action,
+            )
+            if failure.failed is not None
+            else None
+        ),
+        not_attempted=tuple(
+            RuntimeFilePatchOperation(
+                path=operation.path,
+                action=operation.action,
+            )
+            for operation in failure.not_attempted
+        ),
+        exact=failure.exact,
+    )
 
 
 def _control_process_output_callback(
