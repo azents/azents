@@ -766,6 +766,8 @@ export interface ProviderToolCall {
   arguments: string;
   status: "completed" | "failed" | "running" | "unknown";
   output?: string;
+  semanticOutput?: string;
+  references?: ProviderToolReference[];
   attachments?: FileAttachment[];
 }
 

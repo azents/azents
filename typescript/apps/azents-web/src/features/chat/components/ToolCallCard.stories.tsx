@@ -50,6 +50,26 @@ export const Failed = {
   },
 } satisfies Story;
 
+export const GenericFailureExpanded = {
+  args: {
+    toolCall: {
+      id: "generic-failure-story",
+      callId: "generic-failure-story",
+      name: "custom_database_query",
+      arguments: '{"query":"select status from jobs"}',
+      result: "Connection refused",
+      status: "failed",
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(
+      canvas.getByRole("button", { name: /custom_database_query/ }),
+    );
+    await expect(canvas.getByText("Connection refused")).toBeVisible();
+  },
+} satisfies Story;
+
 export const Interrupted = {
   args: {
     toolCall: interruptedToolCall,
@@ -98,7 +118,7 @@ export const KnownPatch = {
       callId: "known-patch-story",
       name: "apply_patch",
       arguments:
-        '{"base_path":"/workspace/agent/azents","patch":"*** Begin Patch"}',
+        '{"base_path":"/workspace/agent/azents","patch":"*** Begin Patch\\n*** Update File: src/features/chat/components/ToolCallCard.tsx\\n@@\\n-old value\\n+new value\\n*** Add File: src/features/chat/components/PatchPreview.tsx\\n+export const patchPreview = true;\\n*** Delete File: src/features/chat/components/LegacyPatchPreview.tsx\\n*** End Patch"}',
       status: "completed",
       result: "Applied patch under /workspace/agent/azents.",
       resultMetadata: {
@@ -113,5 +133,36 @@ export const KnownPatch = {
         ],
       },
     },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(
+      canvas.getByRole("button", { name: /Applied patch/ }),
+    );
+    await expect(
+      canvas.getByText("src/features/chat/components/PatchPreview.tsx"),
+    ).toBeVisible();
+    await expect(
+      canvas.getByText("export const patchPreview = true;"),
+    ).toBeVisible();
+  },
+} satisfies Story;
+
+export const KnownEdit = {
+  args: {
+    toolCall: {
+      id: "known-edit-story",
+      callId: "known-edit-story",
+      name: "edit",
+      arguments:
+        '{"path":"/workspace/agent/azents/src/features/chat/components/ToolCallCard.tsx","old_string":"fw={600}","new_string":"c=\\"dimmed\\" fw={500}"}',
+      status: "completed",
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(canvas.getByRole("button", { name: /Edited file/ }));
+    await expect(canvas.getByText("fw={600}")).toBeVisible();
+    await expect(canvas.getByText('c="dimmed" fw={500}')).toBeVisible();
   },
 } satisfies Story;

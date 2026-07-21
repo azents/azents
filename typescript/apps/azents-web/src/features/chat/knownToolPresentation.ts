@@ -1,5 +1,7 @@
 import { z } from "zod";
+import { parseV4APatch } from "./v4aPatchPresentation.ts";
 import type { ActiveToolCall } from "./types";
+import type { V4APatchFile } from "./v4aPatchPresentation.ts";
 
 export type KnownToolPresentationReason =
   | "unregistered"
@@ -24,16 +26,14 @@ export interface OutputDetail {
   output: string;
 }
 
-export interface PatchChange {
-  action: "add" | "update" | "delete";
-  path: string;
-  addedLines: number;
-  removedLines: number;
+export interface DiffDetail {
+  type: "diff";
+  file: V4APatchFile;
 }
 
 export interface PatchDetail {
   type: "patch";
-  changes: PatchChange[];
+  files: V4APatchFile[];
 }
 
 export interface ProcessDetail {
@@ -43,7 +43,12 @@ export interface ProcessDetail {
   output: string;
 }
 
-export type KnownToolDetail = OutputDetail | PatchDetail | ProcessDetail | null;
+export type KnownToolDetail =
+  | OutputDetail
+  | DiffDetail
+  | PatchDetail
+  | ProcessDetail
+  | null;
 
 export interface KnownToolPresentation {
   action: KnownToolAction;
@@ -140,6 +145,31 @@ function outputDetail(toolCall: ActiveToolCall): KnownToolDetail {
     : null;
 }
 
+function editDiff(
+  path: string,
+  oldValue: string,
+  newValue: string,
+): V4APatchFile {
+  return {
+    type: "update",
+    path: displayPath(path),
+    moveTo: null,
+    hunks: [
+      {
+        context: null,
+        lines: [
+          ...oldValue
+            .split("\n")
+            .map((content) => ({ type: "remove" as const, content })),
+          ...newValue
+            .split("\n")
+            .map((content) => ({ type: "add" as const, content })),
+        ],
+      },
+    ],
+  };
+}
+
 function terminal(toolCall: ActiveToolCall): boolean {
   return toolCall.status !== "running" && toolCall.status !== "preparing";
 }
@@ -166,38 +196,36 @@ function patchPresentation(
   toolCall: ActiveToolCall,
   input: z.infer<typeof applyPatchInputSchema>,
 ): KnownToolPresentationResult {
+  const patch = parseV4APatch(input.patch);
+  if (patch === null) {
+    return generic("invalid-arguments");
+  }
   if (!terminal(toolCall)) {
     return presentation("patch", displayPath(input.base_path), null, null);
   }
   const metadata = toolCall.resultMetadata;
   const success = applyPatchResultSchema.safeParse(metadata);
   if (success.success) {
-    const changes = success.data.changes.map((change) => ({
-      action: change.action,
-      path: displayPath(change.path),
-      addedLines: change.added_lines,
-      removedLines: change.removed_lines,
-    }));
     return presentation(
       "patch",
       displayPath(input.base_path),
-      changes.length > 0 ? String(changes.length) : null,
-      { type: "patch", changes },
+      success.data.changes.length > 0
+        ? String(success.data.changes.length)
+        : null,
+      { type: "patch", files: patch.files },
     );
   }
   const failure = applyPatchFailureSchema.safeParse(metadata);
   if (failure.success) {
-    const changes = failure.data.applied.map((change) => ({
-      action: change.action,
-      path: displayPath(change.path),
-      addedLines: change.added_lines,
-      removedLines: change.removed_lines,
-    }));
     return presentation(
       "patch",
       displayPath(input.base_path),
-      changes.length > 0 ? String(changes.length) : null,
-      changes.length > 0 ? { type: "patch", changes } : outputDetail(toolCall),
+      failure.data.applied.length > 0
+        ? String(failure.data.applied.length)
+        : null,
+      failure.data.applied.length > 0
+        ? { type: "patch", files: patch.files }
+        : outputDetail(toolCall),
     );
   }
   return generic("invalid-output");
@@ -295,7 +323,14 @@ export function knownToolPresentation(
       case "edit": {
         const input = editInputSchema.safeParse(argumentsResult.value);
         return input.success
-          ? presentation("edit", displayPath(input.data.path), null, null)
+          ? presentation("edit", displayPath(input.data.path), null, {
+              type: "diff",
+              file: editDiff(
+                input.data.path,
+                input.data.old_string,
+                input.data.new_string,
+              ),
+            })
           : generic("invalid-arguments");
       }
       case "apply_patch": {

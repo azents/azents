@@ -56,7 +56,8 @@ void test("requires structured metadata for terminal patch calls", () => {
   const result = knownToolPresentation(
     toolCall({
       name: "apply_patch",
-      arguments: '{"base_path":"/workspace/agent","patch":"*** Begin Patch"}',
+      arguments:
+        '{"base_path":"/workspace/agent","patch":"*** Begin Patch\\n*** Update File: src/example.ts\\n@@\\n-old\\n+new\\n*** End Patch"}',
     }),
   );
   assert.deepEqual(result, { type: "generic", reason: "invalid-output" });
@@ -66,7 +67,8 @@ void test("specializes structured patch metadata without parsing output text", (
   const result = knownToolPresentation(
     toolCall({
       name: "apply_patch",
-      arguments: '{"base_path":"/workspace/agent","patch":"*** Begin Patch"}',
+      arguments:
+        '{"base_path":"/workspace/agent","patch":"*** Begin Patch\\n*** Update File: src/example.ts\\n@@\\n-old\\n+new\\n*** End Patch"}',
       resultMetadata: {
         kind: "apply_patch_result",
         changes: [
@@ -88,12 +90,20 @@ void test("specializes structured patch metadata without parsing output text", (
       qualifier: "1",
       detail: {
         type: "patch",
-        changes: [
+        files: [
           {
-            action: "update",
+            type: "update",
             path: "src/example.ts",
-            addedLines: 4,
-            removedLines: 2,
+            moveTo: null,
+            hunks: [
+              {
+                context: null,
+                lines: [
+                  { type: "remove", content: "old" },
+                  { type: "add", content: "new" },
+                ],
+              },
+            ],
           },
         ],
       },
@@ -185,6 +195,41 @@ void test("specializes simple Phase 1 resource and search tools", () => {
     assert.equal(result.type, "specialized");
     assert.equal(result.presentation.action, item.action);
   }
+});
+
+void test("renders file edits as a unified diff", () => {
+  const result = knownToolPresentation(
+    toolCall({
+      name: "edit",
+      arguments:
+        '{"path":"/workspace/agent/src/example.ts","old_string":"const value = 1;","new_string":"const value = 2;"}',
+    }),
+  );
+  assert.deepEqual(result, {
+    type: "specialized",
+    presentation: {
+      action: "edit",
+      subject: "src/example.ts",
+      qualifier: null,
+      detail: {
+        type: "diff",
+        file: {
+          type: "update",
+          path: "src/example.ts",
+          moveTo: null,
+          hunks: [
+            {
+              context: null,
+              lines: [
+                { type: "remove", content: "const value = 1;" },
+                { type: "add", content: "const value = 2;" },
+              ],
+            },
+          ],
+        },
+      },
+    },
+  });
 });
 
 void test("keeps malformed process metadata generic and supports running stdin", () => {

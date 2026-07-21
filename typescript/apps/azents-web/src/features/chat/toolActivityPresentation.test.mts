@@ -259,3 +259,53 @@ void test("keeps an attachment-bearing tool outside Activity and closes the grou
     ["activity", "message", "activity"],
   );
 });
+
+void test("uses compaction start and result messages as Activity cutoffs", () => {
+  const beforeTool = clientToolMessage("before-tool", "before-call", "read");
+  const afterTool = clientToolMessage("after-tool", "after-call", "write");
+  const items = projectChatPresentationItems(
+    [
+      event("before-call", "client_tool_call", {
+        call_id: "before-call",
+        name: "read",
+        arguments: "{}",
+      }),
+      event("compaction-start", "compaction_marker", {
+        compaction_id: "compaction-1",
+        status: "started",
+      }),
+      event("compaction-result", "compaction_summary", {
+        compaction_id: "compaction-1",
+        content: "Compaction summary.",
+      }),
+      event("after-call", "client_tool_call", {
+        call_id: "after-call",
+        name: "write",
+        arguments: "{}",
+      }),
+    ],
+    [
+      beforeTool,
+      message("compaction-start", { role: "compaction_started" }),
+      message("compaction-result", {
+        role: "compaction",
+        content: "Compaction summary.",
+      }),
+      afterTool,
+    ],
+  );
+
+  assert.deepEqual(
+    items.map((item) => item.type),
+    ["activity", "message", "message", "activity"],
+  );
+  assert.equal(activityAt(items, 0).events.length, 1);
+  assert.equal(activityAt(items, 3).events.length, 1);
+
+  const startMarker = items[1];
+  const resultMarker = items[2];
+  assert.ok(startMarker?.type === "message");
+  assert.ok(resultMarker?.type === "message");
+  assert.equal(startMarker.message.role, "compaction_started");
+  assert.equal(resultMarker.message.role, "compaction");
+});

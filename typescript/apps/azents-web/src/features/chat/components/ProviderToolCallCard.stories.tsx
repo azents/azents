@@ -37,6 +37,41 @@ export const Running = {
   },
 } satisfies Story;
 
+export const WebSearchResults = {
+  args: {
+    toolCall: {
+      id: "provider-search-results",
+      callId: "provider-search-results",
+      name: "web_search",
+      arguments: '{"query":"Azents agent platform"}',
+      status: "completed",
+      semanticOutput: "Found two relevant sources.",
+      references: [
+        {
+          kind: "url",
+          uri: "https://example.com/overview",
+          title: "Azents overview",
+          excerpt: "An overview of the Azents agent platform.",
+          metadata: {},
+        },
+        {
+          kind: "url",
+          uri: "https://example.com/docs",
+          title: "Azents documentation",
+          excerpt: "Guides for configuring agent workflows.",
+          metadata: {},
+        },
+      ],
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(canvas.getByRole("button", { name: /Web search/ }));
+    await expect(canvas.getByText("Azents overview")).toBeVisible();
+    await expect(canvas.getByText("Azents documentation")).toBeVisible();
+  },
+} satisfies Story;
+
 export const CompletedWithOutputAndAttachment = {
   args: {
     toolCall: {

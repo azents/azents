@@ -1372,10 +1372,20 @@ export function ChatView({
                       </Fragment>
                     );
                   }
-                  if (
-                    msg.role === "compaction_started" ||
-                    isBoundaryMessage(msg)
-                  ) {
+                  if (msg.role === "compaction_started") {
+                    return (
+                      <Fragment key={item.id}>
+                        {durableBefore.map((actionExecution) => (
+                          <ActionExecutionTimelineCard
+                            key={actionExecution.execution.id}
+                            actionExecution={actionExecution}
+                          />
+                        ))}
+                        <CompactionIndicator />
+                      </Fragment>
+                    );
+                  }
+                  if (isBoundaryMessage(msg)) {
                     return durableBefore.length > 0 ? (
                       <Fragment key={item.id}>
                         {durableBefore.map((actionExecution) => (

@@ -15,7 +15,6 @@ import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
 import { AgentRunIndicator } from "./AgentRunIndicator";
 import inlineControlClasses from "./ChatInlineControl.module.css";
-import { CompactionDivider } from "./CompactionDivider";
 import {
   formatElapsedDuration,
   startElapsedDurationTimer,
@@ -132,9 +131,6 @@ function eventDetail(event: ActivityEvent): React.ReactElement | null {
     ) : (
       <ProviderToolCallCard toolCall={event.toolCall.toolCall} />
     );
-  }
-  if (event.kind === "compaction" && event.message?.content) {
-    return <CompactionDivider content={event.message.content} />;
   }
   if (event.message) {
     return <MessageBubble message={event.message} />;
@@ -261,7 +257,7 @@ export function ToolActivityGroup({
         <Text
           size="xs"
           c="dimmed"
-          pl={rem(46)}
+          pl={rem(20)}
           ff="monospace"
           style={{ fontVariantNumeric: "tabular-nums" }}
         >
@@ -293,7 +289,7 @@ export function ToolActivityGroup({
       </Group>
 
       <Collapse expanded={opened}>
-        <Stack gap="xs" mt="xs" pl="md">
+        <Stack gap={0} mt={rem(4)} pl={rem(12)}>
           {activity.events.map((event) => (
             <Box key={event.id}>{eventDetail(event)}</Box>
           ))}

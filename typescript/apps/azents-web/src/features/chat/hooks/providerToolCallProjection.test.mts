@@ -94,6 +94,16 @@ void test("provider call projects text and one attachment while hiding file part
       "- url: https://example.com/source\n  Title: Source",
   );
   assert.equal(projected.output.includes("model-file-1"), false);
+  assert.equal(projected.semanticOutput, "Generated one image.");
+  assert.deepEqual(projected.references, [
+    {
+      kind: "url",
+      uri: "https://example.com/source",
+      title: "Source",
+      excerpt: null,
+      metadata: {},
+    },
+  ]);
   assert.deepEqual(projected.attachments, [
     {
       attachmentId: "attachment-1",
