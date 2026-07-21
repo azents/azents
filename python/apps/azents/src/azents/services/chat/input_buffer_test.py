@@ -176,6 +176,7 @@ def _service(
         event_transcript_repository=EventTranscriptRepository(),
         agent_run_repository=AgentRunRepository(),
         action_execution_repository=ActionExecutionRepository(),
+        vfs_projection_service=None,
     )
     return ChatSessionService(
         message_repository=MessageRepository(),
@@ -494,6 +495,7 @@ class TestChatSessionInputBuffer:
             event_transcript_repository=EventTranscriptRepository(),
             agent_run_repository=AgentRunRepository(),
             action_execution_repository=ActionExecutionRepository(),
+            vfs_projection_service=None,
         )
         promoted = await input_buffer_service.flush_session_input_buffers(
             session_id=session_id,

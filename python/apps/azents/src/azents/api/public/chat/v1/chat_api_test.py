@@ -1594,6 +1594,7 @@ class TestListInputActions:
             CurrentUser(user_id="user-1", session_id="auth-session"),
             _EventService(),  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
             _EmptySkillStore(),  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            None,
         )
 
         items = response.model_dump(mode="json")["items"]

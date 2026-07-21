@@ -28,6 +28,7 @@ from azents.core.inference_profile import (
     SessionInferenceState,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
+from azents.core.vfs import make_vfs_projection, make_vfs_source_revision
 from azents.engine.events.action_messages import GoalAction, SkillAction
 from azents.engine.events.types import (
     AgentMessagePayload,
@@ -66,6 +67,7 @@ from azents.services.exchange_file import (
     FileNotFound,
     SessionNotFound,
 )
+from azents.services.vfs import VfsResolvedFile
 from azents.testing.model_selection import (
     make_test_model_selection_dict,
     make_test_model_settings,
@@ -389,6 +391,38 @@ async def _create_terminal_child_run(
     return completed.id, completed.run_index
 
 
+class _VfsService:
+    """VFS resolver test double for managed Skill action promotion."""
+
+    def __init__(self) -> None:
+        revision = make_vfs_source_revision(
+            source_id="release:azents",
+            source_kind="global_release",
+            namespace="azents",
+            entries=[
+                (
+                    "azents://skills/azents/review/SKILL.md",
+                    b"---\nname: review\ndescription: Review code.\n---\nManaged body",
+                    "text/markdown",
+                )
+            ],
+        )
+        self.projection = make_vfs_projection([revision])
+        self.run_ids: list[str] = []
+
+    async def resolve_file(self, **kwargs: object) -> VfsResolvedFile:
+        """Resolve from the configured immutable projection."""
+        self.run_ids.append(str(kwargs["run_id"]))
+        entry = self.projection.find(str(kwargs["uri"]))
+        if entry is None:
+            raise AssertionError("Missing VFS Skill fixture")
+        return VfsResolvedFile(
+            projection_revision_id=self.projection.revision_id,
+            projection_hash=self.projection.projection_hash,
+            entry=entry,
+        )
+
+
 async def _agent_id_for_session(
     rdb_session_manager: SessionManager[AsyncSession],
     session_id: str,
@@ -528,6 +562,7 @@ def _input_buffer_service(
     *,
     exchange_file_service: ExchangeFileService | None = None,
     event_transcript_repository: EventTranscriptRepository | None = None,
+    vfs_projection_service: object | None = None,
 ) -> InputBufferService:
     """Create InputBufferService for tests."""
     return InputBufferService(
@@ -540,6 +575,7 @@ def _input_buffer_service(
         ),
         agent_run_repository=AgentRunRepository(),
         action_execution_repository=ActionExecutionRepository(),
+        vfs_projection_service=vfs_projection_service,  # pyright: ignore[reportArgumentType]
     )
 
 
@@ -724,6 +760,7 @@ class TestInputBufferService:
             event_transcript_repository=EventTranscriptRepository(),
             agent_run_repository=AgentRunRepository(),
             action_execution_repository=ActionExecutionRepository(),
+            vfs_projection_service=None,
         )
         enqueue = InputBufferEnqueue(
             session_id="session-001",
@@ -1524,6 +1561,61 @@ class TestInputBufferService:
         assert [message.external_id for message in result.user_messages] == [
             f"{buffer_id}:user_message"
         ]
+
+    async def test_flush_managed_skill_action_uses_active_run_vfs(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Managed Skill action snapshots the exact current run VFS body."""
+        session_id, user_id = await _create_fixture(
+            rdb_session_manager,
+            "input-buffer-managed-skill-action",
+        )
+        async with rdb_session_manager() as session:
+            run = await AgentRunRepository().create_pending(
+                session,
+                session_id=session_id,
+                parent_agent_run_id=None,
+            )
+        uri = "azents://skills/azents/review/SKILL.md"
+        buffer_id = await _create_action_buffer(
+            rdb_session_manager,
+            session_id=session_id,
+            user_id=user_id,
+            content="Review this change",
+            action=SkillAction(skill_path=uri),
+        )
+        vfs_service = _VfsService()
+        service = _input_buffer_service(
+            rdb_session_manager,
+            vfs_projection_service=vfs_service,
+        )
+
+        result = await service.flush_session_input_buffers(
+            session_id=session_id,
+            model="gpt-5.4",
+            required_inference_profile=RequestedInferenceProfile(
+                model_target_label="Fast",
+                reasoning_effort=ModelReasoningEffort.HIGH,
+            ),
+            expected_buffer_id=buffer_id,
+            prepared_inference_state=None,
+            profile_resolution_failure=None,
+            active_run_id=run.id,
+        )
+
+        assert vfs_service.run_ids == [run.id]
+        assert [event.kind for event in result.events] == [
+            EventKind.SKILL_LOADED,
+            EventKind.USER_MESSAGE,
+        ]
+        skill_event = result.events[0]
+        assert isinstance(skill_event.payload, SkillLoadedPayload)
+        assert skill_event.payload.skill_path == uri
+        assert skill_event.payload.body.endswith("Managed body")
+        projected_entry = vfs_service.projection.find(uri)
+        assert projected_entry is not None
+        assert skill_event.payload.content_hash == projected_entry.content_hash
 
     async def test_flush_preserves_exchange_attachment_payload(
         self,

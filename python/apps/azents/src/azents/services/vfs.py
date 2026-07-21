@@ -16,15 +16,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.tools import ToolkitProvider
 from azents.core.vfs import (
+    AZENTS_VFS_SUPPORTED_MOUNTS,
+    VfsFileEntry,
     VfsProjection,
     VfsSourceRevision,
     VfsSourceSpec,
+    VfsUriError,
+    canonicalize_vfs_uri,
     make_vfs_projection,
     make_vfs_source_revision,
     make_vfs_uri,
 )
 from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import AgentRunRepository
+from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.toolkit import AgentToolkitRepository, ToolkitRepository
 
 logger = logging.getLogger(__name__)
@@ -39,12 +44,30 @@ _GLOBAL_RELEASE_SOURCE = VfsSourceSpec(
 )
 
 
+class VfsFileResolutionError(Exception):
+    """Authorized run VFS file resolution failure."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
 @dataclasses.dataclass(frozen=True)
 class VfsCatalogSnapshot:
     """Published release source revisions and bounded diagnostics."""
 
     revisions: list[VfsSourceRevision]
     diagnostics: list[str]
+
+
+@dataclasses.dataclass(frozen=True)
+class VfsResolvedFile:
+    """One verified file and the persisted projection that authorized it."""
+
+    projection_revision_id: str
+    projection_hash: str
+    entry: VfsFileEntry
 
 
 class ReleaseVfsCatalog:
@@ -95,6 +118,7 @@ class VfsProjectionService:
     toolkit_registry: Mapping[str, ToolkitProvider[Any]]
     catalog: ReleaseVfsCatalog
     agent_run_repository: AgentRunRepository
+    agent_session_repository: AgentSessionRepository
     agent_toolkit_repository: AgentToolkitRepository
     toolkit_repository: ToolkitRepository
 
@@ -143,8 +167,17 @@ class VfsProjectionService:
         """Return the run's immutable projection, creating it exactly once."""
         async with self.session_manager() as session:
             run = await self.agent_run_repository.get_by_id(session, run_id)
-        if run is None or run.session_id != session_id:
+            agent_session = await self.agent_session_repository.get_by_id(
+                session,
+                session_id,
+            )
+        if run is None or run.session_id != session_id or agent_session is None:
             raise ValueError("AgentRun not found in session")
+        if (
+            agent_session.agent_id != agent_id
+            or agent_session.workspace_id != workspace_id
+        ):
+            raise ValueError("AgentRun ownership mismatch")
         if run.vfs_projection is not None:
             return run.vfs_projection
 
@@ -161,6 +194,110 @@ class VfsProjectionService:
             )
             await session.commit()
         return projection
+
+    async def load_run_projection(
+        self,
+        *,
+        run_id: str,
+        agent_id: str,
+        session_id: str,
+        workspace_id: str,
+    ) -> VfsProjection:
+        """Load one run projection after validating its complete ownership chain."""
+        async with self.session_manager() as session:
+            run = await self.agent_run_repository.get_by_id(session, run_id)
+            agent_session = await self.agent_session_repository.get_by_id(
+                session,
+                session_id,
+            )
+        if run is None or run.session_id != session_id or agent_session is None:
+            raise VfsFileResolutionError("not_found", "Run VFS projection not found")
+        if (
+            agent_session.agent_id != agent_id
+            or agent_session.workspace_id != workspace_id
+        ):
+            raise VfsFileResolutionError(
+                "permission_denied",
+                "Run VFS projection access denied",
+            )
+        if run.vfs_projection is None:
+            raise VfsFileResolutionError(
+                "storage_unavailable",
+                "Run VFS projection is unavailable",
+            )
+        return run.vfs_projection
+
+    async def projection_for_actions(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        workspace_id: str,
+        running: bool,
+        active_run_id: str | None,
+    ) -> VfsProjection:
+        """Return the exact active run projection or an idle composer preview."""
+        if running:
+            if active_run_id is None:
+                raise VfsFileResolutionError(
+                    "storage_unavailable",
+                    "Active run VFS projection is unavailable",
+                )
+            return await self.load_run_projection(
+                run_id=active_run_id,
+                agent_id=agent_id,
+                session_id=session_id,
+                workspace_id=workspace_id,
+            )
+        return await self.build_preview(
+            agent_id=agent_id,
+            workspace_id=workspace_id,
+        )
+
+    async def resolve_file(
+        self,
+        *,
+        run_id: str,
+        agent_id: str,
+        session_id: str,
+        workspace_id: str,
+        uri: str,
+    ) -> VfsResolvedFile:
+        """Resolve one exact authorized file from a persisted run projection."""
+        try:
+            canonical_uri = canonicalize_vfs_uri(uri)
+        except VfsUriError as exc:
+            raise VfsFileResolutionError("invalid_uri", str(exc)) from exc
+        mount = canonical_uri.split("://", 1)[1].split("/", 1)[0]
+        if mount not in AZENTS_VFS_SUPPORTED_MOUNTS:
+            raise VfsFileResolutionError(
+                "unsupported_mount",
+                f"Unsupported azents:// mount: {mount}",
+            )
+        projection = await self.load_run_projection(
+            run_id=run_id,
+            agent_id=agent_id,
+            session_id=session_id,
+            workspace_id=workspace_id,
+        )
+        entry = projection.find(canonical_uri)
+        if entry is None:
+            raise VfsFileResolutionError(
+                "not_found",
+                f"VFS file not found in the current run projection: {canonical_uri}",
+            )
+        try:
+            entry.decode_body()
+        except ValueError as exc:
+            raise VfsFileResolutionError(
+                "storage_unavailable",
+                f"VFS file content is unavailable: {canonical_uri}",
+            ) from exc
+        return VfsResolvedFile(
+            projection_revision_id=projection.revision_id,
+            projection_hash=projection.projection_hash,
+            entry=entry,
+        )
 
     async def _eligible_provider_specs(
         self,
@@ -225,6 +362,8 @@ def _load_release_source(spec: VfsSourceSpec) -> VfsSourceRevision:
             raise ValueError(
                 f"VFS source file must be below a mount directory: {relative_path}"
             )
+        if mount not in AZENTS_VFS_SUPPORTED_MOUNTS:
+            raise ValueError(f"Unsupported VFS source mount: {mount}")
         canonical_uri = make_vfs_uri(mount, spec.namespace, mount_relative)
         body = item.read_bytes()
         media_type = mimetypes.guess_type(posixpath.basename(relative_path))[0]

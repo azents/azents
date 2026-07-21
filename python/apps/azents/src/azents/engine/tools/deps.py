@@ -25,6 +25,7 @@ from azents.engine.tools.todo import TodoStateStore, TodoToolkitProvider
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import AgentRunRepository
+from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.mcp_oauth_connection import MCPOAuthConnectionRepository
 from azents.repos.toolkit import AgentToolkitRepository, ToolkitRepository
 from azents.services.artifact import ArtifactService
@@ -110,7 +111,6 @@ def get_vfs_projection_service(
         dict[str, ToolkitProvider[Any]], Depends(get_toolkit_registry)
     ],
     catalog: Annotated[ReleaseVfsCatalog, Depends(get_release_vfs_catalog)],
-    cipher: Annotated[CredentialCipher, Depends(get_credential_cipher)],
 ) -> VfsProjectionService:
     """Create the run VFS projection service."""
     return VfsProjectionService(
@@ -118,8 +118,9 @@ def get_vfs_projection_service(
         toolkit_registry=toolkit_registry,
         catalog=catalog,
         agent_run_repository=AgentRunRepository(),
+        agent_session_repository=AgentSessionRepository(),
         agent_toolkit_repository=AgentToolkitRepository(),
-        toolkit_repository=ToolkitRepository(cipher=cipher),
+        toolkit_repository=ToolkitRepository(),
     )
 
 
@@ -152,6 +153,14 @@ def get_skill_state_store(
 
 def get_skill_toolkit_provider(
     skill_store: Annotated[SkillStateStore, Depends(get_skill_state_store)],
+    vfs_projection_service: Annotated[
+        VfsProjectionService,
+        Depends(get_vfs_projection_service),
+    ],
 ) -> SkillToolkitProvider:
     """SkillToolkitProvider dependency without runtime sync support."""
-    return SkillToolkitProvider(store=skill_store)
+    return SkillToolkitProvider(
+        store=skill_store,
+        projection_service=None,
+        vfs_projection_service=vfs_projection_service,
+    )

@@ -20,6 +20,7 @@ from azents.services.exchange_file import (
     FileUnavailable,
     SessionNotFound,
 )
+from azents.services.vfs import VfsFileResolutionError, VfsProjectionService
 
 
 @dataclasses.dataclass(frozen=True)
@@ -149,6 +150,46 @@ class ArtifactImportResolver:
             size=artifact.size_bytes,
             source_uri=uri,
             source_kind="artifact",
+        )
+
+
+@dataclasses.dataclass(frozen=True)
+class AzentsImportResolver:
+    """Current-run Azents VFS URI resolver."""
+
+    vfs_projection_service: VfsProjectionService
+    run_id: str
+    agent_id: str
+    session_id: str
+    workspace_id: str
+
+    async def resolve(self, uri: str) -> ImportResolvedFile:
+        """Resolve an authorized VFS entry to verified file bytes."""
+        try:
+            resolved = await self.vfs_projection_service.resolve_file(
+                run_id=self.run_id,
+                agent_id=self.agent_id,
+                session_id=self.session_id,
+                workspace_id=self.workspace_id,
+                uri=uri,
+            )
+        except VfsFileResolutionError as exc:
+            raise ImportResolveError(exc.code, exc.message) from None
+        entry = resolved.entry
+        try:
+            body = entry.decode_body()
+        except ValueError as exc:
+            raise ImportResolveError(
+                "storage_unavailable",
+                f"VFS file content is unavailable: {entry.canonical_uri}",
+            ) from exc
+        return ImportResolvedFile(
+            body=body,
+            name=entry.canonical_uri.rsplit("/", 1)[-1],
+            media_type=entry.media_type,
+            size=entry.size_bytes,
+            source_uri=entry.canonical_uri,
+            source_kind="azents",
         )
 
 

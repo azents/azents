@@ -414,6 +414,85 @@ void test("covers every remaining source-less builtin with a validated adapter",
   }
 });
 
+void test("renders a completed managed Skill result", () => {
+  const skillPath = "azents://skills/azents/deep-research/SKILL.md";
+  const content = [
+    "---",
+    "name: deep-research",
+    "description: Research deeply",
+    "---",
+    "",
+    "# Deep Research",
+  ].join("\n");
+  const metadata = {
+    name: "deep-research",
+    slug: "deep-research",
+    skill_path: skillPath,
+    source_kind: "azents",
+    source_label: "azents",
+    relative_hint: "azents/deep-research",
+    projection_revision_id: "revision-1",
+    projection_hash: "projection-hash",
+    source_id: "global",
+    source_revision_id: "release-1",
+    content_hash: "content-hash",
+  };
+  const result = knownToolPresentation(
+    toolCall({
+      name: "load_skill",
+      arguments: JSON.stringify({ skill_path: skillPath }),
+      result: `Skill loaded from the active projection.\nMetadata: ${JSON.stringify(metadata)}\n\n${content}`,
+    }),
+  );
+
+  assert.deepEqual(result, {
+    type: "specialized",
+    presentation: {
+      action: "loadSkill",
+      subject: "deep-research",
+      qualifier: null,
+      detail: { type: "skill", content },
+    },
+  });
+});
+
+void test("renders an azents VFS import as a managed temporary file", () => {
+  const result = knownToolPresentation(
+    toolCall({
+      name: "import_file",
+      arguments: JSON.stringify({
+        uri: "azents://skills/azents/deep-research/references/evidence-checklist.md",
+        path: "/tmp/agent/imports/evidence-checklist.md",
+        overwrite: false,
+      }),
+      result: "Imported managed resource.",
+    }),
+  );
+
+  assert.deepEqual(result, {
+    type: "specialized",
+    presentation: {
+      action: "importFile",
+      subject: "evidence-checklist.md",
+      qualifier: null,
+      detail: {
+        type: "semantic",
+        fields: [
+          { label: "source", value: "azents" },
+          {
+            label: "destination",
+            value: "/tmp/agent/imports/evidence-checklist.md",
+          },
+          { label: "overwrite", value: "false" },
+          { label: "temporary", value: "true" },
+        ],
+        sections: [],
+        items: [],
+      },
+    },
+  });
+});
+
 void test("keeps sensitive builtin payloads out of collapsed summaries", () => {
   const cases = [
     {

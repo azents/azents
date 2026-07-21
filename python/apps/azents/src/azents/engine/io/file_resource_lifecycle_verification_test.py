@@ -384,8 +384,11 @@ async def test_artifact_output_import_and_expiration_e2e_path() -> None:
         session_storage=storage,
         exchange_file_service=AsyncMock(),
         artifact_service=service,
+        vfs_projection_service=None,
         session_id="session-1",
         agent_id="agent-1",
+        workspace_id="workspace-1",
+        run_id="run-1",
         user_id="user-1",
     )
     await import_tool.handler(json.dumps({"uri": artifact.uri}))
