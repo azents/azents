@@ -304,6 +304,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Sequential Input Buffer Preparation Historical Requirements Reconstruction](requirements/sequential-260712-sequential-input-buffer-preparation.md) | sequential-260712 | 2026-07-12 | 2026-07-12 |
 | [Server-Side Session ID Generation Historical Requirements Reconstruction](requirements/server-260311-server-side.md) | server-260311 | 2026-03-11 | 2026-03-11 |
 | [Service Toolkit Design Discussion Historical Requirements Reconstruction](requirements/service-260311-service-toolkit.md) | service-260311 | 2026-03-11 | - |
+| [Extensible Session Lifecycle Requirements](requirements/session-260721-lifecycle-extensibility.md) | session-260721 | 2026-07-21 | - |
 | [Agent Settings Pages and Memory UI Historical Requirements Reconstruction](requirements/settings-260702-settings-pages-and-memory-ui.md) | settings-260702 | 2026-07-02 | - |
 | [Model-Scoped Selectable Model Settings Historical Requirements Reconstruction](requirements/settings-260716-selectable-settings.md) | settings-260716 | 2026-07-16 | - |
 | [Model Unread Run Results as Session-Shared State Historical Requirements Reconstruction](requirements/shared-260720-shared-unread-result.md) | shared-260720 | 2026-07-20 | - |
@@ -616,6 +617,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Sequential Input Buffer Preparation Historical Decision Reconstruction](adr/sequential-260712-sequential-input-buffer-preparation.md)
 - [Server-Side Session ID Generation Historical Decision Reconstruction](adr/server-260311-server-side.md)
 - [Service Toolkit Design Discussion](adr/service-260311-service-toolkit.md)
+- [Extensible Session Lifecycle](adr/session-260721-lifecycle-extensibility.md)
 - [Agent Settings Pages and Memory UI](adr/settings-260702-settings-pages-and-memory-ui.md)
 - [Model-Scoped Selectable Model Settings Historical Decision Reconstruction](adr/settings-260716-selectable-settings.md)
 - [Model Unread Run Results as Session-Shared State](adr/shared-260720-shared-unread-result.md)
