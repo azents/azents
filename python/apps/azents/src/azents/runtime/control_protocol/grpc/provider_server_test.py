@@ -11,10 +11,12 @@ from typing import NoReturn
 import grpc
 import pytest
 from azents_runtime_control.proto import runtime_provider_control_pb2
+from azents_runtime_control.provider import (
+    RuntimeLifecycleCommandType as RuntimeProviderCommandType,
+)
 from azents_runtime_control.provider import RuntimeProviderReport
 from google.protobuf import timestamp_pb2
 
-from azents.core.enums import RuntimeLifecycleCommandType
 from azents.runtime.control_protocol.data import (
     RuntimeDispatchResult,
     RuntimeProviderCommand,
@@ -223,7 +225,7 @@ async def test_provider_grpc_relays_commands_and_records_completion() -> None:
             provider_generation=accepted.register_accepted.generation,
             runtime_id="runtime-1",
             desired_generation=5,
-            command_type=RuntimeLifecycleCommandType.START,
+            command_type=RuntimeProviderCommandType.START,
             reset_final_desired_state=None,
             payload={
                 "identity": {

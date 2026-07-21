@@ -751,6 +751,26 @@ async def test_reset_stopped_recreates_only_pvc() -> None:
 
 
 @pytest.mark.asyncio
+async def test_terminal_delete_removes_pod_and_pvc_idempotently() -> None:
+    api = FakeKubernetesApi()
+    provider = _provider(api)
+    await provider.start(_command(RuntimeLifecycleCommandType.START))
+
+    first = await provider.terminal_delete(
+        _command(RuntimeLifecycleCommandType.TERMINAL_DELETE)
+    )
+    second = await provider.terminal_delete(
+        _command(RuntimeLifecycleCommandType.TERMINAL_DELETE)
+    )
+
+    assert first.report.terminal_delete_acknowledged is True
+    assert first.report.workspace_path == ""
+    assert second.report.terminal_delete_acknowledged is True
+    assert ("azents-runtime", "azents-runtime-runtime-1") not in api.pods
+    assert ("azents-runtime", "azents-runtime-runtime-1-workspace") not in api.pvcs
+
+
+@pytest.mark.asyncio
 async def test_start_reuses_current_pod_across_generation_changes() -> None:
     api = FakeKubernetesApi()
     provider = _provider(api)

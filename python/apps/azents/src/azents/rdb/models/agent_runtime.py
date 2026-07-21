@@ -145,6 +145,24 @@ class RDBAgentRuntime(RDBModel):
         nullable=True,
         default=None,
     )
+    terminal_delete_requested_generation: Mapped[int | None] = mapped_column(
+        sa.Integer,
+        init=False,
+        nullable=True,
+        default=None,
+    )
+    terminal_delete_acknowledged_generation: Mapped[int | None] = mapped_column(
+        sa.Integer,
+        init=False,
+        nullable=True,
+        default=None,
+    )
+    terminal_delete_acknowledged_at: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime,
+        init=False,
+        nullable=True,
+        default=None,
+    )
     provider_observed_state: Mapped[RuntimeProviderObservedState] = mapped_column(
         runtime_provider_observed_state_enum,
         init=False,

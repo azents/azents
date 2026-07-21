@@ -4,8 +4,11 @@ import dataclasses
 from datetime import datetime
 from typing import Protocol
 
+from azents_runtime_control.provider import (
+    RuntimeLifecycleCommandType as RuntimeProviderCommandType,
+)
+
 from azents.core.enums import (
-    RuntimeLifecycleCommandType,
     RuntimeProviderObservedState,
     RuntimeRunnerState,
 )
@@ -125,7 +128,7 @@ class RuntimeProviderCommand:
     provider_generation: int
     runtime_id: str
     desired_generation: int
-    command_type: RuntimeLifecycleCommandType
+    command_type: RuntimeProviderCommandType
     reset_final_desired_state: str | None
     payload: dict[str, JsonValue]
     deadline_at: datetime | None

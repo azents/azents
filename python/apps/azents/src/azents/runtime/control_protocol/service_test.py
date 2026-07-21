@@ -3,8 +3,10 @@
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from azents_runtime_control.provider import (
+    RuntimeLifecycleCommandType as RuntimeProviderCommandType,
+)
 
-from azents.core.enums import RuntimeLifecycleCommandType
 from azents.runtime.control_protocol.data import (
     RuntimeDispatchResult,
     RuntimeProtocolCapabilities,
@@ -99,7 +101,7 @@ async def test_dispatch_provider_command_uses_provider_generation_fence() -> Non
             provider_generation=accepted.generation,
             runtime_id="runtime-1",
             desired_generation=3,
-            command_type=RuntimeLifecycleCommandType.START,
+            command_type=RuntimeProviderCommandType.START,
             reset_final_desired_state=None,
             payload={"reason": "user"},
             deadline_at=now + timedelta(seconds=30),
@@ -206,7 +208,7 @@ async def test_provider_reconnect_skips_previous_generation_requests() -> None:
             provider_generation=first.generation,
             runtime_id="runtime-1",
             desired_generation=3,
-            command_type=RuntimeLifecycleCommandType.START,
+            command_type=RuntimeProviderCommandType.START,
             reset_final_desired_state=None,
             payload={"reason": "user"},
             deadline_at=now + timedelta(seconds=30),

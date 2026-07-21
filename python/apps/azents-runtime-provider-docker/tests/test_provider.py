@@ -399,6 +399,30 @@ async def test_reset_stopped_deletes_workspace_data_and_does_not_start_container
 
 
 @pytest.mark.asyncio
+async def test_terminal_delete_removes_container_and_workspace_idempotently(
+    tmp_path: Path,
+) -> None:
+    docker = FakeDockerApi()
+    provider = _provider(tmp_path, docker)
+    await provider.start(_command(RuntimeLifecycleCommandType.START))
+    marker = tmp_path / "agent-runtimes" / "runtime-1" / "workspace" / "delete.txt"
+    marker.write_text("gone")
+
+    first = await provider.terminal_delete(
+        _command(RuntimeLifecycleCommandType.TERMINAL_DELETE)
+    )
+    second = await provider.terminal_delete(
+        _command(RuntimeLifecycleCommandType.TERMINAL_DELETE)
+    )
+
+    assert first.report.terminal_delete_acknowledged is True
+    assert first.report.workspace_path == ""
+    assert second.report.terminal_delete_acknowledged is True
+    assert "azents-runtime-runtime-1" not in docker.containers
+    assert not marker.exists()
+
+
+@pytest.mark.asyncio
 async def test_observe_known_runtimes_reports_container_and_directory(
     tmp_path: Path,
 ) -> None:

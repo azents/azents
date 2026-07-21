@@ -4,6 +4,9 @@ import dataclasses
 import logging
 from datetime import UTC, datetime, timedelta
 
+from azents_runtime_control.provider import (
+    RuntimeLifecycleCommandType as RuntimeProviderCommandType,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
@@ -109,16 +112,19 @@ class RuntimeLifecycleReconciler:
         return dispatched
 
     async def _dispatch_runtime(self, runtime: AgentRuntime) -> bool:
+        command_type = _provider_command_type(runtime)
+        if command_type is None:
+            return False
         return await self._dispatch_runtime_command(
             runtime,
-            command_type=runtime.last_lifecycle_command,
+            command_type=command_type,
             claim_lifecycle=True,
         )
 
     async def _dispatch_observe(self, runtime: AgentRuntime) -> bool:
         return await self._dispatch_runtime_command(
             runtime,
-            command_type=RuntimeLifecycleCommandType.OBSERVE,
+            command_type=RuntimeProviderCommandType.OBSERVE,
             claim_lifecycle=False,
         )
 
@@ -126,7 +132,7 @@ class RuntimeLifecycleReconciler:
         self,
         runtime: AgentRuntime,
         *,
-        command_type: RuntimeLifecycleCommandType | None,
+        command_type: RuntimeProviderCommandType,
         claim_lifecycle: bool,
     ) -> bool:
         provider_id = runtime.runtime_provider_id
@@ -145,9 +151,6 @@ class RuntimeLifecycleReconciler:
                 message="Agent Runtime has no configured Runtime Provider.",
             )
             return False
-        if command_type is None:
-            return False
-
         connection = await self._coordination_store.get_connection(
             kind=RuntimeConnectionKind.PROVIDER,
             subject_id=provider_id,
@@ -303,6 +306,20 @@ def _reset_final_desired_state(runtime: AgentRuntime) -> str | None:
     if runtime.reset_final_desired_state is None:
         return None
     return runtime.reset_final_desired_state.value
+
+
+def _provider_command_type(
+    runtime: AgentRuntime,
+) -> RuntimeProviderCommandType | None:
+    if (
+        runtime.terminal_delete_requested_generation == runtime.desired_generation
+        and runtime.terminal_delete_acknowledged_generation
+        != runtime.desired_generation
+    ):
+        return RuntimeProviderCommandType.TERMINAL_DELETE
+    if runtime.last_lifecycle_command is None:
+        return None
+    return RuntimeProviderCommandType(runtime.last_lifecycle_command.value)
 
 
 def _runner_auth_credential_id(runtime: AgentRuntime) -> str:

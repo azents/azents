@@ -24,6 +24,7 @@ def _runtime(
         RuntimeProviderConnectionState.DISCONNECTED
     ),
     runner_state: RuntimeRunnerState = RuntimeRunnerState.UNKNOWN,
+    terminal_delete_requested_generation: int | None = None,
     failure_generation: int | None = None,
     failure_code: str | None = None,
     failure_message: str | None = None,
@@ -40,6 +41,9 @@ def _runtime(
         desired_generation=desired_generation,
         last_lifecycle_command=None,
         reset_final_desired_state=None,
+        terminal_delete_requested_generation=terminal_delete_requested_generation,
+        terminal_delete_acknowledged_generation=None,
+        terminal_delete_acknowledged_at=None,
         provider_observed_state=provider_observed_state,
         provider_observed_generation=0,
         provider_connection_state=provider_connection_state,
@@ -154,3 +158,15 @@ class TestAgentRuntimeLifecycleSummary:
 
         assert state.summary == RuntimeSummary.STARTING
         assert state.failure is None
+
+    def test_terminal_deletion_disables_all_runtime_actions(self) -> None:
+        """Terminal deletion does not expose lifecycle actions."""
+        state = self.service.calculate_state(
+            _runtime(terminal_delete_requested_generation=3)
+        )
+
+        assert state.actions.start is False
+        assert state.actions.stop is False
+        assert state.actions.restart is False
+        assert state.actions.reset is False
+        assert state.actions.use_runner is False

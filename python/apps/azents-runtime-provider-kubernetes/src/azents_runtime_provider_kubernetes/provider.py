@@ -218,6 +218,37 @@ class KubernetesRuntimeProvider:
             report=report,
         )
 
+    async def terminal_delete(
+        self,
+        command: RuntimeLifecycleCommand,
+    ) -> RuntimeLifecycleResult:
+        """Delete the Runtime Pod and PVC without recreating either resource."""
+        _LOGGER.info(
+            "Kubernetes Runtime terminal deletion requested",
+            extra=_log_context(command, self._config),
+        )
+        await self._api.delete_pod(
+            _pod_name(command.identity.runtime_id),
+            self._config.namespace,
+        )
+        await self._api.delete_pvc(
+            _pvc_name(command.identity.runtime_id),
+            self._config.namespace,
+        )
+        return RuntimeLifecycleResult(
+            command_type=RuntimeLifecycleCommandType.TERMINAL_DELETE,
+            report=dataclasses.replace(
+                self._report(
+                    command,
+                    observed_state=RuntimeProviderObservedState.STOPPED,
+                    reason="terminal_resources_absent",
+                    provider_runtime_id=None,
+                ),
+                workspace_path="",
+                terminal_delete_acknowledged=True,
+            ),
+        )
+
     async def observe(
         self,
         command: RuntimeLifecycleCommand,
@@ -514,6 +545,7 @@ class KubernetesRuntimeProvider:
             reason=reason,
             diagnostic={},
             reported_at=datetime.now(UTC),
+            terminal_delete_acknowledged=False,
         )
 
     def _report_from_pod(self, pod: PodResource) -> RuntimeProviderReport:
@@ -537,6 +569,7 @@ class KubernetesRuntimeProvider:
             reason=reason,
             diagnostic={"source": "pod"},
             reported_at=datetime.now(UTC),
+            terminal_delete_acknowledged=False,
         )
 
     def _report_from_pod_event(
@@ -566,6 +599,7 @@ class KubernetesRuntimeProvider:
                 reason="pod_deleted",
                 diagnostic={"source": "pod_watch", "event_type": event.event_type},
                 reported_at=datetime.now(UTC),
+                terminal_delete_acknowledged=False,
             )
         report = self._report_from_pod(event.pod)
         return dataclasses.replace(
@@ -595,6 +629,7 @@ class KubernetesRuntimeProvider:
             reason="pvc_present_without_pod",
             diagnostic={"source": "pvc"},
             reported_at=datetime.now(UTC),
+            terminal_delete_acknowledged=False,
         )
 
 
