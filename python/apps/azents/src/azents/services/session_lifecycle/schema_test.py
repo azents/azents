@@ -125,3 +125,38 @@ async def test_installed_catalog_reader_exposes_current_worktree_risk(
     assert any(
         violation.code == "multiple_mutating_paths" for violation in worktree_violations
     )
+
+
+async def test_installed_catalog_restricts_agent_decommission_lifecycle_roots(
+    rdb_session: AsyncSession,
+) -> None:
+    """Fresh migrated PostgreSQL protects Agent and Workspace lifecycle roots."""
+    foreign_keys = await PostgreSQLSessionLifecycleGraphReader().read_foreign_keys(
+        rdb_session
+    )
+    expected_constraints = {
+        "agents_workspace_id_fkey",
+        "agent_sessions_workspace_id_fkey",
+        "agent_sessions_agent_id_fkey",
+        "agent_runtimes_workspace_id_fkey",
+        "agent_runtimes_agent_id_fkey",
+        "artifacts_agent_id_fkey",
+        "exchange_files_agent_id_fkey",
+        "model_files_agent_id_fkey",
+        "session_agent_contexts_agent_id_fkey",
+        "toolkit_states_agent_id_fkey",
+    }
+    lifecycle_root_foreign_keys = {
+        foreign_key.constraint_name: foreign_key
+        for foreign_key in foreign_keys
+        if foreign_key.constraint_name in expected_constraints
+    }
+
+    assert lifecycle_root_foreign_keys.keys() == expected_constraints
+    assert all(
+        foreign_key.delete_action is PostgreSQLForeignKeyDeleteAction.RESTRICT
+        for foreign_key in lifecycle_root_foreign_keys.values()
+    )
+    assert all(
+        foreign_key.triggers for foreign_key in lifecycle_root_foreign_keys.values()
+    )
