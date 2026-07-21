@@ -1,16 +1,13 @@
 """IdleContinuationService tests."""
 
+import dataclasses
 import datetime
 from typing import Any, cast
 
 import pytest
 
 from azents.broker.types import BrokerMessage, SessionBroker, SessionWakeUp
-from azents.core.enums import (
-    EventKind,
-    InputBufferKind,
-    InputBufferSchedulingMode,
-)
+from azents.core.enums import EventKind, InputBufferKind, InputBufferSchedulingMode
 from azents.core.tools import Toolkit, ToolkitState, ToolkitStatus, TurnContext
 from azents.engine.events.types import Event
 from azents.engine.hooks.types import (
@@ -33,15 +30,8 @@ from azents.worker.session.idle_continuation import IdleContinuationService
 class _InputBufferService:
     """InputBufferService test double."""
 
-    def __init__(self, *, pending: bool) -> None:
-        self.pending = pending
-        self.checked_session_ids: list[str] = []
+    def __init__(self) -> None:
         self.enqueued_batches: list[list[InputBufferEnqueue]] = []
-
-    async def has_pending_session_input_buffers(self, session_id: str) -> bool:
-        """Record and return whether pending input buffer exists."""
-        self.checked_session_ids.append(session_id)
-        return self.pending
 
     async def enqueue_many(
         self,
@@ -94,25 +84,82 @@ class _SessionManager:
         return _SessionContext()
 
 
+@dataclasses.dataclass(frozen=True)
+class _LockedSession:
+    """Minimal locked AgentSession projection."""
+
+    pending_idle_continuation_run_id: str | None
+    pending_command_id: str | None
+
+
 class _AgentSessionRepository:
     """AgentSessionRepository test double."""
 
     def __init__(self) -> None:
-        self.marked_running: list[str] = []
+        self.boundary_run_id: str | None = "run-001"
+        self.consumed: list[tuple[str, str, bool]] = []
 
-    async def lock_by_id(self, session: object, session_id: str) -> object:
-        """Return a locked Session fixture."""
-        del session, session_id
-        return object()
-
-    async def mark_running_for_input_wakeup(
+    async def lock_by_id(
         self,
         session: object,
         session_id: str,
-    ) -> None:
-        """Record wake transition."""
+    ) -> _LockedSession:
+        """Return a locked Session fixture."""
+        del session, session_id
+        return _LockedSession(
+            pending_idle_continuation_run_id=self.boundary_run_id,
+            pending_command_id=None,
+        )
+
+    async def consume_pending_idle_continuation(
+        self,
+        session: object,
+        *,
+        session_id: str,
+        run_id: str,
+        continue_running: bool,
+    ) -> bool:
+        """Consume the matching durable boundary."""
         del session
-        self.marked_running.append(session_id)
+        if self.boundary_run_id != run_id:
+            return False
+        self.boundary_run_id = None
+        self.consumed.append((session_id, run_id, continue_running))
+        return True
+
+
+class _AgentRunRepository:
+    """AgentRunRepository test double."""
+
+    async def get_active_by_session_id(
+        self,
+        session: object,
+        *,
+        session_id: str,
+    ) -> None:
+        """Report no active Run."""
+        del session, session_id
+        return None
+
+
+class _InputBufferRepository:
+    """InputBufferRepository test double."""
+
+    def __init__(self, *, pending: bool) -> None:
+        self.pending = pending
+        self.checked_session_ids: list[str] = []
+
+    async def has_by_session_id_and_scheduling_mode(
+        self,
+        session: object,
+        *,
+        session_id: str,
+        scheduling_mode: InputBufferSchedulingMode,
+    ) -> bool:
+        """Return configured pending wake-producing input state."""
+        del session, scheduling_mode
+        self.checked_session_ids.append(session_id)
+        return self.pending
 
 
 class _EventPublisher:
@@ -184,6 +231,7 @@ def _service(
     event_publisher: _EventPublisher,
     broker: _Broker,
     agent_session_repository: _AgentSessionRepository | None = None,
+    input_buffer_repository: _InputBufferRepository | None = None,
 ) -> IdleContinuationService:
     """Create IdleContinuationService under test."""
     return IdleContinuationService(
@@ -192,6 +240,11 @@ def _service(
             Any,
             agent_session_repository or _AgentSessionRepository(),
         ),
+        agent_run_repository=cast(Any, _AgentRunRepository()),
+        input_buffer_repository=cast(
+            Any,
+            input_buffer_repository or _InputBufferRepository(pending=False),
+        ),
         event_publisher=cast(WorkerEventPublisher, event_publisher),
         broker=cast(SessionBroker, broker),
         session_manager=cast(Any, _SessionManager()),
@@ -199,11 +252,12 @@ def _service(
 
 
 @pytest.mark.asyncio
-async def test_enqueue_uses_single_runner_boundary_for_pending_input_check() -> None:
-    """Idle continuation does not repeat the runner's pending-input check."""
-    input_buffer_service = _InputBufferService(pending=True)
+async def test_consume_defers_when_new_pending_input_exists() -> None:
+    """Known pending input prevents idle hook evaluation and its outcome."""
+    input_buffer_service = _InputBufferService()
     event_publisher = _EventPublisher()
     broker = _Broker()
+    input_buffer_repository = _InputBufferRepository(pending=True)
     toolkit = _IdleToolkit(
         [SessionContinuationInput(content="", metadata={"source": "goal"})]
     )
@@ -212,26 +266,28 @@ async def test_enqueue_uses_single_runner_boundary_for_pending_input_check() -> 
         input_buffer_service=input_buffer_service,
         event_publisher=event_publisher,
         broker=broker,
-    ).enqueue(
+        input_buffer_repository=input_buffer_repository,
+    ).consume(
         _message(),
         toolkits=[ToolkitBinding(toolkit, "goal", False)],
         run_id="run-001",
     )
 
-    assert result is True
-    assert input_buffer_service.checked_session_ids == []
-    assert len(toolkit.contexts) == 1
-    assert len(input_buffer_service.enqueued_batches) == 1
-    assert len(event_publisher.dispatched) == 1
-    assert broker.sent_messages == [_message()]
+    assert result is False
+    assert toolkit.contexts == []
+    assert input_buffer_service.enqueued_batches == []
+    assert event_publisher.dispatched == []
+    assert broker.sent_messages == []
+    assert input_buffer_repository.checked_session_ids == ["session-001"]
 
 
 @pytest.mark.asyncio
-async def test_enqueue_stores_continuation_and_sends_wake_up() -> None:
+async def test_consume_stores_continuation_and_sends_wake_up() -> None:
     """Idle continuation is buffered before sending the wake-up signal."""
-    input_buffer_service = _InputBufferService(pending=False)
+    input_buffer_service = _InputBufferService()
     event_publisher = _EventPublisher()
     broker = _Broker()
+    repository = _AgentSessionRepository()
     toolkit = _IdleToolkit(
         [
             SessionContinuationInput(
@@ -245,7 +301,8 @@ async def test_enqueue_stores_continuation_and_sends_wake_up() -> None:
         input_buffer_service=input_buffer_service,
         event_publisher=event_publisher,
         broker=broker,
-    ).enqueue(
+        agent_session_repository=repository,
+    ).consume(
         message := _message(),
         toolkits=[ToolkitBinding(toolkit, "goal", False)],
         run_id="run-001",
@@ -271,7 +328,9 @@ async def test_enqueue_stores_continuation_and_sends_wake_up() -> None:
         "provider_slug": "goal",
     }
     assert enqueue.content == "ignored"
+    assert enqueue.idempotency_key == "idle_continuation:run-001:goal:0"
     assert enqueue.attachments == []
+    assert repository.consumed == [("session-001", "run-001", True)]
     assert len(event_publisher.dispatched) == 1
     assert event_publisher.dispatched[0][0] == "session-001"
     assert event_publisher.dispatched[0][1].kind == EventKind.GOAL_CONTINUATION

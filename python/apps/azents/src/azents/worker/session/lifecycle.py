@@ -145,6 +145,24 @@ class SessionLifecycleService:
 
         return await self.run_short_db(get_active)
 
+    async def get_pending_idle_continuation_run_id(
+        self,
+        session_id: str,
+    ) -> str | None:
+        """Return the completed Run awaiting true-idle continuation evaluation."""
+        async with self.session_manager() as db_session:
+            agent_session = await self.agent_session_repository.get_by_id(
+                db_session,
+                session_id,
+            )
+        if agent_session is None:
+            raise ValueError("AgentSession not found")
+        return agent_session.pending_idle_continuation_run_id
+
+    async def has_pending_idle_continuation(self, session_id: str) -> bool:
+        """Return whether a completed Run still requires idle evaluation."""
+        return (await self.get_pending_idle_continuation_run_id(session_id)) is not None
+
     async def heartbeat_session(self, session_id: str) -> None:
         """Refresh DB heartbeat and Redis owner lease of RUNNING session."""
         await self.run_short_db(

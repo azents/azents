@@ -14,6 +14,7 @@ from azents.core.enums import (
     AgentRunPhase,
     AgentRunStatus,
     AgentSessionEndReason,
+    AgentSessionStatus,
     EventKind,
     LLMProvider,
 )
@@ -1055,6 +1056,148 @@ class TestEventExecutionRepositories:
         assert found is not None
         assert found.id == run.id
         assert wrong_session is None
+
+    async def test_completed_run_records_pending_idle_continuation(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Completed Run atomically records its durable idle boundary."""
+        workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
+            rdb_session,
+            "event-runtime-idle-boundary",
+        )
+        agent_session = await _agent_session_repository().create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        repo = AgentRunRepository()
+        completed = await repo.create(
+            rdb_session,
+            AgentRunCreate(
+                session_id=agent_session.id,
+                parent_agent_run_id=None,
+            ),
+        )
+
+        await repo.mark_terminal(
+            rdb_session,
+            completed.id,
+            AgentRunStatus.COMPLETED,
+            ended_at=datetime.datetime.now(datetime.UTC),
+        )
+
+        rdb_agent_session = await rdb_session.get(RDBAgentSession, agent_session.id)
+        assert rdb_agent_session is not None
+        await rdb_session.refresh(rdb_agent_session)
+        assert rdb_agent_session.pending_idle_continuation_run_id == completed.id
+
+        pending = await repo.create_pending(
+            rdb_session,
+            session_id=agent_session.id,
+            parent_agent_run_id=None,
+        )
+        await repo.activate_pending(
+            rdb_session,
+            run_id=pending.id,
+            activated_at=datetime.datetime.now(datetime.UTC),
+        )
+
+        await rdb_session.refresh(rdb_agent_session)
+        assert rdb_agent_session.pending_idle_continuation_run_id is None
+
+    async def test_noncompleted_run_does_not_record_pending_idle_continuation(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Noncompleted terminal states cannot create idle continuation work."""
+        workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
+            rdb_session,
+            "event-runtime-no-idle-boundary",
+        )
+        agent_session = await _agent_session_repository().create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        repo = AgentRunRepository()
+        run = await repo.create(
+            rdb_session,
+            AgentRunCreate(
+                session_id=agent_session.id,
+                parent_agent_run_id=None,
+            ),
+        )
+
+        await repo.mark_terminal(
+            rdb_session,
+            run.id,
+            AgentRunStatus.FAILED,
+            ended_at=datetime.datetime.now(datetime.UTC),
+        )
+
+        rdb_agent_session = await rdb_session.get(RDBAgentSession, agent_session.id)
+        assert rdb_agent_session is not None
+        assert rdb_agent_session.pending_idle_continuation_run_id is None
+
+    async def test_archived_session_cannot_consume_pending_idle_continuation(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """A stale completed boundary cannot reactivate an archived Session."""
+        workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
+            rdb_session,
+            "event-runtime-archived-idle-boundary",
+        )
+        session_repository = _agent_session_repository()
+        agent_session = await session_repository.create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        run_repository = AgentRunRepository()
+        completed = await run_repository.create(
+            rdb_session,
+            AgentRunCreate(
+                session_id=agent_session.id,
+                parent_agent_run_id=None,
+            ),
+        )
+        await run_repository.mark_terminal(
+            rdb_session,
+            completed.id,
+            AgentRunStatus.COMPLETED,
+            ended_at=datetime.datetime.now(datetime.UTC),
+        )
+        await session_repository.archive(
+            rdb_session,
+            agent_session.id,
+            ended_at=datetime.datetime.now(datetime.UTC),
+            end_reason=AgentSessionEndReason.DELETED,
+        )
+
+        consumed = await session_repository.consume_pending_idle_continuation(
+            rdb_session,
+            session_id=agent_session.id,
+            run_id=completed.id,
+            continue_running=True,
+        )
+
+        rdb_agent_session = await rdb_session.get(RDBAgentSession, agent_session.id)
+        assert rdb_agent_session is not None
+        await rdb_session.refresh(rdb_agent_session)
+        assert consumed is False
+        assert rdb_agent_session.status is AgentSessionStatus.ARCHIVED
+        assert rdb_agent_session.pending_idle_continuation_run_id == completed.id
 
     async def test_agent_run_retry_state_updates_and_clears_on_terminal(
         self,

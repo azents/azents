@@ -436,6 +436,11 @@ class AgentRunRepository:
         create: AgentRunCreate,
     ) -> AgentRunState:
         """Create Agent run row."""
+        if create.status == AgentRunStatus.RUNNING:
+            await self._lock_session_for_run_activation(
+                session,
+                session_id=create.session_id,
+            )
         await self.mark_session_running_terminal(
             session,
             session_id=create.session_id,
@@ -463,6 +468,11 @@ class AgentRunRepository:
             rdb.started_at = datetime.datetime.now(datetime.UTC)
         session.add(rdb)
         await session.flush()
+        if create.status == AgentRunStatus.RUNNING:
+            await self._clear_pending_idle_continuation(
+                session,
+                session_id=create.session_id,
+            )
         return self._build(rdb)
 
     async def create_pending(
@@ -551,9 +561,17 @@ class AgentRunRepository:
         )
         if rdb is None:
             raise ValueError("Pending AgentRun not found")
+        await self._lock_session_for_run_activation(
+            session,
+            session_id=rdb.session_id,
+        )
         rdb.status = AgentRunStatus.RUNNING
         rdb.started_at = activated_at
         await session.flush()
+        await self._clear_pending_idle_continuation(
+            session,
+            session_id=rdb.session_id,
+        )
         await session.refresh(rdb)
         return self._build(rdb)
 
@@ -1015,6 +1033,8 @@ class AgentRunRepository:
             terminal_result_message=terminal_result_message,
         )
         await session.flush()
+        if status == AgentRunStatus.COMPLETED:
+            await self._record_pending_idle_continuation(session, rdb)
         await self._upsert_unread_terminal_run(session, rdb)
         await session.refresh(rdb)
         return self._build(rdb)
@@ -1049,6 +1069,8 @@ class AgentRunRepository:
             terminal_result_message=terminal_result_message,
         )
         await session.flush()
+        if status == AgentRunStatus.COMPLETED:
+            await self._record_pending_idle_continuation(session, rdb)
         await self._upsert_unread_terminal_run(session, rdb)
         await session.refresh(rdb)
         return self._build(rdb)
@@ -1079,6 +1101,48 @@ class AgentRunRepository:
         )
         await session.flush()
         return self._build(rdb)
+
+    async def _clear_pending_idle_continuation(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+    ) -> None:
+        """Discard an older idle boundary when new Run work starts."""
+        await session.execute(
+            sa.update(RDBAgentSession)
+            .where(RDBAgentSession.id == session_id)
+            .values(pending_idle_continuation_run_id=None)
+        )
+        await session.flush()
+
+    async def _lock_session_for_run_activation(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+    ) -> None:
+        """Serialize Run activation with pending idle-boundary consumption."""
+        locked_session_id = await session.scalar(
+            sa.select(RDBAgentSession.id)
+            .where(RDBAgentSession.id == session_id)
+            .with_for_update()
+        )
+        if locked_session_id is None:
+            raise ValueError("AgentSession not found")
+
+    async def _record_pending_idle_continuation(
+        self,
+        session: AsyncSession,
+        run: RDBAgentRun,
+    ) -> None:
+        """Record the completed Run that must close the next idle boundary."""
+        await session.execute(
+            sa.update(RDBAgentSession)
+            .where(RDBAgentSession.id == run.session_id)
+            .values(pending_idle_continuation_run_id=run.id)
+        )
+        await session.flush()
 
     @staticmethod
     def _apply_terminal_values(

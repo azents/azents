@@ -15,8 +15,8 @@ code_paths:
   - python/apps/azents/src/azents/services/chat/**
   - python/apps/azents/src/azents/api/public/chat/v1/**
   - typescript/apps/azents-web/src/features/chat/**
-last_verified_at: 2026-07-16
-spec_version: 9
+last_verified_at: 2026-07-21
+spec_version: 10
 ---
 
 # Goal Domain Spec
@@ -84,27 +84,34 @@ The required order is:
 
 1. A foreground run reaches a terminal `RunComplete` boundary and the durable run status is
    `completed`.
-2. The runner confirms there is no pending command, pending input buffer, or queued actionable
-   wake-up.
-3. The runner transitions the session runtime to `idle`.
-4. The runner dispatches `on_session_idle` hooks over the resolved toolkit bindings.
+2. That terminalization atomically stores the Run ID in
+   `AgentSession.pending_idle_continuation_run_id`. Other terminal statuses do not create this
+   pointer.
+3. The runner confirms there is no pending command, wake-producing input buffer, queued actionable
+   wake-up, or active Run. Starting an actionable replacement Run clears an earlier pointer because
+   that earlier boundary did not remain idle.
+4. The runner resolves current session hook providers and dispatches `on_session_idle` with the
+   stored Run ID.
 5. Goal Toolkit returns continuation input only when the current Goal has `status == active` and a
    non-empty `objective`.
-6. `IdleContinuationService` enqueues returned continuation input through `InputBufferService`.
-7. `InputBufferService` inserts `InputBufferKind.GOAL_CONTINUATION` rows and marks the session
-   runtime `running` in the same database transaction.
-8. The worker publishes pending input-buffer live state and sends a broker wake-up signal.
+6. One transaction rechecks the durable idle conditions, conditionally consumes the matching pointer,
+   and either inserts `InputBufferKind.GOAL_CONTINUATION` rows plus `running` state or commits
+   `idle` state when no hook returns continuation input.
+7. Continuation InputBuffers use deterministic Run/provider/ordinal idempotency keys. The worker
+   publishes newly created pending input-buffer live state and sends a broker wake-up signal after
+   commit.
 
 `paused`, `blocked`, `complete`, or empty Goal state returns no continuation. If the latest terminal
 run status is `failed`, `stopped`, `interrupted`, or `cancelled`, idle continuation is skipped even
 though the session may still transition to `idle`. If retry is active, the run remains `running` and
 the idle continuation path is not reached. If any pending input buffer already exists when the idle
-hook boundary is reached, idle continuation is skipped so existing user or system input runs first.
+hook boundary is reached, idle continuation is deferred so existing user or system input runs first.
 
 Hook providers do not write durable transcript events and do not send broker wake-ups directly. They
 return `SessionContinuationInput`; the worker converts it into session-bound input buffers. Broker
-wake-up is only a signal. The recoverable source of truth is the pending input buffer plus the
-same-transaction `running` state transition.
+wake-up is only a signal. The recoverable source of truth is the pending idle-continuation pointer
+until its atomic outcome commits, then the pending input buffer plus the same-transaction `running`
+state transition.
 
 A broker wake-up with no pending InputBuffer still starts a turn when the transcript tail after the
 latest run marker contains an actionable direct control event, including `goal_updated`. A wake-up

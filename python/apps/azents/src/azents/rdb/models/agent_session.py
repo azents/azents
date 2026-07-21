@@ -333,6 +333,13 @@ class RDBAgentSession(RDBModel):
         server_default=sa.func.now(),
         nullable=False,
     )
+    pending_idle_continuation_run_id: Mapped[str | None] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("agent_runs.id", ondelete="SET NULL"),
+        init=False,
+        nullable=True,
+        default=None,
+    )
     owner_generation: Mapped[int] = mapped_column(
         sa.BigInteger,
         init=False,
