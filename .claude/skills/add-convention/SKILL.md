@@ -28,7 +28,6 @@ Current scopes:
 | `typescript` | `typescript/**` |
 | `infra` | `infra/**` |
 | `github-actions` | `.github/workflows/**` |
-| `opencode` | `.opencode/agents/*.md` |
 | `testenv` | `testenv/**` |
 
 If no scope fits, **stop and ask the user** — adding a scope is a separate change (new entry in `SCOPE_CONFIG`, new index file in `.claude/rules/`, new directory in `.claude/conventions/`). When uncertain between two scopes, prefer the more specific one; when uncertain whether anything fits, prefer `global`.
