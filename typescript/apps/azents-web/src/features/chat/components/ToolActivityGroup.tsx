@@ -31,6 +31,8 @@ import {
   visibleElapsedDurationSeconds,
 } from "./elapsedDuration";
 import { ProviderToolCallCard } from "./ProviderToolCallCard";
+import { ReasoningActivityRow } from "./ReasoningActivityRow";
+import { SkillLoadedActivityRow } from "./SkillLoadedActivityRow";
 import { ToolCallCard } from "./ToolCallCard";
 import type {
   ActivityCategory,
@@ -139,6 +141,23 @@ function eventDetail(event: ActivityEvent): React.ReactElement | null {
       <ToolCallCard toolCall={event.toolCall.toolCall} />
     ) : (
       <ProviderToolCallCard toolCall={event.toolCall.toolCall} />
+    );
+  }
+  if (event.kind === "reasoning") {
+    return (
+      <ReasoningActivityRow
+        reasoningSummary={
+          event.message?.reasoningSummary ?? event.message?.content ?? ""
+        }
+      />
+    );
+  }
+  if (event.kind === "skill") {
+    return (
+      <SkillLoadedActivityRow
+        content={event.message?.content ?? ""}
+        name={event.message?.metadata?.name ?? null}
+      />
     );
   }
   return <ActivityMessageRow event={event} />;
@@ -281,7 +300,7 @@ export function ToolActivityGroup({
   );
 
   return (
-    <Box mb="xs" opacity={dimmed ? 0.45 : 1} style={{ minWidth: 0 }}>
+    <Box mb={rem(4)} opacity={dimmed ? 0.45 : 1} style={{ minWidth: 0 }}>
       <Group gap="xs" wrap="nowrap" data-tool-activity-id={activity.id}>
         {hasDetails ? (
           <UnstyledButton
@@ -306,7 +325,7 @@ export function ToolActivityGroup({
         keepMounted={false}
         {...chatCollapseTransitionProps}
       >
-        <Stack gap={0} mt={rem(4)} pl="xs">
+        <Stack gap={0} mt={rem(2)} pl="xs">
           {activity.events.map((event) => (
             <Box key={event.id}>{eventDetail(event)}</Box>
           ))}

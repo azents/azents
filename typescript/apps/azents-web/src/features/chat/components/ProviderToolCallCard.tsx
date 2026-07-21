@@ -3,7 +3,6 @@ import {
   Code,
   Collapse,
   Group,
-  Loader,
   rem,
   ScrollArea,
   Stack,
@@ -13,6 +12,7 @@ import {
 import { IconChevronRight, IconSearch, IconTool } from "@tabler/icons-react";
 import { useState } from "react";
 import {
+  activityDetailScrollbarSize,
   activityRowBorder,
   activityRowChevronSize,
   activityRowDetailInset,
@@ -31,24 +31,13 @@ import {
   providerToolStatusLabel,
 } from "./providerToolCallPresentation";
 import { providerWebSearchPresentation } from "./providerWebSearchPresentation";
+import { ToolCallStatusIcon } from "./ToolCallStatusIcon";
 import type { ProviderToolCall } from "../types";
 import type { ReactElement } from "react";
 
 interface ProviderToolCallCardProps {
   toolCall: ProviderToolCall;
   hiddenAttachmentUris?: readonly string[];
-}
-
-function statusColor(status: ProviderToolCall["status"]): string {
-  switch (status) {
-    case "running":
-      return "blue";
-    case "failed":
-      return "red.5";
-    case "completed":
-    case "unknown":
-      return "dimmed";
-  }
 }
 
 function RawProviderToolDetails({
@@ -68,7 +57,10 @@ function RawProviderToolDetails({
           <Text size="xs" c="dimmed" mb="xs">
             Arguments
           </Text>
-          <ScrollArea.Autosize mah={rem(240)}>
+          <ScrollArea.Autosize
+            mah={rem(240)}
+            scrollbarSize={activityDetailScrollbarSize}
+          >
             <Code block>{toolCall.arguments}</Code>
           </ScrollArea.Autosize>
         </Box>
@@ -78,7 +70,10 @@ function RawProviderToolDetails({
           <Text size="xs" c="dimmed" mb="xs">
             Output
           </Text>
-          <ScrollArea.Autosize mah={rem(240)}>
+          <ScrollArea.Autosize
+            mah={rem(240)}
+            scrollbarSize={activityDetailScrollbarSize}
+          >
             <Code block>{toolCall.output}</Code>
           </ScrollArea.Autosize>
         </Box>
@@ -111,7 +106,6 @@ export function ProviderToolCallCard({
     hasRawDetails ||
     (visibleAttachments.length > 0 && !showAttachmentsDirectly);
   const status = providerToolStatusLabel(toolCall.status);
-  const color = statusColor(toolCall.status);
   const subject = webSearch?.query ?? activityLabel;
   const ariaLabel = [displayName, subject, status].join(" · ");
   const detail = webSearch ? (
@@ -175,12 +169,7 @@ export function ProviderToolCallCard({
               }}
             />
             <Box c="dimmed" style={{ flexShrink: 0, marginTop: rem(1) }}>
-              {toolCall.status === "running" ? (
-                <Loader
-                  size={activityRowIconSize}
-                  color="var(--mantine-color-dimmed)"
-                />
-              ) : webSearch !== null ? (
+              {webSearch !== null ? (
                 <IconSearch size={activityRowIconSize} />
               ) : (
                 <IconTool size={activityRowIconSize} />
@@ -205,16 +194,7 @@ export function ProviderToolCallCard({
                 {subject}
               </Text>
             </Group>
-            <Text
-              size={activityRowSummarySize}
-              c={color}
-              style={{
-                flexShrink: 0,
-                opacity: toolCall.status === "failed" ? 0.75 : 1,
-              }}
-            >
-              {status}
-            </Text>
+            <ToolCallStatusIcon label={status} status={toolCall.status} />
           </Group>
         </UnstyledButton>
         {detail !== null ? (

@@ -131,6 +131,30 @@ void test("matches native reasoning identity from the raw event", () => {
   assert.equal(activityEvent.message?.id, reasoningMessage.id);
 });
 
+void test("keeps skill-loaded messages inside Activity", () => {
+  const skillMessage = message("skill-message", {
+    role: "skill_loaded",
+    content: "Loaded skill body.",
+    metadata: { name: "frontend-design" },
+  });
+  const items = projectChatPresentationItems(
+    [
+      event("skill-message", "skill_loaded", {
+        name: "frontend-design",
+      }),
+    ],
+    [skillMessage],
+  );
+
+  assert.equal(items.length, 1);
+  const activity = activityAt(items, 0);
+  assert.deepEqual(
+    activity.events.map((activityEvent) => activityEvent.kind),
+    ["skill"],
+  );
+  assert.equal(activity.events[0]?.message?.id, skillMessage.id);
+});
+
 void test("uses immutable Toolkit source identity as the summary category", () => {
   const toolkitSource = {
     toolkit_config_id: "toolkit-config-1",
