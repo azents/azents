@@ -6,10 +6,12 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, conversation, workspace, toolkit]
 code_paths:
+  - python/apps/azents/src/azents/core/vfs.py
   - python/apps/azents/src/azents/services/exchange_file/**
   - python/apps/azents/src/azents/services/artifact.py
   - python/apps/azents/src/azents/services/model_file.py
   - python/apps/azents/src/azents/services/input_buffer.py
+  - python/apps/azents/src/azents/services/vfs.py
   - python/apps/azents/src/azents/repos/artifact/**
   - python/apps/azents/src/azents/repos/model_file/**
   - python/apps/azents/src/azents/repos/agent_session/**
@@ -42,15 +44,15 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ToolActivityGroup.tsx
   - typescript/apps/azents-web/src/features/chat/components/ToolCallCard.tsx
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
-last_verified_at: 2026-07-20
-spec_version: 23
+last_verified_at: 2026-07-21
+spec_version: 24
 ---
 
 # File Exchange Storage
 
 ## Overview
 
-File Exchange Storage is the flow that separately stores and retrieves user-facing attachments exchanged between user and Agent, internal Artifacts for agent/tool, and ModelFiles for LLM rich input. User uploads files from chat input, and Agent imports external attachment or internal artifact into sandbox with `import_file`, or exposes sandbox file to user with `present_file`. Generated provider image/file output is preserved as canonical file and attachment output parts on one provider tool call instead of storing raw Base64 directly in an event.
+File Exchange Storage is the flow that separately stores and retrieves user-facing attachments exchanged between user and Agent, internal Artifacts for agent/tool, managed VFS files, and ModelFiles for LLM rich input. User uploads files from chat input, and Agent imports an external attachment, internal artifact, or current-run managed resource into sandbox with `import_file`, or exposes sandbox file to user with `present_file`. Generated provider image/file output is preserved as canonical file and attachment output parts on one provider tool call instead of storing raw Base64 directly in an event.
 
 ## Flows
 
@@ -75,9 +77,11 @@ not.
 
 ### Agent imports user or internal file
 
-`import_file` tool uses resolver registry by scheme. Supported schemes are `exchange://{object_key}` and `artifact://{storage_key}`. URI is storage location, not entity reference. Do not put business logic that extracts entity id from URI string. Default destination is `/tmp/agent/imports/`, and default destination collisions are deduped with numeric suffix. If explicit destination already exists, fail by default and overwrite only when `overwrite=true`.
+`import_file` tool uses resolver registry by scheme. Supported schemes are `exchange://{object_key}`, `artifact://{storage_key}`, and canonical `azents://` paths present in the current AgentRun projection. URI is storage location, not entity reference. Do not put business logic that extracts entity id from URI string. Default destination is `/tmp/agent/imports/`, and default destination collisions are deduped with numeric suffix. If explicit destination already exists, fail by default and overwrite only when `overwrite=true`.
 
 `exchange://{object_key}` materializes user-visible attachment into Runtime file. `artifact://{storage_key}` materializes agent/tool internal output Artifact into Runtime file. In both cases, original file body is not directly attached to LLM prompt.
+
+`azents://` materializes one immutable managed file from the current run projection. The resolver verifies run, Agent, Session, and Workspace ownership, exact projection membership, Base64 decoding, decoded size, and content hash before writing through the same Runtime FileStorage path. Ordinary Runtime file tools do not resolve the URI directly. The source entry remains in the retained AgentRun projection; only the copied Runtime path follows Runtime persistence rules, and a default `/tmp/agent/imports/` copy is temporary.
 
 ### Agent/tool output artifact
 

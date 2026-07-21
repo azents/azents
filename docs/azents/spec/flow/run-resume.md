@@ -6,12 +6,14 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, conversation]
 code_paths:
+  - python/apps/azents/src/azents/core/vfs.py
   - python/apps/azents/src/azents/broker/redis.py
   - python/apps/azents/src/azents/broker/types.py
   - python/apps/azents/src/azents/worker/worker.py
   - python/apps/azents/src/azents/services/agent_session_input.py
   - python/apps/azents/src/azents/services/session_git_worktree/**
   - python/apps/azents/src/azents/services/action_execution.py
+  - python/apps/azents/src/azents/services/vfs.py
   - python/apps/azents/src/azents/repos/action_execution/**
   - python/apps/azents/src/azents/repos/agent_run/**
   - python/apps/azents/src/azents/repos/agent_execution/**
@@ -21,8 +23,9 @@ code_paths:
   - python/apps/azents/src/azents/engine/run/types.py
   - python/apps/azents/src/azents/engine/run/errors.py
   - python/apps/azents/src/azents/worker/session/**
-last_verified_at: 2026-07-18
-spec_version: 21
+  - python/apps/azents/src/azents/worker/run/**
+last_verified_at: 2026-07-21
+spec_version: 22
 ---
 
 # Run Resume
@@ -38,7 +41,7 @@ The event runtime resumes from durable transcript and `agent_runs`, not SDK seri
 | Broker wake-up | New session wake-up signal | Live sticky owner receives the wake-up directly; otherwise a worker can take over after owner heartbeat expiry |
 | Broker redelivery | Unacked session wake-up signal | Another worker receives and resumes from durable DB state |
 | Stale session activity | Worker recovery scan of `agent_sessions.run_state` | Worker enqueues a wake-up signal for the affected session |
-| Active event run | pending/running `agent_runs`, resolved inference provenance, phase, active tools, and retry state | Runtime preserves the run/input boundary, resumes from an activated snapshot, and repairs missing interrupted results |
+| Active event run | pending/running `agent_runs`, resolved inference provenance, phase, active tools, retry state, and nullable VFS projection | Runtime preserves the run/input boundary, ensures or reuses the immutable managed-file snapshot, resumes from an activated snapshot, and repairs missing interrupted results |
 | Pending tool call | Event transcript has call without result | Runtime appends one deterministic cancelled result without executing the handler |
 | Leftover operation action | Session has an active buffer-keyed action execution at a new processing boundary | Worker records one cancelled durable snapshot and deletes the live execution before admitting new work; it never invokes the stale handler. |
 
@@ -65,8 +68,10 @@ The sticky lease and heartbeat timeout intentionally have different meanings:
 
 `AgentSession.run_state` remains a coarse session execution recovery signal (`idle` / `running`).
 Detailed execution state lives in `agent_runs.phase`, `active_tool_calls`, and nullable
-`retry_state`. `AgentRuntime` owns shared sandbox lifecycle and runner/provider state, not session
+`retry_state` and `vfs_projection`. `AgentRuntime` owns shared sandbox lifecycle and runner/provider state, not session
 run ownership.
+
+Before recovery promotes any pending input, `RunExecutor` ensures the selected run's VFS projection. A projection already stored on the run is returned unchanged, so package deployment changes and Toolkit attachment changes cannot alter managed Skill or import bytes during takeover. A pre-migration run with a null projection receives one at this boundary before its first post-deployment promotion.
 
 Worker shutdown must not partially process a new message. If shutdown wins before processing, the
 message is left for broker redelivery or ownership takeover.
@@ -169,7 +174,7 @@ The takeover path must preserve single-session execution:
 - A stale heartbeat permits lease stealing even if the 30-minute sticky key remains.
 - Wake-up signals remain in the per-session Redis list until a worker with valid ownership drains
   them. Model input payloads, operation action inputs, and control state remain durable in Postgres. Before an operation input buffer is deleted, its pending `ActionExecution`, typed action payload, and admitting `owner_generation` are committed under the source `input_buffer_id`. A takeover converts any surviving execution from an older processing boundary into a cancelled durable snapshot before consuming new input.
-- Durable transcript and `agent_runs` remain the execution source of truth after takeover.
+- Durable transcript and `agent_runs`, including the run's immutable VFS projection, remain the execution source of truth after takeover.
 
 ## Operation Action Recovery
 

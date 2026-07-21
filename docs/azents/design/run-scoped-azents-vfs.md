@@ -2,6 +2,7 @@
 title: "Run-Scoped Azents Virtual Filesystem"
 created: 2026-07-19
 updated: 2026-07-21
+implemented: 2026-07-21
 tags: [architecture, backend, engine, toolkit, skill, storage]
 ---
 
