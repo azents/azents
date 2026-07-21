@@ -243,6 +243,7 @@ Class | Method | HTTP request | Description
  - [AgentAdminListResponse](azentspublicclient/docs/AgentAdminListResponse.md)
  - [AgentAdminResponse](azentspublicclient/docs/AgentAdminResponse.md)
  - [AgentCreateRequest](azentspublicclient/docs/AgentCreateRequest.md)
+ - [AgentDecommissionResponse](azentspublicclient/docs/AgentDecommissionResponse.md)
  - [AgentListResponse](azentspublicclient/docs/AgentListResponse.md)
  - [AgentModelSelection](azentspublicclient/docs/AgentModelSelection.md)
  - [AgentModelSelectionInput](azentspublicclient/docs/AgentModelSelectionInput.md)

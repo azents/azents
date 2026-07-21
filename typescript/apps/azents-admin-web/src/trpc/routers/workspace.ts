@@ -6,7 +6,6 @@
  */
 import {
   workspaceV1CreateWorkspace,
-  workspaceV1DeleteWorkspace,
   workspaceV1GetWorkspace,
   workspaceV1ListWorkspaces,
   workspaceV1UpdateWorkspace,
@@ -84,19 +83,5 @@ export const workspaceRouter = router({
         throwOnError: true,
       });
       return data;
-    }),
-
-  /**
-   * 워크스페이스 삭제
-   */
-  delete: protectedProcedure
-    .input(z.object({ handle: z.string() }))
-    .mutation(async ({ ctx, input }) => {
-      await workspaceV1DeleteWorkspace({
-        client: ctx.adminApiClient,
-        path: { handle: input.handle },
-        throwOnError: true,
-      });
-      return { success: true };
     }),
 });

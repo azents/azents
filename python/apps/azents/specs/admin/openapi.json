@@ -2114,45 +2114,6 @@
             }
           }
         }
-      },
-      "delete": {
-        "tags": [
-          "Workspace v1"
-        ],
-        "summary": "Delete Workspace",
-        "description": "Delete a Workspace.",
-        "operationId": "workspace_v1_delete_workspace",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "handle",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Handle"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
       }
     },
     "/workspace-user/v1/workspace-users": {

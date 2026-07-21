@@ -190,19 +190,3 @@ class TestWorkspaceRepository:
 
         # Then: None
         assert workspace_id is None
-
-    async def test_delete_by_handle(self, rdb_session: AsyncSession) -> None:
-        """handle Workspace Delete."""
-        # Given: Workspace create
-        repo = WorkspaceRepository()
-        create_result = await repo.create(
-            rdb_session, WorkspaceCreate(name="Delete target", handle="delete-test")
-        )
-        assert isinstance(create_result, Success)
-
-        # When: delete
-        await repo.delete_by_handle(rdb_session, "delete-test")
-
-        # Then: None when fetching
-        workspace = await repo.get_by_handle(rdb_session, "delete-test")
-        assert workspace is None

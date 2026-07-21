@@ -100,16 +100,6 @@ async def update_workspace(
             assert_never(result)
 
 
-@router.delete("/workspaces/{handle}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_workspace(
-    workspace_service: Annotated[WorkspaceService, Depends()],
-    *,
-    handle: str,
-) -> None:
-    """Delete a Workspace."""
-    await workspace_service.delete_by_handle(handle)
-
-
 def mount(mounter: RouteMounter) -> None:
     """Mount Workspace v1 routes."""
     mounter(

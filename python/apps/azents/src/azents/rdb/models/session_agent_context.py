@@ -39,7 +39,7 @@ class RDBSessionAgentContext(RDBModel):
 
     agent_id: Mapped[str] = mapped_column(
         sa.String(32),
-        sa.ForeignKey("agents.id", ondelete="CASCADE"),
+        sa.ForeignKey("agents.id", ondelete="RESTRICT"),
         nullable=False,
     )
     workspace_id: Mapped[str] = mapped_column(

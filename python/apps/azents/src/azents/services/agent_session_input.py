@@ -8,6 +8,7 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
+    AgentLifecycleStatus,
     AgentProjectDefaultItemType,
     AgentSessionKind,
     AgentSessionStatus,
@@ -155,6 +156,12 @@ class AgentSessionInputService:
                 return Failure(AgentSessionInputInactiveSession())
             if agent_session.session_kind is AgentSessionKind.SUBAGENT:
                 return Failure(AgentSessionInputSubagentReadOnly())
+            agent = await self.agent_repository.get_by_id(session, agent_id)
+            if (
+                agent is None
+                or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
+            ):
+                return Failure(AgentSessionInputInactiveSession())
 
             runtime = await self.agent_runtime_repository.ensure_for_agent(
                 session, agent_id
@@ -212,6 +219,12 @@ class AgentSessionInputService:
                 return Failure(AgentSessionInputInactiveSession())
             if agent_session.session_kind is AgentSessionKind.SUBAGENT:
                 return Failure(AgentSessionInputSubagentReadOnly())
+            agent = await self.agent_repository.get_by_id(session, agent_id)
+            if (
+                agent is None
+                or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
+            ):
+                return Failure(AgentSessionInputInactiveSession())
 
             runtime = await self.agent_runtime_repository.ensure_for_agent(
                 session, agent_id
@@ -276,6 +289,8 @@ class AgentSessionInputService:
         async with self.session_manager() as session:
             agent = await self.agent_repository.get_by_id(session, agent_id)
             if agent is None:
+                return Failure(AgentSessionInputSessionNotFound())
+            if agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE:
                 return Failure(AgentSessionInputSessionNotFound())
             if not await self._has_workspace_access(
                 session,

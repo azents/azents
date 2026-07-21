@@ -31,6 +31,7 @@ azentspublicclient/docs/AgentAdminAddRequest.md
 azentspublicclient/docs/AgentAdminListResponse.md
 azentspublicclient/docs/AgentAdminResponse.md
 azentspublicclient/docs/AgentCreateRequest.md
+azentspublicclient/docs/AgentDecommissionResponse.md
 azentspublicclient/docs/AgentListResponse.md
 azentspublicclient/docs/AgentModelSelection.md
 azentspublicclient/docs/AgentModelSelectionInput.md
@@ -338,6 +339,7 @@ azentspublicclient/models/agent_admin_add_request.py
 azentspublicclient/models/agent_admin_list_response.py
 azentspublicclient/models/agent_admin_response.py
 azentspublicclient/models/agent_create_request.py
+azentspublicclient/models/agent_decommission_response.py
 azentspublicclient/models/agent_list_response.py
 azentspublicclient/models/agent_model_selection.py
 azentspublicclient/models/agent_model_selection_input.py
@@ -627,6 +629,7 @@ azentspublicclient/test/test_agent_admin_add_request.py
 azentspublicclient/test/test_agent_admin_list_response.py
 azentspublicclient/test/test_agent_admin_response.py
 azentspublicclient/test/test_agent_create_request.py
+azentspublicclient/test/test_agent_decommission_response.py
 azentspublicclient/test/test_agent_list_response.py
 azentspublicclient/test/test_agent_model_selection.py
 azentspublicclient/test/test_agent_model_selection_input.py

@@ -11,7 +11,7 @@ from azents.core.agent import (
     SelectableModelOption,
     SubagentSettings,
 )
-from azents.core.enums import AgentType
+from azents.core.enums import AgentLifecycleStatus, AgentType
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_admin import RDBAgentAdmin
 from azents.services.uploads.schema import StoredImage
@@ -196,9 +196,23 @@ class AgentRepository:
             return Failure(NotFound(agent_id=agent_id))
         return Success(self._build_row(rdb_agent))
 
-    async def delete_by_id(self, session: AsyncSession, agent_id: str) -> None:
-        """Delete Agent by ID."""
-        await session.execute(sa.delete(RDBAgent).where(RDBAgent.id == agent_id))
+    async def mark_decommissioning(
+        self,
+        session: AsyncSession,
+        agent_id: str,
+    ) -> Agent | None:
+        """Fence an Agent from new work for durable decommission."""
+        result = await session.execute(
+            sa.update(RDBAgent)
+            .where(RDBAgent.id == agent_id)
+            .values(lifecycle_status=AgentLifecycleStatus.DECOMMISSIONING)
+            .returning(RDBAgent)
+        )
+        rdb = result.scalar_one_or_none()
+        if rdb is None:
+            return None
+        await session.flush()
+        return self._build_row(rdb)
 
     def _build_row(self, rdb: RDBAgent) -> Agent:
         """Convert RDB row to domain model."""
@@ -236,6 +250,7 @@ class AgentRepository:
             model_parameters=model_parameters,
             system_prompt=rdb.system_prompt,
             enabled=rdb.enabled,
+            lifecycle_status=rdb.lifecycle_status,
             type=rdb.type,
             runtime_provider_id=rdb.runtime_provider_id,
             shell_enabled=rdb.shell_enabled,

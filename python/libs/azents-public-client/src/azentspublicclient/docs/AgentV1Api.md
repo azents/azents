@@ -278,13 +278,13 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **agent_v1_delete_agent**
-> agent_v1_delete_agent(agent_id, handle)
+> AgentDecommissionResponse agent_v1_delete_agent(agent_id, handle)
 
 Delete Agent
 
-Delete an Agent.
+Request durable Agent decommission.
 
-Only administrators or workspace owners can delete it.
+Only administrators or workspace owners can request it.
 
 ### Example
 
@@ -292,6 +292,7 @@ Only administrators or workspace owners can delete it.
 
 ```python
 import azentspublicclient
+from azentspublicclient.models.agent_decommission_response import AgentDecommissionResponse
 from azentspublicclient.rest import ApiException
 from pprint import pprint
 
@@ -320,7 +321,9 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
     try:
         # Delete Agent
-        api_instance.agent_v1_delete_agent(agent_id, handle)
+        api_response = api_instance.agent_v1_delete_agent(agent_id, handle)
+        print("The response of AgentV1Api->agent_v1_delete_agent:\n")
+        pprint(api_response)
     except Exception as e:
         print("Exception when calling AgentV1Api->agent_v1_delete_agent: %s\n" % e)
 ```
@@ -337,7 +340,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-void (empty response body)
+[**AgentDecommissionResponse**](AgentDecommissionResponse.md)
 
 ### Authorization
 
@@ -352,7 +355,7 @@ void (empty response body)
 
 | Status code | Description | Response headers |
 |-------------|-------------|------------------|
-**204** | Successful Response |  -  |
+**202** | Successful Response |  -  |
 **422** | Validation Error |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)

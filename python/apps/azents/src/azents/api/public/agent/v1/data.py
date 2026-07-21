@@ -18,6 +18,7 @@ from azents.core.enums import AgentType
 from azents.repos.memory.data import MemoryScope
 from azents.services.agent.data import (
     AgentAdminOutput,
+    AgentDecommissionOutput,
     AgentOutput,
     AvatarUploadTicketOutput,
 )
@@ -88,6 +89,23 @@ class AgentListResponse(BaseModel):
     """Agent list response."""
 
     items: list[AgentResponse]
+
+
+class AgentDecommissionResponse(BaseModel):
+    """Accepted Agent decommission response."""
+
+    job_id: str
+    status: str
+    created_at: datetime.datetime
+
+    @classmethod
+    def convert_from(cls, data: AgentDecommissionOutput) -> Self:
+        """Convert service output to a public response."""
+        return cls(
+            job_id=data.job.id,
+            status=data.job.status.value,
+            created_at=data.job.created_at,
+        )
 
 
 class AgentCreateRequest(BaseModel):

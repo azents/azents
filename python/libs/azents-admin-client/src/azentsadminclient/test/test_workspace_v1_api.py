@@ -33,13 +33,6 @@ class TestWorkspaceV1Api(unittest.TestCase):
         """
         pass
 
-    def test_workspace_v1_delete_workspace(self) -> None:
-        """Test case for workspace_v1_delete_workspace
-
-        Delete Workspace
-        """
-        pass
-
     def test_workspace_v1_get_workspace(self) -> None:
         """Test case for workspace_v1_get_workspace
 

@@ -1,7 +1,6 @@
 "use client";
 
 import { useForm } from "@mantine/form";
-import { modals } from "@mantine/modals";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { trpc } from "@/trpc/client";
 import { workspaceFormSchema } from "../schemas";
@@ -16,7 +15,6 @@ export interface WorkspaceDetailContainerProps {
   workspaceHandle: string | null;
   isCreateMode: boolean;
   onSaved: (handle: string) => void;
-  onDeleted: () => void;
   onCancel: () => void;
 }
 
@@ -38,7 +36,7 @@ const EMPTY_FORM: WorkspaceFormData = {
 export function useWorkspaceDetailContainer(
   props: WorkspaceDetailContainerProps,
 ) {
-  const { workspaceHandle, isCreateMode, onSaved, onDeleted, onCancel } = props;
+  const { workspaceHandle, isCreateMode, onSaved, onCancel } = props;
   const utils = trpc.useUtils();
 
   // --- 데이터 로딩 ---
@@ -97,19 +95,14 @@ export function useWorkspaceDetailContainer(
   // --- 뮤테이션 ---
   const createMutation = trpc.workspace.create.useMutation();
   const updateMutation = trpc.workspace.update.useMutation();
-  const deleteMutation = trpc.workspace.delete.useMutation();
 
   const isCreating = createMutation.isPending;
   const isUpdating = updateMutation.isPending;
-  const isDeleting = deleteMutation.isPending;
 
   // --- 상태 계산 ---
   const state: WorkspaceDetailState = useMemo(() => {
     if (!isCreateMode && !workspaceHandle) {
       return { type: "EMPTY" };
-    }
-    if (isDeleting && currentWorkspace) {
-      return { type: "DELETING", workspace: currentWorkspace };
     }
     if (isCreating || isUpdating) {
       return {
@@ -142,7 +135,6 @@ export function useWorkspaceDetailContainer(
     loadError,
     isCreating,
     isUpdating,
-    isDeleting,
   ]);
 
   // --- 핸들러 ---
@@ -186,39 +178,11 @@ export function useWorkspaceDetailContainer(
     ],
   );
 
-  const handleDelete = useCallback(() => {
-    if (!workspaceHandle) {
-      return;
-    }
-    modals.openConfirmModal({
-      title: "Workspace 삭제",
-      children:
-        "정말 이 Workspace를 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.",
-      labels: { confirm: "삭제", cancel: "취소" },
-      confirmProps: { color: "red" },
-      onConfirm: () => {
-        deleteMutation.mutate(
-          { handle: workspaceHandle },
-          {
-            onSuccess: () => {
-              void utils.workspace.list.invalidate();
-              void utils.workspace.get.invalidate({
-                handle: workspaceHandle,
-              });
-              onDeleted();
-            },
-          },
-        );
-      },
-    });
-  }, [workspaceHandle, deleteMutation, utils, onDeleted]);
-
   return {
     state,
     form,
     isDirty,
     onSubmit: handleSubmit,
-    onDelete: handleDelete,
     onCancel,
   };
 }

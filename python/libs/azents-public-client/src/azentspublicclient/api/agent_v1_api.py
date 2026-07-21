@@ -23,6 +23,7 @@ from azentspublicclient.models.agent_admin_add_request import AgentAdminAddReque
 from azentspublicclient.models.agent_admin_list_response import AgentAdminListResponse
 from azentspublicclient.models.agent_admin_response import AgentAdminResponse
 from azentspublicclient.models.agent_create_request import AgentCreateRequest
+from azentspublicclient.models.agent_decommission_response import AgentDecommissionResponse
 from azentspublicclient.models.agent_list_response import AgentListResponse
 from azentspublicclient.models.agent_response import AgentResponse
 from azentspublicclient.models.agent_update_request import AgentUpdateRequest
@@ -976,10 +977,10 @@ class AgentV1Api:
         _content_type: Optional[StrictStr] = None,
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> None:
+    ) -> AgentDecommissionResponse:
         """Delete Agent
 
-        Delete an Agent.  Only administrators or workspace owners can delete it.
+        Request durable Agent decommission.  Only administrators or workspace owners can request it.
 
         :param agent_id: (required)
         :type agent_id: str
@@ -1017,7 +1018,7 @@ class AgentV1Api:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '204': None,
+            '202': "AgentDecommissionResponse",
             '422': "HTTPValidationError",
         }
         response_data = self.api_client.call_api(
@@ -1048,10 +1049,10 @@ class AgentV1Api:
         _content_type: Optional[StrictStr] = None,
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> ApiResponse[None]:
+    ) -> ApiResponse[AgentDecommissionResponse]:
         """Delete Agent
 
-        Delete an Agent.  Only administrators or workspace owners can delete it.
+        Request durable Agent decommission.  Only administrators or workspace owners can request it.
 
         :param agent_id: (required)
         :type agent_id: str
@@ -1089,7 +1090,7 @@ class AgentV1Api:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '204': None,
+            '202': "AgentDecommissionResponse",
             '422': "HTTPValidationError",
         }
         response_data = self.api_client.call_api(
@@ -1123,7 +1124,7 @@ class AgentV1Api:
     ) -> RESTResponseType:
         """Delete Agent
 
-        Delete an Agent.  Only administrators or workspace owners can delete it.
+        Request durable Agent decommission.  Only administrators or workspace owners can request it.
 
         :param agent_id: (required)
         :type agent_id: str
@@ -1161,7 +1162,7 @@ class AgentV1Api:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '204': None,
+            '202': "AgentDecommissionResponse",
             '422': "HTTPValidationError",
         }
         response_data = self.api_client.call_api(

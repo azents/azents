@@ -12,7 +12,7 @@ from azents.core.agent import (
     DEFAULT_SUBAGENT_MAX_DEPTH,
     DEFAULT_SUBAGENT_MAX_SUBAGENTS,
 )
-from azents.core.enums import AgentType
+from azents.core.enums import AgentLifecycleStatus, AgentType
 from azents.rdb.models.base import RDBModel
 from azents.rdb.types.datetime import TimeZoneDateTime
 
@@ -25,6 +25,12 @@ def _agent_type_values(enum_cls: type[AgentType]) -> list[str]:
 agent_type_enum = ENUM(
     AgentType,
     name="agent_type",
+    create_type=False,
+    values_callable=_agent_type_values,
+)
+agent_lifecycle_status_enum = ENUM(
+    AgentLifecycleStatus,
+    name="agent_lifecycle_status",
     create_type=False,
     values_callable=_agent_type_values,
 )
@@ -86,7 +92,7 @@ class RDBAgent(RDBModel):
     )
     workspace_id: Mapped[str] = mapped_column(
         sa.String(32),
-        sa.ForeignKey("workspaces.id", ondelete="CASCADE"),
+        sa.ForeignKey("workspaces.id", ondelete="RESTRICT"),
         nullable=False,
     )
     name: Mapped[str] = mapped_column(sa.String(100), nullable=False)
@@ -119,6 +125,12 @@ class RDBAgent(RDBModel):
         sa.Text, nullable=True, default=None
     )
     enabled: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=True)
+    lifecycle_status: Mapped[AgentLifecycleStatus] = mapped_column(
+        agent_lifecycle_status_enum,
+        nullable=False,
+        default=AgentLifecycleStatus.ACTIVE,
+        server_default=AgentLifecycleStatus.ACTIVE.value,
+    )
     type: Mapped[AgentType] = mapped_column(
         agent_type_enum, nullable=False, default=AgentType.PUBLIC
     )

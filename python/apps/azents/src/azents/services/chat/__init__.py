@@ -10,6 +10,7 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
+    AgentLifecycleStatus,
     AgentProjectDefaultItemType,
     AgentRunPhase,
     AgentRunStatus,
@@ -347,7 +348,10 @@ class ChatSessionService:
         """
         async with self.session_manager() as session:
             agent = await self.agent_repository.get_by_id(session, agent_id)
-            if agent is None:
+            if (
+                agent is None
+                or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
+            ):
                 return Failure(AgentNotFound())
             workspace_user = (
                 await self.workspace_user_repository.get_by_workspace_and_user(
@@ -1076,6 +1080,12 @@ class ChatSessionService:
                 or root.agent_id != agent_id
                 or root.session_kind is not AgentSessionKind.ROOT
                 or root.status != AgentSessionStatus.ARCHIVED
+            ):
+                return Failure(SessionNotFound())
+            agent = await self.agent_repository.get_by_id(session, agent_id)
+            if (
+                agent is None
+                or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
             ):
                 return Failure(SessionNotFound())
             workspace_user = (

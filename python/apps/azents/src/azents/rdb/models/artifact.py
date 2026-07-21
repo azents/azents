@@ -62,7 +62,7 @@ class RDBArtifact(RDBModel):
     )
     agent_id: Mapped[str] = mapped_column(
         sa.String(32),
-        sa.ForeignKey("agents.id", ondelete="CASCADE"),
+        sa.ForeignKey("agents.id", ondelete="RESTRICT"),
         nullable=False,
     )
     created_run_id: Mapped[str] = mapped_column(sa.String(32), nullable=False)

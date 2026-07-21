@@ -61,7 +61,7 @@ class RDBModelFile(RDBModel):
     )
     agent_id: Mapped[str] = mapped_column(
         sa.String(32),
-        sa.ForeignKey("agents.id", ondelete="CASCADE"),
+        sa.ForeignKey("agents.id", ondelete="RESTRICT"),
         nullable=False,
     )
     media_type: Mapped[str] = mapped_column(sa.String(255), nullable=False)

@@ -13,7 +13,7 @@ from azents.core.agent import (
     SelectableModelOption,
     SubagentSettings,
 )
-from azents.core.enums import AgentType
+from azents.core.enums import AgentLifecycleStatus, AgentType
 from azents.services.uploads.schema import StoredImage
 
 
@@ -42,6 +42,9 @@ class Agent(BaseModel):
     )
     system_prompt: str | None = Field(default=None, description="System prompt")
     enabled: bool = Field(description="Enabled flag")
+    lifecycle_status: AgentLifecycleStatus = Field(
+        description="Durable lifecycle admission state"
+    )
     type: AgentType = Field(description="Visibility scope")
     runtime_provider_id: str | None = Field(
         default=None, description="Runtime Provider logical ID"

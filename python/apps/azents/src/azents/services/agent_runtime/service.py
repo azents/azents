@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.config import Config
 from azents.core.deps import get_config
 from azents.core.enums import (
+    AgentLifecycleStatus,
     AgentType,
     RuntimeDesiredState,
     RuntimeLifecycleCommandType,
@@ -289,7 +290,7 @@ class AgentRuntimeService:
         """Check Agent Runtime access permission."""
         async with self.session_manager() as session:
             agent = await self.agent_repository.get_by_id(session, agent_id)
-        if agent is None:
+        if agent is None or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE:
             return AgentNotFound(agent_id=agent_id)
         if agent.workspace_id != workspace_id:
             return AgentNotBelongToWorkspace(agent_id=agent_id)

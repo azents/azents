@@ -55,6 +55,7 @@ __all__ = [
     "AgentAdminListResponse",
     "AgentAdminResponse",
     "AgentCreateRequest",
+    "AgentDecommissionResponse",
     "AgentListResponse",
     "AgentModelSelection",
     "AgentModelSelectionInput",
@@ -376,6 +377,7 @@ from azentspublicclient.models.agent_admin_add_request import AgentAdminAddReque
 from azentspublicclient.models.agent_admin_list_response import AgentAdminListResponse as AgentAdminListResponse
 from azentspublicclient.models.agent_admin_response import AgentAdminResponse as AgentAdminResponse
 from azentspublicclient.models.agent_create_request import AgentCreateRequest as AgentCreateRequest
+from azentspublicclient.models.agent_decommission_response import AgentDecommissionResponse as AgentDecommissionResponse
 from azentspublicclient.models.agent_list_response import AgentListResponse as AgentListResponse
 from azentspublicclient.models.agent_model_selection import AgentModelSelection as AgentModelSelection
 from azentspublicclient.models.agent_model_selection_input import AgentModelSelectionInput as AgentModelSelectionInput

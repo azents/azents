@@ -10,6 +10,7 @@ from azents.scheduler.types import (
     TaskContext,
     TaskResult,
 )
+from azents.services.agent_decommission import AgentDecommissionService
 from azents.services.archived_session_purge import ArchivedSessionPurgeService
 from azents.services.archived_session_retention import (
     ArchivedSessionRetentionService,
@@ -74,6 +75,23 @@ async def archived_session_purge_handler(context: TaskContext) -> TaskResult:
     """Advance a bounded batch of durable archived-session purge jobs."""
     service = await context.container.solve(ArchivedSessionPurgeService)
     summary = await service.purge_once(
+        lease_owner=context.lease_owner,
+        deadline=context.deadline,
+    )
+    return TaskResult(
+        summary={
+            "task_key": context.task_key,
+            "attempt_started_at": context.attempt_started_at.isoformat(),
+            "manual_triggered": context.manual_triggered,
+            **dataclasses.asdict(summary),
+        }
+    )
+
+
+async def agent_decommission_handler(context: TaskContext) -> TaskResult:
+    """Advance durable Agent decommission jobs without owning session purge."""
+    service = await context.container.solve(AgentDecommissionService)
+    summary = await service.decommission_once(
         lease_owner=context.lease_owner,
         deadline=context.deadline,
     )
@@ -161,6 +179,20 @@ ARCHIVED_SESSION_PURGE_TASK = ScheduledTaskDefinition(
     enabled_by_default=True,
 )
 
+AGENT_DECOMMISSION_TASK = ScheduledTaskDefinition(
+    key="agent_decommission",
+    description="Retire Agent roots and finalize decommissioned Agents.",
+    interval=datetime.timedelta(minutes=1),
+    timeout=datetime.timedelta(minutes=10),
+    retry_policy=RetryPolicy(
+        kind="bounded_backoff",
+        min_delay=datetime.timedelta(minutes=1),
+        max_delay=datetime.timedelta(minutes=30),
+    ),
+    handler=agent_decommission_handler,
+    enabled_by_default=True,
+)
+
 FILE_LIFECYCLE_CLEANUP_TASK = ScheduledTaskDefinition(
     key="file_lifecycle_cleanup",
     description="Expire TTL-owned files and collect head-pruned ModelFiles.",
@@ -180,6 +212,7 @@ SCHEDULED_TASK_DEFINITIONS: tuple[ScheduledTaskDefinition, ...] = (
     SYSTEM_CATALOG_PROJECTION_TASK,
     ARCHIVED_SESSION_RETENTION_RECALCULATION_TASK,
     ARCHIVED_SESSION_PURGE_TASK,
+    AGENT_DECOMMISSION_TASK,
     FILE_LIFECYCLE_CLEANUP_TASK,
 )
 
