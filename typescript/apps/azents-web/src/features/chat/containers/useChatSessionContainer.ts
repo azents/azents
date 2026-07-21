@@ -41,6 +41,7 @@ import type {
   ChatMessage,
   ChatTimelineState,
   ChatViewState,
+  ClientToolWireDialect,
   ConnectionStatus,
   FailedRunAttemptSummary,
   FailedRunErrorKind,
@@ -196,6 +197,10 @@ function stringField(
 ): string | null {
   const value = record[key];
   return typeof value === "string" ? value : null;
+}
+
+function clientToolWireDialectFromValue(value: unknown): ClientToolWireDialect {
+  return value === "plaintext_custom" ? value : "json_function";
 }
 
 function numberField(
@@ -1009,6 +1014,7 @@ function mapEvents(
             callId,
             name,
             arguments: stringField(payload, "arguments") ?? "",
+            wireDialect: clientToolWireDialectFromValue(payload.wire_dialect),
             toolkitSource: toolkitSourceFromValue(payload.toolkit_source),
             status: "running",
           },

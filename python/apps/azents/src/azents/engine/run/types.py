@@ -5,7 +5,7 @@ Defines tools, token usage, and engine callback types.
 
 import dataclasses
 from collections.abc import Awaitable, Callable
-from typing import Annotated, Literal, Protocol, TypeAlias
+from typing import Annotated, Literal, Protocol, TypeAlias, runtime_checkable
 
 from azcommon.types import JSONObject
 from pydantic import (
@@ -98,6 +98,18 @@ class FunctionToolResult(BaseModel):
 
 # Async function taking JSON string args and returning string or ToolResult
 FunctionToolHandler: TypeAlias = Callable[[str], Awaitable[str | FunctionToolResult]]
+
+
+@runtime_checkable
+class PlaintextCustomToolHandler(Protocol):
+    """Optional plaintext-custom execution adapter for one function tool handler."""
+
+    async def execute_plaintext_custom(
+        self,
+        arguments: str,
+    ) -> str | FunctionToolResult:
+        """Execute one validated plaintext-custom tool input."""
+        ...
 
 
 @dataclasses.dataclass(frozen=True)

@@ -19,7 +19,7 @@ from azents.engine.run.contracts import ToolkitBinding
 from azents.engine.run.emit import PublishedEvent
 from azents.engine.run.types import FunctionTool, FunctionToolSpec
 
-_PROFILE = ClientToolProfile.GPT_V4A_APPLY_PATCH
+_PROFILE = ClientToolProfile.V4A_APPLY_PATCH_FUNCTION
 
 
 class _Config(BaseModel):
@@ -32,6 +32,18 @@ async def _unconditional_handler(arguments: str) -> str:
 
 async def _profiled_handler(arguments: str) -> str:
     return arguments
+
+
+class _PlaintextCustomHandler:
+    """Test handler implementing both apply_patch transport dialects."""
+
+    async def __call__(self, arguments: str) -> str:
+        """Execute the JSON-function variant."""
+        return arguments
+
+    async def execute_plaintext_custom(self, arguments: str) -> str:
+        """Execute the plaintext-custom variant."""
+        return arguments
 
 
 class _ProfiledToolkit(Toolkit[_Config]):
@@ -113,6 +125,25 @@ async def test_projection_includes_profiled_schema_handler_entry_and_prompt() ->
     assert projected.tools["apply_patch"].handler is _profiled_handler
 
 
+async def test_custom_profile_declares_plaintext_apply_patch_tool() -> None:
+    custom_handler = _PlaintextCustomHandler()
+    candidate = await _custom_candidate_catalog(custom_handler)
+
+    projected = project_tool_catalog_for_client_profiles(
+        candidate,
+        frozenset({ClientToolProfile.V4A_APPLY_PATCH_PLAINTEXT_CUSTOM}),
+    )
+
+    assert projected.native_tools == [
+        {
+            "type": "custom",
+            "name": "apply_patch",
+            "description": "Apply one patch.",
+            "format": {"type": "text"},
+        }
+    ]
+
+
 async def _candidate_catalog() -> ToolCatalog:
     return await build_tool_catalog(
         toolkit_bindings=[
@@ -134,3 +165,47 @@ async def _candidate_catalog() -> ToolCatalog:
 
 async def _noop_publish(event: PublishedEvent) -> None:
     del event
+
+
+async def _custom_candidate_catalog(
+    handler: _PlaintextCustomHandler,
+) -> ToolCatalog:
+    return await build_tool_catalog(
+        toolkit_bindings=[
+            ToolkitBinding(
+                toolkit=_InlineApplyPatchToolkit(handler),
+                slug="runtime",
+                use_prefix=False,
+            )
+        ],
+        context=TurnContext(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id="run-1",
+            publish_event=_noop_publish,
+        ),
+    )
+
+
+class _InlineApplyPatchToolkit(Toolkit[_Config]):
+    """Toolkit that contributes one dual-dialect apply_patch handler."""
+
+    def __init__(self, handler: _PlaintextCustomHandler) -> None:
+        self.handler = handler
+
+    async def update_context(self, context: TurnContext) -> ToolkitState:
+        del context
+        return ToolkitState(
+            status=ToolkitStatus.ENABLED,
+            tools=[
+                FunctionTool(
+                    spec=FunctionToolSpec(
+                        name="apply_patch",
+                        description="Apply one patch.",
+                        input_schema={"type": "object"},
+                    ),
+                    handler=self.handler,
+                ).with_required_client_tool_profile(_PROFILE)
+            ],
+        )

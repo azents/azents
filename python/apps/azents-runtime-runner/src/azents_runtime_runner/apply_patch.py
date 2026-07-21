@@ -13,6 +13,10 @@ from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Literal, TypeAlias
 
+from azents_runtime_control.apply_patch import (
+    MAX_APPLY_PATCH_BASE_PATH_BYTES,
+    MAX_APPLY_PATCH_BYTES,
+)
 from azents_runtime_control.runner import JsonValue
 
 PatchAction: TypeAlias = Literal["add", "update", "delete"]
@@ -26,10 +30,10 @@ PATCH_SCHEMA_VERSION = 1
 class ApplyPatchLimits:
     """Bounded resource limits for one patch operation."""
 
-    max_patch_bytes: int = 1024 * 1024
+    max_patch_bytes: int = MAX_APPLY_PATCH_BYTES
     max_operations: int = 100
     max_hunks: int = 500
-    max_path_bytes: int = 4096
+    max_path_bytes: int = MAX_APPLY_PATCH_BASE_PATH_BYTES
     max_file_bytes: int = 8 * 1024 * 1024
     max_aggregate_bytes: int = 32 * 1024 * 1024
 

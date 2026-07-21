@@ -163,6 +163,41 @@ const applyPatchInputSchema = z.object({
   base_path: z.string().min(1),
   patch: z.string().min(1),
 });
+const plaintextBasePathPrefix = "*** Base Path: ";
+const plaintextPatchStart = "*** Begin Patch";
+const maxPlaintextApplyPatchBytes = 1024 * 1024;
+const maxPlaintextBasePathBytes = 4096;
+
+function plaintextApplyPatchInput(
+  argumentsText: string,
+): { base_path: string; patch: string } | null {
+  const encoder = new TextEncoder();
+  if (encoder.encode(argumentsText).byteLength > maxPlaintextApplyPatchBytes) {
+    return null;
+  }
+  const newlineIndex = argumentsText.indexOf("\n");
+  if (newlineIndex < 0) {
+    return null;
+  }
+  const header = argumentsText.slice(0, newlineIndex);
+  if (!header.startsWith(plaintextBasePathPrefix)) {
+    return null;
+  }
+  const basePath = header.slice(plaintextBasePathPrefix.length);
+  if (
+    basePath.length === 0 ||
+    !basePath.startsWith("/") ||
+    encoder.encode(basePath).byteLength > maxPlaintextBasePathBytes ||
+    /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/.test(basePath)
+  ) {
+    return null;
+  }
+  const patch = argumentsText.slice(newlineIndex + 1);
+  if (!patch.startsWith(plaintextPatchStart)) {
+    return null;
+  }
+  return { base_path: basePath, patch };
+}
 const execCommandInputSchema = z.object({ command: z.string().min(1) });
 const writeStdinInputSchema = z.object({ process_id: z.string().min(1) });
 const presentFileInputSchema = z.object({
@@ -600,6 +635,24 @@ export function knownToolPresentation(
   if (toolCall.status === "preparing") {
     return generic("unsupported-phase");
   }
+  if (toolCall.name === "apply_patch") {
+    const input =
+      toolCall.wireDialect === "plaintext_custom"
+        ? plaintextApplyPatchInput(toolCall.arguments)
+        : (() => {
+            const argumentsResult = parsedJson(toolCall.arguments);
+            if (!argumentsResult.success) {
+              return null;
+            }
+            const parsed = applyPatchInputSchema.safeParse(
+              argumentsResult.value,
+            );
+            return parsed.success ? parsed.data : null;
+          })();
+    return input === null
+      ? generic("invalid-arguments")
+      : patchPresentation(toolCall, input);
+  }
   const argumentsResult = parsedJson(toolCall.arguments);
   if (!argumentsResult.success) {
     return generic("invalid-arguments");
@@ -684,12 +737,6 @@ export function knownToolPresentation(
                 input.data.new_string,
               ),
             })
-          : generic("invalid-arguments");
-      }
-      case "apply_patch": {
-        const input = applyPatchInputSchema.safeParse(argumentsResult.value);
-        return input.success
-          ? patchPresentation(toolCall, input.data)
           : generic("invalid-arguments");
       }
       case "delete": {

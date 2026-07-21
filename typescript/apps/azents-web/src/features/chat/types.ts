@@ -756,6 +756,7 @@ export interface ActiveToolCall {
   callId?: string;
   name: string;
   arguments: string;
+  wireDialect?: ClientToolWireDialect;
   toolkitSource?: ToolkitSourceSnapshot | InvalidToolkitSource | null;
   result?: string;
   resultMetadata?: Record<string, unknown>;

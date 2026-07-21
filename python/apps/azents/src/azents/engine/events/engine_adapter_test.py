@@ -701,7 +701,7 @@ class _ProfiledCandidateToolkit(Toolkit[BaseModel]):
                     ),
                     handler=handler,
                 ).with_required_client_tool_profile(
-                    ClientToolProfile.GPT_V4A_APPLY_PATCH
+                    ClientToolProfile.V4A_APPLY_PATCH_FUNCTION
                 )
             ],
         )
@@ -714,7 +714,9 @@ class _ProfiledCandidateToolkit(Toolkit[BaseModel]):
         del context
         return [
             ProfiledToolkitPrompt(
-                required_client_tool_profile=(ClientToolProfile.GPT_V4A_APPLY_PATCH),
+                required_client_tool_profile=(
+                    ClientToolProfile.V4A_APPLY_PATCH_FUNCTION
+                ),
                 content="Use apply_patch for multi-file changes.",
             )
         ]

@@ -432,6 +432,27 @@ def test_chatgpt_lowerer_uses_standard_full_context_request() -> None:
     assert request.continuation_store_enabled() is False
 
 
+def test_openai_sdk_lowerer_accepts_plaintext_custom_apply_patch_tool() -> None:
+    """Validate the reviewed plaintext custom declaration through the pinned SDK."""
+    tool: dict[str, object] = {
+        "type": "custom",
+        "name": "apply_patch",
+        "description": "Apply one strict V4A patch.",
+        "format": {"type": "text"},
+    }
+    lowerer = OpenAIResponsesLowerer(
+        provider="openai",
+        model="gpt-5.1",
+        provider_id=LLMProvider.OPENAI,
+        credential_kwargs={},
+        tools=[tool],
+    )
+
+    request = lowerer.lower([_event()], model="gpt-5.1")
+
+    assert request.tools == [tool]
+
+
 def test_chatgpt_lowerer_uses_standard_hosted_web_search_tool() -> None:
     """ChatGPT hosted web search remains in the standard tools field."""
     capabilities = ModelCapabilities()

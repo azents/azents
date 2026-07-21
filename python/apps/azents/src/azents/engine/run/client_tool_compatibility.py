@@ -2,15 +2,43 @@
 
 import dataclasses
 import enum
+import hashlib
 from collections.abc import Sequence
 
-from azents.core.enums import LLMModelDeveloper
+from azents.core.enums import LLMModelDeveloper, LLMProvider
 
 
 class ClientToolProfile(enum.StrEnum):
     """Code-owned model compatibility profiles for client-executed tools."""
 
-    GPT_V4A_APPLY_PATCH = "gpt_v4a_apply_patch"
+    V4A_APPLY_PATCH_FUNCTION = "v4a_apply_patch_function"
+    V4A_APPLY_PATCH_PLAINTEXT_CUSTOM = "v4a_apply_patch_plaintext_custom"
+
+
+@dataclasses.dataclass(frozen=True)
+class ClientToolRoute:
+    """Credential-free route facts used for pre-dispatch dialect selection."""
+
+    provider: LLMProvider
+    adapter: str
+    native_format: str
+    official_openai_endpoint: bool
+    api_key_available: bool
+    custom_rollout_percent: int
+    cohort_key: str
+
+    def __post_init__(self) -> None:
+        """Normalize route facts and reject invalid rollout configuration."""
+        object.__setattr__(self, "adapter", _normalize_required(self.adapter))
+        object.__setattr__(
+            self,
+            "native_format",
+            _normalize_required(self.native_format),
+        )
+        if not 0 <= self.custom_rollout_percent <= 100:
+            raise ValueError("Custom tool rollout percent must be between 0 and 100")
+        if not self.cohort_key:
+            raise ValueError("Custom tool rollout cohort key must be non-empty")
 
 
 class ClientToolCompatibilityMatchKind(enum.IntEnum):
@@ -136,8 +164,8 @@ def build_default_client_tool_compatibility_registry() -> (
     return ClientToolCompatibilityRegistry(
         (
             ClientToolCompatibilityRule(
-                rule_id="openai-gpt-v4a-apply-patch",
-                profile=ClientToolProfile.GPT_V4A_APPLY_PATCH,
+                rule_id="openai-gpt-v4a-apply-patch-function",
+                profile=ClientToolProfile.V4A_APPLY_PATCH_FUNCTION,
                 model_developer=LLMModelDeveloper.OPENAI,
                 enabled=True,
                 exact_model_identifier=None,
@@ -152,15 +180,73 @@ def resolve_client_tool_profiles(
     model_identifier: str,
     model_developer: LLMModelDeveloper | None,
     model_family: str | None,
+    route: ClientToolRoute,
 ) -> frozenset[ClientToolProfile]:
-    """Resolve default client tool profiles for one selected model snapshot."""
-    return build_default_client_tool_compatibility_registry().resolve(
+    """Resolve one pre-dispatch client-tool dialect selection."""
+    profiles = build_default_client_tool_compatibility_registry().resolve(
         ClientToolCompatibilityKey(
             model_identifier=model_identifier,
             model_developer=model_developer,
             model_family=model_family,
         )
     )
+    if ClientToolProfile.V4A_APPLY_PATCH_FUNCTION not in profiles:
+        return frozenset()
+    key = ClientToolCompatibilityKey(
+        model_identifier=model_identifier,
+        model_developer=model_developer,
+        model_family=model_family,
+    )
+    if _custom_apply_patch_transport_eligible(key=key, route=route):
+        return frozenset({ClientToolProfile.V4A_APPLY_PATCH_PLAINTEXT_CUSTOM})
+    if _function_apply_patch_transport_eligible(route):
+        return frozenset({ClientToolProfile.V4A_APPLY_PATCH_FUNCTION})
+    return frozenset()
+
+
+def _custom_apply_patch_transport_eligible(
+    *,
+    key: ClientToolCompatibilityKey,
+    route: ClientToolRoute,
+) -> bool:
+    """Return whether one exact reviewed OpenAI custom route is selected."""
+    return (
+        route.provider is LLMProvider.OPENAI
+        and route.adapter == "openai"
+        and route.native_format == "responses"
+        and route.official_openai_endpoint
+        and route.api_key_available
+        and key.model_identifier == "gpt-5.1"
+        and _cohort_enabled(
+            cohort_key=route.cohort_key,
+            percent=route.custom_rollout_percent,
+        )
+    )
+
+
+def _function_apply_patch_transport_eligible(route: ClientToolRoute) -> bool:
+    """Return whether the selected route has reviewed JSON function transport."""
+    if route.native_format != "responses":
+        return False
+    if route.provider in {LLMProvider.OPENAI, LLMProvider.CHATGPT_OAUTH}:
+        return route.adapter == "openai"
+    return route.provider is LLMProvider.OPENROUTER and route.adapter == "litellm"
+
+
+def _cohort_enabled(*, cohort_key: str, percent: int) -> bool:
+    """Return deterministic stable cohort membership without retaining the key."""
+    if percent == 0:
+        return False
+    if percent == 100:
+        return True
+    bucket = (
+        int.from_bytes(
+            hashlib.sha256(cohort_key.encode("utf-8")).digest()[:8],
+            byteorder="big",
+        )
+        % 100
+    )
+    return bucket < percent
 
 
 def _validate_no_same_specificity_overlap(
