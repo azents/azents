@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  ActionIcon,
   Box,
   Button,
   Center,
@@ -12,7 +11,6 @@ import {
   TextInput,
   Title,
 } from "@mantine/core";
-import { IconTrash } from "@tabler/icons-react";
 import dayjs from "dayjs";
 import type { WorkspaceDetailComponentProps } from "../containers/useWorkspaceDetailContainer";
 
@@ -26,7 +24,6 @@ export function WorkspaceDetailView({
   form,
   isDirty,
   onSubmit,
-  onDelete,
   onCancel,
 }: WorkspaceDetailComponentProps): React.ReactElement {
   switch (state.type) {
@@ -52,16 +49,11 @@ export function WorkspaceDetailView({
       );
 
     case "EDITING":
-    case "SAVING":
-    case "DELETING": {
+    case "SAVING": {
       const isSaving = state.type === "SAVING";
-      const isProcessing = state.type === "SAVING" || state.type === "DELETING";
-      const isNew =
-        state.type === "EDITING" || state.type === "SAVING"
-          ? state.isNew
-          : false;
-      const workspace =
-        state.type === "DELETING" ? state.workspace : state.workspace;
+      const isProcessing = isSaving;
+      const isNew = state.isNew;
+      const workspace = state.workspace;
 
       return (
         <Box h="100%" display="flex" style={{ flexDirection: "column" }}>
@@ -74,17 +66,6 @@ export function WorkspaceDetailView({
                 {isNew ? "Workspace 추가" : "Workspace 편집"}
               </Title>
               <Group gap="xs">
-                {!isNew && (
-                  <ActionIcon
-                    color="red"
-                    variant="subtle"
-                    onClick={onDelete}
-                    disabled={isProcessing}
-                    title="삭제"
-                  >
-                    <IconTrash size={18} />
-                  </ActionIcon>
-                )}
                 <Button
                   variant="outline"
                   size="xs"
