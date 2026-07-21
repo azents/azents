@@ -56,7 +56,7 @@ class _VfsService:
             namespace="azents",
             entries=[
                 (
-                    "azents://skills/azents/deep-research/references/checklist.md",
+                    "azents://skills/test/sample/references/checklist.md",
                     b"# Evidence checklist",
                     "text/markdown",
                 )
@@ -352,7 +352,7 @@ async def test_import_file_writes_current_run_vfs_resource() -> None:
     """Materialize one verified azents:// resource through the existing path."""
     storage = FakeSharedStorage()
     service = _VfsService()
-    uri = "azents://skills/azents/deep-research/references/checklist.md"
+    uri = "azents://skills/test/sample/references/checklist.md"
     tool = make_import_file_tool(
         session_storage=storage,
         exchange_file_service=AsyncMock(),
