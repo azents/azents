@@ -13,7 +13,7 @@ Details of all living specs. Synchronized from frontmatter.
 | Domain | Title | Owner | Last Verified | Version |
 |---|---|---|---|---|
 | agent | [Agent Domain Spec](domain/agent.md) | @Hardtack | 2026-07-18 | 50 |
-| conversation | [Conversation & Events](domain/conversation.md) | @Hardtack | 2026-07-21 | 124 |
+| conversation | [Conversation & Events](domain/conversation.md) | @Hardtack | 2026-07-21 | 125 |
 | goal | [Goal Domain Spec](domain/goal.md) | - | 2026-07-16 | 9 |
 | memory | [Memory](domain/memory.md) | @Hardtack | 2026-07-17 | 5 |
 | model-catalog | [Model Catalog Domain Spec](domain/model-catalog.md) | - | 2026-07-21 | 17 |
@@ -26,18 +26,18 @@ Details of all living specs. Synchronized from frontmatter.
 
 | Title | Owner | Last Verified | Version |
 |---|---|---|---|
-| [Agent Execution Loop](flow/agent-execution-loop.md) | @Hardtack | 2026-07-21 | 119 |
+| [Agent Execution Loop](flow/agent-execution-loop.md) | @Hardtack | 2026-07-21 | 120 |
 | [Agent Runtime Control](flow/agent-runtime-control.md) | @Hardtack | 2026-07-20 | 22 |
 | [Agent Runtime Persistence](flow/agent-runtime-persistence.md) | @Hardtack | 2026-07-03 | 3 |
 | [Chat Session Resync](flow/chat-session-resync.md) | @Hardtack | 2026-07-20 | 37 |
 | [ChatGPT OAuth Flow](flow/chatgpt-oauth.md) | @Hardtack | 2026-07-21 | 18 |
-| [Context Compaction](flow/context-compaction.md) | @Hardtack | 2026-07-20 | 29 |
+| [Context Compaction](flow/context-compaction.md) | @Hardtack | 2026-07-21 | 30 |
 | [File Exchange Storage](flow/file-exchange-storage.md) | @Hardtack | 2026-07-21 | 24 |
 | [Kimi OAuth Flow](flow/kimi-oauth.md) | @Hardtack | 2026-07-19 | 1 |
 | [MCP OAuth Flow](flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
 | [OpenRouter API Key Provider Flow](flow/openrouter-api-key.md) | @Hardtack | 2026-07-19 | 3 |
 | [Periodic Execution Flow Spec](flow/periodic-execution.md) | - | 2026-07-19 | 4 |
-| [Run Resume](flow/run-resume.md) | @Hardtack | 2026-07-21 | 22 |
+| [Run Resume](flow/run-resume.md) | @Hardtack | 2026-07-21 | 23 |
 | [Session Context Inspector](flow/session-context-inspector.md) | @Hardtack | 2026-07-19 | 17 |
 | [E2E Primary Test Strategy](flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-07-17 | 8 |
 | [xAI API Key Provider Flow](flow/xai-api-key.md) | @Hardtack | 2026-07-18 | 3 |

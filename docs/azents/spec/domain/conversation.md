@@ -102,7 +102,7 @@ api_routes:
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-07-21
-spec_version: 124
+spec_version: 125
 ---
 
 # Conversation & Events
@@ -508,6 +508,14 @@ parallel top-level attachments field. Tool output is either a plain string or an
 array containing `OutputTextPart`, `AttachmentOutputPart`, `ArtifactOutputPart`, or `FileOutputPart`;
 the serialized discriminators are `text`/`output_text`, `attachment`, `artifact`, and `file`.
 
+Every `client_tool_call` and `client_tool_result` persists a closed `wire_dialect`: `json_function`
+or `plaintext_custom`. Call `arguments` remains the exact decoded provider input and must be
+interpreted only through that stored dialect. Result creation copies the dialect from its admitted
+call; a call/result mismatch is rejected rather than repaired or relabeled. Legacy persisted client
+call, result, and active-call records without the additive field are read only as
+`json_function`; newly written records contain an explicit value. Null, unknown, and malformed values
+do not receive that legacy interpretation.
+
 events have both physical append identity and model-visible order. Physical ids keep the
 durable append/audit sequence. `model_order` is scoped to a session and is the ordering/filtering key
 used when reading future model input. Sequential appends allocate `model_order` with a gap so later
@@ -543,6 +551,16 @@ fallback uses one deterministic readable rendering of semantic input, output, re
 and stable metadata rather than inspecting native artifacts. This includes forward cutover from old
 LiteLLM artifacts and a code-version rollback that reads newer OpenAI-native artifacts;
 cross-adapter objects are never replayed as though they shared schema ownership.
+
+Client-tool native artifacts are subordinate to the canonical stored dialect. A same-native custom
+artifact is replayable only when the current route can represent that custom dialect and the native
+item type matches it; JSON-function artifacts have the analogous function item contract. When a later
+route cannot represent a completed custom call/result pair, lowering preserves the durable events but
+emits bounded, explicitly non-executable historical context. It omits the custom input, keeps only a
+bounded result preview when present, does not create active ownership, and never converts the pair to
+the other dialect. A native function/custom output item without an earlier matching-dialect call is
+dropped before provider dispatch; an incompatible historical custom result remains only as its bounded
+non-executable projection.
 
 A completed provider-hosted `image_generation` item uses one durable provider-call shape. Its
 `semantic.output` contains both a ModelFile-backed `FileOutputPart` and the independently stored
@@ -603,6 +621,11 @@ projects only `AttachmentOutputPart` values as UI files; `FileOutputPart` remain
 Client-tool results preserve their own completion/failure status and canonical output parts. The
 client projection also retains an optional raw result `metadata` object with the matched active
 tool call; rendering may use it only through an exact first-party adapter contract.
+
+Live and durable client-tool projections retain the stored dialect with the call identity. The web
+presentation validates the dialect-specific `apply_patch` input shape before using the specialized
+renderer; malformed or unsupported input remains a per-call Generic card and is never reclassified
+as the other dialect.
 
 Before a client-tool call becomes durable, the resolved Tool Catalog snapshots the source of a
 DB-attached Toolkit onto the call as `toolkit_config_id`, `toolkit_type`, `toolkit_name`, and
@@ -922,6 +945,7 @@ Current verification:
 
 ## 11. Changelog
 
+- **2026-07-21** — v125. Added closed client-tool wire dialect persistence, same-dialect replay and pairing, and bounded non-executable custom history projection.
 - **2026-07-21** — v123. Completed validated specialized presentation coverage for source-less client builtins, added rich provider `web_search`, standardized Activity event rows and fixed Raw data action placement, removed Generic filler copy, and kept sensitive payloads out of collapsed summaries.
 - **2026-07-20** — v122. Added validated, source-aware specialized rendering for the Phase 1 Runtime client-tool set, preserved client result metadata in the frontend projection, and retained per-call Generic raw fallback with separate Raw data diagnostics.
 - **2026-07-20** — v121. Replaced phase-based Activity grouping with ordered durable/live event projection, persisted Toolkit source snapshots for client-tool identity, and rendered all attachment-bearing tool outputs as standalone deliveries.

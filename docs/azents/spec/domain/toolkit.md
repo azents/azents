@@ -129,6 +129,16 @@ The slug prefix is only a tool-call namespace. Toolkit State uses its own `toolk
 
 Final provider-facing client tools are canonicalized by model-visible tool name before lowering to the model request. Toolkit-local generation may use whatever construction order is convenient, but `ToolCatalog.native_tools` is name-sorted so identical toolkit configuration and identical successful toolkit state produce stable function-tool ordering. Provider-hosted tools are also sorted by stable semantic name/config before request lowering when more than one hosted tool is present.
 
+One logical catalog entry may have one route-selected provider declaration variant while preserving
+its final model-visible name, catalog identity, source metadata, Tool Search identity, and executor
+lookup. The current variant-capable entry is `apply_patch`: its reviewed compatibility profile can
+select either the ordinary JSON-function declaration or a plaintext-custom declaration. The custom
+variant is fail-closed and default-disabled: it requires the exact reviewed official OpenAI Responses
+API-key route, exact eligible model, and deterministic enabled rollout cohort. All other eligible
+routes use only their independently reviewed JSON-function transport; unsupported routes omit
+`apply_patch`. A prepared catalog exposes one variant, never both, and Tool Search/declaration-budget
+projection count that selected declaration once.
+
 ### Managed Skill VFS
 
 Azents-managed Skill packages use a read-only virtual filesystem distinct from the Agent Runtime filesystem. The first registered mount is `skills`, and every managed Skill entrypoint has the canonical form:

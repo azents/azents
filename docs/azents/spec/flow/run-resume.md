@@ -25,7 +25,7 @@ code_paths:
   - python/apps/azents/src/azents/worker/session/**
   - python/apps/azents/src/azents/worker/run/**
 last_verified_at: 2026-07-21
-spec_version: 22
+spec_version: 23
 ---
 
 # Run Resume
@@ -229,7 +229,7 @@ Manual failed-run retry is a distinct new pending run. It copies the original re
 
 ## Tool Recovery
 
-Tool recovery reconciles the durable call event, active ownership entry, terminal result, and owner generation before any resumed model dispatch. A previous-generation active call is cancelled best effort and receives one deterministic `client_tool_result(status=cancelled)`. A durable call without active ownership or result is an orphan and receives the same cancelled result without handler execution. A result with stale active ownership keeps the existing result and removes only the stale ownership entry. Completed tool results are never re-executed, and duplicate recovery converges through the result external ID.
+Tool recovery reconciles the durable call event, active ownership entry, terminal result, and owner generation before any resumed model dispatch. A previous-generation active call is cancelled best effort and receives one deterministic `client_tool_result(status=cancelled)`. A durable call without active ownership or result is an orphan and receives the same cancelled result without handler execution. A result with stale active ownership keeps the existing result and removes only the stale ownership entry. Completed tool results are never re-executed, and duplicate recovery converges through the result external ID. Client-tool recovery copies the durable call's `wire_dialect` into every synthetic or recovered terminal result and never reinterprets, relabels, or reruns a call through a different provider dialect.
 
 ## User Stop Resume Boundary
 
@@ -261,6 +261,7 @@ run to observe `check_stop()` as true.
 - Shutdown/handover run completion is not quiescent idle and must not dispatch idle continuation
   hooks.
 - Completed tool results are not duplicated.
+- Tool recovery and cancellation preserve the durable call dialect; cross-dialect result pairing is rejected before handler execution.
 - User stop intent is consumed by stop finalization and must not interrupt the next wake-up.
 - A leftover nonterminal operation is cancelled into one durable snapshot before new work; operation handlers are never resumed or replayed after ownership loss.
 - SDK `RunState` compatibility is not preserved.
@@ -268,6 +269,7 @@ run to observe `check_stop()` as true.
 
 ## Changelog
 
+- **2026-07-21** (spec_version 23) — Made recovery and synthetic client-tool terminal settlement explicitly dialect-preserving.
 - **2026-07-18** (spec_version 21) — Preserved bounded provider failure state and complete retry budgets across handover while giving terminal User Stop precedence over retry finalization.
 - **2026-07-16** (spec_version 20) — Scoped takeover retry recovery to the active model turn and made committed model output plus retry-state removal one durable boundary.
 - **2026-07-14** (spec_version 19) — Replaced operation resume with owner-generation-fenced live execution, atomic terminal snapshot/delete handover, 30-second graceful shutdown, and cancelled no-reexecution takeover recovery.

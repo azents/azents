@@ -18,8 +18,8 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_session.py
   - python/apps/azents/src/azents/rdb/models/agent_run.py
   - python/apps/azents/src/azents/rdb/models/agent.py
-last_verified_at: 2026-07-20
-spec_version: 29
+last_verified_at: 2026-07-21
+spec_version: 30
 ---
 
 # Context Compaction
@@ -123,9 +123,12 @@ Automatic compaction does not re-estimate the full event transcript when provide
 available. It uses the latest turn marker usage as the accounted prefix and estimates only the event
 delta after that marker. The estimator computes model-visible byte cost first and converts it with
 `ceil(bytes / 4)`. It excludes storage metadata, native artifacts, event IDs, timestamps, and schema
-fields, and counts only user/assistant text, client tool call name/arguments, client tool result text,
-provider-tool semantic transcripts, compaction summary text, and bounded file/attachment/artifact
-metadata that can reach model input. Provider call events use the same deterministic semantic renderer
+fields, and counts only user/assistant text, client tool call name plus its model-visible argument
+projection, client tool result text, provider-tool semantic transcripts, compaction summary text, and
+bounded file/attachment/artifact metadata that can reach model input. JSON-function calls contribute
+their arguments. Plaintext-custom calls contribute a fixed omission marker instead of their custom
+input, so that input neither affects automatic-compaction accounting nor enters the summary-model input,
+generated checkpoint, or continuity projection. Provider call events use the same deterministic semantic renderer
 as model lowering, including input, textual output, typed references, optional excerpts, canonical
 file/attachment metadata, and stable sorted metadata; native artifact JSON is never counted.
 
@@ -178,6 +181,11 @@ provider-tool semantic transcripts, compaction summary reminders, system reminde
 file/attachment/artifact metadata. Event IDs, timestamps, native artifacts, event kind, model order,
 and storage-only metadata are not included.
 
+For plaintext-custom client calls, the continuity call-argument slot is the same fixed omission marker
+used by token estimation. The corresponding result remains ordinary bounded model-visible result text.
+Compaction does not rewrite durable call events, select a different dialect, or make a custom call
+executable on a later incompatible route.
+
 Each user-message or transcript excerpt is truncated independently to 2,000 estimated tokens.
 Truncation is marked inline with `[Event truncated by Azents continuity guard.]`. This prevents a
 single large tool output from surviving compaction as an unbounded raw event while still preserving
@@ -220,6 +228,7 @@ the immediate shape of the recent interaction.
 
 ## Changelog
 
+- **2026-07-21** (spec_version 30) — Omitted plaintext-custom client-tool input from compaction accounting and continuity while retaining bounded result continuity.
 - **2026-07-20** (spec_version 29) — Reset the Session Tool Search working set in the successful compaction transaction while preserving it on skipped or unsuccessful attempts.
 - **2026-07-19** (spec_version 28) — Updated compaction rendering and token estimation for one durable provider call with canonical output-part metadata.
 
