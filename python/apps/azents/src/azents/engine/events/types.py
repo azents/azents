@@ -488,7 +488,6 @@ class TurnMarkerPayload(BaseModel):
         default=None,
         gt=0,
     )
-    system_prompt: "SystemPromptAnalysisPayload | None" = Field(default=None)
 
 
 class SystemPromptFragmentPayload(BaseModel):

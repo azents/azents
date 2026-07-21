@@ -1,6 +1,8 @@
 """Session context breakdown tests for provider-tool semantics."""
 
 import datetime
+from types import SimpleNamespace
+from typing import cast
 
 from azents.core.enums import EventKind
 from azents.engine.events.provider_tool_rendering import render_provider_tool_semantic
@@ -11,10 +13,15 @@ from azents.engine.events.types import (
     ProviderToolCallPayload,
     ProviderToolReference,
     ProviderToolSemanticContent,
+    SystemPromptAnalysisPayload,
+    SystemPromptFragmentPayload,
     build_native_compat_key,
 )
+from azents.repos.agent_session.data import AgentSession
 from azents.services.chat.context import (
+    SessionContextSystemPrompt,
     _build_breakdown,  # pyright: ignore[reportPrivateUsage]
+    _build_context,  # pyright: ignore[reportPrivateUsage]
 )
 
 
@@ -88,7 +95,7 @@ def test_context_breakdown_counts_full_provider_call_semantics() -> None:
         ),
     ]
 
-    breakdown = _build_breakdown(events)
+    breakdown = _build_breakdown(events, None)
 
     assert len(breakdown) == 1
     assert breakdown[0].key == "tool"
@@ -96,3 +103,59 @@ def test_context_breakdown_counts_full_provider_call_semantics() -> None:
         render_provider_tool_semantic(result)
     )
     assert breakdown[0].percent == 100.0
+
+
+def test_context_breakdown_uses_session_prompt_snapshot() -> None:
+    """Count the final prompt from the replaceable session snapshot."""
+    final_prompt = SystemPromptFragmentPayload(
+        id="final",
+        source="final",
+        label="Final system prompt",
+        content="latest system prompt",
+        preview="latest system prompt",
+        length=len("latest system prompt"),
+    )
+
+    breakdown = _build_breakdown(
+        [],
+        SessionContextSystemPrompt.from_payload(
+            SystemPromptAnalysisPayload(final_prompt=final_prompt)
+        ),
+    )
+
+    assert len(breakdown) == 1
+    assert breakdown[0].key == "system"
+    assert breakdown[0].tokens == final_prompt.length
+    assert breakdown[0].percent == 100.0
+
+
+def test_context_projection_uses_session_prompt_snapshot() -> None:
+    """Expose snapshot prompt analysis without reading a turn marker."""
+    now = datetime.datetime.now(datetime.UTC)
+    agent_session = cast(
+        AgentSession,
+        SimpleNamespace(
+            id="session-1",
+            agent_id="agent-1",
+            created_at=now,
+            updated_at=now,
+        ),
+    )
+    final_prompt = SystemPromptFragmentPayload(
+        id="final",
+        source="final",
+        label="Final system prompt",
+        content="latest prompt",
+        preview="latest prompt",
+        length=len("latest prompt"),
+    )
+
+    context = _build_context(
+        agent_session,
+        [],
+        SystemPromptAnalysisPayload(final_prompt=final_prompt),
+    )
+
+    assert context.system_prompt is not None
+    assert context.system_prompt.final_prompt is not None
+    assert context.system_prompt.final_prompt.content == "latest prompt"

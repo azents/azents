@@ -126,6 +126,9 @@ from azents.engine.tools.xai_image_generation import XaiImagineClientFactory
 from azents.repos.agent_execution.data import AgentRunCreate, EventCreate
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession
+from azents.repos.agent_session_system_prompt_snapshot import (
+    AgentSessionSystemPromptSnapshotRepository,
+)
 from azents.repos.model_file_pin import ModelFilePinRepository
 from azents.services.artifact import ArtifactService
 from azents.services.exchange_file import ExchangeFileService
@@ -2054,6 +2057,10 @@ async def test_adapter_wires_event_filters_and_session_head_repo() -> None:
         "NativeRequestSizeGuard",
     ]
     assert captured["session_repo"] is session_head_repo
+    assert isinstance(
+        captured["system_prompt_snapshot_repo"],
+        AgentSessionSystemPromptSnapshotRepository,
+    )
     model_adapter = captured["model_adapter"]
     assert isinstance(model_adapter, OpenAIResponsesModelAdapter)
     assert isinstance(
@@ -2528,6 +2535,7 @@ def _agent_engine_adapter(
         agent_session_repo=agent_session_repo or _AgentSessionRepo(),
         session_head_repo=session_head_repo or _EventSessionHeadRepo(None),
         transcript_repo=transcript_repo or _TranscriptRepo([]),
+        system_prompt_snapshot_repo=AgentSessionSystemPromptSnapshotRepository(),
         model_file_pin_repo=_ModelFilePinRepo(),
         compactor=compactor or _Compactor(),
         summary_model_call=summary_model_call

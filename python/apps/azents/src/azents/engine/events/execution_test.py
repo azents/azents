@@ -323,6 +323,40 @@ class _FailingTranscriptRepo(_TranscriptRepo):
         raise RuntimeError("event admission failed")
 
 
+class _SystemPromptSnapshotRepo:
+    """In-memory latest system prompt snapshot repository."""
+
+    def __init__(
+        self,
+        initial: SystemPromptAnalysisPayload | None = None,
+    ) -> None:
+        self.snapshot = initial
+        self.session_ids: list[str] = []
+
+    async def replace(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        system_prompt: SystemPromptAnalysisPayload,
+    ) -> None:
+        """Replace the current snapshot."""
+        del session
+        self.snapshot = system_prompt
+        self.session_ids.append(session_id)
+
+    async def delete(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+    ) -> None:
+        """Delete the current snapshot."""
+        del session
+        self.snapshot = None
+        self.session_ids.append(session_id)
+
+
 class _Lowerer:
     """Lowerer for tests."""
 
@@ -1607,6 +1641,7 @@ async def test_model_usage_is_appended_as_turn_marker(
     """Durably append normalizer usage as turn marker and debug log."""
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
+    system_prompt_snapshot_repo = _SystemPromptSnapshotRepo()
     usage = TokenUsagePayload(
         prompt_tokens=100,
         completion_tokens=20,
@@ -1654,6 +1689,7 @@ async def test_model_usage_is_appended_as_turn_marker(
         ),
         run_repo=run_repo,
         transcript_repo=transcript_repo,
+        system_prompt_snapshot_repo=system_prompt_snapshot_repo,
     )
 
     with caplog.at_level(logging.INFO, logger="azents.engine.events.execution"):
@@ -1680,12 +1716,14 @@ async def test_model_usage_is_appended_as_turn_marker(
     assert payload.applied_inference_profile == inference_state.applied_profile
     assert payload.effective_context_window_tokens == 128_000
     assert payload.effective_auto_compaction_threshold_tokens == 102_400
-    assert payload.system_prompt == system_prompt
     serialized_payload = turn_markers[0].payload.model_dump(mode="json")
+    assert "system_prompt" not in serialized_payload
     assert serialized_payload["applied_inference_profile"]["reasoning_effort"] is None
     assert "provider" not in serialized_payload
     assert "model_selection" not in serialized_payload
     assert "credential_kwargs" not in serialized_payload
+    assert system_prompt_snapshot_repo.snapshot == system_prompt
+    assert system_prompt_snapshot_repo.session_ids == ["session-1"]
     record = next(
         item for item in caplog.records if item.message == "Model token usage"
     )
@@ -1702,6 +1740,51 @@ async def test_model_usage_is_appended_as_turn_marker(
     assert fields["cached_token_ratio"] == 0.75
     assert "raw_usage" not in fields
     assert "raw_hidden_params" not in fields
+
+
+async def test_model_output_without_system_prompt_clears_session_snapshot() -> None:
+    """A successful no-prompt model call must not leave stale diagnostics."""
+    previous_prompt = SystemPromptAnalysisPayload(
+        final_prompt=SystemPromptFragmentPayload(
+            id="final",
+            source="final",
+            label="Final system prompt",
+            content="previous prompt",
+            preview="previous prompt",
+            length=len("previous prompt"),
+        )
+    )
+    system_prompt_snapshot_repo = _SystemPromptSnapshotRepo(previous_prompt)
+    execution = AgentRunExecution(
+        session_manager=_session_context,
+        post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_provider_integration_id=None,
+        model_stream_inference_profile=None,
+        model_adapter=_ModelAdapter(),
+        output_normalizer=_Normalizer([_assistant_event()]),
+        model_call_preparer=_model_call_preparer(
+            lowerer=_Lowerer(),
+            tool_executor=_ToolExecutor(),
+        ),
+        run_repo=_RunRepo(),
+        transcript_repo=_TranscriptRepo(),
+        system_prompt_snapshot_repo=system_prompt_snapshot_repo,
+    )
+
+    await execution.run(
+        AgentRunExecutionRequest(
+            owner_generation=1,
+            tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            run_id="run-1",
+            session_id="session-1",
+            model="gpt-5.1",
+        )
+    )
+
+    assert system_prompt_snapshot_repo.snapshot is None
+    assert system_prompt_snapshot_repo.session_ids == ["session-1"]
 
 
 async def test_model_input_uses_session_head_event_id() -> None:
