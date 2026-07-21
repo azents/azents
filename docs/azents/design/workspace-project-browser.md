@@ -4,6 +4,10 @@ created: 2026-07-03
 updated: 2026-07-03
 implemented: 2026-07-03
 tags: [workspace, project, frontend, backend, runtime]
+document_role: supporting
+document_type: supporting-consolidation
+migration_source: "docs/azents/design/workspace-project-browser.md"
+supporting_role: consolidation
 ---
 
 # Workspace Project Browser
@@ -16,7 +20,7 @@ Azents has three related but distinct concepts:
 - Agent Workspace, which is the runtime filesystem rooted at the provider-reported workspace path;
 - session-owned Projects, which are exact path registrations under `/workspace/agent` that define an `AgentSession` working context.
 
-The current product surface exposes the runtime file browser as an Agent Workspace root-first browser and exposes Projects through a separate session Projects tab/page. That split no longer matches the session Project model established by ADR-0076 and ADR-0086.
+The current product surface exposes the runtime file browser as an Agent Workspace root-first browser and exposes Projects through a separate session Projects tab/page. That split no longer matches the session Project model established by [registry-260625/ADR](../adr/registry-260625-registry.md) and [new-260629/ADR](../adr/new-260629-new-selection.md).
 
 Users expect to browse the files relevant to the current session first. Those files are the registered Project roots, not every file under the Agent Workspace root. At the same time, new-session bootstrap already has Project paths before a session exists, and future worktree creation needs to expose newly created workspace paths as Project candidates before a target session exists.
 
@@ -24,10 +28,10 @@ This design defines a Project-first Workspace browser backed by a backend-owned 
 
 ## Related Decisions
 
-- [ADR-0076: Session-Owned Project Registry](../adr/0076-session-owned-project-registry.md)
-- [ADR-0086: New Session Project Selection](../adr/0086-new-session-project-selection.md)
-- [ADR-0089: Workspace Project Browser Surface](../adr/0089-workspace-project-browser-surface.md)
-- [ADR-0090: Backend Project Browser Manifest](../adr/0090-backend-project-browser-manifest.md)
+- [registry-260625/ADR: Session-Owned Project Registry](../adr/registry-260625-registry.md)
+- [new-260629/ADR: New Session Project Selection](../adr/new-260629-new-selection.md)
+- [browser-260703/ADR: Workspace Project Browser Surface](../adr/browser-260703-browser-surface.md)
+- [backend-260703/ADR: Backend Project Browser Manifest](../adr/backend-260703-backend-browser-manifest.md)
 
 ## Goals
 
@@ -85,7 +89,7 @@ Pre-session Project selection consumes the same Project browser entry model via 
 
 ### REQ-WPB-1 — Project-first concrete session browser
 
-Related decisions: ADR-0089-D1, ADR-0089-D5
+Related decisions: [browser-260703/ADR-D1](../adr/browser-260703-browser-surface.md), [browser-260703/ADR-D5](../adr/browser-260703-browser-surface.md)
 
 Acceptance criteria:
 
@@ -96,7 +100,7 @@ Acceptance criteria:
 
 ### REQ-WPB-2 — Explicit All files secondary mode
 
-Related decisions: ADR-0089-D2
+Related decisions: [browser-260703/ADR-D2](../adr/browser-260703-browser-surface.md)
 
 Acceptance criteria:
 
@@ -106,7 +110,7 @@ Acceptance criteria:
 
 ### REQ-WPB-3 — Project management inside Workspace surface
 
-Related decisions: ADR-0089-D3, ADR-0089-D6
+Related decisions: [browser-260703/ADR-D3](../adr/browser-260703-browser-surface.md), [browser-260703/ADR-D6](../adr/browser-260703-browser-surface.md)
 
 Acceptance criteria:
 
@@ -116,7 +120,7 @@ Acceptance criteria:
 
 ### REQ-WPB-4 — Project root capabilities are backend-provided and registry-scoped
 
-Related decisions: ADR-0089-D4, ADR-0090-D1, ADR-0090-D7
+Related decisions: [browser-260703/ADR-D4](../adr/browser-260703-browser-surface.md), [backend-260703/ADR-D1](../adr/backend-260703-backend-browser-manifest.md), [backend-260703/ADR-D7](../adr/backend-260703-backend-browser-manifest.md)
 
 Acceptance criteria:
 
@@ -127,7 +131,7 @@ Acceptance criteria:
 
 ### REQ-WPB-5 — Backend-owned Project browser manifest
 
-Related decisions: ADR-0090-D1, ADR-0090-D3
+Related decisions: [backend-260703/ADR-D1](../adr/backend-260703-backend-browser-manifest.md), [backend-260703/ADR-D3](../adr/backend-260703-backend-browser-manifest.md)
 
 Acceptance criteria:
 
@@ -138,7 +142,7 @@ Acceptance criteria:
 
 ### REQ-WPB-6 — Agent Project catalog stores reusable status projection
 
-Related decisions: ADR-0090-D2, ADR-0090-D5
+Related decisions: [backend-260703/ADR-D2](../adr/backend-260703-backend-browser-manifest.md), [backend-260703/ADR-D5](../adr/backend-260703-backend-browser-manifest.md)
 
 Acceptance criteria:
 
@@ -149,7 +153,7 @@ Acceptance criteria:
 
 ### REQ-WPB-7 — Manifest reads are non-blocking
 
-Related decisions: ADR-0090-D4
+Related decisions: [backend-260703/ADR-D4](../adr/backend-260703-backend-browser-manifest.md)
 
 Acceptance criteria:
 
@@ -159,7 +163,7 @@ Acceptance criteria:
 
 ### REQ-WPB-8 — Boundary-triggered Project status sync
 
-Related decisions: ADR-0090-D6
+Related decisions: [backend-260703/ADR-D6](../adr/backend-260703-backend-browser-manifest.md)
 
 Acceptance criteria:
 
@@ -172,7 +176,7 @@ Acceptance criteria:
 
 ### REQ-WPB-9 — Preserve Agent Workspace path contract
 
-Related decisions: ADR-0089-D2, ADR-0090-D4
+Related decisions: [browser-260703/ADR-D2](../adr/browser-260703-browser-surface.md), [backend-260703/ADR-D4](../adr/backend-260703-backend-browser-manifest.md)
 
 Acceptance criteria:
 
@@ -184,19 +188,19 @@ Acceptance criteria:
 
 | Decision | Requirements |
 | --- | --- |
-| ADR-0089-D1 — Projects are the default Workspace browser mode | REQ-WPB-1 |
-| ADR-0089-D2 — All files remains as a secondary inspection mode | REQ-WPB-2, REQ-WPB-9 |
-| ADR-0089-D3 — Project management belongs inside the Workspace surface | REQ-WPB-3 |
-| ADR-0089-D4 — Project root actions are registry-scoped, not filesystem-destructive | REQ-WPB-4 |
-| ADR-0089-D5 — Empty Projects is an explicit state | REQ-WPB-1 |
-| ADR-0089-D6 — Legacy Projects route is normalized away | REQ-WPB-3 |
-| ADR-0090-D1 — Backend owns the Project browser manifest contract | REQ-WPB-4, REQ-WPB-5 |
-| ADR-0090-D2 — Session Project bindings remain separate from the Agent Project catalog | REQ-WPB-6 |
-| ADR-0090-D3 — Existing-session and pre-session manifest entrypoints share one entry model | REQ-WPB-5 |
-| ADR-0090-D4 — Browser manifest reads never block on runtime filesystem checks | REQ-WPB-7, REQ-WPB-9 |
-| ADR-0090-D5 — Project filesystem status is a DB-persisted UI projection | REQ-WPB-6 |
-| ADR-0090-D6 — Project filesystem status sync runs at meaningful boundaries | REQ-WPB-8 |
-| ADR-0090-D7 — Frontend renders backend capabilities | REQ-WPB-4 |
+| [browser-260703/ADR-D1](../adr/browser-260703-browser-surface.md) — Projects are the default Workspace browser mode | REQ-WPB-1 |
+| [browser-260703/ADR-D2](../adr/browser-260703-browser-surface.md) — All files remains as a secondary inspection mode | REQ-WPB-2, REQ-WPB-9 |
+| [browser-260703/ADR-D3](../adr/browser-260703-browser-surface.md) — Project management belongs inside the Workspace surface | REQ-WPB-3 |
+| [browser-260703/ADR-D4](../adr/browser-260703-browser-surface.md) — Project root actions are registry-scoped, not filesystem-destructive | REQ-WPB-4 |
+| [browser-260703/ADR-D5](../adr/browser-260703-browser-surface.md) — Empty Projects is an explicit state | REQ-WPB-1 |
+| [browser-260703/ADR-D6](../adr/browser-260703-browser-surface.md) — Legacy Projects route is normalized away | REQ-WPB-3 |
+| [backend-260703/ADR-D1](../adr/backend-260703-backend-browser-manifest.md) — Backend owns the Project browser manifest contract | REQ-WPB-4, REQ-WPB-5 |
+| [backend-260703/ADR-D2](../adr/backend-260703-backend-browser-manifest.md) — Session Project bindings remain separate from the Agent Project catalog | REQ-WPB-6 |
+| [backend-260703/ADR-D3](../adr/backend-260703-backend-browser-manifest.md) — Existing-session and pre-session manifest entrypoints share one entry model | REQ-WPB-5 |
+| [backend-260703/ADR-D4](../adr/backend-260703-backend-browser-manifest.md) — Browser manifest reads never block on runtime filesystem checks | REQ-WPB-7, REQ-WPB-9 |
+| [backend-260703/ADR-D5](../adr/backend-260703-backend-browser-manifest.md) — Project filesystem status is a DB-persisted UI projection | REQ-WPB-6 |
+| [backend-260703/ADR-D6](../adr/backend-260703-backend-browser-manifest.md) — Project filesystem status sync runs at meaningful boundaries | REQ-WPB-8 |
+| [backend-260703/ADR-D7](../adr/backend-260703-backend-browser-manifest.md) — Frontend renders backend capabilities | REQ-WPB-4 |
 
 ## User-visible Behavior
 

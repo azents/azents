@@ -2,6 +2,9 @@
 title: "Provider Tool Live Activity Validation Report"
 created: 2026-07-16
 tags: [backend, engine, frontend, llm, testing]
+document_role: supporting
+document_type: supporting-validation-report
+migration_source: "docs/azents/design/provider-tool-live-activity-validation-report-2026-07-16.md"
 ---
 
 # Provider Tool Live Activity Validation Report

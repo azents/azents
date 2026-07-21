@@ -3,6 +3,9 @@ title: "OSS Admin Surface Authentication and Bootstrap Validation Report"
 created: 2026-07-13
 updated: 2026-07-13
 tags: [admin, auth, bootstrap, e2e, testenv, validation]
+document_role: supporting
+document_type: supporting-validation-report
+migration_source: "docs/azents/design/oss-admin-surface-auth-and-bootstrap-validation-report-2026-07-13.md"
 ---
 
 # OSS Admin Surface Authentication and Bootstrap Validation Report

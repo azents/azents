@@ -2,6 +2,9 @@
 title: "Chat Timeline Reliability Hardening Validation Report"
 created: 2026-07-13
 tags: [backend, frontend, chat, reliability, testing]
+document_role: supporting
+document_type: supporting-validation-report
+migration_source: "docs/azents/design/chat-timeline-reliability-validation-report-2026-07-13.md"
 ---
 
 # Chat Timeline Reliability Hardening Validation Report

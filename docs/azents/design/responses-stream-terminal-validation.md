@@ -3,6 +3,9 @@ title: "Responses Stream Terminal Validation"
 created: 2026-07-15
 implemented: 2026-07-15
 tags: [backend, engine, llm, retry]
+document_role: supporting
+document_type: supporting-validation-report
+migration_source: "docs/azents/design/responses-stream-terminal-validation.md"
 ---
 # Responses Stream Terminal Validation
 
@@ -12,7 +15,7 @@ Azents will require an explicit native `response.completed` terminal event befor
 
 This phase intentionally does not change the successful-output policy. A reasoning-only response explicitly terminated by `response.completed` remains accepted by the current execution loop.
 
-The durable decision is recorded in [ADR-0145](../adr/0145-require-explicit-responses-stream-completion.md).
+The durable decision is recorded in [responses-260715/ADR](../adr/responses-260715-responses-stream-completion.md).
 
 ## Problem
 

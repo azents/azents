@@ -4,6 +4,10 @@ tags: [backend, kubernetes, engine]
 created: 2026-04-01
 updated: 2026-04-01
 implemented: 2026-04-01
+document_role: supporting
+document_type: supporting-consolidation
+migration_source: "docs/azents/design/lightkube-migration.md"
+supporting_role: consolidation
 ---
 
 # kubernetes_asyncio → lightkube Migration Design
@@ -21,7 +25,7 @@ Replace K8s client in Kubernetes Toolkit (`engine/tools/kubernetes.py`) from `ku
 
 ## Discussion Points and Decisions
 
-See [../adr/0016-lightkube-migration.md](../adr/0016-lightkube-migration.md).
+See [../adr/lightkube-260401-lightkube-migration.md](../adr/lightkube-260401-lightkube-migration.md).
 
 Summary:
 1. **Scope**: Toolkit only (exclude agent_home_k8s.py)

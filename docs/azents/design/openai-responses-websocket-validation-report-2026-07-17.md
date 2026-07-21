@@ -2,13 +2,16 @@
 title: "OpenAI Responses WebSocket Validation Report — 2026-07-17"
 created: 2026-07-17
 tags: [backend, engine, llm, openai, oauth, testing, websocket]
+document_role: supporting
+document_type: supporting-validation-report
+migration_source: "docs/azents/design/openai-responses-websocket-validation-report-2026-07-17.md"
 ---
 
 # OpenAI Responses WebSocket Validation Report — 2026-07-17
 
 ## Scope
 
-This report validates implementation commit `d09ccfee` against ADR-0150 and the OpenAI Responses WebSocket transport design. Validation covers dependency resolution, formatting, linting, type safety, deterministic backend behavior, worker retry ownership and propagation, timeout cleanup, custom-endpoint HTTP compatibility, and the product E2E suite in Docker-enabled CI.
+This report validates implementation commit `d09ccfee` against [responses-260716/ADR](../adr/responses-260716-openai-responses-websocket-lifecycle.md) and the OpenAI Responses WebSocket transport design. Validation covers dependency resolution, formatting, linting, type safety, deterministic backend behavior, worker retry ownership and propagation, timeout cleanup, custom-endpoint HTTP compatibility, and the product E2E suite in Docker-enabled CI.
 
 No external provider call was made. No credentials, account headers, provider payloads, response identifiers, model output, or raw WebSocket frames were captured as evidence.
 
@@ -70,7 +73,7 @@ The AIMock fixture sets `AZ_OPENAI_BASE_URL` to a custom HTTP endpoint. The pass
 
 ## External Validation
 
-Live OpenAI Platform validation was not run because it is optional under ADR-0150 and no provider credential was supplied for this validation phase. The previously retained ChatGPT OAuth probe evidence remains external to the repository and was not rerun or disclosed.
+Live OpenAI Platform validation was not run because it is optional under [responses-260716/ADR](../adr/responses-260716-openai-responses-websocket-lifecycle.md) and no provider credential was supplied for this validation phase. The previously retained ChatGPT OAuth probe evidence remains external to the repository and was not rerun or disclosed.
 
 ## Privacy Review
 

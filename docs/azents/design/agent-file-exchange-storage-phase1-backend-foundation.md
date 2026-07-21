@@ -4,6 +4,9 @@ tags: [backend, api, engine]
 created: 2026-05-05
 updated: 2026-05-05
 implemented: 2026-05-05
+document_role: supporting
+document_type: supporting-phase
+migration_source: "docs/azents/design/agent-file-exchange-storage-phase1-backend-foundation.md"
 ---
 
 # Agent File Exchange Storage Phase 1 — Backend Foundation

@@ -2,6 +2,9 @@
 title: "Archived Session Retention Validation Report"
 created: 2026-07-19
 tags: [backend, frontend, scheduler, session, retention, admin, testenv]
+document_role: supporting
+document_type: supporting-validation-report
+migration_source: "docs/azents/design/archived-session-retention-validation-report-2026-07-19.md"
 ---
 
 # Archived Session Retention Validation Report

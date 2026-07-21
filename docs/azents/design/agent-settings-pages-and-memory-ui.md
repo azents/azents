@@ -2,6 +2,10 @@
 title: "Agent Settings Pages and Memory UI Design"
 created: 2026-07-02
 tags: [product, frontend, backend, api, memory]
+document_role: supporting
+document_type: supporting-consolidation
+migration_source: "docs/azents/design/agent-settings-pages-and-memory-ui.md"
+supporting_role: consolidation
 ---
 
 # Agent Settings Pages and Memory UI Design
@@ -25,7 +29,7 @@ Primary user scenarios:
 
 Agent settings must be split into a hub and focused subpages.
 
-Related decisions: ADR-0088-D1
+Related decisions: [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-206)
 
 Acceptance criteria:
 
@@ -38,7 +42,7 @@ Acceptance criteria:
 
 Memory management must live under Agent settings rather than session UI.
 
-Related decisions: ADR-0088-D2
+Related decisions: [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-207)
 
 Acceptance criteria:
 
@@ -50,7 +54,7 @@ Acceptance criteria:
 
 Memory APIs must enforce scope-aware read and write authorization.
 
-Related decisions: ADR-0088-D3
+Related decisions: [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-208)
 
 Acceptance criteria:
 
@@ -63,7 +67,7 @@ Acceptance criteria:
 
 Human UI APIs must avoid silent overwrite.
 
-Related decisions: ADR-0088-D4
+Related decisions: [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-209)
 
 Acceptance criteria:
 
@@ -76,7 +80,7 @@ Acceptance criteria:
 
 The settings IA refactor and Memory UI must ship separately.
 
-Related decisions: ADR-0088-D5
+Related decisions: [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-210)
 
 Acceptance criteria:
 
@@ -88,7 +92,7 @@ Acceptance criteria:
 
 The first Memory UI must not add revision history, soft delete, or restore.
 
-Related decisions: ADR-0088-D6
+Related decisions: [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-211)
 
 Acceptance criteria:
 
@@ -100,12 +104,12 @@ Acceptance criteria:
 
 | Decision | Requirements |
 | --- | --- |
-| ADR-0088-D1 | REQ-1 |
-| ADR-0088-D2 | REQ-2 |
-| ADR-0088-D3 | REQ-3 |
-| ADR-0088-D4 | REQ-4 |
-| ADR-0088-D5 | REQ-5 |
-| ADR-0088-D6 | REQ-6 |
+| [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-212) | REQ-1 |
+| [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-213) | REQ-2 |
+| [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-214) | REQ-3 |
+| [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-215) | REQ-4 |
+| [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-216) | REQ-5 |
+| [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-217) | REQ-6 |
 
 ## Discussion Points and Decisions
 

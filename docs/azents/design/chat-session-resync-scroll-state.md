@@ -3,6 +3,10 @@ title: "Chat Session Resync and Scroll State Design"
 created: 2026-06-09
 updated: 2026-06-09
 tags: [architecture, frontend, backend, chat]
+document_role: supporting
+document_type: supporting-consolidation
+migration_source: "docs/azents/design/chat-session-resync-scroll-state.md"
+supporting_role: consolidation
 ---
 
 # Chat Session Resync and Scroll State Design
@@ -11,7 +15,7 @@ tags: [architecture, frontend, backend, chat]
 
 Chat screen reads persisted canonical history and non-durable live state separately. This design defines rendering modes for new session entry, refresh, reconnect, periodic reconcile while visible, and scroll position when returning from inactive state.
 
-Base decision is [ADR-0053](../adr/0053-chat-session-resync-scroll-state.md). Implementation uses only the new protocol without compatibility fallback. WebSocket open itself does not mean session event delivery registration is complete; client uses `subscribed` ack or `subscription_health_check_ack` as barrier before applying REST history/live baseline.
+Base decision is [chat-260609/ADR](../adr/chat-260609-chat-resync-scroll.md). Implementation uses only the new protocol without compatibility fallback. WebSocket open itself does not mean session event delivery registration is complete; client uses `subscribed` ack or `subscription_health_check_ack` as barrier before applying REST history/live baseline.
 
 ## Goals
 
@@ -32,26 +36,26 @@ Base decision is [ADR-0053](../adr/0053-chat-session-resync-scroll-state.md). Im
 
 | ID | Content | Base decision |
 | --- | --- | --- |
-| REQ-1 | Existing session WebSocket sends `subscribed` ack after session delivery registration. | ADR-0053-D1 |
-| REQ-2 | Initial history/live REST fetch happens only after `subscribed` ack. | ADR-0053-D1 |
-| REQ-3 | WS events received while applying baseline are stored in buffer and replayed after baseline apply. | ADR-0053-D1 |
-| REQ-4 | `GET /history` supports `before` and `after` cursors. | ADR-0053-D3 |
-| REQ-5 | Sending `before` and `after` together is rejected with 400. | ADR-0053-D3 |
-| REQ-6 | Chat timeline state is represented as `LATEST_FOLLOWING` and `DETACHED_HISTORY_BROWSING` ADT. | ADR-0053-D5 |
-| REQ-7 | Detached state does not render live state, pending input buffer, or model/run indicator. | ADR-0053-D3 |
-| REQ-8 | Clicking “new messages” chip in detached state performs latest reset. | ADR-0053-D3 |
-| REQ-9 | While visible, re-fetch REST baseline every 30 seconds after subscription health check ack. | ADR-0053-D4 |
-| REQ-10 | If health check ack fails, do not trust session subscription and switch to ticket refresh/reconnect path. | ADR-0053-D4 |
+| REQ-1 | Existing session WebSocket sends `subscribed` ack after session delivery registration. | [chat-260609/ADR-D1](../adr/chat-260609-chat-resync-scroll.md) |
+| REQ-2 | Initial history/live REST fetch happens only after `subscribed` ack. | [chat-260609/ADR-D1](../adr/chat-260609-chat-resync-scroll.md) |
+| REQ-3 | WS events received while applying baseline are stored in buffer and replayed after baseline apply. | [chat-260609/ADR-D1](../adr/chat-260609-chat-resync-scroll.md) |
+| REQ-4 | `GET /history` supports `before` and `after` cursors. | [chat-260609/ADR-D3](../adr/chat-260609-chat-resync-scroll.md) |
+| REQ-5 | Sending `before` and `after` together is rejected with 400. | [chat-260609/ADR-D3](../adr/chat-260609-chat-resync-scroll.md) |
+| REQ-6 | Chat timeline state is represented as `LATEST_FOLLOWING` and `DETACHED_HISTORY_BROWSING` ADT. | [chat-260609/ADR-D5](../adr/chat-260609-chat-resync-scroll.md) |
+| REQ-7 | Detached state does not render live state, pending input buffer, or model/run indicator. | [chat-260609/ADR-D3](../adr/chat-260609-chat-resync-scroll.md) |
+| REQ-8 | Clicking “new messages” chip in detached state performs latest reset. | [chat-260609/ADR-D3](../adr/chat-260609-chat-resync-scroll.md) |
+| REQ-9 | While visible, re-fetch REST baseline every 30 seconds after subscription health check ack. | [chat-260609/ADR-D4](../adr/chat-260609-chat-resync-scroll.md) |
+| REQ-10 | If health check ack fails, do not trust session subscription and switch to ticket refresh/reconnect path. | [chat-260609/ADR-D4](../adr/chat-260609-chat-resync-scroll.md) |
 
 ## Decision Table
 
 | Decision | Implementation requirements |
 | --- | --- |
-| ADR-0053-D1 | REQ-1, REQ-2, REQ-3 |
-| ADR-0053-D2 | REQ-2, REQ-3, REQ-8, REQ-9 |
-| ADR-0053-D3 | REQ-4, REQ-5, REQ-6, REQ-7, REQ-8 |
-| ADR-0053-D4 | REQ-3, REQ-9, REQ-10 |
-| ADR-0053-D5 | REQ-6, REQ-7, REQ-8 |
+| [chat-260609/ADR-D1](../adr/chat-260609-chat-resync-scroll.md) | REQ-1, REQ-2, REQ-3 |
+| [chat-260609/ADR-D2](../adr/chat-260609-chat-resync-scroll.md) | REQ-2, REQ-3, REQ-8, REQ-9 |
+| [chat-260609/ADR-D3](../adr/chat-260609-chat-resync-scroll.md) | REQ-4, REQ-5, REQ-6, REQ-7, REQ-8 |
+| [chat-260609/ADR-D4](../adr/chat-260609-chat-resync-scroll.md) | REQ-3, REQ-9, REQ-10 |
+| [chat-260609/ADR-D5](../adr/chat-260609-chat-resync-scroll.md) | REQ-6, REQ-7, REQ-8 |
 
 ## WebSocket Protocol
 

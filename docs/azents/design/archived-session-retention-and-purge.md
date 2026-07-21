@@ -4,6 +4,10 @@ created: 2026-07-19
 updated: 2026-07-19
 implemented: 2026-07-19
 tags: [backend, frontend, scheduler, session, retention, admin]
+document_role: supporting
+document_type: supporting-consolidation
+migration_source: "docs/azents/design/archived-session-retention-and-purge.md"
+supporting_role: consolidation
 ---
 
 # Archived Session Retention and Durable Purge
@@ -324,7 +328,7 @@ Purge resolves the shared SessionAgentContext and all non-cleaned allocations be
 The cleanup service should expose a context/tree operation that:
 
 - iterates each allocation using its recorded `created_by_agent_session_id`;
-- applies ADR-0092 ownership validation;
+- applies [azents-260703/ADR](../adr/azents-260703-azents-git-worktree-ownership-and-cleanup.md) ownership validation;
 - removes the worktree and Azents-created branch through typed runner operations;
 - removes the Agent project-catalog projection and linked context project where applicable;
 - records `cleaned` or retryable failure state.
@@ -604,7 +608,7 @@ Optional live tests may skip only when their declared runtime prerequisite is ab
 - Preview thumbnails are separate ExchangeFile rows and must be claimed and purged with the source.
 - Existing worktree cleanup is request/background-task driven rather than scheduler-owned; purge must assume execution ownership.
 - Existing scheduler infrastructure provides global task leases, retry policies, durable task state, and manual triggering but needs per-root purge work state.
-- ADR-0079, ADR-0092, and the exclusive-TTL portions of ADR-0080 require explicit superseding decisions.
+- [archive-260626/ADR](../adr/archive-260626-archive-policy.md), [azents-260703/ADR](../adr/azents-260703-azents-git-worktree-ownership-and-cleanup.md), and the exclusive-TTL portions of [simplified-260627/ADR](../adr/simplified-260627-simplified-file-lifecycle-policy.md) require explicit superseding decisions.
 
 ## Alternatives considered
 

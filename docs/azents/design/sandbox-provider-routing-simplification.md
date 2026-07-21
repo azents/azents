@@ -2,6 +2,10 @@
 title: "Sandbox Provider Routing Simplification Design"
 created: 2026-05-22
 tags: [architecture, backend, engine, infra, testenv]
+document_role: supporting
+document_type: supporting-consolidation
+migration_source: "docs/azents/design/sandbox-provider-routing-simplification.md"
+supporting_role: consolidation
 ---
 
 # Sandbox Provider Routing Simplification Design
@@ -411,6 +415,6 @@ Rejected. active stream ownership is TTL/heartbeat-based ephemeral routing state
 
 ## Relationship with Existing Documents
 
-- Outbound provider-control decision in `docs/nointern/adr/0035-sandbox-provider-control.md` remains.
-- This document is follow-up design that supplements stateless replica routing problem exposed during implementation after ADR-0035.
-- After implementation completes, current behavior is reflected in `docs/nointern/spec/flow/sandbox-checkpoint-lifecycle.md` and provider-control-related spec.
+- Outbound provider-control decision in `docs/nointern/adr/sandbox-260521-sandbox-control.md` remains.
+- This document is follow-up design that supplements stateless replica routing problem exposed during implementation after [sandbox-260521/ADR](../adr/sandbox-260521-sandbox-control.md).
+- After implementation completes, current behavior is reflected in `docs/nointern/spec/flow/sandbox-260521-sandbox-control.md` and provider-control-related spec.

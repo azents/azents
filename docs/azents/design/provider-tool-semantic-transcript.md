@@ -4,6 +4,10 @@ created: 2026-07-18
 updated: 2026-07-18
 implemented: 2026-07-18
 tags: [backend, engine, llm, tools, compaction]
+document_role: supporting
+document_type: supporting-consolidation
+migration_source: "docs/azents/design/provider-tool-semantic-transcript.md"
+supporting_role: consolidation
 ---
 
 # Provider Tool Semantic Transcript Design

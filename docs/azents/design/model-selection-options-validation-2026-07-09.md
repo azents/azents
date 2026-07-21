@@ -2,6 +2,9 @@
 title: "Agent Model Selection Options Validation Report"
 created: 2026-07-09
 tags: [backend, frontend, testenv, documentation]
+document_role: supporting
+document_type: supporting-validation-report
+migration_source: "docs/azents/design/model-selection-options-validation-2026-07-09.md"
 ---
 
 # Agent Model Selection Options Validation Report

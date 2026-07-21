@@ -3,6 +3,10 @@ title: "Dynamic LLM ModelConfig Architecture Design"
 created: 2026-05-16
 updated: 2026-05-16
 tags: [backend, api, frontend, engine]
+document_role: supporting
+document_type: supporting-consolidation
+migration_source: "docs/azents/design/dynamic-llm-model-configs.md"
+supporting_role: consolidation
 ---
 
 # Dynamic LLM ModelConfig Architecture Design

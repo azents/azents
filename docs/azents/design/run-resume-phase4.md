@@ -4,6 +4,9 @@ tags: [infra]
 created: 2026-03-26
 updated: 2026-03-26
 implemented: 2026-03-26
+document_role: supporting
+document_type: supporting-phase
+migration_source: "docs/azents/design/run-resume-phase4.md"
 ---
 
 # Run Resume Phase 4: Infrastructure + Monitoring

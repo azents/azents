@@ -2,6 +2,9 @@
 title: "Existing Session Worktree Registration Validation Report"
 created: 2026-07-06
 tags: [validation, frontend, backend, api, workspace, git]
+document_role: supporting
+document_type: supporting-validation-report
+migration_source: "docs/azents/design/existing-session-worktree-registration-validation-2026-07-06.md"
 ---
 
 # Existing Session Worktree Registration Validation Report

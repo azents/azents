@@ -4,6 +4,10 @@ created: 2026-07-14
 updated: 2026-07-14
 implemented: 2026-07-14
 tags: [backend, frontend, engine, worker, api, database, reliability]
+document_role: supporting
+document_type: supporting-consolidation
+migration_source: "docs/azents/design/worktree-operation-live-durable-handover.md"
+supporting_role: consolidation
 ---
 
 # Worktree Operation Live-to-Durable Handover Design
@@ -127,7 +131,7 @@ incomplete prior processing boundary. The new processing boundary terminalizes i
 deletes it before admitting new operations. In particular, a new owner never resumes or replays a
 stale `pending` or `running` operation.
 
-This follows ADR-0143's no-reexecution rule: an external side effect may have completed before the old
+This follows [postgresql-260712/ADR](../adr/postgresql-260712-postgresql-authoritative-for-call-ownership.md)'s no-reexecution rule: an external side effect may have completed before the old
 worker lost the chance to record it, so cancellation is safer than duplicating the side effect.
 
 ### 3. Progress publication
@@ -248,7 +252,7 @@ filesystem state.
 User stop preemptively cancels the supervised operation task and requests best-effort Runtime
 operation cancellation without waiting for Runtime cleanup. The worker promptly terminalizes the
 live execution as `cancelled` with a user-stop reason and removes it. The surrounding Run follows the
-existing ADR-0052 user-stop semantics.
+existing [preemptive-260607/ADR](../adr/preemptive-260607-preemptive-stop.md) user-stop semantics.
 
 A late handler completion cannot append a second result because deterministic terminal identity and
 row locking make terminalization single-winner and idempotent.
@@ -357,7 +361,7 @@ local deterministic test remains required.
 
 ## Implementation Phases and Commit Boundaries
 
-1. Document and validate this lifecycle against current code, specs, ADR-0052, and ADR-0143.
+1. Document and validate this lifecycle against current code, specs, [preemptive-260607/ADR](../adr/preemptive-260607-preemptive-stop.md), and [postgresql-260712/ADR](../adr/postgresql-260712-postgresql-authoritative-for-call-ownership.md).
 2. Make one explicit commit that removes the incorrect retained-terminal/resume/anchored operation
    handling. The tree may be temporarily without worktree operation execution between commits.
 3. Make a separate reimplementation commit that adds live ownership, atomic durable handover,
@@ -402,10 +406,10 @@ location. Active operations belong at the live chat tail.
 
 ## Validation Findings
 
-- ADR-0143 already establishes PostgreSQL ownership, deterministic terminal identity, no stale
+- [postgresql-260712/ADR](../adr/postgresql-260712-postgresql-authoritative-for-call-ownership.md) already establishes PostgreSQL ownership, deterministic terminal identity, no stale
   re-execution, and admission fencing for foreground tools; this design applies the same reliability
   model to operation TurnActions.
-- ADR-0052 requires immediate user-stop cancellation and distinguishes user stop from
+- [preemptive-260607/ADR](../adr/preemptive-260607-preemptive-stop.md) requires immediate user-stop cancellation and distinguishes user stop from
   shutdown/handover. The operation snapshot records the distinct cancellation cause while both
   terminal outcomes use status `cancelled`.
 - `session_git_worktrees.action_execution_id` is nullable with `ON DELETE SET NULL`, so deleting live
@@ -424,5 +428,5 @@ cancellation semantics defined here.
 ## ADR Assessment
 
 No new ADR is required for this implementation. The hard-to-reverse ownership and stop policies are
-already established by ADR-0143 and ADR-0052. This design records their application to operation
+already established by [postgresql-260712/ADR](../adr/postgresql-260712-postgresql-authoritative-for-call-ownership.md) and [preemptive-260607/ADR](../adr/preemptive-260607-preemptive-stop.md). This design records their application to operation
 TurnActions; the final implemented behavior will be promoted into the relevant living specs.

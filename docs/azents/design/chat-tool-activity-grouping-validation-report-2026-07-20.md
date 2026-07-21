@@ -2,13 +2,16 @@
 title: "Chat Tool Activity Grouping Validation Report"
 created: 2026-07-20
 tags: [frontend, chat, tools, ux, testing]
+document_role: supporting
+document_type: supporting-validation-report
+migration_source: "docs/azents/design/chat-tool-activity-grouping-validation-report-2026-07-20.md"
 ---
 
 # Chat Tool Activity Grouping Validation Report
 
 ## Scope
 
-This report validates the complete frontend implementation described by [Chat Tool Activity Grouping](./chat-tool-activity-grouping.md) and [ADR-0173](../adr/0173-group-chat-tool-activity-in-the-frontend.md) through implementation commit `f6a6c04d`.
+This report validates the complete frontend implementation described by [Chat Tool Activity Grouping](./group-260720-group-chat-activity-in-the-frontend.md) and [group-260720/ADR](../adr/group-260720-group-chat-activity-in-the-frontend.md) through implementation commit `f6a6c04d`.
 
 The validation covers:
 
@@ -150,7 +153,7 @@ The known Node `MODULE_TYPELESS_PACKAGE_JSON` warnings remain non-failing and pr
 | Backend tool/event payloads remain unchanged | No backend or public-client contract changes | Existing event and semantic identity contracts remain aligned | Retain current backend contract wording |
 | Durable provider calls replace matching live calls by `call_id` | Preserved | Existing `domain/conversation.md` wording is aligned | Verify and refresh metadata only |
 
-No new ADR is required. ADR-0173 already owns the hard-to-reverse frontend grouping decision and remains immutable.
+No new ADR is required. [group-260720/ADR](../adr/group-260720-group-chat-activity-in-the-frontend.md) already owns the hard-to-reverse frontend grouping decision and remains immutable.
 
 ## Findings
 

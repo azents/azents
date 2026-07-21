@@ -3,13 +3,17 @@ title: "Model Stream Timeout Watchdog"
 created: 2026-07-15
 updated: 2026-07-15
 tags: [backend, engine, worker, streaming, reliability, testenv]
+document_role: supporting
+document_type: supporting-consolidation
+migration_source: "docs/azents/design/model-stream-timeout-watchdog.md"
+supporting_role: consolidation
 ---
 
 # Model Stream Timeout Watchdog
 
 ## Status
 
-Approved design based on [ADR-0146](../adr/0146-model-stream-parsed-event-idle-and-attempt-bounds.md). Implementation has not started.
+Approved design based on [stream-260715/ADR](../adr/stream-260715-stream-parsed-event-idle-and-attempt-bounds.md). Implementation has not started.
 
 ## Problem
 
@@ -58,7 +62,7 @@ The primary adapter calls `aresponses()` inside its async generator before yield
 
 `RunExecutor` converts a run-stopping exception into `FailedRunAttempt`, stores `agent_runs.retry_state`, publishes live retry state, waits through exponential backoff, and retries the same Run. The declared policy is ten retries after the initial attempt. Intermediate attempts do not append durable `system_error` or terminal markers.
 
-Validation found an existing implementation drift: `_failed_run_finalization_reason()` currently finalizes when `failed_attempt_count >= max_retries`, so a configured value of ten permits ten total failed attempts rather than an initial attempt plus ten retries. The retry prerequisite phase corrects this off-by-one behavior to the accepted ADR-0084 policy before timeout failures rely on it.
+Validation found an existing implementation drift: `_failed_run_finalization_reason()` currently finalizes when `failed_attempt_count >= max_retries`, so a configured value of ten permits ten total failed attempts rather than an initial attempt plus ten retries. The retry prerequisite phase corrects this off-by-one behavior to the accepted [failed-260627/ADR](../adr/failed-260627-failed-error-retry.md) policy before timeout failures rely on it.
 
 ### Live partial boundary
 
@@ -72,7 +76,7 @@ Validation found an existing implementation drift: `_failed_run_finalization_rea
 | Parsed-event idle | 300 seconds | Matches the Codex stream-idle duration. Starts before `aresponses()` in Azents; every parsed provider event resets it. |
 | Absolute provider attempt | 1,800 seconds | Azents production-data policy; starts before `aresponses()` and never resets. Codex has no equivalent absolute cap. |
 | Timeout close grace | 5 seconds | Internal bounded-cleanup budget before registry adoption; User Stop does not wait for this grace. |
-| Failed-run retry | 10 retries after the initial attempt | Existing Azents ADR-0084 policy, not the Codex reconnect budget. Timeout uses the existing retry state and backoff policy. |
+| Failed-run retry | 10 retries after the initial attempt | Existing Azents [failed-260627/ADR](../adr/failed-260627-failed-error-retry.md) policy, not the Codex reconnect budget. Timeout uses the existing retry state and backoff policy. |
 
 The absolute deadline bounds one provider attempt, not the Run. A background Run may remain active for hours while retrying. This is intentional and remains under explicit user Stop control.
 
@@ -371,9 +375,9 @@ Validation used `origin/main` commit `6788ddbe552c0db05a38128166e211111e6c9557`.
 - LiteLLM 1.87.0 `aresponses()` accepts `float | openai.Timeout | None`; `httpx.Timeout(None, connect=15.0)` supplies the chosen connect-only lower-level bound.
 - LiteLLM `Timeout` subclasses OpenAI `APITimeoutError`, allowing narrow timeout mapping before the existing broader OpenAI error conversion.
 - `LivePartialBatcher` currently has independently scheduled timer callbacks with no discard operation or Session mutation lock, confirming that ordered failed-attempt cleanup must land first.
-- Current retry finalization uses `failed_attempt_count >= max_retries`, confirming the existing off-by-one drift from ADR-0084's initial-attempt-plus-ten-retries policy.
+- Current retry finalization uses `failed_attempt_count >= max_retries`, confirming the existing off-by-one drift from [failed-260627/ADR](../adr/failed-260627-failed-error-retry.md)'s initial-attempt-plus-ten-retries policy.
 - The Agent Execution Loop spec already defines completion-only durability, incremental non-durable projection, User Stop partial assistant preservation, and durable retry state. The proposed watchdog refines rather than replaces those boundaries.
-- ADR-0052 requires preemptive User Stop and non-blocking provider cleanup; bounded close and late-task adoption are consistent with that accepted control boundary.
+- [preemptive-260607/ADR](../adr/preemptive-260607-preemptive-stop.md) requires preemptive User Stop and non-blocking provider cleanup; bounded close and late-task adoption are consistent with that accepted control boundary.
 
 ## Open Risks and Validation Questions
 

@@ -4,6 +4,10 @@ created: 2026-07-11
 updated: 2026-07-11
 implemented: 2026-07-11
 tags: [agent, backend, engine, subagent]
+document_role: supporting
+document_type: supporting-consolidation
+migration_source: "docs/azents/design/subagent-spawn-inference-profile.md"
+supporting_role: consolidation
 ---
 
 # Subagent Spawn Inference Profile Design
@@ -132,7 +136,7 @@ An explicit effort is never silently normalized. It either validates or fails.
 | `none` | Allowed. |
 | Positive bounded count | Allowed. |
 
-A full-history child without an override continues to inherit the parent run profile under ADR-0108.
+A full-history child without an override continues to inherit the parent run profile under [subagent-260710/ADR](../adr/subagent-260710-subagent-parent-profile-inheritance.md).
 
 ## Persistence and lifecycle
 
@@ -245,4 +249,4 @@ None for the current default-subagent scope. Predefined profiles require a separ
 
 ## Alternatives considered
 
-The rejected alternatives and long-term consequences are recorded in ADR-0124.
+The rejected alternatives and long-term consequences are recorded in [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-276).

@@ -4,6 +4,9 @@ tags: [frontend, chat, runtime]
 created: 2026-04-30
 updated: 2026-04-30
 implemented: 2026-04-30
+document_role: supporting
+document_type: supporting-secondary-design
+migration_source: "docs/azents/design/frontend-chat-wire-envelope.md"
 ---
 
 # Frontend Chat Wire Format Update (events-unification follow-up)

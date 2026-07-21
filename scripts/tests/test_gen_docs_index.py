@@ -26,6 +26,9 @@ class DevelopmentSnapshotValidationTest(unittest.TestCase):
         *,
         created: str = "2026-07-21",
         implemented: str = "",
+        document_role: str = "",
+        document_type: str = "",
+        include_snapshot_metadata: bool = True,
         include_tags: bool = True,
     ) -> None:
         path = self.docs_root / rel_path
@@ -37,6 +40,22 @@ class DevelopmentSnapshotValidationTest(unittest.TestCase):
         ]
         if implemented:
             fields.append(f"implemented: {implemented}")
+        if document_role:
+            fields.append(f"document_role: {document_role}")
+        if document_type:
+            fields.append(f"document_type: {document_type}")
+        if include_snapshot_metadata:
+            match = gen_docs_index.DEVELOPMENT_SNAPSHOT_FILENAME_PATTERN.fullmatch(
+                path.name
+            )
+            if match is not None and not document_role:
+                fields.append("document_role: primary")
+            if match is not None and not document_type:
+                fields.append(f"document_type: {path.parent.name}")
+            if match is not None:
+                fields.append(
+                    f"snapshot_id: {match.group('word')}-{match.group('date')}"
+                )
         if include_tags:
             fields.append("tags: [documentation]")
         fields.extend(["---", "", f"# {path.stem}", ""])
@@ -84,9 +103,25 @@ class DevelopmentSnapshotValidationTest(unittest.TestCase):
 
         self.assertEqual(self.errors(), [])
 
-    def test_allows_legacy_adr_and_design_names(self) -> None:
+    def test_rejects_legacy_adr_and_unclassified_design_names(self) -> None:
         self.write_doc("adr/0181-existing-decision.md")
         self.write_doc("design/existing-feature.md")
+
+        errors = self.errors()
+        self.assertTrue(any("ADR filename must match" in error for error in errors))
+        self.assertTrue(
+            any(
+                "Noncanonical Design filenames require explicit" in error
+                for error in errors
+            )
+        )
+
+    def test_allows_explicit_supporting_design_name(self) -> None:
+        self.write_doc(
+            "design/existing-feature.md",
+            document_role="supporting",
+            document_type="supporting-plan",
+        )
 
         self.assertEqual(self.errors(), [])
 
@@ -189,6 +224,28 @@ class DevelopmentSnapshotValidationTest(unittest.TestCase):
                 "Requirements filename date must match the `created` date" in error
                 for error in self.errors()
             )
+        )
+
+    def test_rejects_primary_snapshot_without_explicit_metadata(self) -> None:
+        basename = "docids-260721-shared-identifiers.md"
+        self.write_doc(
+            f"requirements/{basename}",
+            include_snapshot_metadata=False,
+        )
+
+        errors = self.errors()
+        self.assertTrue(
+            any(
+                "Missing `document_role` frontmatter field" in error for error in errors
+            )
+        )
+        self.assertTrue(
+            any(
+                "Missing `document_type` frontmatter field" in error for error in errors
+            )
+        )
+        self.assertTrue(
+            any("Missing `snapshot_id` frontmatter field" in error for error in errors)
         )
 
 

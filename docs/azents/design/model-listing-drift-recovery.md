@@ -2,13 +2,17 @@
 title: "Model Listing Drift Recovery Design"
 created: 2026-06-18
 tags: [backend, api, frontend, engine, documentation]
+document_role: supporting
+document_type: supporting-consolidation
+migration_source: "docs/azents/design/model-listing-drift-recovery.md"
+supporting_role: consolidation
 ---
 
 # Model Listing Drift Recovery Design
 
 ## 1. Background
 
-ADR-0031 adopted a structure that separates Agent model selection from static `LLMModel` / `LLMProviderModel` catalog and queries provider-specific dynamic model listing through workspace `LLMProviderIntegration` credential/config. That decision included these principles.
+[dynamic-260516/ADR](../adr/dynamic-260516-dynamic-llm-configs.md) adopted a structure that separates Agent model selection from static `LLMModel` / `LLMProviderModel` catalog and queries provider-specific dynamic model listing through workspace `LLMProviderIntegration` credential/config. That decision included these principles.
 
 - `LLMModel` / `LLMProviderModel` are no longer managed as static catalog for Agent model selection.
 - Existing `llm_models`, `llm_provider_models`, catalog sync, Admin/public model catalog API, and frontend static model router are removal targets.
@@ -16,7 +20,7 @@ ADR-0031 adopted a structure that separates Agent model selection from static `L
 - Dynamic listing result is ephemeral and is not FK target of Agent or ModelConfig.
 - If cache is needed, newly design separate table not referenced by Agent/ModelConfig.
 
-ADR-0063 later removed `ModelConfig` entity and simplified Agent/Workspace to directly store model selection snapshots. This change removes ModelConfig rows; it does not remove integration-scoped dynamic listing. At Agent/Workspace settings submit time, server still must query integration-scoped listing again and store selected model identifier as server-normalized snapshot.
+[selection-260616/ADR](../adr/selection-260616-selection-snapshot.md) later removed `ModelConfig` entity and simplified Agent/Workspace to directly store model selection snapshots. This change removes ModelConfig rows; it does not remove integration-scoped dynamic listing. At Agent/Workspace settings submit time, server still must query integration-scoped listing again and store selected model identifier as server-normalized snapshot.
 
 Current implementation has drifted from this intent.
 
@@ -38,7 +42,7 @@ Following static catalog code and DB models still remain.
 - Admin/public `llm_model` / `llm_provider_model` API surface
 - catalog sync merge/materialize/source status code
 
-These do not match ADR-0031 decision to remove static catalog.
+These do not match [dynamic-260516/ADR](../adr/dynamic-260516-dynamic-llm-configs.md) decision to remove static catalog.
 
 ### 2.2 Integration model listing uses static cache
 
@@ -56,7 +60,7 @@ Therefore, Bedrock/Vertex family becomes structurally inaccurate once using glob
 
 Current `docs/azents/spec/domain/agent.md` says production environment prioritizes materialized `llm_provider_models` cache and does not perform on-demand fetch even if cache is empty.
 
-But this conflicts with intent of ADR-0031/0063. Spec followed current implementation and became drifted. This recovery must update it to original decisions.
+But this conflicts with intent of [dynamic-260516/ADR](../adr/dynamic-260516-dynamic-llm-configs.md)/0063. Spec followed current implementation and became drifted. This recovery must update it to original decisions.
 
 ## 3. Goals
 
@@ -66,7 +70,7 @@ But this conflicts with intent of ADR-0031/0063. Spec followed current implement
 4. Store only model selection snapshot verified by server at submit time in Agent/Workspace.
 5. Use provider-specific listing source in production as well. OpenAI/Anthropic/Gemini can use public catalog source; Bedrock/Vertex use provider API based on integration credential/config.
 6. Existing Agent runtime uses stored snapshot as source of truth and does not query latest listing again on run start.
-7. Update current spec to match ADR-0031/0063 intent.
+7. Update current spec to match [dynamic-260516/ADR](../adr/dynamic-260516-dynamic-llm-configs.md)/0063 intent.
 
 ## 4. Non-goals
 

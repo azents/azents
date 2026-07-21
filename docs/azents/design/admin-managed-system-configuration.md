@@ -4,6 +4,10 @@ created: 2026-07-20
 updated: 2026-07-20
 implemented: 2026-07-20
 tags: [architecture, backend, frontend, admin, configuration, security, infra, testenv]
+document_role: supporting
+document_type: supporting-consolidation
+migration_source: "docs/azents/design/admin-managed-system-configuration.md"
+supporting_role: consolidation
 ---
 
 # Admin-Managed System Configuration Design
@@ -25,7 +29,7 @@ The design separates three configuration classes:
    environment variable overrides only its bound field without being copied into PostgreSQL.
 
 The hard-to-reverse decisions are recorded in
-[ADR-0172](../adr/0172-generalize-admin-managed-system-configuration.md).
+[admin-260718/ADR](../adr/admin-260718-admin-configuration.md).
 
 ## Goals
 

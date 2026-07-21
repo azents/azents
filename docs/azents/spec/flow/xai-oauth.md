@@ -266,9 +266,9 @@ Unexpected presentation failures remain inside a card-local error boundary.
 
 | Date | Version | Change | Rationale |
 |---|---|---|---|
-| 2026-07-19 | 6 | Added integration-scoped CLI-proxy subscription usage, trusted redirects, permission-projected financial details, and card-local presentation | ADR-0169 and validated subscription usage implementation |
+| 2026-07-19 | 6 | Added integration-scoped CLI-proxy subscription usage, trusted redirects, permission-projected financial details, and card-local presentation | [ambiguous historical ADR reference](../../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-291) and validated subscription usage implementation |
 | 2026-07-18 | 5 | Routed unclassified provider outcomes to internal-error handling without provider retry state | Preserve actionable incident tracebacks instead of generic unknown-provider logs |
-| 2026-07-18 | 4 | Applied the bounded common provider-failure contract and complete Run retry budget | ADR-0165 coordinated provider-failure cutover |
-| 2026-07-10 | 3 | Clarified separation from the stable API-key provider and documented shared xAI transport/catalog behavior | `docs/azents/design/xai-api-key-provider.md` |
+| 2026-07-18 | 4 | Applied the bounded common provider-failure contract and complete Run retry budget | [failures-260718/ADR](../../adr/failures-260718-failures-transparent.md) coordinated provider-failure cutover |
+| 2026-07-10 | 3 | Clarified separation from the stable API-key provider and documented shared xAI transport/catalog behavior | `docs/azents/design/xai-260710-xai-api-key.md` |
 | 2026-07-10 | 2 | Adopted the public Grok CLI client identity and made the experimental provider available without operator OAuth configuration | OpenCode xAI OAuth and ChatGPT OAuth parity review |
-| 2026-07-10 | 1 | Wrote current xAI OAuth device, runtime refresh, catalog, and UI behavior | `docs/azents/design/xai-oauth-provider.md` |
+| 2026-07-10 | 1 | Wrote current xAI OAuth device, runtime refresh, catalog, and UI behavior | `docs/azents/design/oauth-260710-xai-oauth.md` |

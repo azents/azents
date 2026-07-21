@@ -2,6 +2,9 @@
 title: "Latest Session System Prompt"
 created: 2026-07-21
 tags: [chat, observability, storage, architecture]
+document_role: primary
+document_type: adr
+snapshot_id: prompt-260721
 ---
 
 # Latest Session System Prompt

@@ -110,5 +110,5 @@ LiteLLM HTTP, transport, and typed terminal failures are normalized into the com
 | Date | Version | Change | Rationale |
 |---|---:|---|---|
 | 2026-07-18 | 3 | Routed unclassified provider outcomes to internal-error handling without provider retry state | Preserve actionable incident tracebacks instead of generic unknown-provider logs |
-| 2026-07-18 | 2 | Applied the bounded common provider-failure contract and complete Run retry budget | ADR-0165 coordinated provider-failure cutover |
-| 2026-07-10 | 1 | Documented the stable xAI API-key integration, catalog, runtime, UI, and security behavior | `docs/azents/design/xai-api-key-provider.md` |
+| 2026-07-18 | 2 | Applied the bounded common provider-failure contract and complete Run retry budget | [failures-260718/ADR](../../adr/failures-260718-failures-transparent.md) coordinated provider-failure cutover |
+| 2026-07-10 | 1 | Documented the stable xAI API-key integration, catalog, runtime, UI, and security behavior | `docs/azents/design/xai-260710-xai-api-key.md` |

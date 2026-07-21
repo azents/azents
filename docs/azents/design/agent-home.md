@@ -4,6 +4,10 @@ tags: [backend, engine, infra]
 created: 2026-03-23
 updated: 2026-03-25
 implemented: 2026-03-25
+document_role: supporting
+document_type: supporting-consolidation
+migration_source: "docs/azents/design/agent-home.md"
+supporting_role: consolidation
 ---
 
 # Agent Home Design

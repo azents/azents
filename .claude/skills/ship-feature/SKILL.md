@@ -56,7 +56,7 @@ Before implementation:
 - Identify impacted apps/packages and project rules.
 - Confirm whether the feature needs E2E coverage, fixtures, credentials, or external prerequisites.
 
-If Requirements are missing or unconfirmed, the core document basenames do not match, the ADR is missing, or the Design still has open product decisions, return to `feature-design` first.
+If Requirements are missing or unconfirmed, the core document basenames do not match, the ADR is missing, or the Design still has open product decisions, return to `feature-design` first. Current Azents core documents must use dated shared snapshot basenames; do not create numbered ADR files or treat legacy numbered ADRs as current records.
 
 ## Phase 1: Create the implementation plan
 

@@ -4,6 +4,10 @@ created: 2026-06-05
 updated: 2026-06-05
 implemented: 2026-06-05
 tags: [architecture, backend, frontend, api, chat, testing]
+document_role: supporting
+document_type: supporting-consolidation
+migration_source: "docs/azents/design/rest-chat-write-boundary.md"
+supporting_role: consolidation
 ---
 
 # REST Chat Write Boundary Design
@@ -12,7 +16,7 @@ tags: [architecture, backend, frontend, api, chat, testing]
 
 This design moves Web chat user write path from WebSocket to REST commit boundary. Goal is to change meaning of message send success from “sent payload through WebSocket” to “server committed user input to input buffer and returned authoritative live snapshot”.
 
-Related decisions follow [ADR-0051](../adr/0051-rest-chat-write-boundary.md).
+Related decisions follow [rest-260605/ADR](../adr/rest-260605-rest-chat-write-boundary.md).
 
 Core changes are as follows.
 
@@ -33,8 +37,8 @@ Core changes are as follows.
 Normal message, user message edit, and slash command must be handled by REST endpoint, not WebSocket write. Stop remains on WebSocket in first phase.
 
 #### Related decisions
-- ADR-0051-D1
-- ADR-0051-D8
+- [rest-260605/ADR-D1](../adr/rest-260605-rest-chat-write-boundary.md)
+- [rest-260605/ADR-D8](../adr/rest-260605-rest-chat-write-boundary.md)
 
 #### Acceptance criteria
 - message send REST endpoint exists and Web UI uses it.
@@ -49,7 +53,7 @@ Normal message, user message edit, and slash command must be handled by REST end
 Message REST write must return success response only after committing user input to input buffer. After commit, it sends input signal to worker, but signal delivery success is not condition for REST success.
 
 #### Related decisions
-- ADR-0051-D2
+- [rest-260605/ADR-D2](../adr/rest-260605-rest-chat-write-boundary.md)
 
 #### Acceptance criteria
 - After message REST success response, input buffer row or live user_message projection for that input can be queried on server.
@@ -63,7 +67,7 @@ Message REST write must return success response only after committing user input
 REST write response must return current session's authoritative live snapshot, not one accepted item. Full durable history page is not included in default response.
 
 #### Related decisions
-- ADR-0051-D3
+- [rest-260605/ADR-D3](../adr/rest-260605-rest-chat-write-boundary.md)
 
 #### Acceptance criteria
 - message/edit/command REST response includes session id and live snapshot.
@@ -77,7 +81,7 @@ REST write response must return current session's authoritative live snapshot, n
 Every REST write request must require `client_request_id`, and retrying same user intention must not create duplicate input buffer or duplicate command/edit work.
 
 #### Related decisions
-- ADR-0051-D4
+- [rest-260605/ADR-D4](../adr/rest-260605-rest-chat-write-boundary.md)
 
 #### Acceptance criteria
 - message/edit/command REST request schema requires `client_request_id`.
@@ -91,8 +95,8 @@ Every REST write request must require `client_request_id`, and retrying same use
 First message of new session is handled by REST endpoint that does not receive session id. Server creates session and then creates input buffer through same buffer-first path.
 
 #### Related decisions
-- ADR-0051-D5
-- ADR-0051-D2
+- [rest-260605/ADR-D5](../adr/rest-260605-rest-chat-write-boundary.md)
+- [rest-260605/ADR-D2](../adr/rest-260605-rest-chat-write-boundary.md)
 
 #### Acceptance criteria
 - New session message REST request can be called without session id.
@@ -106,7 +110,7 @@ First message of new session is handled by REST endpoint that does not receive s
 Frontend does not create optimistic pending bubble in timeline during REST write request and only shows sending state at composer/send button level. Pending bubble is rendered only after REST response snapshot.
 
 #### Related decisions
-- ADR-0051-D6
+- [rest-260605/ADR-D6](../adr/rest-260605-rest-chat-write-boundary.md)
 
 #### Acceptance criteria
 - No timeline pending input buffer is added while message REST request is in-flight.
@@ -120,7 +124,7 @@ Frontend does not create optimistic pending bubble in timeline during REST write
 For same session, only one message/edit/command REST write can be in-flight at same time. Additional input during run is possible, but write requests themselves are not sent in parallel.
 
 #### Related decisions
-- ADR-0051-D7
+- [rest-260605/ADR-D7](../adr/rest-260605-rest-chat-write-boundary.md)
 
 #### Acceptance criteria
 - If one of message/edit/command is in-flight, other write submit is disabled or blocked.
@@ -133,7 +137,7 @@ For same session, only one message/edit/command REST write can be in-flight at s
 API E2E and browser E2E are primary QA targets. If Docker/testenv/browser execution is difficult in current environment, run possible verification and separately track non-executable items with GitHub Issue.
 
 #### Related decisions
-- ADR-0051-D9
+- [rest-260605/ADR-D9](../adr/rest-260605-rest-chat-write-boundary.md)
 
 #### Acceptance criteria
 - Design QA Checklist defines API E2E and browser E2E scenarios.
@@ -145,15 +149,15 @@ API E2E and browser E2E are primary QA targets. If Docker/testenv/browser execut
 
 | ADR decision | Requirements |
 | --- | --- |
-| ADR-0051-D1. message/edit/command write moves to REST | REQ-1 |
-| ADR-0051-D2. REST write success criterion is input buffer commit | REQ-2, REQ-5 |
-| ADR-0051-D3. REST write response returns authoritative live snapshot | REQ-3 |
-| ADR-0051-D4. Every REST write is idempotent with `client_request_id` | REQ-4 |
-| ADR-0051-D5. New session write is handled by REST message contract without session id | REQ-5 |
-| ADR-0051-D6. Remove Frontend timeline optimistic pending bubble | REQ-6 |
-| ADR-0051-D7. REST write per Session is serialized in first phase | REQ-7 |
-| ADR-0051-D8. WebSocket message/edit/command write path removed with REST transition | REQ-1 |
-| ADR-0051-D9. Run possible verification and track hard-to-run E2E with GitHub Issue | REQ-8 |
+| [rest-260605/ADR-D1](../adr/rest-260605-rest-chat-write-boundary.md). message/edit/command write moves to REST | REQ-1 |
+| [rest-260605/ADR-D2](../adr/rest-260605-rest-chat-write-boundary.md). REST write success criterion is input buffer commit | REQ-2, REQ-5 |
+| [rest-260605/ADR-D3](../adr/rest-260605-rest-chat-write-boundary.md). REST write response returns authoritative live snapshot | REQ-3 |
+| [rest-260605/ADR-D4](../adr/rest-260605-rest-chat-write-boundary.md). Every REST write is idempotent with `client_request_id` | REQ-4 |
+| [rest-260605/ADR-D5](../adr/rest-260605-rest-chat-write-boundary.md). New session write is handled by REST message contract without session id | REQ-5 |
+| [rest-260605/ADR-D6](../adr/rest-260605-rest-chat-write-boundary.md). Remove Frontend timeline optimistic pending bubble | REQ-6 |
+| [rest-260605/ADR-D7](../adr/rest-260605-rest-chat-write-boundary.md). REST write per Session is serialized in first phase | REQ-7 |
+| [rest-260605/ADR-D8](../adr/rest-260605-rest-chat-write-boundary.md). WebSocket message/edit/command write path removed with REST transition | REQ-1 |
+| [rest-260605/ADR-D9](../adr/rest-260605-rest-chat-write-boundary.md). Run possible verification and track hard-to-run E2E with GitHub Issue | REQ-8 |
 
 ## Problem Definition
 
@@ -356,11 +360,11 @@ Message write keeps input buffer as source of truth.
 - metadata
 - client_request_id or idempotency record reference
 
-Attachment FilePart materialization follows ADR-0049. Upload API is not session-aware, and REST message write boundary materializes exchange attachment according to current agent/session/user.
+Attachment FilePart materialization follows [input-260604/ADR](../adr/input-260604-input-bound-filepart-materialization.md). Upload API is not session-aware, and REST message write boundary materializes exchange attachment according to current agent/session/user.
 
 ### Live snapshot
 
-Response snapshot respects existing canonical history/live architecture. Reuse canonical event live projection from ADR-0047 as much as possible.
+Response snapshot respects existing canonical history/live architecture. Reuse canonical event live projection from [chat-260604/ADR](../adr/chat-260604-chat-protocol-history-live.md) as much as possible.
 
 Snapshot can include:
 
@@ -413,9 +417,9 @@ Remove message/edit/command send responsibility from `useChatWebSocket`. WebSock
 
 | Item | Current confirmation | Risk |
 | --- | --- | --- |
-| input buffer source | ADR-0034 and current `input_buffers` repository/service exist | idempotency column/table addition needed |
-| live snapshot source | after ADR-0047, history/live canonical event API and frontend mapper exist | response model for REST write response needed |
-| attachment materialization | ADR-0049 helper defines user input boundary materialization | new REST endpoint must use same helper |
+| input buffer source | [chat-260519/ADR](../adr/chat-260519-chat-input-buffer.md) and current `input_buffers` repository/service exist | idempotency column/table addition needed |
+| live snapshot source | after [chat-260604/ADR](../adr/chat-260604-chat-protocol-history-live.md), history/live canonical event API and frontend mapper exist | response model for REST write response needed |
+| attachment materialization | [input-260604/ADR](../adr/input-260604-input-bound-filepart-materialization.md) helper defines user input boundary materialization | new REST endpoint must use same helper |
 | frontend state mapping | `useChatSessionContainer` maps history/live events to view model | need split write mutation and WebSocket hook responsibility |
 | WS write removal | current WS handler parses message/edit/command/stop all together | need redesign parse/receive loop to keep only stop |
 | E2E execution | testenv E2E exists, but current runtime may not have Docker | track non-executable items with GitHub Issue |

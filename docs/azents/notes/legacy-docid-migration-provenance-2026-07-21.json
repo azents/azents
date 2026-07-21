@@ -1,0 +1,1641 @@
+{
+  "snapshot": "migration-260721",
+  "created": "2026-07-21",
+  "historical_cutoff": "2026-07-21",
+  "legacy_adrs": {
+    "0001-per-session-sandbox.md": {
+      "snapshot_id": "sandbox-260424",
+      "adr": "docs/azents/adr/sandbox-260424-sandbox.md",
+      "requirements": "docs/azents/requirements/sandbox-260424-sandbox.md",
+      "design": "docs/azents/design/sandbox-260424-sandbox.md"
+    },
+    "0002-memory-filesystem-to-db.md": {
+      "snapshot_id": "memory-260426",
+      "adr": "docs/azents/adr/memory-260426-memory-filesystem-to-db.md",
+      "requirements": "docs/azents/requirements/memory-260426-memory-filesystem-to-db.md",
+      "design": "docs/azents/design/memory-260426-memory-filesystem-to-db.md"
+    },
+    "0003-events-table-as-single-truth.md": {
+      "snapshot_id": "events-260428",
+      "adr": "docs/azents/adr/events-260428-events-table-as-truth.md",
+      "requirements": "docs/azents/requirements/events-260428-events-table-as-truth.md",
+      "design": "docs/azents/design/events-260428-events-table-as-truth.md"
+    },
+    "0004-split-function-call-output-item.md": {
+      "snapshot_id": "function-260429",
+      "adr": "docs/azents/adr/function-260429-function-call-output-item.md",
+      "requirements": "docs/azents/requirements/function-260429-function-call-output-item.md",
+      "design": "docs/azents/design/function-260429-function-call-output-item.md"
+    },
+    "0005-workspace-browser-api.md": {
+      "snapshot_id": "browser-260501",
+      "adr": "docs/azents/adr/browser-260501-browser-api.md",
+      "requirements": "docs/azents/requirements/browser-260501-browser-api.md",
+      "design": "docs/azents/design/browser-260501-browser-api.md"
+    },
+    "0006-agent-centric-session-sandbox.md": {
+      "snapshot_id": "sandbox-260503",
+      "adr": "docs/azents/adr/sandbox-260503-sandbox.md",
+      "requirements": "docs/azents/requirements/sandbox-260503-sandbox.md",
+      "design": "docs/azents/design/sandbox-260503-sandbox.md"
+    },
+    "0007-agent-file-exchange-storage.md": {
+      "snapshot_id": "file-260505",
+      "adr": "docs/azents/adr/file-260505-file-exchange.md",
+      "requirements": "docs/azents/requirements/file-260505-file-exchange.md",
+      "design": "docs/azents/design/file-260505-file-exchange.md"
+    },
+    "0008-agent-runtime-sandbox-control-channel.md": {
+      "snapshot_id": "sandbox-260506",
+      "adr": "docs/azents/adr/sandbox-260506-sandbox-control-channel.md",
+      "requirements": "docs/azents/requirements/sandbox-260506-sandbox-control-channel.md",
+      "design": "docs/azents/design/sandbox-260506-sandbox-control-channel.md"
+    },
+    "0009-agent-centric-nav.md": {
+      "snapshot_id": "nav-260420",
+      "adr": "docs/azents/adr/nav-260420-nav.md",
+      "requirements": "docs/azents/requirements/nav-260420-nav.md",
+      "design": "docs/azents/design/nav-260420-nav.md"
+    },
+    "0010-background-tool-call.md": {
+      "snapshot_id": "background-260416",
+      "adr": "docs/azents/adr/background-260416-background-call.md",
+      "requirements": "docs/azents/requirements/background-260416-background-call.md",
+      "design": "docs/azents/design/background-260416-background-call.md"
+    },
+    "0011-builtin-tools.md": {
+      "snapshot_id": "builtin-260315",
+      "adr": "docs/azents/adr/builtin-260315-builtin-tools.md",
+      "requirements": "docs/azents/requirements/builtin-260315-builtin-tools.md",
+      "design": "docs/azents/design/builtin-260315-builtin-tools.md"
+    },
+    "0012-declarative-toolkit-status.md": {
+      "snapshot_id": "declarative-260331",
+      "adr": "docs/azents/adr/declarative-260331-declarative-toolkit-status.md",
+      "requirements": "docs/azents/requirements/declarative-260331-declarative-toolkit-status.md",
+      "design": "docs/azents/design/declarative-260331-declarative-toolkit-status.md"
+    },
+    "0013-dynamic-tools.md": {
+      "snapshot_id": "dynamic-260329",
+      "adr": "docs/azents/adr/dynamic-260329-dynamic-tools.md",
+      "requirements": "docs/azents/requirements/dynamic-260329-dynamic-tools.md",
+      "design": "docs/azents/design/dynamic-260329-dynamic-tools.md"
+    },
+    "0014-gvisor-byoc-sandbox.md": {
+      "snapshot_id": "gvisor-260403",
+      "adr": "docs/azents/adr/gvisor-260403-gvisor-byoc-sandbox.md",
+      "requirements": "docs/azents/requirements/gvisor-260403-gvisor-byoc-sandbox.md",
+      "design": "docs/azents/design/gvisor-260403-gvisor-byoc-sandbox.md"
+    },
+    "0015-lightkube-migration-agent-home.md": {
+      "snapshot_id": "lightkube-260403",
+      "adr": "docs/azents/adr/lightkube-260403-lightkube-migration-home.md",
+      "requirements": "docs/azents/requirements/lightkube-260403-lightkube-migration-home.md",
+      "design": "docs/azents/design/lightkube-260403-lightkube-migration-home.md"
+    },
+    "0016-lightkube-migration.md": {
+      "snapshot_id": "lightkube-260401",
+      "adr": "docs/azents/adr/lightkube-260401-lightkube-migration.md",
+      "requirements": "docs/azents/requirements/lightkube-260401-lightkube-migration.md",
+      "design": "docs/azents/design/lightkube-260401-lightkube-migration.md"
+    },
+    "0017-local-fullstack-test-env.md": {
+      "snapshot_id": "local-260406",
+      "adr": "docs/azents/adr/local-260406-local-fullstack-test-env.md",
+      "requirements": "docs/azents/requirements/local-260406-local-fullstack-test-env.md",
+      "design": "docs/azents/design/local-260406-local-fullstack-test-env.md"
+    },
+    "0018-mcp-stdio-sidecar.md": {
+      "snapshot_id": "mcp-260325",
+      "adr": "docs/azents/adr/mcp-260325-mcp-stdio-sidecar.md",
+      "requirements": "docs/azents/requirements/mcp-260325-mcp-stdio-sidecar.md",
+      "design": "docs/azents/design/mcp-260325-mcp-stdio-sidecar.md"
+    },
+    "0019-phase1-activity-tracking-lifecycle-hooks.md": {
+      "snapshot_id": "phase1-260416",
+      "adr": "docs/azents/adr/phase1-260416-phase1-activity-tracking-lifecycle-hooks.md",
+      "requirements": "docs/azents/requirements/phase1-260416-phase1-activity-tracking-lifecycle-hooks.md",
+      "design": "docs/azents/design/phase1-260416-phase1-activity-tracking-lifecycle-hooks.md"
+    },
+    "0020-phase2-durable-lifecycle-workflow.md": {
+      "snapshot_id": "phase2-260416",
+      "adr": "docs/azents/adr/phase2-260416-phase2-lifecycle-workflow.md",
+      "requirements": "docs/azents/requirements/phase2-260416-phase2-lifecycle-workflow.md",
+      "design": "docs/azents/design/phase2-260416-phase2-lifecycle-workflow.md"
+    },
+    "0021-phase3-snapshot-hibernation.md": {
+      "snapshot_id": "phase3-260418",
+      "adr": "docs/azents/adr/phase3-260418-phase3-snapshot-hibernation.md",
+      "requirements": "docs/azents/requirements/phase3-260418-phase3-snapshot-hibernation.md",
+      "design": "docs/azents/design/phase3-260418-phase3-snapshot-hibernation.md"
+    },
+    "0022-sandbox-runtime-profile.md": {
+      "snapshot_id": "sandbox-260419",
+      "adr": "docs/azents/adr/sandbox-260419-sandbox-profile.md",
+      "requirements": "docs/azents/requirements/sandbox-260419-sandbox-profile.md",
+      "design": "docs/azents/design/sandbox-260419-sandbox-profile.md"
+    },
+    "0023-scheduled-tasks.md": {
+      "snapshot_id": "scheduled-260331",
+      "adr": "docs/azents/adr/scheduled-260331-scheduled-tasks.md",
+      "requirements": "docs/azents/requirements/scheduled-260331-scheduled-tasks.md",
+      "design": "docs/azents/design/scheduled-260331-scheduled-tasks.md"
+    },
+    "0024-service-toolkit.md": {
+      "snapshot_id": "service-260311",
+      "adr": "docs/azents/adr/service-260311-service-toolkit.md",
+      "requirements": "docs/azents/requirements/service-260311-service-toolkit.md",
+      "design": "docs/azents/design/service-260311-service-toolkit.md"
+    },
+    "0025-session-web-viewer.md": {
+      "snapshot_id": "web-260416",
+      "adr": "docs/azents/adr/web-260416-web-viewer.md",
+      "requirements": "docs/azents/requirements/web-260416-web-viewer.md",
+      "design": "docs/azents/design/web-260416-web-viewer.md"
+    },
+    "0026-slack-byoa.md": {
+      "snapshot_id": "slack-260414",
+      "adr": "docs/azents/adr/slack-260414-slack-byoa.md",
+      "requirements": "docs/azents/requirements/slack-260414-slack-byoa.md",
+      "design": "docs/azents/design/slack-260414-slack-byoa.md"
+    },
+    "0027-testenv-runner-redesign.md": {
+      "snapshot_id": "testenv-260414",
+      "adr": "docs/azents/adr/testenv-260414-testenv-runner-redesign.md",
+      "requirements": "docs/azents/requirements/testenv-260414-testenv-runner-redesign.md",
+      "design": "docs/azents/design/testenv-260414-testenv-runner-redesign.md"
+    },
+    "0028-testenv-setup-scenarios.md": {
+      "snapshot_id": "testenv-260411",
+      "adr": "docs/azents/adr/testenv-260411-testenv-setup-scenarios.md",
+      "requirements": "docs/azents/requirements/testenv-260411-testenv-setup-scenarios.md",
+      "design": "docs/azents/design/testenv-260411-testenv-setup-scenarios.md"
+    },
+    "0029-drop-dormant-stdio-mcp-sidecar.md": {
+      "snapshot_id": "drop-260512",
+      "adr": "docs/azents/adr/drop-260512-drop-dormant-stdio-mcp-sidecar.md",
+      "requirements": "docs/azents/requirements/drop-260512-drop-dormant-stdio-mcp-sidecar.md",
+      "design": "docs/azents/design/drop-260512-drop-dormant-stdio-mcp-sidecar.md"
+    },
+    "0029-testenv-qa-fixtures.md": {
+      "snapshot_id": "testenv-260512",
+      "adr": "docs/azents/adr/testenv-260512-testenv-qa-fixtures.md",
+      "requirements": "docs/azents/requirements/testenv-260512-testenv-qa-fixtures.md",
+      "design": "docs/azents/design/testenv-260512-testenv-qa-fixtures.md"
+    },
+    "0030-llm-model-catalog-source.md": {
+      "snapshot_id": "llm-260513",
+      "adr": "docs/azents/adr/llm-260513-llm-catalog-source.md",
+      "requirements": "docs/azents/requirements/llm-260513-llm-catalog-source.md",
+      "design": "docs/azents/design/llm-260513-llm-catalog-source.md"
+    },
+    "0031-dynamic-llm-model-configs.md": {
+      "snapshot_id": "dynamic-260516",
+      "adr": "docs/azents/adr/dynamic-260516-dynamic-llm-configs.md",
+      "requirements": "docs/azents/requirements/dynamic-260516-dynamic-llm-configs.md",
+      "design": "docs/azents/design/dynamic-260516-dynamic-llm-configs.md"
+    },
+    "0032-toolkit-hooks-for-agents-md.md": {
+      "snapshot_id": "toolkit-260514",
+      "adr": "docs/azents/adr/toolkit-260514-toolkit-hooks-for-agents-md.md",
+      "requirements": "docs/azents/requirements/toolkit-260514-toolkit-hooks-for-agents-md.md",
+      "design": "docs/azents/design/toolkit-260514-toolkit-hooks-for-agents-md.md"
+    },
+    "0033-runtime-hook-system.md": {
+      "snapshot_id": "hook-260518",
+      "adr": "docs/azents/adr/hook-260518-hook.md",
+      "requirements": "docs/azents/requirements/hook-260518-hook.md",
+      "design": "docs/azents/design/hook-260518-hook.md"
+    },
+    "0034-chat-input-buffer.md": {
+      "snapshot_id": "chat-260519",
+      "adr": "docs/azents/adr/chat-260519-chat-input-buffer.md",
+      "requirements": "docs/azents/requirements/chat-260519-chat-input-buffer.md",
+      "design": "docs/azents/design/chat-260519-chat-input-buffer.md"
+    },
+    "0035-sandbox-provider-control.md": {
+      "snapshot_id": "sandbox-260521",
+      "adr": "docs/azents/adr/sandbox-260521-sandbox-control.md",
+      "requirements": "docs/azents/requirements/sandbox-260521-sandbox-control.md",
+      "design": "docs/azents/design/sandbox-260521-sandbox-control.md"
+    },
+    "0036-sandbox-provider-routing-simplification.md": {
+      "snapshot_id": "sandbox-260522",
+      "adr": "docs/azents/adr/sandbox-260522-sandbox-routing-simplification.md",
+      "requirements": "docs/azents/requirements/sandbox-260522-sandbox-routing-simplification.md",
+      "design": "docs/azents/design/sandbox-260522-sandbox-routing-simplification.md"
+    },
+    "0037-system-docker-sandbox-provider.md": {
+      "snapshot_id": "docker-260523",
+      "adr": "docs/azents/adr/docker-260523-docker-sandbox.md",
+      "requirements": "docs/azents/requirements/docker-260523-docker-sandbox.md",
+      "design": "docs/azents/design/docker-260523-docker-sandbox.md"
+    },
+    "0038-sandbox-system-redesign.md": {
+      "snapshot_id": "sandbox-260525",
+      "adr": "docs/azents/adr/sandbox-260525-sandbox-redesign.md",
+      "requirements": "docs/azents/requirements/sandbox-260525-sandbox-redesign.md",
+      "design": "docs/azents/design/sandbox-260525-sandbox-redesign.md"
+    },
+    "0039-agent-execution-transcript-normalization.md": {
+      "snapshot_id": "execution-260527",
+      "adr": "docs/azents/adr/execution-260527-execution-transcript-normalization.md",
+      "requirements": "docs/azents/requirements/execution-260527-execution-transcript-normalization.md",
+      "design": "docs/azents/design/execution-260527-execution-transcript-normalization.md"
+    },
+    "0040-session-scoped-toolkit-lifecycle.md": {
+      "snapshot_id": "toolkit-260529",
+      "adr": "docs/azents/adr/toolkit-260529-toolkit-lifecycle.md",
+      "requirements": "docs/azents/requirements/toolkit-260529-toolkit-lifecycle.md",
+      "design": "docs/azents/design/toolkit-260529-toolkit-lifecycle.md"
+    },
+    "0041-session-context-inspector.md": {
+      "snapshot_id": "context-260530",
+      "adr": "docs/azents/adr/context-260530-context-inspector.md",
+      "requirements": "docs/azents/requirements/context-260530-context-inspector.md",
+      "design": "docs/azents/design/context-260530-context-inspector.md"
+    },
+    "0042-compaction-logical-event-ordering.md": {
+      "snapshot_id": "compaction-260530",
+      "adr": "docs/azents/adr/compaction-260530-compaction-logical-event-ordering.md",
+      "requirements": "docs/azents/requirements/compaction-260530-compaction-logical-event-ordering.md",
+      "design": "docs/azents/design/compaction-260530-compaction-logical-event-ordering.md"
+    },
+    "0043-codex-like-compaction-checkpoints.md": {
+      "snapshot_id": "codex-260530",
+      "adr": "docs/azents/adr/codex-260530-codex-compaction-checkpoints.md",
+      "requirements": "docs/azents/requirements/codex-260530-codex-compaction-checkpoints.md",
+      "design": "docs/azents/design/codex-260530-codex-compaction-checkpoints.md"
+    },
+    "0044-compaction-summary-injection-wrapper.md": {
+      "snapshot_id": "compaction-260531",
+      "adr": "docs/azents/adr/compaction-260531-compaction-summary-injection-wrapper.md",
+      "requirements": "docs/azents/requirements/compaction-260531-compaction-summary-injection-wrapper.md",
+      "design": "docs/azents/design/compaction-260531-compaction-summary-injection-wrapper.md"
+    },
+    "0045-agent-scoped-exchange-uploads.md": {
+      "snapshot_id": "exchange-260531",
+      "adr": "docs/azents/adr/exchange-260531-exchange-uploads.md",
+      "requirements": "docs/azents/requirements/exchange-260531-exchange-uploads.md",
+      "design": "docs/azents/design/exchange-260531-exchange-uploads.md"
+    },
+    "0046-file-media-resource-lifecycle.md": {
+      "snapshot_id": "file-260601",
+      "adr": "docs/azents/adr/file-260601-file-media-resource-lifecycle.md",
+      "requirements": "docs/azents/requirements/file-260601-file-media-resource-lifecycle.md",
+      "design": "docs/azents/design/file-260601-file-media-resource-lifecycle.md"
+    },
+    "0047-chat-protocol-history-live-state.md": {
+      "snapshot_id": "chat-260604",
+      "adr": "docs/azents/adr/chat-260604-chat-protocol-history-live.md",
+      "requirements": "docs/azents/requirements/chat-260604-chat-protocol-history-live.md",
+      "design": "docs/azents/design/chat-260604-chat-protocol-history-live.md"
+    },
+    "0048-tool-output-context-pressure-filter.md": {
+      "snapshot_id": "output-260604",
+      "adr": "docs/azents/adr/output-260604-output-context-pressure-filter.md",
+      "requirements": "docs/azents/requirements/output-260604-output-context-pressure-filter.md",
+      "design": "docs/azents/design/output-260604-output-context-pressure-filter.md"
+    },
+    "0049-user-input-bound-filepart-materialization.md": {
+      "snapshot_id": "input-260604",
+      "adr": "docs/azents/adr/input-260604-input-bound-filepart-materialization.md",
+      "requirements": "docs/azents/requirements/input-260604-input-bound-filepart-materialization.md",
+      "design": "docs/azents/design/input-260604-input-bound-filepart-materialization.md"
+    },
+    "0050-live-history-projection-handoff-and-stream-batching.md": {
+      "snapshot_id": "live-260604",
+      "adr": "docs/azents/adr/live-260604-live-history-projection-handoff-and-stream-batching.md",
+      "requirements": "docs/azents/requirements/live-260604-live-history-projection-handoff-and-stream-batching.md",
+      "design": "docs/azents/design/live-260604-live-history-projection-handoff-and-stream-batching.md"
+    },
+    "0051-rest-chat-write-boundary.md": {
+      "snapshot_id": "rest-260605",
+      "adr": "docs/azents/adr/rest-260605-rest-chat-write-boundary.md",
+      "requirements": "docs/azents/requirements/rest-260605-rest-chat-write-boundary.md",
+      "design": "docs/azents/design/rest-260605-rest-chat-write-boundary.md"
+    },
+    "0052-preemptive-user-stop.md": {
+      "snapshot_id": "preemptive-260607",
+      "adr": "docs/azents/adr/preemptive-260607-preemptive-stop.md",
+      "requirements": "docs/azents/requirements/preemptive-260607-preemptive-stop.md",
+      "design": "docs/azents/design/preemptive-260607-preemptive-stop.md"
+    },
+    "0053-chat-session-resync-scroll-state.md": {
+      "snapshot_id": "chat-260609",
+      "adr": "docs/azents/adr/chat-260609-chat-resync-scroll.md",
+      "requirements": "docs/azents/requirements/chat-260609-chat-resync-scroll.md",
+      "design": "docs/azents/design/chat-260609-chat-resync-scroll.md"
+    },
+    "0054-live-state-partial-history-taxonomy.md": {
+      "snapshot_id": "live-260610",
+      "adr": "docs/azents/adr/live-260610-live-partial-history-taxonomy.md",
+      "requirements": "docs/azents/requirements/live-260610-live-partial-history-taxonomy.md",
+      "design": "docs/azents/design/live-260610-live-partial-history-taxonomy.md"
+    },
+    "0055-system-prompt-context-inspector.md": {
+      "snapshot_id": "prompt-260611",
+      "adr": "docs/azents/adr/prompt-260611-prompt-context-inspector.md",
+      "requirements": "docs/azents/requirements/prompt-260611-prompt-context-inspector.md",
+      "design": "docs/azents/design/prompt-260611-prompt-context-inspector.md"
+    },
+    "0056-usage-based-auto-compaction.md": {
+      "snapshot_id": "usage-260612",
+      "adr": "docs/azents/adr/usage-260612-usage-auto-compaction.md",
+      "requirements": "docs/azents/requirements/usage-260612-usage-auto-compaction.md",
+      "design": "docs/azents/design/usage-260612-usage-auto-compaction.md"
+    },
+    "0057-event-native-event-terminology.md": {
+      "snapshot_id": "event-260613",
+      "adr": "docs/azents/adr/event-260613-event-event-terminology.md",
+      "requirements": "docs/azents/requirements/event-260613-event-event-terminology.md",
+      "design": "docs/azents/design/event-260613-event-event-terminology.md"
+    },
+    "0058-session-todo-toolkit-state-ui.md": {
+      "snapshot_id": "todo-260613",
+      "adr": "docs/azents/adr/todo-260613-todo-toolkit-ui.md",
+      "requirements": "docs/azents/requirements/todo-260613-todo-toolkit-ui.md",
+      "design": "docs/azents/design/todo-260613-todo-toolkit-ui.md"
+    },
+    "0059-todo-toolkit-always-on-split.md": {
+      "snapshot_id": "toolkit-260613",
+      "adr": "docs/azents/adr/toolkit-260613-todo-toolkit-always-on.md",
+      "requirements": "docs/azents/requirements/toolkit-260613-todo-toolkit-always-on.md",
+      "design": "docs/azents/design/toolkit-260613-todo-toolkit-always-on.md"
+    },
+    "0060-session-scoped-goal-pursuing.md": {
+      "snapshot_id": "goal-260613",
+      "adr": "docs/azents/adr/goal-260613-goal-pursuing.md",
+      "requirements": "docs/azents/requirements/goal-260613-goal-pursuing.md",
+      "design": "docs/azents/design/goal-260613-goal-pursuing.md"
+    },
+    "0061-input-control-plane-clean-migration.md": {
+      "snapshot_id": "input-260615",
+      "adr": "docs/azents/adr/input-260615-input-control-plane-clean-migration.md",
+      "requirements": "docs/azents/requirements/input-260615-input-control-plane-clean-migration.md",
+      "design": "docs/azents/design/input-260615-input-control-plane-clean-migration.md"
+    },
+    "0062-goal-continuation-idle-hook.md": {
+      "snapshot_id": "goal-260615",
+      "adr": "docs/azents/adr/goal-260615-goal-continuation-idle-hook.md",
+      "requirements": "docs/azents/requirements/goal-260615-goal-continuation-idle-hook.md",
+      "design": "docs/azents/design/goal-260615-goal-continuation-idle-hook.md"
+    },
+    "0063-agent-model-selection-snapshot.md": {
+      "snapshot_id": "selection-260616",
+      "adr": "docs/azents/adr/selection-260616-selection-snapshot.md",
+      "requirements": "docs/azents/requirements/selection-260616-selection-snapshot.md",
+      "design": "docs/azents/design/selection-260616-selection-snapshot.md"
+    },
+    "0064-provider-hosted-web-search.md": {
+      "snapshot_id": "hosted-260617",
+      "adr": "docs/azents/adr/hosted-260617-hosted-web-search.md",
+      "requirements": "docs/azents/requirements/hosted-260617-hosted-web-search.md",
+      "design": "docs/azents/design/hosted-260617-hosted-web-search.md"
+    },
+    "0065-signup-token-registration.md": {
+      "snapshot_id": "signup-260617",
+      "adr": "docs/azents/adr/signup-260617-signup-token-registration.md",
+      "requirements": "docs/azents/requirements/signup-260617-signup-token-registration.md",
+      "design": "docs/azents/design/signup-260617-signup-token-registration.md"
+    },
+    "0066-credential-provider-and-admin-password-reset.md": {
+      "snapshot_id": "credential-260618",
+      "adr": "docs/azents/adr/credential-260618-credential-and-admin-password.md",
+      "requirements": "docs/azents/requirements/credential-260618-credential-and-admin-password.md",
+      "design": "docs/azents/design/credential-260618-credential-and-admin-password.md"
+    },
+    "0067-model-catalog-projection-sync.md": {
+      "snapshot_id": "catalog-260620",
+      "adr": "docs/azents/adr/catalog-260620-catalog-projection-sync.md",
+      "requirements": "docs/azents/requirements/catalog-260620-catalog-projection-sync.md",
+      "design": "docs/azents/design/catalog-260620-catalog-projection-sync.md"
+    },
+    "0068-periodic-execution-infrastructure.md": {
+      "snapshot_id": "periodic-260620",
+      "adr": "docs/azents/adr/periodic-260620-periodic-execution-infrastructure.md",
+      "requirements": "docs/azents/requirements/periodic-260620-periodic-execution-infrastructure.md",
+      "design": "docs/azents/design/periodic-260620-periodic-execution-infrastructure.md"
+    },
+    "0069-github-toolkit-multi-installation.md": {
+      "snapshot_id": "github-260621",
+      "adr": "docs/azents/adr/github-260621-github-toolkit-multi-installation.md",
+      "requirements": "docs/azents/requirements/github-260621-github-toolkit-multi-installation.md",
+      "design": "docs/azents/design/github-260621-github-toolkit-multi-installation.md"
+    },
+    "0070-remove-workspace-team-concept.md": {
+      "snapshot_id": "team-260622",
+      "adr": "docs/azents/adr/team-260622-team-concept.md",
+      "requirements": "docs/azents/requirements/team-260622-team-concept.md",
+      "design": "docs/azents/design/team-260622-team-concept.md"
+    },
+    "0071-toolkit-level-mcp-oauth.md": {
+      "snapshot_id": "toolkit-260623",
+      "adr": "docs/azents/adr/toolkit-260623-toolkit-level-mcp-oauth.md",
+      "requirements": "docs/azents/requirements/toolkit-260623-toolkit-level-mcp-oauth.md",
+      "design": "docs/azents/design/toolkit-260623-toolkit-level-mcp-oauth.md"
+    },
+    "0072-release-and-snapshot-artifact-policy.md": {
+      "snapshot_id": "and-260623",
+      "adr": "docs/azents/adr/and-260623-and-snapshot-artifact-policy.md",
+      "requirements": "docs/azents/requirements/and-260623-and-snapshot-artifact-policy.md",
+      "design": "docs/azents/design/and-260623-and-snapshot-artifact-policy.md"
+    },
+    "0073-open-source-ci-policy.md": {
+      "snapshot_id": "open-260623",
+      "adr": "docs/azents/adr/open-260623-open-source-ci-policy.md",
+      "requirements": "docs/azents/requirements/open-260623-open-source-ci-policy.md",
+      "design": "docs/azents/design/open-260623-open-source-ci-policy.md"
+    },
+    "0074-primary-agent-sessions.md": {
+      "snapshot_id": "primary-260625",
+      "adr": "docs/azents/adr/primary-260625-primary-sessions.md",
+      "requirements": "docs/azents/requirements/primary-260625-primary-sessions.md",
+      "design": "docs/azents/design/primary-260625-primary-sessions.md"
+    },
+    "0075-agent-session-runtime-ownership-removal.md": {
+      "snapshot_id": "ownership-260625",
+      "adr": "docs/azents/adr/ownership-260625-ownership-removal.md",
+      "requirements": "docs/azents/requirements/ownership-260625-ownership-removal.md",
+      "design": "docs/azents/design/ownership-260625-ownership-removal.md"
+    },
+    "0076-session-owned-project-registry.md": {
+      "snapshot_id": "registry-260625",
+      "adr": "docs/azents/adr/registry-260625-registry.md",
+      "requirements": "docs/azents/requirements/registry-260625-registry.md",
+      "design": "docs/azents/design/registry-260625-registry.md"
+    },
+    "0077-session-owned-rest-write-idempotency.md": {
+      "snapshot_id": "rest-260625",
+      "adr": "docs/azents/adr/rest-260625-rest-write-idempotency.md",
+      "requirements": "docs/azents/requirements/rest-260625-rest-write-idempotency.md",
+      "design": "docs/azents/design/rest-260625-rest-write-idempotency.md"
+    },
+    "0078-agent-focused-navigation-ia.md": {
+      "snapshot_id": "navigation-260626",
+      "adr": "docs/azents/adr/navigation-260626-navigation-ia.md",
+      "requirements": "docs/azents/requirements/navigation-260626-navigation-ia.md",
+      "design": "docs/azents/design/navigation-260626-navigation-ia.md"
+    },
+    "0079-agent-session-archive-policy.md": {
+      "snapshot_id": "archive-260626",
+      "adr": "docs/azents/adr/archive-260626-archive-policy.md",
+      "requirements": "docs/azents/requirements/archive-260626-archive-policy.md",
+      "design": "docs/azents/design/archive-260626-archive-policy.md"
+    },
+    "0080-simplified-file-lifecycle-policy.md": {
+      "snapshot_id": "simplified-260627",
+      "adr": "docs/azents/adr/simplified-260627-simplified-file-lifecycle-policy.md",
+      "requirements": "docs/azents/requirements/simplified-260627-simplified-file-lifecycle-policy.md",
+      "design": "docs/azents/design/simplified-260627-simplified-file-lifecycle-policy.md"
+    },
+    "0081-runtime-exec-process.md": {
+      "snapshot_id": "exec-260627",
+      "adr": "docs/azents/adr/exec-260627-exec-process.md",
+      "requirements": "docs/azents/requirements/exec-260627-exec-process.md",
+      "design": "docs/azents/design/exec-260627-exec-process.md"
+    },
+    "0082-agent-workspace-file-management.md": {
+      "snapshot_id": "file-260628",
+      "adr": "docs/azents/adr/file-260628-file-management.md",
+      "requirements": "docs/azents/requirements/file-260628-file-management.md",
+      "design": "docs/azents/design/file-260628-file-management.md"
+    },
+    "0083-runtime-exec-user-stop-termination.md": {
+      "snapshot_id": "exec-260628",
+      "adr": "docs/azents/adr/exec-260628-exec-stop-termination.md",
+      "requirements": "docs/azents/requirements/exec-260628-exec-stop-termination.md",
+      "design": "docs/azents/design/exec-260628-exec-stop-termination.md"
+    },
+    "0084-failed-run-error-retry.md": {
+      "snapshot_id": "failed-260627",
+      "adr": "docs/azents/adr/failed-260627-failed-error-retry.md",
+      "requirements": "docs/azents/requirements/failed-260627-failed-error-retry.md",
+      "design": "docs/azents/design/failed-260627-failed-error-retry.md"
+    },
+    "0085-deterministic-tool-catalog-and-mcp-snapshots.md": {
+      "snapshot_id": "deterministic-260628",
+      "adr": "docs/azents/adr/deterministic-260628-deterministic-catalog-and-mcp-snapshots.md",
+      "requirements": "docs/azents/requirements/deterministic-260628-deterministic-catalog-and-mcp-snapshots.md",
+      "design": "docs/azents/design/deterministic-260628-deterministic-catalog-and-mcp-snapshots.md"
+    },
+    "0086-chat-action-messages.md": {
+      "snapshot_id": "chat-260630",
+      "adr": "docs/azents/adr/chat-260630-chat-action-messages.md",
+      "requirements": "docs/azents/requirements/chat-260630-chat-action-messages.md",
+      "design": "docs/azents/design/chat-260630-chat-action-messages.md"
+    },
+    "0086-new-session-project-selection.md": {
+      "snapshot_id": "new-260629",
+      "adr": "docs/azents/adr/new-260629-new-selection.md",
+      "requirements": "docs/azents/requirements/new-260629-new-selection.md",
+      "design": "docs/azents/design/new-260629-new-selection.md"
+    },
+    "0087-filesystem-skill-projection-revisions.md": {
+      "snapshot_id": "filesystem-260701",
+      "adr": "docs/azents/adr/filesystem-260701-filesystem-skill-projection-revisions.md",
+      "requirements": "docs/azents/requirements/filesystem-260701-filesystem-skill-projection-revisions.md",
+      "design": "docs/azents/design/filesystem-260701-filesystem-skill-projection-revisions.md"
+    },
+    "0088-agent-settings-pages-and-memory-ui.md": {
+      "snapshot_id": "settings-260702",
+      "adr": "docs/azents/adr/settings-260702-settings-pages-and-memory-ui.md",
+      "requirements": "docs/azents/requirements/settings-260702-settings-pages-and-memory-ui.md",
+      "design": "docs/azents/design/settings-260702-settings-pages-and-memory-ui.md"
+    },
+    "0088-claude-rules-loader.md": {
+      "snapshot_id": "claude-260702",
+      "adr": "docs/azents/adr/claude-260702-claude-rules-loader.md",
+      "requirements": "docs/azents/requirements/claude-260702-claude-rules-loader.md",
+      "design": "docs/azents/design/claude-260702-claude-rules-loader.md"
+    },
+    "0089-workspace-project-browser-surface.md": {
+      "snapshot_id": "browser-260703",
+      "adr": "docs/azents/adr/browser-260703-browser-surface.md",
+      "requirements": "docs/azents/requirements/browser-260703-browser-surface.md",
+      "design": "docs/azents/design/browser-260703-browser-surface.md"
+    },
+    "0090-backend-project-browser-manifest.md": {
+      "snapshot_id": "backend-260703",
+      "adr": "docs/azents/adr/backend-260703-backend-browser-manifest.md",
+      "requirements": "docs/azents/requirements/backend-260703-backend-browser-manifest.md",
+      "design": "docs/azents/design/backend-260703-backend-browser-manifest.md"
+    },
+    "0091-session-initialization-lifecycle.md": {
+      "snapshot_id": "initialization-260703",
+      "adr": "docs/azents/adr/initialization-260703-initialization-lifecycle.md",
+      "requirements": "docs/azents/requirements/initialization-260703-initialization-lifecycle.md",
+      "design": "docs/azents/design/initialization-260703-initialization-lifecycle.md"
+    },
+    "0092-azents-owned-git-worktree-ownership-and-cleanup.md": {
+      "snapshot_id": "azents-260703",
+      "adr": "docs/azents/adr/azents-260703-azents-git-worktree-ownership-and-cleanup.md",
+      "requirements": "docs/azents/requirements/azents-260703-azents-git-worktree-ownership-and-cleanup.md",
+      "design": "docs/azents/design/azents-260703-azents-git-worktree-ownership-and-cleanup.md"
+    },
+    "0093-new-session-mixed-workspace-selection.md": {
+      "snapshot_id": "new-260705",
+      "adr": "docs/azents/adr/new-260705-new-mixed-selection.md",
+      "requirements": "docs/azents/requirements/new-260705-new-mixed-selection.md",
+      "design": "docs/azents/design/new-260705-new-mixed-selection.md"
+    },
+    "0094-action-as-operation-turn-actions.md": {
+      "snapshot_id": "action-260705",
+      "adr": "docs/azents/adr/action-260705-action-as-operation-turn-actions.md",
+      "requirements": "docs/azents/requirements/action-260705-action-as-operation-turn-actions.md",
+      "design": "docs/azents/design/action-260705-action-as-operation-turn-actions.md"
+    },
+    "0095-register-project-picker-worktree-ui.md": {
+      "snapshot_id": "register-260706",
+      "adr": "docs/azents/adr/register-260706-register-picker-worktree-ui.md",
+      "requirements": "docs/azents/requirements/register-260706-register-picker-worktree-ui.md",
+      "design": "docs/azents/design/register-260706-register-picker-worktree-ui.md"
+    },
+    "0096-codex-first-subagent-redesign.md": {
+      "snapshot_id": "codex-260706",
+      "adr": "docs/azents/adr/codex-260706-codex-subagent-redesign.md",
+      "requirements": "docs/azents/requirements/codex-260706-codex-subagent-redesign.md",
+      "design": "docs/azents/design/codex-260706-codex-subagent-redesign.md"
+    },
+    "0097-turn-action-fifo-continuation.md": {
+      "snapshot_id": "turn-260708",
+      "adr": "docs/azents/adr/turn-260708-turn-action-fifo-continuation.md",
+      "requirements": "docs/azents/requirements/turn-260708-turn-action-fifo-continuation.md",
+      "design": "docs/azents/design/turn-260708-turn-action-fifo-continuation.md"
+    },
+    "0098-subagent-human-write-boundary.md": {
+      "snapshot_id": "subagent-260709",
+      "adr": "docs/azents/adr/subagent-260709-subagent-human-write-boundary.md",
+      "requirements": "docs/azents/requirements/subagent-260709-subagent-human-write-boundary.md",
+      "design": "docs/azents/design/subagent-260709-subagent-human-write-boundary.md"
+    },
+    "0099-codex-compatible-subagent-concurrency.md": {
+      "snapshot_id": "codex-260709",
+      "adr": "docs/azents/adr/codex-260709-codex-subagent-concurrency.md",
+      "requirements": "docs/azents/requirements/codex-260709-codex-subagent-concurrency.md",
+      "design": "docs/azents/design/codex-260709-codex-subagent-concurrency.md"
+    },
+    "0100-label-based-model-targets.md": {
+      "snapshot_id": "label-260709",
+      "adr": "docs/azents/adr/label-260709-label-targets.md",
+      "requirements": "docs/azents/requirements/label-260709-label-targets.md",
+      "design": "docs/azents/design/label-260709-label-targets.md"
+    },
+    "0101-subagent-forked-history-task-boundaries.md": {
+      "snapshot_id": "forked-260709",
+      "adr": "docs/azents/adr/forked-260709-subagent-forked-history-task-boundaries.md",
+      "requirements": "docs/azents/requirements/forked-260709-subagent-forked-history-task-boundaries.md",
+      "design": "docs/azents/design/forked-260709-subagent-forked-history-task-boundaries.md"
+    },
+    "0102-session-scoped-runner-operation-concurrency.md": {
+      "snapshot_id": "runner-260710",
+      "adr": "docs/azents/adr/runner-260710-runner-operation-concurrency.md",
+      "requirements": "docs/azents/requirements/runner-260710-runner-operation-concurrency.md",
+      "design": "docs/azents/design/runner-260710-runner-operation-concurrency.md"
+    },
+    "0103-per-prompt-model-fifo-run-boundaries.md": {
+      "snapshot_id": "prompt-260710",
+      "adr": "docs/azents/adr/prompt-260710-prompt-fifo-boundaries.md",
+      "requirements": "docs/azents/requirements/prompt-260710-prompt-fifo-boundaries.md",
+      "design": "docs/azents/design/prompt-260710-prompt-fifo-boundaries.md"
+    },
+    "0104-per-prompt-reasoning-effort-run-boundaries.md": {
+      "snapshot_id": "boundaries-260710",
+      "adr": "docs/azents/adr/boundaries-260710-prompt-reasoning-effort-boundaries.md",
+      "requirements": "docs/azents/requirements/boundaries-260710-prompt-reasoning-effort-boundaries.md",
+      "design": "docs/azents/design/boundaries-260710-prompt-reasoning-effort-boundaries.md"
+    },
+    "0105-run-time-model-target-resolution.md": {
+      "snapshot_id": "time-260710",
+      "adr": "docs/azents/adr/time-260710-time-target-resolution.md",
+      "requirements": "docs/azents/requirements/time-260710-time-target-resolution.md",
+      "design": "docs/azents/design/time-260710-time-target-resolution.md"
+    },
+    "0106-session-last-used-inference-profile.md": {
+      "snapshot_id": "used-260710",
+      "adr": "docs/azents/adr/used-260710-used-inference-profile.md",
+      "requirements": "docs/azents/requirements/used-260710-used-inference-profile.md",
+      "design": "docs/azents/design/used-260710-used-inference-profile.md"
+    },
+    "0107-reexecution-model-target-intent.md": {
+      "snapshot_id": "reexecution-260710",
+      "adr": "docs/azents/adr/reexecution-260710-reexecution-target-intent.md",
+      "requirements": "docs/azents/requirements/reexecution-260710-reexecution-target-intent.md",
+      "design": "docs/azents/design/reexecution-260710-reexecution-target-intent.md"
+    },
+    "0108-subagent-parent-run-profile-inheritance.md": {
+      "snapshot_id": "subagent-260710",
+      "adr": "docs/azents/adr/subagent-260710-subagent-parent-profile-inheritance.md",
+      "requirements": "docs/azents/requirements/subagent-260710-subagent-parent-profile-inheritance.md",
+      "design": "docs/azents/design/subagent-260710-subagent-parent-profile-inheritance.md"
+    },
+    "0109-agent-default-model-target-role.md": {
+      "snapshot_id": "target-260710",
+      "adr": "docs/azents/adr/target-260710-target-role.md",
+      "requirements": "docs/azents/requirements/target-260710-target-role.md",
+      "design": "docs/azents/design/target-260710-target-role.md"
+    },
+    "0110-integrated-compact-chat-composer.md": {
+      "snapshot_id": "integrated-260710",
+      "adr": "docs/azents/adr/integrated-260710-integrated-compact-chat-composer.md",
+      "requirements": "docs/azents/requirements/integrated-260710-integrated-compact-chat-composer.md",
+      "design": "docs/azents/design/integrated-260710-integrated-compact-chat-composer.md"
+    },
+    "0111-reasoning-effort-default-selection.md": {
+      "snapshot_id": "selection-260710",
+      "adr": "docs/azents/adr/selection-260710-reasoning-effort-selection.md",
+      "requirements": "docs/azents/requirements/selection-260710-reasoning-effort-selection.md",
+      "design": "docs/azents/design/selection-260710-reasoning-effort-selection.md"
+    },
+    "0112-user-message-profile-provenance-display.md": {
+      "snapshot_id": "message-260710",
+      "adr": "docs/azents/adr/message-260710-message-profile-provenance-display.md",
+      "requirements": "docs/azents/requirements/message-260710-message-profile-provenance-display.md",
+      "design": "docs/azents/design/message-260710-message-profile-provenance-display.md"
+    },
+    "0113-composer-profile-reload-precedence.md": {
+      "snapshot_id": "composer-260710",
+      "adr": "docs/azents/adr/composer-260710-composer-profile-reload-precedence.md",
+      "requirements": "docs/azents/requirements/composer-260710-composer-profile-reload-precedence.md",
+      "design": "docs/azents/design/composer-260710-composer-profile-reload-precedence.md"
+    },
+    "0114-run-scoped-context-usage-display.md": {
+      "snapshot_id": "context-260710",
+      "adr": "docs/azents/adr/context-260710-context-usage-display.md",
+      "requirements": "docs/azents/requirements/context-260710-context-usage-display.md",
+      "design": "docs/azents/design/context-260710-context-usage-display.md"
+    },
+    "0115-public-inference-profile-request-contract.md": {
+      "snapshot_id": "public-260710",
+      "adr": "docs/azents/adr/public-260710-public-inference-profile-request-contract.md",
+      "requirements": "docs/azents/requirements/public-260710-public-inference-profile-request-contract.md",
+      "design": "docs/azents/design/public-260710-public-inference-profile-request-contract.md"
+    },
+    "0116-durable-requested-inference-profile-storage.md": {
+      "snapshot_id": "inference-260710",
+      "adr": "docs/azents/adr/inference-260710-inference-profile.md",
+      "requirements": "docs/azents/requirements/inference-260710-inference-profile.md",
+      "design": "docs/azents/design/inference-260710-inference-profile.md"
+    },
+    "0117-agent-run-inference-provenance.md": {
+      "snapshot_id": "provenance-260710",
+      "adr": "docs/azents/adr/provenance-260710-inference-provenance.md",
+      "requirements": "docs/azents/requirements/provenance-260710-inference-provenance.md",
+      "design": "docs/azents/design/provenance-260710-inference-provenance.md"
+    },
+    "0118-current-profile-matching-run-join-policy.md": {
+      "snapshot_id": "profile-260710",
+      "adr": "docs/azents/adr/profile-260710-profile-matching-join-policy.md",
+      "requirements": "docs/azents/requirements/profile-260710-profile-matching-join-policy.md",
+      "design": "docs/azents/design/profile-260710-profile-matching-join-policy.md"
+    },
+    "0119-precreate-inherited-subagent-run.md": {
+      "snapshot_id": "precreate-260710",
+      "adr": "docs/azents/adr/precreate-260710-precreate-inherited-subagent.md",
+      "requirements": "docs/azents/requirements/precreate-260710-precreate-inherited-subagent.md",
+      "design": "docs/azents/design/precreate-260710-precreate-inherited-subagent.md"
+    },
+    "0120-typed-profile-resolution-failures.md": {
+      "snapshot_id": "typed-260710",
+      "adr": "docs/azents/adr/typed-260710-typed-profile-resolution-failures.md",
+      "requirements": "docs/azents/requirements/typed-260710-typed-profile-resolution-failures.md",
+      "design": "docs/azents/design/typed-260710-typed-profile-resolution-failures.md"
+    },
+    "0121-atomic-run-profile-activation.md": {
+      "snapshot_id": "atomic-260710",
+      "adr": "docs/azents/adr/atomic-260710-atomic-profile-activation.md",
+      "requirements": "docs/azents/requirements/atomic-260710-atomic-profile-activation.md",
+      "design": "docs/azents/design/atomic-260710-atomic-profile-activation.md"
+    },
+    "0122-inline-user-message-inference-summary.md": {
+      "snapshot_id": "inline-260710",
+      "adr": "docs/azents/adr/inline-260710-inline-message-inference-summary.md",
+      "requirements": "docs/azents/requirements/inline-260710-inline-message-inference-summary.md",
+      "design": "docs/azents/design/inline-260710-inline-message-inference-summary.md"
+    },
+    "0123-require-explicit-reasoning-effort-in-user-input.md": {
+      "snapshot_id": "effort-260710",
+      "adr": "docs/azents/adr/effort-260710-reasoning-effort-in-input.md",
+      "requirements": "docs/azents/requirements/effort-260710-reasoning-effort-in-input.md",
+      "design": "docs/azents/design/effort-260710-reasoning-effort-in-input.md"
+    },
+    "0124-keep-inference-provenance-run-owned.md": {
+      "snapshot_id": "inference-260711",
+      "adr": "docs/azents/adr/inference-260711-inference-provenance.md",
+      "requirements": "docs/azents/requirements/inference-260711-inference-provenance.md",
+      "design": "docs/azents/design/inference-260711-inference-provenance.md"
+    },
+    "0124-subagent-spawn-inference-profile-overrides.md": {
+      "snapshot_id": "subagent-260711",
+      "adr": "docs/azents/adr/subagent-260711-subagent-spawn-inference-profile-overrides.md",
+      "requirements": "docs/azents/requirements/subagent-260711-subagent-spawn-inference-profile-overrides.md",
+      "design": "docs/azents/design/subagent-260711-subagent-spawn-inference-profile-overrides.md"
+    },
+    "0125-drain-input-buffers-before-turn-start.md": {
+      "snapshot_id": "drain-260712",
+      "adr": "docs/azents/adr/drain-260712-drain-input-buffers-before-turn-start.md",
+      "requirements": "docs/azents/requirements/drain-260712-drain-input-buffers-before-turn-start.md",
+      "design": "docs/azents/design/drain-260712-drain-input-buffers-before-turn-start.md"
+    },
+    "0126-resolve-user-message-profile-during-buffer-preparation.md": {
+      "snapshot_id": "message-260712",
+      "adr": "docs/azents/adr/message-260712-message-profile-during-buffer-preparation.md",
+      "requirements": "docs/azents/requirements/message-260712-message-profile-during-buffer-preparation.md",
+      "design": "docs/azents/design/message-260712-message-profile-during-buffer-preparation.md"
+    },
+    "0127-handle-message-edits-as-transactional-preparation.md": {
+      "snapshot_id": "handle-260712",
+      "adr": "docs/azents/adr/handle-260712-handle-message-edits-as-transactional-preparation.md",
+      "requirements": "docs/azents/requirements/handle-260712-handle-message-edits-as-transactional-preparation.md",
+      "design": "docs/azents/design/handle-260712-handle-message-edits-as-transactional-preparation.md"
+    },
+    "0128-treat-goal-actions-as-model-producing-preparation.md": {
+      "snapshot_id": "goal-260712",
+      "adr": "docs/azents/adr/goal-260712-goal-actions-as-producing-preparation.md",
+      "requirements": "docs/azents/requirements/goal-260712-goal-actions-as-producing-preparation.md",
+      "design": "docs/azents/design/goal-260712-goal-actions-as-producing-preparation.md"
+    },
+    "0129-consume-failed-buffer-items-without-starting-a-turn.md": {
+      "snapshot_id": "consume-260712",
+      "adr": "docs/azents/adr/consume-260712-consume-failed-buffer-items-without-starting-a-turn.md",
+      "requirements": "docs/azents/requirements/consume-260712-consume-failed-buffer-items-without-starting-a-turn.md",
+      "design": "docs/azents/design/consume-260712-consume-failed-buffer-items-without-starting-a-turn.md"
+    },
+    "0130-treat-skill-actions-as-model-producing-preparation.md": {
+      "snapshot_id": "skill-260712",
+      "adr": "docs/azents/adr/skill-260712-skill-actions-as-producing-preparation.md",
+      "requirements": "docs/azents/requirements/skill-260712-skill-actions-as-producing-preparation.md",
+      "design": "docs/azents/design/skill-260712-skill-actions-as-producing-preparation.md"
+    },
+    "0131-keep-action-messages-buffer-only.md": {
+      "snapshot_id": "action-260712",
+      "adr": "docs/azents/adr/action-260712-action-messages-buffer-only.md",
+      "requirements": "docs/azents/requirements/action-260712-action-messages-buffer-only.md",
+      "design": "docs/azents/design/action-260712-action-messages-buffer-only.md"
+    },
+    "0132-separate-durable-events-model-lowering-and-turn-eligibility.md": {
+      "snapshot_id": "events-260712",
+      "adr": "docs/azents/adr/events-260712-events-lowering-and-turn-eligibility.md",
+      "requirements": "docs/azents/requirements/events-260712-events-lowering-and-turn-eligibility.md",
+      "design": "docs/azents/design/events-260712-events-lowering-and-turn-eligibility.md"
+    },
+    "0133-fold-turn-eligibility-with-failure-veto.md": {
+      "snapshot_id": "fold-260712",
+      "adr": "docs/azents/adr/fold-260712-fold-turn-eligibility-with-failure-veto.md",
+      "requirements": "docs/azents/requirements/fold-260712-fold-turn-eligibility-with-failure-veto.md",
+      "design": "docs/azents/design/fold-260712-fold-turn-eligibility-with-failure-veto.md"
+    },
+    "0134-remove-background-completion-input.md": {
+      "snapshot_id": "background-260712",
+      "adr": "docs/azents/adr/background-260712-background-completion-input.md",
+      "requirements": "docs/azents/requirements/background-260712-background-completion-input.md",
+      "design": "docs/azents/design/background-260712-background-completion-input.md"
+    },
+    "0135-directly-promote-continuation-and-agent-messages.md": {
+      "snapshot_id": "directly-260712",
+      "adr": "docs/azents/adr/directly-260712-directly-promote-continuation-and-messages.md",
+      "requirements": "docs/azents/requirements/directly-260712-directly-promote-continuation-and-messages.md",
+      "design": "docs/azents/design/directly-260712-directly-promote-continuation-and-messages.md"
+    },
+    "0136-use-polymorphic-input-buffer-processors.md": {
+      "snapshot_id": "polymorphic-260712",
+      "adr": "docs/azents/adr/polymorphic-260712-polymorphic-input-buffer-processors.md",
+      "requirements": "docs/azents/requirements/polymorphic-260712-polymorphic-input-buffer-processors.md",
+      "design": "docs/azents/design/polymorphic-260712-polymorphic-input-buffer-processors.md"
+    },
+    "0137-linearize-input-buffer-boundaries-on-session-row-lock.md": {
+      "snapshot_id": "linearize-260712",
+      "adr": "docs/azents/adr/linearize-260712-linearize-input-buffer-boundaries-on-row-lock.md",
+      "requirements": "docs/azents/requirements/linearize-260712-linearize-input-buffer-boundaries-on-row-lock.md",
+      "design": "docs/azents/design/linearize-260712-linearize-input-buffer-boundaries-on-row-lock.md"
+    },
+    "0138-separate-input-acceptance-and-processing-idempotency.md": {
+      "snapshot_id": "input-260712",
+      "adr": "docs/azents/adr/input-260712-input-acceptance-and-processing-idempotency.md",
+      "requirements": "docs/azents/requirements/input-260712-input-acceptance-and-processing-idempotency.md",
+      "design": "docs/azents/design/input-260712-input-acceptance-and-processing-idempotency.md"
+    },
+    "0139-keep-pending-buffer-deletion-state-neutral.md": {
+      "snapshot_id": "pending-260712",
+      "adr": "docs/azents/adr/pending-260712-pending-buffer-deletion-neutral.md",
+      "requirements": "docs/azents/requirements/pending-260712-pending-buffer-deletion-neutral.md",
+      "design": "docs/azents/design/pending-260712-pending-buffer-deletion-neutral.md"
+    },
+    "0140-use-session-current-inference-state-per-turn.md": {
+      "snapshot_id": "inference-260712",
+      "adr": "docs/azents/adr/inference-260712-inference-turn.md",
+      "requirements": "docs/azents/requirements/inference-260712-inference-turn.md",
+      "design": "docs/azents/design/inference-260712-inference-turn.md"
+    },
+    "0141-correlate-terminal-run-events.md": {
+      "snapshot_id": "terminal-260712",
+      "adr": "docs/azents/adr/terminal-260712-terminal-events.md",
+      "requirements": "docs/azents/requirements/terminal-260712-terminal-events.md",
+      "design": "docs/azents/design/terminal-260712-terminal-events.md"
+    },
+    "0142-persist-turn-usage-inference-provenance.md": {
+      "snapshot_id": "persist-260712",
+      "adr": "docs/azents/adr/persist-260712-persist-turn-usage-inference-provenance.md",
+      "requirements": "docs/azents/requirements/persist-260712-persist-turn-usage-inference-provenance.md",
+      "design": "docs/azents/design/persist-260712-persist-turn-usage-inference-provenance.md"
+    },
+    "0143-make-postgresql-authoritative-for-tool-call-ownership.md": {
+      "snapshot_id": "postgresql-260712",
+      "adr": "docs/azents/adr/postgresql-260712-postgresql-authoritative-for-call-ownership.md",
+      "requirements": "docs/azents/requirements/postgresql-260712-postgresql-authoritative-for-call-ownership.md",
+      "design": "docs/azents/design/postgresql-260712-postgresql-authoritative-for-call-ownership.md"
+    },
+    "0144-oss-admin-surface-auth-and-bootstrap.md": {
+      "snapshot_id": "oss-260713",
+      "adr": "docs/azents/adr/oss-260713-oss-admin-surface-auth-and-bootstrap.md",
+      "requirements": "docs/azents/requirements/oss-260713-oss-admin-surface-auth-and-bootstrap.md",
+      "design": "docs/azents/design/oss-260713-oss-admin-surface-auth-and-bootstrap.md"
+    },
+    "0145-model-scoped-selectable-model-settings.md": {
+      "snapshot_id": "selectable-260716",
+      "adr": "docs/azents/adr/selectable-260716-selectable-settings.md",
+      "requirements": "docs/azents/requirements/selectable-260716-selectable-settings.md",
+      "design": "docs/azents/design/selectable-260716-selectable-settings.md"
+    },
+    "0145-require-explicit-responses-stream-completion.md": {
+      "snapshot_id": "responses-260715",
+      "adr": "docs/azents/adr/responses-260715-responses-stream-completion.md",
+      "requirements": "docs/azents/requirements/responses-260715-responses-stream-completion.md",
+      "design": "docs/azents/design/responses-260715-responses-stream-completion.md"
+    },
+    "0145-scope-failed-run-retry-to-model-turn.md": {
+      "snapshot_id": "failed-260716",
+      "adr": "docs/azents/adr/failed-260716-failed-retry-to-turn.md",
+      "requirements": "docs/azents/requirements/failed-260716-failed-retry-to-turn.md",
+      "design": "docs/azents/design/failed-260716-failed-retry-to-turn.md"
+    },
+    "0146-model-stream-parsed-event-idle-and-attempt-bounds.md": {
+      "snapshot_id": "stream-260715",
+      "adr": "docs/azents/adr/stream-260715-stream-parsed-event-idle-and-attempt-bounds.md",
+      "requirements": "docs/azents/requirements/stream-260715-stream-parsed-event-idle-and-attempt-bounds.md",
+      "design": "docs/azents/design/stream-260715-stream-parsed-event-idle-and-attempt-bounds.md"
+    },
+    "0147-openai-native-responses-transport-family.md": {
+      "snapshot_id": "openai-260716",
+      "adr": "docs/azents/adr/openai-260716-openai-responses-transport-family.md",
+      "requirements": "docs/azents/requirements/openai-260716-openai-responses-transport-family.md",
+      "design": "docs/azents/design/openai-260716-openai-responses-transport-family.md"
+    },
+    "0147-tool-search-bounded-working-set.md": {
+      "snapshot_id": "search-260717",
+      "adr": "docs/azents/adr/search-260717-search-bounded-working-set.md",
+      "requirements": "docs/azents/requirements/search-260717-search-bounded-working-set.md",
+      "design": "docs/azents/design/search-260717-search-bounded-working-set.md"
+    },
+    "0148-define-openai-http-migration-by-semantic-parity.md": {
+      "snapshot_id": "http-260716",
+      "adr": "docs/azents/adr/http-260716-openai-http-migration-by-semantic-parity.md",
+      "requirements": "docs/azents/requirements/http-260716-openai-http-migration-by-semantic-parity.md",
+      "design": "docs/azents/design/http-260716-openai-http-migration-by-semantic-parity.md"
+    },
+    "0149-use-litellm-only-as-openai-cost-calculator.md": {
+      "snapshot_id": "litellm-260716",
+      "adr": "docs/azents/adr/litellm-260716-litellm-only-as-openai-cost-calculator.md",
+      "requirements": "docs/azents/requirements/litellm-260716-litellm-only-as-openai-cost-calculator.md",
+      "design": "docs/azents/design/litellm-260716-litellm-only-as-openai-cost-calculator.md"
+    },
+    "0150-openai-responses-websocket-lifecycle.md": {
+      "snapshot_id": "responses-260716",
+      "adr": "docs/azents/adr/responses-260716-openai-responses-websocket-lifecycle.md",
+      "requirements": "docs/azents/requirements/responses-260716-openai-responses-websocket-lifecycle.md",
+      "design": "docs/azents/design/responses-260716-openai-responses-websocket-lifecycle.md"
+    },
+    "0151-use-generic-native-adapter-request-types.md": {
+      "snapshot_id": "generic-260716",
+      "adr": "docs/azents/adr/generic-260716-generic-adapter-request-types.md",
+      "requirements": "docs/azents/requirements/generic-260716-generic-adapter-request-types.md",
+      "design": "docs/azents/design/generic-260716-generic-adapter-request-types.md"
+    },
+    "0152-include-chatgpt-oauth-in-openai-native-http-migration.md": {
+      "snapshot_id": "chatgpt-260716",
+      "adr": "docs/azents/adr/chatgpt-260716-chatgpt-oauth-in-openai-http-migration.md",
+      "requirements": "docs/azents/requirements/chatgpt-260716-chatgpt-oauth-in-openai-http-migration.md",
+      "design": "docs/azents/design/chatgpt-260716-chatgpt-oauth-in-openai-http-migration.md"
+    },
+    "0153-use-official-openai-sdk-native-stream-events.md": {
+      "snapshot_id": "official-260716",
+      "adr": "docs/azents/adr/official-260716-official-openai-sdk-stream-events.md",
+      "requirements": "docs/azents/requirements/official-260716-official-openai-sdk-stream-events.md",
+      "design": "docs/azents/design/official-260716-official-openai-sdk-stream-events.md"
+    },
+    "0154-keep-native-artifact-compatibility-keys-strict.md": {
+      "snapshot_id": "artifact-260716",
+      "adr": "docs/azents/adr/artifact-260716-artifact-compatibility-keys-strict.md",
+      "requirements": "docs/azents/requirements/artifact-260716-artifact-compatibility-keys-strict.md",
+      "design": "docs/azents/design/artifact-260716-artifact-compatibility-keys-strict.md"
+    },
+    "0155-use-default-openai-sdk-http-retries.md": {
+      "snapshot_id": "sdk-260716",
+      "adr": "docs/azents/adr/sdk-260716-openai-sdk-http-retries.md",
+      "requirements": "docs/azents/requirements/sdk-260716-openai-sdk-http-retries.md",
+      "design": "docs/azents/design/sdk-260716-openai-sdk-http-retries.md"
+    },
+    "0156-scope-openai-sdk-clients-to-logical-model-operations.md": {
+      "snapshot_id": "clients-260716",
+      "adr": "docs/azents/adr/clients-260716-openai-sdk-clients-to-logical-operations.md",
+      "requirements": "docs/azents/requirements/clients-260716-openai-sdk-clients-to-logical-operations.md",
+      "design": "docs/azents/design/clients-260716-openai-sdk-clients-to-logical-operations.md"
+    },
+    "0157-keep-openai-http-failure-semantics-at-the-azents-boundary.md": {
+      "snapshot_id": "failure-260716",
+      "adr": "docs/azents/adr/failure-260716-openai-http-failure-semantics-at-the-azents-boundary.md",
+      "requirements": "docs/azents/requirements/failure-260716-openai-http-failure-semantics-at-the-azents-boundary.md",
+      "design": "docs/azents/design/failure-260716-openai-http-failure-semantics-at-the-azents-boundary.md"
+    },
+    "0158-calculate-openai-compatible-costs-from-sdk-usage.md": {
+      "snapshot_id": "costs-260716",
+      "adr": "docs/azents/adr/costs-260716-openai-costs-from-sdk-usage.md",
+      "requirements": "docs/azents/requirements/costs-260716-openai-costs-from-sdk-usage.md",
+      "design": "docs/azents/design/costs-260716-openai-costs-from-sdk-usage.md"
+    },
+    "0159-cut-over-openai-compatible-http-paths-atomically.md": {
+      "snapshot_id": "over-260716",
+      "adr": "docs/azents/adr/over-260716-over-openai-http-paths-atomically.md",
+      "requirements": "docs/azents/requirements/over-260716-over-openai-http-paths-atomically.md",
+      "design": "docs/azents/design/over-260716-over-openai-http-paths-atomically.md"
+    },
+    "0160-use-documented-openai-responses-terminal-discriminators.md": {
+      "snapshot_id": "documented-260716",
+      "adr": "docs/azents/adr/documented-260716-documented-openai-responses-terminal-discriminators.md",
+      "requirements": "docs/azents/requirements/documented-260716-documented-openai-responses-terminal-discriminators.md",
+      "design": "docs/azents/design/documented-260716-documented-openai-responses-terminal-discriminators.md"
+    },
+    "0161-deliver-openai-http-migration-as-one-revertible-change.md": {
+      "snapshot_id": "migration-260716",
+      "adr": "docs/azents/adr/migration-260716-openai-http-migration-as-revertible-change.md",
+      "requirements": "docs/azents/requirements/migration-260716-openai-http-migration-as-revertible-change.md",
+      "design": "docs/azents/design/migration-260716-openai-http-migration-as-revertible-change.md"
+    },
+    "0162-use-standard-responses-for-chatgpt-oauth.md": {
+      "snapshot_id": "standard-260716",
+      "adr": "docs/azents/adr/standard-260716-standard-responses-for-chatgpt-oauth.md",
+      "requirements": "docs/azents/requirements/standard-260716-standard-responses-for-chatgpt-oauth.md",
+      "design": "docs/azents/design/standard-260716-standard-responses-for-chatgpt-oauth.md"
+    },
+    "0163-normalize-provider-tool-live-activity.md": {
+      "snapshot_id": "live-260716",
+      "adr": "docs/azents/adr/live-260716-live-activity.md",
+      "requirements": "docs/azents/requirements/live-260716-live-activity.md",
+      "design": "docs/azents/design/live-260716-live-activity.md"
+    },
+    "0164-materialize-provider-generated-images-as-file-resources.md": {
+      "snapshot_id": "generated-260717",
+      "adr": "docs/azents/adr/generated-260717-generated-images-as-file-resources.md",
+      "requirements": "docs/azents/requirements/generated-260717-generated-images-as-file-resources.md",
+      "design": "docs/azents/design/generated-260717-generated-images-as-file-resources.md"
+    },
+    "0165-make-model-provider-failures-transparent.md": {
+      "snapshot_id": "failures-260718",
+      "adr": "docs/azents/adr/failures-260718-failures-transparent.md",
+      "requirements": "docs/azents/requirements/failures-260718-failures-transparent.md",
+      "design": "docs/azents/design/failures-260718-failures-transparent.md"
+    },
+    "0166-resolve-builtin-capabilities-to-model-specific-executors.md": {
+      "snapshot_id": "builtin-260718",
+      "adr": "docs/azents/adr/builtin-260718-builtin-capabilities-to-executors.md",
+      "requirements": "docs/azents/requirements/builtin-260718-builtin-capabilities-to-executors.md",
+      "design": "docs/azents/design/builtin-260718-builtin-capabilities-to-executors.md"
+    },
+    "0166-subagent-model-override-policy.md": {
+      "snapshot_id": "subagent-260717",
+      "adr": "docs/azents/adr/subagent-260717-subagent-override-policy.md",
+      "requirements": "docs/azents/requirements/subagent-260717-subagent-override-policy.md",
+      "design": "docs/azents/design/subagent-260717-subagent-override-policy.md"
+    },
+    "0167-normalize-provider-tool-semantic-transcript.md": {
+      "snapshot_id": "semantic-260718",
+      "adr": "docs/azents/adr/semantic-260718-semantic-transcript.md",
+      "requirements": "docs/azents/requirements/semantic-260718-semantic-transcript.md",
+      "design": "docs/azents/design/semantic-260718-semantic-transcript.md"
+    },
+    "0168-release-bundled-and-provider-backed-skill-sources.md": {
+      "snapshot_id": "bundled-260719",
+      "adr": "docs/azents/adr/bundled-260719-bundled-and-backed-skill-sources.md",
+      "requirements": "docs/azents/requirements/bundled-260719-bundled-and-backed-skill-sources.md",
+      "design": "docs/azents/design/bundled-260719-bundled-and-backed-skill-sources.md"
+    },
+    "0168-unify-subagent-communication-through-mailbox-activity.md": {
+      "snapshot_id": "unify-260719",
+      "adr": "docs/azents/adr/unify-260719-unify-subagent-communication-through-mailbox-activity.md",
+      "requirements": "docs/azents/requirements/unify-260719-unify-subagent-communication-through-mailbox-activity.md",
+      "design": "docs/azents/design/unify-260719-unify-subagent-communication-through-mailbox-activity.md"
+    },
+    "0168-use-single-provider-tool-events.md": {
+      "snapshot_id": "events-260719",
+      "adr": "docs/azents/adr/events-260719-events.md",
+      "requirements": "docs/azents/requirements/events-260719-events.md",
+      "design": "docs/azents/design/events-260719-events.md"
+    },
+    "0169-add-openrouter-as-an-integration-scoped-llm-provider.md": {
+      "snapshot_id": "openrouter-260719",
+      "adr": "docs/azents/adr/openrouter-260719-openrouter-as-an-integration-llm.md",
+      "requirements": "docs/azents/requirements/openrouter-260719-openrouter-as-an-integration-llm.md",
+      "design": "docs/azents/design/openrouter-260719-openrouter-as-an-integration-llm.md"
+    },
+    "0169-integration-scoped-subscription-usage.md": {
+      "snapshot_id": "integration-260719",
+      "adr": "docs/azents/adr/integration-260719-integration-subscription-usage.md",
+      "requirements": "docs/azents/requirements/integration-260719-integration-subscription-usage.md",
+      "design": "docs/azents/design/integration-260719-integration-subscription-usage.md"
+    },
+    "0170-project-subscription-usage-from-selected-model.md": {
+      "snapshot_id": "subscription-260719",
+      "adr": "docs/azents/adr/subscription-260719-subscription-usage-from.md",
+      "requirements": "docs/azents/requirements/subscription-260719-subscription-usage-from.md",
+      "design": "docs/azents/design/subscription-260719-subscription-usage-from.md"
+    },
+    "0171-add-kimi-subscription-as-an-integration-scoped-provider.md": {
+      "snapshot_id": "kimi-260719",
+      "adr": "docs/azents/adr/kimi-260719-kimi-subscription-as-an-integration.md",
+      "requirements": "docs/azents/requirements/kimi-260719-kimi-subscription-as-an-integration.md",
+      "design": "docs/azents/design/kimi-260719-kimi-subscription-as-an-integration.md"
+    },
+    "0171-archived-session-retention-and-purge.md": {
+      "snapshot_id": "archived-260719",
+      "adr": "docs/azents/adr/archived-260719-archived-retention-and-purge.md",
+      "requirements": "docs/azents/requirements/archived-260719-archived-retention-and-purge.md",
+      "design": "docs/azents/design/archived-260719-archived-retention-and-purge.md"
+    },
+    "0172-generalize-admin-managed-system-configuration.md": {
+      "snapshot_id": "admin-260718",
+      "adr": "docs/azents/adr/admin-260718-admin-configuration.md",
+      "requirements": "docs/azents/requirements/admin-260718-admin-configuration.md",
+      "design": "docs/azents/design/admin-260718-admin-configuration.md"
+    },
+    "0172-gpt-apply-patch-alongside-existing-edit.md": {
+      "snapshot_id": "gpt-260720",
+      "adr": "docs/azents/adr/gpt-260720-gpt-patch-alongside-existing-edit.md",
+      "requirements": "docs/azents/requirements/gpt-260720-gpt-patch-alongside-existing-edit.md",
+      "design": "docs/azents/design/gpt-260720-gpt-patch-alongside-existing-edit.md"
+    },
+    "0172-reset-tool-search-working-set-on-compaction.md": {
+      "snapshot_id": "search-260720",
+      "adr": "docs/azents/adr/search-260720-search-working-set-on-compaction.md",
+      "requirements": "docs/azents/requirements/search-260720-search-working-set-on-compaction.md",
+      "design": "docs/azents/design/search-260720-search-working-set-on-compaction.md"
+    },
+    "0173-group-chat-tool-activity-in-the-frontend.md": {
+      "snapshot_id": "group-260720",
+      "adr": "docs/azents/adr/group-260720-group-chat-activity-in-the-frontend.md",
+      "requirements": "docs/azents/requirements/group-260720-group-chat-activity-in-the-frontend.md",
+      "design": "docs/azents/design/group-260720-group-chat-activity-in-the-frontend.md"
+    },
+    "0174-present-chat-activity-as-an-ordered-event-stream.md": {
+      "snapshot_id": "chat-260720",
+      "adr": "docs/azents/adr/chat-260720-chat-activity-as-an-ordered-event-stream.md",
+      "requirements": "docs/azents/requirements/chat-260720-chat-activity-as-an-ordered-event-stream.md",
+      "design": "docs/azents/design/chat-260720-chat-activity-as-an-ordered-event-stream.md"
+    },
+    "0174-session-shared-unread-run-result-state.md": {
+      "snapshot_id": "shared-260720",
+      "adr": "docs/azents/adr/shared-260720-shared-unread-result.md",
+      "requirements": "docs/azents/requirements/shared-260720-shared-unread-result.md",
+      "design": "docs/azents/design/shared-260720-shared-unread-result.md"
+    },
+    "0175-retire-legacy-platform-github-bindings.md": {
+      "snapshot_id": "legacy-260720",
+      "adr": "docs/azents/adr/legacy-260720-legacy-platform-github-bindings.md",
+      "requirements": "docs/azents/requirements/legacy-260720-legacy-platform-github-bindings.md",
+      "design": "docs/azents/design/legacy-260720-legacy-platform-github-bindings.md"
+    },
+    "0176-render-known-tools-through-validated-frontend-adapters.md": {
+      "snapshot_id": "known-260720",
+      "adr": "docs/azents/adr/known-260720-known-tools-through-validated-frontend-adapters.md",
+      "requirements": "docs/azents/requirements/known-260720-known-tools-through-validated-frontend-adapters.md",
+      "design": "docs/azents/design/known-260720-known-tools-through-validated-frontend-adapters.md"
+    },
+    "0177-complete-builtin-tool-presentations.md": {
+      "snapshot_id": "builtin-260721",
+      "adr": "docs/azents/adr/builtin-260721-builtin-presentations.md",
+      "requirements": "docs/azents/requirements/builtin-260721-builtin-presentations.md",
+      "design": "docs/azents/design/builtin-260721-builtin-presentations.md"
+    },
+    "0178-enable-tool-search-by-default.md": {
+      "snapshot_id": "search-260721",
+      "adr": "docs/azents/adr/search-260721-search-by.md",
+      "requirements": "docs/azents/requirements/search-260721-search-by.md",
+      "design": "docs/azents/design/search-260721-search-by.md"
+    },
+    "0179-apply-patch-provider-tool-dialects.md": {
+      "snapshot_id": "patch-260721",
+      "adr": "docs/azents/adr/patch-260721-patch-dialects.md",
+      "requirements": "docs/azents/requirements/patch-260721-patch-dialects.md",
+      "design": "docs/azents/design/patch-260721-patch-dialects.md"
+    },
+    "0180-remove-apply-patch-custom-rollout.md": {
+      "snapshot_id": "custom-260721",
+      "adr": "docs/azents/adr/custom-260721-patch-custom-rollout.md",
+      "requirements": "docs/azents/requirements/custom-260721-patch-custom-rollout.md",
+      "design": "docs/azents/design/custom-260721-patch-custom-rollout.md"
+    },
+    "0181-suppress-unread-indicators-while-sessions-run.md": {
+      "snapshot_id": "unread-260721",
+      "adr": "docs/azents/adr/unread-260721-unread-indicators-while-sessions.md",
+      "requirements": "docs/azents/requirements/unread-260721-unread-indicators-while-sessions.md",
+      "design": "docs/azents/design/unread-260721-unread-indicators-while-sessions.md"
+    }
+  },
+  "design_targets": {
+    "agent-centric-nav-2026-04-21.md": "docs/azents/design/nav-260420-nav.md",
+    "agent-execution-canonical-runtime.md": "docs/azents/design/execution-260527-execution-transcript-normalization.md",
+    "agent-file-exchange-storage.md": "docs/azents/design/file-260505-file-exchange.md",
+    "per-session-sandbox.md": "docs/azents/design/sandbox-260424-sandbox.md",
+    "lightkube-migration-agent-home.md": "docs/azents/design/lightkube-260403-lightkube-migration-home.md",
+    "agent-runtime-system-redesign.md": "docs/azents/design/sandbox-260525-sandbox-redesign.md",
+    "agent-session-sandbox-architecture.md": "docs/azents/design/sandbox-260503-sandbox.md",
+    "agent-workspace-file-management.md": "docs/azents/design/file-260628-file-management.md",
+    "builtin-tools.md": "docs/azents/design/builtin-260315-builtin-tools.md",
+    "chat-tool-activity-grouping.md": "docs/azents/design/group-260720-group-chat-activity-in-the-frontend.md",
+    "chat-idle-resume-resync.md": "docs/azents/design/chat-260609-chat-resync-scroll.md",
+    "deterministic-tool-call-handling.md": "docs/azents/design/preemptive-260607-preemptive-stop.md",
+    "chat-live-state-projection.md": "docs/azents/design/chat-260604-chat-protocol-history-live.md",
+    "chat-live-state-taxonomy.md": "docs/azents/design/live-260610-live-partial-history-taxonomy.md",
+    "existing-session-worktree-registration.md": "docs/azents/design/action-260705-action-as-operation-turn-actions.md",
+    "credential-password-reset.md": "docs/azents/design/credential-260618-credential-and-admin-password.md",
+    "declarative-toolkit-status.md": "docs/azents/design/declarative-260331-declarative-toolkit-status.md",
+    "drop-dormant-stdio-mcp-sidecar.md": "docs/azents/design/drop-260512-drop-dormant-stdio-mcp-sidecar.md",
+    "enhanced-file-browser.md": "docs/azents/design/browser-260501-browser-api.md",
+    "events-unification-2026-04-29.md": "docs/azents/design/function-260429-function-call-output-item.md",
+    "run-resume.md": "docs/azents/design/failed-260716-failed-retry-to-turn.md",
+    "file-resource-lifecycle-and-tool-output.md": "docs/azents/design/file-260601-file-media-resource-lifecycle.md",
+    "filesystem-skill-projection.md": "docs/azents/design/filesystem-260701-filesystem-skill-projection-revisions.md",
+    "github-toolkit-multi-installation.md": "docs/azents/design/github-260621-github-toolkit-multi-installation.md",
+    "gvisor-sandbox.md": "docs/azents/design/gvisor-260403-gvisor-byoc-sandbox.md",
+    "in-sandbox-sandbox-client-control-channel.md": "docs/azents/design/sandbox-260506-sandbox-control-channel.md",
+    "llm-model-catalog-sync.md": "docs/azents/design/llm-260513-llm-catalog-source.md",
+    "local-fullstack-test-env.md": "docs/azents/design/local-260406-local-fullstack-test-env.md",
+    "mcp-stdio-toolkit.md": "docs/azents/design/mcp-260325-mcp-stdio-sidecar.md",
+    "mcp-toolkit-oauth-connections.md": "docs/azents/design/toolkit-260623-toolkit-level-mcp-oauth.md",
+    "memory-db-redesign.md": "docs/azents/design/memory-260426-memory-filesystem-to-db.md",
+    "model-catalog-adr-0067-drift-correction.md": "docs/azents/design/catalog-260620-catalog-projection-sync.md",
+    "session-initialization-steps.md": "docs/azents/design/initialization-260703-initialization-lifecycle.md",
+    "openai-sdk-events-redesign.md": "docs/azents/design/events-260428-events-table-as-truth.md",
+    "provider-hosted-web-search.md": "docs/azents/design/hosted-260617-hosted-web-search.md",
+    "oss-admin-surface-auth-and-bootstrap.md": "docs/azents/design/oss-260713-oss-admin-surface-auth-and-bootstrap.md",
+    "primary-agent-sessions.md": "docs/azents/design/primary-260625-primary-sessions.md",
+    "sandbox-checkpoint-lifecycle.md": "docs/azents/design/sandbox-260521-sandbox-control.md",
+    "session-context-inspector.md": "docs/azents/design/context-260530-context-inspector.md",
+    "session-subscription-usage.md": "docs/azents/design/subscription-260719-subscription-usage-from.md",
+    "session-todo-ui.md": "docs/azents/design/todo-260613-todo-toolkit-ui.md",
+    "session-web-viewer.md": "docs/azents/design/web-260416-web-viewer.md",
+    "signup-tokens.md": "docs/azents/design/signup-260617-signup-token-registration.md",
+    "slack-byoa.md": "docs/azents/design/slack-260414-slack-byoa.md",
+    "system-docker-sandbox-provider.md": "docs/azents/design/docker-260523-docker-sandbox.md",
+    "system-prompt-context-inspector.md": "docs/azents/design/prompt-260611-prompt-context-inspector.md",
+    "testenv-runner-redesign.md": "docs/azents/design/testenv-260414-testenv-runner-redesign.md",
+    "tool-output-context-pressure-filter.md": "docs/azents/design/output-260604-output-context-pressure-filter.md",
+    "toolkit-hooks-agents-md.md": "docs/azents/design/toolkit-260514-toolkit-hooks-for-agents-md.md",
+    "account-linking.md": "docs/azents/design/account-260315-account-linking.md",
+    "agent-focused-session-layout.md": "docs/azents/design/layout-260626-layout.md",
+    "agent-profile-image.md": "docs/azents/design/profile-260421-profile-image.md",
+    "agent-sandbox.md": "docs/azents/design/sandbox-260225-sandbox.md",
+    "agent-session-foundation.md": "docs/azents/design/foundation-260504-foundation.md",
+    "agent-team-home-2026-04-21.md": "docs/azents/design/team-260421-team-home-2026.md",
+    "auth-guard.md": "docs/azents/design/auth-260219-auth-guard.md",
+    "auth.md": "docs/azents/design/authsnapshot-260219-auth.md",
+    "aws-toolkit.md": "docs/azents/design/aws-260326-aws-toolkit.md",
+    "chat-attachment-presentation.md": "docs/azents/design/chat-260711-chat-attachment-presentation.md",
+    "chatgpt-oauth-provider.md": "docs/azents/design/chatgpt-260502-chatgpt-oauth.md",
+    "chatgpt-responses-lite-catalog.md": "docs/azents/design/chatgpt-260712-chatgpt-responses-lite-catalog.md",
+    "claude-rules-loader.md": "docs/azents/design/rules-260702-claude-rules-loader.md",
+    "codex-multi-agent-v2-prompt-parity.md": "docs/azents/design/codex-260710-codex-multi-prompt-parity.md",
+    "context-compaction.md": "docs/azents/design/context-260305-context-compaction.md",
+    "core-concepts.md": "docs/azents/design/core-260207-core-concepts.md",
+    "daily-log.md": "docs/azents/design/daily-260322-daily-log.md",
+    "design-system.md": "docs/azents/design/nointern-260216-nointern-web.md",
+    "devserver-lifecycle.md": "docs/azents/design/devserver-260406-devserver-lifecycle.md",
+    "discord-gateway-ha.md": "docs/azents/design/discord-260327-discord-gateway.md",
+    "discord-oauth-button-url-fix.md": "docs/azents/design/oauth-260327-discord-oauth-button-url-fix.md",
+    "discord-toolkit.md": "docs/azents/design/discord-260312-discord-toolkit.md",
+    "docids-260721-shared-development-snapshot-identifiers.md": "docs/azents/design/docids-260721-shared-development-snapshot-identifiers.md",
+    "docker-agent-home-sidecar.md": "docs/azents/design/docker-260409-docker-home-sidecar.md",
+    "draft-agent-session-first-message.md": "docs/azents/design/draft-260628-draft-message.md",
+    "email-login-onboarding.md": "docs/azents/design/email-260217-email-login-onboarding.md",
+    "engine-event-refactoring.md": "docs/azents/design/engine-260317-engine-event-refactoring.md",
+    "event-architecture-review.md": "docs/azents/design/event-260308-event-architecture-review.md",
+    "event-subscription-routing-2026-05-08.md": "docs/azents/design/event-260508-event-subscription-routing-2026.md",
+    "explicit-agent-session-write-target.md": "docs/azents/design/write-260625-write-target.md",
+    "external-watch-raw-session-subscription.md": "docs/azents/design/external-260503-external-watch-raw-subscription.md",
+    "file-support-design.md": "docs/azents/design/file-260301-file-support.md",
+    "ga4-native-toolkit.md": "docs/azents/design/ga4-260401-ga4-toolkit.md",
+    "gcp-observability-toolkit.md": "docs/azents/design/gcp-260326-gcp-observability-toolkit.md",
+    "github-toolkit-shell-env-2026-04-24.md": "docs/azents/design/github-260424-github-toolkit-shell-env-2026.md",
+    "github-toolkit.md": "docs/azents/design/github-260313-github-toolkit.md",
+    "helm-packaging.md": "docs/azents/design/helm-260512-helm-packaging.md",
+    "home-as-agent-list-2026-04-21.md": "docs/azents/design/home-260421-home-list-2026.md",
+    "i18n.md": "docs/azents/design/i18n-260216-i18n.md",
+    "idempotent-sandbox-lifecycle.md": "docs/azents/design/idempotent-260524-idempotent-sandbox-lifecycle.md",
+    "integrations-e2e.md": "docs/azents/design/integrations-260411-integrations-e2e.md",
+    "kimi-subscription-provider.md": "docs/azents/design/kimisubscription-260719-kimi-subscription.md",
+    "kubernetes-toolkit.md": "docs/azents/design/kubernetes-260327-kubernetes-toolkit.md",
+    "llm-event-storage-redesign.md": "docs/azents/design/llm-260304-llm-event-redesign.md",
+    "llm-pipeline.md": "docs/azents/design/llm-260408-llm-pipeline.md",
+    "llm-provider-integration.md": "docs/azents/design/llm-260221-llm-integration.md",
+    "mcp-egress-proxy.md": "docs/azents/design/mcp-260319-mcp-egress-proxy.md",
+    "mcp-toolkit.md": "docs/azents/design/mcp-260228-mcp-toolkit.md",
+    "memory-db-redesign-2026-04-26.md": "docs/azents/design/redesign-260426-memory-redesign-2026.md",
+    "message-queueing.md": "docs/azents/design/message-260305-message-queueing.md",
+    "model-config-removal.md": "docs/azents/design/config-260616-config-removal.md",
+    "model-scoped-selectable-model-settings.md": "docs/azents/design/settings-260716-selectable-settings.md",
+    "model-selection-options.md": "docs/azents/design/selection-260709-selection-options.md",
+    "model-specific-image-generation.md": "docs/azents/design/image-260718-image-generation.md",
+    "multi-active-agent-sessions-overview.md": "docs/azents/design/multi-260625-multi-active-sessions-overview.md",
+    "multi-worktree-registration.md": "docs/azents/design/multi-260704-multi-worktree-registration.md",
+    "nointern-discord-integration.md": "docs/azents/design/nointern-260310-nointern-discord-integration.md",
+    "nointern-slack-integration.md": "docs/azents/design/slack-260310-nointern-slack-integration.md",
+    "notion-toolkit.md": "docs/azents/design/notion-260321-notion-toolkit.md",
+    "openai-responses-websocket-transport.md": "docs/azents/design/openai-260717-openai-responses-websocket-transport.md",
+    "per-prompt-inference-profile.md": "docs/azents/design/promptinferenceprofile-260710-prompt-inference-profile.md",
+    "per-user-pat.md": "docs/azents/design/pat-260321-pat.md",
+    "provider-compat-layer-2026-05-03.md": "docs/azents/design/compat-260503-compat-layer-2026.md",
+    "provider-hosted-image-generation.md": "docs/azents/design/hosted-260717-hosted-image-generation.md",
+    "provider-tool-live-activity.md": "docs/azents/design/activity-260716-live-activity.md",
+    "pyright-config.md": "docs/azents/design/pyright-260310-pyright-config.md",
+    "remove-project-registration-requests.md": "docs/azents/design/registration-260707-registration-requests.md",
+    "remove-workspace-team-concept.md": "docs/azents/design/concept-260622-team-concept.md",
+    "run-scoped-azents-vfs.md": "docs/azents/design/azents-260719-azents-vfs.md",
+    "runtime-hook-system.md": "docs/azents/design/hook-260507-hook.md",
+    "sandbox-credential-injection-2026-04-24.md": "docs/azents/design/sandbox-260421-sandbox-credential-injection-2026.md",
+    "sandbox-daemon-sidecar.md": "docs/azents/design/sandbox-260403-sandbox-daemon-sidecar.md",
+    "sandbox-explicit-restore-reset.md": "docs/azents/design/sandbox-260524-sandbox-restore.md",
+    "sandbox-provider-control-distributed-recovery.md": "docs/azents/design/control-260524-sandbox-control-distributed-recovery.md",
+    "sandbox-runtime-workspace-state-boundary.md": "docs/azents/design/boundary-260524-sandbox-boundary.md",
+    "seed-helpers.md": "docs/azents/design/seed-260407-seed-helpers.md",
+    "sentry-toolkit-stdio.md": "docs/azents/design/sentry-260327-sentry-toolkit-stdio.md",
+    "sentry-toolkit.md": "docs/azents/design/toolkit-260327-sentry-toolkit.md",
+    "sequential-input-buffer-preparation.md": "docs/azents/design/sequential-260712-sequential-input-buffer-preparation.md",
+    "server-side-session-id.md": "docs/azents/design/server-260311-server-side.md",
+    "session-scoped-runner-operation-concurrency.md": "docs/azents/design/operation-260710-runner-operation-concurrency.md",
+    "session-workspace-project-existing-folder-registration.md": "docs/azents/design/existing-260611-existing-folder-registration.md",
+    "session-workspace-projects.md": "docs/azents/design/projects-260509-projects.md",
+    "shell-environment.md": "docs/azents/design/shell-260315-shell-environment.md",
+    "slack-toolkit.md": "docs/azents/design/slack-260312-slack-toolkit.md",
+    "stage4-web.md": "docs/azents/design/stage4-260410-stage4-web.md",
+    "stdio-mcp-ga4-integration.md": "docs/azents/design/stdio-260326-stdio-mcp-ga4-integration.md",
+    "stdio-mcp-resolve-integration.md": "docs/azents/design/stdio-260328-stdio-mcp-integration.md",
+    "streaming-responsibility-migration.md": "docs/azents/design/streaming-260314-streaming-responsibility-migration.md",
+    "subagent-inherit-2026-04-24.md": "docs/azents/design/subagent-260424-subagent-inherit-2026.md",
+    "subagent-model-override-policy.md": "docs/azents/design/override-260717-subagent-override-policy.md",
+    "subagent-removal-2026-07-06.md": "docs/azents/design/subagent-260706-subagent-removal-2026.md",
+    "subagent.md": "docs/azents/design/subagent-260306-subagent.md",
+    "team-crud.md": "docs/azents/design/team-260212-team-crud.md",
+    "team-member-crud.md": "docs/azents/design/team-260213-team-member-crud.md",
+    "testenv-devtools-tc-live-upgrade.md": "docs/azents/design/testenv-260416-testenv-devtools-live-upgrade.md",
+    "testenv-recipes.md": "docs/azents/design/testenv-260412-testenv-recipes.md",
+    "token-usage-storage.md": "docs/azents/design/token-260305-token-usage.md",
+    "tool-output-truncation.md": "docs/azents/design/output-260306-output-truncation.md",
+    "toolkit-assignment.md": "docs/azents/design/toolkit-260225-toolkit-assignment.md",
+    "unified-oauth-flow.md": "docs/azents/design/unified-260327-unified-oauth.md",
+    "usage-based-auto-compaction.md": "docs/azents/design/auto-260612-usage-auto-compaction.md",
+    "user-crud.md": "docs/azents/design/crud-260212-crud.md",
+    "user-folder-recognition.md": "docs/azents/design/folder-260403-folder-recognition.md",
+    "workspace-invitation.md": "docs/azents/design/invitation-260219-invitation.md",
+    "workspace-join-request.md": "docs/azents/design/join-260316-join-request.md",
+    "xai-api-key-provider.md": "docs/azents/design/xai-260710-xai-api-key.md",
+    "xai-oauth-provider.md": "docs/azents/design/oauth-260710-xai-oauth.md"
+  },
+  "design_roles": {
+    "agent-centric-nav-2026-04-21.md": "primary",
+    "agent-execution-canonical-runtime.md": "primary",
+    "agent-file-exchange-storage.md": "primary",
+    "memory-system.md": "supporting",
+    "per-session-sandbox.md": "primary",
+    "lightkube-migration-agent-home.md": "primary",
+    "agent-runtime-system-redesign.md": "primary",
+    "agent-session-sandbox-architecture.md": "primary",
+    "architecture.md": "supporting",
+    "agent-workspace-file-management.md": "primary",
+    "builtin-tools.md": "primary",
+    "chat-tool-activity-grouping.md": "primary",
+    "chat-idle-resume-resync.md": "primary",
+    "deterministic-tool-call-handling.md": "primary",
+    "chat-live-state-projection.md": "primary",
+    "frontend-chat-wire-envelope.md": "supporting",
+    "chat-live-state-taxonomy.md": "primary",
+    "existing-session-worktree-registration.md": "primary",
+    "credential-password-reset.md": "primary",
+    "declarative-toolkit-status.md": "primary",
+    "drop-dormant-stdio-mcp-sidecar.md": "primary",
+    "enhanced-file-browser.md": "primary",
+    "events-unification-2026-04-29.md": "primary",
+    "run-resume.md": "primary",
+    "file-resource-lifecycle-and-tool-output.md": "primary",
+    "filesystem-skill-projection.md": "primary",
+    "github-toolkit-multi-installation.md": "primary",
+    "gvisor-sandbox.md": "primary",
+    "in-sandbox-sandbox-client-control-channel.md": "primary",
+    "llm-model-catalog-sync.md": "primary",
+    "local-fullstack-test-env.md": "primary",
+    "mcp-stdio-toolkit.md": "primary",
+    "mcp-toolkit-oauth-connections.md": "primary",
+    "memory-db-redesign.md": "primary",
+    "model-catalog-adr-0067-drift-correction.md": "primary",
+    "model-catalog-sync-trigger-drift-remediation.md": "supporting",
+    "session-initialization-steps.md": "primary",
+    "openai-sdk-events-redesign.md": "primary",
+    "provider-hosted-web-search.md": "primary",
+    "oss-admin-surface-auth-and-bootstrap.md": "primary",
+    "primary-agent-sessions.md": "primary",
+    "sandbox-checkpoint-lifecycle.md": "primary",
+    "session-context-inspector.md": "primary",
+    "session-subscription-usage.md": "primary",
+    "session-todo-ui.md": "primary",
+    "session-web-viewer.md": "primary",
+    "signup-tokens.md": "primary",
+    "slack-byoa.md": "primary",
+    "system-docker-sandbox-provider.md": "primary",
+    "system-prompt-context-inspector.md": "primary",
+    "testenv-runner-redesign.md": "primary",
+    "tool-output-context-pressure-filter.md": "primary",
+    "toolkit-hooks-agents-md.md": "primary",
+    "account-linking.md": "primary",
+    "agent-focused-session-layout.md": "primary",
+    "agent-profile-image.md": "primary",
+    "agent-sandbox.md": "primary",
+    "agent-session-foundation.md": "primary",
+    "agent-team-home-2026-04-21.md": "primary",
+    "auth-guard.md": "primary",
+    "auth.md": "primary",
+    "aws-toolkit.md": "primary",
+    "chat-attachment-presentation.md": "primary",
+    "chatgpt-oauth-provider.md": "primary",
+    "chatgpt-responses-lite-catalog.md": "primary",
+    "claude-rules-loader.md": "primary",
+    "codex-multi-agent-v2-prompt-parity.md": "primary",
+    "context-compaction.md": "primary",
+    "core-concepts.md": "primary",
+    "daily-log.md": "primary",
+    "design-system.md": "primary",
+    "devserver-lifecycle.md": "primary",
+    "discord-gateway-ha.md": "primary",
+    "discord-oauth-button-url-fix.md": "primary",
+    "discord-toolkit.md": "primary",
+    "docids-260721-shared-development-snapshot-identifiers.md": "primary",
+    "docker-agent-home-sidecar.md": "primary",
+    "draft-agent-session-first-message.md": "primary",
+    "email-login-onboarding.md": "primary",
+    "engine-event-refactoring.md": "primary",
+    "event-architecture-review.md": "primary",
+    "event-subscription-routing-2026-05-08.md": "primary",
+    "explicit-agent-session-write-target.md": "primary",
+    "external-watch-raw-session-subscription.md": "primary",
+    "file-support-design.md": "primary",
+    "ga4-native-toolkit.md": "primary",
+    "gcp-observability-toolkit.md": "primary",
+    "github-toolkit-shell-env-2026-04-24.md": "primary",
+    "github-toolkit.md": "primary",
+    "helm-packaging.md": "primary",
+    "home-as-agent-list-2026-04-21.md": "primary",
+    "i18n.md": "primary",
+    "idempotent-sandbox-lifecycle.md": "primary",
+    "integrations-e2e.md": "primary",
+    "kimi-subscription-provider.md": "primary",
+    "kubernetes-toolkit.md": "primary",
+    "llm-event-storage-redesign.md": "primary",
+    "llm-pipeline.md": "primary",
+    "llm-provider-integration.md": "primary",
+    "mcp-egress-proxy.md": "primary",
+    "mcp-toolkit.md": "primary",
+    "memory-db-redesign-2026-04-26.md": "primary",
+    "message-queueing.md": "primary",
+    "model-config-removal.md": "primary",
+    "model-scoped-selectable-model-settings.md": "primary",
+    "model-selection-options.md": "primary",
+    "model-specific-image-generation.md": "primary",
+    "multi-active-agent-sessions-overview.md": "primary",
+    "multi-worktree-registration.md": "primary",
+    "nointern-discord-integration.md": "primary",
+    "nointern-slack-integration.md": "primary",
+    "notion-toolkit.md": "primary",
+    "openai-responses-websocket-transport.md": "primary",
+    "per-prompt-inference-profile.md": "primary",
+    "per-user-pat.md": "primary",
+    "provider-compat-layer-2026-05-03.md": "primary",
+    "provider-hosted-image-generation.md": "primary",
+    "provider-tool-live-activity.md": "primary",
+    "pyright-config.md": "primary",
+    "remove-project-registration-requests.md": "primary",
+    "remove-workspace-team-concept.md": "primary",
+    "run-scoped-azents-vfs.md": "primary",
+    "runtime-hook-system.md": "primary",
+    "sandbox-credential-injection-2026-04-24.md": "primary",
+    "sandbox-daemon-sidecar.md": "primary",
+    "sandbox-explicit-restore-reset.md": "primary",
+    "sandbox-provider-control-distributed-recovery.md": "primary",
+    "sandbox-runtime-workspace-state-boundary.md": "primary",
+    "seed-helpers.md": "primary",
+    "sentry-toolkit-stdio.md": "primary",
+    "sentry-toolkit.md": "primary",
+    "sequential-input-buffer-preparation.md": "primary",
+    "server-side-session-id.md": "primary",
+    "session-scoped-runner-operation-concurrency.md": "primary",
+    "session-workspace-project-existing-folder-registration.md": "primary",
+    "session-workspace-projects.md": "primary",
+    "shell-environment.md": "primary",
+    "slack-toolkit.md": "primary",
+    "stage4-web.md": "primary",
+    "stdio-mcp-ga4-integration.md": "primary",
+    "stdio-mcp-resolve-integration.md": "primary",
+    "streaming-responsibility-migration.md": "primary",
+    "subagent-inherit-2026-04-24.md": "primary",
+    "subagent-model-override-policy.md": "primary",
+    "subagent-removal-2026-07-06.md": "primary",
+    "subagent.md": "primary",
+    "team-crud.md": "primary",
+    "team-member-crud.md": "primary",
+    "testenv-devtools-tc-live-upgrade.md": "primary",
+    "testenv-recipes.md": "primary",
+    "token-usage-storage.md": "primary",
+    "tool-output-truncation.md": "primary",
+    "toolkit-assignment.md": "primary",
+    "unified-oauth-flow.md": "primary",
+    "usage-based-auto-compaction.md": "primary",
+    "user-crud.md": "primary",
+    "user-folder-recognition.md": "primary",
+    "workspace-invitation.md": "primary",
+    "workspace-join-request.md": "primary",
+    "xai-api-key-provider.md": "primary",
+    "xai-oauth-provider.md": "primary",
+    "primary-agent-sessions-migration-phases.md": "supporting",
+    "live-history-projection-and-partial-batching.md": "supporting",
+    "dynamic-llm-model-configs.md": "supporting",
+    "subagent-inherit-testenv-report-2026-04-24.md": "supporting",
+    "session-git-worktree-lifecycle.md": "supporting",
+    "codex-like-compaction-checkpoints.md": "supporting",
+    "codex-first-subagent-validation-2026-07-08.md": "supporting",
+    "apply-patch-provider-tool-dialects.md": "supporting",
+    "kimi-subscription-validation-report-2026-07-19.md": "supporting",
+    "provider-tool-single-event-transcript.md": "supporting",
+    "session-operation-turn-action-migration.md": "supporting",
+    "scheduled-tasks.md": "supporting",
+    "provider-tool-semantic-transcript.md": "supporting",
+    "agent-settings-pages-and-memory-ui.md": "supporting",
+    "gpt-apply-patch-function-tool.md": "supporting",
+    "concurrent-read-latency-hardening-validation-2026-07-19.md": "supporting",
+    "responses-api-migration.md": "supporting",
+    "preemptive-user-stop-phase6-audit.md": "supporting",
+    "github-actions-ci-cd.md": "supporting",
+    "subagent-inherit-audit-2026-04-24.md": "supporting",
+    "provider-compat-qa-report-2026-05-03.md": "supporting",
+    "subagent-spawn-inference-profile-validation-2026-07-11.md": "supporting",
+    "session-shared-unread-run-state.md": "supporting",
+    "responses-stream-terminal-validation.md": "supporting",
+    "rest-chat-write-boundary.md": "supporting",
+    "chat-known-tool-specialized-renderers.md": "supporting",
+    "phase2-durable-lifecycle-workflow.md": "supporting",
+    "model-provider-failure-recovery.md": "supporting",
+    "admin-managed-system-configuration-validation-report-2026-07-20.md": "supporting",
+    "session-subscription-usage-validation-2026-07-19.md": "supporting",
+    "existing-session-worktree-registration-validation-2026-07-06.md": "supporting",
+    "subagent-mailbox-activity-wait.md": "supporting",
+    "file-media-resource-lifecycle-audit-report-2026-06-02.md": "supporting",
+    "periodic-execution-infrastructure.md": "supporting",
+    "session-scoped-runner-operation-concurrency-validation-2026-07-10.md": "supporting",
+    "new-session-mixed-workspace-selection-implementation-plan.md": "supporting",
+    "phase3-snapshot-hibernation.md": "supporting",
+    "sandbox-runtime-profile.md": "supporting",
+    "toolkit-state-machine.md": "supporting",
+    "gpt-apply-patch-testenv-report-2026-07-20.md": "supporting",
+    "worktree-operation-live-durable-handover.md": "supporting",
+    "input-control-plane-clean-migration.md": "supporting",
+    "chat-run-state-regression-hardening-validation-2026-07-12.md": "supporting",
+    "provider-compat-spec-sync-report-2026-05-03.md": "supporting",
+    "shared-storage-and-skills.md": "supporting",
+    "github-toolkit-shell-env-audit-report-2026-04-24.md": "supporting",
+    "model-listing-drift-recovery.md": "supporting",
+    "simplified-file-lifecycle-policy.md": "supporting",
+    "signup-tokens-verification-report-2026-06-17.md": "supporting",
+    "failed-run-retry-recovery-ux.md": "supporting",
+    "run-resume-phase3.md": "supporting",
+    "chat-run-state-regression-hardening.md": "supporting",
+    "provider-tool-live-activity-validation-report-2026-07-16.md": "supporting",
+    "chat-input-buffer.md": "supporting",
+    "in-sandbox-sandbox-client-control-channel-phase1-runtime-manager.md": "supporting",
+    "workspace-project-browser.md": "supporting",
+    "agent-home.md": "supporting",
+    "claude-rules-loader-validation-2026-07-02.md": "supporting",
+    "multi-worktree-registration-validation-2026-07-04.md": "supporting",
+    "model-catalog-projection-sync.md": "supporting",
+    "codex-first-subagent-prerequisites-validation-2026-07-08.md": "supporting",
+    "testenv-setup-scenarios.md": "supporting",
+    "turn-scoped-failed-run-retry.md": "supporting",
+    "agent-execution-canonical-runtime-phase12-verification.md": "supporting",
+    "archived-session-retention-and-purge.md": "supporting",
+    "agent-execution-adr-0039-audit-report-2026-05-28.md": "supporting",
+    "session-scoped-toolkit-lifecycle.md": "supporting",
+    "file-media-resource-lifecycle-implementation-plan.md": "supporting",
+    "chat-attachment-presentation-validation-2026-07-11.md": "supporting",
+    "multi-user-scenario.md": "supporting",
+    "background-tool-call.md": "supporting",
+    "slack-toolkit-impl.md": "supporting",
+    "failed-run-error-retry.md": "supporting",
+    "primary-agent-sessions-phase7-backend.md": "supporting",
+    "sandbox-provider-control.md": "supporting",
+    "scheduled-tasks-phase4.md": "supporting",
+    "admin-managed-system-configuration.md": "supporting",
+    "archived-session-retention-validation-report-2026-07-19.md": "supporting",
+    "subagent-spawn-inference-profile.md": "supporting",
+    "subscription-provider-usage.md": "supporting",
+    "session-scoped-toolkit-lifecycle-verification-2026-05-29.md": "supporting",
+    "tool-search-bounded-working-set-validation-2026-07-19.md": "supporting",
+    "openai-compatible-responses-http-migration.md": "supporting",
+    "user-input-bound-filepart-materialization.md": "supporting",
+    "concurrent-read-latency-hardening.md": "supporting",
+    "adr-0179-implementation-audit-2026-07-21.md": "supporting",
+    "model-stream-timeout-watchdog.md": "supporting",
+    "chat-timeline-reliability-hardening.md": "supporting",
+    "runtime-exec-process-tools.md": "supporting",
+    "apply-patch-provider-tool-dialects-release-gate-2026-07-21.md": "supporting",
+    "sequential-input-buffer-preparation-validation-2026-07-12.md": "supporting",
+    "phase1-activity-tracking-lifecycle-hooks.md": "supporting",
+    "openrouter-api-key-provider.md": "supporting",
+    "preemptive-user-stop.md": "supporting",
+    "oss-admin-surface-auth-and-bootstrap-validation-report-2026-07-13.md": "supporting",
+    "chat-activity-ordered-event-revision.md": "supporting",
+    "provider-hosted-image-generation-validation-report-2026-07-17.md": "supporting",
+    "model-catalog-verification-audit-2026-06-21.md": "supporting",
+    "chat-session-resync-scroll-state.md": "supporting",
+    "codex-first-subagent-redesign.md": "supporting",
+    "model-stream-timeout-watchdog-validation-report-2026-07-15.md": "supporting",
+    "subscription-provider-usage-validation-2026-07-19.md": "supporting",
+    "openai-responses-websocket-validation-report-2026-07-17.md": "supporting",
+    "run-resume-phase4.md": "supporting",
+    "model-selection-options-validation-2026-07-09.md": "supporting",
+    "xai-api-key-provider-validation-report-2026-07-10.md": "supporting",
+    "service-toolkit-base.md": "supporting",
+    "new-session-mixed-workspace-selection.md": "supporting",
+    "llm-tool-execution.md": "supporting",
+    "sandbox-daemon.md": "supporting",
+    "new-session-project-selection.md": "supporting",
+    "sandbox-provider-routing-simplification.md": "supporting",
+    "preemptive-user-stop-phase7-verification.md": "supporting",
+    "chat-tool-activity-grouping-validation-report-2026-07-20.md": "supporting",
+    "lightkube-migration.md": "supporting",
+    "subagent-inherit-spec-sync-2026-04-24.md": "supporting",
+    "chat-timeline-reliability-validation-report-2026-07-13.md": "supporting",
+    "goal-continuation-ui.md": "supporting",
+    "deterministic-tool-call-handling-validation-2026-07-12.md": "supporting",
+    "adr85-implementation-audit-2026-06-29.md": "supporting",
+    "agent-file-exchange-storage-phase1-backend-foundation.md": "supporting",
+    "model-scoped-selectable-model-settings-validation-2026-07-16.md": "supporting",
+    "provider-compat-audit-report-2026-05-03.md": "supporting",
+    "azents-rename-plan.md": "supporting",
+    "professional-coding-agent.md": "supporting",
+    "support-agent-team.md": "supporting",
+    "personal-agent.md": "supporting",
+    "routine-scheduler-agent.md": "supporting",
+    "oncall-agent.md": "supporting"
+  },
+  "ambiguity_manifest": "docs/azents/notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md",
+  "rewrite_counts": {
+    "files_changed": 599,
+    "replacement_actions": 599,
+    "ambiguity_occurrences_rewritten": 428,
+    "link_repair_files": 10
+  }
+}

@@ -4,6 +4,9 @@ tags: [backend, architecture]
 created: 2026-02-04
 updated: 2026-03-06
 implemented: 2026-03-06
+document_role: supporting
+document_type: supporting-secondary-design
+migration_source: "docs/azents/design/architecture.md"
 ---
 
 # nointern Architecture Design

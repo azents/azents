@@ -3,6 +3,10 @@ title: "Model Provider Failure Transparency and Retry Design"
 created: 2026-07-18
 updated: 2026-07-18
 tags: [architecture, backend, engine, frontend, api, llm, reliability, observability, security, ux]
+document_role: supporting
+document_type: supporting-consolidation
+migration_source: "docs/azents/design/model-provider-failure-recovery.md"
+supporting_role: consolidation
 ---
 
 # Model Provider Failure Transparency and Retry Design
@@ -15,7 +19,7 @@ Retry lifecycle changes are part of the transparency design rather than a separa
 
 User Stop remains terminal and non-replayable. This design does not restore the stopped-Run recovery, source linkage, endpoint, UI, or schema that existed in the reverted implementation.
 
-This document implements ADR-0165 as one coordinated backend, worker, API, frontend, logging, and test cutover.
+This document implements [failures-260718/ADR](../adr/failures-260718-failures-transparent.md) as one coordinated backend, worker, API, frontend, logging, and test cutover.
 
 ## Problem
 
@@ -64,7 +68,7 @@ These behaviors make provider failures appear to be unexplained Azents failures 
 
 `ModelCallError`, `TransientModelCallError`, and `NonRetryableModelCallError` are the current Engine-visible families. OpenAI-native and LiteLLM adapters map provider outcomes independently. Some paths preserve a fixed status-specific message or bounded code, while other paths replace the provider reason with a generic string.
 
-ADR-0157 intentionally prevents raw OpenAI SDK exception and response propagation. The implementation must retain that security boundary while allowing explicitly selected, bounded, redacted scalar error fields to cross through a typed Azents contract.
+[failure-260716/ADR](../adr/failure-260716-openai-http-failure-semantics-at-the-azents-boundary.md) intentionally prevents raw OpenAI SDK exception and response propagation. The implementation must retain that security boundary while allowing explicitly selected, bounded, redacted scalar error fields to cross through a typed Azents contract.
 
 ### Failed-run retry
 
@@ -488,7 +492,7 @@ Rejected because the provider reason would still be lost during adapter normaliz
 
 ### Retry only transient provider categories
 
-Rejected by ADR-0165 in favor of one predictable complete-budget provider policy. Diagnostic retryability remains observable but does not shorten the budget.
+Rejected by [failures-260718/ADR](../adr/failures-260718-failures-transparent.md) in favor of one predictable complete-budget provider policy. Diagnostic retryability remains observable but does not shorten the budget.
 
 ### Keep compaction's current independent lifecycle
 
@@ -523,12 +527,12 @@ The reverted PR #513 remains historical implementation evidence, not the design 
 Implementation must update at least:
 
 - `docs/azents/spec/flow/agent-execution-loop.md`;
-- `docs/azents/spec/flow/context-compaction.md`;
-- `docs/azents/spec/flow/run-resume.md`;
+- `docs/azents/spec/flow/context-260305-context-compaction.md`;
+- `docs/azents/spec/flow/failed-260716-failed-retry-to-turn.md`;
 - `docs/azents/spec/flow/chat-session-resync.md`;
 - `docs/azents/spec/domain/conversation.md`;
 - provider-specific flow specs whose adapter failure behavior changes.
 
 ## Open Questions
 
-None. ADR-0165 fixes the product decisions, and this design defines their implementation boundaries against the latest main behavior.
+None. [failures-260718/ADR](../adr/failures-260718-failures-transparent.md) fixes the product decisions, and this design defines their implementation boundaries against the latest main behavior.

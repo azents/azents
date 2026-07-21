@@ -2,13 +2,16 @@
 title: "Multi-Worktree Registration Validation Report"
 created: 2026-07-04
 tags: [backend, frontend, runtime, session, workspace, git, validation]
+document_role: supporting
+document_type: supporting-validation-report
+migration_source: "docs/azents/design/multi-worktree-registration-validation-2026-07-04.md"
 ---
 
 # Multi-Worktree Registration Validation Report
 
 ## Scope
 
-This report validates the implementation stack for [Multi-Worktree Registration](multi-worktree-registration.md) through Phase 4:
+This report validates the implementation stack for [Multi-Worktree Registration](multi-260704-multi-worktree-registration.md) through Phase 4:
 
 - `Multi-worktree registration [3/7]: Backend queue and API`
 - `Multi-worktree registration [4/7]: Project panel worktree attach UI`

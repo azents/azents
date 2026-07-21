@@ -2,13 +2,16 @@
 title: "Provider-Hosted Image Generation Validation Report"
 created: 2026-07-17
 tags: [backend, engine, frontend, llm, storage, testenv]
+document_role: supporting
+document_type: supporting-validation-report
+migration_source: "docs/azents/design/provider-hosted-image-generation-validation-report-2026-07-17.md"
 ---
 
 # Provider-Hosted Image Generation Validation Report
 
 ## Scope
 
-This report validates the implementation described by [`provider-hosted-image-generation.md`](./provider-hosted-image-generation.md).
+This report validates the implementation described by [`hosted-260717-hosted-image-generation.md`](./hosted-260717-hosted-image-generation.md).
 
 The validation covers:
 

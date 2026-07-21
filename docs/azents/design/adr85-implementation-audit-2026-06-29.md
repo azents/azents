@@ -1,20 +1,23 @@
 ---
-title: "ADR-0085 Implementation Audit - 2026-06-29"
+title: "[deterministic-260628/ADR](../adr/deterministic-260628-deterministic-catalog-and-mcp-snapshots.md) Implementation Audit - 2026-06-29"
 created: 2026-06-29
 updated: 2026-06-29
 implemented: 2026-06-29
 tags: [backend, engine, toolkit, verification]
+document_role: supporting
+document_type: supporting-audit
+migration_source: "docs/azents/design/adr85-implementation-audit-2026-06-29.md"
 ---
 
-# ADR-0085 Implementation Audit - 2026-06-29
+# [deterministic-260628/ADR](../adr/deterministic-260628-deterministic-catalog-and-mcp-snapshots.md) Implementation Audit - 2026-06-29
 
 ## Scope
 
-This audit rechecked current implementation against ADR-0085 decisions for deterministic tool catalogs, MCP snapshots, AGENTS.md instruction handling, and legacy GitHub per-user PAT behavior.
+This audit rechecked current implementation against [deterministic-260628/ADR](../adr/deterministic-260628-deterministic-catalog-and-mcp-snapshots.md) decisions for deterministic tool catalogs, MCP snapshots, AGENTS.md instruction handling, and legacy GitHub per-user PAT behavior.
 
 ## Decision Gap Table
 
-| ADR-0085 decision | Reverified implementation gap | Resolution in this change |
+| [deterministic-260628/ADR](../adr/deterministic-260628-deterministic-catalog-and-mcp-snapshots.md) decision | Reverified implementation gap | Resolution in this change |
 | --- | --- | --- |
 | D1-D3: client tools must be lowered deterministically and model-visible pseudo availability tools should not affect tool catalogs. | Core tool lowering already sorts model-visible function tools, but MCP wrapper paths still had synchronous discovery/loading-style assumptions in tests and inconsistent snapshot use. | Kept canonical final client-tool sort and moved MCP/AWS/GCP/GitHub wrapper behavior to latest-successful snapshot exposure with deterministic tool ordering. Loading/error prompt text and setup/retry pseudo-tools are not model-visible availability controls. |
 | D4-D9: MCP-backed toolkits should keep `list_tools` discovery off the run-preparation critical path and expose only the latest successful serializable snapshot. | Generic MCP had snapshot infrastructure, but wrapper-specific AWS/GCP/GitHub paths needed matching lifecycle behavior and tests. | AWS/GCP/GitHub wrappers now build serializable snapshot items, refresh in background, atomically store successful snapshots, preserve the previous successful snapshot on refresh failure, and rebuild runtime-only handlers from stored metadata. |

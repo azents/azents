@@ -3,13 +3,16 @@ title: "Primary Agent Sessions Migration Phases"
 created: 2026-06-25
 updated: 2026-06-25
 tags: [architecture, backend, frontend, engine, migration]
+document_role: supporting
+document_type: supporting-phase
+migration_source: "docs/azents/design/primary-agent-sessions-migration-phases.md"
 ---
 
 # Primary Agent Sessions Migration Phases
 
 ## Overview
 
-This document defines the incremental migration plan toward the target state in [Primary Agent Sessions Target Design](./primary-agent-sessions.md), based on [ADR-0074](../adr/0074-primary-agent-sessions.md).
+This document defines the incremental migration plan toward the target state in [Primary Agent Sessions Target Design](./primary-260625-primary-sessions.md), based on [primary-260625/ADR](../adr/primary-260625-primary-sessions.md).
 
 The target design is the source of truth for final behavior. This document is only the implementation sequencing guide.
 
@@ -276,7 +279,7 @@ Each implementation phase should include product-path verification when behavior
 
 ## Relationship to Abandoned Design
 
-This phased plan supersedes [Abandoned Multi-Active AgentSession Migration Overview](./multi-active-agent-sessions-overview.md).
+This phased plan supersedes [Abandoned Multi-Active AgentSession Migration Overview](./multi-260625-multi-active-sessions-overview.md).
 
 The main differences are:
 

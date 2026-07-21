@@ -4,6 +4,10 @@ created: 2026-07-19
 updated: 2026-07-19
 implemented: 2026-07-19
 tags: [backend, runtime, toolkit, performance, reliability]
+document_role: supporting
+document_type: supporting-consolidation
+migration_source: "docs/azents/design/concurrent-read-latency-hardening.md"
+supporting_role: consolidation
 ---
 
 # Concurrent Read Latency Hardening
@@ -196,4 +200,4 @@ After validation, update:
 - `docs/azents/spec/domain/toolkit.md` for discovery caching, singleflight, fresh-content, ownership, and diagnostics behavior;
 - `docs/azents/spec/flow/agent-runtime-control.md` for non-blocking bounded filesystem execution and Session ownership of appendix-internal operations.
 
-No ADR change is required because the design implements and hardens existing ADR-0085, ADR-0088, and ADR-0102 contracts rather than replacing them.
+No ADR change is required because the design implements and hardens existing [deterministic-260628/ADR](../adr/deterministic-260628-deterministic-catalog-and-mcp-snapshots.md), [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-228), and [runner-260710/ADR](../adr/runner-260710-runner-operation-concurrency.md) contracts rather than replacing them.

@@ -4,6 +4,9 @@ tags: [process, backend, engine, frontend, audit]
 created: 2026-04-24
 updated: 2026-04-24
 implemented: 2026-04-24
+document_role: supporting
+document_type: supporting-audit
+migration_source: "docs/azents/design/subagent-inherit-audit-2026-04-24.md"
 ---
 
 # Subagent Inherit Design-Implementation Audit Report

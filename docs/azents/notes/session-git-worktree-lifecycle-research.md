@@ -27,7 +27,7 @@ The design must preserve the current Project model while adding a separate lifec
 - `SessionWorkspaceProjectService` validates Project paths under `/workspace/agent` and syncs skill projection after Project changes.
 - Main now includes the Workspace Project Browser work. `agent_project_catalog` is an Agent-scoped reusable Project path candidate and filesystem status projection. It is a UI/read-model projection, not the source of prompt Project eligibility.
 - Main now includes backend-owned Project browser manifest endpoints for existing sessions and pre-session previews. This is important for future worktree-created Project candidates.
-- ADR-0090 already names future worktree creation success as a Project filesystem status sync trigger.
+- [backend-260703/ADR](../adr/backend-260703-backend-browser-manifest.md) already names future worktree creation success as a Project filesystem status sync trigger.
 
 Relevant code paths:
 
@@ -40,7 +40,7 @@ Relevant code paths:
 - `python/apps/azents/src/azents/repos/agent_project_catalog/__init__.py`
 - `python/apps/azents/src/azents/services/agent_project_catalog/__init__.py`
 - `python/apps/azents/src/azents/services/project_browser_manifest.py`
-- `docs/azents/adr/0090-backend-project-browser-manifest.md`
+- `docs/azents/adr/backend-260703-backend-browser-manifest.md`
 - `docs/azents/design/workspace-project-browser.md`
 
 ## Codex Research

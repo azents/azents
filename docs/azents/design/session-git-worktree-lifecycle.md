@@ -2,6 +2,10 @@
 title: "Session Git Worktree Lifecycle"
 created: 2026-07-03
 tags: [backend, runtime, session, workspace, git]
+document_role: supporting
+document_type: supporting-consolidation
+migration_source: "docs/azents/design/session-git-worktree-lifecycle.md"
+supporting_role: consolidation
 ---
 
 # Session Git Worktree Lifecycle
@@ -12,7 +16,7 @@ Azents currently creates non-primary AgentSessions with explicit Project paths s
 
 The new worktree flow should let a new AgentSession start in an Azents-owned Git worktree created from a selected source Project and starting ref. The worktree must be registered as the session Project only after Git setup succeeds, and it must be cleaned up when the session is archived or deleted.
 
-This design depends on [Session Initialization Steps](session-initialization-steps.md). Git worktree creation is a blocking initialization step. The first user input is stored normally, but run dispatch is gated until initialization becomes ready.
+This design depends on [Session Initialization Steps](initialization-260703-initialization-lifecycle.md). Git worktree creation is a blocking initialization step. The first user input is stored normally, but run dispatch is gated until initialization becomes ready.
 
 ## Goals
 
@@ -45,7 +49,7 @@ This design depends on [Session Initialization Steps](session-initialization-ste
 
 `ChatSessionService.archive_agent_session()` validates access, rejects team-primary/running sessions, and transitions the session to archived. It does not perform filesystem cleanup. The current archive model is soft: transcript, run rows, exchange files, and Project registry rows remain.
 
-`agent_project_catalog` is an Agent-scoped Project path/status read model. ADR-0090 states that prompt Project eligibility remains based on session Project bindings, not catalog status.
+`agent_project_catalog` is an Agent-scoped Project path/status read model. [backend-260703/ADR](../adr/backend-260703-backend-browser-manifest.md) states that prompt Project eligibility remains based on session Project bindings, not catalog status.
 
 ## Proposed Design
 
@@ -266,7 +270,7 @@ On worktree ready:
 
 - Create a `session_workspace_projects` row for `worktree_path`.
 - Upsert `agent_project_catalog` for `agent_id + worktree_path` as part of the ready success path.
-- Request or trigger Project filesystem status sync using the same boundary-triggered mechanism described by ADR-0090.
+- Request or trigger Project filesystem status sync using the same boundary-triggered mechanism described by [backend-260703/ADR](../adr/backend-260703-backend-browser-manifest.md).
 - Do not update `agent_project_presets`.
 - Do not update `agent_project_defaults`.
 
@@ -430,7 +434,7 @@ Validation against the current codebase found the design feasible, with these im
 
 Before implementation, resolve these items explicitly:
 
-- Resolved: ADR-0092 records the Azents-owned worktree ownership and cleanup policy.
+- Resolved: [azents-260703/ADR](../adr/azents-260703-azents-git-worktree-ownership-and-cleanup.md) records the Azents-owned worktree ownership and cleanup policy.
 - Resolved: `session_handle` is stored on `agent_sessions.handle`, generated as a three-word slug from a vendored BIP-39 English wordlist snapshot, globally unique, and backfilled for existing sessions.
 - Resolved: Git source/ref discovery uses a separate backend preview/discovery API backed by a typed `list_git_refs` runner operation. The UI preselects the repository default branch and the create request still sends explicit `starting_ref`.
 - Resolved: Archive marks cleanup pending, soft-archives immediately, and enqueues background cleanup. Hard delete must preserve ownership metadata until cleanup has completed or recorded failure state. Manual cleanup retries the same cleanup worker from `cleanup_failed`.
@@ -525,4 +529,4 @@ Frontend tests:
 - Resolved: `source_project_path` may be selected from backend Project Browser/catalog candidates before target session creation. It does not need to be registered on the new session yet, but it must be under the Agent Workspace and is validated as a Git repository by `list_git_refs` and `create_git_worktree`.
 - Resolved: Manual cleanup is an explicit action for `cleanup_failed` worktrees and enqueues the same background cleanup worker after ownership revalidation.
 - Resolved: Worktree-created catalog entries do not get `source = worktree` metadata in the MVP; Project Browser worktree display is projected from `session_git_worktrees` when needed.
-- Resolved: ADR-0092 records the persistent worktree ownership and cleanup policy.
+- Resolved: [azents-260703/ADR](../adr/azents-260703-azents-git-worktree-ownership-and-cleanup.md) records the persistent worktree ownership and cleanup policy.

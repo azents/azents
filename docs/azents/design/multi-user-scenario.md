@@ -4,6 +4,9 @@ tags: [architecture, engine]
 created: 2026-03-06
 updated: 2026-03-11
 implemented: 2026-03-11
+document_role: supporting
+document_type: supporting-scenario
+migration_source: "docs/azents/design/multi-user-scenario.md"
 ---
 
 # Multi-user Scenario
@@ -75,7 +78,7 @@ Always use thread without exception, so session boundary is clear.
 
 - **One run loop absorbs multiple user messages**: one RunStarted → process N messages → one RunComplete
 - **Still runs in A's session**: consecutive mentions by same user, so no session change
-- See [Message Queueing design](./message-queueing.md) for detailed mechanism
+- See [Message Queueing design](./message-260305-message-queueing.md) for detailed mechanism
 
 ---
 

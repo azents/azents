@@ -3,6 +3,10 @@ title: "Chat Input Buffer Design"
 created: 2026-05-19
 updated: 2026-05-19
 tags: [backend, frontend, engine, api]
+document_role: supporting
+document_type: supporting-consolidation
+migration_source: "docs/azents/design/chat-input-buffer.md"
+supporting_role: consolidation
 ---
 
 # Chat Input Buffer Design
@@ -294,7 +298,7 @@ Product behavior verification is E2E primary. Unit/integration tests support fas
 
 ## Accepted Decisions
 
-- Main decision follows ADR-0034: use separate RDB input buffer and promote to `UserInputEvent` at model-call boundary.
+- Main decision follows [chat-260519/ADR](../adr/chat-260519-chat-input-buffer.md): use separate RDB input buffer and promote to `UserInputEvent` at model-call boundary.
 - Table name is simple `input_buffers`.
 - Web chat user input is always first stored in buffer regardless of run state.
 - Every model-call turn starts with buffer flush. First turn is no exception.

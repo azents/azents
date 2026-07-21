@@ -3,6 +3,10 @@ title: "Failed-run Error Retry and Finalization Design"
 created: 2026-06-28
 updated: 2026-06-28
 tags: [backend, engine, worker, retry, ux]
+document_role: supporting
+document_type: supporting-consolidation
+migration_source: "docs/azents/design/failed-run-error-retry.md"
+supporting_role: consolidation
 ---
 # Failed-run Error Retry and Finalization Design
 
@@ -10,7 +14,7 @@ tags: [backend, engine, worker, retry, ux]
 
 Azents will treat failed-run errors as a run lifecycle concern instead of an immediate transcript append concern. A run-stopping failure first becomes a structured failed attempt, then a bounded retry loop decides whether to continue the same run or promote the latest failure to final durable output.
 
-This design implements the decisions recorded in [ADR-0084: Failed-run Error Retry and Finalization](../adr/0084-failed-run-error-retry.md).
+This design implements the decisions recorded in [failed-260627/ADR: Failed-run Error Retry and Finalization](../adr/failed-260627-failed-error-retry.md).
 
 ## Goals
 

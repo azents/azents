@@ -3,13 +3,17 @@ title: "Chat Timeline Reliability Hardening Design"
 created: 2026-07-13
 updated: 2026-07-13
 tags: [architecture, backend, frontend, chat, reliability]
+document_role: supporting
+document_type: supporting-consolidation
+migration_source: "docs/azents/design/chat-timeline-reliability-hardening.md"
+supporting_role: consolidation
 ---
 
 # Chat Timeline Reliability Hardening Design
 
 ## Overview
 
-This design hardens the complete Chat display pipeline after a source audit found deterministic failures across Worker projection, WebSocket resynchronization, event projection, pagination, and scroll following. It reinforces the existing canonical history/live split from ADR-0047 and the session resync state model from ADR-0053. It does not replace those decisions.
+This design hardens the complete Chat display pipeline after a source audit found deterministic failures across Worker projection, WebSocket resynchronization, event projection, pagination, and scroll following. It reinforces the existing canonical history/live split from [chat-260604/ADR](../adr/chat-260604-chat-protocol-history-live.md) and the session resync state model from [chat-260609/ADR](../adr/chat-260609-chat-resync-scroll.md). It does not replace those decisions.
 
 The implementation must preserve durable transcript authority while making every live projection failure recoverable. The browser must either apply a complete REST baseline plus buffered WebSocket observations or release the buffer and continue from observations; it must never remain in an indefinite half-resynchronized state.
 
@@ -53,9 +57,9 @@ The current implementation violates several existing invariants.
 
 ## Existing Decisions
 
-- ADR-0047 keeps durable canonical events and non-durable canonical projections separate and requires canonical WebSocket transport actions.
-- ADR-0050 requires history-first durable handoff followed by live counterpart removal and makes live publication best-effort.
-- ADR-0053 requires a confirmed session subscription barrier before REST baseline, two timeline states, and detached history isolation.
+- [chat-260604/ADR](../adr/chat-260604-chat-protocol-history-live.md) keeps durable canonical events and non-durable canonical projections separate and requires canonical WebSocket transport actions.
+- [live-260604/ADR](../adr/live-260604-live-history-projection-handoff-and-stream-batching.md) requires history-first durable handoff followed by live counterpart removal and makes live publication best-effort.
+- [chat-260609/ADR](../adr/chat-260609-chat-resync-scroll.md) requires a confirmed session subscription barrier before REST baseline, two timeline states, and detached history isolation.
 - Current Living Specs require exact terminal `run_id` correlation and requested inference intent on human input rows.
 
 ## Decisions
@@ -212,7 +216,7 @@ The validation PR records exact commands, environment, focused results, E2E arti
 
 ### Keep raw durable frames for compatibility
 
-Rejected. ADR-0047 defines canonical transport actions as the final public contract, and compatibility fallback would preserve two competing reducers.
+Rejected. [chat-260604/ADR](../adr/chat-260604-chat-protocol-history-live.md) defines canonical transport actions as the final public contract, and compatibility fallback would preserve two competing reducers.
 
 ### Fix each rendered symptom without raw event state
 
@@ -220,7 +224,7 @@ Rejected. Page-boundary tool loss, control-only pagination, detached durable act
 
 ### Reconnect on every resume instead of health-checking subscription
 
-Rejected. ADR-0053 explicitly chooses application-level subscription health checks and REST convergence.
+Rejected. [chat-260609/ADR](../adr/chat-260609-chat-resync-scroll.md) explicitly chooses application-level subscription health checks and REST convergence.
 
 ### Make projection publication transactional with durable execution
 

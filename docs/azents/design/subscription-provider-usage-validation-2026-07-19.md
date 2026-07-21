@@ -2,6 +2,9 @@
 title: "Subscription Provider Usage Validation Report"
 created: 2026-07-19
 tags: [backend, frontend, api, llm, oauth, billing, security, testing, testenv]
+document_role: supporting
+document_type: supporting-validation-report
+migration_source: "docs/azents/design/subscription-provider-usage-validation-2026-07-19.md"
 ---
 
 # Subscription Provider Usage Validation Report
@@ -9,7 +12,7 @@ tags: [backend, frontend, api, llm, oauth, billing, security, testing, testenv]
 ## Scope
 
 This report validates the implementation described by
-[`subscription-provider-usage.md`](./subscription-provider-usage.md), ADR-0168, and the phased
+[`subscription-provider-usage.md`](./subscription-provider-usage.md), [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-277), and the phased
 delivery requirements recorded during implementation.
 
 The validation covers:
@@ -21,7 +24,7 @@ The validation covers:
 - disabled, unavailable, stale-refresh, external-link, and multi-card isolation behavior;
 - card-local frontend state projection, accessibility, localization, responsive presentation, and error containment;
 - deterministic provider fixture readiness and sanitized request evidence;
-- implementation drift against ADR-0168, the approved design, implementation plan, and current living specs.
+- implementation drift against [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-278), the approved design, implementation plan, and current living specs.
 
 No live provider credential or live provider request is part of this validation.
 
@@ -267,7 +270,7 @@ assertions.
 | Narrow responsive layout | Storybook build passed | Not applicable | Passed at 390 pixels | Passed |
 | Secret-safe journal and service logs | Proxy assertions passed | Passed in deterministic CI | Journal assertions passed | Passed |
 
-## ADR-0168 and Approved Design Comparison
+## [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-279) and Approved Design Comparison
 
 | Decision | Implemented behavior | Validation | Drift |
 | --- | --- | --- | --- |

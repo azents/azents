@@ -4,6 +4,9 @@ tags: [backend, engine]
 created: 2026-03-12
 updated: 2026-03-23
 implemented: 2026-03-23
+document_role: supporting
+document_type: supporting-plan
+migration_source: "docs/azents/design/service-toolkit-base.md"
 ---
 
 # Service Toolkit Base Implementation Plan

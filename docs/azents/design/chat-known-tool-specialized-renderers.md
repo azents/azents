@@ -4,6 +4,10 @@ created: 2026-07-20
 updated: 2026-07-20
 implemented: 2026-07-20
 tags: [frontend, chat, tools, ux, testing]
+document_role: supporting
+document_type: supporting-consolidation
+migration_source: "docs/azents/design/chat-known-tool-specialized-renderers.md"
+supporting_role: consolidation
 ---
 
 # Chat Known-Tool Specialized Renderers
@@ -18,7 +22,7 @@ Chat Activity now presents internal work as one ordered event stream, but each c
 - Did a patch touch one file or several?
 - Which results or references are relevant?
 
-Known tools should communicate those facts directly without weakening the permanent Generic compatibility boundary established by ADR-0173 and retained by ADR-0174.
+Known tools should communicate those facts directly without weakening the permanent Generic compatibility boundary established by [group-260720/ADR](../adr/group-260720-group-chat-activity-in-the-frontend.md) and retained by [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-223).
 
 ## Goals
 
@@ -67,7 +71,7 @@ Activity expansion delegates client and provider calls to separate generic card 
 
 ## Accepted Decisions
 
-The architectural decisions are recorded in [ADR-0176](../adr/0176-render-known-tools-through-validated-frontend-adapters.md).
+The architectural decisions are recorded in [known-260720/ADR](../adr/known-260720-known-tools-through-validated-frontend-adapters.md).
 
 1. Only canonical source-aware identities may authorize specialization.
 2. Pure phase-aware frontend adapters validate and adapt payloads before React rendering.

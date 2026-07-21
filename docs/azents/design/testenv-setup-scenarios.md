@@ -4,6 +4,9 @@ tags: [testenv, nointern, harness, scenarios]
 created: 2026-04-11
 updated: 2026-04-11
 implemented: 2026-04-11
+document_role: supporting
+document_type: supporting-scenario
+migration_source: "docs/azents/design/testenv-setup-scenarios.md"
 ---
 
 # Design for separating testenv setup scenarios and injecting INDEX
@@ -41,7 +44,7 @@ Agent is still the runner. Setup is only a reference document saying "prepare th
 
 ## Discussion Points and Decisions
 
-See `docs/nointern/adr/0028-testenv-setup-scenarios.md` for detailed discussion. Summary of 5 decisions:
+See `docs/nointern/adr/testenv-260411-testenv-setup-scenarios.md` for detailed discussion. Summary of 5 decisions:
 
 1. **Setup output delivery**: `runs/<run-id>/state.json` file-based
 2. **Idempotency**: frontmatter `idempotent: bool` + `verify:` shell command

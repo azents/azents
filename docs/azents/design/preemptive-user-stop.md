@@ -3,6 +3,10 @@ title: "Preemptive User Stop Design"
 created: 2026-06-07
 updated: 2026-06-09
 tags: [architecture, backend, frontend, api, chat, engine, testing]
+document_role: supporting
+document_type: supporting-consolidation
+migration_source: "docs/azents/design/preemptive-user-stop.md"
+supporting_role: consolidation
 ---
 
 # Preemptive User Stop Design
@@ -11,7 +15,7 @@ tags: [architecture, backend, frontend, api, chat, engine, testing]
 
 This design changes Chat stop from WebSocket-input-based cooperative stop to REST control boundary based preemptive user interrupt.
 
-Related decisions follow [ADR-0052](../adr/0052-preemptive-user-stop.md). Existing [ADR-0051](../adr/0051-rest-chat-write-boundary.md) moved message/edit/command writes to REST and left stop as follow-up target. This design implements that follow-up target and simplifies Chat WebSocket into a live-subscription-only channel.
+Related decisions follow [preemptive-260607/ADR](../adr/preemptive-260607-preemptive-stop.md). Existing [rest-260605/ADR](../adr/rest-260605-rest-chat-write-boundary.md) moved message/edit/command writes to REST and left stop as follow-up target. This design implements that follow-up target and simplifies Chat WebSocket into a live-subscription-only channel.
 
 Core changes:
 
@@ -33,7 +37,7 @@ Core changes:
 When user stop applies to active run, engine must switch immediately to cancellation path rather than waiting for model call, streaming, or foreground tool execution to finish naturally.
 
 #### Related decisions
-- ADR-0052-D1
+- [preemptive-260607/ADR-D1](../adr/preemptive-260607-preemptive-stop.md)
 
 #### Acceptance criteria
 - When stop request arrives during active run, runner/engine delivers interrupt to active execution handle.
@@ -46,7 +50,7 @@ When user stop applies to active run, engine must switch immediately to cancella
 If stop request arrives with no active run, do not create history, run marker, terminal status. This stop must not remain as latch interrupting next run.
 
 #### Related decisions
-- ADR-0052-D2
+- [preemptive-260607/ADR-D2](../adr/preemptive-260607-preemptive-stop.md)
 
 #### Acceptance criteria
 - idle stop does not append durable event.
@@ -59,7 +63,7 @@ If stop request arrives with no active run, do not create history, run marker, t
 When user stop arrives during LLM call or streaming, immediately cancel provider call/stream and close underlying HTTP response/body stream. At stop time, only non-empty assistant text in engine streaming accumulator is promoted to durable assistant message.
 
 #### Related decisions
-- ADR-0052-D3
+- [preemptive-260607/ADR-D3](../adr/preemptive-260607-preemptive-stop.md)
 
 #### Acceptance criteria
 - provider call/stream receives cancellation on stop and underlying HTTP response/body stream is closed.
@@ -73,7 +77,7 @@ When user stop arrives during LLM call or streaming, immediately cancel provider
 When user stop arrives during tool calling, send cancel signal to active foreground tool, but engine does not wait for tool termination.
 
 #### Related decisions
-- ADR-0052-D4
+- [preemptive-260607/ADR-D4](../adr/preemptive-260607-preemptive-stop.md)
 
 #### Acceptance criteria
 - foreground tool executor may provide optional cancellation hook.
@@ -87,7 +91,7 @@ When user stop arrives during tool calling, send cancel signal to active foregro
 On stop during tool calling, completed tool results already in durable history remain. Active foreground tool calls without result are patched as cancelled result.
 
 #### Related decisions
-- ADR-0052-D5
+- [preemptive-260607/ADR-D5](../adr/preemptive-260607-preemptive-stop.md)
 
 #### Acceptance criteria
 - on stop, durable `client_tool_result(status="cancelled")` is appended for every active client tool call without result.
@@ -101,7 +105,7 @@ On stop during tool calling, completed tool results already in durable history r
 Current scope assumes completed-result-centered tool execution. If streaming output tool appears, durable promotion policy of tool live state is decided by separate design.
 
 #### Related decisions
-- ADR-0052-D6
+- [preemptive-260607/ADR-D6](../adr/preemptive-260607-preemptive-stop.md)
 
 #### Acceptance criteria
 - this implementation does not promote partial tool output to durable history.
@@ -113,7 +117,7 @@ Current scope assumes completed-result-centered tool execution. If streaming out
 User stop closes current run as `interrupted` terminal. Shutdown or handover stop is non-terminal stop for worker shutdown, process restart, execution owner change, recovery/resume, and remains continuation/recovery target.
 
 #### Related decisions
-- ADR-0052-D7
+- [preemptive-260607/ADR-D7](../adr/preemptive-260607-preemptive-stop.md)
 
 #### Acceptance criteria
 - user stop cancellation reason creates run marker `interrupted`.
@@ -126,7 +130,7 @@ User stop closes current run as `interrupted` terminal. Shutdown or handover sto
 Tell next model input that previous assistant run was interrupted by user. Do not use system role or assistant role.
 
 #### Related decisions
-- ADR-0052-D8
+- [preemptive-260607/ADR-D8](../adr/preemptive-260607-preemptive-stop.md)
 
 #### Acceptance criteria
 - durable history keeps interruption marker or system-reminder-like event.
@@ -141,7 +145,7 @@ Tell next model input that previous assistant run was interrupted by user. Do no
 Frontend stop button sends user stop request through REST endpoint, not WebSocket payload.
 
 #### Related decisions
-- ADR-0052-D9
+- [preemptive-260607/ADR-D9](../adr/preemptive-260607-preemptive-stop.md)
 
 #### Acceptance criteria
 - public REST stop endpoint exists.
@@ -155,7 +159,7 @@ Frontend stop button sends user stop request through REST endpoint, not WebSocke
 After stop input moves to REST, Chat WebSocket does not receive client-to-server chat input. It only owns server-to-client live/history projection subscription.
 
 #### Related decisions
-- ADR-0052-D10
+- [preemptive-260607/ADR-D10](../adr/preemptive-260607-preemptive-stop.md)
 
 #### Acceptance criteria
 - WebSocket `{ "type": "stop" }` handling path is removed and does not execute user stop.
@@ -167,16 +171,16 @@ After stop input moves to REST, Chat WebSocket does not receive client-to-server
 
 | ADR decision | Requirements |
 | --- | --- |
-| ADR-0052-D1. User stop is preemptive interrupt that takes precedence over current run | REQ-1 |
-| ADR-0052-D2. User stop in idle state is durable no-op without ack | REQ-2 |
-| ADR-0052-D3. User stop during LLM call/streaming immediately cancels and durably stores only assistant text | REQ-3 |
-| ADR-0052-D4. User stop during tool calling sends cancel signal fire-and-forget | REQ-4 |
-| ADR-0052-D5. Tool calling stop patches unresolved active tool calls as cancelled results | REQ-5 |
-| ADR-0052-D6. Streaming tool partial persistence is not handled in this scope | REQ-6 |
-| ADR-0052-D7. User stop and shutdown/handover stop have separate terminal meaning | REQ-7 |
-| ADR-0052-D8. User stop interruption is delivered to model input as user-role synthetic control event | REQ-8 |
-| ADR-0052-D9. Stop button works through REST endpoint | REQ-9 |
-| ADR-0052-D10. Chat WebSocket becomes live-subscription-only channel | REQ-10 |
+| [preemptive-260607/ADR-D1](../adr/preemptive-260607-preemptive-stop.md). User stop is preemptive interrupt that takes precedence over current run | REQ-1 |
+| [preemptive-260607/ADR-D2](../adr/preemptive-260607-preemptive-stop.md). User stop in idle state is durable no-op without ack | REQ-2 |
+| [preemptive-260607/ADR-D3](../adr/preemptive-260607-preemptive-stop.md). User stop during LLM call/streaming immediately cancels and durably stores only assistant text | REQ-3 |
+| [preemptive-260607/ADR-D4](../adr/preemptive-260607-preemptive-stop.md). User stop during tool calling sends cancel signal fire-and-forget | REQ-4 |
+| [preemptive-260607/ADR-D5](../adr/preemptive-260607-preemptive-stop.md). Tool calling stop patches unresolved active tool calls as cancelled results | REQ-5 |
+| [preemptive-260607/ADR-D6](../adr/preemptive-260607-preemptive-stop.md). Streaming tool partial persistence is not handled in this scope | REQ-6 |
+| [preemptive-260607/ADR-D7](../adr/preemptive-260607-preemptive-stop.md). User stop and shutdown/handover stop have separate terminal meaning | REQ-7 |
+| [preemptive-260607/ADR-D8](../adr/preemptive-260607-preemptive-stop.md). User stop interruption is delivered to model input as user-role synthetic control event | REQ-8 |
+| [preemptive-260607/ADR-D9](../adr/preemptive-260607-preemptive-stop.md). Stop button works through REST endpoint | REQ-9 |
+| [preemptive-260607/ADR-D10](../adr/preemptive-260607-preemptive-stop.md). Chat WebSocket becomes live-subscription-only channel | REQ-10 |
 
 ## Problem Definition
 

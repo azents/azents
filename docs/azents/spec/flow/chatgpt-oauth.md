@@ -307,24 +307,24 @@ error boundary.
 | Date | Version | Change | Rationale |
 |---|---|---|---|
 | 2026-07-21 | 18 | Ensured subscription-usage response timestamps are timezone-aware before public serialization, preserving supplied offsets | Ensure browser clients receive an explicit offset and localize reset and freshness timestamps correctly |
-| 2026-07-19 | 17 | Added integration-scoped live subscription usage, permission-projected financial details, one-refresh retry, and card-local presentation | ADR-0169 and validated subscription usage implementation |
+| 2026-07-19 | 17 | Added integration-scoped live subscription usage, permission-projected financial details, one-refresh retry, and card-local presentation | [ambiguous historical ADR reference](../../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-288) and validated subscription usage implementation |
 | 2026-07-19 | 16 | Added one bounded Exchange attachment context item after same-native generated-image replay | Preserve local attachment discoverability without duplicating rich image input |
 | 2026-07-18 | 15 | Routed unclassified provider outcomes to internal-error handling without provider retry state | Preserve actionable incident tracebacks instead of generic unknown-provider logs |
-| 2026-07-18 | 14 | Unified provider failures under the bounded common contract and full Run retry budget | ADR-0165 coordinated provider-failure cutover |
+| 2026-07-18 | 14 | Unified provider failures under the bounded common contract and full Run retry budget | [failures-260718/ADR](../../adr/failures-260718-failures-transparent.md) coordinated provider-failure cutover |
 | 2026-07-17 | 13 | Classified typed terminal failures with bounded diagnostics and immediate finalization for deterministic provider errors | Avoid blind retries while preserving safe transient recovery |
 | 2026-07-17 | 12 | Omitted provider item IDs from `store=false` replay while retaining tool call continuity and reconstructed generated-image results | ChatGPT stateless Responses wire contract |
-| 2026-07-17 | 11 | Added execution-owned persistent WebSocket sampling with SessionRunner-scoped HTTP fallback while retaining HTTP compaction and title operations | [`adr/0150-openai-responses-websocket-lifecycle.md`](../../adr/0150-openai-responses-websocket-lifecycle.md) |
-| 2026-07-16 | 10 | Standardized all ChatGPT OAuth calls on the public Responses request contract and removed catalog-driven Lite dialect selection | [`adr/0162-use-standard-responses-for-chatgpt-oauth.md`](../../adr/0162-use-standard-responses-for-chatgpt-oauth.md) |
+| 2026-07-17 | 11 | Added execution-owned persistent WebSocket sampling with SessionRunner-scoped HTTP fallback while retaining HTTP compaction and title operations | [`adr/responses-260716-openai-responses-websocket-lifecycle.md`](../../adr/responses-260716-openai-responses-websocket-lifecycle.md) |
+| 2026-07-16 | 10 | Standardized all ChatGPT OAuth calls on the public Responses request contract and removed catalog-driven Lite dialect selection | [`adr/standard-260716-standard-responses-for-chatgpt-oauth.md`](../../adr/standard-260716-standard-responses-for-chatgpt-oauth.md) |
 | 2026-07-16 | 9 | Routed sampling, compaction, and title Responses HTTP through the official OpenAI SDK with full-context stateless ChatGPT requests | [`design/openai-compatible-responses-http-migration.md`](../../design/openai-compatible-responses-http-migration.md) |
 | 2026-07-14 | 8 | Removed the system-catalog fallback and made the account catalog transactional with OAuth integration creation | `python/apps/azents/src/azents/services/chatgpt_oauth/__init__.py` |
-| 2026-07-12 | 7 | Added account-scoped model discovery and saved-capability-driven Responses Lite lowering | [`design/chatgpt-responses-lite-catalog.md`](../../design/chatgpt-responses-lite-catalog.md) |
-| 2026-06-16 | 5 | Updated runtime refresh sequence from Agent model selection snapshot → Integration resolve | [`adr/0063-agent-model-selection-snapshot.md`](../../adr/0063-agent-model-selection-snapshot.md) |
+| 2026-07-12 | 7 | Added account-scoped model discovery and saved-capability-driven Responses Lite lowering | [`design/chatgpt-260712-chatgpt-responses-lite-catalog.md`](../../design/chatgpt-260712-chatgpt-responses-lite-catalog.md) |
+| 2026-06-16 | 5 | Updated runtime refresh sequence from Agent model selection snapshot → Integration resolve | [`adr/selection-260616-selection-snapshot.md`](../../adr/selection-260616-selection-snapshot.md) |
 | 2026-05-17 | 4 | Updated runtime refresh sequence from Agent static provider model resolve to ModelConfig → Integration resolve | [`design/dynamic-llm-model-configs.md`](../../design/dynamic-llm-model-configs.md) |
 | 2026-05-09 | 3 | Reflected that current public API implements only device flow and removed callback flow descriptions | `python/apps/azents/src/azents/api/public/chatgpt_oauth/v1/__init__.py` |
-| 2026-05-06 | 2 | Reverified that Agent File Exchange Storage change does not alter ChatGPT OAuth provider credential/runtime call rules | [`design/agent-file-exchange-storage.md`](../../design/agent-file-exchange-storage.md) |
+| 2026-05-06 | 2 | Reverified that Agent File Exchange Storage change does not alter ChatGPT OAuth provider credential/runtime call rules | [`design/file-260505-file-exchange.md`](../../design/file-260505-file-exchange.md) |
 | 2026-05-03 | 1 | Added LLM Settings UX rules for ChatGPT OAuth connection start and alias edit | `typescript/apps/azents-web/src/features/llm-settings/components/LlmSettings.tsx` |
 | 2026-05-03 | 1 | Remove input item top-level `id` from ChatGPT OAuth `store=false` Responses request | Legacy SDK runtime path, superseded by event adapter |
 | 2026-05-03 | 1 | Specify `store=false` condition for runtime Responses call | Legacy SDK runtime path, superseded by event adapter |
 | 2026-05-28 | 5 | Updated ChatGPT OAuth runtime integration to event LiteLLM Responses adapter code path | `python/apps/azents/src/azents/engine/events/**` |
 | 2026-05-03 | 1 | Include Codex OAuth grounding query in Callback authorize URL | `python/apps/azents/src/azents/services/chatgpt_oauth/__init__.py` |
-| 2026-05-02 | 1 | Wrote current spec for ChatGPT OAuth callback/device/runtime refresh | `docs/azents/design/chatgpt-oauth-provider.md` |
+| 2026-05-02 | 1 | Wrote current spec for ChatGPT OAuth callback/device/runtime refresh | `docs/azents/design/chatgpt-260502-chatgpt-oauth.md` |

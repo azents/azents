@@ -2,6 +2,9 @@
 title: "Chat Run State Regression Hardening Validation Report"
 created: 2026-07-12
 tags: [api, backend, chat, engine, frontend, testenv, process]
+document_role: supporting
+document_type: supporting-validation-report
+migration_source: "docs/azents/design/chat-run-state-regression-hardening-validation-2026-07-12.md"
 ---
 
 # Chat Run State Regression Hardening Validation Report

@@ -4,12 +4,16 @@ created: 2026-07-08
 updated: 2026-07-08
 implemented: 2026-07-08
 tags: [architecture, backend, frontend, engine, api]
+document_role: supporting
+document_type: supporting-consolidation
+migration_source: "docs/azents/design/codex-first-subagent-redesign.md"
+supporting_role: consolidation
 ---
 # Codex-first Subagent Redesign Implementation Design
 
 ## Summary
 
-Azents will implement the new subagent model defined by [ADR-0096](../adr/0096-codex-first-subagent-redesign.md). The implementation should avoid mixing unrelated foundation cleanup with the model-visible subagent surface. Independent prerequisite work should land first, then the subagent-specific stack should focus on `SessionAgent`, `SessionAgentContext`, collaboration tools, child scheduling, and UI projection.
+Azents will implement the new subagent model defined by [codex-260706/ADR](../adr/codex-260706-codex-subagent-redesign.md). The implementation should avoid mixing unrelated foundation cleanup with the model-visible subagent surface. Independent prerequisite work should land first, then the subagent-specific stack should focus on `SessionAgent`, `SessionAgentContext`, collaboration tools, child scheduling, and UI projection.
 
 The rollout has no feature flag. Intermediate code remains unexposed by keeping unfinished endpoints, tools, and UI entry points unregistered until their phase reaches a coherent usable boundary.
 
@@ -128,13 +132,13 @@ Status: mostly complete before this design.
 Scope:
 
 - Remove legacy subagent surfaces.
-- Record ADR-0096 decisions.
+- Record [codex-260706/ADR](../adr/codex-260706-codex-subagent-redesign.md) decisions.
 - Ensure old `role=subagent`, `agent_subagents`, legacy events, and old UI routes are not resurrected.
 
 Completion criteria:
 
 - Current branch contains no legacy subagent compatibility layer.
-- ADR-0096 is validated with the docs index check.
+- [codex-260706/ADR](../adr/codex-260706-codex-subagent-redesign.md) is validated with the docs index check.
 
 ### Prerequisite Phase 1 — Session input producer and wake boundary cleanup
 
@@ -469,8 +473,8 @@ Rejected. The redesign has no legacy compatibility target. Incomplete surfaces s
 
 ## Related Documents
 
-- [ADR-0096: Codex-first Subagent Redesign](../adr/0096-codex-first-subagent-redesign.md)
-- [Subagent Removal Design](subagent-removal-2026-07-06.md)
-- [ADR-0080: Simplified File Lifecycle Policy](../adr/0080-simplified-file-lifecycle-policy.md)
-- [ADR-0092: Azents-owned Git Worktree Ownership and Cleanup](../adr/0092-azents-owned-git-worktree-ownership-and-cleanup.md)
-- [ADR-0094: Model Session Operations as Turn Actions](../adr/0094-action-as-operation-turn-actions.md)
+- [codex-260706/ADR: Codex-first Subagent Redesign](../adr/codex-260706-codex-subagent-redesign.md)
+- [Subagent Removal Design](subagent-260706-subagent-removal-2026.md)
+- [simplified-260627/ADR: Simplified File Lifecycle Policy](../adr/simplified-260627-simplified-file-lifecycle-policy.md)
+- [azents-260703/ADR: Azents-owned Git Worktree Ownership and Cleanup](../adr/azents-260703-azents-git-worktree-ownership-and-cleanup.md)
+- [action-260705/ADR: Model Session Operations as Turn Actions](../adr/action-260705-action-as-operation-turn-actions.md)

@@ -4,6 +4,10 @@ created: 2026-05-29
 updated: 2026-05-29
 implemented: 2026-05-29
 tags: [architecture, backend, engine, toolkit]
+document_role: supporting
+document_type: supporting-consolidation
+migration_source: "docs/azents/design/session-scoped-toolkit-lifecycle.md"
+supporting_role: consolidation
 ---
 
 # Session-scoped Toolkit Lifecycle Design
@@ -16,10 +20,10 @@ When user sends a message, worker must not wait for MCP/remote toolkit connectio
 
 Basis decisions:
 
-- [ADR-0013: Dynamic Tool Management — Toolkit State Machine](../adr/0013-dynamic-tools.md)
-- [ADR-0033: Adopt Runtime Hook System](../adr/0033-runtime-hook-system.md)
-- [ADR-0039: Agent Execution Transcript Normalization](../adr/0039-agent-execution-transcript-normalization.md)
-- [ADR-0040: Manage Toolkit Lifecycle as AgentSession Lifecycle](../adr/0040-session-scoped-toolkit-lifecycle.md)
+- [dynamic-260329/ADR: Dynamic Tool Management — Toolkit State Machine](../adr/dynamic-260329-dynamic-tools.md)
+- [hook-260518/ADR: Adopt Runtime Hook System](../adr/hook-260518-hook.md)
+- [execution-260527/ADR: Agent Execution Transcript Normalization](../adr/execution-260527-execution-transcript-normalization.md)
+- [toolkit-260529/ADR: Manage Toolkit Lifecycle as AgentSession Lifecycle](../adr/toolkit-260529-toolkit-lifecycle.md)
 
 Current related specs:
 
@@ -61,7 +65,7 @@ Simply moving `__aenter__()` before run is not enough. Some toolkits capture run
 - Introduce generic model request IR.
 - Change transcript/table migration.
 - Rename Toolkit or introduce separate RuntimeCapabilityProvider base class.
-- Revive stdio MCP sidecar. Keep ADR-0029 decision removing dormant per-agent stdio.
+- Revive stdio MCP sidecar. Keep [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-268) decision removing dormant per-agent stdio.
 - Make engine own retry/wait loop waiting for MCP readiness.
 
 ## Current State
@@ -168,7 +172,7 @@ Hook providers are the session-managed toolkit instances in the ordered run snap
 
 `on_run_start`, `on_run_end`, `on_turn_start`, `on_turn_end`, `on_before_tool_call`, and `on_after_tool_call` use contexts built at dispatch time. No hook context is cached on toolkit instances.
 
-Hook exception policy remains ADR-0033: cancellation propagates, non-cancellation exceptions follow lifecycle-specific fail-open/log policy.
+Hook exception policy remains [hook-260518/ADR](../adr/hook-260518-hook.md): cancellation propagates, non-cancellation exceptions follow lifecycle-specific fail-open/log policy.
 
 ## User-visible Behavior
 
@@ -273,11 +277,11 @@ CI policy:
 
 ## Known Spec Drift To Resolve During Promotion
 
-`spec/domain/toolkit.md` still contains a `toolkit-hook-observation-only` statement in one section, while ADR-0033 allows before-tool deny and after-tool text replacement. Spec promotion must remove or qualify the stale wording.
+`spec/domain/toolkit.md` still contains a `toolkit-hook-observation-only` statement in one section, while [hook-260518/ADR](../adr/hook-260518-hook.md) allows before-tool deny and after-tool text replacement. Spec promotion must remove or qualify the stale wording.
 
-The same spec glossary still references stdio + mcp-proxy sidecar support, while ADR-0029 removed dormant per-agent stdio MCP sidecar. Spec promotion must align this with the current remote HTTP/Streamable HTTP direction.
+The same spec glossary still references stdio + mcp-proxy sidecar support, while [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-269) removed dormant per-agent stdio MCP sidecar. Spec promotion must align this with the current remote HTTP/Streamable HTTP direction.
 
-`design/mcp-toolkit.md` predates the current `update_context()` state machine and should not be treated as the governing design for this migration.
+`design/mcp-260228-mcp-toolkit.md` predates the current `update_context()` state machine and should not be treated as the governing design for this migration.
 
 Subagent multi-hop cycle prevention, subagent memory write restrictions, shared-scope routing, and shutdown resume idempotency are existing known gaps. They are not prerequisites for toolkit lifecycle migration unless implementation touches the affected path.
 

@@ -163,7 +163,7 @@ Do not treat assumptions as current behavior. Do not let existing code structure
 
 Create the ADR before accepting the first design decision. The initial ADR may contain unresolved questions while discussion is active.
 
-For Azents, create the ADR at `docs/azents/adr/{requirements-basename}.md`. Use `<snapshot>/ADR` for the document and `<snapshot>/ADR-DN` for accepted decisions. Keep all hard-to-reverse decisions for the snapshot in this one ADR. Do not allocate a new global ADR number. Existing numbered ADRs remain historical inputs and must not be renamed.
+For Azents, create the ADR at `docs/azents/adr/{requirements-basename}.md`. Use `<snapshot>/ADR` for the document and `<snapshot>/ADR-DN` for accepted decisions. Keep all hard-to-reverse decisions for the snapshot in this one ADR. Do not allocate a global ADR number. Legacy numbered ADRs are historical inputs only and are not valid current ADR files after migration.
 
 For every decision that determines architecture or product contract:
 
@@ -309,7 +309,7 @@ For final output, use:
 - Do not turn benchmark patterns into requirements without user acceptance.
 - Do not create an ADR before the Requirements document is confirmed.
 - Do not duplicate the Requirements source of truth in the ADR or design.
-- Do not create a new numbered ADR or use a different primary Design basename for an Azents development snapshot.
+- Do not create or retain a numbered ADR file, or use a different primary Design basename, for an Azents development snapshot. Legacy numbered ADRs may appear only in explicit historical provenance or ambiguity records.
 - Do not silently weaken a requirement to avoid a feasibility problem.
 - Do not modify implemented Requirements, adopted ADRs, or implemented designs.
 - Keep current behavior in `docs/azents/spec/`.

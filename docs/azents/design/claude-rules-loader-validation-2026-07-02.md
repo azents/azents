@@ -2,6 +2,9 @@
 title: "Claude Rules Loader Validation Report"
 created: 2026-07-02
 tags: [backend, engine, runtime, toolkit, validation]
+document_role: supporting
+document_type: supporting-validation-report
+migration_source: "docs/azents/design/claude-rules-loader-validation-2026-07-02.md"
 ---
 # Claude Rules Loader Validation Report
 
@@ -84,9 +87,9 @@ Fixes applied to PR #138:
 
 After the second fix, the local full backend suite and PR #138 CI passed.
 
-## Implementation vs. ADR-0088 Comparison
+## Implementation vs. [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-224) Comparison
 
-| ADR-0088 decision | Implementation status | Evidence |
+| [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-225) decision | Implementation status | Evidence |
 | --- | --- | --- |
 | Adopt Claude rules loading as a separate auto-bound runtime Toolkit with slug `claude_rules` | Implemented | `ClaudeRulesToolkit`, `ClaudeRulesToolkitProvider`, and runtime auto-binding tests |
 | Resolve the Toolkit whenever runtime tools are enabled | Implemented | Runtime resolve, executor, and subagent plumbing tests |
@@ -107,7 +110,7 @@ After the second fix, the local full backend suite and PR #138 CI passed.
 | Let Toolkit State failures and code bugs raise to the hook dispatcher fail-open path | Implemented | Code path review and existing dispatcher exception tests |
 | Follow-up work: implement Toolkit, add helper/hook tests, update living spec after implementation | Completed in stack | PR #138 implements/tests, PR #140 promotes `docs/azents/spec/domain/toolkit.md` |
 
-No ADR-0088 decision drift was found.
+No [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-226) decision drift was found.
 
 ## Implementation vs. Design Comparison
 

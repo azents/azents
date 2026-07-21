@@ -3,6 +3,9 @@ title: "Input Control Plane Clean Migration Design"
 created: 2026-06-15
 updated: 2026-06-15
 tags: [architecture, backend, engine, api, chat, testing]
+document_role: supporting
+document_type: supporting-plan
+migration_source: "docs/azents/design/input-control-plane-clean-migration.md"
 ---
 
 # Input Control Plane Clean Migration Design
@@ -11,7 +14,7 @@ tags: [architecture, backend, engine, api, chat, testing]
 
 This design cleans up azents engine ingress based on clean state. Model input payload is stored only in `input_buffers` at session runner ingress; control actions that are not inputs, such as command/stop, are separated into DB state. Redis broker is responsible only for wake-up and fast-path interrupt signals, not payload queue.
 
-Related decisions follow [ADR-0061](../adr/0061-input-control-plane-clean-migration.md).
+Related decisions follow [input-260615/ADR](../adr/input-260615-input-control-plane-clean-migration.md).
 
 ## Requirements
 
@@ -21,7 +24,7 @@ Related decisions follow [ADR-0061](../adr/0061-input-control-plane-clean-migrat
 User message, edited user message, and background completion must be stored as `input_buffers` rows, not as broker payload or direct `InvokeInput.messages` on session wake-up.
 
 #### Related decisions
-- ADR-0061-D1
+- [input-260615/ADR-D1](../adr/input-260615-input-control-plane-clean-migration.md)
 
 #### Acceptance criteria
 - There is no direct user input path through `SessionMessage.messages`.
@@ -34,8 +37,8 @@ User message, edited user message, and background completion must be stored as `
 Input buffer must select durable event kind by kind and allow UI to distinguish user input from system/internal input.
 
 #### Related decisions
-- ADR-0061-D2
-- ADR-0061-D4
+- [input-260615/ADR-D2](../adr/input-260615-input-control-plane-clean-migration.md)
+- [input-260615/ADR-D4](../adr/input-260615-input-control-plane-clean-migration.md)
 
 #### Acceptance criteria
 - `input_buffers.kind` is stored as PostgreSQL enum.
@@ -49,7 +52,7 @@ Input buffer must select durable event kind by kind and allow UI to distinguish 
 Edit request is not queued in middle of run. Only after DB lock confirms idle state, history rewrite and edited input buffer creation are performed.
 
 #### Related decisions
-- ADR-0061-D3
+- [input-260615/ADR-D3](../adr/input-260615-input-control-plane-clean-migration.md)
 
 #### Acceptance criteria
 - Running session edit returns 409 and does not create broker payload.
@@ -63,7 +66,7 @@ Edit request is not queued in middle of run. Only after DB lock confirms idle st
 Slash command is not mixed into input buffer. Command request is stored as single pending command in idle state and executed inside session runner lifecycle.
 
 #### Related decisions
-- ADR-0061-D5
+- [input-260615/ADR-D5](../adr/input-260615-input-control-plane-clean-migration.md)
 
 #### Acceptance criteria
 - Running session command returns 409.
@@ -78,7 +81,7 @@ Slash command is not mixed into input buffer. Command request is stored as singl
 Stop request records DB stop intent as source of truth, and broker stop signal is used as fast path for immediate cancel.
 
 #### Related decisions
-- ADR-0061-D6
+- [input-260615/ADR-D6](../adr/input-260615-input-control-plane-clean-migration.md)
 
 #### Acceptance criteria
 - Stop API records stop intent for running session.
@@ -93,7 +96,7 @@ Stop request records DB stop intent as source of truth, and broker stop signal i
 Broker ingress types keep only session wake-up and stop fast-path signal.
 
 #### Related decisions
-- ADR-0061-D7
+- [input-260615/ADR-D7](../adr/input-260615-input-control-plane-clean-migration.md)
 
 #### Acceptance criteria
 - `SessionMessage.messages` field is absent.
@@ -104,13 +107,13 @@ Broker ingress types keep only session wake-up and stop fast-path signal.
 
 | ADR decision | Requirements |
 | --- | --- |
-| ADR-0061-D1. `input_buffers` is source of truth for session runner input payload | REQ-1 |
-| ADR-0061-D2. Input buffer item has promotion/rendering taxonomy through `kind` | REQ-2 |
-| ADR-0061-D3. Edit is idle-only history rewrite command | REQ-3 |
-| ADR-0061-D4. Background completion is stored as separate event kind and model input role remains user | REQ-2 |
-| ADR-0061-D5. Command is idle-only pending command, not input buffer | REQ-4 |
-| ADR-0061-D6. Stop is DB-backed running-only interrupt intent | REQ-5 |
-| ADR-0061-D7. Broker ingress keeps only wake-up and stop signal | REQ-6 |
+| [input-260615/ADR-D1](../adr/input-260615-input-control-plane-clean-migration.md). `input_buffers` is source of truth for session runner input payload | REQ-1 |
+| [input-260615/ADR-D2](../adr/input-260615-input-control-plane-clean-migration.md). Input buffer item has promotion/rendering taxonomy through `kind` | REQ-2 |
+| [input-260615/ADR-D3](../adr/input-260615-input-control-plane-clean-migration.md). Edit is idle-only history rewrite command | REQ-3 |
+| [input-260615/ADR-D4](../adr/input-260615-input-control-plane-clean-migration.md). Background completion is stored as separate event kind and model input role remains user | REQ-2 |
+| [input-260615/ADR-D5](../adr/input-260615-input-control-plane-clean-migration.md). Command is idle-only pending command, not input buffer | REQ-4 |
+| [input-260615/ADR-D6](../adr/input-260615-input-control-plane-clean-migration.md). Stop is DB-backed running-only interrupt intent | REQ-5 |
+| [input-260615/ADR-D7](../adr/input-260615-input-control-plane-clean-migration.md). Broker ingress keeps only wake-up and stop signal | REQ-6 |
 
 ## Architecture
 

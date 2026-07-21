@@ -4,6 +4,9 @@ tags: [architecture, engine, sandbox]
 created: 2026-05-03
 updated: 2026-05-03
 implemented: 2026-05-03
+document_role: supporting
+document_type: supporting-supporting
+migration_source: "docs/azents/design/agent-session-sandbox-scenarios/professional-coding-agent.md"
 ---
 
 # Scenario: Professional Coding Agent

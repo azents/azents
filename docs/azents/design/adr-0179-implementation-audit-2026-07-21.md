@@ -1,24 +1,27 @@
 ---
-title: "ADR-0179 Implementation Audit - 2026-07-21"
+title: "[patch-260721/ADR](../adr/patch-260721-patch-dialects.md) Implementation Audit - 2026-07-21"
 created: 2026-07-21
 updated: 2026-07-21
 implemented: 2026-07-21
 tags: [backend, engine, frontend, verification]
+document_role: supporting
+document_type: supporting-audit
+migration_source: "docs/azents/design/adr-0179-implementation-audit-2026-07-21.md"
 ---
 
-# ADR-0179 Implementation Audit - 2026-07-21
+# [patch-260721/ADR](../adr/patch-260721-patch-dialects.md) Implementation Audit - 2026-07-21
 
 ## Scope
 
 This audit compares the implemented apply-patch provider-tool dialect behavior with
-[ADR-0179](../adr/0179-apply-patch-provider-tool-dialects.md). It records current implementation and
+[patch-260721/ADR](../adr/patch-260721-patch-dialects.md). It records current implementation and
 test evidence only. Current behavior is specified in [Agent Execution Loop](../spec/flow/agent-execution-loop.md),
 [Toolkit](../spec/domain/toolkit.md), [Conversation & Events](../spec/domain/conversation.md),
 [Context Compaction](../spec/flow/context-compaction.md), and [Run Resume](../spec/flow/run-resume.md).
 
 ## Decision Evidence
 
-| ADR-0179 decision | Implemented behavior | Code evidence | Test evidence |
+| [patch-260721/ADR](../adr/patch-260721-patch-dialects.md) decision | Implemented behavior | Code evidence | Test evidence |
 | --- | --- | --- | --- |
 | D1: verified custom transport while retaining one Runtime operation | The catalog can declare `apply_patch` as plaintext custom; normalization waits for completed custom input, the handler validates the envelope before the existing Runtime operation, and results lower as custom output. | `engine/events/tools.py`, `engine/events/openai_responses.py`, `engine/events/responses_output.py`, `engine/tools/apply_patch.py` | `engine/events/openai_responses_test.py`, `engine/events/tools_test.py`, `engine/tools/apply_patch_test.py` |
 | D2: independent semantic and route transport eligibility | Profile resolution distinguishes V4A semantic eligibility from route-specific custom and JSON-function transport. Unknown or unsupported routes omit the tool. | `engine/run/client_tool_compatibility.py`, `engine/events/engine_adapter.py` | `engine/run/client_tool_compatibility_test.py`, `engine/events/engine_adapter_test.py` |
@@ -51,5 +54,5 @@ event.
 
 ## Result
 
-No ADR-0179 implementation contradiction was found in the audited code paths. This audit does not
-amend ADR-0179; it records the implementation evidence and the remaining operational rollout gate.
+No [patch-260721/ADR](../adr/patch-260721-patch-dialects.md) implementation contradiction was found in the audited code paths. This audit does not
+amend [patch-260721/ADR](../adr/patch-260721-patch-dialects.md); it records the implementation evidence and the remaining operational rollout gate.

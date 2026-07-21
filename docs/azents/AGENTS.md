@@ -78,7 +78,7 @@ Use a Markdown link on the first meaningful cross-document mention. Later mentio
 
 Requirements contain product intent only: problem, actors, one primary scenario, supporting scenarios, goals, non-goals, requirements with acceptance criteria, fixed constraints, open assumptions, and requester confirmation. Keep APIs, data models, architecture, implementation choices, phases, and ADR decisions out of Requirements.
 
-The shared format applies only to the core Requirements, ADR, and primary Design for a new development snapshot. Specs, Notes, Issues, Plans, audit reports, validation reports, and other supporting records retain their existing naming rules. Existing numbered ADRs, existing Design filenames, and legacy `ADR-NNNN-DN` references remain valid and must not be renamed as part of new snapshot creation.
+The shared format applies to the core Requirements, ADR, and primary Design for every current development snapshot. Specs, Notes, Issues, Plans, audit reports, validation reports, and other supporting records retain descriptive naming rules only when explicitly classified as supporting. Legacy numbered ADRs, pre-migration Design filenames, and bare `ADR-NNNN-DN` references are historical inputs only; they are not valid current core documents after migration and may remain only in explicit provenance or ambiguity records.
 
 ### Development Snapshot Lifecycle
 
@@ -134,7 +134,7 @@ tags: [backend, engine]
 - Keep all hard-to-reverse decisions for the snapshot in one ADR and identify them as `{snapshot}/ADR-D1`, `{snapshot}/ADR-D2`, and so on.
 - Reference the affected `{snapshot}/REQ-N` items instead of duplicating Requirements text.
 - Keep the ADR append-only after acceptance. If later development changes a decision, create a new snapshot rather than rewriting the accepted ADR.
-- Existing numbered ADR filenames and `ADR-NNNN-DN` references remain valid historical records.
+- Legacy numbered ADR filenames and bare `ADR-NNNN-DN` references are historical provenance only and are not valid current ADR records after migration.
 
 ### Additional Rules for `design/`
 
@@ -267,4 +267,4 @@ tags: [slack, integration, architecture]
 ---
 ```
 
-The new ADR filename is `slack-260721-channel-agent-conversation.md`. Existing numbered ADRs keep their existing title and filename format.
+The current ADR filename is `slack-260721-channel-agent-conversation.md`. Legacy numbered ADR filenames are historical inputs only and are not valid current ADR files after migration.

@@ -3,6 +3,10 @@ title: "Goal Continuation and UI Design"
 created: 2026-06-15
 updated: 2026-06-15
 tags: [architecture, backend, engine, api, frontend, testing]
+document_role: supporting
+document_type: supporting-consolidation
+migration_source: "docs/azents/design/goal-continuation-ui.md"
+supporting_role: consolidation
 ---
 
 # Goal Continuation and UI Design
@@ -11,7 +15,7 @@ tags: [architecture, backend, engine, api, frontend, testing]
 
 Goal pursuing exposes a session-scoped Goal to model and, when a session with active Goal becomes idle, generates automatic continuation input to wake the next run. This phase implements Codex-style Goal toolset, idle continuation, and preview UI above chat input.
 
-Related decisions follow ADR-0060 and ADR-0062. Budget/accounting is excluded to a later phase.
+Related decisions follow [goal-260613/ADR](../adr/goal-260613-goal-pursuing.md) and [goal-260615/ADR](../adr/goal-260615-goal-continuation-idle-hook.md). Budget/accounting is excluded to a later phase.
 
 ## Requirements
 

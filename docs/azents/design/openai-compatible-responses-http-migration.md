@@ -4,6 +4,10 @@ created: 2026-07-16
 updated: 2026-07-16
 implemented: 2026-07-16
 tags: [architecture, backend, engine, llm, openai, oauth, migration]
+document_role: supporting
+document_type: supporting-consolidation
+migration_source: "docs/azents/design/openai-compatible-responses-http-migration.md"
+supporting_role: consolidation
 ---
 
 # OpenAI-Compatible Responses HTTP Migration
@@ -12,7 +16,7 @@ tags: [architecture, backend, engine, llm, openai, oauth, migration]
 
 Migrate every OpenAI API-key and ChatGPT OAuth Responses HTTP call from LiteLLM transport to the official OpenAI Python SDK while preserving Azents request semantics, canonical events, native artifacts, usage, cost estimates, lifecycle behavior, and operational rollback.
 
-The migration restores the generic adapter pipeline originally designed by ADR-0039. OpenAI-compatible calls use an Azents-owned immutable request type and official SDK `ResponseStreamEvent` objects. LiteLLM remains the transport for non-migrated providers and a public in-process pricing utility for OpenAI-compatible cost estimates.
+The migration restores the generic adapter pipeline originally designed by [execution-260527/ADR](../adr/execution-260527-execution-transcript-normalization.md). OpenAI-compatible calls use an Azents-owned immutable request type and official SDK `ResponseStreamEvent` objects. LiteLLM remains the transport for non-migrated providers and a public in-process pricing utility for OpenAI-compatible cost estimates.
 
 Phase 1 covers primary sampling, context compaction, and automatic Session title generation for both migrated providers. Phase 2 WebSocket work remains deferred until this HTTP migration is implemented and validated.
 
@@ -171,7 +175,7 @@ The stream state tracks:
 - the completed typed `Response` and `ResponseUsage`;
 - preservable partial assistant text for User Stop.
 
-`ResponseFailedEvent` with `type="response.failed"`, `ResponseIncompleteEvent` with `type="response.incomplete"`, and `ResponseErrorEvent` with `type="error"` fail before durable model output is appended. SDK 2.45.0 has no typed `response.error` variant; ADR-0160 corrects ADR-0157's earlier event list. EOF without a class-and-wire matched `ResponseCompletedEvent` also fails.
+`ResponseFailedEvent` with `type="response.failed"`, `ResponseIncompleteEvent` with `type="response.incomplete"`, and `ResponseErrorEvent` with `type="error"` fail before durable model output is appended. SDK 2.45.0 has no typed `response.error` variant; [documented-260716/ADR](../adr/documented-260716-documented-openai-responses-terminal-discriminators.md) corrects [failure-260716/ADR](../adr/failure-260716-openai-http-failure-semantics-at-the-azents-boundary.md)'s earlier event list. EOF without a class-and-wire matched `ResponseCompletedEvent` also fails.
 
 Unsupported stream events do not create live or canonical projections. A completed output item with an unsupported item type is still serialized into the existing canonical `unknown_adapter_output` artifact; an otherwise unknown stream event is not independently persisted.
 
@@ -252,7 +256,7 @@ Title generation uses the same provider routing rule and OpenAI-native bounded-o
 
 ## Atomic Cutover and Rollback
 
-All six provider/call-site combinations switch routing in one final cutover. ADR-0161 packages the design, implementation, tests, specs, and cutover in one pull request so reverting that pull request restores the complete LiteLLM implementation. The pull request may contain reviewable commits, but none are released independently. There is no feature flag, shadow request, or SDK-to-LiteLLM runtime fallback.
+All six provider/call-site combinations switch routing in one final cutover. [migration-260716/ADR](../adr/migration-260716-openai-http-migration-as-revertible-change.md) packages the design, implementation, tests, specs, and cutover in one pull request so reverting that pull request restores the complete LiteLLM implementation. The pull request may contain reviewable commits, but none are released independently. There is no feature flag, shadow request, or SDK-to-LiteLLM runtime fallback.
 
 Pre-cutover gates require deterministic parity and bounded live evidence for both provider dialects. Failure blocks cutover.
 
@@ -329,7 +333,7 @@ Retained live evidence consists of the scenario name, provider/model, pass/fail 
 
 ## Implementation Phases
 
-All phases below are commits or logical work units in the single pull request required by ADR-0161, not separately deployable pull requests.
+All phases below are commits or logical work units in the single pull request required by [migration-260716/ADR](../adr/migration-260716-openai-http-migration-as-revertible-change.md), not separately deployable pull requests.
 
 1. Pin the official SDK directly and restore generic adapter request/event typing, field-presence semantics, and async lifecycle cleanup.
 2. Add OpenAI request types, lowerer, client factory, continuation dispatch, typed normalizer, safe error mapping, and SDK/HTTP logger guards.
@@ -345,7 +349,7 @@ Implementation must update at least:
 
 - `docs/azents/spec/flow/agent-execution-loop.md`
 - `docs/azents/spec/flow/chatgpt-oauth.md`
-- `docs/azents/spec/flow/session-context-inspector.md`
+- `docs/azents/spec/flow/context-260530-context-inspector.md`
 
 The specs must describe the official SDK transport owner, provider-specific storage and continuation behavior, typed terminal semantics, operation-scoped clients, usage/cost provenance, atomic cutover, and version rollback behavior.
 
@@ -361,26 +365,26 @@ The specs must describe the official SDK transport owner, provider-specific stor
 
 ## Decisions and References
 
-- ADR-0039: generic adapter and normalized transcript architecture.
-- ADR-0148: semantic parity rather than LiteLLM wire parity.
-- ADR-0149: LiteLLM public pricing utility boundary.
-- ADR-0151: generic native adapter request types.
-- ADR-0152: include ChatGPT OAuth in the HTTP migration.
-- ADR-0153: preserve official SDK native stream events.
-- ADR-0154: strict native artifact compatibility keys.
-- ADR-0155: official SDK default HTTP retries.
-- ADR-0156: logical-operation SDK client lifetime.
-- ADR-0157: Azents-owned timeout, cancellation, and safe failure semantics.
-- ADR-0158: SDK usage and pricing estimates for both migrated providers.
-- ADR-0159: atomic cutover with code-version rollback.
-- ADR-0160: documented SDK terminal discriminators and unknown-event handling.
-- ADR-0161: one pull request and one pull-request revert for the complete HTTP migration.
+- [execution-260527/ADR](../adr/execution-260527-execution-transcript-normalization.md): generic adapter and normalized transcript architecture.
+- [http-260716/ADR](../adr/http-260716-openai-http-migration-by-semantic-parity.md): semantic parity rather than LiteLLM wire parity.
+- [litellm-260716/ADR](../adr/litellm-260716-litellm-only-as-openai-cost-calculator.md): LiteLLM public pricing utility boundary.
+- [generic-260716/ADR](../adr/generic-260716-generic-adapter-request-types.md): generic native adapter request types.
+- [chatgpt-260716/ADR](../adr/chatgpt-260716-chatgpt-oauth-in-openai-http-migration.md): include ChatGPT OAuth in the HTTP migration.
+- [official-260716/ADR](../adr/official-260716-official-openai-sdk-stream-events.md): preserve official SDK native stream events.
+- [artifact-260716/ADR](../adr/artifact-260716-artifact-compatibility-keys-strict.md): strict native artifact compatibility keys.
+- [sdk-260716/ADR](../adr/sdk-260716-openai-sdk-http-retries.md): official SDK default HTTP retries.
+- [clients-260716/ADR](../adr/clients-260716-openai-sdk-clients-to-logical-operations.md): logical-operation SDK client lifetime.
+- [failure-260716/ADR](../adr/failure-260716-openai-http-failure-semantics-at-the-azents-boundary.md): Azents-owned timeout, cancellation, and safe failure semantics.
+- [costs-260716/ADR](../adr/costs-260716-openai-costs-from-sdk-usage.md): SDK usage and pricing estimates for both migrated providers.
+- [over-260716/ADR](../adr/over-260716-over-openai-http-paths-atomically.md): atomic cutover with code-version rollback.
+- [documented-260716/ADR](../adr/documented-260716-documented-openai-responses-terminal-discriminators.md): documented SDK terminal discriminators and unknown-event handling.
+- [migration-260716/ADR](../adr/migration-260716-openai-http-migration-as-revertible-change.md): one pull request and one pull-request revert for the complete HTTP migration.
 
 ## Validation Findings
 
 Repository validation changed or sharpened four draft assumptions:
 
-- The pinned SDK's typed error discriminator is `error`, not `response.error`; ADR-0160 records the correction without weakening explicit-completion enforcement.
+- The pinned SDK's typed error discriminator is `error`, not `response.error`; [documented-260716/ADR](../adr/documented-260716-documented-openai-responses-terminal-discriminators.md) records the correction without weakening explicit-completion enforcement.
 - Responses Lite is capability-driven for primary sampling. The current compaction and title helper has no saved capability input and uses the standard Responses dialect, so the migration preserves that call-site distinction rather than forcing sampling-only prefixes into helper prompts.
 - OpenAI-compatible compaction and title currently omit `max_output_tokens`; their existing post-response character/title guards remain the parity contract.
 - The shared helper currently drops ChatGPT `extra_headers` even though the living OAuth spec requires the common client identity headers. The SDK client factory restores those non-content headers for all ChatGPT calls as a spec-preserving correction.

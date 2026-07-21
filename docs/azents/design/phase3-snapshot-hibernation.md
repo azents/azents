@@ -4,11 +4,14 @@ tags: [backend, engine, infra, architecture]
 created: 2026-04-16
 updated: 2026-04-17
 implemented: 2026-04-17
+document_role: supporting
+document_type: supporting-phase
+migration_source: "docs/azents/design/phase3-snapshot-hibernation.md"
 ---
 
 # Phase 3 — Agent Home Snapshot Hibernation (Design)
 
-> Discussion basis: [../../adr/0021-phase3-snapshot-hibernation.md](../../adr/0021-phase3-snapshot-hibernation.md)
+> Discussion basis: [../../adr/phase3-260418-phase3-snapshot-hibernation.md](../adr/phase3-260418-phase3-snapshot-hibernation.md)
 > Parent issue: #2661 / Prerequisites: #2627 (Phase 2), #2609 (Phase 1), #2608 (Research)
 > Full discussion: #2664
 

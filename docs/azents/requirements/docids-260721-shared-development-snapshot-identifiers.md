@@ -3,6 +3,9 @@ title: "Shared Development Snapshot Identifier Requirements"
 created: 2026-07-21
 updated: 2026-07-21
 implemented: 2026-07-21
+document_role: primary
+document_type: requirements
+snapshot_id: docids-260721
 tags: [documentation, process, architecture]
 ---
 

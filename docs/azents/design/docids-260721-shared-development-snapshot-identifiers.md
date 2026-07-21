@@ -4,6 +4,10 @@ created: 2026-07-21
 updated: 2026-07-21
 implemented: 2026-07-21
 tags: [documentation, process, architecture, testing]
+document_role: primary
+document_type: design
+snapshot_id: docids-260721
+migration_source: "docs/azents/design/docids-260721-shared-development-snapshot-identifiers.md"
 ---
 
 # Shared Development Snapshot Identifier Design

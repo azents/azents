@@ -4,6 +4,9 @@ tags: [backend, engine]
 created: 2026-05-06
 updated: 2026-05-06
 implemented: 2026-05-06
+document_role: supporting
+document_type: supporting-phase
+migration_source: "docs/azents/design/in-sandbox-sandbox-client-control-channel-phase1-runtime-manager.md"
 ---
 
 # Sandbox Control Phase 1 — AgentRuntime Manager Refactor

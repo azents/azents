@@ -9,7 +9,7 @@ tags: [backend, engine, plan]
 ## Source of Truth
 
 - Design: `docs/azents/design/codex-like-compaction-checkpoints.md`
-- ADR: `docs/azents/adr/0043-codex-like-compaction-checkpoints.md`
+- ADR: `docs/azents/adr/codex-260530-codex-compaction-checkpoints.md`
 - Existing spec: `docs/azents/spec/flow/context-compaction.md`
 
 ## Stack Shape
@@ -28,7 +28,7 @@ main
 - Branch: `azents-codex-compaction-design`
 - PR: design/ADR only
 - Output for next phase:
-  - ADR-0043 with accepted decisions
+  - [codex-260530/ADR](../adr/codex-260530-codex-compaction-checkpoints.md) with accepted decisions
   - Design document with acceptance criteria and QA checklist
 
 ## Phase 2 — Multi-phase Implementation Plan

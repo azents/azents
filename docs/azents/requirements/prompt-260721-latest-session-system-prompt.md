@@ -4,6 +4,9 @@ created: 2026-07-21
 updated: 2026-07-21
 implemented: 2026-07-21
 tags: [chat, observability, storage]
+document_role: primary
+document_type: requirements
+snapshot_id: prompt-260721
 ---
 
 # Latest Session System Prompt Requirements

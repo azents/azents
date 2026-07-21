@@ -4,13 +4,17 @@ created: 2026-07-19
 updated: 2026-07-19
 implemented: 2026-07-19
 tags: [architecture, backend, engine, subagent, testenv]
+document_role: supporting
+document_type: supporting-consolidation
+migration_source: "docs/azents/design/subagent-mailbox-activity-wait.md"
+supporting_role: consolidation
 ---
 
 # Subagent Mailbox Activity Wait and Terminal Result Delivery
 
 ## Summary
 
-This design implements [ADR-0168](../adr/0168-unify-subagent-communication-through-mailbox-activity.md) by making the current agent's mailbox the model-facing coordination path for both ordinary agent messages and terminal child results.
+This design implements [unify-260719/ADR](../adr/unify-260719-unify-subagent-communication-through-mailbox-activity.md) by making the current agent's mailbox the model-facing coordination path for both ordinary agent messages and terminal child results.
 
 `wait_agent` becomes a targetless activity wait. Any pending mailbox message for the current `SessionAgent` ends the wait, regardless of sender. If no mailbox input is pending, the wait also ends when every descendant is idle. The tool reports only why the wait ended; it does not consume or repeat message content. Existing model-call boundary preparation promotes the mailbox input after the tool returns.
 
@@ -25,8 +29,8 @@ The implementation adds explicit scheduling intent to `input_buffers`, durable p
 
 ## Related Decisions and Current Specifications
 
-- ADR-0168 defines mailbox activity as the new `wait_agent` coordination path and removes named wait targets.
-- ADR-0096 remains authoritative for the `SessionAgent` tree, input-buffer-backed mailbox, context forking, collaboration tool surface, and source-owned wake policy except where ADR-0168 supersedes terminal-result waiting.
+- [unify-260719/ADR](../adr/unify-260719-unify-subagent-communication-through-mailbox-activity.md) defines mailbox activity as the new `wait_agent` coordination path and removes named wait targets.
+- [codex-260706/ADR](../adr/codex-260706-codex-subagent-redesign.md) remains authoritative for the `SessionAgent` tree, input-buffer-backed mailbox, context forking, collaboration tool surface, and source-owned wake policy except where [unify-260719/ADR](../adr/unify-260719-unify-subagent-communication-through-mailbox-activity.md) supersedes terminal-result waiting.
 - Current behavior is specified in:
   - `docs/azents/spec/domain/conversation.md`
   - `docs/azents/spec/domain/toolkit.md`

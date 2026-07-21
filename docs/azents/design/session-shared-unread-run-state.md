@@ -4,6 +4,10 @@ created: 2026-07-20
 updated: 2026-07-20
 implemented: 2026-07-20
 tags: [conversation, backend, frontend, api, ux]
+document_role: supporting
+document_type: supporting-consolidation
+migration_source: "docs/azents/design/session-shared-unread-run-state.md"
+supporting_role: consolidation
 ---
 
 # Session-Shared Unread Run State
@@ -12,7 +16,7 @@ tags: [conversation, backend, frontend, api, ux]
 
 Azents will show a small unread indicator in the Agent rail when an active root AgentSession has a terminal Run that has not yet been reviewed in the latest visible Chat timeline. The unread state is shared by the Session: review by any authorized workspace member clears it for everyone.
 
-This design implements ADR-0174. It does not introduce user-specific notifications, change Session ordering, or add unread behavior to subagent or archived Session surfaces.
+This design implements [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-270). It does not introduce user-specific notifications, change Session ordering, or add unread behavior to subagent or archived Session surfaces.
 
 ## Problem
 
@@ -368,4 +372,4 @@ Required deterministic tests fail CI on any failure or skip. Optional live-provi
 
 ## Open Questions
 
-None. Product decisions are recorded in ADR-0174, and implementation details are defined by this design.
+None. Product decisions are recorded in [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-271), and implementation details are defined by this design.

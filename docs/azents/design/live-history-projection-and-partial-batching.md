@@ -4,6 +4,10 @@ created: 2026-06-04
 updated: 2026-06-04
 implemented: 2026-06-04
 tags: [architecture, backend, frontend, chat, streaming]
+document_role: supporting
+document_type: supporting-consolidation
+migration_source: "docs/azents/design/live-history-projection-and-partial-batching.md"
+supporting_role: consolidation
 ---
 
 # Chat live/history handoff and streaming partial batching design
@@ -12,7 +16,7 @@ tags: [architecture, backend, frontend, chat, streaming]
 
 This corrects UI handoff defect and streaming live projection bottleneck discovered after Chat canonical history/live protocol implementation.
 
-This design is based on [ADR-0050](../adr/0050-live-history-projection-handoff-and-stream-batching.md). Existing history/live split decision in [ADR-0047](../adr/0047-chat-protocol-history-live-state.md) remains.
+This design is based on [live-260604/ADR](../adr/live-260604-live-history-projection-handoff-and-stream-batching.md). Existing history/live split decision in [chat-260604/ADR](../adr/chat-260604-chat-protocol-history-live.md) remains.
 
 There are two core goals.
 
@@ -254,7 +258,7 @@ Correction direction:
 
 ### 3. Intermediate structure and final structure
 
-Final structure in ADR-0047 is separate `historyEvents`/`liveEvents` reducer. This follow-up fix prioritizes defect correction.
+Final structure in [chat-260604/ADR](../adr/chat-260604-chat-protocol-history-live.md) is separate `historyEvents`/`liveEvents` reducer. This follow-up fix prioritizes defect correction.
 
 - Short term: apply history skip removal and live remove guard in existing direct `messages` state reducer.
 - Long term: complete selector with separate `historyEvents`/`liveEvents` state.

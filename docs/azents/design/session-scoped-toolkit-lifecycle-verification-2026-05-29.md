@@ -3,6 +3,9 @@ title: "Session-scoped Toolkit Lifecycle Verification 2026-05-29"
 created: 2026-05-29
 updated: 2026-05-29
 tags: [backend, engine, toolkit, qa]
+document_role: supporting
+document_type: supporting-validation-report
+migration_source: "docs/azents/design/session-scoped-toolkit-lifecycle-verification-2026-05-29.md"
 ---
 
 # Session-scoped Toolkit Lifecycle Verification 2026-05-29

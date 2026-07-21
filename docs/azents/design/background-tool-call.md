@@ -4,6 +4,10 @@ tags: [engine, backend, architecture]
 created: 2026-04-15
 updated: 2026-04-15
 implemented: 2026-04-15
+document_role: supporting
+document_type: supporting-consolidation
+migration_source: "docs/azents/design/background-tool-call.md"
+supporting_role: consolidation
 ---
 
 # Background Tool Call Design
@@ -30,7 +34,7 @@ Support a **general background tool call mechanism** at engine level so tool exe
 
 - GitHub Issue: [#2559](https://github.com/azents/azents/issues/2559)
 - Discussion: [#2591](https://github.com/azents/azents/discussions/2591)
-- Discussion record: [`../adr/0010-background-tool-call.md`](../adr/0010-background-tool-call.md)
+- Discussion record: [`../adr/background-260416-background-call.md`](../adr/background-260416-background-call.md)
 
 ---
 

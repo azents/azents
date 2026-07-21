@@ -53,8 +53,8 @@ Relevant files:
 - `python/apps/nointern/src/nointern/runtime/sandbox/control/worker_client.py`
 - `python/apps/nointern-sandbox-client/src/nointern_sandbox_client/*`
 - `proto/nointern/sandbox_control/v1/sandbox_control.proto`
-- `docs/nointern/adr/0008-agent-runtime-sandbox-control-channel.md`
-- `docs/nointern/design/in-sandbox-sandbox-client-control-channel.md`
+- `docs/nointern/adr/sandbox-260506-sandbox-control-channel.md`
+- `docs/nointern/design/sandbox-260506-sandbox-control-channel.md`
 
 ### 2.1 Lifecycle and command/file transport are separate
 

@@ -4,6 +4,9 @@ tags: [backend, frontend, engine, sandbox, toolkit, github, audit]
 created: 2026-04-24
 updated: 2026-04-24
 implemented: 2026-04-24
+document_role: supporting
+document_type: supporting-audit
+migration_source: "docs/azents/design/github-toolkit-shell-env-audit-report-2026-04-24.md"
 ---
 
 # github-toolkit-shell-env Audit Report
