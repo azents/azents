@@ -13,11 +13,13 @@ from azcommon.testing.images import get_docker_hub_image
 from testcontainers.postgres import PostgresContainer
 
 from azents.consts import PROJECT_ROOT
+from azents.core.enums import EventKind
 from azents.engine.events.types import (
     AttachmentOutputPart,
     ClientToolResultPayload,
     FileOutputPart,
     ProviderToolCallPayload,
+    upgrade_persisted_client_tool_payload,
 )
 
 _MIGRATION_PATH = (
@@ -217,7 +219,12 @@ def test_single_provider_tool_event_upgrade_and_downgrade(
                 assert isinstance(call.semantic.output[1], AttachmentOutputPart)
 
                 _, client_payload = upgraded["client-result"]
-                client = ClientToolResultPayload.model_validate(client_payload)
+                upgraded_client_payload = upgrade_persisted_client_tool_payload(
+                    EventKind.CLIENT_TOOL_RESULT,
+                    client_payload,
+                )
+                client = ClientToolResultPayload.model_validate(upgraded_client_payload)
+                assert client.wire_dialect == "json_function"
                 assert isinstance(client.output, list)
                 assert isinstance(client.output[1], AttachmentOutputPart)
                 assert "attachments" not in client_payload
