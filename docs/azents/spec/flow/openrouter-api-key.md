@@ -159,4 +159,4 @@ Later OpenRouter catalog changes do not mutate existing Agent or Workspace snaps
 |---|---:|---|---|
 | 2026-07-19 | 3 | Added API-key credit usage with bounded-key percentage and manager financial details; unlimited keys remain hidden | Reuse the shared usage surface without presenting a meaningless limit for `null` OpenRouter key limits |
 | 2026-07-19 | 2 | Extended OpenRouter response-handle acquisition to 60 seconds while preserving common stream idle and absolute bounds | Prevent transient upstream routing and model preparation from crossing the common 15-second acquisition deadline |
-| 2026-07-19 | 1 | Documented the stable OpenRouter API-key integration, account catalog, runtime, UI, and security behavior | ADR-0169 and the verified OpenRouter implementation |
+| 2026-07-19 | 1 | Documented the stable OpenRouter API-key integration, account catalog, runtime, UI, and security behavior | [ambiguous historical ADR reference](../../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-290) and the verified OpenRouter implementation |

@@ -2,6 +2,9 @@
 title: "Preemptive User Stop Phase 7 Verification Result"
 created: 2026-06-09
 tags: [backend, frontend, api, chat, engine, testing, e2e]
+document_role: supporting
+document_type: supporting-validation-report
+migration_source: "docs/azents/design/preemptive-user-stop-phase7-verification.md"
 ---
 
 # Preemptive User Stop Phase 7 Verification Result

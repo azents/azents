@@ -3,6 +3,9 @@ title: "Subagent Spawn Inference Profile Validation Report"
 created: 2026-07-11
 updated: 2026-07-11
 tags: [validation, agent, backend, engine, subagent, testenv]
+document_role: supporting
+document_type: supporting-validation-report
+migration_source: "docs/azents/design/subagent-spawn-inference-profile-validation-2026-07-11.md"
 ---
 
 # Subagent Spawn Inference Profile Validation Report
@@ -10,7 +13,7 @@ tags: [validation, agent, backend, engine, subagent, testenv]
 ## Scope
 
 Validate the implementation in `docs/azents/design/subagent-spawn-inference-profile.md`
-against ADR-0124, the delivery plan, deterministic E2E fixtures, and current living specs.
+against [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-275), the delivery plan, deterministic E2E fixtures, and current living specs.
 
 ## Environment
 

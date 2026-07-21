@@ -4,6 +4,10 @@ created: 2026-07-16
 updated: 2026-07-16
 implemented: 2026-07-16
 tags: [backend, engine, worker, retry, recovery, chat]
+document_role: supporting
+document_type: supporting-consolidation
+migration_source: "docs/azents/design/turn-scoped-failed-run-retry.md"
+supporting_role: consolidation
 ---
 # Turn-scoped Failed-run Retry
 
@@ -22,7 +26,7 @@ The product policy is that a retry budget belongs to one model turn. Worker hand
 - Clear durable retry state atomically with successful model output admission.
 - Keep WebSocket and REST live retry projections consistent.
 - Prevent a stale retry cycle from being attributed to a later turn or a newly selected inference profile.
-- Correct the Living Specs and supersede the run-scoped portion of ADR-0084 without rewriting implemented history.
+- Correct the Living Specs and supersede the run-scoped portion of [failed-260627/ADR](../adr/failed-260627-failed-error-retry.md) without rewriting implemented history.
 
 ## Non-goals
 
@@ -52,7 +56,7 @@ A recovering worker treats every non-null `retry_state` on a running run as acti
 
 ### BUG-5: Decision and Living Spec drift
 
-ADR-0084 requires durable retry progress to survive recovery for a running run, but does not delimit that progress to one model turn. `run-resume.md` likewise describes the running run as the retry scope. Meanwhile `agent-execution-loop.md` and `conversation.md` say retry state is cleared when the next attempt begins, which conflicts with both the implementation and the recovery requirement for an in-flight retry. The implemented retry recovery UX design expects the retry card to remain visible while a retry model call is waiting or streaming.
+[failed-260627/ADR](../adr/failed-260627-failed-error-retry.md) requires durable retry progress to survive recovery for a running run, but does not delimit that progress to one model turn. `failed-260716-failed-retry-to-turn.md` likewise describes the running run as the retry scope. Meanwhile `agent-execution-loop.md` and `conversation.md` say retry state is cleared when the next attempt begins, which conflicts with both the implementation and the recovery requirement for an in-flight retry. The implemented retry recovery UX design expects the retry card to remain visible while a retry model call is waiting or streaming.
 
 ## Decision Points
 
@@ -195,9 +199,9 @@ Rejected. It would hide some stale UI but leave incorrect retry counts and takeo
 
 ## Required Documentation Updates
 
-- Add ADR-0145 to supersede ADR-0084 only for retry-budget scope and success lifecycle.
+- Add [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-284) to supersede [failed-260627/ADR](../adr/failed-260627-failed-error-retry.md) only for retry-budget scope and success lifecycle.
 - Update `agent-execution-loop.md` with the turn-scoped invariant and atomic output commit.
-- Update `run-resume.md` so takeover preserves only the current model turn's retry cycle.
+- Update `failed-260716-failed-retry-to-turn.md` so takeover preserves only the current model turn's retry cycle.
 - Update `conversation.md` and `chat-session-resync.md` so `run.retry` is present exactly while that cycle is active.
 
 ## Open Risks and Assumptions

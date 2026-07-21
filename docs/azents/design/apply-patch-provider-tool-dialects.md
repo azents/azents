@@ -3,6 +3,10 @@ title: "Apply-Patch Provider Tool Dialects Design"
 created: 2026-07-21
 updated: 2026-07-21
 tags: [backend, engine, frontend, llm, openai, runtime, tools, testing]
+document_role: supporting
+document_type: supporting-consolidation
+migration_source: "docs/azents/design/apply-patch-provider-tool-dialects.md"
+supporting_role: consolidation
 ---
 
 # Apply-Patch Provider Tool Dialects Design
@@ -19,7 +23,7 @@ The plaintext representation removes JSON string escaping from the large V4A bod
 
 The design makes the originating wire dialect durable on both client-tool calls and results. Same-compatible model turns reconstruct the correct provider call/output items. A completed custom pair becomes bounded readable historical context when a later provider cannot represent that dialect; a pending continuation never changes dialect or becomes executable text.
 
-The decisions are recorded in [ADR-0179](../adr/0179-apply-patch-provider-tool-dialects.md). ADR-0172 remains authoritative for V4A grammar, Runtime safety, commit, cancellation, and typed result semantics.
+The decisions are recorded in [patch-260721/ADR](../adr/patch-260721-patch-dialects.md). [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-218) remains authoritative for V4A grammar, Runtime safety, commit, cancellation, and typed result semantics.
 
 ## Problem
 
@@ -220,7 +224,7 @@ Resolve three states independently:
 
 Each dimension is tri-state: `verified`, `denied`, or `unknown`. Unknown behaves as denied.
 
-The initial semantic rule preserves current ADR-0172 behavior without widening it. The implementation may rename the profile from GPT-specific terminology to `v4a_apply_patch`, while retaining the same reviewed developer/family matching result. New model developers or families require explicit conformance evidence.
+The initial semantic rule preserves current [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-219) behavior without widening it. The implementation may rename the profile from GPT-specific terminology to `v4a_apply_patch`, while retaining the same reviewed developer/family matching result. New model developers or families require explicit conformance evidence.
 
 ### Route identity
 
@@ -437,7 +441,7 @@ The prepared executor performs these checks in order:
 3. call input satisfies the variant adapter;
 4. only then invoke the logical tool handler.
 
-One custom `apply_patch` call invokes Runner at most once. Envelope parse failure invokes Runner zero times. Runner cancellation and typed terminal settlement retain ADR-0172 behavior.
+One custom `apply_patch` call invokes Runner at most once. Envelope parse failure invokes Runner zero times. Runner cancellation and typed terminal settlement retain [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-220) behavior.
 
 `FunctionToolError` may be renamed to `ClientToolError` as part of the internal abstraction migration. It continues to produce one failed canonical result rather than an Engine exception. Unexpected exceptions retain the existing generic failure boundary.
 
@@ -692,9 +696,9 @@ Implementation updates current behavior in:
   - logical client tools, selected wire variants, deterministic declaration ordering, Tool Search, and budgets;
 - `docs/azents/spec/domain/conversation.md`
   - durable/live dialect fields, completed-history fallback, and frontend rendering;
-- `docs/azents/spec/flow/context-compaction.md`
+- `docs/azents/spec/flow/context-260305-context-compaction.md`
   - dialect-aware input rendering and token estimation;
-- `docs/azents/spec/flow/run-resume.md`
+- `docs/azents/spec/flow/failed-260716-failed-retry-to-turn.md`
   - dialect-preserving synthetic terminal results; and
 - `docs/azents/spec/flow/agent-runtime-control.md`
   - no semantic change, but verify that the existing Runner contract remains the sole execution boundary.
@@ -862,7 +866,7 @@ but each accepted decision has an implementable ownership boundary.
 | Model/provider switch history | conditional | Current lowering reconstructs every canonical client call/result as a function pair and processes events independently. Pair-aware dialect lowering plus explicit target historical-dialect capability is required for structured replay or bounded non-executable text projection. |
 | Compaction and context inspection | feasible | Token estimation and continuity rendering consume name/arguments as strings but label them as function calls and may include bounded raw arguments. They need dialect-specific structured values and a custom summary that never presents truncated V4A as executable input. |
 | API, live state, and frontend | feasible | Active-call live projection and hand-written frontend types currently omit dialect; the specialized `apply_patch` adapter always parses JSON. Adding the discriminator and a strict custom-envelope parser preserves the existing card and Generic fallback behavior. |
-| Compatibility-first rollout | conditional | Older Pydantic readers ignore additive fields, which permits a JSON-only expansion phase, but they cannot safely process custom records. The fleet barrier and permanent reader floor in ADR-0179-D6 are therefore required before the first production custom write. |
+| Compatibility-first rollout | conditional | Older Pydantic readers ignore additive fields, which permits a JSON-only expansion phase, but they cannot safely process custom records. The fleet barrier and permanent reader floor in [patch-260721/ADR-D6](../adr/patch-260721-patch-dialects.md) are therefore required before the first production custom write. |
 
 ### Remaining non-blocking risks
 

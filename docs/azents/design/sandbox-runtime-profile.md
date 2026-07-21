@@ -4,11 +4,15 @@ tags: [backend, sandbox, runtime, gvisor, kata, infra]
 created: 2026-04-19
 updated: 2026-04-19
 implemented: 2026-04-19
+document_role: supporting
+document_type: supporting-consolidation
+migration_source: "docs/azents/design/sandbox-runtime-profile.md"
+supporting_role: consolidation
 ---
 
 # Sandbox Runtime Profile Design
 
-Bind policies by Agent Home sandbox container runtime (gVisor / runc / Kata) into a single abstraction. See [`../adr/0022-sandbox-runtime-profile.md`](../adr/0022-sandbox-runtime-profile.md) for discussion background and rejected options.
+Bind policies by Agent Home sandbox container runtime (gVisor / runc / Kata) into a single abstraction. See [`../adr/sandbox-260419-sandbox-profile.md`](../adr/sandbox-260419-sandbox-profile.md) for discussion background and rejected options.
 
 ## 1. Scope
 
@@ -162,6 +166,6 @@ These 4 tests catch regressions in "profile → cmd/pod spec" mapping. Actual ru
 
 ## References
 
-- [`../adr/0022-sandbox-runtime-profile.md`](../adr/0022-sandbox-runtime-profile.md) — design decision background and rejected options
+- [`../adr/sandbox-260419-sandbox-profile.md`](../adr/sandbox-260419-sandbox-profile.md) — design decision background and rejected options
 - [`phase3-snapshot-hibernation.md`](phase3-snapshot-hibernation.md) — original snapshot system
-- [`gvisor-byoc-sandbox.md`](../adr/0014-gvisor-byoc-sandbox.md) — gVisor adoption background
+- [`gvisor-byoc-sandbox.md`](../adr/gvisor-260403-gvisor-byoc-sandbox.md) — gVisor adoption background

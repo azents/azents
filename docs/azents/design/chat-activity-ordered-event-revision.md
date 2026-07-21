@@ -3,6 +3,10 @@ title: "Chat Activity Ordered Event Revision"
 created: 2026-07-20
 updated: 2026-07-20
 tags: [frontend, chat, tools, ux, testing]
+document_role: supporting
+document_type: supporting-consolidation
+migration_source: "docs/azents/design/chat-activity-ordered-event-revision.md"
+supporting_role: consolidation
 ---
 
 # Chat Activity Ordered Event Revision
@@ -17,7 +21,7 @@ The first Chat Tool Activity implementation reduced timeline item count, but its
 - expansion regroups events into phases and loses the chronological relationship among reasoning, Skill use, tools, and internal control events; and
 - known-tool specialization was reduced to phase labels while raw detail cards remained largely generic.
 
-This revision follows [ADR-0174](../adr/0174-present-chat-activity-as-an-ordered-event-stream.md). It preserves ADR-0173's frontend-owned grouping while replacing its phase hierarchy. Client tool-call events add the canonical Toolkit source snapshot required for product-level summary categories.
+This revision follows [chat-260720/ADR](../adr/chat-260720-chat-activity-as-an-ordered-event-stream.md). It preserves [group-260720/ADR](../adr/group-260720-group-chat-activity-in-the-frontend.md)'s frontend-owned grouping while replacing its phase hierarchy. Client tool-call events add the canonical Toolkit source snapshot required for product-level summary categories.
 
 ## Goals
 
@@ -554,7 +558,7 @@ The phases may be delivered as a stack because the backend contract can land ind
 
 The design is final because:
 
-- the user-visible control/result boundary is recorded in ADR-0174;
+- the user-visible control/result boundary is recorded in [chat-260720/ADR](../adr/chat-260720-chat-activity-as-an-ordered-event-stream.md);
 - the ownership matrix contains no unresolved row;
 - the feasibility matrix contains no `blocked` result;
 - the design and ADR agree on Toolkit source, historical fallback, attachment and control boundaries, summary overflow, and ordered expansion; and

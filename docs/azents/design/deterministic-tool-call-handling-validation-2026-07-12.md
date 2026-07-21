@@ -2,13 +2,16 @@
 title: "Deterministic Tool Call Handling Validation Report"
 created: 2026-07-12
 tags: [agent, engine, runtime, testing]
+document_role: supporting
+document_type: supporting-validation-report
+migration_source: "docs/azents/design/deterministic-tool-call-handling-validation-2026-07-12.md"
 ---
 
 # Deterministic Tool Call Handling Validation Report
 
 ## Scope
 
-This report validates the implementation of [Deterministic Tool Call Handling and Worker Handover](deterministic-tool-call-handling.md) through the durable execution, PostgreSQL live projection, and Background protocol removal phases.
+This report validates the implementation of [Deterministic Tool Call Handling and Worker Handover](preemptive-260607-preemptive-stop.md) through the durable execution, PostgreSQL live projection, and Background protocol removal phases.
 
 The validation uses deterministic repository, engine, worker, REST projection, Runtime Control, and Runner integration tests. It does not use timing-only sleeps or external credentials.
 
@@ -82,7 +85,7 @@ The implementation matches the approved design, but the current living specs sti
 | `spec/domain/conversation.md` | `active_tool_calls` still includes `background`; live-state Redis wording does not identify PostgreSQL as the sole active-call source |
 | `spec/flow/agent-execution-loop.md` | Active-call shape and Background tool behavior are stale; missing-result handling does not state deterministic no-reexecution reconciliation |
 | `spec/flow/agent-runtime-control.md` | Still lists background operation completion claims |
-| `spec/flow/run-resume.md` | Says an unresolved foreground call may execute after interruption; recovery now cancels orphan and previous-owner calls without execution |
+| `spec/flow/failed-260716-failed-retry-to-turn.md` | Says an unresolved foreground call may execute after interruption; recovery now cancels orphan and previous-owner calls without execution |
 
 ## Conclusion
 

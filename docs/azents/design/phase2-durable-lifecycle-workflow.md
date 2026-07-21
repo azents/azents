@@ -4,11 +4,14 @@ tags: [backend, engine, infra, architecture]
 created: 2026-04-16
 updated: 2026-04-16
 implemented: 2026-04-16
+document_role: supporting
+document_type: supporting-phase
+migration_source: "docs/azents/design/phase2-durable-lifecycle-workflow.md"
 ---
 
 # Phase 2 — Durable Lifecycle Workflow + Lease Token (Design)
 
-> Discussion basis: [../../adr/0020-phase2-durable-lifecycle-workflow.md](../../adr/0020-phase2-durable-lifecycle-workflow.md)
+> Discussion basis: [../../adr/phase2-260416-phase2-lifecycle-workflow.md](../adr/phase2-260416-phase2-lifecycle-workflow.md)
 > Parent issue: #2627 / Prerequisite: #2609 (Phase 1), #2608 (Research)
 
 ## 1. Overview

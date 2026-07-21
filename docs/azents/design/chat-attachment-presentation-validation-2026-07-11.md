@@ -2,6 +2,9 @@
 title: "Chat Attachment Presentation Validation"
 created: 2026-07-11
 tags: [frontend, chat, attachments, testing]
+document_role: supporting
+document_type: supporting-validation-report
+migration_source: "docs/azents/design/chat-attachment-presentation-validation-2026-07-11.md"
 ---
 
 # Chat Attachment Presentation Validation

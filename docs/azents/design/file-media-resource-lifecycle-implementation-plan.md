@@ -1,23 +1,26 @@
 ---
-title: "ADR-0046 file/media resource lifecycle full migration implementation plan"
+title: "[file-260601/ADR](../adr/file-260601-file-media-resource-lifecycle.md) file/media resource lifecycle full migration implementation plan"
 created: 2026-06-02
 updated: 2026-06-03
 tags: [architecture, backend, frontend, engine, testing]
+document_role: supporting
+document_type: supporting-plan
+migration_source: "docs/azents/design/file-media-resource-lifecycle-implementation-plan.md"
 ---
 
-# ADR-0046 file/media resource lifecycle full migration implementation plan
+# [file-260601/ADR](../adr/file-260601-file-media-resource-lifecycle.md) file/media resource lifecycle full migration implementation plan
 
 ## Purpose
 
-This document is stacked implementation plan to fully apply [`ADR-0046: Attachment, Artifact, and FilePart lifecycle`](../adr/0046-file-media-resource-lifecycle.md).
+This document is stacked implementation plan to fully apply [`file-260601/ADR: Attachment, Artifact, and FilePart lifecycle`](../adr/file-260601-file-media-resource-lifecycle.md).
 
-Baseline document is [`ADR-0046 file/media resource lifecycle implementation audit report`](./file-media-resource-lifecycle-audit-report-2026-06-02.md), and conflict-resolution decisions finalized in the audit report's "Additional decisions" section are the implementation baseline.
+Baseline document is [`file-260601/ADR file/media resource lifecycle implementation audit report`](./file-media-resource-lifecycle-audit-report-2026-06-02.md), and conflict-resolution decisions finalized in the audit report's "Additional decisions" section are the implementation baseline.
 
-As of 2026-06-03 re-audit, ADR-0046 current contract is fully implemented. This document preserves plan and phase boundaries, while current implementation status follows audit report and spec.
+As of 2026-06-03 re-audit, [file-260601/ADR](../adr/file-260601-file-media-resource-lifecycle.md) current contract is fully implemented. This document preserves plan and phase boundaries, while current implementation status follows audit report and spec.
 
 Final goals were following three, and all are judged complete in current stack.
 
-- Make every ADR-0046 item fully implemented in production path.
+- Make every [file-260601/ADR](../adr/file-260601-file-media-resource-lifecycle.md) item fully implemented in production path.
 - Remove legacy compatibility layers duplicating Attachment, Artifact, FilePart, and ModelFile.
 - Ensure raw blob does not remain in canonical event, REST/WS projection, or frontend state.
 
@@ -25,7 +28,7 @@ Final goals were following three, and all are judged complete in current stack.
 
 - Existing production event/session data migration is not performed. azents service maintains private cutover premise.
 - "Migration rewrite" does not mean rewriting past data for preservation; it means current write/read path no longer creates or reads legacy shape.
-- ADR-0046 body is append-only decision record. Items where body and this implementation decision conflict are corrected by ADR-0046 2026-06-03 amendment.
+- [file-260601/ADR](../adr/file-260601-file-media-resource-lifecycle.md) body is append-only decision record. Items where body and this implementation decision conflict are corrected by [file-260601/ADR](../adr/file-260601-file-media-resource-lifecycle.md) 2026-06-03 amendment.
 - `Attachment` is user-agent delivery envelope, `Artifact` is agent/tool output resource, and `FilePart` is explicit model rich input. They do not auto-convert into each other.
 - Adapter-native artifact remains only as opaque replay hint, but does not take precedence over raw blob-free invariant.
 
@@ -80,11 +83,11 @@ Final goals were following three, and all are judged complete in current stack.
 
 ## Stacked PR Plan
 
-### `file-media-lifecycle [1/17]: ADR-0046 audit and decisions`
+### `file-media-lifecycle [1/17]: [file-260601/ADR](../adr/file-260601-file-media-resource-lifecycle.md) audit and decisions`
 
 Already opened audit/decision document PR.
 
-- Check current implementation status of each ADR-0046 item.
+- Check current implementation status of each [file-260601/ADR](../adr/file-260601-file-media-resource-lifecycle.md) item.
 - List legacy layers that became duplicate concepts due to ADR.
 - Record additional decisions for URI scheme, raw blob-free invariant, FilePart creation, lifecycle owner.
 
@@ -209,7 +212,7 @@ Completion criteria:
 Completion criteria:
 
 - production path does not create or consume legacy event shape.
-- old revert/legacy media transport and ADR-0046 current schema do not coexist.
+- old revert/legacy media transport and [file-260601/ADR](../adr/file-260601-file-media-resource-lifecycle.md) current schema do not coexist.
 - UI renders only current Attachment/Artifact/FilePart shapes.
 
 ### `file-media-lifecycle [11/17]: E2E and regression coverage`
@@ -246,7 +249,7 @@ Completion criteria:
 
 ### `file-media-lifecycle [12/17]: ModelFile reduction lifecycle`
 
-- Align ModelFile reduction lifecycle to ADR-0046 policy.
+- Align ModelFile reduction lifecycle to [file-260601/ADR](../adr/file-260601-file-media-resource-lifecycle.md) policy.
 - image ModelFile degrades to max edge 1024 JPEG at age 1.
 - image ModelFile degrades to max edge 300 JPEG at age 3.
 - image ModelFile becomes unreachable at age 10+ and tries blob delete after next run boundary grace.
@@ -265,9 +268,9 @@ Completion criteria:
 
 - Update `docs/azents/spec/` to current implementation.
 - Update `code_paths` and `last_verified_at` for specs related to file/media resource lifecycle, tool output shape, chat projection, agent execution lowering.
-- Add new ADR if ADR-0046 and later decisions require append-only record.
+- Add new ADR if [file-260601/ADR](../adr/file-260601-file-media-resource-lifecycle.md) and later decisions require append-only record.
 - Update audit report to current stacked head.
-- Remove remaining legacy compatibility layer from production path or mark as item tied to ADR-0039 cleanup.
+- Remove remaining legacy compatibility layer from production path or mark as item tied to [execution-260527/ADR](../adr/execution-260527-execution-transcript-normalization.md) cleanup.
 - After implementation completion, remove temporary implementation plan document or organize separately as completed-state document.
 
 Completion criteria:
@@ -333,7 +336,7 @@ Completion criteria:
 
 Completion criteria:
 
-- ADR-0046 audit report reveals every remaining gap in current implementation.
+- [file-260601/ADR](../adr/file-260601-file-media-resource-lifecycle.md) audit report reveals every remaining gap in current implementation.
 - If not every item is `[x] fully applied`, specify `[~]`, `[ ]`, `[!]` status and follow-up implementation needs.
 - Unit/integration test exists that deleted/unavailable ModelFile FilePart lowers to placeholder in model request.
 - compaction summary raw blob-free regression test exists.

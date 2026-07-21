@@ -4,19 +4,23 @@ created: 2026-05-30
 updated: 2026-05-30
 implemented: 2026-05-30
 tags: [backend, engine]
+document_role: supporting
+document_type: supporting-consolidation
+migration_source: "docs/azents/design/codex-like-compaction-checkpoints.md"
+supporting_role: consolidation
 ---
 
 # Codex-like Compaction Checkpoints
 
 ## Source Documents
 
-- [ADR-0042: Model input after compaction is rearranged in logical event order](../adr/0042-compaction-logical-event-ordering.md)
-- [ADR-0043: Generate compaction summary as Codex-like handoff checkpoint](../adr/0043-codex-like-compaction-checkpoints.md)
+- [compaction-260530/ADR: Model input after compaction is rearranged in logical event order](../adr/compaction-260530-compaction-logical-event-ordering.md)
+- [codex-260530/ADR: Generate compaction summary as Codex-like handoff checkpoint](../adr/codex-260530-codex-compaction-checkpoints.md)
 - [Context Compaction spec](../spec/flow/context-compaction.md)
 
 ## Problem Background
 
-Azents canonical runtime replaces old canonical transcript with `compaction_summary` to support long-running agent session. After ADR-0042, auto compaction keeps preserved tail as raw canonical events and summary replaces only compacted older range.
+Azents canonical runtime replaces old canonical transcript with `compaction_summary` to support long-running agent session. After [compaction-260530/ADR](../adr/compaction-260530-compaction-logical-event-ordering.md), auto compaction keeps preserved tail as raw canonical events and summary replaces only compacted older range.
 
 Remaining problem is quality and size control of summary itself. Existing compaction prompt is strongly conversation-summary shaped. Long-running coding agent structurally needs branch, PR, file, command, verification, decision, pending work, and blocker information so next agent/model step can continue without rereading compacted transcript.
 

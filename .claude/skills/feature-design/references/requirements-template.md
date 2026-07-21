@@ -72,7 +72,7 @@ Confirmed by the requester on YYYY-MM-DD before ADR and design decisions began.
 
 Use `{word}-{YYMMDD}/REQ-N` when referencing an individual requirement from an ADR, design, implementation plan, or validation report.
 
-Reuse the exact Requirements basename for the snapshot's primary ADR and Design:
+Reuse the exact Requirements basename for the snapshot's primary ADR and Design. Do not create numbered ADR files; after migration, numbered ADR filenames and bare legacy ADR references are historical inputs only and belong only in explicit provenance or ambiguity records:
 
 ```text
 docs/azents/requirements/<word>-<YYMMDD>-<slug>.md

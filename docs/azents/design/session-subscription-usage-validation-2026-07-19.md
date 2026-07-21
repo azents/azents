@@ -3,6 +3,9 @@ title: "Session Subscription Usage Validation — 2026-07-19"
 created: 2026-07-19
 updated: 2026-07-19
 tags: [frontend, llm, oauth, ux, testing, validation]
+document_role: supporting
+document_type: supporting-validation-report
+migration_source: "docs/azents/design/session-subscription-usage-validation-2026-07-19.md"
 ---
 
 # Session Subscription Usage Validation — 2026-07-19
@@ -51,7 +54,7 @@ The TypeScript public client was regenerated from the existing public OpenAPI do
 
 ## Documentation Comparison
 
-- ADR-0170 owns the selected-model placement and operational-only visibility decision.
+- [subscription-260719/ADR](../adr/subscription-260719-subscription-usage-from.md) owns the selected-model placement and operational-only visibility decision.
 - The implemented design records the compact desktop/mobile behavior and frontend-only validation boundary.
 - `docs/azents/spec/domain/conversation.md` is the current-behavior source of truth for composer projection, provider eligibility, freshness, and failure isolation.
 - ChatGPT OAuth and xAI OAuth provider flow contracts are unchanged because the session projection reuses the existing integration-scoped endpoint and provider adapters.

@@ -4,6 +4,10 @@ tags: [backend, engine]
 created: 2026-03-30
 updated: 2026-03-30
 implemented: 2026-03-30
+document_role: supporting
+document_type: supporting-consolidation
+migration_source: "docs/azents/design/scheduled-tasks.md"
+supporting_role: consolidation
 ---
 
 # Scheduled Tasks Design

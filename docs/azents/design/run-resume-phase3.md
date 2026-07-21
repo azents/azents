@@ -4,11 +4,14 @@ tags: [backend, engine]
 created: 2026-03-26
 updated: 2026-03-26
 implemented: 2026-03-26
+document_role: supporting
+document_type: supporting-phase
+migration_source: "docs/azents/design/run-resume-phase3.md"
 ---
 
 # Run Resume Phase 3 — Timeout + Cancel
 
-[Design document](./run-resume.md) · [Implementation plan](./run-resume-impl-plan.md) · [Phase 1](./run-resume-phase1.md) · [Phase 2](./run-resume-phase2.md)
+[Design document](./failed-260716-failed-retry-to-turn.md) · [Implementation plan](./run-resume-impl-plan.md) · [Phase 1](./run-resume-phase1.md) · [Phase 2](./run-resume-phase2.md)
 
 ## Overview
 

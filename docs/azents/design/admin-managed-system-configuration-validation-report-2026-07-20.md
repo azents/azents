@@ -2,6 +2,9 @@
 title: "Admin-Managed System Configuration Validation Report"
 created: 2026-07-20
 tags: [backend, frontend, admin, configuration, security, infra, testenv]
+document_role: supporting
+document_type: supporting-validation-report
+migration_source: "docs/azents/design/admin-managed-system-configuration-validation-report-2026-07-20.md"
 ---
 
 # Admin-Managed System Configuration Validation Report

@@ -4,13 +4,16 @@ created: 2026-06-21
 updated: 2026-06-21
 implemented: 2026-06-21
 tags: [backend, api, frontend, engine, verification]
+document_role: supporting
+document_type: supporting-audit
+migration_source: "docs/azents/design/model-catalog-verification-audit-2026-06-21.md"
 ---
 
 # Model Catalog Verification Audit - 2026-06-21
 
 ## Scope
 
-This audit compares the model catalog stacked implementation against ADR-0067 and `docs/azents/design/model-catalog-projection-sync.md` before merge.
+This audit compares the model catalog stacked implementation against [catalog-260620/ADR](../adr/catalog-260620-catalog-projection-sync.md) and `docs/azents/design/model-catalog-projection-sync.md` before merge.
 
 Audited PR stack:
 
@@ -57,28 +60,28 @@ CI evidence:
 
 ### F-2. Normal frontend model reads still used request-time listing
 
-- **Related decisions:** ADR-0067-D2, D14
+- **Related decisions:** [catalog-260620/ADR-D2](../adr/catalog-260620-catalog-projection-sync.md), D14
 - **Finding:** Agent and workspace model settings containers still called the legacy `/models` path through tRPC.
 - **Fix:** `#4816` switches `llmProviderIntegration.listModels` to `/catalog-entries` and maps stored projection entries into the existing option shape.
 - **Status:** Fixed for current azents-web normal model selection reads.
 
 ### F-3. Integration catalog reads for system providers needed fallback
 
-- **Related decisions:** ADR-0067-D1, D12
+- **Related decisions:** [catalog-260620/ADR-D1](../adr/catalog-260620-catalog-projection-sync.md), D12
 - **Finding:** Stored catalog reads are integration-first, but OpenAI/Anthropic/Gemini use system catalogs rather than integration-specific provider listings.
 - **Fix:** The repository read path verifies the integration belongs to the workspace, then falls back to the provider system catalog when no integration catalog exists.
 - **Status:** Fixed.
 
 ### F-4. Integration sync failure could still surface as unhandled server error
 
-- **Related decisions:** ADR-0067-D6, D17
+- **Related decisions:** [catalog-260620/ADR-D6](../adr/catalog-260620-catalog-projection-sync.md), D17
 - **Finding:** Integration sync marked attempts as failed but re-raised provider/listing exceptions. A manual sync retry could still return an unhandled server error instead of domain failure state.
 - **Fix:** Verification phase changes `IntegrationCatalogProjectionService.sync_integration_catalog()` to return a failed sync summary after persisting the failed attempt. The public sync response includes `status`, `failure_code`, `failure_message`, and `action_hint`.
 - **Status:** Fixed in verification branch.
 
 ### F-5. Initial integration sync was not queued after create/update
 
-- **Related decisions:** ADR-0067-D5, D17
+- **Related decisions:** [catalog-260620/ADR-D5](../adr/catalog-260620-catalog-projection-sync.md), D17
 - **Finding:** The explicit sync endpoint existed, but create/update did not start an initial integration catalog sync.
 - **Fix:** Verification phase queues a best-effort FastAPI background task after Bedrock/Vertex create or update. The background task calls the integration sync service and never fails the create/update response.
 - **Status:** Fixed in verification branch.

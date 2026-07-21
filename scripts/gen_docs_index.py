@@ -10,7 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 FRONTMATTER_PATTERN = re.compile(r"^---\n(.*?)\n---\n", re.DOTALL)
-FIELD_PATTERN = re.compile(r"^(\w+):\s*(.*)$", re.MULTILINE)
+FIELD_PATTERN = re.compile(r"^(\w+):[^\S\r\n]*(.*)$", re.MULTILINE)
 EXCLUDED = {"INDEX.md"}
 COMMON_REQUIRED_FIELDS = ("title",)
 SPEC_REQUIRED_FIELDS = ("spec_type", "code_paths", "last_verified_at", "spec_version")
@@ -116,12 +116,52 @@ def validate_snapshot_document(
     if top_dir == "requirements" and filename_match is None:
         errors.append("Requirements filename must match `{word}-{YYMMDD}-{slug}.md`")
         return errors
+    if top_dir == "adr" and filename_match is None:
+        errors.append("ADR filename must match `{word}-{YYMMDD}-{slug}.md`")
+        return errors
     if filename_match is None:
+        if top_dir == "design":
+            role = fields.get("document_role", "")
+            document_type = fields.get("document_type", "")
+            if role != "supporting" or not document_type.startswith("supporting-"):
+                errors.append(
+                    "Noncanonical Design filenames require explicit "
+                    "`document_role: supporting` and `document_type: supporting-*`"
+                )
         return errors
 
     if len(Path(rel_path).parts) != 2:
         errors.append(
             f"New snapshot {top_dir} documents must be directly under `{top_dir}/`"
+        )
+
+    document_role = fields.get("document_role", "")
+    document_type = fields.get("document_type", "")
+    if document_role and document_role not in {"primary", "supporting"}:
+        errors.append("`document_role` must be `primary` or `supporting`")
+    if document_type and document_role == "":
+        errors.append("`document_type` requires a matching `document_role`")
+    if document_role == "supporting":
+        if top_dir != "design":
+            errors.append(
+                "Supporting snapshot documents are only allowed under `design/`"
+            )
+        if not document_type.startswith("supporting-"):
+            errors.append(
+                "Supporting Design documents must use a `supporting-*` document_type"
+            )
+    elif document_role == "primary" and document_type and document_type != top_dir:
+        errors.append(
+            f"Primary {top_dir} documents must use `document_type: {top_dir}`"
+        )
+
+    snapshot_id = fields.get("snapshot_id", "")
+    expected_snapshot_id = (
+        f"{filename_match.group('word')}-{filename_match.group('date')}"
+    )
+    if snapshot_id and snapshot_id != expected_snapshot_id:
+        errors.append(
+            f"`snapshot_id` must match the filename snapshot ID `{expected_snapshot_id}`"
         )
 
     for field_name in ("created", "tags"):
@@ -192,6 +232,10 @@ def validate_docs(docs_root: Path) -> list[str]:
         if top_dir not in CORE_DOCUMENT_DIRS or filename_match is None:
             continue
 
+        fields = parse_frontmatter(path)
+        if fields.get("document_role") == "supporting":
+            continue
+
         short_id = f"{filename_match.group('word')}-{filename_match.group('date')}"
         snapshot = snapshots.setdefault(short_id, {})
         previous = snapshot.get(top_dir)
@@ -203,7 +247,7 @@ def validate_docs(docs_root: Path) -> list[str]:
                 f"`{short_id}` already used by {previous_rel}"
             )
             continue
-        snapshot[top_dir] = (path, parse_frontmatter(path))
+        snapshot[top_dir] = (path, fields)
 
     for short_id, snapshot in sorted(snapshots.items()):
         requirements = snapshot.get("requirements")

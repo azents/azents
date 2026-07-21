@@ -4,6 +4,10 @@ created: 2026-07-05
 updated: 2026-07-05
 implemented: 2026-07-05
 tags: [backend, frontend, api, session, workspace, git]
+document_role: supporting
+document_type: supporting-consolidation
+migration_source: "docs/azents/design/session-operation-turn-action-migration.md"
+supporting_role: consolidation
 ---
 
 # Session Operation Turn Action Migration Design
@@ -21,7 +25,7 @@ The migration covers both:
 - new-session Git worktree setup that currently uses `SessionInitialization`; and
 - future existing-session Git worktree addition through the same `create_git_worktree` TurnAction.
 
-The design follows ADR-0094. The `action_message` event is the operation identity. Its action payload
+The design follows [action-260705/ADR](../adr/action-260705-action-as-operation-turn-actions.md). The `action_message` event is the operation identity. Its action payload
 is the source of truth for operation parameters. Execution progress is durable-event based and is
 projected into live state. Project registry mutation is a context invalidation boundary so later model
 turns rebuild system prompt and tool context from the updated Project set.
@@ -263,7 +267,7 @@ This is a clean migration:
 - regenerate OpenAPI clients after schema changes;
 - migrate or replace existing initialization tests with action execution tests;
 - update specs after implementation to reflect current behavior; and
-- supersede ADR-0091 initialization lifecycle behavior with ADR-0094 where they conflict.
+- supersede [initialization-260703/ADR](../adr/initialization-260703-initialization-lifecycle.md) initialization lifecycle behavior with [action-260705/ADR](../adr/action-260705-action-as-operation-turn-actions.md) where they conflict.
 
 Because the follow-up existing-session worktree addition depends on this substrate, this migration
 should ship first as its own feature stack.

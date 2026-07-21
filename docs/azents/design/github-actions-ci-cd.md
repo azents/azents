@@ -3,6 +3,10 @@ title: "GitHub Actions CI/CD Migration Design"
 created: 2026-06-23
 updated: 2026-06-23
 tags: [ci-cd, github-actions, release, infra, security]
+document_role: supporting
+document_type: supporting-consolidation
+migration_source: "docs/azents/design/github-actions-ci-cd.md"
+supporting_role: consolidation
 ---
 
 # GitHub Actions CI/CD Migration Design
@@ -13,8 +17,8 @@ Azents needs a public-repository GitHub Actions setup that supports deterministi
 
 This design implements the policies from:
 
-- [ADR-0072: Release and Snapshot Artifact Policy](../adr/0072-release-and-snapshot-artifact-policy.md)
-- [ADR-0073: Open Source CI Policy](../adr/0073-open-source-ci-policy.md)
+- [and-260623/ADR: Release and Snapshot Artifact Policy](../adr/and-260623-and-snapshot-artifact-policy.md)
+- [open-260623/ADR: Open Source CI Policy](../adr/open-260623-open-source-ci-policy.md)
 
 The migration intentionally removes private-infrastructure assumptions from the Azents repository. All workflows use GitHub-hosted runners, all third-party actions are pinned to commit SHAs, pull request CI is read-only and secret-free, and write-permission work is isolated to trusted snapshot/release workflows.
 
@@ -22,7 +26,7 @@ The migration intentionally removes private-infrastructure assumptions from the 
 
 ### REQ-1. Public PR CI is deterministic and secret-free
 
-- Related decisions: `ADR-0073-D1`, `ADR-0073-D2`, `ADR-0073-D3`, `ADR-0073-D4`
+- Related decisions: `[open-260623/ADR-D1](../adr/open-260623-open-source-ci-policy.md)`, `[open-260623/ADR-D2](../adr/open-260623-open-source-ci-policy.md)`, `[open-260623/ADR-D3](../adr/open-260623-open-source-ci-policy.md)`, `[open-260623/ADR-D4](../adr/open-260623-open-source-ci-policy.md)`
 - Acceptance criteria:
   - Pull request CI uses `ubuntu-latest` only.
   - Pull request CI has `permissions: contents: read` and `pull-requests: read` only.
@@ -32,7 +36,7 @@ The migration intentionally removes private-infrastructure assumptions from the 
 
 ### REQ-2. Required checks remain stable under path filtering
 
-- Related decisions: `ADR-0073-D6`, `ADR-0073-D7`, `ADR-0073-D8`
+- Related decisions: `[open-260623/ADR-D6](../adr/open-260623-open-source-ci-policy.md)`, `[open-260623/ADR-D7](../adr/open-260623-open-source-ci-policy.md)`, `[open-260623/ADR-D8](../adr/open-260623-open-source-ci-policy.md)`
 - Acceptance criteria:
   - The CI workflow is not trigger-filtered with workflow-level `paths`.
   - A `changes` job computes affected scopes.
@@ -44,7 +48,7 @@ The migration intentionally removes private-infrastructure assumptions from the 
 
 ### REQ-3. Deterministic E2E blocks merges
 
-- Related decisions: `ADR-0073-D5`
+- Related decisions: `[open-260623/ADR-D5](../adr/open-260623-open-source-ci-policy.md)`
 - Acceptance criteria:
   - `ci-python-e2e` is a required gate.
   - The E2E run command excludes `live_external` and `runtime_provider` tests.
@@ -52,7 +56,7 @@ The migration intentionally removes private-infrastructure assumptions from the 
 
 ### REQ-4. Snapshot publishing is trusted and private
 
-- Related decisions: `ADR-0072-D2`, `ADR-0072-D4`, `ADR-0072-D5`, `ADR-0072-D8`, `ADR-0073-D9`
+- Related decisions: `[and-260623/ADR-D2](../adr/and-260623-and-snapshot-artifact-policy.md)`, `[and-260623/ADR-D4](../adr/and-260623-and-snapshot-artifact-policy.md)`, `[and-260623/ADR-D5](../adr/and-260623-and-snapshot-artifact-policy.md)`, `[and-260623/ADR-D8](../adr/and-260623-and-snapshot-artifact-policy.md)`, `[open-260623/ADR-D9](../adr/open-260623-open-source-ci-policy.md)`
 - Acceptance criteria:
   - Snapshot publishing has no pull request trigger.
   - Snapshot images publish to private `*-snapshot` GHCR packages.
@@ -62,7 +66,7 @@ The migration intentionally removes private-infrastructure assumptions from the 
 
 ### REQ-5. External release publishing is manual and protected
 
-- Related decisions: `ADR-0072-D3`, `ADR-0072-D5`, `ADR-0072-D6`, `ADR-0072-D8`, `ADR-0072-D9`, `ADR-0073-D9`
+- Related decisions: `[and-260623/ADR-D3](../adr/and-260623-and-snapshot-artifact-policy.md)`, `[and-260623/ADR-D5](../adr/and-260623-and-snapshot-artifact-policy.md)`, `[and-260623/ADR-D6](../adr/and-260623-and-snapshot-artifact-policy.md)`, `[and-260623/ADR-D8](../adr/and-260623-and-snapshot-artifact-policy.md)`, `[and-260623/ADR-D9](../adr/and-260623-and-snapshot-artifact-policy.md)`, `[open-260623/ADR-D9](../adr/open-260623-open-source-ci-policy.md)`
 - Acceptance criteria:
   - External release publishing uses `workflow_dispatch` only.
   - The release workflow uses a protected `release` environment.
@@ -72,7 +76,7 @@ The migration intentionally removes private-infrastructure assumptions from the 
 
 ### REQ-6. Chart values support digest-pinned deployment
 
-- Related decisions: `ADR-0072-D5`, `ADR-0072-D6`
+- Related decisions: `[and-260623/ADR-D5](../adr/and-260623-and-snapshot-artifact-policy.md)`, `[and-260623/ADR-D6](../adr/and-260623-and-snapshot-artifact-policy.md)`
 - Acceptance criteria:
   - Component image values can include digest fields.
   - Rendered image references use `repository:tag@digest` when a digest is provided.
@@ -80,7 +84,7 @@ The migration intentionally removes private-infrastructure assumptions from the 
 
 ### REQ-7. Workflow supply-chain hygiene is explicit
 
-- Related decisions: `ADR-0072-D8`, `ADR-0073-D2`, `ADR-0073-D9`
+- Related decisions: `[and-260623/ADR-D8](../adr/and-260623-and-snapshot-artifact-policy.md)`, `[open-260623/ADR-D2](../adr/open-260623-open-source-ci-policy.md)`, `[open-260623/ADR-D9](../adr/open-260623-open-source-ci-policy.md)`
 - Acceptance criteria:
   - All third-party actions are pinned to full commit SHAs.
   - Each workflow declares minimal permissions.
@@ -90,22 +94,22 @@ The migration intentionally removes private-infrastructure assumptions from the 
 
 | ADR decision | Requirements |
 | --- | --- |
-| `ADR-0072-D2` | REQ-4 |
-| `ADR-0072-D3` | REQ-5 |
-| `ADR-0072-D4` | REQ-4 |
-| `ADR-0072-D5` | REQ-4, REQ-5, REQ-6 |
-| `ADR-0072-D6` | REQ-5, REQ-6 |
-| `ADR-0072-D8` | REQ-4, REQ-5, REQ-7 |
-| `ADR-0072-D9` | REQ-5 |
-| `ADR-0073-D1` | REQ-1 |
-| `ADR-0073-D2` | REQ-1, REQ-7 |
-| `ADR-0073-D3` | REQ-1 |
-| `ADR-0073-D4` | REQ-1 |
-| `ADR-0073-D5` | REQ-3 |
-| `ADR-0073-D6` | REQ-2 |
-| `ADR-0073-D7` | REQ-2 |
-| `ADR-0073-D8` | REQ-2 |
-| `ADR-0073-D9` | REQ-4, REQ-5, REQ-7 |
+| `[and-260623/ADR-D2](../adr/and-260623-and-snapshot-artifact-policy.md)` | REQ-4 |
+| `[and-260623/ADR-D3](../adr/and-260623-and-snapshot-artifact-policy.md)` | REQ-5 |
+| `[and-260623/ADR-D4](../adr/and-260623-and-snapshot-artifact-policy.md)` | REQ-4 |
+| `[and-260623/ADR-D5](../adr/and-260623-and-snapshot-artifact-policy.md)` | REQ-4, REQ-5, REQ-6 |
+| `[and-260623/ADR-D6](../adr/and-260623-and-snapshot-artifact-policy.md)` | REQ-5, REQ-6 |
+| `[and-260623/ADR-D8](../adr/and-260623-and-snapshot-artifact-policy.md)` | REQ-4, REQ-5, REQ-7 |
+| `[and-260623/ADR-D9](../adr/and-260623-and-snapshot-artifact-policy.md)` | REQ-5 |
+| `[open-260623/ADR-D1](../adr/open-260623-open-source-ci-policy.md)` | REQ-1 |
+| `[open-260623/ADR-D2](../adr/open-260623-open-source-ci-policy.md)` | REQ-1, REQ-7 |
+| `[open-260623/ADR-D3](../adr/open-260623-open-source-ci-policy.md)` | REQ-1 |
+| `[open-260623/ADR-D4](../adr/open-260623-open-source-ci-policy.md)` | REQ-1 |
+| `[open-260623/ADR-D5](../adr/open-260623-open-source-ci-policy.md)` | REQ-3 |
+| `[open-260623/ADR-D6](../adr/open-260623-open-source-ci-policy.md)` | REQ-2 |
+| `[open-260623/ADR-D7](../adr/open-260623-open-source-ci-policy.md)` | REQ-2 |
+| `[open-260623/ADR-D8](../adr/open-260623-open-source-ci-policy.md)` | REQ-2 |
+| `[open-260623/ADR-D9](../adr/open-260623-open-source-ci-policy.md)` | REQ-4, REQ-5, REQ-7 |
 
 ## Architecture
 
@@ -441,16 +445,16 @@ TBD
 
 ### Self-hosted runners for heavy jobs
 
-Rejected by ADR-0073. GitHub-hosted runners are sufficient for the initial deterministic target and keep the public repository safer.
+Rejected by [open-260623/ADR](../adr/open-260623-open-source-ci-policy.md). GitHub-hosted runners are sufficient for the initial deterministic target and keep the public repository safer.
 
 ### Workflow-level path filters
 
-Rejected by ADR-0073. Required CI must avoid pending checks caused by trigger-level path filtering.
+Rejected by [open-260623/ADR](../adr/open-260623-open-source-ci-policy.md). Required CI must avoid pending checks caused by trigger-level path filtering.
 
 ### Live E2E in public CI
 
-Rejected by ADR-0073. Live/external tests are out of scope for the initial migration.
+Rejected by [open-260623/ADR](../adr/open-260623-open-source-ci-policy.md). Live/external tests are out of scope for the initial migration.
 
 ### Separate chart versions from app versions
 
-Rejected by ADR-0072. Initial release policy uses chart/app lockstep versioning.
+Rejected by [and-260623/ADR](../adr/and-260623-and-snapshot-artifact-policy.md). Initial release policy uses chart/app lockstep versioning.

@@ -75,9 +75,9 @@ Important current limitation:
 
 ## Related Azents decisions already recorded
 
-### ADR-0074: Primary Agent Sessions and Team-First Multi-Session UX
+### [primary-260625/ADR](../adr/primary-260625-primary-sessions.md): Primary Agent Sessions and Team-First Multi-Session UX
 
-Relevant points from `docs/azents/adr/0074-primary-agent-sessions.md`:
+Relevant points from `docs/azents/adr/primary-260625-primary-sessions.md`:
 
 - `AgentRuntime` and `AgentSession` are sibling models under `Agent`.
 - `AgentRuntime` owns the physical runtime workspace and runner lifecycle.

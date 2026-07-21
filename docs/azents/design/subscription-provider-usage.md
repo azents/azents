@@ -4,6 +4,10 @@ created: 2026-07-19
 updated: 2026-07-19
 implemented: 2026-07-19
 tags: [backend, frontend, api, llm, oauth, billing, security, testing]
+document_role: supporting
+document_type: supporting-consolidation
+migration_source: "docs/azents/design/subscription-provider-usage.md"
+supporting_role: consolidation
 ---
 
 # Subscription Provider Usage Design
@@ -14,7 +18,7 @@ Azents will show authenticated ChatGPT and xAI subscription usage on the Workspa
 
 The feature reads a live, integration-scoped snapshot through the existing encrypted OAuth credential. It normalizes provider-specific quota windows into one public contract, keeps financial details management-only, and does not persist usage history.
 
-ADR-0169 records the architectural decisions behind this design.
+[ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-280) records the architectural decisions behind this design.
 
 ## Problem
 

@@ -3,6 +3,10 @@ title: "Chat Run State Regression Hardening Design"
 created: 2026-07-12
 updated: 2026-07-12
 tags: [api, backend, chat, engine, frontend, observability, testenv]
+document_role: supporting
+document_type: supporting-consolidation
+migration_source: "docs/azents/design/chat-run-state-regression-hardening.md"
+supporting_role: consolidation
 ---
 
 # Chat Run State Regression Hardening Design
@@ -103,7 +107,7 @@ An explicit correlated terminal clear remains authoritative after the durable te
 
 `RunComplete`, `RunStopped`, and `live_run_cleared` include `run_id`. Frontend terminal handling clears managed state only when the event `run_id` matches the currently active Run. A terminal event for an older Run is ignored for current-state clearing.
 
-The event contract follows [ADR-0141](../adr/0141-correlate-terminal-run-events.md).
+The event contract follows [terminal-260712/ADR](../adr/terminal-260712-terminal-events.md).
 
 ### 6. Publish `RunComplete` only from terminal finalization
 
@@ -139,7 +143,7 @@ A deleted target invalidates only the stored selection and falls through to the 
 
 This snapshot describes the model call that produced the usage marker. It does not mutate later and does not join transcript events back to current AgentRun state.
 
-This extends the run-owned provenance policy only for immutable per-turn usage facts, as recorded in [ADR-0142](../adr/0142-persist-turn-usage-inference-provenance.md).
+This extends the run-owned provenance policy only for immutable per-turn usage facts, as recorded in [persist-260712/ADR](../adr/persist-260712-persist-turn-usage-inference-provenance.md).
 
 ## API and Data Changes
 
@@ -222,7 +226,7 @@ Required evidence includes focused backend/frontend test output, deterministic p
 - `docs/azents/spec/domain/conversation.md`
 - `docs/azents/spec/flow/agent-execution-loop.md`
 - `docs/azents/spec/flow/chat-session-resync.md`
-- `docs/azents/spec/flow/session-context-inspector.md`
+- `docs/azents/spec/flow/context-260530-context-inspector.md`
 
 ## Alternatives Considered
 

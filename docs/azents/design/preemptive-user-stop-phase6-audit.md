@@ -2,6 +2,9 @@
 title: "Preemptive User Stop Phase 6 Implementation Audit"
 created: 2026-06-09
 tags: [backend, frontend, api, chat, engine, testing, audit]
+document_role: supporting
+document_type: supporting-audit
+migration_source: "docs/azents/design/preemptive-user-stop-phase6-audit.md"
 ---
 
 # Preemptive User Stop Phase 6 Implementation Audit

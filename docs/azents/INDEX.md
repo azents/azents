@@ -50,210 +50,623 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Short ID | Created | Implemented |
 |---|---|---|---|
+| [External Platform Account Linking Historical Requirements Reconstruction](requirements/account-260315-account-linking.md) | account-260315 | 2026-03-15 | 2026-03-15 |
+| [Model Session Operations as Turn Actions Historical Requirements Reconstruction](requirements/action-260705-action-as-operation-turn-actions.md) | action-260705 | 2026-07-05 | - |
+| [Keep Action Messages Buffer-Only Historical Requirements Reconstruction](requirements/action-260712-action-messages-buffer-only.md) | action-260712 | 2026-07-12 | - |
+| [Provider Tool Live Activity Historical Requirements Reconstruction](requirements/activity-260716-live-activity.md) | activity-260716 | 2026-07-16 | 2026-07-16 |
+| [Generalize Admin-Managed System Configuration Historical Requirements Reconstruction](requirements/admin-260718-admin-configuration.md) | admin-260718 | 2026-07-18 | - |
+| [Release and Snapshot Artifact Policy Historical Requirements Reconstruction](requirements/and-260623-and-snapshot-artifact-policy.md) | and-260623 | 2026-06-23 | - |
+| [AgentSession Archive Policy Historical Requirements Reconstruction](requirements/archive-260626-archive-policy.md) | archive-260626 | 2026-06-26 | - |
+| [Archived Session Retention and Durable Purge Historical Requirements Reconstruction](requirements/archived-260719-archived-retention-and-purge.md) | archived-260719 | 2026-07-19 | - |
+| [Keep Native Artifact Compatibility Keys Strict Historical Requirements Reconstruction](requirements/artifact-260716-artifact-compatibility-keys-strict.md) | artifact-260716 | 2026-07-16 | - |
+| [Atomically Activate the Resolved Run and Session Profile Historical Requirements Reconstruction](requirements/atomic-260710-atomic-profile-activation.md) | atomic-260710 | 2026-07-10 | - |
+| [nointern-web Login Guard Historical Requirements Reconstruction](requirements/auth-260219-auth-guard.md) | auth-260219 | 2026-02-19 | 2026-02-19 |
+| [nointern-web Authentication System Historical Requirements Reconstruction](requirements/authsnapshot-260219-auth.md) | authsnapshot-260219 | 2026-02-19 | 2026-02-19 |
+| [Usage-based Auto Compaction and Token Estimation Redesign Historical Requirements Reconstruction](requirements/auto-260612-usage-auto-compaction.md) | auto-260612 | 2026-06-12 | - |
+| [AWS Toolkit — Managed MCP + Direct SigV4 Signing Historical Requirements Reconstruction](requirements/aws-260326-aws-toolkit.md) | aws-260326 | 2026-03-26 | 2026-03-26 |
+| [Azents-Owned Git Worktree Ownership and Cleanup Historical Requirements Reconstruction](requirements/azents-260703-azents-git-worktree-ownership-and-cleanup.md) | azents-260703 | 2026-07-03 | - |
+| [Run-Scoped Azents Virtual Filesystem Historical Requirements Reconstruction](requirements/azents-260719-azents-vfs.md) | azents-260719 | 2026-07-19 | 2026-07-21 |
+| [Backend Project Browser Manifest Historical Requirements Reconstruction](requirements/backend-260703-backend-browser-manifest.md) | backend-260703 | 2026-07-03 | - |
+| [Background Tool Call Design Discussion Historical Requirements Reconstruction](requirements/background-260416-background-call.md) | background-260416 | 2026-04-16 | - |
+| [Remove Deprecated Background Completion Input Historical Requirements Reconstruction](requirements/background-260712-background-completion-input.md) | background-260712 | 2026-07-12 | - |
+| [Per-Prompt Reasoning Effort Is a Run Boundary Historical Requirements Reconstruction](requirements/boundaries-260710-prompt-reasoning-effort-boundaries.md) | boundaries-260710 | 2026-07-10 | - |
+| [Sandbox Runtime / Workspace State Boundary Historical Requirements Reconstruction](requirements/boundary-260524-sandbox-boundary.md) | boundary-260524 | 2026-05-24 | - |
+| [Add Session Sandbox Workspace Browser API Historical Requirements Reconstruction](requirements/browser-260501-browser-api.md) | browser-260501 | 2026-05-01 | 2026-05-02 |
+| [Workspace Project Browser Surface Historical Requirements Reconstruction](requirements/browser-260703-browser-surface.md) | browser-260703 | 2026-07-03 | - |
+| [Built-in Tool Support Discussion Historical Requirements Reconstruction](requirements/builtin-260315-builtin-tools.md) | builtin-260315 | 2026-03-15 | 2026-03-15 |
+| [Resolve built-in capabilities to model-specific executors Historical Requirements Reconstruction](requirements/builtin-260718-builtin-capabilities-to-executors.md) | builtin-260718 | 2026-07-18 | - |
+| [Complete Specialized Presentation Coverage for Builtin Tools Historical Requirements Reconstruction](requirements/builtin-260721-builtin-presentations.md) | builtin-260721 | 2026-07-21 | - |
+| [Run-Scoped Azents Virtual Filesystem for Managed Skills and Resources Historical Requirements Reconstruction](requirements/bundled-260719-bundled-and-backed-skill-sources.md) | bundled-260719 | 2026-07-19 | - |
+| [Model Catalog Projection and Sync Historical Requirements Reconstruction](requirements/catalog-260620-catalog-projection-sync.md) | catalog-260620 | 2026-06-20 | - |
+| [Split Chat Input Buffer into Separate RDB Table Historical Requirements Reconstruction](requirements/chat-260519-chat-input-buffer.md) | chat-260519 | 2026-05-19 | - |
+| [Chat Protocol Uses Canonical Event History/Live API Historical Requirements Reconstruction](requirements/chat-260604-chat-protocol-history-live.md) | chat-260604 | 2026-06-04 | 2026-06-04 |
+| [Chat Session Resync Converges to History/Live State After Subscribe Ack Historical Requirements Reconstruction](requirements/chat-260609-chat-resync-scroll.md) | chat-260609 | 2026-06-09 | - |
+| [Chat Action Messages Historical Requirements Reconstruction](requirements/chat-260630-chat-action-messages.md) | chat-260630 | 2026-06-30 | - |
+| [Chat Attachment Presentation Historical Requirements Reconstruction](requirements/chat-260711-chat-attachment-presentation.md) | chat-260711 | 2026-07-11 | 2026-07-11 |
+| [Present Chat Activity as an Ordered Event Stream Historical Requirements Reconstruction](requirements/chat-260720-chat-activity-as-an-ordered-event-stream.md) | chat-260720 | 2026-07-20 | - |
+| [ChatGPT OAuth Provider Historical Requirements Reconstruction](requirements/chatgpt-260502-chatgpt-oauth.md) | chatgpt-260502 | 2026-05-02 | 2026-05-02 |
+| [ChatGPT Responses Lite Catalog Integration Historical Requirements Reconstruction](requirements/chatgpt-260712-chatgpt-responses-lite-catalog.md) | chatgpt-260712 | 2026-07-12 | 2026-07-12 |
+| [Include ChatGPT OAuth in the OpenAI-Native HTTP Migration Historical Requirements Reconstruction](requirements/chatgpt-260716-chatgpt-oauth-in-openai-http-migration.md) | chatgpt-260716 | 2026-07-16 | - |
+| [Adopt Claude Rules Loader as a Separate Runtime Toolkit Historical Requirements Reconstruction](requirements/claude-260702-claude-rules-loader.md) | claude-260702 | 2026-07-02 | - |
+| [Generalize Client Tool Wire Variant Selection Historical Requirements Reconstruction](requirements/client-260721-client-tool-wire-variants.md) | client-260721 | 2026-07-21 | 2026-07-21 |
+| [Scope OpenAI SDK Clients to Logical Model Operations Historical Requirements Reconstruction](requirements/clients-260716-openai-sdk-clients-to-logical-operations.md) | clients-260716 | 2026-07-16 | - |
+| [Generate Compaction Summary as Codex-like Handoff Checkpoint Historical Requirements Reconstruction](requirements/codex-260530-codex-compaction-checkpoints.md) | codex-260530 | 2026-05-30 | - |
+| [Codex-first Subagent Redesign Historical Requirements Reconstruction](requirements/codex-260706-codex-subagent-redesign.md) | codex-260706 | 2026-07-06 | - |
+| [Codex-Compatible Subagent Concurrency Historical Requirements Reconstruction](requirements/codex-260709-codex-subagent-concurrency.md) | codex-260709 | 2026-07-09 | - |
+| [Codex Multi-Agent V2 Subagent Prompt Parity Historical Requirements Reconstruction](requirements/codex-260710-codex-multi-prompt-parity.md) | codex-260710 | 2026-07-10 | 2026-07-10 |
+| [Reorder Model Input by Logical Event Order After Compaction Historical Requirements Reconstruction](requirements/compaction-260530-compaction-logical-event-ordering.md) | compaction-260530 | 2026-05-30 | - |
+| [Use Handoff Resume Wrapper When Injecting Compaction Summary Historical Requirements Reconstruction](requirements/compaction-260531-compaction-summary-injection-wrapper.md) | compaction-260531 | 2026-05-31 | - |
+| [Provider Compatibility Layer Historical Requirements Reconstruction](requirements/compat-260503-compat-layer-2026.md) | compat-260503 | 2026-05-03 | 2026-05-03 |
+| [Restore the Latest Composer Profile Intent on Reload Historical Requirements Reconstruction](requirements/composer-260710-composer-profile-reload-precedence.md) | composer-260710 | 2026-07-10 | - |
+| [Remove Workspace Team Concept Historical Requirements Reconstruction](requirements/concept-260622-team-concept.md) | concept-260622 | 2026-06-22 | 2026-06-22 |
+| [ModelConfig Removal and Agent Model Snapshot Historical Requirements Reconstruction](requirements/config-260616-config-removal.md) | config-260616 | 2026-06-16 | - |
+| [Consume Failed Buffer Items Without Starting a Turn Historical Requirements Reconstruction](requirements/consume-260712-consume-failed-buffer-items-without-starting-a-turn.md) | consume-260712 | 2026-07-12 | - |
+| [Agent Context Compaction Historical Requirements Reconstruction](requirements/context-260305-context-compaction.md) | context-260305 | 2026-03-05 | 2026-03-23 |
+| [Session Context Inspector Historical Requirements Reconstruction](requirements/context-260530-context-inspector.md) | context-260530 | 2026-05-30 | 2026-05-30 |
+| [Display Context Usage from the Resolved Run Profile Historical Requirements Reconstruction](requirements/context-260710-context-usage-display.md) | context-260710 | 2026-07-10 | - |
+| [Sandbox Provider Control Distributed Recovery Historical Requirements Reconstruction](requirements/control-260524-sandbox-control-distributed-recovery.md) | control-260524 | 2026-05-24 | 2026-05-24 |
+| [nointern Core Concepts Historical Requirements Reconstruction](requirements/core-260207-core-concepts.md) | core-260207 | 2026-02-07 | 2026-03-06 |
+| [Calculate OpenAI-Compatible Costs from SDK Usage Historical Requirements Reconstruction](requirements/costs-260716-openai-costs-from-sdk-usage.md) | costs-260716 | 2026-07-16 | - |
+| [Introduce credential provider model and admin password reset token Historical Requirements Reconstruction](requirements/credential-260618-credential-and-admin-password.md) | credential-260618 | 2026-06-18 | - |
+| [User & WorkspaceUser CRUD Document Historical Requirements Reconstruction](requirements/crud-260212-crud.md) | crud-260212 | 2026-02-12 | 2026-02-19 |
+| [Remove Percentage Rollout from Apply-Patch Custom Selection Historical Requirements Reconstruction](requirements/custom-260721-patch-custom-rollout.md) | custom-260721 | 2026-07-21 | - |
+| [nointern Daily Log Historical Requirements Reconstruction](requirements/daily-260322-daily-log.md) | daily-260322 | 2026-03-22 | 2026-03-22 |
+| [Declarative Improvements for Async Toolkit Loading State Historical Requirements Reconstruction](requirements/declarative-260331-declarative-toolkit-status.md) | declarative-260331 | 2026-03-31 | 2026-03-31 |
+| [Deterministic Tool Catalog, MCP Tool Snapshots, and Stable Toolkit Prompts Historical Requirements Reconstruction](requirements/deterministic-260628-deterministic-catalog-and-mcp-snapshots.md) | deterministic-260628 | 2026-06-28 | - |
+| [Full-stack Local Test Environment — Stage 1b (devserver lifecycle) Historical Requirements Reconstruction](requirements/devserver-260406-devserver-lifecycle.md) | devserver-260406 | 2026-04-06 | 2026-04-06 |
+| [Directly Promote Continuation and Agent Messages Historical Requirements Reconstruction](requirements/directly-260712-directly-promote-continuation-and-messages.md) | directly-260712 | 2026-07-12 | - |
+| [Discord Toolkit Historical Requirements Reconstruction](requirements/discord-260312-discord-toolkit.md) | discord-260312 | 2026-03-12 | 2026-03-23 |
+| [Discord Gateway HA Historical Requirements Reconstruction](requirements/discord-260327-discord-gateway.md) | discord-260327 | 2026-03-27 | 2026-03-27 |
 | [Shared Development Snapshot Identifier Requirements](requirements/docids-260721-shared-development-snapshot-identifiers.md) | docids-260721 | 2026-07-21 | 2026-07-21 |
+| [DockerAgentHomeClient sandbox-daemon Sidecar Historical Requirements Reconstruction](requirements/docker-260409-docker-home-sidecar.md) | docker-260409 | 2026-04-09 | 2026-04-09 |
+| [Introduce system Docker Sandbox Provider Historical Requirements Reconstruction](requirements/docker-260523-docker-sandbox.md) | docker-260523 | 2026-05-23 | 2026-05-23 |
+| [Use Documented OpenAI Responses Terminal Discriminators Historical Requirements Reconstruction](requirements/documented-260716-documented-openai-responses-terminal-discriminators.md) | documented-260716 | 2026-07-16 | - |
+| [Draft Agent Session First Message Creation Historical Requirements Reconstruction](requirements/draft-260628-draft-message.md) | draft-260628 | 2026-06-28 | - |
+| [Drain Input Buffers Sequentially Before Turn Start Historical Requirements Reconstruction](requirements/drain-260712-drain-input-buffers-before-turn-start.md) | drain-260712 | 2026-07-12 | - |
+| [Remove Dormant stdio MCP Sidecar Historical Requirements Reconstruction](requirements/drop-260512-drop-dormant-stdio-mcp-sidecar.md) | drop-260512 | 2026-05-12 | - |
+| [Dynamic Tool Management — Toolkit State Machine Historical Requirements Reconstruction](requirements/dynamic-260329-dynamic-tools.md) | dynamic-260329 | 2026-03-29 | - |
+| [Move Agent Model Selection to Dynamic ModelConfig Structure Historical Requirements Reconstruction](requirements/dynamic-260516-dynamic-llm-configs.md) | dynamic-260516 | 2026-05-16 | - |
+| [Require an Explicit Reasoning Effort in User Input Historical Requirements Reconstruction](requirements/effort-260710-reasoning-effort-in-input.md) | effort-260710 | 2026-07-10 | - |
+| [Unified Email Authentication Historical Requirements Reconstruction](requirements/email-260217-email-login-onboarding.md) | email-260217 | 2026-02-17 | 2026-02-19 |
+| [Engine Event Flow Refactoring Historical Requirements Reconstruction](requirements/engine-260317-engine-event-refactoring.md) | engine-260317 | 2026-03-17 | 2026-04-20 |
+| [Event Architecture Review Discussion Historical Requirements Reconstruction](requirements/event-260308-event-architecture-review.md) | event-260308 | 2026-03-08 | 2026-03-08 |
+| [Slack/Discord/Scheduled Event Subscription Migration Historical Requirements Reconstruction](requirements/event-260508-event-subscription-routing-2026.md) | event-260508 | 2026-05-08 | 2026-05-08 |
+| [Adopt Event / Native Event Terminology Historical Requirements Reconstruction](requirements/event-260613-event-event-terminology.md) | event-260613 | 2026-06-13 | - |
+| [Make the events Table the Single Source of Truth and Remove session_items_oai Historical Requirements Reconstruction](requirements/events-260428-events-table-as-truth.md) | events-260428 | 2026-04-28 | 2026-04-28 |
+| [Separate Durable Events, Model Lowering, and Turn Eligibility Historical Requirements Reconstruction](requirements/events-260712-events-lowering-and-turn-eligibility.md) | events-260712 | 2026-07-12 | - |
+| [Use Single Durable Events for Provider Tool Items Historical Requirements Reconstruction](requirements/events-260719-events.md) | events-260719 | 2026-07-19 | - |
+| [Agent-scoped Exchange Uploads Historical Requirements Reconstruction](requirements/exchange-260531-exchange-uploads.md) | exchange-260531 | 2026-05-31 | - |
+| [Runtime Exec Process Tools Historical Requirements Reconstruction](requirements/exec-260627-exec-process.md) | exec-260627 | 2026-06-27 | - |
+| [User Stop Terminates Session-Owned Runtime Exec Processes Historical Requirements Reconstruction](requirements/exec-260628-exec-stop-termination.md) | exec-260628 | 2026-06-28 | - |
+| [Agent Execution Transcript Normalization Historical Requirements Reconstruction](requirements/execution-260527-execution-transcript-normalization.md) | execution-260527 | 2026-05-27 | 2026-05-28 |
+| [Session Workspace Project Existing Folder Registration Historical Requirements Reconstruction](requirements/existing-260611-existing-folder-registration.md) | existing-260611 | 2026-06-11 | 2026-06-11 |
+| [External Watch / Raw Session Event Subscription Historical Requirements Reconstruction](requirements/external-260503-external-watch-raw-subscription.md) | external-260503 | 2026-05-03 | 2026-05-03 |
+| [Failed-run Error Retry and Finalization Historical Requirements Reconstruction](requirements/failed-260627-failed-error-retry.md) | failed-260627 | 2026-06-27 | - |
+| [Scope Failed-run Retry to One Model Turn Historical Requirements Reconstruction](requirements/failed-260716-failed-retry-to-turn.md) | failed-260716 | 2026-07-16 | 2026-03-26 |
+| [Keep OpenAI HTTP Failure Semantics at the Azents Boundary Historical Requirements Reconstruction](requirements/failure-260716-openai-http-failure-semantics-at-the-azents-boundary.md) | failure-260716 | 2026-07-16 | - |
+| [Make Model Provider Failures Transparent Historical Requirements Reconstruction](requirements/failures-260718-failures-transparent.md) | failures-260718 | 2026-07-18 | - |
+| [File Support — Unified Session Storage Architecture Historical Requirements Reconstruction](requirements/file-260301-file-support.md) | file-260301 | 2026-03-01 | 2026-03-23 |
+| [Adopt Agent File Exchange Storage Separate from Sandbox Workspace Historical Requirements Reconstruction](requirements/file-260505-file-exchange.md) | file-260505 | 2026-05-05 | 2026-05-06 |
+| [Attachment, Artifact, and FilePart lifecycle Historical Requirements Reconstruction](requirements/file-260601-file-media-resource-lifecycle.md) | file-260601 | 2026-06-01 | 2026-06-01 |
+| [Add Agent Workspace File Management Operations Historical Requirements Reconstruction](requirements/file-260628-file-management.md) | file-260628 | 2026-06-28 | - |
+| [Filesystem Skill Projection Revisions Historical Requirements Reconstruction](requirements/filesystem-260701-filesystem-skill-projection-revisions.md) | filesystem-260701 | 2026-07-01 | - |
+| [Fold Turn Eligibility with Failure Veto Historical Requirements Reconstruction](requirements/fold-260712-fold-turn-eligibility-with-failure-veto.md) | fold-260712 | 2026-07-12 | - |
+| [Agent User Folder Recognition Historical Requirements Reconstruction](requirements/folder-260403-folder-recognition.md) | folder-260403 | 2026-04-03 | 2026-04-03 |
+| [Mark Forked History Boundaries for Subagent Tasks Historical Requirements Reconstruction](requirements/forked-260709-subagent-forked-history-task-boundaries.md) | forked-260709 | 2026-07-09 | - |
+| [Agent Runtime and Session Foundation Historical Requirements Reconstruction](requirements/foundation-260504-foundation.md) | foundation-260504 | 2026-05-04 | 2026-05-04 |
+| [Split FunctionCallItem.output into a Separate FunctionCallOutputItem Historical Requirements Reconstruction](requirements/function-260429-function-call-output-item.md) | function-260429 | 2026-04-29 | 2026-04-29 |
+| [GA4 stdio MCP -> Native Toolkit Migration Historical Requirements Reconstruction](requirements/ga4-260401-ga4-toolkit.md) | ga4-260401 | 2026-04-01 | 2026-04-01 |
+| [GCP Toolkit — Google Hosted Remote MCP Historical Requirements Reconstruction](requirements/gcp-260326-gcp-observability-toolkit.md) | gcp-260326 | 2026-03-26 | 2026-03-26 |
+| [Materialize Provider-Generated Images as File Resources Historical Requirements Reconstruction](requirements/generated-260717-generated-images-as-file-resources.md) | generated-260717 | 2026-07-17 | - |
+| [Use Generic Native Adapter Request Types Historical Requirements Reconstruction](requirements/generic-260716-generic-adapter-request-types.md) | generic-260716 | 2026-07-16 | - |
+| [GitHub Toolkit Historical Requirements Reconstruction](requirements/github-260313-github-toolkit.md) | github-260313 | 2026-03-13 | 2026-03-22 |
+| [GitHubToolkit Shell Env Injection Feature Historical Requirements Reconstruction](requirements/github-260424-github-toolkit-shell-env-2026.md) | github-260424 | 2026-04-24 | 2026-04-24 |
+| [GitHub Toolkit Multi-Installation Routing Historical Requirements Reconstruction](requirements/github-260621-github-toolkit-multi-installation.md) | github-260621 | 2026-06-21 | - |
+| [Goal Pursuing Is Owned at Session Scope Historical Requirements Reconstruction](requirements/goal-260613-goal-pursuing.md) | goal-260613 | 2026-06-13 | - |
+| [Goal Continuation Uses Idle Hook and Input Buffer Historical Requirements Reconstruction](requirements/goal-260615-goal-continuation-idle-hook.md) | goal-260615 | 2026-06-15 | - |
+| [Treat Goal Actions as Model-Producing Preparation Historical Requirements Reconstruction](requirements/goal-260712-goal-actions-as-producing-preparation.md) | goal-260712 | 2026-07-12 | - |
+| [Add GPT-aligned apply-patch alongside the existing edit tool Historical Requirements Reconstruction](requirements/gpt-260720-gpt-patch-alongside-existing-edit.md) | gpt-260720 | 2026-07-20 | - |
+| [Group Chat Tool Activity in the Frontend Historical Requirements Reconstruction](requirements/group-260720-group-chat-activity-in-the-frontend.md) | group-260720 | 2026-07-20 | 2026-07-20 |
+| [gVisor + BYOC Sandbox Discussion Historical Requirements Reconstruction](requirements/gvisor-260403-gvisor-byoc-sandbox.md) | gvisor-260403 | 2026-04-03 | 2026-04-20 |
+| [Handle Message Edits as Transactional Preparation Historical Requirements Reconstruction](requirements/handle-260712-handle-message-edits-as-transactional-preparation.md) | handle-260712 | 2026-07-12 | - |
+| [NoIntern Helm Packaging Historical Requirements Reconstruction](requirements/helm-260512-helm-packaging.md) | helm-260512 | 2026-05-12 | 2026-05-12 |
+| [Home-as-agent-list Reorganization Historical Requirements Reconstruction](requirements/home-260421-home-list-2026.md) | home-260421 | 2026-04-21 | 2026-04-21 |
+| [Runtime Hook System Historical Requirements Reconstruction](requirements/hook-260507-hook.md) | hook-260507 | 2026-05-07 | 2026-05-07 |
+| [Adopt Runtime Hook System Historical Requirements Reconstruction](requirements/hook-260518-hook.md) | hook-260518 | 2026-05-18 | - |
+| [Provider-hosted web search runs through normalized capability and Agent opt-in Historical Requirements Reconstruction](requirements/hosted-260617-hosted-web-search.md) | hosted-260617 | 2026-06-17 | - |
+| [Provider-Hosted Image Generation Restoration Historical Requirements Reconstruction](requirements/hosted-260717-hosted-image-generation.md) | hosted-260717 | 2026-07-17 | - |
+| [Define the OpenAI HTTP Migration by Semantic Parity Historical Requirements Reconstruction](requirements/http-260716-openai-http-migration-by-semantic-parity.md) | http-260716 | 2026-07-16 | - |
+| [nointern-web i18n Architecture Historical Requirements Reconstruction](requirements/i18n-260216-i18n.md) | i18n-260216 | 2026-02-16 | 2026-02-16 |
+| [Idempotent Sandbox Lifecycle State Historical Requirements Reconstruction](requirements/idempotent-260524-idempotent-sandbox-lifecycle.md) | idempotent-260524 | 2026-05-24 | - |
+| [Model-Specific Image Generation Execution Historical Requirements Reconstruction](requirements/image-260718-image-generation.md) | image-260718 | 2026-07-18 | 2026-07-18 |
+| [Store Requested Inference Profiles as Typed Durable Data Historical Requirements Reconstruction](requirements/inference-260710-inference-profile.md) | inference-260710 | 2026-07-10 | - |
+| [Keep Resolved Inference Provenance Run-Owned Historical Requirements Reconstruction](requirements/inference-260711-inference-provenance.md) | inference-260711 | 2026-07-11 | - |
+| [Use Session Current Inference State Per Turn Historical Requirements Reconstruction](requirements/inference-260712-inference-turn.md) | inference-260712 | 2026-07-12 | - |
+| [Session Initialization Lifecycle Historical Requirements Reconstruction](requirements/initialization-260703-initialization-lifecycle.md) | initialization-260703 | 2026-07-03 | - |
+| [Project Compact Inference Summaries with User Messages Historical Requirements Reconstruction](requirements/inline-260710-inline-message-inference-summary.md) | inline-260710 | 2026-07-10 | - |
+| [User Input Boundary FilePart Materialization Historical Requirements Reconstruction](requirements/input-260604-input-bound-filepart-materialization.md) | input-260604 | 2026-06-04 | - |
+| [Separate Input Payload and Control Action with DB Source of Truth Historical Requirements Reconstruction](requirements/input-260615-input-control-plane-clean-migration.md) | input-260615 | 2026-06-15 | - |
+| [Separate Input Acceptance and Processing Idempotency Historical Requirements Reconstruction](requirements/input-260712-input-acceptance-and-processing-idempotency.md) | input-260712 | 2026-07-12 | - |
+| [Use a Compact Integrated Chat Composer Historical Requirements Reconstruction](requirements/integrated-260710-integrated-compact-chat-composer.md) | integrated-260710 | 2026-07-10 | - |
+| [Read Subscription Usage Through Provider Integrations Historical Requirements Reconstruction](requirements/integration-260719-integration-subscription-usage.md) | integration-260719 | 2026-07-19 | - |
+| [Slack/Discord Integration-Wide E2E Test Environment Historical Requirements Reconstruction](requirements/integrations-260411-integrations-e2e.md) | integrations-260411 | 2026-04-11 | 2026-04-11 |
+| [Workspace User Invitation Feature Historical Requirements Reconstruction](requirements/invitation-260219-invitation.md) | invitation-260219 | 2026-02-19 | 2026-02-19 |
+| [Workspace Join Request Historical Requirements Reconstruction](requirements/join-260316-join-request.md) | join-260316 | 2026-03-16 | 2026-03-16 |
+| [Add Kimi Subscription as an Integration-Scoped Provider Historical Requirements Reconstruction](requirements/kimi-260719-kimi-subscription-as-an-integration.md) | kimi-260719 | 2026-07-19 | - |
+| [Kimi Subscription Provider Historical Requirements Reconstruction](requirements/kimisubscription-260719-kimi-subscription.md) | kimisubscription-260719 | 2026-07-19 | 2026-07-19 |
+| [Render Known Tools Through Validated Frontend Adapters Historical Requirements Reconstruction](requirements/known-260720-known-tools-through-validated-frontend-adapters.md) | known-260720 | 2026-07-20 | - |
+| [Kubernetes Toolkit Historical Requirements Reconstruction](requirements/kubernetes-260327-kubernetes-toolkit.md) | kubernetes-260327 | 2026-03-27 | 2026-03-27 |
+| [Label-Based Model Targets Historical Requirements Reconstruction](requirements/label-260709-label-targets.md) | label-260709 | 2026-07-09 | - |
+| [Agent-Focused Session Layout Historical Requirements Reconstruction](requirements/layout-260626-layout.md) | layout-260626 | 2026-06-26 | 2026-06-26 |
+| [Retire Legacy Platform GitHub App Bindings Historical Requirements Reconstruction](requirements/legacy-260720-legacy-platform-github-bindings.md) | legacy-260720 | 2026-07-20 | - |
+| [kubernetes_asyncio → lightkube Migration Discussion Historical Requirements Reconstruction](requirements/lightkube-260401-lightkube-migration.md) | lightkube-260401 | 2026-04-01 | - |
+| [Agent Home kubernetes_asyncio → lightkube Migration Discussion Historical Requirements Reconstruction](requirements/lightkube-260403-lightkube-migration-home.md) | lightkube-260403 | 2026-04-03 | 2026-04-03 |
+| [Linearize Input Buffer Boundaries on the Session Row Lock Historical Requirements Reconstruction](requirements/linearize-260712-linearize-input-buffer-boundaries-on-row-lock.md) | linearize-260712 | 2026-07-12 | - |
+| [Use LiteLLM Only as the OpenAI Cost Calculator Historical Requirements Reconstruction](requirements/litellm-260716-litellm-only-as-openai-cost-calculator.md) | litellm-260716 | 2026-07-16 | - |
+| [Define Chat Live/History Handoff and Streaming Partial Batching Historical Requirements Reconstruction](requirements/live-260604-live-history-projection-handoff-and-stream-batching.md) | live-260604 | 2026-06-04 | - |
+| [Chat Live State Separates Partial History from Other Live State Historical Requirements Reconstruction](requirements/live-260610-live-partial-history-taxonomy.md) | live-260610 | 2026-06-10 | 2026-06-10 |
+| [Normalize Provider Tool Live Activity Across Model Adapters Historical Requirements Reconstruction](requirements/live-260716-live-activity.md) | live-260716 | 2026-07-16 | - |
+| [LLM Provider Integration Historical Requirements Reconstruction](requirements/llm-260221-llm-integration.md) | llm-260221 | 2026-02-21 | 2026-03-15 |
+| [LLM Event Storage/Reconstruction Redesign Historical Requirements Reconstruction](requirements/llm-260304-llm-event-redesign.md) | llm-260304 | 2026-03-04 | 2026-03-11 |
+| [Full-stack Local Test Environment — Stage 2 (LLM Pipeline) Historical Requirements Reconstruction](requirements/llm-260408-llm-pipeline.md) | llm-260408 | 2026-04-08 | 2026-04-08 |
+| [Move LLM Model Catalog to External Sources and Local Overrides Historical Requirements Reconstruction](requirements/llm-260513-llm-catalog-source.md) | llm-260513 | 2026-05-13 | - |
+| [Full-Stack Local Test Environment — Discussion Record Historical Requirements Reconstruction](requirements/local-260406-local-fullstack-test-env.md) | local-260406 | 2026-04-06 | 2026-04-06 |
+| [MCP Toolkit Historical Requirements Reconstruction](requirements/mcp-260228-mcp-toolkit.md) | mcp-260228 | 2026-02-28 | 2026-03-12 |
+| [MCP Egress Proxy Historical Requirements Reconstruction](requirements/mcp-260319-mcp-egress-proxy.md) | mcp-260319 | 2026-03-19 | 2026-03-19 |
+| [Agent Home Sidecar Discussion (MCP stdio + File ops) Historical Requirements Reconstruction](requirements/mcp-260325-mcp-stdio-sidecar.md) | mcp-260325 | 2026-03-25 | 2026-03-25 |
+| [Move Memory Storage from Filesystem to PostgreSQL Historical Requirements Reconstruction](requirements/memory-260426-memory-filesystem-to-db.md) | memory-260426 | 2026-04-26 | 2026-04-26 |
+| [Message Queueing — User Message Injection During Run Historical Requirements Reconstruction](requirements/message-260305-message-queueing.md) | message-260305 | 2026-03-05 | 2026-03-11 |
+| [Display Inference Provenance from User Message Metadata Historical Requirements Reconstruction](requirements/message-260710-message-profile-provenance-display.md) | message-260710 | 2026-07-10 | - |
+| [Resolve User Message Profiles During Buffer Preparation Historical Requirements Reconstruction](requirements/message-260712-message-profile-during-buffer-preparation.md) | message-260712 | 2026-07-12 | - |
+| [Deliver the OpenAI HTTP Migration as One Revertible Change Historical Requirements Reconstruction](requirements/migration-260716-openai-http-migration-as-revertible-change.md) | migration-260716 | 2026-07-16 | - |
+| [Legacy Snapshot Identifier Migration Requirements](requirements/migration-260721-legacy-snapshot-identifier-migration.md) | migration-260721 | 2026-07-21 | 2026-07-21 |
+| [Multi-Active AgentSession Migration Overview Historical Requirements Reconstruction](requirements/multi-260625-multi-active-sessions-overview.md) | multi-260625 | 2026-06-25 | - |
+| [Multi-Worktree Registration Historical Requirements Reconstruction](requirements/multi-260704-multi-worktree-registration.md) | multi-260704 | 2026-07-04 | 2026-07-04 |
+| [Agent-Centric Navigation Redesign Discussion Historical Requirements Reconstruction](requirements/nav-260420-nav.md) | nav-260420 | 2026-04-20 | 2026-04-21 |
+| [Agent-Focused Navigation Information Architecture Historical Requirements Reconstruction](requirements/navigation-260626-navigation-ia.md) | navigation-260626 | 2026-06-26 | - |
+| [New Session Project Selection Historical Requirements Reconstruction](requirements/new-260629-new-selection.md) | new-260629 | 2026-06-29 | - |
+| [New Session Mixed Workspace Selection Historical Requirements Reconstruction](requirements/new-260705-new-mixed-selection.md) | new-260705 | 2026-07-05 | - |
+| [nointern-web System Historical Requirements Reconstruction](requirements/nointern-260216-nointern-web.md) | nointern-260216 | 2026-02-16 | 2026-02-16 |
+| [nointern Discord Integration Historical Requirements Reconstruction](requirements/nointern-260310-nointern-discord-integration.md) | nointern-260310 | 2026-03-10 | 2026-03-23 |
+| [Notion Toolkit Historical Requirements Reconstruction](requirements/notion-260321-notion-toolkit.md) | notion-260321 | 2026-03-21 | 2026-03-21 |
+| [AuthorizationRequestEvent OAuth URL → Web App Setup Page Migration Historical Requirements Reconstruction](requirements/oauth-260327-discord-oauth-button-url-fix.md) | oauth-260327 | 2026-03-27 | 2026-03-27 |
+| [xAI Grok OAuth Provider Historical Requirements Reconstruction](requirements/oauth-260710-xai-oauth.md) | oauth-260710 | 2026-07-10 | - |
+| [Use Official OpenAI SDK Native Stream Events Historical Requirements Reconstruction](requirements/official-260716-official-openai-sdk-stream-events.md) | official-260716 | 2026-07-16 | - |
+| [Open Source CI Policy Historical Requirements Reconstruction](requirements/open-260623-open-source-ci-policy.md) | open-260623 | 2026-06-23 | - |
+| [Use an OpenAI-Native Responses Transport Family Historical Requirements Reconstruction](requirements/openai-260716-openai-responses-transport-family.md) | openai-260716 | 2026-07-16 | - |
+| [OpenAI Responses WebSocket Transport Historical Requirements Reconstruction](requirements/openai-260717-openai-responses-websocket-transport.md) | openai-260717 | 2026-07-17 | 2026-07-17 |
+| [Add OpenRouter as an Integration-Scoped LLM Provider Historical Requirements Reconstruction](requirements/openrouter-260719-openrouter-as-an-integration-llm.md) | openrouter-260719 | 2026-07-19 | - |
+| [Session-Scoped Runner Operation Concurrency Historical Requirements Reconstruction](requirements/operation-260710-runner-operation-concurrency.md) | operation-260710 | 2026-07-10 | 2026-07-10 |
+| [OSS Admin Surface Authentication and Bootstrap Historical Requirements Reconstruction](requirements/oss-260713-oss-admin-surface-auth-and-bootstrap.md) | oss-260713 | 2026-07-13 | 2026-07-13 |
+| [Tool Output Truncation — Engine-level Output Limit and File Tools Historical Requirements Reconstruction](requirements/output-260306-output-truncation.md) | output-260306 | 2026-03-06 | 2026-03-23 |
+| [Adopt Tool Output Context-pressure Filter Historical Requirements Reconstruction](requirements/output-260604-output-context-pressure-filter.md) | output-260604 | 2026-06-04 | 2026-06-04 |
+| [Cut Over OpenAI-Compatible HTTP Paths Atomically Historical Requirements Reconstruction](requirements/over-260716-over-openai-http-paths-atomically.md) | over-260716 | 2026-07-16 | - |
+| [Subagent Model Override Policy Historical Requirements Reconstruction](requirements/override-260717-subagent-override-policy.md) | override-260717 | 2026-07-17 | 2026-07-17 |
+| [Remove AgentSession Runtime Ownership Historical Requirements Reconstruction](requirements/ownership-260625-ownership-removal.md) | ownership-260625 | 2026-06-25 | - |
+| [GitHub Per-User PAT Authentication Historical Requirements Reconstruction](requirements/pat-260321-pat.md) | pat-260321 | 2026-03-21 | 2026-03-21 |
+| [Select Provider-Specific Tool Dialects for Apply-Patch Historical Requirements Reconstruction](requirements/patch-260721-patch-dialects.md) | patch-260721 | 2026-07-21 | - |
+| [Keep Pending Buffer Deletion State-Neutral Historical Requirements Reconstruction](requirements/pending-260712-pending-buffer-deletion-neutral.md) | pending-260712 | 2026-07-12 | - |
+| [Periodic Execution Infrastructure Historical Requirements Reconstruction](requirements/periodic-260620-periodic-execution-infrastructure.md) | periodic-260620 | 2026-06-20 | - |
+| [Persist Inference Provenance on Turn Usage Markers Historical Requirements Reconstruction](requirements/persist-260712-persist-turn-usage-inference-provenance.md) | persist-260712 | 2026-07-12 | - |
+| [Phase 1 — Separate Activity Tracking and Introduce Lifecycle Hook Interface Discussion Historical Requirements Reconstruction](requirements/phase1-260416-phase1-activity-tracking-lifecycle-hooks.md) | phase1-260416 | 2026-04-16 | - |
+| [Phase 2 — Durable Lifecycle Workflow + Lease Token Discussion Historical Requirements Reconstruction](requirements/phase2-260416-phase2-lifecycle-workflow.md) | phase2-260416 | 2026-04-16 | - |
+| [Phase 3 — Agent Home Snapshot Hibernation Discussion Historical Requirements Reconstruction](requirements/phase3-260418-phase3-snapshot-hibernation.md) | phase3-260418 | 2026-04-18 | - |
+| [Use Polymorphic Input Buffer Processors Historical Requirements Reconstruction](requirements/polymorphic-260712-polymorphic-input-buffer-processors.md) | polymorphic-260712 | 2026-07-12 | - |
+| [Make PostgreSQL Authoritative for Tool Call Ownership Historical Requirements Reconstruction](requirements/postgresql-260712-postgresql-authoritative-for-call-ownership.md) | postgresql-260712 | 2026-07-12 | - |
+| [Precreate the Inherited First Subagent Run Historical Requirements Reconstruction](requirements/precreate-260710-precreate-inherited-subagent.md) | precreate-260710 | 2026-07-10 | - |
+| [User Stop Uses Preemptive Interrupt and REST Control Boundary Historical Requirements Reconstruction](requirements/preemptive-260607-preemptive-stop.md) | preemptive-260607 | 2026-06-07 | 2026-07-12 |
+| [Primary Agent Sessions and Team-First Multi-Session UX Historical Requirements Reconstruction](requirements/primary-260625-primary-sessions.md) | primary-260625 | 2026-06-25 | - |
+| [Agent Profile Image Historical Requirements Reconstruction](requirements/profile-260421-profile-image.md) | profile-260421 | 2026-04-21 | 2026-04-21 |
+| [Reuse the Active Run Profile for Matching Inputs Historical Requirements Reconstruction](requirements/profile-260710-profile-matching-join-policy.md) | profile-260710 | 2026-07-10 | - |
+| [Session Workspace Project Contract Historical Requirements Reconstruction](requirements/projects-260509-projects.md) | projects-260509 | 2026-05-09 | 2026-05-09 |
+| [System Prompt Context Inspector Preserves Pre-assembly Fragment Metadata Historical Requirements Reconstruction](requirements/prompt-260611-prompt-context-inspector.md) | prompt-260611 | 2026-06-11 | - |
+| [Per-Prompt Models Form FIFO Run Boundaries Historical Requirements Reconstruction](requirements/prompt-260710-prompt-fifo-boundaries.md) | prompt-260710 | 2026-07-10 | - |
 | [Latest Session System Prompt Requirements](requirements/prompt-260721-latest-session-system-prompt.md) | prompt-260721 | 2026-07-21 | 2026-07-21 |
+| [Per-Prompt Inference Profile Historical Requirements Reconstruction](requirements/promptinferenceprofile-260710-prompt-inference-profile.md) | promptinferenceprofile-260710 | 2026-07-10 | 2026-07-10 |
+| [Persist Requested and Resolved AgentRun Provenance Historical Requirements Reconstruction](requirements/provenance-260710-inference-provenance.md) | provenance-260710 | 2026-07-10 | - |
+| [Use an Explicit Nested Inference Profile Request Historical Requirements Reconstruction](requirements/public-260710-public-inference-profile-request-contract.md) | public-260710 | 2026-07-10 | - |
+| [Pyright Configuration Review Historical Requirements Reconstruction](requirements/pyright-260310-pyright-config.md) | pyright-260310 | 2026-03-10 | 2026-03-10 |
+| [Memory Redesign: Filesystem → DB + Tool Call Historical Requirements Reconstruction](requirements/redesign-260426-memory-redesign-2026.md) | redesign-260426 | 2026-04-26 | 2026-04-26 |
+| [Re-Execution Preserves Model Target Intent Historical Requirements Reconstruction](requirements/reexecution-260710-reexecution-target-intent.md) | reexecution-260710 | 2026-07-10 | - |
+| [Register Project Picker Worktree UI Historical Requirements Reconstruction](requirements/register-260706-register-picker-worktree-ui.md) | register-260706 | 2026-07-06 | - |
+| [Remove Project Registration Requests Historical Requirements Reconstruction](requirements/registration-260707-registration-requests.md) | registration-260707 | 2026-07-07 | 2026-07-07 |
+| [Session-Owned Project Registry Historical Requirements Reconstruction](requirements/registry-260625-registry.md) | registry-260625 | 2026-06-25 | - |
+| [Require Explicit Responses Stream Completion Historical Requirements Reconstruction](requirements/responses-260715-responses-stream-completion.md) | responses-260715 | 2026-07-15 | - |
+| [Define the OpenAI Responses WebSocket Lifecycle Historical Requirements Reconstruction](requirements/responses-260716-openai-responses-websocket-lifecycle.md) | responses-260716 | 2026-07-16 | - |
+| [Chat Writes Use REST Commit Boundary Historical Requirements Reconstruction](requirements/rest-260605-rest-chat-write-boundary.md) | rest-260605 | 2026-06-05 | - |
+| [Session-Owned REST Write Idempotency Historical Requirements Reconstruction](requirements/rest-260625-rest-write-idempotency.md) | rest-260625 | 2026-06-25 | - |
+| [Claude Rules Loader Historical Requirements Reconstruction](requirements/rules-260702-claude-rules-loader.md) | rules-260702 | 2026-07-02 | 2026-07-02 |
+| [Session-Scoped Runner Operation Concurrency Historical Requirements Reconstruction](requirements/runner-260710-runner-operation-concurrency.md) | runner-260710 | 2026-07-10 | - |
+| [Agent Sandbox Historical Requirements Reconstruction](requirements/sandbox-260225-sandbox.md) | sandbox-260225 | 2026-02-25 | 2026-03-23 |
+| [sandbox-daemon Sidecar Separation + kube API Exec Integration Historical Requirements Reconstruction](requirements/sandbox-260403-sandbox-daemon-sidecar.md) | sandbox-260403 | 2026-04-03 | 2026-04-03 |
+| [Sandbox Runtime Profile Abstraction Discussion Historical Requirements Reconstruction](requirements/sandbox-260419-sandbox-profile.md) | sandbox-260419 | 2026-04-19 | - |
+| [Generalized Sandbox Credential Injection — First Application with EnvVarToolkit Historical Requirements Reconstruction](requirements/sandbox-260421-sandbox-credential-injection-2026.md) | sandbox-260421 | 2026-04-21 | 2026-04-24 |
+| [Move Sandbox Scope from Agent to Session Historical Requirements Reconstruction](requirements/sandbox-260424-sandbox.md) | sandbox-260424 | 2026-04-24 | 2026-04-24 |
+| [Adopt Agent-Centric Raw Sessions and Optional Dedicated Sandboxes Historical Requirements Reconstruction](requirements/sandbox-260503-sandbox.md) | sandbox-260503 | 2026-05-03 | 2026-05-03 |
+| [Adopt AgentRuntime-Based Sandbox Control Channel Historical Requirements Reconstruction](requirements/sandbox-260506-sandbox-control-channel.md) | sandbox-260506 | 2026-05-06 | 2026-05-06 |
+| [Introduce SandboxProviderControl Historical Requirements Reconstruction](requirements/sandbox-260521-sandbox-control.md) | sandbox-260521 | 2026-05-21 | 2026-05-08 |
+| [Simplify Sandbox Provider Routing Historical Requirements Reconstruction](requirements/sandbox-260522-sandbox-routing-simplification.md) | sandbox-260522 | 2026-05-22 | - |
+| [Sandbox Restore Retry and Explicit Reset Historical Requirements Reconstruction](requirements/sandbox-260524-sandbox-restore.md) | sandbox-260524 | 2026-05-24 | - |
+| [Sandbox System Redesign Historical Requirements Reconstruction](requirements/sandbox-260525-sandbox-redesign.md) | sandbox-260525 | 2026-05-25 | - |
+| [Scheduled Tasks Discussion Historical Requirements Reconstruction](requirements/scheduled-260331-scheduled-tasks.md) | scheduled-260331 | 2026-03-31 | - |
+| [Use Default OpenAI SDK HTTP Retries Historical Requirements Reconstruction](requirements/sdk-260716-openai-sdk-http-retries.md) | sdk-260716 | 2026-07-16 | - |
+| [Tool Search and a Bounded Model-Visible Tool Working Set Historical Requirements Reconstruction](requirements/search-260717-search-bounded-working-set.md) | search-260717 | 2026-07-17 | - |
+| [Reset the Tool Search Working Set on Successful Compaction Historical Requirements Reconstruction](requirements/search-260720-search-working-set-on-compaction.md) | search-260720 | 2026-07-20 | - |
+| [Enable Tool Search by Default for New Agents Historical Requirements Reconstruction](requirements/search-260721-search-by.md) | search-260721 | 2026-07-21 | - |
+| [Full-stack Local Test Environment — Stage 1c (Test Data Seed Helpers) Historical Requirements Reconstruction](requirements/seed-260407-seed-helpers.md) | seed-260407 | 2026-04-07 | 2026-04-07 |
+| [Model-Scoped Selectable Model Settings Historical Requirements Reconstruction](requirements/selectable-260716-selectable-settings.md) | selectable-260716 | 2026-07-16 | - |
+| [Agent Model Selection Stores Catalog Snapshot Directly Without ModelConfig Historical Requirements Reconstruction](requirements/selection-260616-selection-snapshot.md) | selection-260616 | 2026-06-16 | - |
+| [Agent Model Selection Options Historical Requirements Reconstruction](requirements/selection-260709-selection-options.md) | selection-260709 | 2026-07-09 | 2026-07-09 |
+| [Expose Default as a Reasoning Effort Selection Historical Requirements Reconstruction](requirements/selection-260710-reasoning-effort-selection.md) | selection-260710 | 2026-07-10 | - |
+| [Normalize Provider Tool Semantic Transcript Content Historical Requirements Reconstruction](requirements/semantic-260718-semantic-transcript.md) | semantic-260718 | 2026-07-18 | - |
+| [Sentry Toolkit — access_token Mode (stdio via mcp-proxy) Historical Requirements Reconstruction](requirements/sentry-260327-sentry-toolkit-stdio.md) | sentry-260327 | 2026-03-27 | 2026-03-27 |
+| [Sequential Input Buffer Preparation Historical Requirements Reconstruction](requirements/sequential-260712-sequential-input-buffer-preparation.md) | sequential-260712 | 2026-07-12 | 2026-07-12 |
+| [Server-Side Session ID Generation Historical Requirements Reconstruction](requirements/server-260311-server-side.md) | server-260311 | 2026-03-11 | 2026-03-11 |
+| [Service Toolkit Design Discussion Historical Requirements Reconstruction](requirements/service-260311-service-toolkit.md) | service-260311 | 2026-03-11 | - |
+| [Agent Settings Pages and Memory UI Historical Requirements Reconstruction](requirements/settings-260702-settings-pages-and-memory-ui.md) | settings-260702 | 2026-07-02 | - |
+| [Model-Scoped Selectable Model Settings Historical Requirements Reconstruction](requirements/settings-260716-selectable-settings.md) | settings-260716 | 2026-07-16 | - |
+| [Model Unread Run Results as Session-Shared State Historical Requirements Reconstruction](requirements/shared-260720-shared-unread-result.md) | shared-260720 | 2026-07-20 | - |
+| [ShellEnvironment Historical Requirements Reconstruction](requirements/shell-260315-shell-environment.md) | shell-260315 | 2026-03-15 | 2026-03-23 |
+| [New signup is controlled by email-bound signup token redeem Historical Requirements Reconstruction](requirements/signup-260617-signup-token-registration.md) | signup-260617 | 2026-06-17 | 2026-06-17 |
+| [Simplified File Lifecycle Policy Historical Requirements Reconstruction](requirements/simplified-260627-simplified-file-lifecycle-policy.md) | simplified-260627 | 2026-06-27 | - |
+| [Treat Skill Actions as Model-Producing Preparation Historical Requirements Reconstruction](requirements/skill-260712-skill-actions-as-producing-preparation.md) | skill-260712 | 2026-07-12 | - |
+| [nointern Slack Integration Historical Requirements Reconstruction](requirements/slack-260310-nointern-slack-integration.md) | slack-260310 | 2026-03-10 | 2026-03-10 |
+| [Slack Toolkit Historical Requirements Reconstruction](requirements/slack-260312-slack-toolkit.md) | slack-260312 | 2026-03-12 | 2026-03-23 |
+| [Slack BYOA Discussion — Discussion Points and Decisions Historical Requirements Reconstruction](requirements/slack-260414-slack-byoa.md) | slack-260414 | 2026-04-14 | 2026-04-12 |
+| [Stage 4 (browser/web QA) Historical Requirements Reconstruction](requirements/stage4-260410-stage4-web.md) | stage4-260410 | 2026-04-10 | 2026-04-10 |
+| [Use Standard Responses for ChatGPT OAuth Historical Requirements Reconstruction](requirements/standard-260716-standard-responses-for-chatgpt-oauth.md) | standard-260716 | 2026-07-16 | - |
+| [stdio MCP Infrastructure + Google Analytics Toolkit Integration Historical Requirements Reconstruction](requirements/stdio-260326-stdio-mcp-ga4-integration.md) | stdio-260326 | 2026-03-26 | 2026-03-26 |
+| [stdio MCP Resolve Flow Integration Historical Requirements Reconstruction](requirements/stdio-260328-stdio-mcp-integration.md) | stdio-260328 | 2026-03-28 | 2026-03-28 |
+| [Bound Model Streams by Parsed-Event Idle and Absolute Attempt Time Historical Requirements Reconstruction](requirements/stream-260715-stream-parsed-event-idle-and-attempt-bounds.md) | stream-260715 | 2026-07-15 | - |
+| [Streaming Responsibility Migration — From Handler to Worker Historical Requirements Reconstruction](requirements/streaming-260314-streaming-responsibility-migration.md) | streaming-260314 | 2026-03-14 | 2026-03-23 |
+| [Subagent Historical Requirements Reconstruction](requirements/subagent-260306-subagent.md) | subagent-260306 | 2026-03-06 | 2026-04-13 |
+| [Subagent Toolkit/Model Inherit Historical Requirements Reconstruction](requirements/subagent-260424-subagent-inherit-2026.md) | subagent-260424 | 2026-04-24 | 2026-04-24 |
+| [Subagent Removal Historical Requirements Reconstruction](requirements/subagent-260706-subagent-removal-2026.md) | subagent-260706 | 2026-07-06 | - |
+| [Subagent Human Write Boundary Historical Requirements Reconstruction](requirements/subagent-260709-subagent-human-write-boundary.md) | subagent-260709 | 2026-07-09 | - |
+| [Subagents Inherit the Parent Run Profile Historical Requirements Reconstruction](requirements/subagent-260710-subagent-parent-profile-inheritance.md) | subagent-260710 | 2026-07-10 | - |
+| [Allow Explicit Inference Profiles When Spawning Subagents Historical Requirements Reconstruction](requirements/subagent-260711-subagent-spawn-inference-profile-overrides.md) | subagent-260711 | 2026-07-11 | - |
+| [Model-Scoped Subagent Override Policy Historical Requirements Reconstruction](requirements/subagent-260717-subagent-override-policy.md) | subagent-260717 | 2026-07-17 | - |
+| [Project Subscription Usage from the Selected Composer Model Historical Requirements Reconstruction](requirements/subscription-260719-subscription-usage-from.md) | subscription-260719 | 2026-07-19 | 2026-07-19 |
+| [Keep Agent Main Model as the Default Target Historical Requirements Reconstruction](requirements/target-260710-target-role.md) | target-260710 | 2026-07-10 | - |
+| [Team CRUD Document Historical Requirements Reconstruction](requirements/team-260212-team-crud.md) | team-260212 | 2026-02-12 | 2026-02-12 |
+| [TeamMember CRUD Document Historical Requirements Reconstruction](requirements/team-260213-team-member-crud.md) | team-260213 | 2026-02-13 | 2026-02-14 |
+| [Agent-Team Home Historical Requirements Reconstruction](requirements/team-260421-team-home-2026.md) | team-260421 | 2026-04-21 | 2026-04-21 |
+| [Remove Workspace Team Concept Historical Requirements Reconstruction](requirements/team-260622-team-concept.md) | team-260622 | 2026-06-22 | - |
+| [Correlate Terminal Run Events by Run ID Historical Requirements Reconstruction](requirements/terminal-260712-terminal-events.md) | terminal-260712 | 2026-07-12 | - |
+| [Split testenv Setup Scenarios and Inject INDEX — Discussion Record Historical Requirements Reconstruction](requirements/testenv-260411-testenv-setup-scenarios.md) | testenv-260411 | 2026-04-11 | - |
+| [testenv Recipes Structure Historical Requirements Reconstruction](requirements/testenv-260412-testenv-recipes.md) | testenv-260412 | 2026-04-12 | 2026-04-12 |
+| [testenv Framework Redesign — Discussion Record Historical Requirements Reconstruction](requirements/testenv-260414-testenv-runner-redesign.md) | testenv-260414 | 2026-04-14 | 2026-04-14 |
+| [Testenv Devtools Extension — Upgrade TC-LCY-002/003/004 to Live Historical Requirements Reconstruction](requirements/testenv-260416-testenv-devtools-live-upgrade.md) | testenv-260416 | 2026-04-16 | 2026-04-16 |
+| [Adopt testenv QA Fixture-First Architecture Historical Requirements Reconstruction](requirements/testenv-260512-testenv-qa-fixtures.md) | testenv-260512 | 2026-05-12 | - |
+| [Resolve Prompt Model Targets at Run Time Historical Requirements Reconstruction](requirements/time-260710-time-target-resolution.md) | time-260710 | 2026-07-10 | - |
+| [Expose Session Todo State through Toolkit State and Chat Live State Historical Requirements Reconstruction](requirements/todo-260613-todo-toolkit-ui.md) | todo-260613 | 2026-06-13 | - |
+| [Token Usage Storage Historical Requirements Reconstruction](requirements/token-260305-token-usage.md) | token-260305 | 2026-03-05 | 2026-04-21 |
+| [Toolkit Assignment Historical Requirements Reconstruction](requirements/toolkit-260225-toolkit-assignment.md) | toolkit-260225 | 2026-02-25 | 2026-03-23 |
+| [Sentry Toolkit Historical Requirements Reconstruction](requirements/toolkit-260327-sentry-toolkit.md) | toolkit-260327 | 2026-03-27 | 2026-03-27 |
+| [Adopt Toolkit Hooks and Toolkit State Historical Requirements Reconstruction](requirements/toolkit-260514-toolkit-hooks-for-agents-md.md) | toolkit-260514 | 2026-05-14 | 2026-05-17 |
+| [Manage Toolkit Lifecycle by AgentSession Lifecycle Historical Requirements Reconstruction](requirements/toolkit-260529-toolkit-lifecycle.md) | toolkit-260529 | 2026-05-29 | - |
+| [Split TodoToolkit as Always-on Toolkit Historical Requirements Reconstruction](requirements/toolkit-260613-todo-toolkit-always-on.md) | toolkit-260613 | 2026-06-13 | - |
+| [Replace MCP Per-User OAuth with Toolkit-Level OAuth Connections Historical Requirements Reconstruction](requirements/toolkit-260623-toolkit-level-mcp-oauth.md) | toolkit-260623 | 2026-06-23 | - |
+| [Continue FIFO Processing After Failed TurnActions Historical Requirements Reconstruction](requirements/turn-260708-turn-action-fifo-continuation.md) | turn-260708 | 2026-07-08 | - |
+| [Expose Typed Actionable Profile Resolution Failures Historical Requirements Reconstruction](requirements/typed-260710-typed-profile-resolution-failures.md) | typed-260710 | 2026-07-10 | - |
+| [Unified OAuth Authentication Flow Historical Requirements Reconstruction](requirements/unified-260327-unified-oauth.md) | unified-260327 | 2026-03-27 | 2026-03-27 |
+| [Unify Subagent Communication Through Mailbox Activity Historical Requirements Reconstruction](requirements/unify-260719-unify-subagent-communication-through-mailbox-activity.md) | unify-260719 | 2026-07-19 | - |
+| [Suppress Unread Indicators While Sessions Run Historical Requirements Reconstruction](requirements/unread-260721-unread-indicators-while-sessions.md) | unread-260721 | 2026-07-21 | - |
+| [Usage-based Auto Compaction and Removal of Tool Output Omit Historical Requirements Reconstruction](requirements/usage-260612-usage-auto-compaction.md) | usage-260612 | 2026-06-12 | - |
+| [Persist the Session Last-Used Inference Profile Historical Requirements Reconstruction](requirements/used-260710-used-inference-profile.md) | used-260710 | 2026-07-10 | - |
+| [Session Web Viewer Discussion — View Discord/Slack Sessions in Web UI Historical Requirements Reconstruction](requirements/web-260416-web-viewer.md) | web-260416 | 2026-04-16 | 2026-04-16 |
+| [Explicit AgentSession Write Target Historical Requirements Reconstruction](requirements/write-260625-write-target.md) | write-260625 | 2026-06-25 | - |
+| [xAI API Key Provider Historical Requirements Reconstruction](requirements/xai-260710-xai-api-key.md) | xai-260710 | 2026-07-10 | 2026-07-10 |
 
 ## Architecture Decision Records (ADR)
 
-- [ADR-0001: Move Sandbox Scope from Agent to Session](adr/0001-per-session-sandbox.md)
-- [ADR-0002: Move Memory Storage from Filesystem to PostgreSQL](adr/0002-memory-filesystem-to-db.md)
-- [ADR-0003: Make the events Table the Single Source of Truth and Remove session_items_oai](adr/0003-events-table-as-single-truth.md)
-- [ADR-0004: Split FunctionCallItem.output into a Separate FunctionCallOutputItem](adr/0004-split-function-call-output-item.md)
-- [ADR-0005: Add Session Sandbox Workspace Browser API](adr/0005-workspace-browser-api.md)
-- [ADR-0006: Adopt Agent-Centric Raw Sessions and Optional Dedicated Sandboxes](adr/0006-agent-centric-session-sandbox.md)
-- [ADR-0007: Adopt Agent File Exchange Storage Separate from Sandbox Workspace](adr/0007-agent-file-exchange-storage.md)
-- [ADR-0008: Adopt AgentRuntime-Based Sandbox Control Channel](adr/0008-agent-runtime-sandbox-control-channel.md)
-- [ADR-0009: Agent-Centric Navigation Redesign Discussion](adr/0009-agent-centric-nav.md)
-- [ADR-0010: Background Tool Call Design Discussion](adr/0010-background-tool-call.md)
-- [ADR-0011: Built-in Tool Support Discussion](adr/0011-builtin-tools.md)
-- [ADR-0012: Declarative Improvements for Async Toolkit Loading State](adr/0012-declarative-toolkit-status.md)
-- [ADR-0013: Dynamic Tool Management — Toolkit State Machine](adr/0013-dynamic-tools.md)
-- [ADR-0014: gVisor + BYOC Sandbox Discussion](adr/0014-gvisor-byoc-sandbox.md)
-- [ADR-0015: Agent Home kubernetes_asyncio → lightkube Migration Discussion](adr/0015-lightkube-migration-agent-home.md)
-- [ADR-0016: kubernetes_asyncio → lightkube Migration Discussion](adr/0016-lightkube-migration.md)
-- [ADR-0017: Full-Stack Local Test Environment — Discussion Record](adr/0017-local-fullstack-test-env.md)
-- [ADR-0018: Agent Home Sidecar Discussion (MCP stdio + File ops)](adr/0018-mcp-stdio-sidecar.md)
-- [ADR-0019: Phase 1 — Separate Activity Tracking and Introduce Lifecycle Hook Interface Discussion](adr/0019-phase1-activity-tracking-lifecycle-hooks.md)
-- [ADR-0020: Phase 2 — Durable Lifecycle Workflow + Lease Token Discussion](adr/0020-phase2-durable-lifecycle-workflow.md)
-- [ADR-0021: Phase 3 — Agent Home Snapshot Hibernation Discussion](adr/0021-phase3-snapshot-hibernation.md)
-- [ADR-0022: Sandbox Runtime Profile Abstraction Discussion](adr/0022-sandbox-runtime-profile.md)
-- [ADR-0023: Scheduled Tasks Discussion](adr/0023-scheduled-tasks.md)
-- [ADR-0024: Service Toolkit Design Discussion](adr/0024-service-toolkit.md)
-- [ADR-0025: Session Web Viewer Discussion — View Discord/Slack Sessions in Web UI](adr/0025-session-web-viewer.md)
-- [ADR-0026: Slack BYOA Discussion — Discussion Points and Decisions](adr/0026-slack-byoa.md)
-- [ADR-0027: testenv Framework Redesign — Discussion Record](adr/0027-testenv-runner-redesign.md)
-- [ADR-0028: Split testenv Setup Scenarios and Inject INDEX — Discussion Record](adr/0028-testenv-setup-scenarios.md)
-- [ADR-0029: Remove Dormant stdio MCP Sidecar](adr/0029-drop-dormant-stdio-mcp-sidecar.md)
-- [ADR-0029: Adopt testenv QA Fixture-First Architecture](adr/0029-testenv-qa-fixtures.md)
-- [ADR-0030: Move LLM Model Catalog to External Sources and Local Overrides](adr/0030-llm-model-catalog-source.md)
-- [ADR-0031: Move Agent Model Selection to Dynamic ModelConfig Structure](adr/0031-dynamic-llm-model-configs.md)
-- [ADR-0032: Adopt Toolkit Hooks and Toolkit State](adr/0032-toolkit-hooks-for-agents-md.md)
-- [ADR-0033: Adopt Runtime Hook System](adr/0033-runtime-hook-system.md)
-- [ADR-0034: Split Chat Input Buffer into Separate RDB Table](adr/0034-chat-input-buffer.md)
-- [ADR-0035: Introduce SandboxProviderControl](adr/0035-sandbox-provider-control.md)
-- [ADR-0036: Simplify Sandbox Provider Routing](adr/0036-sandbox-provider-routing-simplification.md)
-- [ADR-0037: Introduce system Docker Sandbox Provider](adr/0037-system-docker-sandbox-provider.md)
-- [ADR-0038: Sandbox System Redesign](adr/0038-sandbox-system-redesign.md)
-- [ADR-0039: Agent Execution Transcript Normalization](adr/0039-agent-execution-transcript-normalization.md)
-- [ADR-0040: Manage Toolkit Lifecycle by AgentSession Lifecycle](adr/0040-session-scoped-toolkit-lifecycle.md)
-- [ADR-0041: Session Context Inspector](adr/0041-session-context-inspector.md)
-- [ADR-0042: Reorder Model Input by Logical Event Order After Compaction](adr/0042-compaction-logical-event-ordering.md)
-- [ADR-0043: Generate Compaction Summary as Codex-like Handoff Checkpoint](adr/0043-codex-like-compaction-checkpoints.md)
-- [ADR-0044: Use Handoff Resume Wrapper When Injecting Compaction Summary](adr/0044-compaction-summary-injection-wrapper.md)
-- [ADR-0045: Agent-scoped Exchange Uploads](adr/0045-agent-scoped-exchange-uploads.md)
-- [ADR-0046: Attachment, Artifact, and FilePart lifecycle](adr/0046-file-media-resource-lifecycle.md)
-- [ADR-0047: Chat Protocol Uses Canonical Event History/Live API](adr/0047-chat-protocol-history-live-state.md)
-- [ADR-0048: Adopt Tool Output Context-pressure Filter](adr/0048-tool-output-context-pressure-filter.md)
-- [ADR-0049: User Input Boundary FilePart Materialization](adr/0049-user-input-bound-filepart-materialization.md)
-- [ADR-0050: Define Chat Live/History Handoff and Streaming Partial Batching](adr/0050-live-history-projection-handoff-and-stream-batching.md)
-- [ADR-0051: Chat Writes Use REST Commit Boundary](adr/0051-rest-chat-write-boundary.md)
-- [ADR-0052: User Stop Uses Preemptive Interrupt and REST Control Boundary](adr/0052-preemptive-user-stop.md)
-- [ADR-0053: Chat Session Resync Converges to History/Live State After Subscribe Ack](adr/0053-chat-session-resync-scroll-state.md)
-- [ADR-0054: Chat Live State Separates Partial History from Other Live State](adr/0054-live-state-partial-history-taxonomy.md)
-- [ADR-0055: System Prompt Context Inspector Preserves Pre-assembly Fragment Metadata](adr/0055-system-prompt-context-inspector.md)
-- [ADR-0056: Usage-based Auto Compaction and Removal of Tool Output Omit](adr/0056-usage-based-auto-compaction.md)
-- [ADR-0057: Adopt Event / Native Event Terminology](adr/0057-event-native-event-terminology.md)
-- [ADR-0058: Expose Session Todo State through Toolkit State and Chat Live State](adr/0058-session-todo-toolkit-state-ui.md)
-- [ADR-0059: Split TodoToolkit as Always-on Toolkit](adr/0059-todo-toolkit-always-on-split.md)
-- [ADR-0060: Goal Pursuing Is Owned at Session Scope](adr/0060-session-scoped-goal-pursuing.md)
-- [ADR-0061: Separate Input Payload and Control Action with DB Source of Truth](adr/0061-input-control-plane-clean-migration.md)
-- [ADR-0062: Goal Continuation Uses Idle Hook and Input Buffer](adr/0062-goal-continuation-idle-hook.md)
-- [ADR-0063: Agent Model Selection Stores Catalog Snapshot Directly Without ModelConfig](adr/0063-agent-model-selection-snapshot.md)
-- [ADR-0064: Provider-hosted web search runs through normalized capability and Agent opt-in](adr/0064-provider-hosted-web-search.md)
-- [ADR-0065: New signup is controlled by email-bound signup token redeem](adr/0065-signup-token-registration.md)
-- [ADR-0066: Introduce credential provider model and admin password reset token](adr/0066-credential-provider-and-admin-password-reset.md)
-- [ADR-0067: Model Catalog Projection and Sync](adr/0067-model-catalog-projection-sync.md)
-- [ADR-0068: Periodic Execution Infrastructure](adr/0068-periodic-execution-infrastructure.md)
-- [ADR-0069: GitHub Toolkit Multi-Installation Routing](adr/0069-github-toolkit-multi-installation.md)
-- [ADR-0070: Remove Workspace Team Concept](adr/0070-remove-workspace-team-concept.md)
-- [ADR-0071: Replace MCP Per-User OAuth with Toolkit-Level OAuth Connections](adr/0071-toolkit-level-mcp-oauth.md)
-- [ADR-0072: Release and Snapshot Artifact Policy](adr/0072-release-and-snapshot-artifact-policy.md)
-- [ADR-0073: Open Source CI Policy](adr/0073-open-source-ci-policy.md)
-- [ADR-0074: Primary Agent Sessions and Team-First Multi-Session UX](adr/0074-primary-agent-sessions.md)
-- [ADR-0075: Remove AgentSession Runtime Ownership](adr/0075-agent-session-runtime-ownership-removal.md)
-- [ADR-0076: Session-Owned Project Registry](adr/0076-session-owned-project-registry.md)
-- [ADR-0077: Session-Owned REST Write Idempotency](adr/0077-session-owned-rest-write-idempotency.md)
-- [ADR-0078: Agent-Focused Navigation Information Architecture](adr/0078-agent-focused-navigation-ia.md)
-- [ADR-0079: AgentSession Archive Policy](adr/0079-agent-session-archive-policy.md)
-- [ADR-0080: Simplified File Lifecycle Policy](adr/0080-simplified-file-lifecycle-policy.md)
-- [ADR-0081: Runtime Exec Process Tools](adr/0081-runtime-exec-process.md)
-- [ADR-0082: Add Agent Workspace File Management Operations](adr/0082-agent-workspace-file-management.md)
-- [ADR-0083: User Stop Terminates Session-Owned Runtime Exec Processes](adr/0083-runtime-exec-user-stop-termination.md)
-- [ADR-0084: Failed-run Error Retry and Finalization](adr/0084-failed-run-error-retry.md)
-- [ADR-0085: Deterministic Tool Catalog, MCP Tool Snapshots, and Stable Toolkit Prompts](adr/0085-deterministic-tool-catalog-and-mcp-snapshots.md)
-- [ADR-0086: Chat Action Messages](adr/0086-chat-action-messages.md)
-- [ADR-0086: New Session Project Selection](adr/0086-new-session-project-selection.md)
-- [ADR-0087: Filesystem Skill Projection Revisions](adr/0087-filesystem-skill-projection-revisions.md)
-- [ADR-0088: Agent Settings Pages and Memory UI](adr/0088-agent-settings-pages-and-memory-ui.md)
-- [ADR-0088: Adopt Claude Rules Loader as a Separate Runtime Toolkit](adr/0088-claude-rules-loader.md)
-- [ADR-0089: Workspace Project Browser Surface](adr/0089-workspace-project-browser-surface.md)
-- [ADR-0090: Backend Project Browser Manifest](adr/0090-backend-project-browser-manifest.md)
-- [ADR-0091: Session Initialization Lifecycle](adr/0091-session-initialization-lifecycle.md)
-- [ADR-0092: Azents-Owned Git Worktree Ownership and Cleanup](adr/0092-azents-owned-git-worktree-ownership-and-cleanup.md)
-- [ADR-0093: New Session Mixed Workspace Selection](adr/0093-new-session-mixed-workspace-selection.md)
-- [ADR-0094: Model Session Operations as Turn Actions](adr/0094-action-as-operation-turn-actions.md)
-- [ADR-0095: Register Project Picker Worktree UI](adr/0095-register-project-picker-worktree-ui.md)
-- [ADR-0096: Codex-first Subagent Redesign](adr/0096-codex-first-subagent-redesign.md)
-- [ADR-0097: Continue FIFO Processing After Failed TurnActions](adr/0097-turn-action-fifo-continuation.md)
-- [ADR-0098: Subagent Human Write Boundary](adr/0098-subagent-human-write-boundary.md)
-- [ADR-0099: Codex-Compatible Subagent Concurrency](adr/0099-codex-compatible-subagent-concurrency.md)
-- [ADR-0100: Label-Based Model Targets](adr/0100-label-based-model-targets.md)
-- [ADR-0101: Mark Forked History Boundaries for Subagent Tasks](adr/0101-subagent-forked-history-task-boundaries.md)
-- [ADR-0102: Session-Scoped Runner Operation Concurrency](adr/0102-session-scoped-runner-operation-concurrency.md)
-- [ADR-0103: Per-Prompt Models Form FIFO Run Boundaries](adr/0103-per-prompt-model-fifo-run-boundaries.md)
-- [ADR-0104: Per-Prompt Reasoning Effort Is a Run Boundary](adr/0104-per-prompt-reasoning-effort-run-boundaries.md)
-- [ADR-0105: Resolve Prompt Model Targets at Run Time](adr/0105-run-time-model-target-resolution.md)
-- [ADR-0106: Persist the Session Last-Used Inference Profile](adr/0106-session-last-used-inference-profile.md)
-- [ADR-0107: Re-Execution Preserves Model Target Intent](adr/0107-reexecution-model-target-intent.md)
-- [ADR-0108: Subagents Inherit the Parent Run Profile](adr/0108-subagent-parent-run-profile-inheritance.md)
-- [ADR-0109: Keep Agent Main Model as the Default Target](adr/0109-agent-default-model-target-role.md)
-- [ADR-0110: Use a Compact Integrated Chat Composer](adr/0110-integrated-compact-chat-composer.md)
-- [ADR-0111: Expose Default as a Reasoning Effort Selection](adr/0111-reasoning-effort-default-selection.md)
-- [ADR-0112: Display Inference Provenance from User Message Metadata](adr/0112-user-message-profile-provenance-display.md)
-- [ADR-0113: Restore the Latest Composer Profile Intent on Reload](adr/0113-composer-profile-reload-precedence.md)
-- [ADR-0114: Display Context Usage from the Resolved Run Profile](adr/0114-run-scoped-context-usage-display.md)
-- [ADR-0115: Use an Explicit Nested Inference Profile Request](adr/0115-public-inference-profile-request-contract.md)
-- [ADR-0116: Store Requested Inference Profiles as Typed Durable Data](adr/0116-durable-requested-inference-profile-storage.md)
-- [ADR-0117: Persist Requested and Resolved AgentRun Provenance](adr/0117-agent-run-inference-provenance.md)
-- [ADR-0118: Reuse the Active Run Profile for Matching Inputs](adr/0118-current-profile-matching-run-join-policy.md)
-- [ADR-0119: Precreate the Inherited First Subagent Run](adr/0119-precreate-inherited-subagent-run.md)
-- [ADR-0120: Expose Typed Actionable Profile Resolution Failures](adr/0120-typed-profile-resolution-failures.md)
-- [ADR-0121: Atomically Activate the Resolved Run and Session Profile](adr/0121-atomic-run-profile-activation.md)
-- [ADR-0122: Project Compact Inference Summaries with User Messages](adr/0122-inline-user-message-inference-summary.md)
-- [ADR-0123: Require an Explicit Reasoning Effort in User Input](adr/0123-require-explicit-reasoning-effort-in-user-input.md)
-- [ADR-0124: Keep Resolved Inference Provenance Run-Owned](adr/0124-keep-inference-provenance-run-owned.md)
-- [ADR-0124: Allow Explicit Inference Profiles When Spawning Subagents](adr/0124-subagent-spawn-inference-profile-overrides.md)
-- [ADR-0125: Drain Input Buffers Sequentially Before Turn Start](adr/0125-drain-input-buffers-before-turn-start.md)
-- [ADR-0126: Resolve User Message Profiles During Buffer Preparation](adr/0126-resolve-user-message-profile-during-buffer-preparation.md)
-- [ADR-0127: Handle Message Edits as Transactional Preparation](adr/0127-handle-message-edits-as-transactional-preparation.md)
-- [ADR-0128: Treat Goal Actions as Model-Producing Preparation](adr/0128-treat-goal-actions-as-model-producing-preparation.md)
-- [ADR-0129: Consume Failed Buffer Items Without Starting a Turn](adr/0129-consume-failed-buffer-items-without-starting-a-turn.md)
-- [ADR-0130: Treat Skill Actions as Model-Producing Preparation](adr/0130-treat-skill-actions-as-model-producing-preparation.md)
-- [ADR-0131: Keep Action Messages Buffer-Only](adr/0131-keep-action-messages-buffer-only.md)
-- [ADR-0132: Separate Durable Events, Model Lowering, and Turn Eligibility](adr/0132-separate-durable-events-model-lowering-and-turn-eligibility.md)
-- [ADR-0133: Fold Turn Eligibility with Failure Veto](adr/0133-fold-turn-eligibility-with-failure-veto.md)
-- [ADR-0134: Remove Deprecated Background Completion Input](adr/0134-remove-background-completion-input.md)
-- [ADR-0135: Directly Promote Continuation and Agent Messages](adr/0135-directly-promote-continuation-and-agent-messages.md)
-- [ADR-0136: Use Polymorphic Input Buffer Processors](adr/0136-use-polymorphic-input-buffer-processors.md)
-- [ADR-0137: Linearize Input Buffer Boundaries on the Session Row Lock](adr/0137-linearize-input-buffer-boundaries-on-session-row-lock.md)
-- [ADR-0138: Separate Input Acceptance and Processing Idempotency](adr/0138-separate-input-acceptance-and-processing-idempotency.md)
-- [ADR-0139: Keep Pending Buffer Deletion State-Neutral](adr/0139-keep-pending-buffer-deletion-state-neutral.md)
-- [ADR-0140: Use Session Current Inference State Per Turn](adr/0140-use-session-current-inference-state-per-turn.md)
-- [ADR-0141: Correlate Terminal Run Events by Run ID](adr/0141-correlate-terminal-run-events.md)
-- [ADR-0142: Persist Inference Provenance on Turn Usage Markers](adr/0142-persist-turn-usage-inference-provenance.md)
-- [ADR-0143: Make PostgreSQL Authoritative for Tool Call Ownership](adr/0143-make-postgresql-authoritative-for-tool-call-ownership.md)
-- [ADR-0144: OSS Admin Surface Authentication and Bootstrap](adr/0144-oss-admin-surface-auth-and-bootstrap.md)
-- [ADR-0145: Model-Scoped Selectable Model Settings](adr/0145-model-scoped-selectable-model-settings.md)
-- [ADR-0145: Require Explicit Responses Stream Completion](adr/0145-require-explicit-responses-stream-completion.md)
-- [ADR-0145: Scope Failed-run Retry to One Model Turn](adr/0145-scope-failed-run-retry-to-model-turn.md)
-- [ADR-0146: Bound Model Streams by Parsed-Event Idle and Absolute Attempt Time](adr/0146-model-stream-parsed-event-idle-and-attempt-bounds.md)
-- [ADR-0147: Use an OpenAI-Native Responses Transport Family](adr/0147-openai-native-responses-transport-family.md)
-- [ADR-0147: Tool Search and a Bounded Model-Visible Tool Working Set](adr/0147-tool-search-bounded-working-set.md)
-- [ADR-0148: Define the OpenAI HTTP Migration by Semantic Parity](adr/0148-define-openai-http-migration-by-semantic-parity.md)
-- [ADR-0149: Use LiteLLM Only as the OpenAI Cost Calculator](adr/0149-use-litellm-only-as-openai-cost-calculator.md)
-- [ADR-0150: Define the OpenAI Responses WebSocket Lifecycle](adr/0150-openai-responses-websocket-lifecycle.md)
-- [ADR-0151: Use Generic Native Adapter Request Types](adr/0151-use-generic-native-adapter-request-types.md)
-- [ADR-0152: Include ChatGPT OAuth in the OpenAI-Native HTTP Migration](adr/0152-include-chatgpt-oauth-in-openai-native-http-migration.md)
-- [ADR-0153: Use Official OpenAI SDK Native Stream Events](adr/0153-use-official-openai-sdk-native-stream-events.md)
-- [ADR-0154: Keep Native Artifact Compatibility Keys Strict](adr/0154-keep-native-artifact-compatibility-keys-strict.md)
-- [ADR-0155: Use Default OpenAI SDK HTTP Retries](adr/0155-use-default-openai-sdk-http-retries.md)
-- [ADR-0156: Scope OpenAI SDK Clients to Logical Model Operations](adr/0156-scope-openai-sdk-clients-to-logical-model-operations.md)
-- [ADR-0157: Keep OpenAI HTTP Failure Semantics at the Azents Boundary](adr/0157-keep-openai-http-failure-semantics-at-the-azents-boundary.md)
-- [ADR-0158: Calculate OpenAI-Compatible Costs from SDK Usage](adr/0158-calculate-openai-compatible-costs-from-sdk-usage.md)
-- [ADR-0159: Cut Over OpenAI-Compatible HTTP Paths Atomically](adr/0159-cut-over-openai-compatible-http-paths-atomically.md)
-- [ADR-0160: Use Documented OpenAI Responses Terminal Discriminators](adr/0160-use-documented-openai-responses-terminal-discriminators.md)
-- [ADR-0161: Deliver the OpenAI HTTP Migration as One Revertible Change](adr/0161-deliver-openai-http-migration-as-one-revertible-change.md)
-- [ADR-0162: Use Standard Responses for ChatGPT OAuth](adr/0162-use-standard-responses-for-chatgpt-oauth.md)
-- [ADR-0163: Normalize Provider Tool Live Activity Across Model Adapters](adr/0163-normalize-provider-tool-live-activity.md)
-- [ADR-0164: Materialize Provider-Generated Images as File Resources](adr/0164-materialize-provider-generated-images-as-file-resources.md)
-- [ADR-0165: Make Model Provider Failures Transparent](adr/0165-make-model-provider-failures-transparent.md)
-- [ADR-0166: Resolve built-in capabilities to model-specific executors](adr/0166-resolve-builtin-capabilities-to-model-specific-executors.md)
-- [ADR-0166: Model-Scoped Subagent Override Policy](adr/0166-subagent-model-override-policy.md)
-- [ADR-0167: Normalize Provider Tool Semantic Transcript Content](adr/0167-normalize-provider-tool-semantic-transcript.md)
-- [ADR-0168: Run-Scoped Azents Virtual Filesystem for Managed Skills and Resources](adr/0168-release-bundled-and-provider-backed-skill-sources.md)
-- [ADR-0168: Unify Subagent Communication Through Mailbox Activity](adr/0168-unify-subagent-communication-through-mailbox-activity.md)
-- [ADR-0168: Use Single Durable Events for Provider Tool Items](adr/0168-use-single-provider-tool-events.md)
-- [ADR-0169: Add OpenRouter as an Integration-Scoped LLM Provider](adr/0169-add-openrouter-as-an-integration-scoped-llm-provider.md)
-- [ADR-0169: Read Subscription Usage Through Provider Integrations](adr/0169-integration-scoped-subscription-usage.md)
-- [ADR-0170: Project Subscription Usage from the Selected Composer Model](adr/0170-project-subscription-usage-from-selected-model.md)
-- [ADR-0171: Add Kimi Subscription as an Integration-Scoped Provider](adr/0171-add-kimi-subscription-as-an-integration-scoped-provider.md)
-- [ADR-0171: Archived Session Retention and Durable Purge](adr/0171-archived-session-retention-and-purge.md)
-- [ADR-0172: Generalize Admin-Managed System Configuration](adr/0172-generalize-admin-managed-system-configuration.md)
-- [ADR-0172: Add GPT-aligned apply-patch alongside the existing edit tool](adr/0172-gpt-apply-patch-alongside-existing-edit.md)
-- [ADR-0172: Reset the Tool Search Working Set on Successful Compaction](adr/0172-reset-tool-search-working-set-on-compaction.md)
-- [ADR-0173: Group Chat Tool Activity in the Frontend](adr/0173-group-chat-tool-activity-in-the-frontend.md)
-- [ADR-0174: Present Chat Activity as an Ordered Event Stream](adr/0174-present-chat-activity-as-an-ordered-event-stream.md)
-- [ADR-0174: Model Unread Run Results as Session-Shared State](adr/0174-session-shared-unread-run-result-state.md)
-- [ADR-0175: Retire Legacy Platform GitHub App Bindings](adr/0175-retire-legacy-platform-github-bindings.md)
-- [ADR-0176: Render Known Tools Through Validated Frontend Adapters](adr/0176-render-known-tools-through-validated-frontend-adapters.md)
-- [ADR-0177: Complete Specialized Presentation Coverage for Builtin Tools](adr/0177-complete-builtin-tool-presentations.md)
-- [ADR-0178: Enable Tool Search by Default for New Agents](adr/0178-enable-tool-search-by-default.md)
-- [ADR-0179: Select Provider-Specific Tool Dialects for Apply-Patch](adr/0179-apply-patch-provider-tool-dialects.md)
-- [ADR-0180: Remove Percentage Rollout from Apply-Patch Custom Selection](adr/0180-remove-apply-patch-custom-rollout.md)
-- [ADR-0181: Generalize Client Tool Wire Variant Selection](adr/0181-generalize-client-tool-wire-variants.md)
-- [ADR-0181: Suppress Unread Indicators While Sessions Run](adr/0181-suppress-unread-indicators-while-sessions-run.md)
+- [External Platform Account Linking Historical Decision Reconstruction](adr/account-260315-account-linking.md)
+- [Model Session Operations as Turn Actions](adr/action-260705-action-as-operation-turn-actions.md)
+- [Keep Action Messages Buffer-Only](adr/action-260712-action-messages-buffer-only.md)
+- [Provider Tool Live Activity Historical Decision Reconstruction](adr/activity-260716-live-activity.md)
+- [Generalize Admin-Managed System Configuration](adr/admin-260718-admin-configuration.md)
+- [Release and Snapshot Artifact Policy](adr/and-260623-and-snapshot-artifact-policy.md)
+- [AgentSession Archive Policy](adr/archive-260626-archive-policy.md)
+- [Archived Session Retention and Durable Purge](adr/archived-260719-archived-retention-and-purge.md)
+- [Keep Native Artifact Compatibility Keys Strict](adr/artifact-260716-artifact-compatibility-keys-strict.md)
+- [Atomically Activate the Resolved Run and Session Profile](adr/atomic-260710-atomic-profile-activation.md)
+- [nointern-web Login Guard Historical Decision Reconstruction](adr/auth-260219-auth-guard.md)
+- [nointern-web Authentication System Historical Decision Reconstruction](adr/authsnapshot-260219-auth.md)
+- [Usage-based Auto Compaction and Token Estimation Redesign Historical Decision Reconstruction](adr/auto-260612-usage-auto-compaction.md)
+- [AWS Toolkit — Managed MCP + Direct SigV4 Signing Historical Decision Reconstruction](adr/aws-260326-aws-toolkit.md)
+- [Azents-Owned Git Worktree Ownership and Cleanup](adr/azents-260703-azents-git-worktree-ownership-and-cleanup.md)
+- [Run-Scoped Azents Virtual Filesystem Historical Decision Reconstruction](adr/azents-260719-azents-vfs.md)
+- [Backend Project Browser Manifest](adr/backend-260703-backend-browser-manifest.md)
+- [Background Tool Call Design Discussion](adr/background-260416-background-call.md)
+- [Remove Deprecated Background Completion Input](adr/background-260712-background-completion-input.md)
+- [Per-Prompt Reasoning Effort Is a Run Boundary](adr/boundaries-260710-prompt-reasoning-effort-boundaries.md)
+- [Sandbox Runtime / Workspace State Boundary Historical Decision Reconstruction](adr/boundary-260524-sandbox-boundary.md)
+- [Add Session Sandbox Workspace Browser API](adr/browser-260501-browser-api.md)
+- [Workspace Project Browser Surface](adr/browser-260703-browser-surface.md)
+- [Built-in Tool Support Discussion](adr/builtin-260315-builtin-tools.md)
+- [Resolve built-in capabilities to model-specific executors](adr/builtin-260718-builtin-capabilities-to-executors.md)
+- [Complete Specialized Presentation Coverage for Builtin Tools](adr/builtin-260721-builtin-presentations.md)
+- [Run-Scoped Azents Virtual Filesystem for Managed Skills and Resources](adr/bundled-260719-bundled-and-backed-skill-sources.md)
+- [Model Catalog Projection and Sync](adr/catalog-260620-catalog-projection-sync.md)
+- [Split Chat Input Buffer into Separate RDB Table](adr/chat-260519-chat-input-buffer.md)
+- [Chat Protocol Uses Canonical Event History/Live API](adr/chat-260604-chat-protocol-history-live.md)
+- [Chat Session Resync Converges to History/Live State After Subscribe Ack](adr/chat-260609-chat-resync-scroll.md)
+- [Chat Action Messages](adr/chat-260630-chat-action-messages.md)
+- [Chat Attachment Presentation Historical Decision Reconstruction](adr/chat-260711-chat-attachment-presentation.md)
+- [Present Chat Activity as an Ordered Event Stream](adr/chat-260720-chat-activity-as-an-ordered-event-stream.md)
+- [ChatGPT OAuth Provider Historical Decision Reconstruction](adr/chatgpt-260502-chatgpt-oauth.md)
+- [ChatGPT Responses Lite Catalog Integration Historical Decision Reconstruction](adr/chatgpt-260712-chatgpt-responses-lite-catalog.md)
+- [Include ChatGPT OAuth in the OpenAI-Native HTTP Migration](adr/chatgpt-260716-chatgpt-oauth-in-openai-http-migration.md)
+- [Adopt Claude Rules Loader as a Separate Runtime Toolkit](adr/claude-260702-claude-rules-loader.md)
+- [Generalize Client Tool Wire Variant Selection Historical Decision Reconstruction](adr/client-260721-client-tool-wire-variants.md)
+- [Scope OpenAI SDK Clients to Logical Model Operations](adr/clients-260716-openai-sdk-clients-to-logical-operations.md)
+- [Generate Compaction Summary as Codex-like Handoff Checkpoint](adr/codex-260530-codex-compaction-checkpoints.md)
+- [Codex-first Subagent Redesign](adr/codex-260706-codex-subagent-redesign.md)
+- [Codex-Compatible Subagent Concurrency](adr/codex-260709-codex-subagent-concurrency.md)
+- [Codex Multi-Agent V2 Subagent Prompt Parity Historical Decision Reconstruction](adr/codex-260710-codex-multi-prompt-parity.md)
+- [Reorder Model Input by Logical Event Order After Compaction](adr/compaction-260530-compaction-logical-event-ordering.md)
+- [Use Handoff Resume Wrapper When Injecting Compaction Summary](adr/compaction-260531-compaction-summary-injection-wrapper.md)
+- [Provider Compatibility Layer Historical Decision Reconstruction](adr/compat-260503-compat-layer-2026.md)
+- [Restore the Latest Composer Profile Intent on Reload](adr/composer-260710-composer-profile-reload-precedence.md)
+- [Remove Workspace Team Concept Historical Decision Reconstruction](adr/concept-260622-team-concept.md)
+- [ModelConfig Removal and Agent Model Snapshot Historical Decision Reconstruction](adr/config-260616-config-removal.md)
+- [Consume Failed Buffer Items Without Starting a Turn](adr/consume-260712-consume-failed-buffer-items-without-starting-a-turn.md)
+- [Agent Context Compaction Historical Decision Reconstruction](adr/context-260305-context-compaction.md)
+- [Session Context Inspector](adr/context-260530-context-inspector.md)
+- [Display Context Usage from the Resolved Run Profile](adr/context-260710-context-usage-display.md)
+- [Sandbox Provider Control Distributed Recovery Historical Decision Reconstruction](adr/control-260524-sandbox-control-distributed-recovery.md)
+- [nointern Core Concepts Historical Decision Reconstruction](adr/core-260207-core-concepts.md)
+- [Calculate OpenAI-Compatible Costs from SDK Usage](adr/costs-260716-openai-costs-from-sdk-usage.md)
+- [Introduce credential provider model and admin password reset token](adr/credential-260618-credential-and-admin-password.md)
+- [User & WorkspaceUser CRUD Document Historical Decision Reconstruction](adr/crud-260212-crud.md)
+- [Remove Percentage Rollout from Apply-Patch Custom Selection](adr/custom-260721-patch-custom-rollout.md)
+- [nointern Daily Log Historical Decision Reconstruction](adr/daily-260322-daily-log.md)
+- [Declarative Improvements for Async Toolkit Loading State](adr/declarative-260331-declarative-toolkit-status.md)
+- [Deterministic Tool Catalog, MCP Tool Snapshots, and Stable Toolkit Prompts](adr/deterministic-260628-deterministic-catalog-and-mcp-snapshots.md)
+- [Full-stack Local Test Environment — Stage 1b (devserver lifecycle) Historical Decision Reconstruction](adr/devserver-260406-devserver-lifecycle.md)
+- [Directly Promote Continuation and Agent Messages](adr/directly-260712-directly-promote-continuation-and-messages.md)
+- [Discord Toolkit Historical Decision Reconstruction](adr/discord-260312-discord-toolkit.md)
+- [Discord Gateway HA Historical Decision Reconstruction](adr/discord-260327-discord-gateway.md)
 - [Shared Development Snapshot Identifiers](adr/docids-260721-shared-development-snapshot-identifiers.md)
+- [DockerAgentHomeClient sandbox-daemon Sidecar Historical Decision Reconstruction](adr/docker-260409-docker-home-sidecar.md)
+- [Introduce system Docker Sandbox Provider](adr/docker-260523-docker-sandbox.md)
+- [Use Documented OpenAI Responses Terminal Discriminators](adr/documented-260716-documented-openai-responses-terminal-discriminators.md)
+- [Draft Agent Session First Message Creation Historical Decision Reconstruction](adr/draft-260628-draft-message.md)
+- [Drain Input Buffers Sequentially Before Turn Start](adr/drain-260712-drain-input-buffers-before-turn-start.md)
+- [Remove Dormant stdio MCP Sidecar](adr/drop-260512-drop-dormant-stdio-mcp-sidecar.md)
+- [Dynamic Tool Management — Toolkit State Machine](adr/dynamic-260329-dynamic-tools.md)
+- [Move Agent Model Selection to Dynamic ModelConfig Structure](adr/dynamic-260516-dynamic-llm-configs.md)
+- [Require an Explicit Reasoning Effort in User Input](adr/effort-260710-reasoning-effort-in-input.md)
+- [Unified Email Authentication Historical Decision Reconstruction](adr/email-260217-email-login-onboarding.md)
+- [Engine Event Flow Refactoring Historical Decision Reconstruction](adr/engine-260317-engine-event-refactoring.md)
+- [Event Architecture Review Discussion Historical Decision Reconstruction](adr/event-260308-event-architecture-review.md)
+- [Slack/Discord/Scheduled Event Subscription Migration Historical Decision Reconstruction](adr/event-260508-event-subscription-routing-2026.md)
+- [Adopt Event / Native Event Terminology](adr/event-260613-event-event-terminology.md)
+- [Make the events Table the Single Source of Truth and Remove session_items_oai](adr/events-260428-events-table-as-truth.md)
+- [Separate Durable Events, Model Lowering, and Turn Eligibility](adr/events-260712-events-lowering-and-turn-eligibility.md)
+- [Use Single Durable Events for Provider Tool Items](adr/events-260719-events.md)
+- [Agent-scoped Exchange Uploads](adr/exchange-260531-exchange-uploads.md)
+- [Runtime Exec Process Tools](adr/exec-260627-exec-process.md)
+- [User Stop Terminates Session-Owned Runtime Exec Processes](adr/exec-260628-exec-stop-termination.md)
+- [Agent Execution Transcript Normalization](adr/execution-260527-execution-transcript-normalization.md)
+- [Session Workspace Project Existing Folder Registration Historical Decision Reconstruction](adr/existing-260611-existing-folder-registration.md)
+- [External Watch / Raw Session Event Subscription Historical Decision Reconstruction](adr/external-260503-external-watch-raw-subscription.md)
+- [Failed-run Error Retry and Finalization](adr/failed-260627-failed-error-retry.md)
+- [Scope Failed-run Retry to One Model Turn](adr/failed-260716-failed-retry-to-turn.md)
+- [Keep OpenAI HTTP Failure Semantics at the Azents Boundary](adr/failure-260716-openai-http-failure-semantics-at-the-azents-boundary.md)
+- [Make Model Provider Failures Transparent](adr/failures-260718-failures-transparent.md)
+- [File Support — Unified Session Storage Architecture Historical Decision Reconstruction](adr/file-260301-file-support.md)
+- [Adopt Agent File Exchange Storage Separate from Sandbox Workspace](adr/file-260505-file-exchange.md)
+- [Attachment, Artifact, and FilePart lifecycle](adr/file-260601-file-media-resource-lifecycle.md)
+- [Add Agent Workspace File Management Operations](adr/file-260628-file-management.md)
+- [Filesystem Skill Projection Revisions](adr/filesystem-260701-filesystem-skill-projection-revisions.md)
+- [Fold Turn Eligibility with Failure Veto](adr/fold-260712-fold-turn-eligibility-with-failure-veto.md)
+- [Agent User Folder Recognition Historical Decision Reconstruction](adr/folder-260403-folder-recognition.md)
+- [Mark Forked History Boundaries for Subagent Tasks](adr/forked-260709-subagent-forked-history-task-boundaries.md)
+- [Agent Runtime and Session Foundation Historical Decision Reconstruction](adr/foundation-260504-foundation.md)
+- [Split FunctionCallItem.output into a Separate FunctionCallOutputItem](adr/function-260429-function-call-output-item.md)
+- [GA4 stdio MCP -> Native Toolkit Migration Historical Decision Reconstruction](adr/ga4-260401-ga4-toolkit.md)
+- [GCP Toolkit — Google Hosted Remote MCP Historical Decision Reconstruction](adr/gcp-260326-gcp-observability-toolkit.md)
+- [Materialize Provider-Generated Images as File Resources](adr/generated-260717-generated-images-as-file-resources.md)
+- [Use Generic Native Adapter Request Types](adr/generic-260716-generic-adapter-request-types.md)
+- [GitHub Toolkit Historical Decision Reconstruction](adr/github-260313-github-toolkit.md)
+- [GitHubToolkit Shell Env Injection Feature Historical Decision Reconstruction](adr/github-260424-github-toolkit-shell-env-2026.md)
+- [GitHub Toolkit Multi-Installation Routing](adr/github-260621-github-toolkit-multi-installation.md)
+- [Goal Pursuing Is Owned at Session Scope](adr/goal-260613-goal-pursuing.md)
+- [Goal Continuation Uses Idle Hook and Input Buffer](adr/goal-260615-goal-continuation-idle-hook.md)
+- [Treat Goal Actions as Model-Producing Preparation](adr/goal-260712-goal-actions-as-producing-preparation.md)
+- [Add GPT-aligned apply-patch alongside the existing edit tool](adr/gpt-260720-gpt-patch-alongside-existing-edit.md)
+- [Group Chat Tool Activity in the Frontend](adr/group-260720-group-chat-activity-in-the-frontend.md)
+- [gVisor + BYOC Sandbox Discussion](adr/gvisor-260403-gvisor-byoc-sandbox.md)
+- [Handle Message Edits as Transactional Preparation](adr/handle-260712-handle-message-edits-as-transactional-preparation.md)
+- [NoIntern Helm Packaging Historical Decision Reconstruction](adr/helm-260512-helm-packaging.md)
+- [Home-as-agent-list Reorganization Historical Decision Reconstruction](adr/home-260421-home-list-2026.md)
+- [Runtime Hook System Historical Decision Reconstruction](adr/hook-260507-hook.md)
+- [Adopt Runtime Hook System](adr/hook-260518-hook.md)
+- [Provider-hosted web search runs through normalized capability and Agent opt-in](adr/hosted-260617-hosted-web-search.md)
+- [Provider-Hosted Image Generation Restoration Historical Decision Reconstruction](adr/hosted-260717-hosted-image-generation.md)
+- [Define the OpenAI HTTP Migration by Semantic Parity](adr/http-260716-openai-http-migration-by-semantic-parity.md)
+- [nointern-web i18n Architecture Historical Decision Reconstruction](adr/i18n-260216-i18n.md)
+- [Idempotent Sandbox Lifecycle State Historical Decision Reconstruction](adr/idempotent-260524-idempotent-sandbox-lifecycle.md)
+- [Model-Specific Image Generation Execution Historical Decision Reconstruction](adr/image-260718-image-generation.md)
+- [Store Requested Inference Profiles as Typed Durable Data](adr/inference-260710-inference-profile.md)
+- [Keep Resolved Inference Provenance Run-Owned](adr/inference-260711-inference-provenance.md)
+- [Use Session Current Inference State Per Turn](adr/inference-260712-inference-turn.md)
+- [Session Initialization Lifecycle](adr/initialization-260703-initialization-lifecycle.md)
+- [Project Compact Inference Summaries with User Messages](adr/inline-260710-inline-message-inference-summary.md)
+- [User Input Boundary FilePart Materialization](adr/input-260604-input-bound-filepart-materialization.md)
+- [Separate Input Payload and Control Action with DB Source of Truth](adr/input-260615-input-control-plane-clean-migration.md)
+- [Separate Input Acceptance and Processing Idempotency](adr/input-260712-input-acceptance-and-processing-idempotency.md)
+- [Use a Compact Integrated Chat Composer](adr/integrated-260710-integrated-compact-chat-composer.md)
+- [Read Subscription Usage Through Provider Integrations](adr/integration-260719-integration-subscription-usage.md)
+- [Slack/Discord Integration-Wide E2E Test Environment Historical Decision Reconstruction](adr/integrations-260411-integrations-e2e.md)
+- [Workspace User Invitation Feature Historical Decision Reconstruction](adr/invitation-260219-invitation.md)
+- [Workspace Join Request Historical Decision Reconstruction](adr/join-260316-join-request.md)
+- [Add Kimi Subscription as an Integration-Scoped Provider](adr/kimi-260719-kimi-subscription-as-an-integration.md)
+- [Kimi Subscription Provider Historical Decision Reconstruction](adr/kimisubscription-260719-kimi-subscription.md)
+- [Render Known Tools Through Validated Frontend Adapters](adr/known-260720-known-tools-through-validated-frontend-adapters.md)
+- [Kubernetes Toolkit Historical Decision Reconstruction](adr/kubernetes-260327-kubernetes-toolkit.md)
+- [Label-Based Model Targets](adr/label-260709-label-targets.md)
+- [Agent-Focused Session Layout Historical Decision Reconstruction](adr/layout-260626-layout.md)
+- [Retire Legacy Platform GitHub App Bindings](adr/legacy-260720-legacy-platform-github-bindings.md)
+- [kubernetes_asyncio → lightkube Migration Discussion](adr/lightkube-260401-lightkube-migration.md)
+- [Agent Home kubernetes_asyncio → lightkube Migration Discussion](adr/lightkube-260403-lightkube-migration-home.md)
+- [Linearize Input Buffer Boundaries on the Session Row Lock](adr/linearize-260712-linearize-input-buffer-boundaries-on-row-lock.md)
+- [Use LiteLLM Only as the OpenAI Cost Calculator](adr/litellm-260716-litellm-only-as-openai-cost-calculator.md)
+- [Define Chat Live/History Handoff and Streaming Partial Batching](adr/live-260604-live-history-projection-handoff-and-stream-batching.md)
+- [Chat Live State Separates Partial History from Other Live State](adr/live-260610-live-partial-history-taxonomy.md)
+- [Normalize Provider Tool Live Activity Across Model Adapters](adr/live-260716-live-activity.md)
+- [LLM Provider Integration Historical Decision Reconstruction](adr/llm-260221-llm-integration.md)
+- [LLM Event Storage/Reconstruction Redesign Historical Decision Reconstruction](adr/llm-260304-llm-event-redesign.md)
+- [Full-stack Local Test Environment — Stage 2 (LLM Pipeline) Historical Decision Reconstruction](adr/llm-260408-llm-pipeline.md)
+- [Move LLM Model Catalog to External Sources and Local Overrides](adr/llm-260513-llm-catalog-source.md)
+- [Full-Stack Local Test Environment — Discussion Record](adr/local-260406-local-fullstack-test-env.md)
+- [MCP Toolkit Historical Decision Reconstruction](adr/mcp-260228-mcp-toolkit.md)
+- [MCP Egress Proxy Historical Decision Reconstruction](adr/mcp-260319-mcp-egress-proxy.md)
+- [Agent Home Sidecar Discussion (MCP stdio + File ops)](adr/mcp-260325-mcp-stdio-sidecar.md)
+- [Move Memory Storage from Filesystem to PostgreSQL](adr/memory-260426-memory-filesystem-to-db.md)
+- [Message Queueing — User Message Injection During Run Historical Decision Reconstruction](adr/message-260305-message-queueing.md)
+- [Display Inference Provenance from User Message Metadata](adr/message-260710-message-profile-provenance-display.md)
+- [Resolve User Message Profiles During Buffer Preparation](adr/message-260712-message-profile-during-buffer-preparation.md)
+- [Deliver the OpenAI HTTP Migration as One Revertible Change](adr/migration-260716-openai-http-migration-as-revertible-change.md)
+- [Legacy Snapshot Identifier Migration](adr/migration-260721-legacy-snapshot-identifier-migration.md)
+- [Multi-Active AgentSession Migration Overview Historical Decision Reconstruction](adr/multi-260625-multi-active-sessions-overview.md)
+- [Multi-Worktree Registration Historical Decision Reconstruction](adr/multi-260704-multi-worktree-registration.md)
+- [Agent-Centric Navigation Redesign Discussion](adr/nav-260420-nav.md)
+- [Agent-Focused Navigation Information Architecture](adr/navigation-260626-navigation-ia.md)
+- [New Session Project Selection](adr/new-260629-new-selection.md)
+- [New Session Mixed Workspace Selection](adr/new-260705-new-mixed-selection.md)
+- [nointern-web System Historical Decision Reconstruction](adr/nointern-260216-nointern-web.md)
+- [nointern Discord Integration Historical Decision Reconstruction](adr/nointern-260310-nointern-discord-integration.md)
+- [Notion Toolkit Historical Decision Reconstruction](adr/notion-260321-notion-toolkit.md)
+- [AuthorizationRequestEvent OAuth URL → Web App Setup Page Migration Historical Decision Reconstruction](adr/oauth-260327-discord-oauth-button-url-fix.md)
+- [xAI Grok OAuth Provider Historical Decision Reconstruction](adr/oauth-260710-xai-oauth.md)
+- [Use Official OpenAI SDK Native Stream Events](adr/official-260716-official-openai-sdk-stream-events.md)
+- [Open Source CI Policy](adr/open-260623-open-source-ci-policy.md)
+- [Use an OpenAI-Native Responses Transport Family](adr/openai-260716-openai-responses-transport-family.md)
+- [OpenAI Responses WebSocket Transport Historical Decision Reconstruction](adr/openai-260717-openai-responses-websocket-transport.md)
+- [Add OpenRouter as an Integration-Scoped LLM Provider](adr/openrouter-260719-openrouter-as-an-integration-llm.md)
+- [Session-Scoped Runner Operation Concurrency Historical Decision Reconstruction](adr/operation-260710-runner-operation-concurrency.md)
+- [OSS Admin Surface Authentication and Bootstrap](adr/oss-260713-oss-admin-surface-auth-and-bootstrap.md)
+- [Tool Output Truncation — Engine-level Output Limit and File Tools Historical Decision Reconstruction](adr/output-260306-output-truncation.md)
+- [Adopt Tool Output Context-pressure Filter](adr/output-260604-output-context-pressure-filter.md)
+- [Cut Over OpenAI-Compatible HTTP Paths Atomically](adr/over-260716-over-openai-http-paths-atomically.md)
+- [Subagent Model Override Policy Historical Decision Reconstruction](adr/override-260717-subagent-override-policy.md)
+- [Remove AgentSession Runtime Ownership](adr/ownership-260625-ownership-removal.md)
+- [GitHub Per-User PAT Authentication Historical Decision Reconstruction](adr/pat-260321-pat.md)
+- [Select Provider-Specific Tool Dialects for Apply-Patch](adr/patch-260721-patch-dialects.md)
+- [Keep Pending Buffer Deletion State-Neutral](adr/pending-260712-pending-buffer-deletion-neutral.md)
+- [Periodic Execution Infrastructure](adr/periodic-260620-periodic-execution-infrastructure.md)
+- [Persist Inference Provenance on Turn Usage Markers](adr/persist-260712-persist-turn-usage-inference-provenance.md)
+- [Phase 1 — Separate Activity Tracking and Introduce Lifecycle Hook Interface Discussion](adr/phase1-260416-phase1-activity-tracking-lifecycle-hooks.md)
+- [Phase 2 — Durable Lifecycle Workflow + Lease Token Discussion](adr/phase2-260416-phase2-lifecycle-workflow.md)
+- [Phase 3 — Agent Home Snapshot Hibernation Discussion](adr/phase3-260418-phase3-snapshot-hibernation.md)
+- [Use Polymorphic Input Buffer Processors](adr/polymorphic-260712-polymorphic-input-buffer-processors.md)
+- [Make PostgreSQL Authoritative for Tool Call Ownership](adr/postgresql-260712-postgresql-authoritative-for-call-ownership.md)
+- [Precreate the Inherited First Subagent Run](adr/precreate-260710-precreate-inherited-subagent.md)
+- [User Stop Uses Preemptive Interrupt and REST Control Boundary](adr/preemptive-260607-preemptive-stop.md)
+- [Primary Agent Sessions and Team-First Multi-Session UX](adr/primary-260625-primary-sessions.md)
+- [Agent Profile Image Historical Decision Reconstruction](adr/profile-260421-profile-image.md)
+- [Reuse the Active Run Profile for Matching Inputs](adr/profile-260710-profile-matching-join-policy.md)
+- [Session Workspace Project Contract Historical Decision Reconstruction](adr/projects-260509-projects.md)
+- [System Prompt Context Inspector Preserves Pre-assembly Fragment Metadata](adr/prompt-260611-prompt-context-inspector.md)
+- [Per-Prompt Models Form FIFO Run Boundaries](adr/prompt-260710-prompt-fifo-boundaries.md)
 - [Latest Session System Prompt](adr/prompt-260721-latest-session-system-prompt.md)
+- [Per-Prompt Inference Profile Historical Decision Reconstruction](adr/promptinferenceprofile-260710-prompt-inference-profile.md)
+- [Persist Requested and Resolved AgentRun Provenance](adr/provenance-260710-inference-provenance.md)
+- [Use an Explicit Nested Inference Profile Request](adr/public-260710-public-inference-profile-request-contract.md)
+- [Pyright Configuration Review Historical Decision Reconstruction](adr/pyright-260310-pyright-config.md)
+- [Memory Redesign: Filesystem → DB + Tool Call Historical Decision Reconstruction](adr/redesign-260426-memory-redesign-2026.md)
+- [Re-Execution Preserves Model Target Intent](adr/reexecution-260710-reexecution-target-intent.md)
+- [Register Project Picker Worktree UI](adr/register-260706-register-picker-worktree-ui.md)
+- [Remove Project Registration Requests Historical Decision Reconstruction](adr/registration-260707-registration-requests.md)
+- [Session-Owned Project Registry](adr/registry-260625-registry.md)
+- [Require Explicit Responses Stream Completion](adr/responses-260715-responses-stream-completion.md)
+- [Define the OpenAI Responses WebSocket Lifecycle](adr/responses-260716-openai-responses-websocket-lifecycle.md)
+- [Chat Writes Use REST Commit Boundary](adr/rest-260605-rest-chat-write-boundary.md)
+- [Session-Owned REST Write Idempotency](adr/rest-260625-rest-write-idempotency.md)
+- [Claude Rules Loader Historical Decision Reconstruction](adr/rules-260702-claude-rules-loader.md)
+- [Session-Scoped Runner Operation Concurrency](adr/runner-260710-runner-operation-concurrency.md)
+- [Agent Sandbox Historical Decision Reconstruction](adr/sandbox-260225-sandbox.md)
+- [sandbox-daemon Sidecar Separation + kube API Exec Integration Historical Decision Reconstruction](adr/sandbox-260403-sandbox-daemon-sidecar.md)
+- [Sandbox Runtime Profile Abstraction Discussion](adr/sandbox-260419-sandbox-profile.md)
+- [Generalized Sandbox Credential Injection — First Application with EnvVarToolkit Historical Decision Reconstruction](adr/sandbox-260421-sandbox-credential-injection-2026.md)
+- [Move Sandbox Scope from Agent to Session](adr/sandbox-260424-sandbox.md)
+- [Adopt Agent-Centric Raw Sessions and Optional Dedicated Sandboxes](adr/sandbox-260503-sandbox.md)
+- [Adopt AgentRuntime-Based Sandbox Control Channel](adr/sandbox-260506-sandbox-control-channel.md)
+- [Introduce SandboxProviderControl](adr/sandbox-260521-sandbox-control.md)
+- [Simplify Sandbox Provider Routing](adr/sandbox-260522-sandbox-routing-simplification.md)
+- [Sandbox Restore Retry and Explicit Reset Historical Decision Reconstruction](adr/sandbox-260524-sandbox-restore.md)
+- [Sandbox System Redesign](adr/sandbox-260525-sandbox-redesign.md)
+- [Scheduled Tasks Discussion](adr/scheduled-260331-scheduled-tasks.md)
+- [Use Default OpenAI SDK HTTP Retries](adr/sdk-260716-openai-sdk-http-retries.md)
+- [Tool Search and a Bounded Model-Visible Tool Working Set](adr/search-260717-search-bounded-working-set.md)
+- [Reset the Tool Search Working Set on Successful Compaction](adr/search-260720-search-working-set-on-compaction.md)
+- [Enable Tool Search by Default for New Agents](adr/search-260721-search-by.md)
+- [Full-stack Local Test Environment — Stage 1c (Test Data Seed Helpers) Historical Decision Reconstruction](adr/seed-260407-seed-helpers.md)
+- [Model-Scoped Selectable Model Settings](adr/selectable-260716-selectable-settings.md)
+- [Agent Model Selection Stores Catalog Snapshot Directly Without ModelConfig](adr/selection-260616-selection-snapshot.md)
+- [Agent Model Selection Options Historical Decision Reconstruction](adr/selection-260709-selection-options.md)
+- [Expose Default as a Reasoning Effort Selection](adr/selection-260710-reasoning-effort-selection.md)
+- [Normalize Provider Tool Semantic Transcript Content](adr/semantic-260718-semantic-transcript.md)
+- [Sentry Toolkit — access_token Mode (stdio via mcp-proxy) Historical Decision Reconstruction](adr/sentry-260327-sentry-toolkit-stdio.md)
+- [Sequential Input Buffer Preparation Historical Decision Reconstruction](adr/sequential-260712-sequential-input-buffer-preparation.md)
+- [Server-Side Session ID Generation Historical Decision Reconstruction](adr/server-260311-server-side.md)
+- [Service Toolkit Design Discussion](adr/service-260311-service-toolkit.md)
+- [Agent Settings Pages and Memory UI](adr/settings-260702-settings-pages-and-memory-ui.md)
+- [Model-Scoped Selectable Model Settings Historical Decision Reconstruction](adr/settings-260716-selectable-settings.md)
+- [Model Unread Run Results as Session-Shared State](adr/shared-260720-shared-unread-result.md)
+- [ShellEnvironment Historical Decision Reconstruction](adr/shell-260315-shell-environment.md)
+- [New signup is controlled by email-bound signup token redeem](adr/signup-260617-signup-token-registration.md)
+- [Simplified File Lifecycle Policy](adr/simplified-260627-simplified-file-lifecycle-policy.md)
+- [Treat Skill Actions as Model-Producing Preparation](adr/skill-260712-skill-actions-as-producing-preparation.md)
+- [nointern Slack Integration Historical Decision Reconstruction](adr/slack-260310-nointern-slack-integration.md)
+- [Slack Toolkit Historical Decision Reconstruction](adr/slack-260312-slack-toolkit.md)
+- [Slack BYOA Discussion — Discussion Points and Decisions](adr/slack-260414-slack-byoa.md)
+- [Stage 4 (browser/web QA) Historical Decision Reconstruction](adr/stage4-260410-stage4-web.md)
+- [Use Standard Responses for ChatGPT OAuth](adr/standard-260716-standard-responses-for-chatgpt-oauth.md)
+- [stdio MCP Infrastructure + Google Analytics Toolkit Integration Historical Decision Reconstruction](adr/stdio-260326-stdio-mcp-ga4-integration.md)
+- [stdio MCP Resolve Flow Integration Historical Decision Reconstruction](adr/stdio-260328-stdio-mcp-integration.md)
+- [Bound Model Streams by Parsed-Event Idle and Absolute Attempt Time](adr/stream-260715-stream-parsed-event-idle-and-attempt-bounds.md)
+- [Streaming Responsibility Migration — From Handler to Worker Historical Decision Reconstruction](adr/streaming-260314-streaming-responsibility-migration.md)
+- [Subagent Historical Decision Reconstruction](adr/subagent-260306-subagent.md)
+- [Subagent Toolkit/Model Inherit Historical Decision Reconstruction](adr/subagent-260424-subagent-inherit-2026.md)
+- [Subagent Removal Historical Decision Reconstruction](adr/subagent-260706-subagent-removal-2026.md)
+- [Subagent Human Write Boundary](adr/subagent-260709-subagent-human-write-boundary.md)
+- [Subagents Inherit the Parent Run Profile](adr/subagent-260710-subagent-parent-profile-inheritance.md)
+- [Allow Explicit Inference Profiles When Spawning Subagents](adr/subagent-260711-subagent-spawn-inference-profile-overrides.md)
+- [Model-Scoped Subagent Override Policy](adr/subagent-260717-subagent-override-policy.md)
+- [Project Subscription Usage from the Selected Composer Model](adr/subscription-260719-subscription-usage-from.md)
+- [Keep Agent Main Model as the Default Target](adr/target-260710-target-role.md)
+- [Team CRUD Document Historical Decision Reconstruction](adr/team-260212-team-crud.md)
+- [TeamMember CRUD Document Historical Decision Reconstruction](adr/team-260213-team-member-crud.md)
+- [Agent-Team Home Historical Decision Reconstruction](adr/team-260421-team-home-2026.md)
+- [Remove Workspace Team Concept](adr/team-260622-team-concept.md)
+- [Correlate Terminal Run Events by Run ID](adr/terminal-260712-terminal-events.md)
+- [Split testenv Setup Scenarios and Inject INDEX — Discussion Record](adr/testenv-260411-testenv-setup-scenarios.md)
+- [testenv Recipes Structure Historical Decision Reconstruction](adr/testenv-260412-testenv-recipes.md)
+- [testenv Framework Redesign — Discussion Record](adr/testenv-260414-testenv-runner-redesign.md)
+- [Testenv Devtools Extension — Upgrade TC-LCY-002/003/004 to Live Historical Decision Reconstruction](adr/testenv-260416-testenv-devtools-live-upgrade.md)
+- [Adopt testenv QA Fixture-First Architecture](adr/testenv-260512-testenv-qa-fixtures.md)
+- [Resolve Prompt Model Targets at Run Time](adr/time-260710-time-target-resolution.md)
+- [Expose Session Todo State through Toolkit State and Chat Live State](adr/todo-260613-todo-toolkit-ui.md)
+- [Token Usage Storage Historical Decision Reconstruction](adr/token-260305-token-usage.md)
+- [Toolkit Assignment Historical Decision Reconstruction](adr/toolkit-260225-toolkit-assignment.md)
+- [Sentry Toolkit Historical Decision Reconstruction](adr/toolkit-260327-sentry-toolkit.md)
+- [Adopt Toolkit Hooks and Toolkit State](adr/toolkit-260514-toolkit-hooks-for-agents-md.md)
+- [Manage Toolkit Lifecycle by AgentSession Lifecycle](adr/toolkit-260529-toolkit-lifecycle.md)
+- [Split TodoToolkit as Always-on Toolkit](adr/toolkit-260613-todo-toolkit-always-on.md)
+- [Replace MCP Per-User OAuth with Toolkit-Level OAuth Connections](adr/toolkit-260623-toolkit-level-mcp-oauth.md)
+- [Continue FIFO Processing After Failed TurnActions](adr/turn-260708-turn-action-fifo-continuation.md)
+- [Expose Typed Actionable Profile Resolution Failures](adr/typed-260710-typed-profile-resolution-failures.md)
+- [Unified OAuth Authentication Flow Historical Decision Reconstruction](adr/unified-260327-unified-oauth.md)
+- [Unify Subagent Communication Through Mailbox Activity](adr/unify-260719-unify-subagent-communication-through-mailbox-activity.md)
+- [Suppress Unread Indicators While Sessions Run](adr/unread-260721-unread-indicators-while-sessions.md)
+- [Usage-based Auto Compaction and Removal of Tool Output Omit](adr/usage-260612-usage-auto-compaction.md)
+- [Persist the Session Last-Used Inference Profile](adr/used-260710-used-inference-profile.md)
+- [Session Web Viewer Discussion — View Discord/Slack Sessions in Web UI](adr/web-260416-web-viewer.md)
+- [Explicit AgentSession Write Target Historical Decision Reconstruction](adr/write-260625-write-target.md)
+- [xAI API Key Provider Historical Decision Reconstruction](adr/xai-260710-xai-api-key.md)
 
 ## Issues (Bug Tracking)
 
@@ -265,6 +678,7 @@ Design documents are accumulated records and are not listed individually in this
 
 - [Agent Thread / Session Model Blueprint](notes/agent-thread-session-blueprint.md)
 - [Codex Goal Pursuing Research](notes/codex-goal-pursuing-research.md)
+- [Legacy DocID Migration Historical Ambiguity Manifest](notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md)
 - [Local sandbox provider daemon research](notes/local-sandbox-provider-daemon-research.md)
 - [Run Stall Reliability Design Discussion](notes/run-stall-reliability-design-discussion.md)
 - [Session Git Worktree Lifecycle Research](notes/session-git-worktree-lifecycle-research.md)

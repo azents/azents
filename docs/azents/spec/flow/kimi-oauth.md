@@ -274,4 +274,4 @@ message submission, or integration management.
 
 | Date | Version | Change | Rationale |
 |---|---:|---|---|
-| 2026-07-19 | 1 | Documented Kimi device authorization, encrypted identity, refresh, catalog, Moonshot runtime routing, usage, and UI behavior | ADR-0171 and validated implementation |
+| 2026-07-19 | 1 | Documented Kimi device authorization, encrypted identity, refresh, catalog, Moonshot runtime routing, usage, and UI behavior | [ambiguous historical ADR reference](../../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-289) and validated implementation |

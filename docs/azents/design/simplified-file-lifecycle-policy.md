@@ -3,12 +3,16 @@ title: "Simplified File Lifecycle Policy Design"
 created: 2026-06-27
 updated: 2026-06-27
 tags: [architecture, backend, engine, scheduler]
+document_role: supporting
+document_type: supporting-consolidation
+migration_source: "docs/azents/design/simplified-file-lifecycle-policy.md"
+supporting_role: consolidation
 ---
 # Simplified File Lifecycle Policy Design
 
 ## Overview
 
-This design implements [ADR-0080: Simplified File Lifecycle Policy](../adr/0080-simplified-file-lifecycle-policy.md). It replaces the current run-age Artifact cleanup and persistent ModelFile degradation lifecycle with a simpler split:
+This design implements [simplified-260627/ADR: Simplified File Lifecycle Policy](../adr/simplified-260627-simplified-file-lifecycle-policy.md). It replaces the current run-age Artifact cleanup and persistent ModelFile degradation lifecycle with a simpler split:
 
 - **ModelFile** is context-owned. It is deleted after it falls behind the AgentSession model-input head and no active run pin protects it.
 - **Artifact** is TTL-owned. It expires by configurable `expires_at`, default 7 days.
@@ -23,7 +27,7 @@ The implementation should simplify existing code at the same time as it changes 
 
 Agent run input preparation must not call Artifact, ExchangeFile, or ModelFile cleanup. File cleanup runs through the scheduler.
 
-Related decisions: `ADR-0080-D1`, `ADR-0080-D9`
+Related decisions: `[simplified-260627/ADR-D1](../adr/simplified-260627-simplified-file-lifecycle-policy.md)`, `[simplified-260627/ADR-D9](../adr/simplified-260627-simplified-file-lifecycle-policy.md)`
 
 Acceptance criteria:
 
@@ -35,7 +39,7 @@ Acceptance criteria:
 
 Artifact creation stores `expires_at`, calculated from configuration. Default Artifact TTL is 7 days.
 
-Related decisions: `ADR-0080-D2`, `ADR-0080-D9`
+Related decisions: `[simplified-260627/ADR-D2](../adr/simplified-260627-simplified-file-lifecycle-policy.md)`, `[simplified-260627/ADR-D9](../adr/simplified-260627-simplified-file-lifecycle-policy.md)`
 
 Acceptance criteria:
 
@@ -48,7 +52,7 @@ Acceptance criteria:
 
 ExchangeFile keeps TTL semantics and the current default behavior, but retention duration is configuration-owned.
 
-Related decisions: `ADR-0080-D3`, `ADR-0080-D9`
+Related decisions: `[simplified-260627/ADR-D3](../adr/simplified-260627-simplified-file-lifecycle-policy.md)`, `[simplified-260627/ADR-D9](../adr/simplified-260627-simplified-file-lifecycle-policy.md)`
 
 Acceptance criteria:
 
@@ -61,7 +65,7 @@ Acceptance criteria:
 
 ModelFile deletion follows a durable per-session GC cursor, not run age and not per-file head-update enqueue.
 
-Related decisions: `ADR-0080-D4`, `ADR-0080-D5`, `ADR-0080-D6`
+Related decisions: `[simplified-260627/ADR-D4](../adr/simplified-260627-simplified-file-lifecycle-policy.md)`, `[simplified-260627/ADR-D5](../adr/simplified-260627-simplified-file-lifecycle-policy.md)`, `[simplified-260627/ADR-D6](../adr/simplified-260627-simplified-file-lifecycle-policy.md)`
 
 Acceptance criteria:
 
@@ -74,7 +78,7 @@ Acceptance criteria:
 
 A ModelFile is referenced by exactly one durable FilePart event. Reuse of a `model_file_id` across durable events is not supported.
 
-Related decisions: `ADR-0080-D5`
+Related decisions: `[simplified-260627/ADR-D5](../adr/simplified-260627-simplified-file-lifecycle-policy.md)`
 
 Acceptance criteria:
 
@@ -86,7 +90,7 @@ Acceptance criteria:
 
 ModelFile no longer has persistent run-age degradation/unreachable lifecycle as cleanup behavior.
 
-Related decisions: `ADR-0080-D7`
+Related decisions: `[simplified-260627/ADR-D7](../adr/simplified-260627-simplified-file-lifecycle-policy.md)`
 
 Acceptance criteria:
 
@@ -99,7 +103,7 @@ Acceptance criteria:
 
 A ModelFile already materialized or still needed by an active run must not be deleted by scheduler GC.
 
-Related decisions: `ADR-0080-D6`
+Related decisions: `[simplified-260627/ADR-D6](../adr/simplified-260627-simplified-file-lifecycle-policy.md)`
 
 Acceptance criteria:
 
@@ -113,7 +117,7 @@ Acceptance criteria:
 
 Temporary URI guidance is provided by the toolkit that exposes/consumes those capabilities, not by a global prompt.
 
-Related decisions: `ADR-0080-D8`
+Related decisions: `[simplified-260627/ADR-D8](../adr/simplified-260627-simplified-file-lifecycle-policy.md)`
 
 Acceptance criteria:
 
@@ -126,7 +130,7 @@ Acceptance criteria:
 
 Access denial is controlled by metadata state, not by physical blob deletion success.
 
-Related decisions: `ADR-0080-D9`
+Related decisions: `[simplified-260627/ADR-D9](../adr/simplified-260627-simplified-file-lifecycle-policy.md)`
 
 Acceptance criteria:
 
@@ -139,15 +143,15 @@ Acceptance criteria:
 
 | ADR decision | Requirements |
 | --- | --- |
-| `ADR-0080-D1` Split file lifecycle into context-owned and TTL-owned classes | REQ-1 |
-| `ADR-0080-D2` Artifact TTL default 7 days | REQ-2 |
-| `ADR-0080-D3` Configurable ExchangeFile TTL | REQ-3 |
-| `ADR-0080-D4` ModelFile GC cursor | REQ-4 |
-| `ADR-0080-D5` ModelFile single-event reference | REQ-4, REQ-5 |
-| `ADR-0080-D6` Active run pins | REQ-4, REQ-7 |
-| `ADR-0080-D7` Remove persistent ModelFile degradation | REQ-6 |
-| `ADR-0080-D8` Toolkit prompt guidance | REQ-8 |
-| `ADR-0080-D9` Retryable blob deletion/access separation | REQ-1, REQ-2, REQ-3, REQ-9 |
+| `[simplified-260627/ADR-D1](../adr/simplified-260627-simplified-file-lifecycle-policy.md)` Split file lifecycle into context-owned and TTL-owned classes | REQ-1 |
+| `[simplified-260627/ADR-D2](../adr/simplified-260627-simplified-file-lifecycle-policy.md)` Artifact TTL default 7 days | REQ-2 |
+| `[simplified-260627/ADR-D3](../adr/simplified-260627-simplified-file-lifecycle-policy.md)` Configurable ExchangeFile TTL | REQ-3 |
+| `[simplified-260627/ADR-D4](../adr/simplified-260627-simplified-file-lifecycle-policy.md)` ModelFile GC cursor | REQ-4 |
+| `[simplified-260627/ADR-D5](../adr/simplified-260627-simplified-file-lifecycle-policy.md)` ModelFile single-event reference | REQ-4, REQ-5 |
+| `[simplified-260627/ADR-D6](../adr/simplified-260627-simplified-file-lifecycle-policy.md)` Active run pins | REQ-4, REQ-7 |
+| `[simplified-260627/ADR-D7](../adr/simplified-260627-simplified-file-lifecycle-policy.md)` Remove persistent ModelFile degradation | REQ-6 |
+| `[simplified-260627/ADR-D8](../adr/simplified-260627-simplified-file-lifecycle-policy.md)` Toolkit prompt guidance | REQ-8 |
+| `[simplified-260627/ADR-D9](../adr/simplified-260627-simplified-file-lifecycle-policy.md)` Retryable blob deletion/access separation | REQ-1, REQ-2, REQ-3, REQ-9 |
 
 ## Discussion Points and Decisions
 
@@ -363,7 +367,7 @@ Simplification:
 Current code:
 
 - `scheduler/registry.py` has code-owned scheduled task definitions.
-- ADR-0068 and `spec/flow/periodic-execution.md` define the scheduler role and row lease infrastructure.
+- [periodic-260620/ADR](../adr/periodic-260620-periodic-execution-infrastructure.md) and `spec/flow/periodic-execution.md` define the scheduler role and row lease infrastructure.
 - Existing registered tasks are heartbeat and model catalog projection.
 
 Simplification:
@@ -653,13 +657,13 @@ Expected UI behavior:
 
 No new infrastructure component is required.
 
-This design uses the existing scheduler role from ADR-0068. It only adds a new scheduler task definition and related backend services/migrations.
+This design uses the existing scheduler role from [periodic-260620/ADR](../adr/periodic-260620-periodic-execution-infrastructure.md). It only adds a new scheduler task definition and related backend services/migrations.
 
 ## Feasibility Verification
 
 | Area | Current evidence | Feasibility judgment |
 | --- | --- | --- |
-| Scheduler role | `scheduler/registry.py` and ADR-0068 already support code-owned periodic tasks | Add `file_lifecycle_cleanup` task without new infra |
+| Scheduler role | `scheduler/registry.py` and [periodic-260620/ADR](../adr/periodic-260620-periodic-execution-infrastructure.md) already support code-owned periodic tasks | Add `file_lifecycle_cleanup` task without new infra |
 | Exchange TTL | `exchange_files` already has `expires_at` and `(status, expires_at)` index | Mostly straightforward; move hard-coded TTL to config and scheduler |
 | Artifact TTL | Artifact currently lacks `expires_at` and uses run-age index | Requires migration but simplifies service/repository after conversion |
 | ModelFile head cursor | AgentSession stores head event id; events have `model_order` | Add head order + cursor order columns; scheduler can scan event ranges by `(session_id, model_order)` |
@@ -896,7 +900,7 @@ TBD — E2E/testenv verification phase.
 
 ### Phase 1. ADR/design and policy module
 
-- Add ADR-0080 and this design.
+- Add [simplified-260627/ADR](../adr/simplified-260627-simplified-file-lifecycle-policy.md) and this design.
 - Add `FileLifecyclePolicy` config-oriented helper.
 - Add config fields for Artifact and ExchangeFile TTL.
 

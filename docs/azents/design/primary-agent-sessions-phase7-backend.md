@@ -3,6 +3,9 @@ title: "Primary Agent Sessions Phase 7-A Backend Plan"
 created: 2026-06-26
 updated: 2026-06-26
 tags: [architecture, backend, api, testing]
+document_role: supporting
+document_type: supporting-plan
+migration_source: "docs/azents/design/primary-agent-sessions-phase7-backend.md"
 ---
 
 # Primary Agent Sessions Phase 7-A Backend Plan

@@ -3,6 +3,10 @@ title: "New Session Mixed Workspace Selection Design"
 created: 2026-07-05
 updated: 2026-07-05
 tags: [product, backend, frontend, api, session, workspace, git]
+document_role: supporting
+document_type: supporting-consolidation
+migration_source: "docs/azents/design/new-session-mixed-workspace-selection.md"
+supporting_role: consolidation
 ---
 
 # New Session Mixed Workspace Selection Design
@@ -19,10 +23,10 @@ not a session-wide mode.
 
 This design supersedes the global-mode UX for new-session creation while preserving the decisions in:
 
-- ADR-0086: new-session Project selection is explicit and exact;
-- ADR-0091: blocking startup work uses SessionInitialization and gates first-run dispatch;
-- ADR-0092: Azents-owned Git worktree ownership and cleanup live in `session_git_worktrees`;
-- ADR-0093: new-session mixed workspace selection and compact UI policy.
+- [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-231): new-session Project selection is explicit and exact;
+- [initialization-260703/ADR](../adr/initialization-260703-initialization-lifecycle.md): blocking startup work uses SessionInitialization and gates first-run dispatch;
+- [azents-260703/ADR](../adr/azents-260703-azents-git-worktree-ownership-and-cleanup.md): Azents-owned Git worktree ownership and cleanup live in `session_git_worktrees`;
+- [new-260705/ADR](../adr/new-260705-new-mixed-selection.md): new-session mixed workspace selection and compact UI policy.
 
 ## Problem
 
@@ -316,7 +320,7 @@ Worktree base branch selector.
 
 ## Migration and Rollout
 
-1. Add ADR-0093 and this design document.
+1. Add [new-260705/ADR](../adr/new-260705-new-mixed-selection.md) and this design document.
 2. Add `agent_project_default_item_type` enum and `agent_project_defaults.item_type`.
 3. Remove the unique `(agent_id, path)` default constraint.
 4. Backfill existing default rows as `existing_project`.
@@ -355,9 +359,9 @@ future-session ergonomics.
 
 Repository inspection confirmed:
 
-- ADR-0086 already requires explicit new-session Project selection and path presets.
-- ADR-0091 already provides the first-run initialization gate.
-- ADR-0092 already separates Worktree ownership from Project rows.
+- [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-232) already requires explicit new-session Project selection and path presets.
+- [initialization-260703/ADR](../adr/initialization-260703-initialization-lifecycle.md) already provides the first-run initialization gate.
+- [azents-260703/ADR](../adr/azents-260703-azents-git-worktree-ownership-and-cleanup.md) already separates Worktree ownership from Project rows.
 - `session_git_worktrees` has already been migrated away from one-row-per-session uniqueness.
 - Cleanup paths already iterate multiple allocations.
 - The current runner initialization path still enforces one allocation and must be updated.

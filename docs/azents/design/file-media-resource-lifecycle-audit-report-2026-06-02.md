@@ -1,15 +1,18 @@
 ---
-title: "ADR-0046 File/Media Resource Lifecycle Implementation Audit Report"
+title: "[file-260601/ADR](../adr/file-260601-file-media-resource-lifecycle.md) File/Media Resource Lifecycle Implementation Audit Report"
 created: 2026-06-02
 updated: 2026-06-03
 tags: [architecture, backend, frontend, engine, audit]
+document_role: supporting
+document_type: supporting-audit
+migration_source: "docs/azents/design/file-media-resource-lifecycle-audit-report-2026-06-02.md"
 ---
 
-# ADR-0046 File/Media Resource Lifecycle Implementation Audit Report
+# [file-260601/ADR](../adr/file-260601-file-media-resource-lifecycle.md) File/Media Resource Lifecycle Implementation Audit Report
 
 ## Audit Scope
 
-This document rechecks each decision item of [`ADR-0046: Attachment, Artifact, and FilePart lifecycle`](../adr/0046-file-media-resource-lifecycle.md) against current stacked implementation head.
+This document rechecks each decision item of [`file-260601/ADR: Attachment, Artifact, and FilePart lifecycle`](../adr/file-260601-file-media-resource-lifecycle.md) against current stacked implementation head.
 
 Reference head is `codex/adr-0046-filepart-placeholder-final`, including cumulative state of following stacked PRs.
 
@@ -27,7 +30,7 @@ Reference head is `codex/adr-0046-filepart-placeholder-final`, including cumulat
 - `file-media-lifecycle follow-up: ModelFile unreachable grace`
 - `file-media-lifecycle follow-up: Final spec verification and legacy cleanup`
 
-This audit does not make “existing production data migration” a completion condition. Since ADR-0039 private destructive cutover decision remains, ADR-0046 migration rewrite is interpreted to mean that current write/read path no longer creates or long-term supports legacy file/media shape.
+This audit does not make “existing production data migration” a completion condition. Since [execution-260527/ADR](../adr/execution-260527-execution-transcript-normalization.md) private destructive cutover decision remains, [file-260601/ADR](../adr/file-260601-file-media-resource-lifecycle.md) migration rewrite is interpreted to mean that current write/read path no longer creates or long-term supports legacy file/media shape.
 
 ## Judgment Criteria
 
@@ -38,7 +41,7 @@ This audit does not make “existing production data migration” a completion c
 
 ## Overall Judgment
 
-- `[x]` ADR-0046 is fully implemented by current stack.
+- `[x]` [file-260601/ADR](../adr/file-260601-file-media-resource-lifecycle.md) is fully implemented by current stack.
 - `[x]` URI is clarified as `exchange://{object_key}`, `artifact://{storage_key}` file-location semantics.
 - `[x]` canonical output part union is organized around `text | attachment | artifact | file` families.
 - `[x]` Attachment canonical payload is organized around current shape: `attachment_id`, `uri`, `name`, `media_type`, `size`, `created_at`.
@@ -349,7 +352,7 @@ Evidence:
 
 ## Current Blockers / Gaps
 
-No blockers/gaps by ADR-0046 current contract.
+No blockers/gaps by [file-260601/ADR](../adr/file-260601-file-media-resource-lifecycle.md) current contract.
 
 Operational reinforcement candidates:
 
@@ -381,7 +384,7 @@ Operational reinforcement candidates:
 - Location: `python/apps/azents/src/azents/engine/events/legacy.py`
 - Location: `python/apps/azents/src/azents/engine/types.py`
 - Duplicated current concept: canonical events plus explicit stream projection/control events.
-- Removal reason: ADR-0046 Attachment/Artifact/FilePart semantics can be collapsed again into legacy `ToolCallOutput(content, attachments)`.
+- Removal reason: [file-260601/ADR](../adr/file-260601-file-media-resource-lifecycle.md) Attachment/Artifact/FilePart semantics can be collapsed again into legacy `ToolCallOutput(content, attachments)`.
 - Status: removed from production durable serialization path. `engine/events/legacy.py` remains only as stream/control projection dataclass module.
 
 ### Compatibility `FunctionToolResult`

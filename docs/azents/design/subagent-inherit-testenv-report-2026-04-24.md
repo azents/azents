@@ -4,6 +4,9 @@ tags: [testing, backend, engine]
 created: 2026-04-24
 updated: 2026-04-24
 implemented: 2026-04-24
+document_role: supporting
+document_type: supporting-validation-report
+migration_source: "docs/azents/design/subagent-inherit-testenv-report-2026-04-24.md"
 ---
 
 # Subagent Inherit testenv QA Report

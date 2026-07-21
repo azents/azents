@@ -2,6 +2,9 @@
 title: "Model stream timeout watchdog validation report"
 created: 2026-07-15
 tags: [backend, engine, testenv, testing]
+document_role: supporting
+document_type: supporting-validation-report
+migration_source: "docs/azents/design/model-stream-timeout-watchdog-validation-report-2026-07-15.md"
 ---
 
 # Model Stream Timeout Watchdog Validation Report

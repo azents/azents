@@ -2,6 +2,9 @@
 title: "Kimi Subscription Provider Validation Report"
 created: 2026-07-19
 tags: [backend, frontend, api, testing, documentation, security]
+document_role: supporting
+document_type: supporting-validation-report
+migration_source: "docs/azents/design/kimi-subscription-validation-report-2026-07-19.md"
 ---
 
 # Kimi Subscription Provider Validation Report

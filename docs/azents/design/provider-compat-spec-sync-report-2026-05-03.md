@@ -4,6 +4,9 @@ tags: [backend, engine, documentation]
 created: 2026-05-03
 updated: 2026-05-03
 implemented: 2026-05-03
+document_role: supporting
+document_type: supporting-validation-report
+migration_source: "docs/azents/design/provider-compat-spec-sync-report-2026-05-03.md"
 ---
 
 # Provider Compatibility Spec Sync Report

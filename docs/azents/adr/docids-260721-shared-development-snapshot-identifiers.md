@@ -1,6 +1,9 @@
 ---
 title: "Shared Development Snapshot Identifiers"
 created: 2026-07-21
+document_role: primary
+document_type: adr
+snapshot_id: docids-260721
 tags: [documentation, process, architecture]
 ---
 

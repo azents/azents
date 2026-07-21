@@ -8,6 +8,9 @@ issue: 2401
 parent: 2327
 predecessor: 2376
 discussion: 2403
+document_role: supporting
+document_type: supporting-validation-report
+migration_source: "docs/azents/design/llm-tool-execution.md"
 ---
 
 # Stage 3 — testenv Tool Execution + Sandbox + MCP Verification Platform

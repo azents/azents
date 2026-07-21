@@ -4,6 +4,10 @@ tags: [architecture, engine, backend, frontend]
 created: 2026-03-21
 updated: 2026-04-24
 implemented: 2026-04-24
+document_role: supporting
+document_type: supporting-consolidation
+migration_source: "docs/azents/design/shared-storage-and-skills.md"
+supporting_role: consolidation
 ---
 
 # Shared Storage & Skill System Design

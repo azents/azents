@@ -3,6 +3,9 @@ title: "Signup Tokens Verification Report"
 created: 2026-06-17
 updated: 2026-06-18
 tags: [backend, frontend, testing]
+document_role: supporting
+document_type: supporting-validation-report
+migration_source: "docs/azents/design/signup-tokens-verification-report-2026-06-17.md"
 ---
 
 # Signup Tokens Verification Report

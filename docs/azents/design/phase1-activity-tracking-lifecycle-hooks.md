@@ -4,11 +4,14 @@ tags: [backend, engine, infra, architecture]
 created: 2026-04-15
 updated: 2026-04-15
 implemented: 2026-04-15
+document_role: supporting
+document_type: supporting-phase
+migration_source: "docs/azents/design/phase1-activity-tracking-lifecycle-hooks.md"
 ---
 
 # Phase 1 — Separate Activity Tracking + Lifecycle Hook Interface (Design)
 
-> Decision basis document: [../../adr/0019-phase1-activity-tracking-lifecycle-hooks.md](../../adr/0019-phase1-activity-tracking-lifecycle-hooks.md)
+> Decision basis document: [../../adr/phase1-260416-phase1-activity-tracking-lifecycle-hooks.md](../adr/phase1-260416-phase1-activity-tracking-lifecycle-hooks.md)
 > Parent issue: #2609 / preceding research: #2608
 
 ## 1. Overview
@@ -428,7 +431,7 @@ async def _cleanup_idle(self) -> None:
 
 ## 7. testenv QA Scenarios
 
-`testenv/nointern/scenarios/` uses pair pattern of `TC-*.md` (frontmatter + description) + `tc_handlers/.../tc_*.py` (`docs/development/web/testenv-runner-redesign.md`, existing `TC-SBOX-001` reference). Phase 1 adds following 4 TCs under new category `agent-home-lifecycle/`.
+`testenv/nointern/scenarios/` uses pair pattern of `TC-*.md` (frontmatter + description) + `tc_handlers/.../tc_*.py` (`docs/development/web/testenv-260414-testenv-runner-redesign.md`, existing `TC-SBOX-001` reference). Phase 1 adds following 4 TCs under new category `agent-home-lifecycle/`.
 
 - `TC-LCY-001` — happy path: update `last_activity_at` on SessionMessage(USER) receive
 - `TC-LCY-002` — RESUME non-update: force RESUME injection and confirm `last_activity_at` unchanged

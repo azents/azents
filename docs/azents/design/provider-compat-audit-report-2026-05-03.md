@@ -4,6 +4,9 @@ tags: [backend, engine, testenv]
 created: 2026-05-03
 updated: 2026-05-03
 implemented: 2026-05-03
+document_role: supporting
+document_type: supporting-audit
+migration_source: "docs/azents/design/provider-compat-audit-report-2026-05-03.md"
 ---
 
 # Provider Compatibility Design-Implementation Audit Report

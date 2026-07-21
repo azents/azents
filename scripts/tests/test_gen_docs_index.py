@@ -26,6 +26,8 @@ class DevelopmentSnapshotValidationTest(unittest.TestCase):
         *,
         created: str = "2026-07-21",
         implemented: str = "",
+        document_role: str = "",
+        document_type: str = "",
         include_tags: bool = True,
     ) -> None:
         path = self.docs_root / rel_path
@@ -37,6 +39,10 @@ class DevelopmentSnapshotValidationTest(unittest.TestCase):
         ]
         if implemented:
             fields.append(f"implemented: {implemented}")
+        if document_role:
+            fields.append(f"document_role: {document_role}")
+        if document_type:
+            fields.append(f"document_type: {document_type}")
         if include_tags:
             fields.append("tags: [documentation]")
         fields.extend(["---", "", f"# {path.stem}", ""])
@@ -84,9 +90,25 @@ class DevelopmentSnapshotValidationTest(unittest.TestCase):
 
         self.assertEqual(self.errors(), [])
 
-    def test_allows_legacy_adr_and_design_names(self) -> None:
+    def test_rejects_legacy_adr_and_unclassified_design_names(self) -> None:
         self.write_doc("adr/0181-existing-decision.md")
         self.write_doc("design/existing-feature.md")
+
+        errors = self.errors()
+        self.assertTrue(any("ADR filename must match" in error for error in errors))
+        self.assertTrue(
+            any(
+                "Noncanonical Design filenames require explicit" in error
+                for error in errors
+            )
+        )
+
+    def test_allows_explicit_supporting_design_name(self) -> None:
+        self.write_doc(
+            "design/existing-feature.md",
+            document_role="supporting",
+            document_type="supporting-plan",
+        )
 
         self.assertEqual(self.errors(), [])
 

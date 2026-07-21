@@ -4,15 +4,18 @@ created: 2026-07-16
 updated: 2026-07-16
 implemented: 2026-07-16
 tags: [backend, frontend, api, testing]
+document_role: supporting
+document_type: supporting-secondary-design
+migration_source: "docs/azents/design/model-catalog-sync-trigger-drift-remediation.md"
 ---
 
 # Model Catalog Sync Trigger Drift Remediation
 
 ## Context
 
-ADR-0067 defines integration model catalog synchronization as an explicit, throttled lifecycle. The initial implementation eventually added create/update background sync, manual sync, and a latest-running-attempt check, but it did not complete the lifecycle described by ADR-0067-D5, ADR-0067-D17, and `model-catalog-projection-sync.md` REQ-3.
+[catalog-260620/ADR](../adr/catalog-260620-catalog-projection-sync.md) defines integration model catalog synchronization as an explicit, throttled lifecycle. The initial implementation eventually added create/update background sync, manual sync, and a latest-running-attempt check, but it did not complete the lifecycle described by [catalog-260620/ADR-D5](../adr/catalog-260620-catalog-projection-sync.md), [catalog-260620/ADR-D17](../adr/catalog-260620-catalog-projection-sync.md), and `model-catalog-projection-sync.md` REQ-3.
 
-This remediation preserves the stored-projection read contract while completing the missing trigger, throttling, retry, and UI behavior. ADR-0067 remains immutable and authoritative.
+This remediation preserves the stored-projection read contract while completing the missing trigger, throttling, retry, and UI behavior. [catalog-260620/ADR](../adr/catalog-260620-catalog-projection-sync.md) remains immutable and authoritative.
 
 ## Source Requirements
 

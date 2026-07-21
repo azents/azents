@@ -4,6 +4,9 @@ tags: [architecture, engine, scheduler]
 created: 2026-05-03
 updated: 2026-05-03
 implemented: 2026-05-03
+document_role: supporting
+document_type: supporting-supporting
+migration_source: "docs/azents/design/agent-session-sandbox-scenarios/routine-scheduler-agent.md"
 ---
 
 # Scenario: Routine Scheduler Agent

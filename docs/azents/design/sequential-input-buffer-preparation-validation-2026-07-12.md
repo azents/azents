@@ -2,6 +2,9 @@
 title: "Sequential Input Buffer Preparation Validation Report"
 created: 2026-07-12
 tags: [backend, engine, api, frontend, testenv, process]
+document_role: supporting
+document_type: supporting-validation-report
+migration_source: "docs/azents/design/sequential-input-buffer-preparation-validation-2026-07-12.md"
 ---
 
 # Sequential Input Buffer Preparation Validation Report

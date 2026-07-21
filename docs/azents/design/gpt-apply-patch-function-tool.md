@@ -4,6 +4,10 @@ created: 2026-07-20
 updated: 2026-07-20
 implemented: 2026-07-20
 tags: [backend, engine, runtime, tools, testing]
+document_role: supporting
+document_type: supporting-consolidation
+migration_source: "docs/azents/design/gpt-apply-patch-function-tool.md"
+supporting_role: consolidation
 ---
 
 # GPT Apply-Patch Function Tool Design
@@ -24,7 +28,7 @@ the exact committed prefix when it can be observed. Azents does not attempt a no
 rollback.
 
 The architectural decisions are recorded in
-[ADR-0172](../adr/0172-gpt-apply-patch-alongside-existing-edit.md).
+[gpt-260720/ADR](../adr/gpt-260720-gpt-patch-alongside-existing-edit.md).
 
 ## Problem
 

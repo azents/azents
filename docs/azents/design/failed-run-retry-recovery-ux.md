@@ -3,6 +3,10 @@ title: "Failed-run Retry Recovery UX"
 created: 2026-07-05
 implemented: 2026-07-05
 tags: [backend, frontend, api, chat, retry, ux]
+document_role: supporting
+document_type: supporting-consolidation
+migration_source: "docs/azents/design/failed-run-retry-recovery-ux.md"
+supporting_role: consolidation
 ---
 # Failed-run Retry Recovery UX
 
@@ -48,7 +52,7 @@ Relevant paths:
 - `python/apps/azents/src/azents/worker/live/event_projector.py`
 - `python/apps/azents/src/azents/worker/session/lifecycle.py`
 
-Current implementation already has the durable foundation from ADR-0084:
+Current implementation already has the durable foundation from [failed-260627/ADR](../adr/failed-260627-failed-error-retry.md):
 
 - `FailedRunRetryState` is stored on `agent_runs.retry_state`.
 - `GET /chat/v1/sessions/{session_id}/live` projects `run.retry` when the current running run has retry state.
@@ -97,7 +101,7 @@ Rejected alternatives:
 
 ### 1. Treat failed-run retry UI as live run control state
 
-Automatic retry-in-progress UI is not durable chat history. It belongs to other live state, consistent with ADR-0054.
+Automatic retry-in-progress UI is not durable chat history. It belongs to other live state, consistent with [live-260610/ADR](../adr/live-260610-live-partial-history-taxonomy.md).
 
 Add a frontend `RunRetryCard` rendered near the latest timeline tail when:
 
@@ -362,7 +366,7 @@ Rejected. This is the current broken UX and hides important runtime state.
 
 ### Append retry attempts as durable chat messages
 
-Rejected. Retry attempts are live run state, not transcript history. Durable retry-attempt messages would pollute model input and conflict with ADR-0084.
+Rejected. Retry attempts are live run state, not transcript history. Durable retry-attempt messages would pollute model input and conflict with [failed-260627/ADR](../adr/failed-260627-failed-error-retry.md).
 
 ### Keep the terminal failed card and append a "retry started" message
 
@@ -465,12 +469,12 @@ Frontend:
 
 ## Validation Notes
 
-- ADR-0084 already establishes retry as durable run lifecycle state projected to live state.
-- ADR-0054 classifies run state and model-call waiting as other live state, not partial history.
+- [failed-260627/ADR](../adr/failed-260627-failed-error-retry.md) already establishes retry as durable run lifecycle state projected to live state.
+- [live-260610/ADR](../adr/live-260610-live-partial-history-taxonomy.md) classifies run state and model-call waiting as other live state, not partial history.
 - The current backend `/live` response already has `run.retry`, but the frontend discards it.
 - The current WebSocket pipeline does not publish structured live run snapshots when retry state changes.
 - The existing edit flow already proves that soft-reverting visible history from a model-order boundary is an accepted mechanism for re-entering the loop after an idle control action.
 
 ## ADR Need
 
-No new ADR is required if the implementation follows this design. It refines ADR-0084 UX and API recovery behavior without changing the core retry/finalization ownership decision. Update the living specs after implementation.
+No new ADR is required if the implementation follows this design. It refines [failed-260627/ADR](../adr/failed-260627-failed-error-retry.md) UX and API recovery behavior without changing the core retry/finalization ownership decision. Update the living specs after implementation.

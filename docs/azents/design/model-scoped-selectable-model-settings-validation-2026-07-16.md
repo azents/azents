@@ -3,6 +3,9 @@ title: "Model-Scoped Selectable Model Settings Validation"
 created: 2026-07-16
 updated: 2026-07-16
 tags: [backend, frontend, engine, migration, e2e, qa]
+document_role: supporting
+document_type: supporting-validation-report
+migration_source: "docs/azents/design/model-scoped-selectable-model-settings-validation-2026-07-16.md"
 ---
 
 # Model-Scoped Selectable Model Settings Validation
@@ -55,8 +58,8 @@ covered by the runtime lowerer and resolver tests rather than by a journal asser
 | Unsupported configurable tools are removed | Implemented registry and capability projection retain only `web_search`; migration strips removed identifiers | Updated `domain/model-catalog.md` |
 | Foreground runtime uses selected option settings | `RunRequest` resolution applies selected output cap, tools, and context cap | Updated `flow/agent-execution-loop.md` |
 | Retry and recovery retain prepared intent | `AgentSession.current_model_settings` is stored with the selected model snapshot | Updated `domain/agent.md` and `flow/agent-execution-loop.md` |
-| Lightweight context cap affects compaction | Effective context combines selected foreground and lightweight option caps | Updated `flow/context-compaction.md` |
-| Lightweight output cap does not override summary budget | Compaction continues to use its dynamic internal output budget | Updated `flow/context-compaction.md` |
+| Lightweight context cap affects compaction | Effective context combines selected foreground and lightweight option caps | Updated `flow/context-260305-context-compaction.md` |
+| Lightweight output cap does not override summary budget | Compaction continues to use its dynamic internal output budget | Updated `flow/context-260305-context-compaction.md` |
 | Workspace settings copy is complete and non-propagating | New Agent creation copies option snapshots and settings; later Workspace edits do not propagate | Updated `domain/agent.md` |
 | New model UX starts with an empty focused label | Shared editor creates an empty row and focuses its label input | Storybook interaction coverage present |
 | Reordering a pending empty row preserves valid selected labels | Fallback first preserves an existing valid label, then chooses the first non-empty option | Frontend unit regression coverage present |

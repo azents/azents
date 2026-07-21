@@ -3,13 +3,16 @@ title: "New Session Mixed Workspace Selection Implementation Plan"
 created: 2026-07-05
 updated: 2026-07-05
 tags: [plan, backend, frontend, api, session, workspace, git]
+document_role: supporting
+document_type: supporting-plan
+migration_source: "docs/azents/design/new-session-mixed-workspace-selection-implementation-plan.md"
 ---
 
 # New Session Mixed Workspace Selection Implementation Plan
 
 ## Feature Summary
 
-Implement the design in `docs/azents/design/new-session-mixed-workspace-selection.md` and ADR-0093.
+Implement the design in `docs/azents/design/new-session-mixed-workspace-selection.md` and [new-260705/ADR](../adr/new-260705-new-mixed-selection.md).
 New-session creation becomes an ordered workspace item list that can mix existing Project items and
 Git Worktree items. The azents-web draft selector keeps one compact `Add workspace` flow and renders
 compact selected rows for explicit Project and Worktree items.
@@ -33,7 +36,7 @@ If this needs to be split later, use these boundaries:
 
 ## Phase 1 — Design and Plan
 
-- Add ADR-0093 for the accepted mixed workspace decisions.
+- Add [new-260705/ADR](../adr/new-260705-new-mixed-selection.md) for the accepted mixed workspace decisions.
 - Add final design document with test strategy.
 - Add this implementation plan.
 

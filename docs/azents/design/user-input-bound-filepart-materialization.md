@@ -3,6 +3,10 @@ title: "User Input Boundary FilePart Materialization Design"
 created: 2026-06-04
 updated: 2026-06-04
 tags: [architecture, backend, frontend, engine, security, testing]
+document_role: supporting
+document_type: supporting-consolidation
+migration_source: "docs/azents/design/user-input-bound-filepart-materialization.md"
+supporting_role: consolidation
 ---
 # User Input Boundary FilePart Materialization Design
 
@@ -10,7 +14,7 @@ tags: [architecture, backend, frontend, engine, security, testing]
 
 This design separates chat upload, Exchange attachment, and ModelFile/FilePart boundaries again. Goal is not temporarily blocking bug, but fundamentally correcting file identity and model input lifecycle.
 
-Core decisions follow [ADR-0049](../adr/0049-user-input-bound-filepart-materialization.md).
+Core decisions follow [input-260604/ADR](../adr/input-260604-input-bound-filepart-materialization.md).
 
 - upload is not session-bound and creates only agent-bound Exchange attachment.
 - FilePart is not independent entity but user input model content part.

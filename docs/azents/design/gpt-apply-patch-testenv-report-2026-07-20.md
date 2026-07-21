@@ -2,6 +2,9 @@
 title: "GPT apply-patch Validation Report"
 created: 2026-07-20
 tags: [engine, runtime, testenv, validation]
+document_role: supporting
+document_type: supporting-validation-report
+migration_source: "docs/azents/design/gpt-apply-patch-testenv-report-2026-07-20.md"
 ---
 
 # GPT apply-patch Validation Report
@@ -66,4 +69,4 @@ Phase 7 must update:
 - `agent-runtime-control.md` for `file.apply_patch`, strict V4A semantics, path and file safety, staging and revalidation, ordered commit, typed terminal success/failure, and no-rollback partial failure;
 - both specs' `code_paths`, `last_verified_at`, and changelog/version records as required by the existing spec format.
 
-ADR-0172 remains unchanged.
+[ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-230) remains unchanged.

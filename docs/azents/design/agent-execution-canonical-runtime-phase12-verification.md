@@ -3,6 +3,9 @@ title: "Agent Execution Canonical Runtime Phase 12 Verification"
 created: 2026-05-28
 updated: 2026-05-28
 tags: [backend, engine, qa]
+document_role: supporting
+document_type: supporting-validation-report
+migration_source: "docs/azents/design/agent-execution-canonical-runtime-phase12-verification.md"
 ---
 
 # Agent Execution Canonical Runtime Phase 12 Verification

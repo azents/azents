@@ -3,6 +3,9 @@ title: "Apply-patch provider tool dialects release gate - 2026-07-21"
 created: 2026-07-21
 updated: 2026-07-21
 tags: [architecture, backend, engine, operations, safety]
+document_role: supporting
+document_type: supporting-validation-report
+migration_source: "docs/azents/design/apply-patch-provider-tool-dialects-release-gate-2026-07-21.md"
 ---
 
 # Apply-patch provider tool dialects release gate - 2026-07-21
@@ -10,9 +13,9 @@ tags: [architecture, backend, engine, operations, safety]
 ## Purpose
 
 This record closes the implementation delivery plan for
-[ADR-0179: Select Provider-Specific Tool Dialects for Apply-Patch](../adr/0179-apply-patch-provider-tool-dialects.md)
+[patch-260721/ADR: Select Provider-Specific Tool Dialects for Apply-Patch](../adr/patch-260721-patch-dialects.md)
 and its rollout-control correction in
-[ADR-0180: Remove Percentage Rollout from Apply-Patch Custom Selection](../adr/0180-remove-apply-patch-custom-rollout.md).
+[custom-260721/ADR: Remove Percentage Rollout from Apply-Patch Custom Selection](../adr/custom-260721-patch-custom-rollout.md).
 It records the deployment constraints for the exact reviewed plaintext-custom route.
 It does not add runtime configuration, a percentage, a cohort, or a feature flag.
 
@@ -48,6 +51,6 @@ full lifecycle evidence.
 ## Verification record
 
 The completed delivery includes current behavior in the living specs and an implementation audit at
-[ADR-0179 implementation audit](./adr-0179-implementation-audit-2026-07-21.md). The release gate
+[patch-260721/ADR implementation audit](./adr-0179-implementation-audit-2026-07-21.md). The release gate
 preserves the durable dual-dialect reader requirement while removing rollout configuration from provider
 dialect selection.

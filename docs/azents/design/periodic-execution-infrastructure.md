@@ -4,6 +4,10 @@ created: 2026-06-20
 updated: 2026-06-20
 implemented: 2026-06-20
 tags: [architecture, backend, engine, infra]
+document_role: supporting
+document_type: supporting-consolidation
+migration_source: "docs/azents/design/periodic-execution-infrastructure.md"
+supporting_role: consolidation
 ---
 
 # Periodic Execution Infrastructure Design
@@ -26,7 +30,7 @@ The scheduler is a production role boundary:
 
 Periodic execution must run through a dedicated scheduler entrypoint and production Deployment, not inside AgentWorker.
 
-Related decisions: ADR-0068-D1, ADR-0068-D8
+Related decisions: [periodic-260620/ADR-D1](../adr/periodic-260620-periodic-execution-infrastructure.md), [periodic-260620/ADR-D8](../adr/periodic-260620-periodic-execution-infrastructure.md)
 
 Acceptance criteria:
 
@@ -39,7 +43,7 @@ Acceptance criteria:
 
 The scheduler must own due discovery, lease, retry, and state update, while execution is delegated through a TaskExecutor abstraction.
 
-Related decisions: ADR-0068-D2, ADR-0068-D11
+Related decisions: [periodic-260620/ADR-D2](../adr/periodic-260620-periodic-execution-infrastructure.md), [periodic-260620/ADR-D11](../adr/periodic-260620-periodic-execution-infrastructure.md)
 
 Acceptance criteria:
 
@@ -52,7 +56,7 @@ Acceptance criteria:
 
 System periodic task definitions must be registered in code.
 
-Related decisions: ADR-0068-D3
+Related decisions: [periodic-260620/ADR-D3](../adr/periodic-260620-periodic-execution-infrastructure.md)
 
 Acceptance criteria:
 
@@ -65,7 +69,7 @@ Acceptance criteria:
 
 Scheduler state must persist the current state per task key, without an attempt history table.
 
-Related decisions: ADR-0068-D4
+Related decisions: [periodic-260620/ADR-D4](../adr/periodic-260620-periodic-execution-infrastructure.md)
 
 Acceptance criteria:
 
@@ -78,7 +82,7 @@ Acceptance criteria:
 
 The scheduler must prevent duplicate executions using a Postgres row lease.
 
-Related decisions: ADR-0068-D5
+Related decisions: [periodic-260620/ADR-D5](../adr/periodic-260620-periodic-execution-infrastructure.md)
 
 Acceptance criteria:
 
@@ -91,7 +95,7 @@ Acceptance criteria:
 
 Retry behavior must be defined per task definition.
 
-Related decisions: ADR-0068-D6
+Related decisions: [periodic-260620/ADR-D6](../adr/periodic-260620-periodic-execution-infrastructure.md)
 
 Acceptance criteria:
 
@@ -104,7 +108,7 @@ Acceptance criteria:
 
 Operators must be able to inspect and trigger tasks through CLI.
 
-Related decisions: ADR-0068-D7, ADR-0068-D9
+Related decisions: [periodic-260620/ADR-D7](../adr/periodic-260620-periodic-execution-infrastructure.md), [periodic-260620/ADR-D9](../adr/periodic-260620-periodic-execution-infrastructure.md)
 
 Acceptance criteria:
 
@@ -118,7 +122,7 @@ Acceptance criteria:
 
 The first scheduler consumer must be a no-op heartbeat job.
 
-Related decisions: ADR-0068-D10
+Related decisions: [periodic-260620/ADR-D10](../adr/periodic-260620-periodic-execution-infrastructure.md)
 
 Acceptance criteria:
 
@@ -131,17 +135,17 @@ Acceptance criteria:
 
 | ADR decision | Requirements |
 | --- | --- |
-| ADR-0068-D1 | REQ-1 |
-| ADR-0068-D2 | REQ-2 |
-| ADR-0068-D3 | REQ-3 |
-| ADR-0068-D4 | REQ-4 |
-| ADR-0068-D5 | REQ-5 |
-| ADR-0068-D6 | REQ-6 |
-| ADR-0068-D7 | REQ-7 |
-| ADR-0068-D8 | REQ-1 |
-| ADR-0068-D9 | REQ-7 |
-| ADR-0068-D10 | REQ-8 |
-| ADR-0068-D11 | REQ-2 |
+| [periodic-260620/ADR-D1](../adr/periodic-260620-periodic-execution-infrastructure.md) | REQ-1 |
+| [periodic-260620/ADR-D2](../adr/periodic-260620-periodic-execution-infrastructure.md) | REQ-2 |
+| [periodic-260620/ADR-D3](../adr/periodic-260620-periodic-execution-infrastructure.md) | REQ-3 |
+| [periodic-260620/ADR-D4](../adr/periodic-260620-periodic-execution-infrastructure.md) | REQ-4 |
+| [periodic-260620/ADR-D5](../adr/periodic-260620-periodic-execution-infrastructure.md) | REQ-5 |
+| [periodic-260620/ADR-D6](../adr/periodic-260620-periodic-execution-infrastructure.md) | REQ-6 |
+| [periodic-260620/ADR-D7](../adr/periodic-260620-periodic-execution-infrastructure.md) | REQ-7 |
+| [periodic-260620/ADR-D8](../adr/periodic-260620-periodic-execution-infrastructure.md) | REQ-1 |
+| [periodic-260620/ADR-D9](../adr/periodic-260620-periodic-execution-infrastructure.md) | REQ-7 |
+| [periodic-260620/ADR-D10](../adr/periodic-260620-periodic-execution-infrastructure.md) | REQ-8 |
+| [periodic-260620/ADR-D11](../adr/periodic-260620-periodic-execution-infrastructure.md) | REQ-2 |
 
 ## Architecture
 
@@ -521,7 +525,7 @@ No heartbeat external dependency was found.
 
 #### What to check
 
-During verification, compare implementation against every requirement and ADR-0068 decision.
+During verification, compare implementation against every requirement and [periodic-260620/ADR](../adr/periodic-260620-periodic-execution-infrastructure.md) decision.
 
 #### Why it matters
 
@@ -529,7 +533,7 @@ The user explicitly requires each ship-feature verification phase to audit requi
 
 #### How to check
 
-Create an audit table mapping REQ-1 through REQ-8 and ADR-0068-D1 through D11 to implemented files/tests. Mark any missing item and fix it before merge.
+Create an audit table mapping REQ-1 through REQ-8 and [periodic-260620/ADR-D1](../adr/periodic-260620-periodic-execution-infrastructure.md) through D11 to implemented files/tests. Mark any missing item and fix it before merge.
 
 #### Expected result
 
@@ -541,14 +545,14 @@ PASS for implementation audit. Evidence table:
 
 | Requirement / ADR | Implementation evidence | Result |
 | --- | --- | --- |
-| REQ-1 / ADR-0068-D1,D8 | `src/cli/scheduler.py`, `bin/scheduler.sh`, ArgoCD/Helm scheduler Deployment, `src/cli/devserver.py` scheduler co-run, no scheduler startup in `AgentWorker` | PASS |
-| REQ-2 / ADR-0068-D2,D11 | `TaskExecutor`, `LocalTaskExecutor`, `SchedulerService` execution through executor, no Temporal imports | PASS |
-| REQ-3 / ADR-0068-D3 | `ScheduledTaskDefinition`, `get_task_definitions()`, `HEARTBEAT_TASK`; DB stores state only | PASS |
-| REQ-4 / ADR-0068-D4 | `scheduled_task_states` table/model/repository current state only; no attempt history table | PASS |
-| REQ-5 / ADR-0068-D5 | `claim_due()` conditional row update with lease owner/expiry; repository DB tests prepared | PASS, DB execution deferred to CI/pre-merge due local Docker absence |
-| REQ-6 / ADR-0068-D6 | `RetryPolicy`, `compute_failure_next_run_at()`, service tests | PASS |
-| REQ-7 / ADR-0068-D7,D9 | CLI `list/status/trigger`; trigger mutates state only and scheduler loop executes | PASS |
-| REQ-8 / ADR-0068-D10 | no-op `scheduler_heartbeat` task first consumer | PASS |
+| REQ-1 / [periodic-260620/ADR-D1](../adr/periodic-260620-periodic-execution-infrastructure.md),D8 | `src/cli/scheduler.py`, `bin/scheduler.sh`, ArgoCD/Helm scheduler Deployment, `src/cli/devserver.py` scheduler co-run, no scheduler startup in `AgentWorker` | PASS |
+| REQ-2 / [periodic-260620/ADR-D2](../adr/periodic-260620-periodic-execution-infrastructure.md),D11 | `TaskExecutor`, `LocalTaskExecutor`, `SchedulerService` execution through executor, no Temporal imports | PASS |
+| REQ-3 / [periodic-260620/ADR-D3](../adr/periodic-260620-periodic-execution-infrastructure.md) | `ScheduledTaskDefinition`, `get_task_definitions()`, `HEARTBEAT_TASK`; DB stores state only | PASS |
+| REQ-4 / [periodic-260620/ADR-D4](../adr/periodic-260620-periodic-execution-infrastructure.md) | `scheduled_task_states` table/model/repository current state only; no attempt history table | PASS |
+| REQ-5 / [periodic-260620/ADR-D5](../adr/periodic-260620-periodic-execution-infrastructure.md) | `claim_due()` conditional row update with lease owner/expiry; repository DB tests prepared | PASS, DB execution deferred to CI/pre-merge due local Docker absence |
+| REQ-6 / [periodic-260620/ADR-D6](../adr/periodic-260620-periodic-execution-infrastructure.md) | `RetryPolicy`, `compute_failure_next_run_at()`, service tests | PASS |
+| REQ-7 / [periodic-260620/ADR-D7](../adr/periodic-260620-periodic-execution-infrastructure.md),D9 | CLI `list/status/trigger`; trigger mutates state only and scheduler loop executes | PASS |
+| REQ-8 / [periodic-260620/ADR-D10](../adr/periodic-260620-periodic-execution-infrastructure.md) | no-op `scheduler_heartbeat` task first consumer | PASS |
 
 Commands executed:
 
@@ -569,7 +573,7 @@ Commands executed:
 
 ### Phase 1. Design PR
 
-- Add ADR-0068.
+- Add [periodic-260620/ADR](../adr/periodic-260620-periodic-execution-infrastructure.md).
 - Add this design document.
 - Keep model catalog ADR/design as separate follow-up.
 
@@ -606,20 +610,20 @@ Commands executed:
 
 ### Put scheduler inside AgentWorker
 
-Rejected by ADR-0068-D1. System periodic execution must be a separate role.
+Rejected by [periodic-260620/ADR-D1](../adr/periodic-260620-periodic-execution-infrastructure.md). System periodic execution must be a separate role.
 
 ### Temporal-first implementation
 
-Rejected by ADR-0068-D11. Temporal is future executor only.
+Rejected by [periodic-260620/ADR-D11](../adr/periodic-260620-periodic-execution-infrastructure.md). Temporal is future executor only.
 
 ### DB-defined schedules
 
-Rejected by ADR-0068-D3. System job definitions are code-owned in v1.
+Rejected by [periodic-260620/ADR-D3](../adr/periodic-260620-periodic-execution-infrastructure.md). System job definitions are code-owned in v1.
 
 ### Attempt history table
 
-Rejected by ADR-0068-D4. Current-only state plus structured logs is sufficient for v1.
+Rejected by [periodic-260620/ADR-D4](../adr/periodic-260620-periodic-execution-infrastructure.md). Current-only state plus structured logs is sufficient for v1.
 
 ### LiteLLM sync as first consumer
 
-Rejected by ADR-0068-D10. Heartbeat validates infrastructure first; LiteLLM sync follows after scheduler is in place.
+Rejected by [periodic-260620/ADR-D10](../adr/periodic-260620-periodic-execution-infrastructure.md). Heartbeat validates infrastructure first; LiteLLM sync follows after scheduler is in place.

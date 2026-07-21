@@ -4,6 +4,9 @@ tags: [engine]
 created: 2026-03-04
 updated: 2026-03-04
 implemented: 2026-03-04
+document_role: supporting
+document_type: supporting-plan
+migration_source: "docs/azents/design/responses-api-migration.md"
 ---
 
 # Responses API Migration & Multimodal Support Plan

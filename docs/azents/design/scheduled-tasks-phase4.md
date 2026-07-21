@@ -5,6 +5,9 @@ tags: [backend, engine]
 created: 2026-03-30
 updated: 2026-03-30
 implemented: 2026-03-30
+document_role: supporting
+document_type: supporting-phase
+migration_source: "docs/azents/design/scheduled-tasks-phase4.md"
 ---
 
 # Scheduled Tasks Phase 4 — Interface Integration

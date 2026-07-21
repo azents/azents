@@ -4,6 +4,9 @@ tags: [architecture, engine]
 created: 2026-03-22
 updated: 2026-04-26
 implemented: 2026-04-26
+document_role: supporting
+document_type: supporting-secondary-design
+migration_source: "docs/azents/design/memory-system.md"
 ---
 
 # nointern Memory Design

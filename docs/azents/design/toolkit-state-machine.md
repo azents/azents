@@ -4,6 +4,10 @@ tags: [engine, architecture]
 created: 2026-03-28
 updated: 2026-03-28
 implemented: 2026-03-28
+document_role: supporting
+document_type: supporting-consolidation
+migration_source: "docs/azents/design/toolkit-state-machine.md"
+supporting_role: consolidation
 ---
 
 # Toolkit State Machine Design

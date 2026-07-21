@@ -2,6 +2,9 @@
 title: "Concurrent Read Latency Hardening Validation"
 created: 2026-07-19
 tags: [backend, runtime, toolkit, performance, validation]
+document_role: supporting
+document_type: supporting-validation-report
+migration_source: "docs/azents/design/concurrent-read-latency-hardening-validation-2026-07-19.md"
 ---
 
 # Concurrent Read Latency Hardening Validation

@@ -4,6 +4,10 @@ created: 2026-06-27
 updated: 2026-06-28
 implemented: 2026-06-28
 tags: [architecture, backend, engine, runtime, toolkit]
+document_role: supporting
+document_type: supporting-consolidation
+migration_source: "docs/azents/design/runtime-exec-process-tools.md"
+supporting_role: consolidation
 ---
 # Runtime Exec Process Tools
 
@@ -16,7 +20,7 @@ Azents will replace the current runtime-backed `bash` tool with Codex-like runti
 
 The design keeps the Agent Engine core tool-agnostic. Runtime process ownership, output drain, unread buffers, and lifecycle stay inside the Runtime Runner. Worker, runtime-control, and UI paths use structured process metadata/events for projection and diagnostics, but they do not become process-handle sources of truth.
 
-Decision rationale is recorded in [ADR-0081: Runtime Exec Process Tools](../adr/0081-runtime-exec-process.md).
+Decision rationale is recorded in [exec-260627/ADR: Runtime Exec Process Tools](../adr/exec-260627-exec-process.md).
 
 ## Problem
 
@@ -129,7 +133,7 @@ Processes are ephemeral AgentSession-owned resources scoped to an AgentRuntime R
 - `terminated`
 - `expired`
 
-Runner restart or generation mismatch means previous processes are gone. A later `write_stdin` returns a missing-process observation. Per ADR-0083, user stop terminates all live exec processes owned by the stopped `AgentSession`, while worker graceful shutdown/handover does not terminate runner-owned processes by itself.
+Runner restart or generation mismatch means previous processes are gone. A later `write_stdin` returns a missing-process observation. Per [exec-260628/ADR](../adr/exec-260628-exec-stop-termination.md), user stop terminates all live exec processes owned by the stopped `AgentSession`, while worker graceful shutdown/handover does not terminate runner-owned processes by itself.
 
 ## User-visible Behavior
 
@@ -214,7 +218,7 @@ Client tool result events preserve generic metadata. UI projection may use metad
 
 ### R1. Replace `bash` with process tools
 
-Related decisions: ADR-0081-D1
+Related decisions: [exec-260627/ADR-D1](../adr/exec-260627-exec-process.md)
 
 Acceptance criteria:
 
@@ -225,7 +229,7 @@ Acceptance criteria:
 
 ### R2. Keep process ownership in Runner
 
-Related decisions: ADR-0081-D2, ADR-0081-D3
+Related decisions: [exec-260627/ADR-D2](../adr/exec-260627-exec-process.md), [exec-260627/ADR-D3](../adr/exec-260627-exec-process.md)
 
 Acceptance criteria:
 
@@ -236,7 +240,7 @@ Acceptance criteria:
 
 ### R3. Add generic tool-result metadata
 
-Related decisions: ADR-0081-D4
+Related decisions: [exec-260627/ADR-D4](../adr/exec-260627-exec-process.md)
 
 Acceptance criteria:
 
@@ -247,7 +251,7 @@ Acceptance criteria:
 
 ### R4. Stream and buffer output in Runner
 
-Related decisions: ADR-0081-D5
+Related decisions: [exec-260627/ADR-D5](../adr/exec-260627-exec-process.md)
 
 Acceptance criteria:
 
@@ -259,7 +263,7 @@ Acceptance criteria:
 
 ### R5. Enforce bounded process lifecycle
 
-Related decisions: ADR-0081-D6
+Related decisions: [exec-260627/ADR-D6](../adr/exec-260627-exec-process.md)
 
 Acceptance criteria:
 
@@ -270,7 +274,7 @@ Acceptance criteria:
 
 ### R6. Keep Phase 1 pipe-based and defer PTY
 
-Related decisions: ADR-0081-D7
+Related decisions: [exec-260627/ADR-D7](../adr/exec-260627-exec-process.md)
 
 Acceptance criteria:
 
@@ -280,7 +284,7 @@ Acceptance criteria:
 
 ### R7. Keep exec processes separate from background tool calls
 
-Related decisions: ADR-0081-D8
+Related decisions: [exec-260627/ADR-D8](../adr/exec-260627-exec-process.md)
 
 Acceptance criteria:
 
@@ -293,14 +297,14 @@ Acceptance criteria:
 
 | ADR decision | Requirement mappings |
 | --- | --- |
-| ADR-0081-D1 | R1 |
-| ADR-0081-D2 | R2 |
-| ADR-0081-D3 | R2 |
-| ADR-0081-D4 | R3 |
-| ADR-0081-D5 | R4 |
-| ADR-0081-D6 | R5 |
-| ADR-0081-D7 | R6 |
-| ADR-0081-D8 | R7 |
+| [exec-260627/ADR-D1](../adr/exec-260627-exec-process.md) | R1 |
+| [exec-260627/ADR-D2](../adr/exec-260627-exec-process.md) | R2 |
+| [exec-260627/ADR-D3](../adr/exec-260627-exec-process.md) | R2 |
+| [exec-260627/ADR-D4](../adr/exec-260627-exec-process.md) | R3 |
+| [exec-260627/ADR-D5](../adr/exec-260627-exec-process.md) | R4 |
+| [exec-260627/ADR-D6](../adr/exec-260627-exec-process.md) | R5 |
+| [exec-260627/ADR-D7](../adr/exec-260627-exec-process.md) | R6 |
+| [exec-260627/ADR-D8](../adr/exec-260627-exec-process.md) | R7 |
 
 ## Alternatives Considered
 

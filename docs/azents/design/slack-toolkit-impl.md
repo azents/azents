@@ -4,11 +4,14 @@ tags: [backend, engine]
 created: 2026-03-12
 updated: 2026-03-23
 implemented: 2026-03-23
+document_role: supporting
+document_type: supporting-plan
+migration_source: "docs/azents/design/slack-toolkit-impl.md"
 ---
 
 # Slack Toolkit Implementation Plan
 
-Implementation plan for [Slack Toolkit design](./slack-toolkit.md). Phase 1 performs prerequisite refactors (interface awareness, Block Kit parsing, message formatting improvement), and Phase 2 implements the actual Slack Toolkit.
+Implementation plan for [Slack Toolkit design](./slack-260312-slack-toolkit.md). Phase 1 performs prerequisite refactors (interface awareness, Block Kit parsing, message formatting improvement), and Phase 2 implements the actual Slack Toolkit.
 
 ## Current Status
 

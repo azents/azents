@@ -4,6 +4,10 @@ created: 2026-07-19
 updated: 2026-07-19
 implemented: 2026-07-19
 tags: [backend, engine, frontend, llm, tools, storage]
+document_role: supporting
+document_type: supporting-consolidation
+migration_source: "docs/azents/design/provider-tool-single-event-transcript.md"
+supporting_role: consolidation
 ---
 
 # Provider Tool Single-Event Transcript Design
@@ -60,7 +64,7 @@ image_generation_call native item
 
 The compatible Responses lowerer rehydrates `image_generation_call.result` only from `ProviderToolResultPayload`. Canonical fallback lowering renders provider semantic content. The frontend receives a provider result event and merges its status, text, and attachments into a provider call card by `call_id`.
 
-Other recognized hosted-tool output items already normalize to `provider_tool_call`, and ADR-0167 allows those call events to contain semantic output.
+Other recognized hosted-tool output items already normalize to `provider_tool_call`, and [semantic-260718/ADR](../adr/semantic-260718-semantic-transcript.md) allows those call events to contain semantic output.
 
 ## Proposed Durable Contract
 
@@ -202,7 +206,7 @@ History reload, live-to-durable handoff, and resync must produce the same one-ca
 - Durable events, API responses, WebSocket messages, frontend state, logs, compaction input, and context inspection contain no image Base64, raw bytes, data URLs, credentials, headers, cookies, or raw provider bodies.
 - Exchange URIs remain authorization-gated file-location references.
 - Synthetic attachment context contains bounded metadata only.
-- Provider semantic extraction remains allowlisted and bounded under ADR-0167.
+- Provider semantic extraction remains allowlisted and bounded under [semantic-260718/ADR](../adr/semantic-260718-semantic-transcript.md).
 
 ## Migration and Rollout
 
@@ -317,12 +321,12 @@ Rejected because it leaves two canonical content locations and forces every cons
 - `docs/azents/spec/domain/conversation.md`
 - `docs/azents/spec/flow/agent-execution-loop.md`
 - `docs/azents/spec/flow/file-exchange-storage.md`
-- `docs/azents/spec/flow/context-compaction.md`
-- `docs/azents/spec/flow/session-context-inspector.md`
+- `docs/azents/spec/flow/context-260305-context-compaction.md`
+- `docs/azents/spec/flow/context-260530-context-inspector.md`
 - `docs/azents/spec/flow/chat-session-resync.md`
 
 ## Related Decisions
 
-- [ADR-0164: Materialize Provider-Generated Images as File Resources](../adr/0164-materialize-provider-generated-images-as-file-resources.md)
-- [ADR-0167: Normalize Provider Tool Semantic Transcript Content](../adr/0167-normalize-provider-tool-semantic-transcript.md)
-- [ADR-0168: Use Single Durable Events for Provider Tool Items](../adr/0168-use-single-provider-tool-events.md)
+- [generated-260717/ADR: Materialize Provider-Generated Images as File Resources](../adr/generated-260717-generated-images-as-file-resources.md)
+- [semantic-260718/ADR: Normalize Provider Tool Semantic Transcript Content](../adr/semantic-260718-semantic-transcript.md)
+- [events-260719/ADR: Use Single Durable Events for Provider Tool Items](../adr/events-260719-events.md)

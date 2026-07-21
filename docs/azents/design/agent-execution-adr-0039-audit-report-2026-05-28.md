@@ -1,15 +1,18 @@
 ---
-title: "ADR-0039 Application Audit Report"
+title: "[execution-260527/ADR](../adr/execution-260527-execution-transcript-normalization.md) Application Audit Report"
 created: 2026-05-28
 updated: 2026-05-28
 tags: [architecture, backend, engine, audit]
+document_role: supporting
+document_type: supporting-audit
+migration_source: "docs/azents/design/agent-execution-adr-0039-audit-report-2026-05-28.md"
 ---
 
-# ADR-0039 Application Audit Report
+# [execution-260527/ADR](../adr/execution-260527-execution-transcript-normalization.md) Application Audit Report
 
 ## Audit Scope
 
-Audit criteria are the 26 items under `## Decisions` in [`ADR-0039: Agent Execution Transcript Normalization`](../adr/0039-agent-execution-transcript-normalization.md).
+Audit criteria are the 26 items under `## Decisions` in [`execution-260527/ADR: Agent Execution Transcript Normalization`](../adr/execution-260527-execution-transcript-normalization.md).
 
 This audit re-evaluated based on implementation state. Follow-up changes from PR #4132 are reflected up to shadow table cutover, canonical REST history projection, input buffer canonical persistence, and SDK RunState column removal.
 
@@ -25,7 +28,7 @@ Main code paths checked:
 - `python/apps/azents/db-schemas/rdb/migrations/versions/29d80393ae0e_cut_over_canonical_runtime_tables.py`
 - `testenv/azents/e2e/src/tests/azents/public/`
 
-All verdict values in this document are `fully applied`. However, provider hosted tool stabilization, which ADR explicitly split as non-blocking, remains tracked in #4100. It is not a condition blocking completion of ADR-0039 canonical runtime cutover.
+All verdict values in this document are `fully applied`. However, provider hosted tool stabilization, which ADR explicitly split as non-blocking, remains tracked in #4100. It is not a condition blocking completion of [execution-260527/ADR](../adr/execution-260527-execution-transcript-normalization.md) canonical runtime cutover.
 
 ## Prerequisite Handling
 
@@ -41,7 +44,7 @@ Fourth, manual compaction E2E did not use summary mock endpoint and could leave 
 
 ## Design Contradiction Review
 
-No blocker-level design contradiction between ADR-0039 and implementation was found.
+No blocker-level design contradiction between [execution-260527/ADR](../adr/execution-260527-execution-transcript-normalization.md) and implementation was found.
 
 One point to be careful about is migration downgrade. ADR allows destructive cutover because this is private service, but local pytest fixture runs `downgrade base`. This is not product requirement contradiction but test infrastructure requirement. Therefore, upgrade remains destructive, and downgrade only has old-shape recreation for test teardown.
 

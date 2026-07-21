@@ -2,6 +2,10 @@
 title: "New Session Project Selection Design"
 created: 2026-06-29
 tags: [product, backend, frontend, api, engine]
+document_role: supporting
+document_type: supporting-consolidation
+migration_source: "docs/azents/design/new-session-project-selection.md"
+supporting_role: consolidation
 ---
 
 # New Session Project Selection Design
@@ -20,7 +24,7 @@ This design implements the first step of the broader session Project roadmap cap
 
 New session creation must register exactly the `project_paths` submitted by the client.
 
-Related decisions: ADR-0086-D1, ADR-0086-D2
+Related decisions: [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-233), [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-234)
 
 Acceptance criteria:
 
@@ -32,7 +36,7 @@ Acceptance criteria:
 
 Both direct session creation and first-message session creation require `project_paths`.
 
-Related decisions: ADR-0086-D2
+Related decisions: [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-235)
 
 Acceptance criteria:
 
@@ -44,7 +48,7 @@ Acceptance criteria:
 
 The new session page must initialize its chip list from the latest active non-primary session for the Agent.
 
-Related decisions: ADR-0086-D3
+Related decisions: [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-236)
 
 Acceptance criteria:
 
@@ -56,7 +60,7 @@ Acceptance criteria:
 
 The Add Project dropdown must load preset paths from an Agent-owned Project Catalog.
 
-Related decisions: ADR-0086-D4, ADR-0086-D5
+Related decisions: [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-237), [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-238)
 
 Acceptance criteria:
 
@@ -70,7 +74,7 @@ Acceptance criteria:
 
 The catalog must not become the canonical session Project identity in this phase.
 
-Related decisions: ADR-0086-D4, ADR-0086-D6
+Related decisions: [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-239), [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-240)
 
 Acceptance criteria:
 
@@ -82,7 +86,7 @@ Acceptance criteria:
 
 Project path validation must allow nested Project paths and parent/child overlap within the same session.
 
-Related decisions: ADR-0086-D7
+Related decisions: [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-241)
 
 Acceptance criteria:
 
@@ -95,7 +99,7 @@ Acceptance criteria:
 
 The new session page must render a Project chip selector above the chat input.
 
-Related decisions: ADR-0086-D1, ADR-0086-D3, ADR-0086-D4
+Related decisions: [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-242), [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-243), [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-244)
 
 Acceptance criteria:
 
@@ -109,7 +113,7 @@ Acceptance criteria:
 
 The selector must support direct folder selection through a dedicated directory picker modal.
 
-Related decisions: ADR-0086-D8
+Related decisions: [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-245)
 
 Acceptance criteria:
 
@@ -124,7 +128,7 @@ Acceptance criteria:
 
 Session creation validates path shape but does not check runner directory existence.
 
-Related decisions: ADR-0086-D9
+Related decisions: [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-246)
 
 Acceptance criteria:
 
@@ -136,15 +140,15 @@ Acceptance criteria:
 
 | ADR decision | Requirements |
 | --- | --- |
-| ADR-0086-D1 | REQ-1, REQ-7 |
-| ADR-0086-D2 | REQ-1, REQ-2 |
-| ADR-0086-D3 | REQ-3, REQ-7 |
-| ADR-0086-D4 | REQ-4, REQ-5, REQ-7 |
-| ADR-0086-D5 | REQ-4 |
-| ADR-0086-D6 | REQ-5 |
-| ADR-0086-D7 | REQ-6 |
-| ADR-0086-D8 | REQ-8 |
-| ADR-0086-D9 | REQ-9 |
+| [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-247) | REQ-1, REQ-7 |
+| [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-248) | REQ-1, REQ-2 |
+| [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-249) | REQ-3, REQ-7 |
+| [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-250) | REQ-4, REQ-5, REQ-7 |
+| [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-251) | REQ-4 |
+| [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-252) | REQ-5 |
+| [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-253) | REQ-6 |
+| [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-254) | REQ-8 |
+| [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-255) | REQ-9 |
 
 ## Current Implementation Findings
 
@@ -857,31 +861,31 @@ TBD — E2E/testenv verification phase.
 
 ### Keep hidden primary Project copy
 
-Rejected by ADR-0086-D1. It makes the new Project selector misleading and keeps primary session as implicit source of truth.
+Rejected by [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-256). It makes the new Project selector misleading and keeps primary session as implicit source of truth.
 
 ### Optional `project_paths` with legacy omission behavior
 
-Rejected by ADR-0086-D2. Required exact-set semantics are clearer even though this is a breaking public API change.
+Rejected by [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-257). Required exact-set semantics are clearer even though this is a breaking public API change.
 
 ### Presets from distinct session rows only
 
-Rejected by ADR-0086-D4/D5. A minimal Agent-owned preset store gives a simple query path and future extension point without turning into a logical Project model.
+Rejected by [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-258)/D5. A minimal Agent-owned preset store gives a simple query path and future extension point without turning into a logical Project model.
 
 ### Catalog FK from session Project rows
 
-Rejected by ADR-0086-D6. Catalog is preset-only; session Project rows remain path-only bindings.
+Rejected by [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-259). Catalog is preset-only; session Project rows remain path-only bindings.
 
 ### Direct-child-only Project paths
 
-Rejected by ADR-0086-D7. Nested directories must be valid Project working scopes.
+Rejected by [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-260). Nested directories must be valid Project working scopes.
 
 ### Reuse WorkspacePanel directly for picker
 
-Rejected by ADR-0086-D8. WorkspacePanel is a file management panel with destructive actions; Project selection needs a dedicated directory picker.
+Rejected by [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-261). WorkspacePanel is a file management panel with destructive actions; Project selection needs a dedicated directory picker.
 
 ### Runner existence checks during session creation
 
-Rejected by ADR-0086-D9. Session creation should not depend on runtime readiness, especially when selecting catalog presets.
+Rejected by [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-262). Session creation should not depend on runtime readiness, especially when selecting catalog presets.
 
 ## Open Follow-ups
 

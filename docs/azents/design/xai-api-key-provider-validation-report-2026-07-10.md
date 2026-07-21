@@ -2,6 +2,9 @@
 title: "xAI API Key Provider Validation Report"
 created: 2026-07-10
 tags: [backend, frontend, api, testing, documentation]
+document_role: supporting
+document_type: supporting-validation-report
+migration_source: "docs/azents/design/xai-api-key-provider-validation-report-2026-07-10.md"
 ---
 
 # xAI API Key Provider Validation Report

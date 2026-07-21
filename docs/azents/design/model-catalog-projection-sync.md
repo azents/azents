@@ -3,6 +3,10 @@ title: "Model Catalog Projection and Sync Design"
 created: 2026-06-20
 updated: 2026-06-20
 tags: [backend, api, frontend, engine]
+document_role: supporting
+document_type: supporting-consolidation
+migration_source: "docs/azents/design/model-catalog-projection-sync.md"
+supporting_role: consolidation
 ---
 
 # Model Catalog Projection and Sync Design
@@ -13,7 +17,7 @@ Azents currently lists selectable models by calling provider or external catalog
 
 This design replaces request-time listing with persisted catalog projections. Catalog sync fetches source data outside the normal read path, records current snapshot and latest attempt state, and exposes paginated stored entries to the model picker.
 
-The design is based on [ADR-0067: Model Catalog Projection and Sync](../adr/0067-model-catalog-projection-sync.md). It assumes the periodic execution infrastructure from [ADR-0068](../adr/0068-periodic-execution-infrastructure.md) and `docs/azents/spec/flow/periodic-execution.md` already exists.
+The design is based on [catalog-260620/ADR: Model Catalog Projection and Sync](../adr/catalog-260620-catalog-projection-sync.md). It assumes the periodic execution infrastructure from [periodic-260620/ADR](../adr/periodic-260620-periodic-execution-infrastructure.md) and `docs/azents/spec/flow/periodic-execution.md` already exists.
 
 ## Problem
 
@@ -66,7 +70,7 @@ Frontend state:
 
 Existing documentation:
 
-- `docs/azents/design/llm-model-catalog-sync.md` is an older pre-ADR design that still references nointern-era static catalog tables and models.dev. This new design supersedes it for ADR-0067 implementation.
+- `docs/azents/design/llm-260513-llm-catalog-source.md` is an older pre-ADR design that still references nointern-era static catalog tables and models.dev. This new design supersedes it for [catalog-260620/ADR](../adr/catalog-260620-catalog-projection-sync.md) implementation.
 
 ## Target State
 
@@ -96,7 +100,7 @@ flowchart TD
 
 ### REQ-1. Split system catalog and integration catalog
 
-Related decisions: ADR-0067-D1
+Related decisions: [catalog-260620/ADR-D1](../adr/catalog-260620-catalog-projection-sync.md)
 
 Acceptance criteria:
 
@@ -107,7 +111,7 @@ Acceptance criteria:
 
 ### REQ-2. Remove external listing from normal read path
 
-Related decisions: ADR-0067-D2
+Related decisions: [catalog-260620/ADR-D2](../adr/catalog-260620-catalog-projection-sync.md)
 
 Acceptance criteria:
 
@@ -117,7 +121,7 @@ Acceptance criteria:
 
 ### REQ-3. Implement full sync units
 
-Related decisions: ADR-0067-D3, ADR-0067-D4, ADR-0067-D5
+Related decisions: [catalog-260620/ADR-D3](../adr/catalog-260620-catalog-projection-sync.md), [catalog-260620/ADR-D4](../adr/catalog-260620-catalog-projection-sync.md), [catalog-260620/ADR-D5](../adr/catalog-260620-catalog-projection-sync.md)
 
 Acceptance criteria:
 
@@ -129,7 +133,7 @@ Acceptance criteria:
 
 ### REQ-4. Persist user credential failures as domain state
 
-Related decisions: ADR-0067-D6, ADR-0067-D17
+Related decisions: [catalog-260620/ADR-D6](../adr/catalog-260620-catalog-projection-sync.md), [catalog-260620/ADR-D17](../adr/catalog-260620-catalog-projection-sync.md)
 
 Acceptance criteria:
 
@@ -140,7 +144,7 @@ Acceptance criteria:
 
 ### REQ-5. Provide integration-first picker with catalog state
 
-Related decisions: ADR-0067-D7
+Related decisions: [catalog-260620/ADR-D7](../adr/catalog-260620-catalog-projection-sync.md)
 
 Acceptance criteria:
 
@@ -152,7 +156,7 @@ Acceptance criteria:
 
 ### REQ-6. Store canonical projection entries
 
-Related decisions: ADR-0067-D8, ADR-0067-D9, ADR-0067-D10, ADR-0067-D18
+Related decisions: [catalog-260620/ADR-D8](../adr/catalog-260620-catalog-projection-sync.md), [catalog-260620/ADR-D9](../adr/catalog-260620-catalog-projection-sync.md), [catalog-260620/ADR-D10](../adr/catalog-260620-catalog-projection-sync.md), [catalog-260620/ADR-D18](../adr/catalog-260620-catalog-projection-sync.md)
 
 Acceptance criteria:
 
@@ -165,7 +169,7 @@ Acceptance criteria:
 
 ### REQ-7. Combine provider availability with target projection for Bedrock/Vertex
 
-Related decisions: ADR-0067-D11, ADR-0067-D19
+Related decisions: [catalog-260620/ADR-D11](../adr/catalog-260620-catalog-projection-sync.md), [catalog-260620/ADR-D19](../adr/catalog-260620-catalog-projection-sync.md)
 
 Acceptance criteria:
 
@@ -177,7 +181,7 @@ Acceptance criteria:
 
 ### REQ-8. Keep OpenAI/Anthropic listing and models.dev out of scope
 
-Related decisions: ADR-0067-D12, ADR-0067-D14
+Related decisions: [catalog-260620/ADR-D12](../adr/catalog-260620-catalog-projection-sync.md), [catalog-260620/ADR-D14](../adr/catalog-260620-catalog-projection-sync.md)
 
 Acceptance criteria:
 
@@ -187,7 +191,7 @@ Acceptance criteria:
 
 ### REQ-9. Preserve Agent snapshot semantics
 
-Related decisions: ADR-0067-D13
+Related decisions: [catalog-260620/ADR-D13](../adr/catalog-260620-catalog-projection-sync.md)
 
 Acceptance criteria:
 
@@ -199,7 +203,7 @@ Acceptance criteria:
 
 ### REQ-10. Store LiteLLM source snapshots separately from projections
 
-Related decisions: ADR-0067-D15
+Related decisions: [catalog-260620/ADR-D15](../adr/catalog-260620-catalog-projection-sync.md)
 
 Acceptance criteria:
 
@@ -210,7 +214,7 @@ Acceptance criteria:
 
 ### REQ-11. Keep current snapshot and latest attempt only
 
-Related decisions: ADR-0067-D16
+Related decisions: [catalog-260620/ADR-D16](../adr/catalog-260620-catalog-projection-sync.md)
 
 Acceptance criteria:
 
@@ -224,25 +228,25 @@ Acceptance criteria:
 
 | ADR decision | Requirements |
 | --- | --- |
-| ADR-0067-D1 | REQ-1 |
-| ADR-0067-D2 | REQ-2 |
-| ADR-0067-D3 | REQ-3 |
-| ADR-0067-D4 | REQ-3, REQ-10 |
-| ADR-0067-D5 | REQ-3, REQ-4 |
-| ADR-0067-D6 | REQ-4 |
-| ADR-0067-D7 | REQ-5 |
-| ADR-0067-D8 | REQ-6 |
-| ADR-0067-D9 | REQ-6, REQ-10 |
-| ADR-0067-D10 | REQ-6 |
-| ADR-0067-D11 | REQ-7 |
-| ADR-0067-D12 | REQ-8 |
-| ADR-0067-D13 | REQ-9 |
-| ADR-0067-D14 | REQ-8 |
-| ADR-0067-D15 | REQ-10 |
-| ADR-0067-D16 | REQ-11 |
-| ADR-0067-D17 | REQ-3, REQ-4 |
-| ADR-0067-D18 | REQ-6 |
-| ADR-0067-D19 | REQ-7 |
+| [catalog-260620/ADR-D1](../adr/catalog-260620-catalog-projection-sync.md) | REQ-1 |
+| [catalog-260620/ADR-D2](../adr/catalog-260620-catalog-projection-sync.md) | REQ-2 |
+| [catalog-260620/ADR-D3](../adr/catalog-260620-catalog-projection-sync.md) | REQ-3 |
+| [catalog-260620/ADR-D4](../adr/catalog-260620-catalog-projection-sync.md) | REQ-3, REQ-10 |
+| [catalog-260620/ADR-D5](../adr/catalog-260620-catalog-projection-sync.md) | REQ-3, REQ-4 |
+| [catalog-260620/ADR-D6](../adr/catalog-260620-catalog-projection-sync.md) | REQ-4 |
+| [catalog-260620/ADR-D7](../adr/catalog-260620-catalog-projection-sync.md) | REQ-5 |
+| [catalog-260620/ADR-D8](../adr/catalog-260620-catalog-projection-sync.md) | REQ-6 |
+| [catalog-260620/ADR-D9](../adr/catalog-260620-catalog-projection-sync.md) | REQ-6, REQ-10 |
+| [catalog-260620/ADR-D10](../adr/catalog-260620-catalog-projection-sync.md) | REQ-6 |
+| [catalog-260620/ADR-D11](../adr/catalog-260620-catalog-projection-sync.md) | REQ-7 |
+| [catalog-260620/ADR-D12](../adr/catalog-260620-catalog-projection-sync.md) | REQ-8 |
+| [catalog-260620/ADR-D13](../adr/catalog-260620-catalog-projection-sync.md) | REQ-9 |
+| [catalog-260620/ADR-D14](../adr/catalog-260620-catalog-projection-sync.md) | REQ-8 |
+| [catalog-260620/ADR-D15](../adr/catalog-260620-catalog-projection-sync.md) | REQ-10 |
+| [catalog-260620/ADR-D16](../adr/catalog-260620-catalog-projection-sync.md) | REQ-11 |
+| [catalog-260620/ADR-D17](../adr/catalog-260620-catalog-projection-sync.md) | REQ-3, REQ-4 |
+| [catalog-260620/ADR-D18](../adr/catalog-260620-catalog-projection-sync.md) | REQ-6 |
+| [catalog-260620/ADR-D19](../adr/catalog-260620-catalog-projection-sync.md) | REQ-7 |
 
 ## Data Model
 
@@ -677,7 +681,7 @@ TBD — verification phase must fill this if failures are found.
 
 #### What to check
 
-Compare implementation against every REQ and ADR-0067 decision.
+Compare implementation against every REQ and [catalog-260620/ADR](../adr/catalog-260620-catalog-projection-sync.md) decision.
 
 #### Why it matters
 
@@ -685,7 +689,7 @@ The user explicitly requires verification to audit ADR/requirements against impl
 
 #### How to check
 
-Create an audit table mapping REQ-1 through REQ-11 and ADR-0067-D1 through D19 to implementation files/tests and fix high-impact gaps.
+Create an audit table mapping REQ-1 through REQ-11 and [catalog-260620/ADR-D1](../adr/catalog-260620-catalog-projection-sync.md) through D19 to implementation files/tests and fix high-impact gaps.
 
 #### Expected result
 
@@ -701,7 +705,7 @@ TBD — verification phase must fill this if failures are found.
 
 ## Superseded/Related Documents
 
-- Supersedes current implementation direction in `docs/azents/design/llm-model-catalog-sync.md` where it conflicts with ADR-0067, especially models.dev source path and nointern-era static catalog table references.
+- Supersedes current implementation direction in `docs/azents/design/llm-260513-llm-catalog-source.md` where it conflicts with [catalog-260620/ADR](../adr/catalog-260620-catalog-projection-sync.md), especially models.dev source path and nointern-era static catalog table references.
 - Related current specs:
   - `docs/azents/spec/domain/agent.md`
   - `docs/azents/spec/flow/agent-execution-loop.md`

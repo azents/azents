@@ -2,13 +2,16 @@
 title: "Tool Search and Bounded Working Set Validation"
 created: 2026-07-19
 tags: [backend, frontend, engine, toolkit, llm, validation]
+document_role: supporting
+document_type: supporting-validation-report
+migration_source: "docs/azents/design/tool-search-bounded-working-set-validation-2026-07-19.md"
 ---
 
 # Tool Search and Bounded Working Set Validation
 
 ## Scope
 
-This report validates ADR-0147 after Tool Search became an Agent-level opt-in capability. It covers Agent persistence and API propagation, generated clients, default-disabled compatibility behavior, enabled deferred Tool Search behavior, provider request compatibility budgets, the session-shared working set, frontend settings, and product-path E2E fixtures.
+This report validates [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-281) after Tool Search became an Agent-level opt-in capability. It covers Agent persistence and API propagation, generated clients, default-disabled compatibility behavior, enabled deferred Tool Search behavior, provider request compatibility budgets, the session-shared working set, frontend settings, and product-path E2E fixtures.
 
 The validated stack shape is:
 
@@ -23,7 +26,7 @@ The validated stack shape is:
 9. `feature/tool-search-spec`
 10. `feature/tool-search-cleanup`
 
-The validation preserves ADR-0085 deterministic provider-facing ordering and snapshot-backed MCP discovery. It does not use live provider credentials or remote provider calls.
+The validation preserves [deterministic-260628/ADR](../adr/deterministic-260628-deterministic-catalog-and-mcp-snapshots.md) deterministic provider-facing ordering and snapshot-backed MCP discovery. It does not use live provider credentials or remote provider calls.
 
 ## Environment
 
@@ -241,7 +244,7 @@ The generator rewrote unrelated subscription and generated test artifacts. Revie
 
 ## Implementation-to-ADR Comparison
 
-| ADR-0147 decision | Implementation status | Evidence |
+| [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-282) decision | Implementation status | Evidence |
 | --- | --- | --- |
 | D1: one session-shared working set projected per prepared call | Implemented | Session Toolkit State plus model-path projection tests |
 | D2: optional verified limits; absent means unlimited | Implemented | Compatibility registry and unmatched-path tests |
@@ -262,8 +265,8 @@ The spec-promotion changes document the validated current behavior:
 - `docs/azents/spec/flow/agent-execution-loop.md` records `RunRequest` propagation and the separate immutable prepared-call branches.
 - `docs/azents/spec/domain/model-catalog.md` limits the call-time compatibility-registry exception to Tool Search-enabled Agents.
 
-No current spec removes ADR-0085 deterministic ordering or snapshot-backed MCP discovery.
+No current spec removes [deterministic-260628/ADR](../adr/deterministic-260628-deterministic-catalog-and-mcp-snapshots.md) deterministic ordering or snapshot-backed MCP discovery.
 
 ## Validation Conclusion
 
-All deterministic backend, generated-client, frontend, and static E2E validation sets pass. The implementation matches ADR-0147 including D10 and preserves ADR-0085 behavior. Docker-backed product-path execution remains unavailable locally because the Docker socket is absent. The two focused runtime-provider tests run in a dedicated Docker-capable pull-request CI job and gate `ci-python-e2e`; that job must pass before the stack is merge-ready.
+All deterministic backend, generated-client, frontend, and static E2E validation sets pass. The implementation matches [ambiguous historical ADR reference](../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-283) including D10 and preserves [deterministic-260628/ADR](../adr/deterministic-260628-deterministic-catalog-and-mcp-snapshots.md) behavior. Docker-backed product-path execution remains unavailable locally because the Docker socket is absent. The two focused runtime-provider tests run in a dedicated Docker-capable pull-request CI job and gate `ci-python-e2e`; that job must pass before the stack is merge-ready.

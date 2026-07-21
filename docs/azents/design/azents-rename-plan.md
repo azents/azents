@@ -2,6 +2,9 @@
 title: "Azents rename plan"
 created: 2026-05-26
 tags: [architecture, infra, backend, frontend, documentation]
+document_role: supporting
+document_type: supporting-plan
+migration_source: "docs/azents/design/azents-rename-plan.md"
 ---
 
 # Azents rename plan

@@ -3,12 +3,15 @@ title: "Session-Scoped Runner Operation Concurrency Validation Report"
 created: 2026-07-10
 updated: 2026-07-10
 tags: [backend, runtime, performance, testing, testenv, documentation]
+document_role: supporting
+document_type: supporting-validation-report
+migration_source: "docs/azents/design/session-scoped-runner-operation-concurrency-validation-2026-07-10.md"
 ---
 # Session-Scoped Runner Operation Concurrency Validation Report
 
 ## Summary
 
-This report validates the Session-scoped Runtime Runner operation concurrency implementation against [ADR-0102](../adr/0102-session-scoped-runner-operation-concurrency.md), the [approved design](session-scoped-runner-operation-concurrency.md), and its implementation plan.
+This report validates the Session-scoped Runtime Runner operation concurrency implementation against [runner-260710/ADR](../adr/runner-260710-runner-operation-concurrency.md), the [approved design](operation-260710-runner-operation-concurrency.md), and its implementation plan.
 
 Validation found and fixed four implementation gaps:
 
@@ -23,7 +26,7 @@ The scheduler matrix runs deterministically at the Runner/Control component boun
 
 | PR | Branch | Scope |
 | --- | --- | --- |
-| #319 | `feature/session-runner-concurrency-design` | ADR-0102 and approved design |
+| #319 | `feature/session-runner-concurrency-design` | [runner-260710/ADR](../adr/runner-260710-runner-operation-concurrency.md) and approved design |
 | #320 | `feature/session-runner-concurrency-plan` | Phased implementation and validation plan |
 | #328 | `feature/session-runner-concurrency-scheduler` | Common ownership protocol, bounded admission, fair scheduler, control path, cancellation fences, and transport backpressure |
 | #330 | `feature/session-runner-concurrency-callers` | Explicit Session/system ownership at Runner operation callers |
@@ -55,7 +58,7 @@ The default-capacity case uses the production defaults. Overload and ordering ca
 | Requirement | Observed implementation | Status |
 | --- | --- | --- |
 | Common nullable Session ownership | Protobuf request, Control/Runner envelopes, adapters, and callers carry `owner_session_id`; `None` is an explicit system owner. | Implemented |
-| Defaults 10 Session / 10 system / 50 Runtime | Runner constructor and entrypoint defaults match ADR-0102; full 50-active deterministic validation passes. | Implemented |
+| Defaults 10 Session / 10 system / 50 Runtime | Runner constructor and entrypoint defaults match [runner-260710/ADR](../adr/runner-260710-runner-operation-concurrency.md); full 50-active deterministic validation passes. | Implemented |
 | FIFO per owner and fair cross-owner scheduling | Owner deques and round-robin rotation are covered by explicit FIFO, backlog bypass, and alternating-backlog tests. | Implemented |
 | Pending bounds 100 per owner / 1,000 Runtime | Direct transport admission atomically checks both configured bounds; low-cardinality equivalent overload tests assert final errors and counters. | Implemented |
 | Deadline before handler execution | Scheduler checks the end-to-end deadline before the start fence and does not invoke the handler after expiry. | Implemented |
@@ -68,7 +71,7 @@ The default-capacity case uses the production defaults. Overload and ordering ca
 | Model-visible behavior | Queue-full and timeout remain ordinary final Runner operation errors/tool observations; ownership and diagnostic identifiers are not added to tool output. | Preserved |
 | Runtime lifecycle boundary | Scheduler pressure and Runner diagnostics do not trigger Runtime/server restart or lifecycle inference. | Preserved |
 
-No implementation-to-ADR conflict was found after the validation fixes. No new hard-to-reverse decision was introduced, so ADR-0102 remains unchanged.
+No implementation-to-ADR conflict was found after the validation fixes. No new hard-to-reverse decision was introduced, so [runner-260710/ADR](../adr/runner-260710-runner-operation-concurrency.md) remains unchanged.
 
 ## Validation Commands and Environment
 

@@ -3,6 +3,10 @@ title: "SandboxProviderControl Design"
 created: 2026-05-21
 implemented: 2026-05-22
 tags: [architecture, backend, engine, infra, security]
+document_role: supporting
+document_type: supporting-consolidation
+migration_source: "docs/azents/design/sandbox-provider-control.md"
+supporting_role: consolidation
 ---
 
 # SandboxProviderControl Design
@@ -20,9 +24,9 @@ This design is the Phase 2 design draft for #3914 SandboxProviderControl. The go
 
 Current paths referenced:
 
-- `docs/nointern/adr/0008-agent-runtime-sandbox-control-channel.md`
-- `docs/nointern/design/in-sandbox-sandbox-client-control-channel.md`
-- `docs/nointern/spec/flow/sandbox-checkpoint-lifecycle.md`
+- `docs/nointern/adr/sandbox-260506-sandbox-control-channel.md`
+- `docs/nointern/design/sandbox-260506-sandbox-control-channel.md`
+- `docs/nointern/spec/flow/sandbox-260521-sandbox-control.md`
 - `proto/nointern/sandbox_control/v1/sandbox_control.proto`
 - `python/apps/nointern/src/nointern/runtime/sandbox/session_sandbox.py`
 - `python/apps/nointern/src/nointern/runtime/sandbox/session_sandbox_manager.py`
@@ -30,7 +34,7 @@ Current paths referenced:
 - `python/apps/nointern/src/nointern/runtime/sandbox/control/server.py`
 - `python/apps/nointern/src/nointern/runtime/sandbox/session_sandbox_k8s.py`
 - `python/apps/nointern/src/nointern/runtime/sandbox/session_sandbox_docker.py`
-- `docs/nointern/design/helm-packaging.md`
+- `docs/nointern/design/helm-260512-helm-packaging.md`
 
 Feasibility check compared the draft with current code/docs/Helm chart after drafting. The conclusion is that implementation is possible, but the K8s-first phase must include not only a simple lifecycle wrapper, but also parity with existing `/home/sandbox` checkpoint persistence and sandbox-control auth token migration.
 
@@ -376,7 +380,7 @@ Responsibilities:
 
 Relationship with Helm packaging:
 
-- `docs/nointern/design/helm-packaging.md` treats `server.sandboxControl` and `sandbox` component as default runtime core.
+- `docs/nointern/design/helm-260512-helm-packaging.md` treats `server.sandboxControl` and `sandbox` component as default runtime core.
 - K8s provider controller must be a separate optional component in this structure.
 - Example values namespace should be chosen between `server.sandboxProviderController.enabled` and top-level `sandboxProviderController.enabled`. Which position better matches chart component boundary needs Helm source path review before implementation.
 - After cutover, if optional component is disabled, another active provider must exist. It does not fallback to legacy in-process K8s backend; if no active provider exists, sandbox allocation must fail as admin-visible misconfiguration.

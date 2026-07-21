@@ -4,11 +4,15 @@ created: 2026-07-19
 updated: 2026-07-19
 implemented: 2026-07-19
 tags: [backend, frontend, engine, security, api, testenv]
+document_role: supporting
+document_type: supporting-consolidation
+migration_source: "docs/azents/design/openrouter-api-key-provider.md"
+supporting_role: consolidation
 ---
 
 # OpenRouter API Key Provider
 
-> Related decision record: [ADR-0169: Add OpenRouter as an Integration-Scoped LLM Provider](../adr/0169-add-openrouter-as-an-integration-scoped-llm-provider.md)
+> Related decision record: [openrouter-260719/ADR: Add OpenRouter as an Integration-Scoped LLM Provider](../adr/openrouter-260719-openrouter-as-an-integration-llm.md)
 
 ## Problem
 
@@ -63,7 +67,7 @@ Hosted-tool and prompt-cache behavior currently depends on provider and model de
 
 ## Accepted Product Decisions
 
-The following decisions are recorded in ADR-0169:
+The following decisions are recorded in [openrouter-260719/ADR](../adr/openrouter-260719-openrouter-as-an-integration-llm.md):
 
 1. OpenRouter is an integration-scoped provider and exposes all authenticated account-available text-output models without an Azents allowlist.
 2. Model visibility does not require a LiteLLM metadata match.
@@ -190,7 +194,7 @@ The projection:
 
 The existing stored-snapshot publication, attempt fencing, cooldown, stale refresh, retry backoff, and last-successful-snapshot behavior remain unchanged.
 
-The direct projection branch must be explicit. Passing OpenRouter through `project_integration_entries()` would create `missing_target_projection` hidden entries and violate ADR-0169.
+The direct projection branch must be explicit. Passing OpenRouter through `project_integration_entries()` would create `missing_target_projection` hidden entries and violate [openrouter-260719/ADR](../adr/openrouter-260719-openrouter-as-an-integration-llm.md).
 
 ## Conservative Capability Projection
 
@@ -225,7 +229,7 @@ OpenRouter metadata is the capability source for the first release. LiteLLM meta
 
 ### Built-in tools
 
-OpenRouter's Responses server-side web search is projected as an effective provider-level capability for selectable OpenRouter text-output models. As required by ADR-0064, this capability makes the semantic tool selectable but does not automatically enable it for an Agent; the Agent owner must opt in through model settings. The OpenRouter hosted-tool lowerer emits the current namespaced server-tool type:
+OpenRouter's Responses server-side web search is projected as an effective provider-level capability for selectable OpenRouter text-output models. As required by [hosted-260617/ADR](../adr/hosted-260617-hosted-web-search.md), this capability makes the semantic tool selectable but does not automatically enable it for an Agent; the Agent owner must opt in through model settings. The OpenRouter hosted-tool lowerer emits the current namespaced server-tool type:
 
 ```json
 {"type": "openrouter:web_search"}
