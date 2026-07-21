@@ -675,29 +675,6 @@ class AgentSessionRepository:
         )
         return [agent.agent_session_id for agent in descendants]
 
-    async def delete_by_id(
-        self,
-        session: AsyncSession,
-        agent_session_id: str,
-    ) -> None:
-        """Delete AgentSession and any linked SessionAgent subtree sessions."""
-        linked_agent = await self.get_session_agent_by_session_id(
-            session,
-            agent_session_id,
-        )
-        session_ids = [agent_session_id]
-        if linked_agent is not None:
-            descendants = await self.list_descendant_session_agents(
-                session,
-                session_agent_id=linked_agent.id,
-                include_self=True,
-            )
-            session_ids = [agent.agent_session_id for agent in descendants]
-        await session.execute(
-            sa.delete(RDBAgentSession).where(RDBAgentSession.id.in_(session_ids))
-        )
-        await session.flush()
-
     async def get_team_primary_by_agent_id(
         self,
         session: AsyncSession,

@@ -39,6 +39,9 @@ from azents.repos.exchange_file import ExchangeFileRepository
 from azents.repos.exchange_file.data import ExchangeFile
 from azents.repos.model_file import ModelFileRepository
 from azents.repos.model_file.data import ModelFile
+from azents.repos.session_lifecycle_finalizer import (
+    SessionLifecycleFinalizerRepository,
+)
 from azents.services.session_git_worktree import SessionGitWorktreeService
 from azents.services.session_lifecycle.orchestrator import (
     SessionLifecycleOrchestrator,
@@ -117,6 +120,10 @@ class ArchivedSessionPurgeService:
     artifact_repository: Annotated[ArtifactRepository, Depends(ArtifactRepository)]
     exchange_file_repository: Annotated[
         ExchangeFileRepository, Depends(ExchangeFileRepository)
+    ]
+    lifecycle_finalizer_repository: Annotated[
+        SessionLifecycleFinalizerRepository,
+        Depends(SessionLifecycleFinalizerRepository),
     ]
     session_git_worktree_service: Annotated[
         SessionGitWorktreeService, Depends(SessionGitWorktreeService)
@@ -579,9 +586,10 @@ class ArchivedSessionPurgeService:
                 session,
                 retention_root_session_id=job.root_session_id,
             )
-            await self.agent_session_repository.delete_by_id(
+            await self.lifecycle_finalizer_repository.finalize_purged_root_tree(
                 session,
-                job.root_session_id,
+                root_session_id=job.root_session_id,
+                session_ids=session_ids,
             )
             completed = await self.retention_repository.complete_purge_job(
                 session,
