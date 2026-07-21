@@ -32,7 +32,6 @@ import {
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import {
-  Fragment,
   type PointerEvent as ReactPointerEvent,
   useCallback,
   useEffect,
@@ -109,6 +108,23 @@ const MAX_CHAT_RATIO = 0.75;
 function scrollDistanceFromBottom(viewport: HTMLDivElement): number {
   const { scrollTop, scrollHeight, clientHeight } = viewport;
   return Math.max(0, scrollHeight - scrollTop - clientHeight);
+}
+
+function visibleTimelineItem(viewport: HTMLDivElement): HTMLElement | null {
+  const viewportRect = viewport.getBoundingClientRect();
+  const items = viewport.querySelectorAll<HTMLElement>(
+    "[data-chat-scroll-anchor]",
+  );
+  for (const item of items) {
+    const itemRect = item.getBoundingClientRect();
+    if (
+      itemRect.bottom > viewportRect.top &&
+      itemRect.top < viewportRect.bottom
+    ) {
+      return item;
+    }
+  }
+  return null;
 }
 
 interface StoredChatScrollState {
@@ -773,7 +789,10 @@ export function ChatView({
     if (isLoadingMore && !isLoadingMoreRef.current) {
       const viewport = viewportRef.current;
       if (viewport) {
-        savedScrollRef.current = captureChatScrollAnchor(viewport);
+        savedScrollRef.current = captureChatScrollAnchor(
+          viewport,
+          visibleTimelineItem(viewport),
+        );
       }
     }
     isLoadingMoreRef.current = isLoadingMore;
@@ -836,10 +855,7 @@ export function ChatView({
           pendingInitialScrollRestoreRef.current = null;
         }
       } else {
-        viewport.scrollTop = restorePrependScrollTop(
-          saved,
-          viewport.scrollHeight,
-        );
+        viewport.scrollTop = restorePrependScrollTop(saved, viewport);
       }
       savedScrollRef.current = null;
       prevMessageIdsRef.current = new Set(
@@ -891,7 +907,10 @@ export function ChatView({
       return;
     }
     lastAutoLoadAttemptKeyRef.current = autoLoadAttemptKey;
-    savedScrollRef.current = captureChatScrollAnchor(viewport);
+    savedScrollRef.current = captureChatScrollAnchor(
+      viewport,
+      visibleTimelineItem(viewport),
+    );
     onLoadMore({
       detachFromLatest: !isFollowingLatestRef.current,
     });
@@ -1074,7 +1093,10 @@ export function ChatView({
       const scrollTop = viewport.scrollTop;
 
       if (isLoadingMore && savedScrollRef.current !== null) {
-        savedScrollRef.current = captureChatScrollAnchor(viewport);
+        savedScrollRef.current = captureChatScrollAnchor(
+          viewport,
+          visibleTimelineItem(viewport),
+        );
       }
 
       // (1) follow detection update
@@ -1126,7 +1148,10 @@ export function ChatView({
         const lastLoadMoreTriggerAt = lastLoadMoreTriggerAtRef.current;
         if (now - lastLoadMoreTriggerAt >= LOAD_MORE_COOLDOWN_MS) {
           lastLoadMoreTriggerAtRef.current = now;
-          savedScrollRef.current = captureChatScrollAnchor(viewport);
+          savedScrollRef.current = captureChatScrollAnchor(
+            viewport,
+            visibleTimelineItem(viewport),
+          );
           onLoadMore();
         }
       }
@@ -1327,7 +1352,7 @@ export function ChatView({
                       editingMessageIndex !== null &&
                       item.activity.endMessageIndex >= editingMessageIndex;
                     return (
-                      <Fragment key={item.id}>
+                      <Box key={item.id} data-chat-scroll-anchor>
                         {durableBefore.map((actionExecution) => (
                           <ActionExecutionTimelineCard
                             key={actionExecution.execution.id}
@@ -1365,7 +1390,7 @@ export function ChatView({
                             ) : null
                           }
                         />
-                      </Fragment>
+                      </Box>
                     );
                   }
 
@@ -1376,7 +1401,7 @@ export function ChatView({
                     [];
                   if (msg.role === "compaction") {
                     return (
-                      <Fragment key={item.id}>
+                      <Box key={item.id} data-chat-scroll-anchor>
                         {durableBefore.map((actionExecution) => (
                           <ActionExecutionTimelineCard
                             key={actionExecution.execution.id}
@@ -1384,7 +1409,7 @@ export function ChatView({
                           />
                         ))}
                         <CompactionDivider content={msg.content} />
-                      </Fragment>
+                      </Box>
                     );
                   }
                   if (msg.role === "compaction_started") {
@@ -1395,18 +1420,18 @@ export function ChatView({
                       )
                     ) {
                       return durableBefore.length > 0 ? (
-                        <Fragment key={item.id}>
+                        <Box key={item.id} data-chat-scroll-anchor>
                           {durableBefore.map((actionExecution) => (
                             <ActionExecutionTimelineCard
                               key={actionExecution.execution.id}
                               actionExecution={actionExecution}
                             />
                           ))}
-                        </Fragment>
+                        </Box>
                       ) : null;
                     }
                     return (
-                      <Fragment key={item.id}>
+                      <Box key={item.id} data-chat-scroll-anchor>
                         {durableBefore.map((actionExecution) => (
                           <ActionExecutionTimelineCard
                             key={actionExecution.execution.id}
@@ -1414,19 +1439,19 @@ export function ChatView({
                           />
                         ))}
                         <CompactionIndicator />
-                      </Fragment>
+                      </Box>
                     );
                   }
                   if (isBoundaryMessage(msg)) {
                     return durableBefore.length > 0 ? (
-                      <Fragment key={item.id}>
+                      <Box key={item.id} data-chat-scroll-anchor>
                         {durableBefore.map((actionExecution) => (
                           <ActionExecutionTimelineCard
                             key={actionExecution.execution.id}
                             actionExecution={actionExecution}
                           />
                         ))}
-                      </Fragment>
+                      </Box>
                     ) : null;
                   }
                   const dimmedByEdit =
@@ -1455,7 +1480,7 @@ export function ChatView({
                       }
                     : null;
                   return (
-                    <Fragment key={item.id}>
+                    <Box key={item.id} data-chat-scroll-anchor>
                       {durableBefore.map((actionExecution) => (
                         <ActionExecutionTimelineCard
                           key={actionExecution.execution.id}
@@ -1469,7 +1494,7 @@ export function ChatView({
                         onEdit={() => handleStartEdit(msg)}
                         failedRunRetryAction={failedRunRetryAction}
                       />
-                    </Fragment>
+                    </Box>
                   );
                 })}
                 {activeActivity !== null &&

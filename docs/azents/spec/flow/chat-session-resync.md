@@ -18,8 +18,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/agents/**
   - typescript/apps/azents-web/src/features/chat/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
-last_verified_at: 2026-07-20
-spec_version: 37
+last_verified_at: 2026-07-21
+spec_version: 38
 ---
 
 # Chat Session Resync
@@ -259,6 +259,7 @@ Draft persistence and last-selected-profile persistence are separate agent/sessi
 - Underfilled latest history automatically loads older raw pages without detaching until the viewport becomes scrollable or older history is exhausted; render-hidden pages do not stop the fill loop.
 - Follow stop does not mean transition to `DETACHED_HISTORY_BROWSING` or WS live event buffering.
 - When user actually loads older history pagination, transition to `DETACHED_HISTORY_BROWSING`.
+- When older history is prepended, the client preserves the visual position of the first visible stable timeline item. If that item is no longer rendered, it falls back to preserving the previous scroll-height delta.
 
 ### DETACHED_HISTORY_BROWSING
 
