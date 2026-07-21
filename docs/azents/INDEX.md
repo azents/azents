@@ -21,7 +21,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-17 | 5 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-07-21 | 17 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-20 | 3 |
-| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-07-21 | 64 |
+| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-07-21 | 65 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-07-20 | 8 |
 | [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-07-19 | 41 |
 
@@ -29,7 +29,7 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
-| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-07-21 | 120 |
+| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-07-21 | 121 |
 | [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-07-20 | 22 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-07-03 | 3 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-21 | 38 |
@@ -242,6 +242,7 @@ Design documents are accumulated records and are not listed individually in this
 - [ADR-0177: Complete Specialized Presentation Coverage for Builtin Tools](adr/0177-complete-builtin-tool-presentations.md)
 - [ADR-0178: Enable Tool Search by Default for New Agents](adr/0178-enable-tool-search-by-default.md)
 - [ADR-0179: Select Provider-Specific Tool Dialects for Apply-Patch](adr/0179-apply-patch-provider-tool-dialects.md)
+- [ADR-0180: Remove Percentage Rollout from Apply-Patch Custom Selection](adr/0180-remove-apply-patch-custom-rollout.md)
 
 ## Issues (Bug Tracking)
 

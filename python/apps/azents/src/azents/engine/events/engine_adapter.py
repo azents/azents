@@ -276,7 +276,6 @@ class EventEngineAdapterConfig:
     """Event engine adapter configuration."""
 
     native_request_max_input_chars: int = 16_000_000
-    apply_patch_custom_rollout_percent: int = 0
 
 
 @dataclasses.dataclass
@@ -585,8 +584,6 @@ class AgentEngineAdapter:
                     openai_client_config is not None
                     and openai_client_config.api_key is not None
                 ),
-                custom_rollout_percent=self.config.apply_patch_custom_rollout_percent,
-                cohort_key=request.session_id,
             )
             client_tool_profiles = resolve_client_tool_profiles(
                 model_identifier=(

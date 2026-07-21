@@ -55,7 +55,6 @@ def _route(
     native_format: str = "responses",
     official_openai_endpoint: bool = True,
     api_key_available: bool = True,
-    custom_rollout_percent: int = 0,
 ) -> ClientToolRoute:
     return ClientToolRoute(
         provider=provider,
@@ -63,14 +62,12 @@ def _route(
         native_format=native_format,
         official_openai_endpoint=official_openai_endpoint,
         api_key_available=api_key_available,
-        custom_rollout_percent=custom_rollout_percent,
-        cohort_key="session-1",
     )
 
 
 def test_default_registry_grants_openai_gpt_family() -> None:
     profiles = resolve_client_tool_profiles(
-        model_identifier="gpt-5.1",
+        model_identifier="gpt-5.2",
         model_developer=LLMModelDeveloper.OPENAI,
         model_family="gpt-5",
         route=_route(),
@@ -100,39 +97,32 @@ def test_default_registry_excludes_non_gpt_and_non_openai_models() -> None:
     )
 
 
-def test_exact_official_openai_route_selects_custom_only_when_enabled() -> None:
+def test_exact_official_openai_route_selects_custom() -> None:
     custom_profiles = resolve_client_tool_profiles(
         model_identifier="gpt-5.1",
         model_developer=LLMModelDeveloper.OPENAI,
         model_family="gpt-5",
-        route=_route(custom_rollout_percent=100),
-    )
-    fallback_profiles = resolve_client_tool_profiles(
-        model_identifier="gpt-5.1",
-        model_developer=LLMModelDeveloper.OPENAI,
-        model_family="gpt-5",
-        route=_route(custom_rollout_percent=0),
+        route=_route(),
     )
 
     assert custom_profiles == frozenset(
         {ClientToolProfile.V4A_APPLY_PATCH_PLAINTEXT_CUSTOM}
     )
-    assert fallback_profiles == frozenset({_PROFILE})
 
 
-def test_exact_official_openai_route_supports_custom_history_when_disabled() -> None:
-    """Keep custom lifecycle support independent from new-call rollout selection."""
+def test_exact_official_openai_route_supports_custom_history() -> None:
+    """Keep custom lifecycle support aligned with exact route selection."""
     assert supports_historical_plaintext_custom_apply_patch(
         model_identifier="gpt-5.1",
         model_developer=LLMModelDeveloper.OPENAI,
         model_family="gpt-5",
-        route=_route(custom_rollout_percent=0),
+        route=_route(),
     )
     assert not supports_historical_plaintext_custom_apply_patch(
         model_identifier="gpt-5.1",
         model_developer=LLMModelDeveloper.OPENAI,
         model_family="gpt-5",
-        route=_route(official_openai_endpoint=False, custom_rollout_percent=100),
+        route=_route(official_openai_endpoint=False),
     )
 
 
@@ -143,7 +133,6 @@ def test_custom_route_denial_retains_only_verified_function_fallback() -> None:
         model_family="gpt-5",
         route=_route(
             official_openai_endpoint=False,
-            custom_rollout_percent=100,
         ),
     )
     openrouter = resolve_client_tool_profiles(
@@ -155,7 +144,6 @@ def test_custom_route_denial_retains_only_verified_function_fallback() -> None:
             adapter="litellm",
             official_openai_endpoint=False,
             api_key_available=False,
-            custom_rollout_percent=100,
         ),
     )
 
@@ -172,29 +160,6 @@ def test_unverified_route_omits_apply_patch_instead_of_falling_back() -> None:
     )
 
     assert profiles == frozenset()
-
-
-def test_partial_rollout_cohort_selection_is_stable() -> None:
-    route = _route(custom_rollout_percent=50)
-
-    first = resolve_client_tool_profiles(
-        model_identifier="gpt-5.1",
-        model_developer=LLMModelDeveloper.OPENAI,
-        model_family="gpt-5",
-        route=route,
-    )
-    second = resolve_client_tool_profiles(
-        model_identifier="gpt-5.1",
-        model_developer=LLMModelDeveloper.OPENAI,
-        model_family="gpt-5",
-        route=route,
-    )
-
-    assert first == second
-    assert first in {
-        frozenset({_PROFILE}),
-        frozenset({ClientToolProfile.V4A_APPLY_PATCH_PLAINTEXT_CUSTOM}),
-    }
 
 
 def test_registry_normalizes_model_identity() -> None:

@@ -2,7 +2,6 @@
 
 import dataclasses
 import enum
-import hashlib
 from collections.abc import Sequence
 
 from azents.core.enums import LLMModelDeveloper, LLMProvider
@@ -24,8 +23,6 @@ class ClientToolRoute:
     native_format: str
     official_openai_endpoint: bool
     api_key_available: bool
-    custom_rollout_percent: int
-    cohort_key: str
 
     def __post_init__(self) -> None:
         """Normalize route facts and reject invalid rollout configuration."""
@@ -35,10 +32,6 @@ class ClientToolRoute:
             "native_format",
             _normalize_required(self.native_format),
         )
-        if not 0 <= self.custom_rollout_percent <= 100:
-            raise ValueError("Custom tool rollout percent must be between 0 and 100")
-        if not self.cohort_key:
-            raise ValueError("Custom tool rollout cohort key must be non-empty")
 
 
 class ClientToolCompatibilityMatchKind(enum.IntEnum):
@@ -226,12 +219,7 @@ def _custom_apply_patch_transport_eligible(
     route: ClientToolRoute,
 ) -> bool:
     """Return whether one exact reviewed OpenAI custom route is selected."""
-    return _custom_apply_patch_transport_supported(
-        key=key, route=route
-    ) and _cohort_enabled(
-        cohort_key=route.cohort_key,
-        percent=route.custom_rollout_percent,
-    )
+    return _custom_apply_patch_transport_supported(key=key, route=route)
 
 
 def _custom_apply_patch_transport_supported(
@@ -257,22 +245,6 @@ def _function_apply_patch_transport_eligible(route: ClientToolRoute) -> bool:
     if route.provider in {LLMProvider.OPENAI, LLMProvider.CHATGPT_OAUTH}:
         return route.adapter == "openai"
     return route.provider is LLMProvider.OPENROUTER and route.adapter == "litellm"
-
-
-def _cohort_enabled(*, cohort_key: str, percent: int) -> bool:
-    """Return deterministic stable cohort membership without retaining the key."""
-    if percent == 0:
-        return False
-    if percent == 100:
-        return True
-    bucket = (
-        int.from_bytes(
-            hashlib.sha256(cohort_key.encode("utf-8")).digest()[:8],
-            byteorder="big",
-        )
-        % 100
-    )
-    return bucket < percent
 
 
 def _validate_no_same_specificity_overlap(
