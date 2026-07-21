@@ -312,6 +312,32 @@ class AgentSessionRepository:
     ) -> SessionAgent:
         """Create a child SessionAgent and linked hidden AgentSession."""
         validate_session_agent_child_name(name)
+        root_session_agent_id = await session.scalar(
+            sa.select(RDBSessionAgent.root_session_agent_id).where(
+                RDBSessionAgent.id == parent_session_agent_id
+            )
+        )
+        if root_session_agent_id is None:
+            raise ValueError("Parent SessionAgent not found")
+        root_agent = await session.scalar(
+            sa.select(RDBSessionAgent)
+            .where(
+                RDBSessionAgent.id == root_session_agent_id,
+                RDBSessionAgent.kind == SessionAgentKind.ROOT,
+            )
+            .with_for_update()
+        )
+        if root_agent is None:
+            raise ValueError("Root SessionAgent not found")
+        root_session = await session.get(
+            RDBAgentSession,
+            root_agent.agent_session_id,
+            populate_existing=True,
+        )
+        if root_session is None or root_session.status is not AgentSessionStatus.ACTIVE:
+            raise ValueError("Root AgentSession is not active")
+        if root_session.stop_requested_at is not None:
+            raise ValueError("Root AgentSession is stopping")
         parent_row = await session.execute(
             sa.select(RDBSessionAgent, RDBAgentSession)
             .join(
@@ -319,12 +345,19 @@ class AgentSessionRepository:
                 RDBAgentSession.id == RDBSessionAgent.agent_session_id,
             )
             .where(RDBSessionAgent.id == parent_session_agent_id)
-            .with_for_update(of=RDBSessionAgent)
+            .with_for_update()
+            .execution_options(populate_existing=True)
         )
         parent = parent_row.one_or_none()
         if parent is None:
             raise ValueError("Parent SessionAgent not found")
         parent_agent, parent_agent_session = parent
+        if parent_agent.root_session_agent_id != root_agent.id:
+            raise ValueError("Parent SessionAgent root changed")
+        if parent_agent_session.status is not AgentSessionStatus.ACTIVE:
+            raise ValueError("Parent AgentSession is not active")
+        if parent_agent_session.stop_requested_at is not None:
+            raise ValueError("Parent AgentSession is stopping")
         child_path = _join_session_agent_path(parent_agent.path, name)
 
         existing = await session.scalar(
@@ -707,6 +740,12 @@ class AgentSessionRepository:
         )
         if linked_agent is None:
             return [agent_session_id]
+        locked_root = await self.lock_session_agent_by_id(
+            session,
+            linked_agent.root_session_agent_id,
+        )
+        if locked_root is None:
+            return [agent_session_id]
         descendants = await self.list_descendant_session_agents(
             session,
             session_agent_id=linked_agent.id,
@@ -896,10 +935,12 @@ class AgentSessionRepository:
     ) -> list[AgentSession]:
         """Lock all AgentSessions in one root SessionAgent tree."""
         root_agent = await session.scalar(
-            sa.select(RDBSessionAgent).where(
+            sa.select(RDBSessionAgent)
+            .where(
                 RDBSessionAgent.agent_session_id == root_session_id,
                 RDBSessionAgent.kind == SessionAgentKind.ROOT,
             )
+            .with_for_update()
         )
         if root_agent is None:
             return []

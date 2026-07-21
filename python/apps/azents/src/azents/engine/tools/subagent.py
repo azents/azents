@@ -618,6 +618,11 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                     raise FunctionToolError(
                         "Follow-up tasks can't target the root agent"
                     )
+                await self._enforce_followup_limit(
+                    session,
+                    current=resolution.current,
+                    target=resolution.target,
+                )
                 target_session = await self._session_or_error(
                     session,
                     resolution.target.agent_session_id,
@@ -766,10 +771,20 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                         "an agent cannot interrupt itself; return your result and let "
                         "the parent interrupt you if needed"
                     )
-                target_session = await self._session_or_error(
+                locked_root = (
+                    await self.agent_session_repository.lock_session_agent_by_id(
+                        session,
+                        resolution.current.root_session_agent_id,
+                    )
+                )
+                if locked_root is None:
+                    raise FunctionToolError("Root SessionAgent was not found")
+                target_session = await self.agent_session_repository.lock_by_id(
                     session,
                     resolution.target.agent_session_id,
                 )
+                if target_session is None:
+                    raise FunctionToolError("AgentSession was not found")
                 previous_status = await self._project_agent_status(
                     session, resolution.target
                 )
@@ -871,12 +886,6 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
         current: SessionAgent,
     ) -> None:
         """Raise a tool error when spawning would exceed configured limits."""
-        locked_root = await self.agent_session_repository.lock_session_agent_by_id(
-            session,
-            current.root_session_agent_id,
-        )
-        if locked_root is None:
-            raise FunctionToolError("Root SessionAgent was not found")
         next_depth = _session_agent_depth(current) + 1
         max_depth = self.subagent_settings.max_depth
         if next_depth > max_depth:
@@ -885,7 +894,52 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                 f"{max_depth} would be exceeded by child depth {next_depth}."
             )
 
+        active_subagent_ids = await self._lock_and_list_active_subagent_ids(
+            session,
+            current=current,
+        )
         max_subagents = self.subagent_settings.max_subagents
+        if len(active_subagent_ids) >= max_subagents:
+            raise FunctionToolError(
+                "Cannot spawn subagent: max_subagents "
+                f"{max_subagents} is already reached for this root session."
+            )
+
+    async def _enforce_followup_limit(
+        self,
+        session: AsyncSession,
+        *,
+        current: SessionAgent,
+        target: SessionAgent,
+    ) -> None:
+        """Reject a follow-up that would activate a new over-capacity child."""
+        active_subagent_ids = await self._lock_and_list_active_subagent_ids(
+            session,
+            current=current,
+        )
+        max_subagents = self.subagent_settings.max_subagents
+        if (
+            target.id not in active_subagent_ids
+            and len(active_subagent_ids) >= max_subagents
+        ):
+            raise FunctionToolError(
+                "Cannot assign follow-up task: max_subagents "
+                f"{max_subagents} is already reached for this root session."
+            )
+
+    async def _lock_and_list_active_subagent_ids(
+        self,
+        session: AsyncSession,
+        *,
+        current: SessionAgent,
+    ) -> set[str]:
+        """Lock the root tree and return active child SessionAgent IDs."""
+        locked_root = await self.agent_session_repository.lock_session_agent_by_id(
+            session,
+            current.root_session_agent_id,
+        )
+        if locked_root is None:
+            raise FunctionToolError("Root SessionAgent was not found")
         tree = await self.agent_session_repository.list_session_agent_tree(
             session,
             root_session_agent_id=current.root_session_agent_id,
@@ -901,19 +955,14 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
             session,
             session_ids=[agent.agent_session_id for agent in subagents],
         )
-        active_count = sum(
-            1
+        return {
+            agent.id
             for agent in subagents
             if _session_agent_active(
                 sessions.get(agent.agent_session_id),
                 latest_runs.get(agent.agent_session_id),
             )
-        )
-        if active_count >= max_subagents:
-            raise FunctionToolError(
-                "Cannot spawn subagent: max_subagents "
-                f"{max_subagents} is already reached for this root session."
-            )
+        }
 
     async def _append_forked_history_boundary_reminder(
         self,

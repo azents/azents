@@ -170,6 +170,14 @@ class _AgentRunRepository:
         self.locked_run_ids.append(run_id)
         return self.store.runs.get(run_id)
 
+    async def get_by_id(
+        self,
+        session: AsyncSession,
+        run_id: str,
+    ) -> AgentRunState | None:
+        del session
+        return self.store.runs.get(run_id)
+
     async def mark_parent_result_enqueued(
         self,
         session: AsyncSession,
@@ -208,6 +216,14 @@ class _AgentSessionRepository:
         return self.store.agents_by_session_id.get(agent_session_id)
 
     async def get_session_agent_by_id(
+        self,
+        session: AsyncSession,
+        session_agent_id: str,
+    ) -> SessionAgent | None:
+        del session
+        return self.store.agents_by_id.get(session_agent_id)
+
+    async def lock_session_agent_by_id(
         self,
         session: AsyncSession,
         session_agent_id: str,

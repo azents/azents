@@ -269,6 +269,13 @@ retain the tree and schedule retry; cleanup and database deletion proceed only a
 check is clear. Restore is permitted only before this purge fence starts. A restored tree returns every
 linked session to active state and may then admit work through the ordinary boundaries.
 
+A due purge job may cross the fence only when its root archive schedule still matches the persisted
+job and every `AgentSession` in the linked root `SessionAgent` tree remains archived. An invalid
+pending or retry-wait job is cancelled only while `fencing_started_at` is still null. If a previously
+fenced job is found with a non-archived tree member, automatic cancellation and reclaim both stop; the
+job remains available for explicit operational repair rather than retrying cleanup or weakening the
+all-tree archive validation.
+
 `agent_runs` replaces SDK `RunState`. Run phase is also the UI activity source.
 
 Phase enum:
@@ -600,13 +607,15 @@ Subagent collaboration tools communicate through resolved agent input buffers:
   `list_agents` includes the root and the known agent tree, including ancestors of the caller.
 - `send_message` writes an `agent_message` to any resolved agent, including the root, without waking it.
 - `followup_task` writes an `agent_message`, marks the target running, and sends a broker wake-up,
-  but rejects the root as a target.
+  but rejects the root as a target. It holds the root-tree lock while evaluating active capacity.
+  Assigning more work to an already-active target is allowed at capacity; activating an idle target
+  is rejected when the root tree already has `subagent_settings.max_subagents` active children.
 - `wait_agent` accepts only optional `timeout_seconds` and observes any pending mailbox message for
   the current SessionAgent plus activity across its entire descendant subtree. It repairs direct-child
   terminal delivery before each observation, prioritizes mailbox activity over no-descendant/all-idle/
   timeout outcomes, and never consumes buffers or acknowledges terminal results itself.
 - `interrupt_agent` rejects the root and the caller itself, then records stop intent only for the
-  resolved target's current run.
+  resolved target's current run while holding the root-tree and target-session locks.
 
 `agent_message` lowering renders mailbox payloads as explicit source-labeled envelopes for the target
 session. `spawn_agent` and `followup_task` render `Message Type: NEW_TASK`; `send_message` renders
@@ -627,12 +636,17 @@ runner and locked idle transition consider only pending commands, active Runs, i
 mailbox input remains. A later wake-producing input starts one Run and normal FIFO preparation
 promotes the older queue-only rows before or with the triggering input.
 
-When a current subagent Run becomes terminal, `SubagentTerminalResultService` locks the Run, validates
-its direct parent, inserts one idempotent queue-only `agent_result`, and writes the Run delivery marker
-in the same transaction. Normal terminal handling attempts this side effect before idle evaluation.
-Parent `wait_agent` polling repairs eligible results from direct children, and a later Run in the
-source child session repairs older eligible terminal results. Delivery failure is logged but does not
-roll the Run back or keep the child running.
+Mailbox enqueue holds the root `SessionAgent` row lock, then locks the target `AgentSession`. Every
+mailbox target must still be active; `spawn_agent` and `followup_task` additionally reject a target
+whose stop request is already present before they create input or wake side effects.
+
+When a current subagent Run becomes terminal, `SubagentTerminalResultService` locks the root
+`SessionAgent` tree boundary before locking the Run, validates its direct parent, inserts one
+idempotent queue-only `agent_result`, and writes the Run delivery marker in the same transaction.
+Normal terminal handling attempts this side effect before idle evaluation. Parent `wait_agent`
+polling repairs eligible results from direct children, and a later Run in the source child session
+repairs older eligible terminal results. Delivery failure is logged but does not roll the Run back or
+keep the child running.
 
 Input preparation validates every promoted `agent_result` against the actual direct child and terminal
 Run metadata before monotonically advancing that child's parent-observation cursor. Cursor update,
