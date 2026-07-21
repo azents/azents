@@ -10,6 +10,9 @@ from azents.core.session_lifecycle import (
     SessionLifecycleResourceKind,
     SessionLifecycleTransitionPolicy,
 )
+from azents.services.session_lifecycle.orchestrator import (
+    SessionLifecycleOrchestrator,
+)
 
 
 def _database_resource(
@@ -235,3 +238,8 @@ def get_session_lifecycle_ownership_manifest() -> SessionLifecycleOwnershipManif
             ),
         )
     )
+
+
+def get_session_lifecycle_orchestrator() -> SessionLifecycleOrchestrator:
+    """Return the application-composed session lifecycle orchestrator."""
+    return SessionLifecycleOrchestrator(registry=get_session_lifecycle_registry())

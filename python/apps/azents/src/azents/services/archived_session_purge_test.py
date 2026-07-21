@@ -41,7 +41,10 @@ from azents.repos.model_file import ModelFileRepository
 from azents.repos.model_file.data import ModelFile
 from azents.services.archived_session_purge import ArchivedSessionPurgeService
 from azents.services.session_git_worktree import SessionGitWorktreeService
-from azents.services.session_lifecycle.registry import get_session_lifecycle_registry
+from azents.services.session_lifecycle.registry import (
+    get_session_lifecycle_orchestrator,
+    get_session_lifecycle_registry,
+)
 
 
 @asynccontextmanager
@@ -679,7 +682,7 @@ def _build_service(
             Config,
             SimpleNamespace(workspace_s3=SimpleNamespace(bucket="test-bucket")),
         ),
-        lifecycle_registry=get_session_lifecycle_registry(),
+        lifecycle_orchestrator=get_session_lifecycle_orchestrator(),
     )
     return (
         service,
