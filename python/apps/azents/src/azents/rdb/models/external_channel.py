@@ -849,12 +849,13 @@ class RDBExternalChannelMessageRevision(RDBModel):
 
 
 class RDBExternalChannelPendingContext(RDBModel):
-    """Bounded resource-scoped external context not yet projected to a session."""
+    """Bounded route-and-resource context not yet projected to a session."""
 
     __tablename__ = "external_channel_pending_contexts"
 
-    IX_RESOURCE_POSITION = sa.Index(
-        "ix_external_channel_pending_ctx_resource_position",
+    IX_ROUTE_RESOURCE_POSITION = sa.Index(
+        "ix_external_channel_pending_ctx_route_resource_position",
+        "route_id",
         "resource_id",
         "provider_position",
     )
@@ -862,10 +863,11 @@ class RDBExternalChannelPendingContext(RDBModel):
         "ix_external_channel_pending_contexts_expires_at",
         "expires_at",
     )
-    UQ_RESOURCE_MESSAGE_REVISION = sa.UniqueConstraint(
+    UQ_ROUTE_RESOURCE_MESSAGE_REVISION = sa.UniqueConstraint(
+        "route_id",
         "resource_id",
         "message_revision_id",
-        name="uq_external_channel_pending_contexts_resource_message_revision",
+        name="uq_external_channel_pending_contexts_route_resource_message_revision",
     )
 
     id: Mapped[str] = mapped_column(
@@ -873,6 +875,11 @@ class RDBExternalChannelPendingContext(RDBModel):
         primary_key=True,
         init=False,
         default_factory=lambda: uuid7().hex,
+    )
+    route_id: Mapped[str] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("external_channel_agent_routes.id", ondelete="RESTRICT"),
+        nullable=False,
     )
     resource_id: Mapped[str] = mapped_column(
         sa.String(32),
@@ -901,9 +908,9 @@ class RDBExternalChannelPendingContext(RDBModel):
     )
 
     __table_args__ = (
-        IX_RESOURCE_POSITION,
+        IX_ROUTE_RESOURCE_POSITION,
         IX_EXPIRES_AT,
-        UQ_RESOURCE_MESSAGE_REVISION,
+        UQ_ROUTE_RESOURCE_MESSAGE_REVISION,
     )
 
 

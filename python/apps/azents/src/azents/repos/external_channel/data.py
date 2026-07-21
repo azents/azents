@@ -270,9 +270,10 @@ class ExternalChannelMessageRevisionCreate(_Record):
 
 
 class ExternalChannelPendingContext(_Record):
-    """Bounded resource-scoped external context not yet session-projected."""
+    """Bounded route-and-resource context not yet session-projected."""
 
     id: str
+    route_id: str
     resource_id: str
     message_revision_id: str
     provider_position: str
@@ -284,6 +285,7 @@ class ExternalChannelPendingContext(_Record):
 class ExternalChannelPendingContextCreate(_Record):
     """Pending-context creation payload."""
 
+    route_id: str
     resource_id: str
     message_revision_id: str
     provider_position: str

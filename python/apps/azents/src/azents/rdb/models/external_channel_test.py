@@ -125,6 +125,12 @@ def test_external_channel_installed_schema_preserves_lifecycle_ownership(
                 "RESTRICT",
             ),
             (
+                "external_channel_pending_contexts",
+                "route_id",
+                "external_channel_agent_routes",
+                "RESTRICT",
+            ),
+            (
                 "external_channel_agent_routes",
                 "agent_id",
                 "agents",

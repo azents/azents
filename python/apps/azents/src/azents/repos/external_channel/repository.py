@@ -309,6 +309,7 @@ class ExternalChannelRepository:
             create,
             lambda: session.scalar(
                 sa.select(RDBExternalChannelPendingContext).where(
+                    RDBExternalChannelPendingContext.route_id == create.route_id,
                     RDBExternalChannelPendingContext.resource_id == create.resource_id,
                     RDBExternalChannelPendingContext.message_revision_id
                     == create.message_revision_id,
