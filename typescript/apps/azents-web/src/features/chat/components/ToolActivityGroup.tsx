@@ -4,6 +4,7 @@ import {
   Box,
   Collapse,
   Group,
+  Loader,
   rem,
   Stack,
   Text,
@@ -19,7 +20,6 @@ import {
   activityRowIconSize,
   activityRowSummarySize,
 } from "./activityRowPresentation";
-import { AgentRunIndicator } from "./AgentRunIndicator";
 import inlineControlClasses from "./ChatInlineControl.module.css";
 import {
   chatChevronTransition,
@@ -46,7 +46,6 @@ interface ToolActivityGroupProps {
   authorizationAction?: ReactNode;
   dimmed?: boolean;
   active?: boolean;
-  modelCallStartedAt?: string | null;
 }
 
 interface CategorySummary extends ActivityCategory {
@@ -54,7 +53,6 @@ interface CategorySummary extends ActivityCategory {
 }
 
 const ACTIVITY_DURATION_VISIBILITY_THRESHOLD_SECONDS = 10;
-const MODEL_WAITING_VISIBILITY_THRESHOLD_SECONDS = 10;
 const MAX_VISIBLE_CATEGORIES = 5;
 
 function useVisibleElapsedDuration(
@@ -168,7 +166,6 @@ export function ToolActivityGroup({
   authorizationAction,
   dimmed = false,
   active = false,
-  modelCallStartedAt = null,
 }: ToolActivityGroupProps): React.ReactElement {
   const t = useTranslations("chat.toolActivity");
   const [opened, { close, open, toggle }] = useDisclosure(active);
@@ -185,11 +182,6 @@ export function ToolActivityGroup({
   const groupDurationSeconds = useVisibleElapsedDuration(
     activity.startedAt,
     ACTIVITY_DURATION_VISIBILITY_THRESHOLD_SECONDS,
-    active && hasDetails,
-  );
-  const modelWaitingDurationSeconds = useVisibleElapsedDuration(
-    modelCallStartedAt,
-    MODEL_WAITING_VISIBILITY_THRESHOLD_SECONDS,
     active && hasDetails,
   );
   const categories = categorySummaries(activity.events);
@@ -219,10 +211,6 @@ export function ToolActivityGroup({
     groupDurationSeconds === null
       ? null
       : formatElapsedDuration(groupDurationSeconds);
-  const modelWaitingDuration =
-    modelWaitingDurationSeconds === null
-      ? null
-      : formatElapsedDuration(modelWaitingDurationSeconds);
   const accessibilitySummary = labels.join(" · ");
   const stateSummary = authorizationAction
     ? t("approvalNeeded")
@@ -234,9 +222,6 @@ export function ToolActivityGroup({
     accessibilitySummary,
     stateSummary,
     groupDuration,
-    modelWaitingDuration === null
-      ? ""
-      : t("modelResponseWaiting", { duration: modelWaitingDuration }),
   ]
     .filter((value): value is string => value !== null && value.length > 0)
     .join(": ");
@@ -261,16 +246,14 @@ export function ToolActivityGroup({
             }}
           />
         ) : null}
-        {active ? (
-          <AgentRunIndicator />
-        ) : (
+        {!active ? (
           <IconCheck
             aria-label={t("complete")}
             size={activityRowIconSize}
             color="var(--mantine-color-dimmed)"
             style={{ flexShrink: 0 }}
           />
-        )}
+        ) : null}
         {summary.length > 0 ? (
           <Text
             size={activityRowSummarySize}
@@ -292,22 +275,10 @@ export function ToolActivityGroup({
             className={inlineControlClasses.label}
             style={{ flexShrink: 0, fontVariantNumeric: "tabular-nums" }}
           >
-            ({groupDuration})
+            {groupDuration}
           </Text>
         ) : null}
       </Group>
-      {hasDetails && modelWaitingDuration !== null ? (
-        <Text
-          size={activityRowSummarySize}
-          c="dimmed"
-          pl={rem(20)}
-          ff="monospace"
-          className={inlineControlClasses.label}
-          style={{ fontVariantNumeric: "tabular-nums" }}
-        >
-          {t("modelResponseWaiting", { duration: modelWaitingDuration })}
-        </Text>
-      ) : null}
     </Stack>
   );
 
@@ -341,6 +312,21 @@ export function ToolActivityGroup({
           {activity.events.map((event) => (
             <Box key={event.id}>{eventDetail(event)}</Box>
           ))}
+          {active ? (
+            <Box
+              aria-label="Live activity is running"
+              h={rem(16)}
+              pl={rem(activityRowChevronSize + 6)}
+              role="status"
+              style={{ alignItems: "center", display: "inline-flex" }}
+            >
+              <Loader
+                aria-hidden="true"
+                color="var(--mantine-color-dimmed)"
+                size={rem(activityRowIconSize)}
+              />
+            </Box>
+          ) : null}
         </Stack>
       </Collapse>
     </Box>

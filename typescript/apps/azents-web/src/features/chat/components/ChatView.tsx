@@ -60,6 +60,7 @@ import {
   chatScrollOverscrollBehavior,
   chatScrollViewportProps,
 } from "./activityRowPresentation";
+import { AgentRunIndicator } from "./AgentRunIndicator";
 import { AuthorizationRequestBubble } from "./AuthorizationRequestBubble";
 import { ChatInput } from "./ChatInput";
 import { CompactionDivider } from "./CompactionDivider";
@@ -1363,11 +1364,6 @@ export function ChatView({
                           activity={sourceActivity ?? item.activity}
                           dimmed={dimmedByEdit}
                           active={sourceActivity !== null}
-                          modelCallStartedAt={
-                            sourceActivity === null
-                              ? null
-                              : (activeRun?.modelCallStartedAt ?? null)
-                          }
                           authorizationAction={
                             (sourceActivity !== null ||
                               (activeRun === null &&
@@ -1503,7 +1499,6 @@ export function ChatView({
                     <ToolActivityGroup
                       activity={activeActivity}
                       active
-                      modelCallStartedAt={activeRun.modelCallStartedAt}
                       authorizationAction={
                         attachedAuthorizationRequest !== null ? (
                           <AuthorizationRequestBubble
@@ -1552,6 +1547,12 @@ export function ChatView({
                     actionExecution={actionExecution}
                   />
                 ))}
+                {chatTimelineState.type === "LATEST_FOLLOWING" &&
+                  isResponsePending && (
+                    <AgentRunIndicator
+                      modelCallStartedAt={liveRun?.modelCallStartedAt ?? null}
+                    />
+                  )}
                 {chatTimelineState.type === "LATEST_FOLLOWING" &&
                   pendingInputBuffers.map((buffer) =>
                     buffer.id.startsWith("optimistic:") ? (

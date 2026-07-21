@@ -5,6 +5,9 @@ import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 const meta = {
   title: "Chat/AgentRunIndicator",
   component: AgentRunIndicator,
+  args: {
+    modelCallStartedAt: new Date(Date.now() - 26_000).toISOString(),
+  },
   parameters: { layout: "centered" },
 } satisfies Meta<typeof AgentRunIndicator>;
 
