@@ -5,6 +5,7 @@ import {
   IconHelpCircle,
   IconX,
 } from "@tabler/icons-react";
+import { activityRowIconSize } from "./activityRowPresentation";
 import type { ReactElement } from "react";
 
 export type ToolCallStatus =
@@ -41,17 +42,33 @@ export function ToolCallStatusIcon({
       {status === "preparing" || status === "running" ? (
         <Loader
           aria-hidden="true"
-          size={rem(16)}
+          size={rem(activityRowIconSize)}
           color="var(--mantine-color-dimmed)"
         />
       ) : status === "failed" ? (
-        <IconAlertCircle aria-hidden="true" size={rem(16)} stroke={1.8} />
+        <IconAlertCircle
+          aria-hidden="true"
+          size={rem(activityRowIconSize)}
+          stroke={1.8}
+        />
       ) : status === "completed" ? (
-        <IconCheck aria-hidden="true" size={rem(16)} stroke={1.8} />
+        <IconCheck
+          aria-hidden="true"
+          size={rem(activityRowIconSize)}
+          stroke={1.8}
+        />
       ) : status === "cancelled" || status === "interrupted" ? (
-        <IconX aria-hidden="true" size={rem(16)} stroke={1.8} />
+        <IconX
+          aria-hidden="true"
+          size={rem(activityRowIconSize)}
+          stroke={1.8}
+        />
       ) : (
-        <IconHelpCircle aria-hidden="true" size={rem(16)} stroke={1.8} />
+        <IconHelpCircle
+          aria-hidden="true"
+          size={rem(activityRowIconSize)}
+          stroke={1.8}
+        />
       )}
     </Box>
   );

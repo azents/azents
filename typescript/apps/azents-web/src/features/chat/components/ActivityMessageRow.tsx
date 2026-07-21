@@ -9,6 +9,7 @@ import {
   activityRowSummarySize,
   activityRowVerticalPadding,
 } from "./activityRowPresentation";
+import inlineControlClasses from "./ChatInlineControl.module.css";
 import type { ActivityEvent } from "../toolActivityPresentation";
 import type { ReactElement } from "react";
 
@@ -42,13 +43,13 @@ export function ActivityMessageRow({
 
   return (
     <Box py={activityRowVerticalPadding}>
-      <Group gap="xs" wrap="nowrap" align="flex-start">
+      <Group gap="xs" wrap="nowrap" className={inlineControlClasses.root}>
         <Box
           aria-hidden="true"
           w={activityRowChevronSize}
           style={{ flexShrink: 0 }}
         />
-        <Box c="dimmed" style={{ flexShrink: 0 }}>
+        <Box c="dimmed" style={{ display: "inline-flex", flexShrink: 0 }}>
           {event.kind === "goal-control" ? (
             <IconTargetArrow aria-hidden="true" size={activityRowIconSize} />
           ) : (
@@ -62,6 +63,7 @@ export function ActivityMessageRow({
           truncate
           flex={1}
           miw={0}
+          className={inlineControlClasses.label}
         >
           {label}
         </Text>

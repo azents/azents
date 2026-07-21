@@ -20,6 +20,7 @@ import {
   activityRowSummarySize,
   activityRowVerticalPadding,
 } from "./activityRowPresentation";
+import inlineControlClasses from "./ChatInlineControl.module.css";
 import {
   chatChevronTransition,
   chatCollapseTransitionProps,
@@ -155,7 +156,7 @@ export function ProviderToolCallCard({
           aria-label={ariaLabel}
           disabled={!hasDetails}
         >
-          <Group gap="xs" wrap="nowrap" align="flex-start">
+          <Group gap="xs" wrap="nowrap" className={inlineControlClasses.root}>
             <IconChevronRight
               aria-hidden="true"
               size={activityRowChevronSize}
@@ -168,7 +169,14 @@ export function ProviderToolCallCard({
                 transition: chatChevronTransition,
               }}
             />
-            <Box c="dimmed" style={{ flexShrink: 0, marginTop: rem(1) }}>
+            <Box
+              c="dimmed"
+              style={{
+                display: "inline-flex",
+                flexShrink: 0,
+                marginTop: rem(1),
+              }}
+            >
               {webSearch !== null ? (
                 <IconSearch size={activityRowIconSize} />
               ) : (
@@ -180,6 +188,7 @@ export function ProviderToolCallCard({
                 size={activityRowSummarySize}
                 c="dimmed"
                 fw={500}
+                className={inlineControlClasses.label}
                 style={{ flexShrink: 0 }}
               >
                 {displayName}
@@ -190,6 +199,7 @@ export function ProviderToolCallCard({
                 truncate
                 flex={1}
                 miw={0}
+                className={inlineControlClasses.label}
               >
                 {subject}
               </Text>
