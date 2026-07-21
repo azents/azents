@@ -353,7 +353,7 @@ class TestAgentSessionInputService:
         session_repository = _AgentSessionRepositoryDouble(calls)
         input_buffer_service = _InputBufferServiceDouble(calls)
         service = AgentSessionInputService(
-            agent_repository=AgentRepository(),
+            agent_repository=_ActiveAgentRepositoryDouble(),
             agent_project_preset_repository=AgentProjectPresetRepository(),
             agent_project_catalog_repository=AgentProjectCatalogRepository(),
             agent_project_default_repository=AgentProjectDefaultRepository(),
