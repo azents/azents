@@ -50,38 +50,6 @@ def upgrade() -> None:
         ),
         sa.PrimaryKeyConstraint("session_id"),
     )
-    op.execute(
-        sa.text(
-            """
-            INSERT INTO agent_session_system_prompt_snapshots (
-                session_id,
-                system_prompt,
-                created_at,
-                updated_at
-            )
-            SELECT DISTINCT ON (events.session_id)
-                events.session_id,
-                events.payload -> 'system_prompt',
-                events.created_at,
-                events.created_at
-            FROM events
-            WHERE events.kind = 'turn_marker'
-              AND events.payload ? 'system_prompt'
-              AND events.payload -> 'system_prompt' <> 'null'::jsonb
-            ORDER BY events.session_id, events.model_order DESC, events.id DESC
-            """
-        )
-    )
-    op.execute(
-        sa.text(
-            """
-            UPDATE events
-            SET payload = payload - 'system_prompt'
-            WHERE kind = 'turn_marker'
-              AND payload ? 'system_prompt'
-            """
-        )
-    )
 
 
 def downgrade() -> None:
