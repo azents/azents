@@ -10,6 +10,7 @@ from typing import Sequence
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.dialects import postgresql
 
 revision: str = "9d73ed4d3a13"
 down_revision: str | Sequence[str] | None = "36d3c4f9deef"
@@ -19,12 +20,13 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     """Upgrade schema."""
-    agent_lifecycle_status = sa.Enum(
+    agent_lifecycle_status = postgresql.ENUM(
         "active",
         "decommissioning",
         name="agent_lifecycle_status",
+        create_type=False,
     )
-    agent_decommission_status = sa.Enum(
+    agent_decommission_status = postgresql.ENUM(
         "pending",
         "retiring_sessions",
         "waiting_retention",
@@ -32,6 +34,7 @@ def upgrade() -> None:
         "retry_wait",
         "completed",
         name="agent_decommission_status",
+        create_type=False,
     )
     agent_lifecycle_status.create(op.get_bind(), checkfirst=True)
     agent_decommission_status.create(op.get_bind(), checkfirst=True)
@@ -93,5 +96,7 @@ def downgrade() -> None:
     )
     op.drop_table("agent_decommission_jobs")
     op.drop_column("agents", "lifecycle_status")
-    sa.Enum(name="agent_decommission_status").drop(op.get_bind(), checkfirst=True)
-    sa.Enum(name="agent_lifecycle_status").drop(op.get_bind(), checkfirst=True)
+    postgresql.ENUM(name="agent_decommission_status").drop(
+        op.get_bind(), checkfirst=True
+    )
+    postgresql.ENUM(name="agent_lifecycle_status").drop(op.get_bind(), checkfirst=True)
