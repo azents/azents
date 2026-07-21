@@ -10,6 +10,9 @@ from azents.core.session_lifecycle import (
     SessionLifecycleResourceKind,
     SessionLifecycleTransitionPolicy,
 )
+from azents.services.session_lifecycle.orchestrator import (
+    SessionLifecycleOrchestrator,
+)
 
 
 def _database_resource(
@@ -90,7 +93,7 @@ def get_session_lifecycle_registry() -> SessionLifecycleRegistry:
             SessionLifecycleParticipantDefinition(
                 key="session.artifacts",
                 policy_version=1,
-                dependencies=(),
+                dependencies=("session.model-files",),
                 owned_resources=(
                     _database_resource(
                         "artifacts",
@@ -109,7 +112,7 @@ def get_session_lifecycle_registry() -> SessionLifecycleRegistry:
             SessionLifecycleParticipantDefinition(
                 key="session.exchange-files",
                 policy_version=1,
-                dependencies=(),
+                dependencies=("session.artifacts",),
                 owned_resources=(
                     _database_resource(
                         "exchange_files",
@@ -128,7 +131,7 @@ def get_session_lifecycle_registry() -> SessionLifecycleRegistry:
             SessionLifecycleParticipantDefinition(
                 key="session.git-worktrees",
                 policy_version=1,
-                dependencies=(),
+                dependencies=("session.exchange-files",),
                 owned_resources=(
                     _database_resource(
                         "session_agent_context_git_worktrees",
@@ -235,3 +238,8 @@ def get_session_lifecycle_ownership_manifest() -> SessionLifecycleOwnershipManif
             ),
         )
     )
+
+
+def get_session_lifecycle_orchestrator() -> SessionLifecycleOrchestrator:
+    """Return the application-composed session lifecycle orchestrator."""
+    return SessionLifecycleOrchestrator(registry=get_session_lifecycle_registry())

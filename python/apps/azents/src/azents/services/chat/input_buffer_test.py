@@ -52,6 +52,9 @@ from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.repos.workspace_user.data import WorkspaceUserCreate
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.input_buffer import InputBufferService
+from azents.services.session_lifecycle.registry import (
+    get_session_lifecycle_orchestrator,
+)
 from azents.testing.model_selection import (
     make_test_model_selection,
     make_test_model_selection_dict,
@@ -193,6 +196,7 @@ def _service(
         workspace_user_repository=WorkspaceUserRepository(),
         session_workspace_project_repository=SessionWorkspaceProjectRepository(),
         input_buffer_service=input_buffer_service,
+        lifecycle_orchestrator=get_session_lifecycle_orchestrator(),
         session_manager=rdb_session_manager,
     )
 

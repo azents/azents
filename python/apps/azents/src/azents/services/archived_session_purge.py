@@ -23,6 +23,10 @@ from azents.core.enums import (
     ModelFileStatus,
 )
 from azents.core.s3.deps import get_s3_service
+from azents.core.session_lifecycle import (
+    SessionLifecycleParticipantDefinition,
+    SessionLifecyclePurgeContext,
+)
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import AgentRunRepository
@@ -36,6 +40,13 @@ from azents.repos.exchange_file.data import ExchangeFile
 from azents.repos.model_file import ModelFileRepository
 from azents.repos.model_file.data import ModelFile
 from azents.services.session_git_worktree import SessionGitWorktreeService
+from azents.services.session_lifecycle.orchestrator import (
+    SessionLifecycleOrchestrator,
+    SessionLifecyclePurgeParticipantFailure,
+)
+from azents.services.session_lifecycle.registry import (
+    get_session_lifecycle_orchestrator,
+)
 
 _LEASE_DURATION = datetime.timedelta(minutes=15)
 _MAX_RETRY_DELAY = datetime.timedelta(minutes=30)
@@ -75,6 +86,18 @@ class _ArchivedSessionPurgeJobSummary:
     worktree_count: int
 
 
+@dataclasses.dataclass(frozen=True)
+class _PurgeFileCleanupState:
+    """Durable file cleanup scope selected before external object deletion."""
+
+    model_files: list[ModelFile]
+    artifacts: list[Artifact]
+    exchange_files: list[ExchangeFile]
+    model_file_count: int
+    artifact_count: int
+    exchange_file_count: int
+
+
 @dataclasses.dataclass
 class ArchivedSessionPurgeService:
     """Fence and purge a bounded batch of archived SessionAgent trees."""
@@ -101,6 +124,10 @@ class ArchivedSessionPurgeService:
     broker: Annotated[SessionBroker, Depends(get_broker)]
     s3_service: Annotated[S3Service, Depends(get_s3_service)]
     config: Annotated[Config, Depends(get_config)]
+    lifecycle_orchestrator: Annotated[
+        SessionLifecycleOrchestrator,
+        Depends(get_session_lifecycle_orchestrator),
+    ]
 
     async def purge_once(
         self,
@@ -141,6 +168,14 @@ class ArchivedSessionPurgeService:
                     lease_owner=lease_owner,
                     lease_until=now + _LEASE_DURATION,
                 )
+                if job is not None:
+                    lifecycle_orchestrator = self.lifecycle_orchestrator
+                    await lifecycle_orchestrator.materialize_claimed_purge_participants(
+                        session,
+                        retention_repository=self.retention_repository,
+                        purge_job_id=job.id,
+                        lease_owner=lease_owner,
+                    )
             if job is None:
                 break
             claimed_count += 1
@@ -152,6 +187,29 @@ class ArchivedSessionPurgeService:
                 )
             except asyncio.CancelledError:
                 raise
+            except SessionLifecyclePurgeParticipantFailure as exc:
+                await self._retry(
+                    job_id=job.id,
+                    lease_owner=lease_owner,
+                    attempt_count=job.attempt_count,
+                    error_kind=exc.error_kind,
+                    error_summary=exc.error_summary,
+                    error_participant_key=exc.participant_key,
+                    error_phase=exc.phase,
+                )
+                failed_count += 1
+                retry_scheduled_count += 1
+                logger.exception(
+                    "Archived-session purge job failed; retry scheduled",
+                    extra={
+                        "purge_job_id": job.id,
+                        "root_session_id": job.root_session_id,
+                        "participant_key": exc.participant_key,
+                        "phase": exc.phase,
+                        "attempt_count": job.attempt_count,
+                    },
+                )
+                continue
             except Exception as exc:
                 await self._retry(
                     job_id=job.id,
@@ -266,17 +324,21 @@ class ArchivedSessionPurgeService:
                 worktree_count=0,
             )
 
-        for session_id in session_ids:
-            await self.broker.purge_session_state(session_id)
-
         root_session = next(item for item in sessions if item.id == job.root_session_id)
-        worktree_count = (
-            await self.session_git_worktree_service.run_cleanup_for_root_tree(
-                agent_id=root_session.agent_id,
-                root_session_id=job.root_session_id,
-                subtree_session_ids=session_ids,
-            )
+        context = SessionLifecyclePurgeContext(
+            purge_job_id=job.id,
+            lease_owner=lease_owner,
+            root_session_id=job.root_session_id,
+            subtree_session_ids=tuple(session_ids),
         )
+        await self.lifecycle_orchestrator.run_purge_phase(
+            session_manager=self.session_manager,
+            retention_repository=self.retention_repository,
+            context=context,
+            phase=ArchivedSessionPurgeParticipantPhase.PREPARED,
+            operation=self._prepare_purge_participant,
+        )
+
         async with self.session_manager() as session:
             model_files = await self.model_file_repository.list_for_session_ids(
                 session,
@@ -324,6 +386,67 @@ class ArchivedSessionPurgeService:
                     retention_root_session_id=job.root_session_id,
                 )
             )
+        cleanup_state = _PurgeFileCleanupState(
+            model_files=model_files,
+            artifacts=artifacts,
+            exchange_files=exchange_files,
+            model_file_count=model_file_count,
+            artifact_count=artifact_count,
+            exchange_file_count=exchange_file_count,
+        )
+        worktree_count = 0
+
+        async def cleanup_participant(
+            participant: SessionLifecycleParticipantDefinition,
+        ) -> dict[str, object] | None:
+            nonlocal worktree_count
+            match participant.key:
+                case "session.broker-state":
+                    for session_id in session_ids:
+                        await self.broker.purge_session_state(session_id)
+                    return {"purged_session_count": len(session_ids)}
+                case "session.model-files":
+                    await self._delete_file_blobs(
+                        model_files=cleanup_state.model_files,
+                        artifacts=[],
+                        exchange_files=[],
+                    )
+                    return {"model_file_count": cleanup_state.model_file_count}
+                case "session.artifacts":
+                    await self._delete_file_blobs(
+                        model_files=[],
+                        artifacts=cleanup_state.artifacts,
+                        exchange_files=[],
+                    )
+                    return {"artifact_count": cleanup_state.artifact_count}
+                case "session.exchange-files":
+                    await self._delete_file_blobs(
+                        model_files=[],
+                        artifacts=[],
+                        exchange_files=cleanup_state.exchange_files,
+                    )
+                    return {"exchange_file_count": cleanup_state.exchange_file_count}
+                case "session.git-worktrees":
+                    run_worktree_cleanup = (
+                        self.session_git_worktree_service.run_cleanup_for_root_tree
+                    )
+                    worktree_count = await run_worktree_cleanup(
+                        agent_id=root_session.agent_id,
+                        root_session_id=job.root_session_id,
+                        subtree_session_ids=session_ids,
+                    )
+                    return {"worktree_count": worktree_count}
+                case _:
+                    return None
+
+        await self.lifecycle_orchestrator.run_purge_phase(
+            session_manager=self.session_manager,
+            retention_repository=self.retention_repository,
+            context=context,
+            phase=ArchivedSessionPurgeParticipantPhase.CLEANUP_COMPLETED,
+            operation=cleanup_participant,
+        )
+        async with self.session_manager() as session:
             marked = await self.retention_repository.mark_purge_cleaning(
                 session,
                 job_id=job.id,
@@ -332,15 +455,65 @@ class ArchivedSessionPurgeService:
                 artifact_count=artifact_count,
                 exchange_file_count=exchange_file_count,
                 worktree_count=worktree_count,
-                now=now,
+                now=datetime.datetime.now(datetime.UTC),
             )
-            if not marked:
-                raise RuntimeError("Archived-session purge lease was lost")
+        if not marked:
+            raise RuntimeError("Archived-session purge lease was lost")
 
-        await self._delete_file_blobs(
-            model_files=model_files,
-            artifacts=artifacts,
-            exchange_files=exchange_files,
+        async def verify_participant(
+            participant: SessionLifecycleParticipantDefinition,
+        ) -> dict[str, object] | None:
+            match participant.key:
+                case "session.model-files":
+                    async with self.session_manager() as session:
+                        files = await self.model_file_repository.list_for_session_ids(
+                            session,
+                            session_ids=session_ids,
+                        )
+                    if any(
+                        file.status is not ModelFileStatus.DELETED
+                        or file.blob_deleted_at is None
+                        for file in files
+                    ):
+                        raise RuntimeError("ModelFile purge cleanup is incomplete")
+                    return {"model_file_count": len(files)}
+                case "session.artifacts":
+                    async with self.session_manager() as session:
+                        artifacts = await self.artifact_repository.list_for_session_ids(
+                            session,
+                            session_ids=session_ids,
+                        )
+                    if any(
+                        artifact.status is not ArtifactStatus.EXPIRED
+                        or artifact.blob_deleted_at is None
+                        for artifact in artifacts
+                    ):
+                        raise RuntimeError("Artifact purge cleanup is incomplete")
+                    return {"artifact_count": len(artifacts)}
+                case "session.exchange-files":
+                    async with self.session_manager() as session:
+                        files = (
+                            await self.exchange_file_repository.list_for_retention_root(
+                                session,
+                                retention_root_session_id=job.root_session_id,
+                            )
+                        )
+                    if any(
+                        file.status is not ExchangeFileStatus.EXPIRED
+                        or file.blob_deleted_at is None
+                        for file in files
+                    ):
+                        raise RuntimeError("ExchangeFile purge cleanup is incomplete")
+                    return {"exchange_file_count": len(files)}
+                case _:
+                    return None
+
+        await self.lifecycle_orchestrator.run_purge_phase(
+            session_manager=self.session_manager,
+            retention_repository=self.retention_repository,
+            context=context,
+            phase=ArchivedSessionPurgeParticipantPhase.VERIFIED,
+            operation=verify_participant,
         )
 
         async with self.session_manager() as session:
@@ -427,6 +600,14 @@ class ArchivedSessionPurgeService:
             exchange_file_count=len(exchange_files),
             worktree_count=worktree_count,
         )
+
+    async def _prepare_purge_participant(
+        self,
+        participant: SessionLifecycleParticipantDefinition,
+    ) -> dict[str, object] | None:
+        """Record that a fenced participant is ready for cleanup."""
+        del participant
+        return None
 
     async def _delete_file_blobs(
         self,

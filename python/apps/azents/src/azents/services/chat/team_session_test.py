@@ -41,6 +41,9 @@ from azents.repos.workspace_user.data import WorkspaceUserCreate
 from azents.services.chat.data import InvalidSessionTitle
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.input_buffer import InputBufferService
+from azents.services.session_lifecycle.registry import (
+    get_session_lifecycle_orchestrator,
+)
 from azents.testing.model_selection import make_test_model_selection_dict
 
 from . import ChatSessionService
@@ -148,6 +151,7 @@ def _service(
             action_execution_repository=ActionExecutionRepository(),
             vfs_projection_service=None,
         ),
+        lifecycle_orchestrator=get_session_lifecycle_orchestrator(),
         session_manager=rdb_session_manager,
     )
 
