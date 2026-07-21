@@ -247,7 +247,7 @@ do not delay automatic title generation. Title generation failures must not affe
 Clients display `title` when present and otherwise fall back to a contextual label such as "Team
 primary" or "Session". Concrete session route top bars show this session title while preserving the
 Agent avatar/icon affordance, and expose an inline title edit action that calls the manual title update
-endpoint.
+endpoint. The Web document title mirrors the displayed session title as `{session title} - Azents`.
 
 `POST /chat/v1/agents/{agent_id}/sessions/{session_id}/archive` archives the complete root
 `SessionAgent` tree for an active non-primary root session. The service locks the root and descendant

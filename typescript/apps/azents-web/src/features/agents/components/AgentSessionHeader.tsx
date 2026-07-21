@@ -19,6 +19,7 @@ import {
   Text,
   TextInput,
 } from "@mantine/core";
+import { useDocumentTitle } from "@mantine/hooks";
 import {
   IconChartBar,
   IconFolderOpen,
@@ -108,6 +109,7 @@ export function AgentSessionHeader({
   const updateTitleMutation = trpc.chat.updateAgentSessionTitle.useMutation();
   const session = initialSession ?? sessionQuery.data ?? null;
   const sessionTitle = getSessionDisplayTitle(session, t);
+  useDocumentTitle(`${sessionTitle} - Azents`);
   const [editingOpened, setEditingOpened] = useState(false);
   const [editingTitle, setEditingTitle] = useState("");
   const basePath = `/w/${handle}/agents/${agent.id}`;
