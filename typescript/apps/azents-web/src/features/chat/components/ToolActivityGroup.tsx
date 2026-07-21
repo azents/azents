@@ -270,6 +270,7 @@ export function ToolActivityGroup({
             truncate
             flex={1}
             miw={0}
+            className={inlineControlClasses.label}
           >
             {summary}
           </Text>
@@ -279,6 +280,7 @@ export function ToolActivityGroup({
             size={activityRowSummarySize}
             c="dimmed"
             ff="monospace"
+            className={inlineControlClasses.label}
             style={{ flexShrink: 0, fontVariantNumeric: "tabular-nums" }}
           >
             ({groupDuration})
@@ -291,6 +293,7 @@ export function ToolActivityGroup({
           c="dimmed"
           pl={rem(20)}
           ff="monospace"
+          className={inlineControlClasses.label}
           style={{ fontVariantNumeric: "tabular-nums" }}
         >
           {t("modelResponseWaiting", { duration: modelWaitingDuration })}

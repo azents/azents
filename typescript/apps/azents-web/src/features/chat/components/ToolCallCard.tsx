@@ -35,6 +35,7 @@ import {
   activityRowSummarySize,
   activityRowVerticalPadding,
 } from "./activityRowPresentation";
+import inlineControlClasses from "./ChatInlineControl.module.css";
 import {
   chatChevronTransition,
   chatCollapseTransitionProps,
@@ -457,7 +458,7 @@ function GenericToolCallCard({
           aria-label={ariaLabel}
           disabled={detail === null}
         >
-          <Group gap="xs" wrap="nowrap" align="flex-start">
+          <Group gap="xs" wrap="nowrap" className={inlineControlClasses.root}>
             <IconChevronRight
               aria-hidden="true"
               size={activityRowChevronSize}
@@ -470,7 +471,7 @@ function GenericToolCallCard({
                 transition: chatChevronTransition,
               }}
             />
-            <Box c="dimmed" style={{ flexShrink: 0 }}>
+            <Box c="dimmed" style={{ display: "inline-flex", flexShrink: 0 }}>
               <IconTool size={activityRowIconSize} />
             </Box>
             <Group gap={rem(6)} flex={1} miw={0} wrap="nowrap">
@@ -478,11 +479,18 @@ function GenericToolCallCard({
                 size={activityRowSummarySize}
                 c="dimmed"
                 fw={500}
+                className={inlineControlClasses.label}
                 style={{ flexShrink: 0 }}
               >
                 {toolCall.name}
               </Text>
-              <Text size={activityRowSummarySize} c="dimmed" truncate miw={0}>
+              <Text
+                size={activityRowSummarySize}
+                c="dimmed"
+                truncate
+                miw={0}
+                className={inlineControlClasses.label}
+              >
                 {t("genericDetails")}
               </Text>
             </Group>
@@ -539,7 +547,7 @@ function SpecializedToolCallCard({
     .filter((value) => value.length > 0)
     .join(" · ");
   const summary = (
-    <Group gap="xs" wrap="nowrap" align="flex-start">
+    <Group gap="xs" wrap="nowrap" className={inlineControlClasses.root}>
       <IconChevronRight
         aria-hidden="true"
         size={activityRowChevronSize}
@@ -552,7 +560,10 @@ function SpecializedToolCallCard({
           transition: chatChevronTransition,
         }}
       />
-      <Box c="dimmed" style={{ flexShrink: 0, marginTop: rem(1) }}>
+      <Box
+        c="dimmed"
+        style={{ display: "inline-flex", flexShrink: 0, marginTop: rem(1) }}
+      >
         {presentationIcon(presentation)}
       </Box>
       <Group gap={rem(6)} flex={1} miw={0} wrap="nowrap">
@@ -560,6 +571,7 @@ function SpecializedToolCallCard({
           size={activityRowSummarySize}
           c="dimmed"
           fw={500}
+          className={inlineControlClasses.label}
           style={{ flexShrink: 0 }}
         >
           {action}
@@ -571,6 +583,7 @@ function SpecializedToolCallCard({
             truncate
             flex={1}
             miw={0}
+            className={inlineControlClasses.label}
           >
             {presentation.subject}
           </Text>
@@ -581,6 +594,7 @@ function SpecializedToolCallCard({
             c="dimmed"
             truncate
             miw={0}
+            className={inlineControlClasses.label}
             style={{ flexShrink: 1 }}
           >
             {qualifier}
@@ -612,13 +626,13 @@ function SpecializedToolCallCard({
           )}
           {hasRawData ? (
             <ActionIcon
-              size="sm"
+              size={rem(16)}
               variant="subtle"
               color="gray"
               aria-label={t("viewRawDataFor", { action })}
               onClick={() => setRawOpened(true)}
             >
-              <IconDots size={rem(15)} />
+              <IconDots size={activityRowIconSize} />
             </ActionIcon>
           ) : null}
         </Group>
