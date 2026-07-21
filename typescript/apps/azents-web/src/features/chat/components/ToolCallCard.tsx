@@ -506,16 +506,11 @@ function presentationDetail(
   switch (presentation.detail.type) {
     case "output":
       return (
-        <ScrollArea.Autosize
-          mah={rem(240)}
-          scrollbarSize={activityDetailScrollbarSize}
-          {...activityDetailScrollAreaProps}
-        >
-          <ChatCodeBlock
-            code={presentation.detail.output}
-            language={presentation.detail.language}
-          />
-        </ScrollArea.Autosize>
+        <ChatCodeBlock
+          code={presentation.detail.output}
+          language={presentation.detail.language}
+          maxHeight={rem(240)}
+        />
       );
     case "diff":
       return <PatchFile file={presentation.detail.file} />;

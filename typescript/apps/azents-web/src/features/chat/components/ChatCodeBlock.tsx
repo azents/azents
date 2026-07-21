@@ -1,6 +1,6 @@
 "use client";
 
-import { Box, useComputedColorScheme } from "@mantine/core";
+import { Box, ScrollArea, useComputedColorScheme } from "@mantine/core";
 import { useTranslations } from "next-intl";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import {
@@ -8,6 +8,10 @@ import {
   vscDarkPlus,
 } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { supportedCodeLanguage } from "../codeLanguage";
+import {
+  activityDetailScrollAreaProps,
+  activityDetailScrollbarSize,
+} from "./activityRowPresentation";
 import { ChatCopyButton } from "./ChatCopyButton";
 import classes from "./MarkdownContent.module.css";
 import type { ReactElement } from "react";
@@ -15,6 +19,7 @@ import type { ReactElement } from "react";
 interface ChatCodeBlockProps {
   code: string;
   language: string | null;
+  maxHeight?: string | number;
 }
 
 type CodeColorScheme = "dark" | "light";
@@ -27,6 +32,7 @@ const CODE_BLOCK_THEMES = {
 export function ChatCodeBlock({
   code,
   language,
+  maxHeight,
 }: ChatCodeBlockProps): ReactElement {
   const t = useTranslations("chat");
   const computedColorScheme = useComputedColorScheme("light");
@@ -36,36 +42,58 @@ export function ChatCodeBlock({
   const highlightedLanguage =
     language === null ? null : supportedCodeLanguage(language);
 
-  return (
-    <Box className={classes.codeBlockFrame}>
-      {highlightedLanguage !== null ? (
-        <SyntaxHighlighter
-          PreTag="pre"
-          CodeTag="code"
-          className={classes.codeBlockScroller}
-          language={highlightedLanguage}
-          style={codeTheme}
-          useInlineStyles
-          customStyle={{
+  const codeContent =
+    highlightedLanguage !== null ? (
+      <SyntaxHighlighter
+        PreTag="pre"
+        CodeTag="code"
+        className={classes.codeBlockScroller}
+        language={highlightedLanguage}
+        style={codeTheme}
+        useInlineStyles
+        customStyle={{
+          background: "transparent",
+          color: "inherit",
+          fontFamily: "var(--mantine-font-family-monospace)",
+          fontSize: "var(--mantine-font-size-xs)",
+          lineHeight: 1.55,
+          margin: 0,
+          padding: "0.6em 0.8em",
+        }}
+        codeTagProps={{
+          className: classes.highlightedCode,
+          style: {
             background: "transparent",
             color: "inherit",
-            margin: 0,
-            padding: "0.6em 0.8em",
+          },
+        }}
+      >
+        {code}
+      </SyntaxHighlighter>
+    ) : (
+      <Box component="pre" className={classes.codeBlockScroller}>
+        <code className={classes.highlightedCode}>{code}</code>
+      </Box>
+    );
+
+  return (
+    <Box className={classes.codeBlockFrame}>
+      {maxHeight ? (
+        <ScrollArea.Autosize
+          className={classes.codeBlockScrollArea}
+          mah={maxHeight}
+          scrollbars="xy"
+          scrollbarSize={activityDetailScrollbarSize}
+          styles={{
+            root: { backgroundColor: "transparent" },
+            viewport: { backgroundColor: "transparent" },
           }}
-          codeTagProps={{
-            className: classes.highlightedCode,
-            style: {
-              background: "transparent",
-              color: "inherit",
-            },
-          }}
+          {...activityDetailScrollAreaProps}
         >
-          {code}
-        </SyntaxHighlighter>
+          {codeContent}
+        </ScrollArea.Autosize>
       ) : (
-        <Box component="pre" className={classes.codeBlockScroller}>
-          <code className={classes.highlightedCode}>{code}</code>
-        </Box>
+        codeContent
       )}
       <Box className={classes.codeBlockCopyButton}>
         <ChatCopyButton

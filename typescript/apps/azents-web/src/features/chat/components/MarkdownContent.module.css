@@ -92,17 +92,28 @@
   --azents-chat-code-foreground: var(--mantine-color-gray-0);
 }
 
+.codeBlockScrollArea,
 .codeBlockScroller {
   grid-column: 1;
   grid-row: 1;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.codeBlockScroller {
   margin: 0;
   padding: 0.6em 0.8em;
   background-color: transparent;
   color: inherit;
+  font-family: var(--mantine-font-family-monospace) !important;
+  font-size: var(--mantine-font-size-xs) !important;
+  line-height: 1.55 !important;
+  min-width: 100%;
+  width: max-content;
+}
+
+.codeBlockFrame > .codeBlockScroller {
   overflow-x: auto;
-  font-size: var(--mantine-font-size-xs);
-  line-height: 1.55;
-  max-width: 100%;
 }
 
 .codeBlockCopyButton {
