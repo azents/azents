@@ -294,6 +294,18 @@ class Toolkit(ABC, Generic[ConfigT]):
         """
         return {}
 
+    async def refresh_from_resolved(self, resolved: Toolkit[ConfigT]) -> None:
+        """Refresh per-run state from a newly resolved toolkit instance.
+
+        Session-managed toolkits retain their entered instance between runs. Providers
+        still resolve a fresh instance for every run, and toolkits with mutable
+        per-run state can override this method to adopt that refreshed state without
+        restarting their session lifecycle.
+
+        :param resolved: Fresh toolkit instance resolved for the current run.
+        """
+        del resolved
+
     def hooks(self) -> RuntimeHooks:
         """Return supported runtime hook callback mapping.
 

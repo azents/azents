@@ -34,12 +34,19 @@ class _TrackingToolkit(Toolkit[_Config]):
         self.events = events
         self.fail_enter = fail_enter
         self.update_context_calls = 0
+        self.refresh_calls = 0
 
     async def update_context(self, context: TurnContext) -> ToolkitState:
         """Record update_context calls."""
         del context
         self.update_context_calls += 1
         return ToolkitState(status=ToolkitStatus.ENABLED, tools=[])
+
+    async def refresh_from_resolved(self, resolved: Toolkit[_Config]) -> None:
+        """Record refresh from the current run's resolved toolkit."""
+        assert isinstance(resolved, _TrackingToolkit)
+        self.refresh_calls += 1
+        self.events.append(f"refresh:{self.name}:{resolved.name}")
 
     async def __aenter__(self) -> "_TrackingToolkit":
         """Record enter and optionally fail."""
@@ -116,7 +123,8 @@ async def test_reconcile_reuses_existing_toolkit_for_same_key() -> None:
         assert second_result[0].slug == "renamed"
         assert second_result[0].use_prefix is True
         assert second_result[0].toolkit_type == "mcp"
-        assert events == ["enter:first"]
+        assert first.refresh_calls == 1
+        assert events == ["enter:first", "refresh:first:replacement"]
     finally:
         await lifecycle.close()
 
@@ -136,7 +144,12 @@ async def test_reconcile_exits_removed_toolkits_after_success() -> None:
 
     try:
         assert result[0].toolkit is first
-        assert events == ["enter:first", "enter:second", "exit:second"]
+        assert events == [
+            "enter:first",
+            "enter:second",
+            "refresh:first:new",
+            "exit:second",
+        ]
     finally:
         await lifecycle.close()
 
@@ -172,6 +185,7 @@ async def test_reconcile_unwinds_new_toolkits_when_later_enter_fails() -> None:
             "enter:new",
             "enter:failing",
             "exit:new",
+            "refresh:existing:again",
         ]
     finally:
         await lifecycle.close()

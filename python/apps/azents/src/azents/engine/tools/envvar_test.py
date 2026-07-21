@@ -113,6 +113,24 @@ class TestEnvVarToolkitExposeEnv:
         assert setting == {"FOO": "foo-value"}
         assert "BAR" not in setting
 
+    async def test_refresh_from_resolved_replaces_config_and_values(self) -> None:
+        """Use credentials resolved for the current run."""
+        toolkit = EnvVarToolkit(
+            config=EnvVarToolkitConfig(entries=[EnvEntryMeta(name="FOO")]),
+            values={"FOO": "stale-value"},
+            toolkit_name="Old credentials",
+        )
+        refreshed = EnvVarToolkit(
+            config=EnvVarToolkitConfig(entries=[EnvEntryMeta(name="BAR")]),
+            values={"BAR": "current-value"},
+            toolkit_name="Current credentials",
+        )
+
+        await toolkit.refresh_from_resolved(refreshed)
+
+        assert await toolkit.expose_env() == {"BAR": "current-value"}
+        assert toolkit.display_name == "Current credentials"
+
 
 class TestEnvVarToolkitUpdateContext:
     """EnvVarToolkit.update_context() unit tests."""

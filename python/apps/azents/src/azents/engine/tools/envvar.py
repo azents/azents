@@ -129,6 +129,25 @@ class EnvVarToolkit(Toolkit[EnvVarToolkitConfig]):
             name: value for name, value in self._values.items() if name in allowlist
         }
 
+    async def refresh_from_resolved(
+        self,
+        resolved: Toolkit[EnvVarToolkitConfig],
+    ) -> None:
+        """Adopt the latest config and credentials resolved for a new run.
+
+        EnvVar toolkits have no session-bound resources, but their encrypted
+        credentials may be changed while an AgentSession remains active. Retain the
+        session-managed instance and replace its resolved state so subsequent shell
+        calls expose the current values.
+
+        :param resolved: Freshly resolved EnvVar toolkit for the current run.
+        """
+        if not isinstance(resolved, EnvVarToolkit):
+            raise TypeError("EnvVarToolkit can only refresh from EnvVarToolkit")
+        self._config = resolved._config
+        self._values = resolved._values
+        self.display_name = resolved.display_name
+
 
 class EnvVarToolkitProvider(ToolkitProvider[EnvVarToolkitConfig]):
     """EnvVarToolkit provider.

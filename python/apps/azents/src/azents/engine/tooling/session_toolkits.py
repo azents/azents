@@ -64,11 +64,18 @@ class SessionToolkitLifecycle:
         desired_keys = {item.key for item in desired}
         result: list[ToolkitBinding] = []
         new_entries: dict[SessionToolkitKey, _EnteredToolkit] = {}
+        refresh_entries: list[tuple[_EnteredToolkit, ToolkitBinding]] = []
 
         async with AsyncExitStack() as rollback_stack:
             for item in desired:
                 existing = self._entries.get(item.key)
                 if existing is not None:
+                    refresh_entries.append(
+                        (
+                            existing,
+                            item.binding,
+                        )
+                    )
                     binding = item.binding._replace(toolkit=existing.binding.toolkit)
                     existing.binding = binding
                     result.append(binding)
@@ -78,6 +85,11 @@ class SessionToolkitLifecycle:
                 new_entries[item.key] = entry
                 result.append(entry.binding)
                 rollback_stack.push_async_callback(entry.close)
+
+            for entry, refreshed_binding in refresh_entries:
+                await entry.binding.toolkit.refresh_from_resolved(
+                    refreshed_binding.toolkit
+                )
 
             rollback_stack.pop_all()
 
