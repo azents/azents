@@ -1,6 +1,7 @@
 """Archived-session purge workflow tests."""
 
 import datetime
+import logging
 from collections.abc import AsyncGenerator, Sequence
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
@@ -53,6 +54,7 @@ class _RetentionRepository:
         events: list[str],
     ) -> None:
         self.job = job
+        self.additional_jobs: list[ArchivedSessionPurgeJob] = []
         self.events = events
         self.retry: dict[str, object] | None = None
         self.completed = False
@@ -79,7 +81,13 @@ class _RetentionRepository:
     ) -> ArchivedSessionPurgeJob | None:
         del session, now, lease_owner, lease_until
         self.events.append("claim")
-        return self.job
+        if self.job is not None:
+            job = self.job
+            self.job = None
+            return job
+        if self.additional_jobs:
+            return self.additional_jobs.pop(0)
+        return None
 
     async def mark_purge_cleaning(
         self,
@@ -93,13 +101,17 @@ class _RetentionRepository:
         worktree_count: int,
         now: datetime.datetime,
     ) -> bool:
-        del session, job_id, lease_owner, now
+        del (
+            session,
+            job_id,
+            lease_owner,
+            model_file_count,
+            artifact_count,
+            exchange_file_count,
+            worktree_count,
+            now,
+        )
         self.events.append("mark_cleaning")
-        assert self.job is not None
-        self.job.model_file_count = model_file_count
-        self.job.artifact_count = artifact_count
-        self.job.exchange_file_count = exchange_file_count
-        self.job.worktree_count = worktree_count
         return True
 
     async def mark_purge_retry(
@@ -451,6 +463,7 @@ class _S3Service:
         del bucket
         self.events.append(f"delete_blob:{key}")
         if key == self.fail_key:
+            self.fail_key = None
             raise RuntimeError("object delete failed")
         self.deleted_keys.append(key)
 
@@ -480,6 +493,11 @@ def _job(now: datetime.datetime) -> ArchivedSessionPurgeJob:
         created_at=now,
         updated_at=now,
     )
+
+
+def _deadline() -> datetime.datetime:
+    """Return a scheduler deadline with enough room for test jobs."""
+    return datetime.datetime.now(datetime.UTC) + datetime.timedelta(minutes=5)
 
 
 def _agent_session(
@@ -656,11 +674,32 @@ async def test_purge_reconciles_stale_unstarted_jobs_before_claiming() -> None:
     retention_repository.job = None
     retention_repository.stale_job_count = 2
 
-    summary = await service.purge_once(lease_owner="worker-1")
+    summary = await service.purge_once(
+        lease_owner="worker-1",
+        deadline=_deadline(),
+    )
 
-    assert summary.claimed is False
+    assert summary.claimed_count == 0
     assert summary.stale_job_count == 2
     assert events[:2] == ["reconcile", "claim"]
+
+
+async def test_purge_stops_before_claiming_near_scheduler_deadline() -> None:
+    """A pass does not claim another root without cleanup time remaining."""
+    events: list[str] = []
+    service, *_ = _build_service(
+        events=events,
+        active_checks=[],
+    )
+
+    summary = await service.purge_once(
+        lease_owner="worker-1",
+        deadline=datetime.datetime.now(datetime.UTC) + datetime.timedelta(seconds=20),
+    )
+
+    assert summary.claimed_count == 0
+    assert summary.deadline_reached is True
+    assert events == ["reconcile"]
 
 
 async def test_purge_deletes_external_resources_before_session_tree() -> None:
@@ -676,11 +715,15 @@ async def test_purge_deletes_external_resources_before_session_tree() -> None:
         s3_service,
     ) = _build_service(events=events, active_checks=[False, False])
 
-    summary = await service.purge_once(lease_owner="worker-1")
+    summary = await service.purge_once(
+        lease_owner="worker-1",
+        deadline=_deadline(),
+    )
 
-    assert summary.claimed is True
-    assert summary.completed is True
-    assert summary.retry_scheduled is False
+    assert summary.claimed_count == 1
+    assert summary.completed_count == 1
+    assert summary.retry_scheduled_count == 0
+    assert summary.failed_count == 0
     assert summary.model_file_count == 1
     assert summary.artifact_count == 1
     assert summary.exchange_file_count == 1
@@ -713,10 +756,14 @@ async def test_active_run_schedules_retry_before_external_cleanup() -> None:
         s3_service,
     ) = _build_service(events=events, active_checks=[True])
 
-    summary = await service.purge_once(lease_owner="worker-1")
+    summary = await service.purge_once(
+        lease_owner="worker-1",
+        deadline=_deadline(),
+    )
 
-    assert summary.completed is False
-    assert summary.retry_scheduled is True
+    assert summary.completed_count == 0
+    assert summary.retry_scheduled_count == 1
+    assert summary.failed_count == 0
     assert retention_repository.retry is not None
     assert retention_repository.retry["error_kind"] == "ActiveAgentRun"
     assert agent_session_repository.deleted is False
@@ -742,9 +789,15 @@ async def test_object_delete_failure_preserves_tree_for_retry() -> None:
         s3_fail_key="model-key",
     )
 
-    with pytest.raises(RuntimeError, match="object delete failed"):
-        await service.purge_once(lease_owner="worker-1")
+    summary = await service.purge_once(
+        lease_owner="worker-1",
+        deadline=_deadline(),
+    )
 
+    assert summary.claimed_count == 1
+    assert summary.completed_count == 0
+    assert summary.retry_scheduled_count == 1
+    assert summary.failed_count == 1
     assert retention_repository.retry is not None
     assert retention_repository.retry["error_kind"] == "RuntimeError"
     assert agent_session_repository.deleted is False
@@ -771,9 +824,15 @@ async def test_pinned_model_file_is_not_deleted_and_blocks_finalization() -> Non
         pinned_model_file=True,
     )
 
-    with pytest.raises(RuntimeError, match="ModelFile purge cleanup is incomplete"):
-        await service.purge_once(lease_owner="worker-1")
+    summary = await service.purge_once(
+        lease_owner="worker-1",
+        deadline=_deadline(),
+    )
 
+    assert summary.claimed_count == 1
+    assert summary.completed_count == 0
+    assert summary.retry_scheduled_count == 1
+    assert summary.failed_count == 1
     assert retention_repository.retry is not None
     assert retention_repository.retry["error_kind"] == "RuntimeError"
     assert "ModelFile purge cleanup is incomplete" in str(
@@ -802,13 +861,69 @@ async def test_finalization_rejects_changed_subtree_boundary() -> None:
         item for item in agent_session_repository.sessions if item.id == "root-session"
     ]
 
-    with pytest.raises(
-        RuntimeError,
-        match="Purge root tree boundary changed during cleanup",
-    ):
-        await service.purge_once(lease_owner="worker-1")
+    summary = await service.purge_once(
+        lease_owner="worker-1",
+        deadline=_deadline(),
+    )
 
+    assert summary.claimed_count == 1
+    assert summary.completed_count == 0
+    assert summary.retry_scheduled_count == 1
+    assert summary.failed_count == 1
     assert retention_repository.retry is not None
     assert retention_repository.retry["error_kind"] == "RuntimeError"
     assert agent_session_repository.deleted is False
     assert "delete_session" not in events
+
+
+async def test_job_failure_logs_and_continues_to_next_due_job(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """One failed root is retried without blocking the next due root."""
+    events: list[str] = []
+    (
+        service,
+        retention_repository,
+        agent_session_repository,
+        _,
+        _,
+        _,
+        s3_service,
+    ) = _build_service(
+        events=events,
+        active_checks=[False, False, False],
+        s3_fail_key="model-key",
+    )
+    second_job = _job(datetime.datetime.now(datetime.UTC)).model_copy(
+        update={"id": "job-2"}
+    )
+    retention_repository.additional_jobs.append(second_job)
+
+    with caplog.at_level(
+        logging.ERROR,
+        logger="azents.services.archived_session_purge",
+    ):
+        summary = await service.purge_once(
+            lease_owner="worker-1",
+            deadline=_deadline(),
+        )
+
+    assert summary.claimed_count == 2
+    assert summary.completed_count == 1
+    assert summary.retry_scheduled_count == 1
+    assert summary.failed_count == 1
+    assert retention_repository.completed is True
+    assert agent_session_repository.deleted is True
+    assert s3_service.deleted_keys == [
+        "model-key",
+        "artifact-key",
+        "exchange-key",
+    ]
+    assert events.count("claim") == 3
+    failure_record = next(
+        record
+        for record in caplog.records
+        if record.message == "Archived-session purge job failed; retry scheduled"
+    )
+    assert failure_record.__dict__["purge_job_id"] == "job-1"
+    assert failure_record.__dict__["root_session_id"] == "root-session"

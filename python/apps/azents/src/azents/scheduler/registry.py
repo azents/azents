@@ -71,9 +71,12 @@ async def archived_session_retention_recalculation_handler(
 
 
 async def archived_session_purge_handler(context: TaskContext) -> TaskResult:
-    """Advance one durable archived-session purge job."""
+    """Advance a bounded batch of durable archived-session purge jobs."""
     service = await context.container.solve(ArchivedSessionPurgeService)
-    summary = await service.purge_once(lease_owner=context.lease_owner)
+    summary = await service.purge_once(
+        lease_owner=context.lease_owner,
+        deadline=context.deadline,
+    )
     return TaskResult(
         summary={
             "task_key": context.task_key,

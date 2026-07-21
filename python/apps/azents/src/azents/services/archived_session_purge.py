@@ -3,6 +3,7 @@
 import asyncio
 import dataclasses
 import datetime
+import logging
 from typing import Annotated
 
 from azcommon.infra.s3.service import S3Service
@@ -38,26 +39,44 @@ from azents.services.session_git_worktree import SessionGitWorktreeService
 _LEASE_DURATION = datetime.timedelta(minutes=15)
 _MAX_RETRY_DELAY = datetime.timedelta(minutes=30)
 _STALE_JOB_RECONCILIATION_LIMIT = 100
+_PURGE_JOB_LIMIT = 100
+_DEADLINE_SAFETY_MARGIN = datetime.timedelta(seconds=30)
+
+logger = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass(frozen=True)
 class ArchivedSessionPurgeSummary:
     """Result of one scheduler purge pass."""
 
-    claimed: bool
-    completed: bool
-    retry_scheduled: bool
-    root_session_id: str | None
+    claimed_count: int
+    completed_count: int
+    retry_scheduled_count: int
+    failed_count: int
     model_file_count: int
     artifact_count: int
     exchange_file_count: int
     worktree_count: int
-    stale_job_count: int = 0
+    stale_job_count: int
+    limit_reached: bool
+    deadline_reached: bool
+
+
+@dataclasses.dataclass(frozen=True)
+class _ArchivedSessionPurgeJobSummary:
+    """Result of advancing one claimed archived-session purge job."""
+
+    completed: bool
+    retry_scheduled: bool
+    model_file_count: int
+    artifact_count: int
+    exchange_file_count: int
+    worktree_count: int
 
 
 @dataclasses.dataclass
 class ArchivedSessionPurgeService:
-    """Fence and purge one archived SessionAgent tree per scheduler pass."""
+    """Fence and purge a bounded batch of archived SessionAgent trees."""
 
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
@@ -82,8 +101,13 @@ class ArchivedSessionPurgeService:
     s3_service: Annotated[S3Service, Depends(get_s3_service)]
     config: Annotated[Config, Depends(get_config)]
 
-    async def purge_once(self, *, lease_owner: str) -> ArchivedSessionPurgeSummary:
-        """Claim and advance one durable purge job."""
+    async def purge_once(
+        self,
+        *,
+        lease_owner: str,
+        deadline: datetime.datetime,
+    ) -> ArchivedSessionPurgeSummary:
+        """Claim and advance a bounded batch of durable purge jobs."""
         now = datetime.datetime.now(datetime.UTC)
         async with self.session_manager() as session:
             stale_job_count = (
@@ -93,46 +117,87 @@ class ArchivedSessionPurgeService:
                     limit=_STALE_JOB_RECONCILIATION_LIMIT,
                 )
             )
-            job = await self.retention_repository.claim_due_purge_job(
-                session,
-                now=now,
-                lease_owner=lease_owner,
-                lease_until=now + _LEASE_DURATION,
-            )
-        if job is None:
-            return ArchivedSessionPurgeSummary(
-                claimed=False,
-                completed=False,
-                retry_scheduled=False,
-                root_session_id=None,
-                model_file_count=0,
-                artifact_count=0,
-                exchange_file_count=0,
-                worktree_count=0,
-                stale_job_count=stale_job_count,
-            )
 
-        try:
-            summary = await self._purge_claimed(job=job, lease_owner=lease_owner)
-            return dataclasses.replace(summary, stale_job_count=stale_job_count)
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            await self._retry(
-                job_id=job.id,
-                lease_owner=lease_owner,
-                attempt_count=job.attempt_count,
-                error_kind=type(exc).__name__,
-                error_summary=str(exc) or type(exc).__name__,
-            )
-            raise
+        claimed_count = 0
+        completed_count = 0
+        retry_scheduled_count = 0
+        failed_count = 0
+        model_file_count = 0
+        artifact_count = 0
+        exchange_file_count = 0
+        worktree_count = 0
+        deadline_reached = False
+
+        for _ in range(_PURGE_JOB_LIMIT):
+            now = datetime.datetime.now(datetime.UTC)
+            if now + _DEADLINE_SAFETY_MARGIN >= deadline:
+                deadline_reached = True
+                break
+            async with self.session_manager() as session:
+                job = await self.retention_repository.claim_due_purge_job(
+                    session,
+                    now=now,
+                    lease_owner=lease_owner,
+                    lease_until=now + _LEASE_DURATION,
+                )
+            if job is None:
+                break
+            claimed_count += 1
+
+            try:
+                job_summary = await self._purge_claimed(
+                    job=job,
+                    lease_owner=lease_owner,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                await self._retry(
+                    job_id=job.id,
+                    lease_owner=lease_owner,
+                    attempt_count=job.attempt_count,
+                    error_kind=type(exc).__name__,
+                    error_summary=str(exc) or type(exc).__name__,
+                )
+                failed_count += 1
+                retry_scheduled_count += 1
+                logger.exception(
+                    "Archived-session purge job failed; retry scheduled",
+                    extra={
+                        "purge_job_id": job.id,
+                        "root_session_id": job.root_session_id,
+                        "attempt_count": job.attempt_count,
+                    },
+                )
+                continue
+
+            completed_count += int(job_summary.completed)
+            retry_scheduled_count += int(job_summary.retry_scheduled)
+            model_file_count += job_summary.model_file_count
+            artifact_count += job_summary.artifact_count
+            exchange_file_count += job_summary.exchange_file_count
+            worktree_count += job_summary.worktree_count
+
+        return ArchivedSessionPurgeSummary(
+            claimed_count=claimed_count,
+            completed_count=completed_count,
+            retry_scheduled_count=retry_scheduled_count,
+            failed_count=failed_count,
+            model_file_count=model_file_count,
+            artifact_count=artifact_count,
+            exchange_file_count=exchange_file_count,
+            worktree_count=worktree_count,
+            stale_job_count=stale_job_count,
+            limit_reached=claimed_count == _PURGE_JOB_LIMIT,
+            deadline_reached=deadline_reached,
+        )
 
     async def _purge_claimed(
         self,
         *,
         job: ArchivedSessionPurgeJob,
         lease_owner: str,
-    ) -> ArchivedSessionPurgeSummary:
+    ) -> _ArchivedSessionPurgeJobSummary:
         now = datetime.datetime.now(datetime.UTC)
         async with self.session_manager() as session:
             sessions = await self.agent_session_repository.lock_root_tree_sessions(
@@ -146,8 +211,13 @@ class ArchivedSessionPurgeService:
                     lease_owner=lease_owner,
                     now=now,
                 )
-                return ArchivedSessionPurgeSummary(
-                    True, completed, False, job.root_session_id, 0, 0, 0, 0
+                return _ArchivedSessionPurgeJobSummary(
+                    completed=completed,
+                    retry_scheduled=False,
+                    model_file_count=0,
+                    artifact_count=0,
+                    exchange_file_count=0,
+                    worktree_count=0,
                 )
             if any(item.status is not AgentSessionStatus.ARCHIVED for item in sessions):
                 raise RuntimeError("Purge root tree is no longer archived")
@@ -182,8 +252,13 @@ class ArchivedSessionPurgeService:
                 error_kind="ActiveAgentRun",
                 error_summary="Subtree AgentRun is still active after purge fencing.",
             )
-            return ArchivedSessionPurgeSummary(
-                True, False, True, job.root_session_id, 0, 0, 0, 0
+            return _ArchivedSessionPurgeJobSummary(
+                completed=False,
+                retry_scheduled=True,
+                model_file_count=0,
+                artifact_count=0,
+                exchange_file_count=0,
+                worktree_count=0,
             )
 
         for session_id in session_ids:
@@ -339,15 +414,13 @@ class ArchivedSessionPurgeService:
             if not completed:
                 raise RuntimeError("Archived-session purge lease was lost")
 
-        return ArchivedSessionPurgeSummary(
-            True,
-            True,
-            False,
-            job.root_session_id,
-            len(model_files),
-            len(artifacts),
-            len(exchange_files),
-            worktree_count,
+        return _ArchivedSessionPurgeJobSummary(
+            completed=True,
+            retry_scheduled=False,
+            model_file_count=len(model_files),
+            artifact_count=len(artifacts),
+            exchange_file_count=len(exchange_files),
+            worktree_count=worktree_count,
         )
 
     async def _delete_file_blobs(
