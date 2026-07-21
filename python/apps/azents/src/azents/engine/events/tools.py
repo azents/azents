@@ -19,6 +19,7 @@ from azents.engine.events.system_prompt import ToolkitPromptInput
 from azents.engine.events.types import (
     ClientToolCallPayload,
     ClientToolResultPayload,
+    ClientToolWireDialect,
     OutputTextPart,
     ToolkitSourceSnapshot,
     ToolOutput,
@@ -30,6 +31,7 @@ from azents.engine.run.types import (
     FunctionToolCancelRequest,
     FunctionToolError,
     FunctionToolResult,
+    PlaintextCustomToolHandler,
 )
 from azents.engine.tooling.tool_search import (
     CatalogTool,
@@ -49,6 +51,7 @@ class ToolCatalog:
     """Tool catalog used by one run/turn of event loop."""
 
     tools: Mapping[str, FunctionTool]
+    wire_dialects: Mapping[str, ClientToolWireDialect]
     entries: Mapping[str, CatalogTool]
     static_prompt_fragment_inputs: list[ToolkitPromptInput]
     dynamic_prompt_fragment_inputs: list[ToolkitPromptInput]
@@ -110,7 +113,7 @@ class ToolCatalog:
         self,
         tool_names: Sequence[str],
     ) -> list[dict[str, object]]:
-        """Return selected function schemas in canonical final-name order."""
+        """Return selected provider declarations in canonical final-name order."""
         selected: list[FunctionTool] = []
         for name in sorted(set(tool_names)):
             tool = self.tools.get(name)
@@ -118,15 +121,34 @@ class ToolCatalog:
                 raise ValueError(f"Tool name is not in the prepared catalog: {name}")
             selected.append(tool)
         return [
-            {
-                "type": "function",
-                "name": tool.spec.name,
-                "description": tool.spec.description,
-                "parameters": tool.spec.input_schema,
-                "strict": False,
-            }
+            _native_tool_declaration(tool, self.wire_dialects[tool.spec.name])
             for tool in selected
         ]
+
+
+def _native_tool_declaration(
+    tool: FunctionTool,
+    wire_dialect: ClientToolWireDialect,
+) -> dict[str, object]:
+    """Lower one prepared client tool through its selected declaration dialect."""
+    if wire_dialect == "plaintext_custom":
+        if not isinstance(tool.handler, PlaintextCustomToolHandler):
+            raise ValueError(
+                "Plaintext custom declaration requires a plaintext custom handler"
+            )
+        return {
+            "type": "custom",
+            "name": tool.spec.name,
+            "description": tool.spec.description,
+            "format": {"type": "text"},
+        }
+    return {
+        "type": "function",
+        "name": tool.spec.name,
+        "description": tool.spec.description,
+        "parameters": tool.spec.input_schema,
+        "strict": False,
+    }
 
 
 def project_tool_catalog_for_client_profiles(
@@ -140,11 +162,26 @@ def project_tool_catalog_for_client_profiles(
         if (
             tool.required_client_tool_profile is None
             or tool.required_client_tool_profile in profiles
+            or (
+                name == "apply_patch"
+                and tool.required_client_tool_profile
+                is ClientToolProfile.V4A_APPLY_PATCH_FUNCTION
+                and ClientToolProfile.V4A_APPLY_PATCH_PLAINTEXT_CUSTOM in profiles
+            )
         )
     }
     entries = {name: catalog.entries[name] for name in tools}
+    wire_dialects: dict[str, ClientToolWireDialect] = {
+        name: catalog.wire_dialects[name] for name in tools
+    }
+    if (
+        "apply_patch" in wire_dialects
+        and ClientToolProfile.V4A_APPLY_PATCH_PLAINTEXT_CUSTOM in profiles
+    ):
+        wire_dialects["apply_patch"] = "plaintext_custom"
     return ToolCatalog(
         tools=MappingProxyType(tools),
+        wire_dialects=MappingProxyType(wire_dialects),
         entries=MappingProxyType(entries),
         static_prompt_fragment_inputs=[
             prompt
@@ -172,6 +209,7 @@ def extend_tool_catalog(
 ) -> ToolCatalog:
     """Return a catalog extended with collision-checked auto-bound tools."""
     tools = dict(catalog.tools)
+    wire_dialects = dict(catalog.wire_dialects)
     entries = dict(catalog.entries)
     source = ToolCatalogSource(
         slug="builtin",
@@ -185,6 +223,7 @@ def extend_tool_catalog(
         if name in tools:
             raise ValueError(f"Tool name is already bound: {name}")
         tools[name] = tool
+        wire_dialects[name] = "json_function"
         entries[name] = CatalogTool(
             tool=tool,
             source=source,
@@ -192,6 +231,7 @@ def extend_tool_catalog(
         )
     return ToolCatalog(
         tools=MappingProxyType(tools),
+        wire_dialects=MappingProxyType(wire_dialects),
         entries=MappingProxyType(entries),
         static_prompt_fragment_inputs=catalog.static_prompt_fragment_inputs,
         dynamic_prompt_fragment_inputs=catalog.dynamic_prompt_fragment_inputs,
@@ -206,6 +246,7 @@ async def build_tool_catalog(
 ) -> ToolCatalog:
     """Collect Toolkit state and build event tool catalog."""
     tools: dict[str, FunctionTool] = {}
+    wire_dialects: dict[str, ClientToolWireDialect] = {}
     entries: dict[str, CatalogTool] = {}
     static_prompt_fragment_inputs: list[ToolkitPromptInput] = []
     dynamic_prompt_fragment_inputs: list[ToolkitPromptInput] = []
@@ -275,6 +316,7 @@ async def build_tool_catalog(
                 tool.with_prefix(f"{binding.slug}__") if binding.use_prefix else tool
             )
             tools[bound.spec.name] = bound
+            wire_dialects[bound.spec.name] = "json_function"
             entries[bound.spec.name] = CatalogTool(
                 tool=bound,
                 source=source,
@@ -285,6 +327,7 @@ async def build_tool_catalog(
             )
     return ToolCatalog(
         tools=MappingProxyType(tools),
+        wire_dialects=MappingProxyType(wire_dialects),
         entries=MappingProxyType(entries),
         static_prompt_fragment_inputs=static_prompt_fragment_inputs,
         dynamic_prompt_fragment_inputs=dynamic_prompt_fragment_inputs,
@@ -421,8 +464,22 @@ class ToolCatalogClientToolExecutor(ClientToolExecutor):
                     [OutputTextPart(text=f"Tool not found: {call.name}")]
                 ),
             )
+        expected_wire_dialect = self.catalog.wire_dialects.get(call.name)
+        if expected_wire_dialect != call.wire_dialect:
+            return _dialect_mismatch_result(
+                call,
+                expected_wire_dialect=expected_wire_dialect,
+            )
         try:
-            result = await tool.handler(call.arguments)
+            if call.wire_dialect == "plaintext_custom":
+                if not isinstance(tool.handler, PlaintextCustomToolHandler):
+                    return _dialect_mismatch_result(
+                        call,
+                        expected_wire_dialect=expected_wire_dialect,
+                    )
+                result = await tool.handler.execute_plaintext_custom(call.arguments)
+            else:
+                result = await tool.handler(call.arguments)
         except FunctionToolError as exc:
             return ClientToolResultPayload(
                 call_id=call.call_id,
@@ -448,6 +505,32 @@ class ToolCatalogClientToolExecutor(ClientToolExecutor):
             arguments=call.arguments,
         )
         asyncio.create_task(_call_cancel_handler(tool, request))
+
+
+def _dialect_mismatch_result(
+    call: ClientToolCallPayload,
+    *,
+    expected_wire_dialect: ClientToolWireDialect | None,
+) -> ClientToolResultPayload:
+    """Return one safe failed result without invoking a handler."""
+    return ClientToolResultPayload(
+        call_id=call.call_id,
+        name=call.name,
+        wire_dialect=call.wire_dialect,
+        status="failed",
+        output=enforce_tool_output_text_hard_cap(
+            [
+                OutputTextPart(
+                    text="Tool call dialect does not match the prepared declaration."
+                )
+            ]
+        ),
+        metadata={
+            "kind": "client_tool_dialect_mismatch",
+            "expected_wire_dialect": expected_wire_dialect,
+            "received_wire_dialect": call.wire_dialect,
+        },
+    )
 
 
 async def _call_cancel_handler(

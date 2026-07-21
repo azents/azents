@@ -115,6 +115,53 @@ void test("specializes structured patch metadata without parsing output text", (
   });
 });
 
+void test("specializes a plaintext custom apply_patch envelope", () => {
+  const result = knownToolPresentation(
+    toolCall({
+      name: "apply_patch",
+      wireDialect: "plaintext_custom",
+      arguments:
+        "*** Base Path: /workspace/agent\n*** Begin Patch\n*** Add File: placeholder\n*** End Patch",
+      resultMetadata: {
+        kind: "apply_patch_result",
+        changes: [
+          {
+            action: "add",
+            path: "/workspace/agent/placeholder",
+            added_lines: 0,
+            removed_lines: 0,
+          },
+        ],
+      },
+    }),
+  );
+  assert.equal(result.type, "specialized");
+  assert.equal(result.presentation.action, "patch");
+  assert.equal(result.presentation.subject, "agent");
+});
+
+void test("rejects malformed plaintext custom apply_patch envelopes", () => {
+  const result = knownToolPresentation(
+    toolCall({
+      name: "apply_patch",
+      wireDialect: "plaintext_custom",
+      arguments: "*** Base Path: relative\n*** Begin Patch",
+    }),
+  );
+  assert.deepEqual(result, { type: "generic", reason: "invalid-arguments" });
+});
+
+void test("rejects oversized plaintext custom apply_patch envelopes", () => {
+  const result = knownToolPresentation(
+    toolCall({
+      name: "apply_patch",
+      wireDialect: "plaintext_custom",
+      arguments: `*** Base Path: /workspace/agent\n${"x".repeat(1024 * 1024)}`,
+    }),
+  );
+  assert.deepEqual(result, { type: "generic", reason: "invalid-arguments" });
+});
+
 void test("uses validated process metadata for terminal command detail", () => {
   const result = knownToolPresentation(
     toolCall({

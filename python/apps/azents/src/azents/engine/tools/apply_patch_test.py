@@ -8,7 +8,12 @@ from datetime import datetime
 import pytest
 
 from azents.engine.run.client_tool_compatibility import ClientToolProfile
-from azents.engine.run.types import FunctionTool, FunctionToolError, FunctionToolResult
+from azents.engine.run.types import (
+    FunctionTool,
+    FunctionToolError,
+    FunctionToolResult,
+    PlaintextCustomToolHandler,
+)
 from azents.engine.tools.apply_patch import (
     RuntimeApplyPatchOperationClient,
     RuntimePatchTarget,
@@ -115,7 +120,9 @@ async def test_apply_patch_schema_profile_and_success_result(
 
     assert tool.spec.name == "apply_patch"
     assert tool.spec.input_schema["additionalProperties"] is False
-    assert tool.required_client_tool_profile is ClientToolProfile.GPT_V4A_APPLY_PATCH
+    assert (
+        tool.required_client_tool_profile is ClientToolProfile.V4A_APPLY_PATCH_FUNCTION
+    )
     assert isinstance(result, FunctionToolResult)
     assert result.output == (
         "Applied patch under /workspace/project: 1 file changed (+1 -0):\nA new.txt"
@@ -144,6 +151,46 @@ async def test_apply_patch_schema_profile_and_success_result(
     assert call["schema_version"] == 1
     assert _PATCH not in caplog.text
     assert "secret replacement text" not in caplog.text
+
+
+async def test_plaintext_custom_apply_patch_preserves_v4a_body() -> None:
+    runner = _RunnerOperations(
+        RuntimeFileApplyPatchResult(
+            changes=(),
+            final_cursor="1-0",
+        )
+    )
+    tool = _tool(runner)
+    patch = "*** Begin Patch\n*** End Patch"
+
+    assert isinstance(tool.handler, PlaintextCustomToolHandler)
+    await tool.handler.execute_plaintext_custom(
+        "*** Base Path: /workspace/project\n" + patch
+    )
+
+    assert len(runner.calls) == 1
+    assert runner.calls[0]["base_path"] == "/workspace/project"
+    assert runner.calls[0]["patch"] == patch.encode()
+
+
+async def test_plaintext_custom_rejects_invalid_envelope_before_runner() -> None:
+    runner = _RunnerOperations(
+        RuntimeFileApplyPatchResult(
+            changes=(),
+            final_cursor="1-0",
+        )
+    )
+    tool = _tool(runner)
+
+    assert isinstance(tool.handler, PlaintextCustomToolHandler)
+    with pytest.raises(FunctionToolError) as error:
+        await tool.handler.execute_plaintext_custom(
+            "*** Base Path: relative\n*** Begin Patch\n*** End Patch"
+        )
+
+    assert error.value.metadata["kind"] == "apply_patch_input_failure"
+    assert error.value.metadata["reason"] == "base_path_not_absolute"
+    assert runner.calls == []
 
 
 async def test_apply_patch_preserves_typed_partial_failure_metadata() -> None:

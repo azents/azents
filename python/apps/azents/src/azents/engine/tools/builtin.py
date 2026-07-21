@@ -54,6 +54,7 @@ from azents.engine.run.types import (
 from azents.engine.tooling.make_tool import make_tool
 from azents.engine.tools.apply_patch import (
     GPT_V4A_APPLY_PATCH_PROMPT,
+    GPT_V4A_PLAINTEXT_CUSTOM_APPLY_PATCH_PROMPT,
     RuntimePatchTarget,
     make_apply_patch_tool,
 )
@@ -873,9 +874,17 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
             return []
         return [
             ProfiledToolkitPrompt(
-                required_client_tool_profile=(ClientToolProfile.GPT_V4A_APPLY_PATCH),
+                required_client_tool_profile=(
+                    ClientToolProfile.V4A_APPLY_PATCH_FUNCTION
+                ),
                 content=GPT_V4A_APPLY_PATCH_PROMPT,
-            )
+            ),
+            ProfiledToolkitPrompt(
+                required_client_tool_profile=(
+                    ClientToolProfile.V4A_APPLY_PATCH_PLAINTEXT_CUSTOM
+                ),
+                content=GPT_V4A_PLAINTEXT_CUSTOM_APPLY_PATCH_PROMPT,
+            ),
         ]
 
     async def _make_instruction_context(

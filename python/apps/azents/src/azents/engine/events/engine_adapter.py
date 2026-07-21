@@ -137,6 +137,7 @@ from azents.engine.run.builtin_tools import (
     resolve_builtin_tools,
 )
 from azents.engine.run.client_tool_compatibility import (
+    ClientToolRoute,
     resolve_client_tool_profiles,
 )
 from azents.engine.run.contracts import RunContext, RunRequest, ToolkitBinding
@@ -274,6 +275,7 @@ class EventEngineAdapterConfig:
     """Event engine adapter configuration."""
 
     native_request_max_input_chars: int = 16_000_000
+    apply_patch_custom_rollout_percent: int = 0
 
 
 @dataclasses.dataclass
@@ -556,6 +558,19 @@ class AgentEngineAdapter:
                 if model_selection is not None
                 else request.model_developer
             )
+            lowerer_type = (
+                OpenAIResponsesLowerer
+                if _uses_openai_sdk(request.provider)
+                else LiteLLMResponsesLowerer
+            )
+            openai_client_config = (
+                openai_responses_client_config(
+                    provider=request.provider,
+                    credential_kwargs=request.credential_kwargs,
+                )
+                if _uses_openai_sdk(request.provider)
+                else None
+            )
             client_tool_profiles = resolve_client_tool_profiles(
                 model_identifier=(
                     model_selection.model_identifier
@@ -564,6 +579,24 @@ class AgentEngineAdapter:
                 ),
                 model_developer=model_developer,
                 model_family=model_family,
+                route=ClientToolRoute(
+                    provider=request.provider,
+                    adapter=lowerer_type.adapter,
+                    native_format=lowerer_type.native_format,
+                    official_openai_endpoint=(
+                        request.provider is LLMProvider.OPENAI
+                        and openai_client_config is not None
+                        and openai_client_config.base_url is None
+                    ),
+                    api_key_available=(
+                        openai_client_config is not None
+                        and openai_client_config.api_key is not None
+                    ),
+                    custom_rollout_percent=(
+                        self.config.apply_patch_custom_rollout_percent
+                    ),
+                    cohort_key=request.session_id,
+                ),
             )
             candidate_catalog = await build_tool_catalog(
                 toolkit_bindings=request.toolkits,
@@ -641,11 +674,6 @@ class AgentEngineAdapter:
             if client_builtin_tools:
                 catalog = extend_tool_catalog(catalog, client_builtin_tools)
 
-            lowerer_type = (
-                OpenAIResponsesLowerer
-                if _uses_openai_sdk(request.provider)
-                else LiteLLMResponsesLowerer
-            )
             provider_visible_tool_names: tuple[str, ...]
             deferred_tool_names: frozenset[str]
             if request.tool_search_enabled:

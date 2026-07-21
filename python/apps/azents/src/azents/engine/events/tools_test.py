@@ -15,6 +15,7 @@ from azents.engine.events.tools import (
     ToolCatalogClientToolExecutor,
     build_tool_catalog,
     extend_tool_catalog,
+    project_tool_catalog_for_client_profiles,
     summarize_tool_arguments,
 )
 from azents.engine.events.types import (
@@ -24,6 +25,7 @@ from azents.engine.events.types import (
     OutputTextPart,
     build_native_compat_key,
 )
+from azents.engine.run.client_tool_compatibility import ClientToolProfile
 from azents.engine.run.contracts import ToolkitBinding
 from azents.engine.run.types import (
     FunctionTool,
@@ -801,6 +803,124 @@ async def test_client_tool_executor_returns_failed_for_unknown_tool() -> None:
     output = result.output[0]
     assert isinstance(output, OutputTextPart)
     assert "Tool not found" in output.text
+
+
+async def test_client_tool_executor_rejects_dialect_mismatch_before_handler() -> None:
+    calls: list[str] = []
+
+    async def handler(arguments: str) -> str:
+        calls.append(arguments)
+        return arguments
+
+    catalog = await build_tool_catalog(
+        toolkit_bindings=[
+            ToolkitBinding(
+                toolkit=_InlineToolkit(
+                    FunctionTool(
+                        spec=FunctionToolSpec(
+                            name="echo",
+                            description="Echo input.",
+                            input_schema={"type": "object"},
+                        ),
+                        handler=handler,
+                    )
+                ),
+                slug="",
+                use_prefix=False,
+            )
+        ],
+        context=TurnContext(
+            user_id=None,
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id="run-1",
+            publish_event=_noop_publish,
+        ),
+    )
+
+    result = await ToolCatalogClientToolExecutor(catalog).execute(
+        ClientToolCallPayload(
+            call_id="call-1",
+            name="echo",
+            arguments="plaintext input",
+            native_artifact=_artifact(),
+            wire_dialect="plaintext_custom",
+        )
+    )
+
+    assert calls == []
+    assert result.status == "failed"
+    assert result.wire_dialect == "plaintext_custom"
+    assert result.metadata == {
+        "kind": "client_tool_dialect_mismatch",
+        "expected_wire_dialect": "json_function",
+        "received_wire_dialect": "plaintext_custom",
+    }
+
+
+async def test_client_tool_executor_rejects_json_for_custom_declaration() -> None:
+    handler = _DualDialectHandler()
+    candidate = await build_tool_catalog(
+        toolkit_bindings=[
+            ToolkitBinding(
+                toolkit=_InlineToolkit(
+                    FunctionTool(
+                        spec=FunctionToolSpec(
+                            name="apply_patch",
+                            description="Apply one patch.",
+                            input_schema={"type": "object"},
+                        ),
+                        handler=handler,
+                    ).with_required_client_tool_profile(
+                        ClientToolProfile.V4A_APPLY_PATCH_FUNCTION
+                    )
+                ),
+                slug="",
+                use_prefix=False,
+            )
+        ],
+        context=TurnContext(
+            user_id=None,
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id="run-1",
+            publish_event=_noop_publish,
+        ),
+    )
+    catalog = project_tool_catalog_for_client_profiles(
+        candidate,
+        frozenset({ClientToolProfile.V4A_APPLY_PATCH_PLAINTEXT_CUSTOM}),
+    )
+
+    result = await ToolCatalogClientToolExecutor(catalog).execute(
+        ClientToolCallPayload(
+            call_id="call-1",
+            name="apply_patch",
+            arguments="{}",
+            native_artifact=_artifact(),
+            wire_dialect="json_function",
+        )
+    )
+
+    assert handler.calls == []
+    assert result.status == "failed"
+    assert result.metadata["expected_wire_dialect"] == "plaintext_custom"
+    assert result.metadata["received_wire_dialect"] == "json_function"
+
+
+class _DualDialectHandler:
+    """Test handler that records calls from either wire dialect."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    async def __call__(self, arguments: str) -> str:
+        self.calls.append(arguments)
+        return arguments
+
+    async def execute_plaintext_custom(self, arguments: str) -> str:
+        self.calls.append(arguments)
+        return arguments
 
 
 def test_summarize_tool_arguments_is_stable() -> None:

@@ -1,21 +1,27 @@
 """GPT-aligned V4A apply_patch tool backed by one Runtime Runner operation."""
 
 import dataclasses
+import json
 import logging
+import os
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
 from azcommon.types import JSONObject
-from pydantic import BaseModel, ConfigDict, Field
+from azents_runtime_control.apply_patch import (
+    MAX_APPLY_PATCH_BASE_PATH_BYTES,
+    MAX_APPLY_PATCH_BYTES,
+)
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from azents.engine.run.client_tool_compatibility import ClientToolProfile
 from azents.engine.run.types import (
     FunctionTool,
     FunctionToolError,
     FunctionToolResult,
+    FunctionToolSpec,
 )
-from azents.engine.tooling.make_tool import make_tool
 from azents.engine.tools.runtime_io import (
     RuntimeFileApplyPatchFailedError,
     RuntimeFileApplyPatchFailure,
@@ -33,12 +39,32 @@ logger = logging.getLogger(__name__)
 _APPLY_PATCH_SCHEMA_VERSION = 1
 _APPLY_PATCH_TIMEOUT_SECONDS = 30
 _OPERATION_RESULT_GRACE_SECONDS = 10
+_PLAINTEXT_BASE_PATH_PREFIX = "*** Base Path: "
+_PLAINTEXT_PATCH_START = "*** Begin Patch"
+_PLAINTEXT_INPUT_MAX_BYTES = (
+    len(_PLAINTEXT_BASE_PATH_PREFIX.encode("ascii"))
+    + MAX_APPLY_PATCH_BASE_PATH_BYTES
+    + 1
+    + MAX_APPLY_PATCH_BYTES
+)
 
 GPT_V4A_APPLY_PATCH_PROMPT = """\
 Use `edit` for one small exact replacement. Use `apply_patch` for multiple hunks,
 multiple files, or combined add/update/delete operations. Read existing files before
 patching them. Send one complete V4A patch through the `patch` argument without Markdown
 fences. Include each file only once, use exact context, and do not invent line numbers.
+After an applicability failure, read the current source before retrying. A commit-phase
+failure may have partially applied the patch, so re-read every affected file before
+continuing.
+"""
+
+GPT_V4A_PLAINTEXT_CUSTOM_APPLY_PATCH_PROMPT = """\
+Use `edit` for one small exact replacement. Use `apply_patch` for multiple hunks,
+multiple files, or combined add/update/delete operations. Read existing files before
+patching them. Send exactly one plaintext input with this first line:
+`*** Base Path: /absolute/runtime/path`
+Immediately follow it with one complete V4A patch beginning `*** Begin Patch`. Use LF,
+do not add a blank line, Markdown fence, or commentary, and include each file only once.
 After an applicability failure, read the current source before retrying. A commit-phase
 failure may have partially applied the patch, so re-read every affected file before
 continuing.
@@ -60,6 +86,15 @@ class ApplyPatchInput(BaseModel):
             "One complete V4A patch from *** Begin Patch through *** End Patch."
         )
     )
+
+
+class ApplyPatchPlaintextInputError(Exception):
+    """Rejected plaintext custom input without retaining untrusted text."""
+
+    def __init__(self, reason: str) -> None:
+        """Store one stable transport failure category."""
+        super().__init__(reason)
+        self.reason = reason
 
 
 @dataclasses.dataclass(frozen=True)
@@ -99,16 +134,72 @@ def make_apply_patch_tool(
     agent_id: str,
 ) -> FunctionTool:
     """Create the strict Runtime-backed apply_patch function tool."""
+    return FunctionTool(
+        spec=FunctionToolSpec(
+            name="apply_patch",
+            description=(
+                "Apply one complete strict V4A patch under an absolute Runtime base "
+                "directory. Supports Add File, Update File, and Delete File operations "
+                "with exact context matching."
+            ),
+            input_schema=ApplyPatchInput.model_json_schema(),
+        ),
+        handler=_ApplyPatchHandler(
+            runner_operations=runner_operations,
+            resolve_runtime_target=resolve_runtime_target,
+            owner_session_id=owner_session_id,
+            agent_id=agent_id,
+        ),
+    ).with_required_client_tool_profile(ClientToolProfile.V4A_APPLY_PATCH_FUNCTION)
 
-    async def handler(input: ApplyPatchInput) -> FunctionToolResult:
+
+@dataclasses.dataclass(frozen=True)
+class _ApplyPatchHandler:
+    """JSON-function and plaintext-custom adapters over one Runtime operation."""
+
+    runner_operations: RuntimeApplyPatchOperationClient
+    resolve_runtime_target: RuntimePatchTargetResolver
+    owner_session_id: str | None
+    agent_id: str
+
+    async def __call__(self, arguments: str) -> FunctionToolResult:
+        """Execute the JSON-function variant."""
+        try:
+            input = ApplyPatchInput.model_validate(json.loads(arguments))
+        except json.JSONDecodeError as exc:
+            raise FunctionToolError(f"Invalid JSON in tool arguments: {exc}") from None
+        except ValidationError as exc:
+            raise FunctionToolError(str(exc)) from None
+        return await self._execute(input)
+
+    async def execute_plaintext_custom(self, arguments: str) -> FunctionToolResult:
+        """Execute the exact plaintext-custom envelope variant."""
+        try:
+            input = parse_plaintext_custom_apply_patch_input(arguments)
+        except ApplyPatchPlaintextInputError as exc:
+            raise FunctionToolError(
+                "Invalid apply_patch plaintext input.",
+                metadata={
+                    "kind": "apply_patch_input_failure",
+                    "phase": "transport",
+                    "reason": exc.reason,
+                    "applied": [],
+                    "not_attempted": [],
+                    "exact": True,
+                },
+            ) from None
+        return await self._execute(input)
+
+    async def _execute(self, input: ApplyPatchInput) -> FunctionToolResult:
+        """Run one already-adapted V4A operation."""
         patch = input.patch.encode("utf-8")
         started_at = datetime.now(UTC)
         try:
-            target = await resolve_runtime_target()
-            result = await runner_operations.apply_patch(
+            target = await self.resolve_runtime_target()
+            result = await self.runner_operations.apply_patch(
                 runtime_id=target.runtime_id,
                 runner_generation=target.runner_generation,
-                owner_session_id=owner_session_id,
+                owner_session_id=self.owner_session_id,
                 base_path=input.base_path,
                 patch=patch,
                 schema_version=_APPLY_PATCH_SCHEMA_VERSION,
@@ -123,8 +214,8 @@ def make_apply_patch_tool(
             logger.info(
                 "Runtime apply_patch failed",
                 extra={
-                    "agent_id": agent_id,
-                    "session_id": owner_session_id,
+                    "agent_id": self.agent_id,
+                    "session_id": self.owner_session_id,
                     "patch_bytes": len(patch),
                     "phase": exc.failure.phase,
                     "reason": exc.failure.reason,
@@ -152,8 +243,8 @@ def make_apply_patch_tool(
         logger.info(
             "Runtime apply_patch completed",
             extra={
-                "agent_id": agent_id,
-                "session_id": owner_session_id,
+                "agent_id": self.agent_id,
+                "session_id": self.owner_session_id,
                 "patch_bytes": len(patch),
                 "change_count": len(result.changes),
                 "added_lines": sum(change.added_lines for change in result.changes),
@@ -170,15 +261,48 @@ def make_apply_patch_tool(
             },
         )
 
-    return make_tool(
-        handler,
-        name="apply_patch",
-        description=(
-            "Apply one complete strict V4A patch under an absolute Runtime base "
-            "directory. Supports Add File, Update File, and Delete File operations "
-            "with exact context matching."
-        ),
-    ).with_required_client_tool_profile(ClientToolProfile.GPT_V4A_APPLY_PATCH)
+
+def parse_plaintext_custom_apply_patch_input(arguments: str) -> ApplyPatchInput:
+    """Parse one exact plaintext custom envelope without modifying its V4A body."""
+    try:
+        encoded = arguments.encode("utf-8")
+    except UnicodeEncodeError:
+        raise ApplyPatchPlaintextInputError("invalid_base_path_character") from None
+    if len(encoded) > _PLAINTEXT_INPUT_MAX_BYTES:
+        raise ApplyPatchPlaintextInputError("input_too_large")
+    newline_index = arguments.find("\n")
+    if newline_index < 0:
+        raise ApplyPatchPlaintextInputError("invalid_base_path_header")
+    header = arguments[:newline_index]
+    if not header.startswith(_PLAINTEXT_BASE_PATH_PREFIX):
+        raise ApplyPatchPlaintextInputError("invalid_base_path_header")
+    base_path = header.removeprefix(_PLAINTEXT_BASE_PATH_PREFIX)
+    if not base_path:
+        raise ApplyPatchPlaintextInputError("invalid_base_path_header")
+    if len(base_path.encode("utf-8")) > MAX_APPLY_PATCH_BASE_PATH_BYTES:
+        raise ApplyPatchPlaintextInputError("base_path_too_long")
+    if _contains_prohibited_base_path_character(base_path):
+        raise ApplyPatchPlaintextInputError("invalid_base_path_character")
+    if not os.path.isabs(base_path):
+        raise ApplyPatchPlaintextInputError("base_path_not_absolute")
+    patch = arguments[newline_index + 1 :]
+    if not patch:
+        raise ApplyPatchPlaintextInputError("missing_patch_body")
+    if not patch.startswith(_PLAINTEXT_PATCH_START):
+        raise ApplyPatchPlaintextInputError("invalid_patch_start")
+    if len(patch.encode("utf-8")) > MAX_APPLY_PATCH_BYTES:
+        raise ApplyPatchPlaintextInputError("input_too_large")
+    return ApplyPatchInput(base_path=base_path, patch=patch)
+
+
+def _contains_prohibited_base_path_character(value: str) -> bool:
+    """Return whether a header path contains prohibited transport characters."""
+    return any(
+        ord(character) <= 0x1F
+        or 0x7F <= ord(character) <= 0x9F
+        or character in {"\u2028", "\u2029"}
+        for character in value
+    )
 
 
 def _success_message(
