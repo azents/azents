@@ -47,8 +47,8 @@ Recommended stack:
 
 Before implementation:
 
-- Identify the approved Requirements document and canonical short ID.
-- Identify the approved design document.
+- Identify the approved Requirements, accepted ADR, and approved primary Design.
+- Confirm all three use the same canonical snapshot ID and basename.
 - Confirm the design traces every requirement through accepted ADR decisions or explicit conventional implementation choices.
 - Confirm non-goals and boundaries.
 - Read relevant specs under `docs/azents/spec/`.
@@ -56,7 +56,7 @@ Before implementation:
 - Identify impacted apps/packages and project rules.
 - Confirm whether the feature needs E2E coverage, fixtures, credentials, or external prerequisites.
 
-If Requirements are missing or unconfirmed, or the design still has open product decisions, return to `feature-design` first.
+If Requirements are missing or unconfirmed, the core document basenames do not match, the ADR is missing, or the Design still has open product decisions, return to `feature-design` first.
 
 ## Phase 1: Create the implementation plan
 
@@ -110,9 +110,9 @@ Run `/spec-review` and update current specs under `docs/azents/spec/`.
 
 Also:
 
-- Add the `implemented` date to the Requirements snapshot and design only when the implementation is complete and verified.
-- Treat the implemented Requirements snapshot as immutable. Record later product changes in a new Requirements document.
-- Propose a new ADR when the shipped behavior includes a hard-to-reverse decision, persistent contract, or long-term operational policy.
+- Add the same `implemented` date to the Requirements snapshot and Design only when the implementation is complete and verified.
+- Treat the implemented Requirements, accepted ADR, and Design as one immutable snapshot. Record later product or design changes in a new snapshot.
+- If validation discovers an unrecorded hard-to-reverse decision, return to `feature-design` and record it before marking the snapshot implemented.
 - Keep implemented/adopted ADRs immutable.
 
 ## Phase 5: Cleanup PR
@@ -168,6 +168,7 @@ For each completed phase, report:
 
 - Do not inflate a simple fix or small self-contained change into a PR stack; use one focused PR.
 - Do not start implementation without confirmed Requirements, a design, or explicit user approval.
+- Do not ship an Azents feature when its new-format Requirements, ADR, and primary Design use different basenames.
 - Do not collapse a large feature into one PR when phased delivery is expected.
 - Do not leave stale plan documents after implementation is complete.
 - Do not update generated clients manually; regenerate them from OpenAPI when API routes or schemas change.

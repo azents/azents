@@ -14,7 +14,8 @@ FIELD_PATTERN = re.compile(r"^(\w+):\s*(.*)$", re.MULTILINE)
 EXCLUDED = {"INDEX.md"}
 COMMON_REQUIRED_FIELDS = ("title",)
 SPEC_REQUIRED_FIELDS = ("spec_type", "code_paths", "last_verified_at", "spec_version")
-REQUIREMENTS_FILENAME_PATTERN = re.compile(
+CORE_DOCUMENT_DIRS = ("requirements", "adr", "design")
+DEVELOPMENT_SNAPSHOT_FILENAME_PATTERN = re.compile(
     r"^(?P<word>[a-z][a-z0-9]*)-(?P<date>\d{6})-"
     r"(?P<slug>[a-z0-9]+(?:-[a-z0-9]+)*)\.md$"
 )
@@ -42,10 +43,12 @@ class DocInfo:
 
     @property
     def short_id(self) -> str:
-        """Return the canonical short ID for a Requirements snapshot."""
-        if self.top_dir != "requirements":
+        """Return the canonical short ID for a development snapshot document."""
+        if self.top_dir not in CORE_DOCUMENT_DIRS:
             return ""
-        match = REQUIREMENTS_FILENAME_PATTERN.fullmatch(Path(self.rel_path).name)
+        match = DEVELOPMENT_SNAPSHOT_FILENAME_PATTERN.fullmatch(
+            Path(self.rel_path).name
+        )
         if match is None:
             return ""
         return f"{match.group('word')}-{match.group('date')}"
@@ -100,6 +103,43 @@ def has_list_field(body: str, field_name: str) -> bool:
     return False
 
 
+def validate_snapshot_document(
+    path: Path,
+    rel_path: str,
+    fields: dict[str, str],
+) -> list[str]:
+    """Validate a new-format Requirements, ADR, or Design document."""
+    errors: list[str] = []
+    top_dir = Path(rel_path).parts[0]
+    filename_match = DEVELOPMENT_SNAPSHOT_FILENAME_PATTERN.fullmatch(path.name)
+
+    if top_dir == "requirements" and filename_match is None:
+        errors.append("Requirements filename must match `{word}-{YYMMDD}-{slug}.md`")
+        return errors
+    if filename_match is None:
+        return errors
+
+    if len(Path(rel_path).parts) != 2:
+        errors.append(
+            f"New snapshot {top_dir} documents must be directly under `{top_dir}/`"
+        )
+
+    for field_name in ("created", "tags"):
+        if not fields.get(field_name):
+            errors.append(f"Missing `{field_name}` frontmatter field")
+
+    created = fields.get("created", "")
+    created_match = re.fullmatch(r"20(\d{2})-(\d{2})-(\d{2})", created)
+    if created and created_match is None:
+        errors.append("`created` must use `YYYY-MM-DD`")
+    elif top_dir == "requirements" and created_match is not None:
+        created_short = "".join(created_match.groups())
+        if filename_match.group("date") != created_short:
+            errors.append("Requirements filename date must match the `created` date")
+
+    return errors
+
+
 def validate_doc(path: Path, docs_root: Path) -> list[str]:
     """Validate frontmatter fields required for index generation."""
     errors: list[str] = []
@@ -113,32 +153,9 @@ def validate_doc(path: Path, docs_root: Path) -> list[str]:
             errors.append(f"Missing `{field_name}` frontmatter field")
 
     rel_path = path.relative_to(docs_root).as_posix()
-    if rel_path.startswith("requirements/"):
-        if len(Path(rel_path).parts) != 2:
-            errors.append(
-                "Requirements documents must be directly under `requirements/`"
-            )
-
-        filename_match = REQUIREMENTS_FILENAME_PATTERN.fullmatch(path.name)
-        if filename_match is None:
-            errors.append(
-                "Requirements filename must match `{word}-{YYMMDD}-{slug}.md`"
-            )
-
-        for field_name in ("created", "tags"):
-            if not fields.get(field_name):
-                errors.append(f"Missing `{field_name}` frontmatter field")
-
-        created = fields.get("created", "")
-        created_match = re.fullmatch(r"20(\d{2})-(\d{2})-(\d{2})", created)
-        if created and created_match is None:
-            errors.append("`created` must use `YYYY-MM-DD`")
-        elif filename_match is not None and created_match is not None:
-            created_short = "".join(created_match.groups())
-            if filename_match.group("date") != created_short:
-                errors.append(
-                    "Requirements filename date must match the `created` date"
-                )
+    top_dir = Path(rel_path).parts[0] if len(Path(rel_path).parts) > 1 else ""
+    if top_dir in CORE_DOCUMENT_DIRS:
+        errors.extend(validate_snapshot_document(path, rel_path, fields))
 
     if rel_path.startswith("spec/"):
         for field_name in SPEC_REQUIRED_FIELDS:
@@ -160,7 +177,7 @@ def validate_doc(path: Path, docs_root: Path) -> list[str]:
 def validate_docs(docs_root: Path) -> list[str]:
     """Return markdown frontmatter errors under docs root."""
     errors: list[str] = []
-    requirements_ids: dict[str, Path] = {}
+    snapshots: dict[str, dict[str, tuple[Path, dict[str, str]]]] = {}
     for path in docs_root.rglob("*.md"):
         if path.is_symlink() or not path.is_file() or path.name in EXCLUDED:
             continue
@@ -169,22 +186,79 @@ def validate_docs(docs_root: Path) -> list[str]:
             errors.append(f"{rel_path}: {error}")
 
         rel_path = path.relative_to(docs_root).as_posix()
-        if rel_path.startswith("requirements/"):
-            filename_match = REQUIREMENTS_FILENAME_PATTERN.fullmatch(path.name)
-            if filename_match is not None:
-                short_id = (
-                    f"{filename_match.group('word')}-{filename_match.group('date')}"
+        parts = Path(rel_path).parts
+        top_dir = parts[0] if len(parts) > 1 else ""
+        filename_match = DEVELOPMENT_SNAPSHOT_FILENAME_PATTERN.fullmatch(path.name)
+        if top_dir not in CORE_DOCUMENT_DIRS or filename_match is None:
+            continue
+
+        short_id = f"{filename_match.group('word')}-{filename_match.group('date')}"
+        snapshot = snapshots.setdefault(short_id, {})
+        previous = snapshot.get(top_dir)
+        if previous is not None:
+            current_rel = path.relative_to(ROOT).as_posix()
+            previous_rel = previous[0].relative_to(ROOT).as_posix()
+            errors.append(
+                f"{current_rel}: Duplicate {top_dir.title()} snapshot ID "
+                f"`{short_id}` already used by {previous_rel}"
+            )
+            continue
+        snapshot[top_dir] = (path, parse_frontmatter(path))
+
+    for short_id, snapshot in sorted(snapshots.items()):
+        requirements = snapshot.get("requirements")
+        adr = snapshot.get("adr")
+        design = snapshot.get("design")
+
+        if requirements is None and (adr is not None or design is not None):
+            source = adr or design
+            assert source is not None
+            source_rel = source[0].relative_to(ROOT).as_posix()
+            errors.append(
+                f"{source_rel}: Development snapshot `{short_id}` must create "
+                "Requirements before ADR or Design"
+            )
+
+        if design is not None and adr is None:
+            design_rel = design[0].relative_to(ROOT).as_posix()
+            errors.append(
+                f"{design_rel}: Development snapshot `{short_id}` must create "
+                "ADR before Design"
+            )
+
+        anchor = requirements or adr
+        if anchor is not None:
+            anchor_path = anchor[0]
+            for top_dir, entry in snapshot.items():
+                path = entry[0]
+                if path.name == anchor_path.name:
+                    continue
+                path_rel = path.relative_to(ROOT).as_posix()
+                anchor_rel = anchor_path.relative_to(ROOT).as_posix()
+                errors.append(
+                    f"{path_rel}: Development snapshot basename must match {anchor_rel}"
                 )
-                previous = requirements_ids.get(short_id)
-                if previous is not None:
-                    current_rel = path.relative_to(ROOT).as_posix()
-                    previous_rel = previous.relative_to(ROOT).as_posix()
-                    errors.append(
-                        f"{current_rel}: Duplicate Requirements short ID "
-                        f"`{short_id}` already used by {previous_rel}"
-                    )
-                else:
-                    requirements_ids[short_id] = path
+
+        requirements_implemented = ""
+        if requirements is not None:
+            requirements_implemented = requirements[1].get("implemented", "")
+        design_implemented = ""
+        if design is not None:
+            design_implemented = design[1].get("implemented", "")
+        if requirements_implemented or design_implemented:
+            reference_entry = requirements if requirements_implemented else design
+            assert reference_entry is not None
+            reference_rel = reference_entry[0].relative_to(ROOT).as_posix()
+            if set(snapshot) != set(CORE_DOCUMENT_DIRS):
+                errors.append(
+                    f"{reference_rel}: Implemented development snapshot `{short_id}` "
+                    "must include matching Requirements, ADR, and Design documents"
+                )
+            elif requirements_implemented != design_implemented:
+                errors.append(
+                    f"{reference_rel}: Requirements and Design for development "
+                    f"snapshot `{short_id}` must use the same `implemented` date"
+                )
     return errors
 
 

@@ -46,6 +46,12 @@ Design documents are accumulated records and are not listed individually in this
 | [xAI API Key Provider Flow](spec/flow/xai-api-key.md) | @Hardtack | 2026-07-18 | 3 |
 | [xAI OAuth Flow](spec/flow/xai-oauth.md) | @Hardtack | 2026-07-19 | 6 |
 
+## Requirements Snapshots
+
+| Title | Short ID | Created | Implemented |
+|---|---|---|---|
+| [Shared Development Snapshot Identifier Requirements](requirements/docids-260721-shared-development-snapshot-identifiers.md) | docids-260721 | 2026-07-21 | 2026-07-21 |
+
 ## Architecture Decision Records (ADR)
 
 - [ADR-0001: Move Sandbox Scope from Agent to Session](adr/0001-per-session-sandbox.md)
@@ -244,6 +250,7 @@ Design documents are accumulated records and are not listed individually in this
 - [ADR-0179: Select Provider-Specific Tool Dialects for Apply-Patch](adr/0179-apply-patch-provider-tool-dialects.md)
 - [ADR-0180: Remove Percentage Rollout from Apply-Patch Custom Selection](adr/0180-remove-apply-patch-custom-rollout.md)
 - [ADR-0181: Suppress Unread Indicators While Sessions Run](adr/0181-suppress-unread-indicators-while-sessions-run.md)
+- [Shared Development Snapshot Identifiers](adr/docids-260721-shared-development-snapshot-identifiers.md)
 
 ## Issues (Bug Tracking)
 
