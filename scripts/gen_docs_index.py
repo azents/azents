@@ -14,6 +14,10 @@ FIELD_PATTERN = re.compile(r"^(\w+):\s*(.*)$", re.MULTILINE)
 EXCLUDED = {"INDEX.md"}
 COMMON_REQUIRED_FIELDS = ("title",)
 SPEC_REQUIRED_FIELDS = ("spec_type", "code_paths", "last_verified_at", "spec_version")
+REQUIREMENTS_FILENAME_PATTERN = re.compile(
+    r"^(?P<word>[a-z][a-z0-9]*)-(?P<date>\d{6})-"
+    r"(?P<slug>[a-z0-9]+(?:-[a-z0-9]+)*)\.md$"
+)
 
 
 @dataclass(frozen=True)
@@ -25,6 +29,8 @@ class DocInfo:
     spec_type: str = ""
     domain: str = ""
     owner: str = ""
+    created: str = ""
+    implemented: str = ""
     last_verified_at: str = ""
     spec_version: str = ""
 
@@ -33,6 +39,16 @@ class DocInfo:
         """Top-level directory name relative to docs root."""
         parts = Path(self.rel_path).parts
         return parts[0] if len(parts) > 1 else ""
+
+    @property
+    def short_id(self) -> str:
+        """Return the canonical short ID for a Requirements snapshot."""
+        if self.top_dir != "requirements":
+            return ""
+        match = REQUIREMENTS_FILENAME_PATTERN.fullmatch(Path(self.rel_path).name)
+        if match is None:
+            return ""
+        return f"{match.group('word')}-{match.group('date')}"
 
 
 def resolve_docs_root(value: str) -> Path:
@@ -97,6 +113,33 @@ def validate_doc(path: Path, docs_root: Path) -> list[str]:
             errors.append(f"Missing `{field_name}` frontmatter field")
 
     rel_path = path.relative_to(docs_root).as_posix()
+    if rel_path.startswith("requirements/"):
+        if len(Path(rel_path).parts) != 2:
+            errors.append(
+                "Requirements documents must be directly under `requirements/`"
+            )
+
+        filename_match = REQUIREMENTS_FILENAME_PATTERN.fullmatch(path.name)
+        if filename_match is None:
+            errors.append(
+                "Requirements filename must match `{word}-{YYMMDD}-{slug}.md`"
+            )
+
+        for field_name in ("created", "tags"):
+            if not fields.get(field_name):
+                errors.append(f"Missing `{field_name}` frontmatter field")
+
+        created = fields.get("created", "")
+        created_match = re.fullmatch(r"20(\d{2})-(\d{2})-(\d{2})", created)
+        if created and created_match is None:
+            errors.append("`created` must use `YYYY-MM-DD`")
+        elif filename_match is not None and created_match is not None:
+            created_short = "".join(created_match.groups())
+            if filename_match.group("date") != created_short:
+                errors.append(
+                    "Requirements filename date must match the `created` date"
+                )
+
     if rel_path.startswith("spec/"):
         for field_name in SPEC_REQUIRED_FIELDS:
             if field_name == "code_paths":
@@ -117,12 +160,31 @@ def validate_doc(path: Path, docs_root: Path) -> list[str]:
 def validate_docs(docs_root: Path) -> list[str]:
     """Return markdown frontmatter errors under docs root."""
     errors: list[str] = []
+    requirements_ids: dict[str, Path] = {}
     for path in docs_root.rglob("*.md"):
         if path.is_symlink() or not path.is_file() or path.name in EXCLUDED:
             continue
         for error in validate_doc(path, docs_root):
             rel_path = path.relative_to(ROOT).as_posix()
             errors.append(f"{rel_path}: {error}")
+
+        rel_path = path.relative_to(docs_root).as_posix()
+        if rel_path.startswith("requirements/"):
+            filename_match = REQUIREMENTS_FILENAME_PATTERN.fullmatch(path.name)
+            if filename_match is not None:
+                short_id = (
+                    f"{filename_match.group('word')}-{filename_match.group('date')}"
+                )
+                previous = requirements_ids.get(short_id)
+                if previous is not None:
+                    current_rel = path.relative_to(ROOT).as_posix()
+                    previous_rel = previous.relative_to(ROOT).as_posix()
+                    errors.append(
+                        f"{current_rel}: Duplicate Requirements short ID "
+                        f"`{short_id}` already used by {previous_rel}"
+                    )
+                else:
+                    requirements_ids[short_id] = path
     return errors
 
 
@@ -142,6 +204,8 @@ def load_docs(docs_root: Path) -> list[DocInfo]:
                 spec_type=fm.get("spec_type", ""),
                 domain=fm.get("domain", ""),
                 owner=fm.get("owner", ""),
+                created=fm.get("created", ""),
+                implemented=fm.get("implemented", ""),
                 last_verified_at=fm.get("last_verified_at", ""),
                 spec_version=fm.get("spec_version", ""),
             )
@@ -217,6 +281,13 @@ def render_main_index(docs: list[DocInfo], docs_root: Path, project_name: str) -
     ]
     section(
         "Living Specs — Flow", flow_specs, ["Owner", "Last Verified At", "Spec Version"]
+    )
+
+    requirements = [doc for doc in docs if doc.top_dir == "requirements"]
+    section(
+        "Requirements Snapshots",
+        requirements,
+        ["Short ID", "Created", "Implemented"],
     )
 
     adrs = [doc for doc in docs if doc.top_dir == "adr"]

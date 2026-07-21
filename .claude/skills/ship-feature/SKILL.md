@@ -1,6 +1,6 @@
 ---
 name: ship-feature
-description: "Ship a large, multi-phase feature after design discussion is complete. Convert the approved design into an implementation plan and stacked PRs for phased delivery. Use when: (1) a large feature design is complete and the user says to implement, (2) the user invokes 'ship-feature' for phased delivery, (3) a design document requires multiple implementation phases. Use one focused PR instead for simple fixes and small, self-contained changes."
+description: "Ship a large, multi-phase feature after Requirements and design discussion are complete. Convert the approved Requirements, ADR, and design into an implementation plan and stacked PRs for phased delivery. Use when: (1) a large feature design is complete and the user says to implement, (2) the user invokes 'ship-feature' for phased delivery, (3) a design document requires multiple implementation phases. Use one focused PR instead for simple fixes and small, self-contained changes."
 ---
 
 # Ship Feature Workflow
@@ -16,14 +16,14 @@ Before creating plans or branches, choose the delivery shape based on reviewabil
 - Include all required tests, generated artifacts, and spec or documentation updates in that single PR.
 - Do not create separate design, plan, validation, spec-promotion, or cleanup PRs only to match this workflow.
 
-For work that requires phased delivery, use this stacked PR series: design document → implementation plan → phased implementation → validation → spec promotion → cleanup.
+For work that requires phased delivery, use this stacked PR series: approved Requirements/ADR/design baseline → implementation plan → phased implementation → validation → spec promotion → cleanup.
 
 ## PR stack structure
 
 Use a consistent title prefix so reviewers can recognize the series.
 
 ```text
-{feature-name} [1/N]: Design
+{feature-name} [1/N]: Design baseline
 {feature-name} [2/N]: Implementation plan
 {feature-name} [3/N]: Phase 1 — {phase summary}
 {feature-name} [4/N]: Phase 2 — {phase summary}
@@ -36,7 +36,7 @@ Recommended stack:
 
 | Order | PR | Contents |
 | --- | --- | --- |
-| 1 | Design document | Approved design under the project-approved `docs/` location |
+| 1 | Design baseline | Approved Requirements, ADR, and design under the project-approved `docs/` locations |
 | 2 | Implementation plan | Multi-phase plan under the project-approved `plans/` location, including validation matrix and fixture prerequisites |
 | 3..N-3 | Phase implementation | Phase-specific plan, code, and tests. Include frontend work as one or more implementation phases when needed |
 | N-2 | E2E/testenv validation | Run planned E2E and fixture/prerequisite validation, record commands/environment/evidence, compare implementation against current specs, and fix discovered issues |
@@ -47,20 +47,22 @@ Recommended stack:
 
 Before implementation:
 
+- Identify the approved Requirements document and canonical short ID.
 - Identify the approved design document.
+- Confirm the design traces every requirement through accepted ADR decisions or explicit conventional implementation choices.
 - Confirm non-goals and boundaries.
 - Read relevant specs under `docs/azents/spec/`.
 - Read relevant ADRs only for rationale or hard constraints.
 - Identify impacted apps/packages and project rules.
 - Confirm whether the feature needs E2E coverage, fixtures, credentials, or external prerequisites.
 
-If the design is missing or still has open product decisions, return to `feature-design` first.
+If Requirements are missing or unconfirmed, or the design still has open product decisions, return to `feature-design` first.
 
 ## Phase 1: Create the implementation plan
 
 Create a multi-phase implementation plan in the project-approved planning location. The plan must include:
 
-- Feature summary and design link
+- Feature summary, Requirements short ID, ADR links, and design link
 - Phase list with explicit PR boundaries
 - Dependencies between phases
 - Data/API/runtime changes by phase
@@ -108,7 +110,8 @@ Run `/spec-review` and update current specs under `docs/azents/spec/`.
 
 Also:
 
-- Mark the design implemented only when the implementation is complete and verified.
+- Add the `implemented` date to the Requirements snapshot and design only when the implementation is complete and verified.
+- Treat the implemented Requirements snapshot as immutable. Record later product changes in a new Requirements document.
 - Propose a new ADR when the shipped behavior includes a hard-to-reverse decision, persistent contract, or long-term operational policy.
 - Keep implemented/adopted ADRs immutable.
 
@@ -117,6 +120,7 @@ Also:
 After the feature is implemented, validated, and reflected in current specs, remove stale implementation plan documents. The source of truth becomes:
 
 - Current specs
+- Immutable implemented Requirements snapshots
 - Adopted ADRs
 - Implemented design documents when they still carry useful historical rationale
 - Actual code
@@ -141,6 +145,7 @@ When starting the shipping workflow, report:
 ```markdown
 ## Ship Feature Plan
 
+- Requirements: `<path>` (`<short-id>`)
 - Design: `<path>`
 - Stack prefix: `{feature-name}`
 - Planned PRs:
@@ -162,7 +167,7 @@ For each completed phase, report:
 ## Guardrails
 
 - Do not inflate a simple fix or small self-contained change into a PR stack; use one focused PR.
-- Do not start implementation without a design or explicit user approval.
+- Do not start implementation without confirmed Requirements, a design, or explicit user approval.
 - Do not collapse a large feature into one PR when phased delivery is expected.
 - Do not leave stale plan documents after implementation is complete.
 - Do not update generated clients manually; regenerate them from OpenAPI when API routes or schemas change.
