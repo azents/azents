@@ -25,6 +25,8 @@ import { useForm } from "@mantine/form";
 import { useModals } from "@mantine/modals";
 import { IconSend, IconTrash } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
+import { formatLocalizedDate } from "@/shared/lib/date-format";
+import { useLocale } from "@/shared/providers/locale";
 import type { WorkspaceMembersContainerProps } from "../containers/useWorkspaceMembers";
 import type {
   InviteFormState,
@@ -220,6 +222,7 @@ function MemberRow({
 }): React.ReactElement {
   const t = useTranslations("workspace.dashboard");
   const modals = useModals();
+  const { locale } = useLocale();
   const roleLabel = useRoleLabel(member.role);
   const isOwner = member.role === "owner";
   // Management control condition: manager+ permission && not self && target is not owner
@@ -246,7 +249,7 @@ function MemberRow({
       </Table.Td>
       <Table.Td>
         <Text size="xs" c="dimmed">
-          {new Date(member.created_at).toLocaleDateString()}
+          {formatLocalizedDate(new Date(member.created_at), locale)}
         </Text>
       </Table.Td>
       {canManage && (
@@ -384,6 +387,7 @@ function InvitationRow({
 }): React.ReactElement {
   const t = useTranslations("workspace.dashboard");
   const modals = useModals();
+  const { locale } = useLocale();
   const roleLabel = useRoleLabel(invitation.role);
 
   return (
@@ -402,7 +406,7 @@ function InvitationRow({
       </Table.Td>
       <Table.Td>
         <Text size="xs" c="dimmed">
-          {new Date(invitation.created_at).toLocaleDateString()}
+          {formatLocalizedDate(new Date(invitation.created_at), locale)}
         </Text>
       </Table.Td>
       {canManage && (
@@ -521,6 +525,7 @@ function JoinRequestRow({
 }): React.ReactElement {
   const t = useTranslations("workspace.dashboard");
   const modals = useModals();
+  const { locale } = useLocale();
 
   return (
     <Table.Tr>
@@ -534,7 +539,7 @@ function JoinRequestRow({
       </Table.Td>
       <Table.Td>
         <Text size="xs" c="dimmed">
-          {new Date(joinRequest.created_at).toLocaleDateString()}
+          {formatLocalizedDate(new Date(joinRequest.created_at), locale)}
         </Text>
       </Table.Td>
       <Table.Td>
