@@ -3,6 +3,7 @@
 import datetime
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from types import SimpleNamespace
 from typing import cast
 from unittest.mock import AsyncMock
 
@@ -10,6 +11,7 @@ from azcommon.result import Failure, Result, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
+    AgentLifecycleStatus,
     AgentSessionKind,
     AgentSessionPrimaryKind,
     AgentSessionRunState,
@@ -26,6 +28,7 @@ from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.session import SessionManager
 from azents.repos.action_execution import ActionExecutionRepository
 from azents.repos.agent import AgentRepository
+from azents.repos.agent.data import Agent
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
 from azents.repos.agent_project_default import AgentProjectDefaultRepository
@@ -97,6 +100,22 @@ class _RuntimeRepositoryDouble(AgentRuntimeRepository):
             agent_id="agent-1",
             created_at=now,
             updated_at=now,
+        )
+
+
+class _ActiveAgentRepositoryDouble(AgentRepository):
+    """Repository double that returns a lifecycle-admitted Agent."""
+
+    async def get_by_id(
+        self,
+        session: AsyncSession,
+        agent_id: str,
+    ) -> Agent | None:
+        """Return a minimal active Agent projection."""
+        del session, agent_id
+        return cast(
+            Agent,
+            SimpleNamespace(lifecycle_status=AgentLifecycleStatus.ACTIVE),
         )
 
 
@@ -391,7 +410,7 @@ class TestAgentSessionInputService:
 
         input_buffer_service = _InputBufferServiceDouble(calls)
         service = AgentSessionInputService(
-            agent_repository=AgentRepository(),
+            agent_repository=_ActiveAgentRepositoryDouble(),
             agent_project_preset_repository=AgentProjectPresetRepository(),
             agent_project_catalog_repository=AgentProjectCatalogRepository(),
             agent_project_default_repository=AgentProjectDefaultRepository(),

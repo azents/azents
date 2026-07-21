@@ -17,6 +17,7 @@ from azents.core.agent import (
 )
 from azents.core.enums import AgentType
 from azents.repos.agent.data import Agent
+from azents.repos.agent_decommission.data import AgentDecommissionJob
 from azents.services.uploads.schema import UploadedImage
 
 
@@ -95,6 +96,12 @@ class AvatarUploadTicketOutput:
     upload_key: str
     upload_url: str
     expires_at: datetime.datetime
+
+
+class AgentDecommissionOutput(BaseModel):
+    """Accepted durable Agent decommission request."""
+
+    job: AgentDecommissionJob = Field(description="Durable decommission job")
 
 
 class AgentCreateInput(BaseModel):
@@ -294,3 +301,10 @@ class AvatarUploadRejected:
     """Avatar upload violates handler constraints."""
 
     message: str
+
+
+@dataclasses.dataclass(frozen=True)
+class UnlimitedRetention:
+    """Agent decommission requires finite archived-session retention."""
+
+    agent_id: str

@@ -236,7 +236,7 @@
           "Agent v1"
         ],
         "summary": "Delete Agent",
-        "description": "Delete an Agent.\n\nOnly administrators or workspace owners can delete it.",
+        "description": "Request durable Agent decommission.\n\nOnly administrators or workspace owners can request it.",
         "operationId": "agent_v1_delete_agent",
         "security": [
           {
@@ -264,8 +264,15 @@
           }
         ],
         "responses": {
-          "204": {
-            "description": "Successful Response"
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentDecommissionResponse"
+                }
+              }
+            }
           },
           "422": {
             "description": "Validation Error",
@@ -8704,6 +8711,31 @@
         ],
         "title": "AgentCreateRequest",
         "description": "Agent creation request."
+      },
+      "AgentDecommissionResponse": {
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "title": "Job Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "job_id",
+          "status",
+          "created_at"
+        ],
+        "title": "AgentDecommissionResponse",
+        "description": "Accepted Agent decommission response."
       },
       "AgentListResponse": {
         "properties": {

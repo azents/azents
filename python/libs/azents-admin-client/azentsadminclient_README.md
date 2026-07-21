@@ -124,7 +124,6 @@ Class | Method | HTTP request | Description
 *WorkspaceUserV1Api* | [**workspaceuser_v1_transfer_workspace_ownership**](azentsadminclient/docs/WorkspaceUserV1Api.md#workspaceuser_v1_transfer_workspace_ownership) | **POST** /workspace-user/v1/workspaces/{handle}/transfer-ownership | Transfer Workspace Ownership
 *WorkspaceUserV1Api* | [**workspaceuser_v1_update_workspace_user**](azentsadminclient/docs/WorkspaceUserV1Api.md#workspaceuser_v1_update_workspace_user) | **PATCH** /workspace-user/v1/workspace-users/{workspace_user_id} | Update Workspace User
 *WorkspaceV1Api* | [**workspace_v1_create_workspace**](azentsadminclient/docs/WorkspaceV1Api.md#workspace_v1_create_workspace) | **POST** /workspace/v1/workspaces | Create Workspace
-*WorkspaceV1Api* | [**workspace_v1_delete_workspace**](azentsadminclient/docs/WorkspaceV1Api.md#workspace_v1_delete_workspace) | **DELETE** /workspace/v1/workspaces/{handle} | Delete Workspace
 *WorkspaceV1Api* | [**workspace_v1_get_workspace**](azentsadminclient/docs/WorkspaceV1Api.md#workspace_v1_get_workspace) | **GET** /workspace/v1/workspaces/{handle} | Get Workspace
 *WorkspaceV1Api* | [**workspace_v1_list_workspaces**](azentsadminclient/docs/WorkspaceV1Api.md#workspace_v1_list_workspaces) | **GET** /workspace/v1/workspaces | List Workspaces
 *WorkspaceV1Api* | [**workspace_v1_update_workspace**](azentsadminclient/docs/WorkspaceV1Api.md#workspace_v1_update_workspace) | **PATCH** /workspace/v1/workspaces/{handle} | Update Workspace

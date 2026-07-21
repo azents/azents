@@ -14,7 +14,7 @@ from azents.core.agent import (
     AgentModelSelectionInput,
     SelectableModelOption,
 )
-from azents.core.enums import AgentType
+from azents.core.enums import AgentLifecycleStatus, AgentType
 from azents.repos.agent.data import Agent
 from azents.testing.model_selection import (
     make_test_model_selection,
@@ -49,6 +49,7 @@ def _make_agent(agent_id: str = "agent-1") -> Agent:
         model_parameters=None,
         system_prompt=None,
         enabled=True,
+        lifecycle_status=AgentLifecycleStatus.ACTIVE,
         type=AgentType.PUBLIC,
         runtime_provider_id=None,
         shell_enabled=True,
@@ -68,6 +69,8 @@ def _make_service() -> AgentService:
     workspace_model_settings_repository = AsyncMock()
     model_catalog_read_service = AsyncMock()
     workspace_user_repository = AsyncMock()
+    agent_decommission_repository = AsyncMock()
+    archived_session_retention_repository = AsyncMock()
     upload_service = AsyncMock()
     avatar_handler = AsyncMock()
     s3_service = AsyncMock()
@@ -82,6 +85,8 @@ def _make_service() -> AgentService:
         workspace_model_settings_repository=workspace_model_settings_repository,
         model_catalog_read_service=model_catalog_read_service,
         workspace_user_repository=workspace_user_repository,
+        agent_decommission_repository=agent_decommission_repository,
+        archived_session_retention_repository=archived_session_retention_repository,
         upload_service=upload_service,
         avatar_handler=avatar_handler,
         s3_service=s3_service,

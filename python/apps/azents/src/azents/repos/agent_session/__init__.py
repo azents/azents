@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent import AgentModelSelection, SelectableModelSettings
 from azents.core.enums import (
+    AgentLifecycleStatus,
     AgentSessionEndReason,
     AgentSessionKind,
     AgentSessionPrimaryKind,
@@ -25,6 +26,7 @@ from azents.core.enums import (
 )
 from azents.core.inference_profile import SessionInferenceState
 from azents.core.session_handle import generate_session_handle
+from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.agent_session_unread_run import RDBAgentSessionUnreadRun
@@ -80,6 +82,11 @@ class AgentSessionRepository:
         create: AgentSessionCreate,
     ) -> AgentSession:
         """Create AgentSession."""
+        lifecycle_status = await session.scalar(
+            sa.select(RDBAgent.lifecycle_status).where(RDBAgent.id == create.agent_id)
+        )
+        if lifecycle_status is not AgentLifecycleStatus.ACTIVE:
+            raise ValueError("Agent is not active for Session creation")
         for _ in range(SESSION_HANDLE_INSERT_ATTEMPTS):
             result = await session.execute(
                 pg_insert(RDBAgentSession)
@@ -493,6 +500,38 @@ class AgentSessionRepository:
         )
         return [self._build(rdb) for rdb in result.scalars()]
 
+    async def list_root_trees_by_agent_id(
+        self,
+        session: AsyncSession,
+        *,
+        agent_id: str,
+    ) -> list[AgentSession]:
+        """List every root tree for Agent decommission reconciliation."""
+        rows = (
+            await session.execute(
+                sa.select(RDBAgentSession)
+                .where(
+                    RDBAgentSession.agent_id == agent_id,
+                    RDBAgentSession.session_kind == AgentSessionKind.ROOT,
+                )
+                .order_by(RDBAgentSession.created_at, RDBAgentSession.id)
+            )
+        ).scalars()
+        return [self._build(row) for row in rows]
+
+    async def has_any_for_agent_id(
+        self,
+        session: AsyncSession,
+        *,
+        agent_id: str,
+    ) -> bool:
+        """Return whether any Session row remains for an Agent."""
+        return bool(
+            await session.scalar(
+                sa.select(sa.exists().where(RDBAgentSession.agent_id == agent_id))
+            )
+        )
+
     async def list_active_unread_by_agent_id(
         self,
         session: AsyncSession,
@@ -702,6 +741,11 @@ class AgentSessionRepository:
         agent_id: str,
     ) -> AgentSession:
         """Ensure active team primary AgentSession for Agent."""
+        lifecycle_status = await session.scalar(
+            sa.select(RDBAgent.lifecycle_status).where(RDBAgent.id == agent_id)
+        )
+        if lifecycle_status is not AgentLifecycleStatus.ACTIVE:
+            raise ValueError("Agent is not active for team-primary recovery")
         existing_primary = await self.get_team_primary_by_agent_id(session, agent_id)
         if existing_primary is not None:
             return existing_primary
@@ -1389,10 +1433,12 @@ class AgentSessionRepository:
         cutoff = sa.func.now() - stale_threshold
         result = await session.execute(
             sa.select(RDBAgentSession)
+            .join(RDBAgent, RDBAgent.id == RDBAgentSession.agent_id)
             .where(
                 RDBAgentSession.status == AgentSessionStatus.ACTIVE,
                 RDBAgentSession.run_state == AgentSessionRunState.RUNNING,
                 RDBAgentSession.run_heartbeat_at < cutoff,
+                RDBAgent.lifecycle_status == AgentLifecycleStatus.ACTIVE,
             )
             .order_by(RDBAgentSession.run_heartbeat_at)
             .limit(limit)

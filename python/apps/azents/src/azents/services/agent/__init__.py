@@ -34,6 +34,8 @@ from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent, AgentCreate, AgentUpdate, NotFound
 from azents.repos.agent_admin import AgentAdminRepository
 from azents.repos.agent_admin.data import AgentAdminCreate
+from azents.repos.agent_decommission import AgentDecommissionRepository
+from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
 from azents.repos.workspace_model_settings import WorkspaceModelSettingsRepository
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.services.llm_catalog import ModelCatalogReadService
@@ -59,6 +61,7 @@ from .data import (
     AgentAdminListOutput,
     AgentAdminOutput,
     AgentCreateInput,
+    AgentDecommissionOutput,
     AgentListOutput,
     AgentOutput,
     AgentUpdateInput,
@@ -73,6 +76,7 @@ from .data import (
     NotAdmin,
     NotBelongToWorkspace,
     PrivateAgentAccessDenied,
+    UnlimitedRetention,
     WorkspaceUserNotFound,
 )
 
@@ -115,6 +119,13 @@ class AgentService:
     model_catalog_read_service: Annotated[ModelCatalogReadService, Depends()]
     workspace_user_repository: Annotated[
         WorkspaceUserRepository, Depends(WorkspaceUserRepository)
+    ]
+    agent_decommission_repository: Annotated[
+        AgentDecommissionRepository, Depends(AgentDecommissionRepository)
+    ]
+    archived_session_retention_repository: Annotated[
+        ArchivedSessionRetentionRepository,
+        Depends(ArchivedSessionRetentionRepository),
     ]
     upload_service: Annotated[UploadService, Depends(get_upload_service)]
     avatar_handler: Annotated[AvatarUploadHandler, Depends(_get_avatar_handler)]
@@ -611,8 +622,11 @@ class AgentService:
         workspace_id: str,
         workspace_user_id: str,
         role: WorkspaceUserRole,
-    ) -> Result[None, NotFound | NotBelongToWorkspace | NotAdmin]:
-        """Delete Agent by ID."""
+    ) -> Result[
+        AgentDecommissionOutput,
+        NotFound | NotBelongToWorkspace | NotAdmin | UnlimitedRetention,
+    ]:
+        """Request durable Agent decommission."""
         async with self.session_manager() as session:
             existing = await self.repository.get_by_id(session, agent_id)
         if existing is None:
@@ -625,8 +639,24 @@ class AgentService:
         if admin_check is not None:
             return Failure(admin_check)
         async with self.session_manager() as session:
-            await self.repository.delete_by_id(session, agent_id)
-        return Success(None)
+            settings = await self.archived_session_retention_repository.lock_settings(
+                session
+            )
+            if settings.archived_session_retention_days is None:
+                return Failure(UnlimitedRetention(agent_id=agent_id))
+            decommissioned = await self.repository.mark_decommissioning(
+                session,
+                agent_id,
+            )
+            if decommissioned is None:
+                return Failure(NotFound(agent_id=agent_id))
+            job = await self.agent_decommission_repository.create_or_get(
+                session,
+                agent_id=decommissioned.id,
+                workspace_id=decommissioned.workspace_id,
+                requested_by_workspace_user_id=workspace_user_id,
+            )
+        return Success(AgentDecommissionOutput(job=job))
 
     async def list_admins(
         self,

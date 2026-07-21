@@ -122,6 +122,24 @@ class AgentProjectDefaultItemType(enum.StrEnum):
     GIT_WORKTREE = "git_worktree"
 
 
+class AgentLifecycleStatus(enum.StrEnum):
+    """Durable Agent lifecycle admission state."""
+
+    ACTIVE = "active"
+    DECOMMISSIONING = "decommissioning"
+
+
+class AgentDecommissionStatus(enum.StrEnum):
+    """Durable Agent decommission job state."""
+
+    PENDING = "pending"
+    RETIRING_SESSIONS = "retiring_sessions"
+    WAITING_RETENTION = "waiting_retention"
+    FINALIZING = "finalizing"
+    RETRY_WAIT = "retry_wait"
+    COMPLETED = "completed"
+
+
 class AgentSessionRunState(enum.StrEnum):
     """Engine execution status of AgentSession."""
 

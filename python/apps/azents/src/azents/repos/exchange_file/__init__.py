@@ -266,6 +266,71 @@ class ExchangeFileRepository:
         ).all()
         return [self._build(row) for row in rows]
 
+    async def list_unbound_by_agent_id(
+        self,
+        session: AsyncSession,
+        *,
+        agent_id: str,
+    ) -> list[ExchangeFile]:
+        """List ExchangeFiles still owned directly by an Agent."""
+        rows = (
+            await session.scalars(
+                sa.select(RDBExchangeFile)
+                .where(
+                    RDBExchangeFile.agent_id == agent_id,
+                    RDBExchangeFile.retention_root_session_id.is_(None),
+                )
+                .order_by(RDBExchangeFile.id)
+            )
+        ).all()
+        return [self._build(row) for row in rows]
+
+    async def expire_unbound_by_agent_id(
+        self,
+        session: AsyncSession,
+        *,
+        agent_id: str,
+        expired_at: datetime.datetime,
+    ) -> list[ExchangeFile]:
+        """Expire direct Agent-owned ExchangeFiles before external cleanup."""
+        rows = (
+            await session.scalars(
+                sa.select(RDBExchangeFile)
+                .where(
+                    RDBExchangeFile.agent_id == agent_id,
+                    RDBExchangeFile.retention_root_session_id.is_(None),
+                    RDBExchangeFile.status == ExchangeFileStatus.AVAILABLE,
+                )
+                .order_by(RDBExchangeFile.id)
+            )
+        ).all()
+        for row in rows:
+            row.status = ExchangeFileStatus.EXPIRED
+            row.expired_at = expired_at
+        await session.flush()
+        return [self._build(row) for row in rows]
+
+    async def delete_unbound_expired_by_agent_id(
+        self,
+        session: AsyncSession,
+        *,
+        agent_id: str,
+    ) -> int:
+        """Delete externally-cleaned direct Agent-owned ExchangeFile metadata."""
+        deleted_ids = (
+            await session.scalars(
+                sa.delete(RDBExchangeFile)
+                .where(
+                    RDBExchangeFile.agent_id == agent_id,
+                    RDBExchangeFile.retention_root_session_id.is_(None),
+                    RDBExchangeFile.status == ExchangeFileStatus.EXPIRED,
+                    RDBExchangeFile.blob_deleted_at.is_not(None),
+                )
+                .returning(RDBExchangeFile.id)
+            )
+        ).all()
+        return len(deleted_ids)
+
     async def expire_for_retention_root(
         self,
         session: AsyncSession,

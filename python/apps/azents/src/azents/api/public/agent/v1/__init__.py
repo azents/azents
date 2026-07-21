@@ -27,6 +27,7 @@ from azents.services.agent.data import (
     NotAdmin,
     NotBelongToWorkspace,
     PrivateAgentAccessDenied,
+    UnlimitedRetention,
     WorkspaceUserNotFound,
 )
 from azents.services.memory import MemoryService
@@ -43,6 +44,7 @@ from .data import (
     AgentAdminListResponse,
     AgentAdminResponse,
     AgentCreateRequest,
+    AgentDecommissionResponse,
     AgentListResponse,
     AgentResponse,
     AgentUpdateRequest,
@@ -318,17 +320,18 @@ async def update_agent(
 
 @router.delete(
     "/workspaces/{handle}/agents/{agent_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=AgentDecommissionResponse,
 )
 async def delete_agent(
     member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
     service: Annotated[AgentService, Depends()],
     *,
     agent_id: str,
-) -> None:
-    """Delete an Agent.
+) -> AgentDecommissionResponse:
+    """Request durable Agent decommission.
 
-    Only administrators or workspace owners can delete it.
+    Only administrators or workspace owners can request it.
     """
     result = await service.delete_by_id(
         agent_id,
@@ -337,8 +340,8 @@ async def delete_agent(
         role=member.role,
     )
     match result:
-        case Success():
-            return
+        case Success(value):
+            return AgentDecommissionResponse.convert_from(value)
         case Failure(error):
             match error:
                 case NotFound() | NotBelongToWorkspace():
@@ -350,6 +353,14 @@ async def delete_agent(
                     raise HTTPException(
                         status_code=status.HTTP_403_FORBIDDEN,
                         detail="Not allowed to manage this agent.",
+                    )
+                case UnlimitedRetention():
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=(
+                            "Agent decommission requires finite archived-session "
+                            "retention."
+                        ),
                     )
                 case _:
                     assert_never(error)

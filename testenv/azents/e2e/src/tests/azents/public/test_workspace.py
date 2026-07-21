@@ -32,21 +32,18 @@ class TestWorkspaceGetByHandle:
         uniq = unique()
         handle = f"ws-public-{uniq}"
 
-        created = admin_api.workspace_v1_create_workspace(
+        admin_api.workspace_v1_create_workspace(
             WorkspaceCreateRequest(
                 name=f"Public Test {uniq}",
                 handle=handle,
             )
         )
 
-        try:
-            fetched = public_api.workspace_v1_get_workspace_by_handle(handle)
-            assert fetched.name == f"Public Test {uniq}"
-            assert fetched.handle == handle
-            assert fetched.created_at is not None
-            assert fetched.updated_at is not None
-        finally:
-            admin_api.workspace_v1_delete_workspace(created.handle)
+        fetched = public_api.workspace_v1_get_workspace_by_handle(handle)
+        assert fetched.name == f"Public Test {uniq}"
+        assert fetched.handle == handle
+        assert fetched.created_at is not None
+        assert fetched.updated_at is not None
 
     def test_get_workspace_by_handle_not_found_returns_404(
         self,

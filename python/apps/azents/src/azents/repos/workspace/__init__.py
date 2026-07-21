@@ -124,16 +124,6 @@ class WorkspaceRepository:
                 return Failure(HandleConflict(handle=update.get("handle", "")))
             raise
 
-    async def delete_by_handle(self, session: AsyncSession, handle: str) -> None:
-        """Delete Workspace by handle.
-
-        :param session: Database session
-        :param handle: Workspace handle
-        """
-        await session.execute(
-            sa.delete(RDBWorkspace).where(RDBWorkspace.handle == handle)
-        )
-
     async def resolve_id(self, session: AsyncSession, handle: str) -> str | None:
         """Convert handle to internal ID.
 

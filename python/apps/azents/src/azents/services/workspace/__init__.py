@@ -163,11 +163,3 @@ class WorkspaceService:
                 if workspace is not None:
                     items.append(WorkspaceOutput.convert_from(workspace))
         return WorkspaceListOutput(items=items)
-
-    async def delete_by_handle(self, handle: str) -> None:
-        """Delete Workspace by handle.
-
-        :param handle: Workspace handle
-        """
-        async with self.session_manager() as session:
-            await self.workspace_repository.delete_by_handle(session, handle)

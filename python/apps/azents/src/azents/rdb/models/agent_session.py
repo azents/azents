@@ -203,12 +203,12 @@ class RDBAgentSession(RDBModel):
     )
     workspace_id: Mapped[str] = mapped_column(
         sa.String(32),
-        sa.ForeignKey("workspaces.id", ondelete="CASCADE"),
+        sa.ForeignKey("workspaces.id", ondelete="RESTRICT"),
         nullable=False,
     )
     agent_id: Mapped[str] = mapped_column(
         sa.String(32),
-        sa.ForeignKey("agents.id", ondelete="CASCADE"),
+        sa.ForeignKey("agents.id", ondelete="RESTRICT"),
         nullable=False,
     )
     handle: Mapped[str] = mapped_column(sa.String(120), nullable=False)
