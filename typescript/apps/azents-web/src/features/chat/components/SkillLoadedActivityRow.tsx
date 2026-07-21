@@ -29,7 +29,6 @@ import type { ReactElement } from "react";
 
 interface SkillLoadedActivityRowProps {
   content: string;
-  grouped?: boolean;
   name: string | null;
 }
 
@@ -45,7 +44,6 @@ function stripMarkdownFrontmatter(content: string): string {
 
 export function SkillLoadedActivityRow({
   content,
-  grouped = false,
   name,
 }: SkillLoadedActivityRowProps): ReactElement {
   const t = useTranslations("chat");
@@ -54,12 +52,7 @@ export function SkillLoadedActivityRow({
   const displayName = name || t("skillLoaded.unknownSkill");
 
   return (
-    <Box
-      py={grouped ? activityRowVerticalPadding : 0}
-      mb={grouped ? 0 : "md"}
-      w="100%"
-      style={{ minWidth: 0 }}
-    >
+    <Box py={activityRowVerticalPadding} w="100%" style={{ minWidth: 0 }}>
       <Stack gap={rem(6)} maw={rem(720)}>
         <Group
           gap={rem(6)}

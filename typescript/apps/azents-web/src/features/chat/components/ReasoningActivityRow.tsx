@@ -24,8 +24,6 @@ import classes from "./ReasoningActivityRow.module.css";
 import type { KeyboardEvent, MouseEvent, ReactElement } from "react";
 
 interface ReasoningActivityRowProps {
-  grouped?: boolean;
-  hasContent?: boolean;
   reasoningSummary: string;
 }
 
@@ -84,8 +82,6 @@ function isElementVisibleInViewport(element: HTMLElement): boolean {
 }
 
 export function ReasoningActivityRow({
-  grouped = false,
-  hasContent = false,
   reasoningSummary,
 }: ReasoningActivityRowProps): ReactElement {
   const t = useTranslations("chat");
@@ -177,12 +173,7 @@ export function ReasoningActivityRow({
   );
 
   return (
-    <Box
-      py={grouped ? activityRowVerticalPadding : 0}
-      mb={hasContent ? "xs" : 0}
-      w="100%"
-      style={{ minWidth: 0 }}
-    >
+    <Box py={activityRowVerticalPadding} w="100%" style={{ minWidth: 0 }}>
       {canExpand ? (
         <UnstyledButton
           ref={headerRef}

@@ -146,7 +146,6 @@ function eventDetail(event: ActivityEvent): React.ReactElement | null {
   if (event.kind === "reasoning") {
     return (
       <ReasoningActivityRow
-        grouped
         reasoningSummary={
           event.message?.reasoningSummary ?? event.message?.content ?? ""
         }
@@ -156,7 +155,6 @@ function eventDetail(event: ActivityEvent): React.ReactElement | null {
   if (event.kind === "skill") {
     return (
       <SkillLoadedActivityRow
-        grouped
         content={event.message?.content ?? ""}
         name={event.message?.metadata?.name ?? null}
       />

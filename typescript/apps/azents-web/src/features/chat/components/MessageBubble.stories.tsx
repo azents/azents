@@ -204,28 +204,6 @@ export const Streaming = {
   },
 } satisfies Story;
 
-export const ThinkingOnly = {
-  args: {
-    message: createChatMessage({
-      id: "assistant-thinking",
-      content: null,
-      status: "partial",
-      reasoningSummary:
-        "<!-- internal marker -->\n\n## Verifying provider coverage with a deliberately long preview that truncates consistently across mobile and desktop\n\nNeed to check whether each component can render from static props.\n\n<!— -->",
-    }),
-  },
-} satisfies Story;
-
-export const ThinkingWithoutSummary = {
-  args: {
-    message: createChatMessage({
-      id: "assistant-thinking-without-summary",
-      content: null,
-      status: "partial",
-    }),
-  },
-} satisfies Story;
-
 export const WithToolCall = {
   args: {
     message: createChatMessage({
@@ -338,20 +316,6 @@ export const UserWithMixedAttachments = {
       </StorybookCanvas>
     ),
   ],
-} satisfies Story;
-
-export const SkillLoadedIndicator = {
-  args: {
-    message: createChatMessage({
-      id: "skill-loaded",
-      role: "skill_loaded",
-      content:
-        "---\nname: ship-pr\n---\n\n# Ship PR\n\nCreate and monitor a pull request.",
-      metadata: {
-        name: "ship-pr",
-      },
-    }),
-  },
 } satisfies Story;
 
 export const GoalContinuationIndicator = {
