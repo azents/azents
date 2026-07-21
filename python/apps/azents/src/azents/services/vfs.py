@@ -34,15 +34,6 @@ from azents.repos.toolkit import AgentToolkitRepository, ToolkitRepository
 
 logger = logging.getLogger(__name__)
 
-_GLOBAL_RELEASE_SOURCE = VfsSourceSpec(
-    source_id="release:azents",
-    source_kind="global_release",
-    namespace="azents",
-    package="azents",
-    resource_root="resources/vfs/global",
-    required=True,
-)
-
 
 class VfsFileResolutionError(Exception):
     """Authorized run VFS file resolution failure."""
@@ -134,9 +125,7 @@ class VfsProjectionService:
             agent_id=agent_id,
             workspace_id=workspace_id,
         )
-        catalog_snapshot = await self.catalog.snapshot(
-            [_GLOBAL_RELEASE_SOURCE, *provider_specs]
-        )
+        catalog_snapshot = await self.catalog.snapshot(provider_specs)
         projection = make_vfs_projection(
             catalog_snapshot.revisions,
             diagnostics=catalog_snapshot.diagnostics,

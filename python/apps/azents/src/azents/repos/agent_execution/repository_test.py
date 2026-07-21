@@ -837,7 +837,7 @@ class TestEventExecutionRepositories:
                     namespace="azents",
                     entries=[
                         (
-                            "azents://skills/azents/deep-research/SKILL.md",
+                            "azents://skills/test/sample/SKILL.md",
                             b"first",
                             "text/markdown",
                         )
@@ -853,7 +853,7 @@ class TestEventExecutionRepositories:
                     namespace="azents",
                     entries=[
                         (
-                            "azents://skills/azents/deep-research/SKILL.md",
+                            "azents://skills/test/sample/SKILL.md",
                             b"second",
                             "text/markdown",
                         )

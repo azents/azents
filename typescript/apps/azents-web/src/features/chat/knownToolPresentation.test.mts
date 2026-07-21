@@ -466,22 +466,22 @@ void test("covers every remaining source-less builtin with a validated adapter",
 });
 
 void test("renders a completed managed Skill result", () => {
-  const skillPath = "azents://skills/azents/deep-research/SKILL.md";
+  const skillPath = "azents://skills/test/sample/SKILL.md";
   const content = [
     "---",
-    "name: deep-research",
-    "description: Research deeply",
+    "name: sample",
+    "description: Test Skill",
     "---",
     "",
     "# Deep Research",
   ].join("\n");
   const metadata = {
-    name: "deep-research",
-    slug: "deep-research",
+    name: "sample",
+    slug: "sample",
     skill_path: skillPath,
     source_kind: "azents",
-    source_label: "azents",
-    relative_hint: "azents/deep-research",
+    source_label: "test",
+    relative_hint: "test/sample",
     projection_revision_id: "revision-1",
     projection_hash: "projection-hash",
     source_id: "global",
@@ -500,7 +500,7 @@ void test("renders a completed managed Skill result", () => {
     type: "specialized",
     presentation: {
       action: "loadSkill",
-      subject: "deep-research",
+      subject: "sample",
       qualifier: null,
       detail: { type: "skill", content },
     },
@@ -512,8 +512,8 @@ void test("renders an azents VFS import as a managed temporary file", () => {
     toolCall({
       name: "import_file",
       arguments: JSON.stringify({
-        uri: "azents://skills/azents/deep-research/references/evidence-checklist.md",
-        path: "/tmp/agent/imports/evidence-checklist.md",
+        uri: "azents://skills/test/sample/references/checklist.md",
+        path: "/tmp/agent/imports/checklist.md",
         overwrite: false,
       }),
       result: "Imported managed resource.",
@@ -524,7 +524,7 @@ void test("renders an azents VFS import as a managed temporary file", () => {
     type: "specialized",
     presentation: {
       action: "importFile",
-      subject: "evidence-checklist.md",
+      subject: "checklist.md",
       qualifier: null,
       detail: {
         type: "semantic",
@@ -532,7 +532,7 @@ void test("renders an azents VFS import as a managed temporary file", () => {
           { label: "source", value: "azents" },
           {
             label: "destination",
-            value: "/tmp/agent/imports/evidence-checklist.md",
+            value: "/tmp/agent/imports/checklist.md",
           },
           { label: "overwrite", value: "false" },
           { label: "temporary", value: "true" },

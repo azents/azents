@@ -20,8 +20,8 @@ from azents.core.vfs import (
 @pytest.mark.parametrize(
     "uri",
     [
-        "azents://skills/azents/deep-research/SKILL.md",
-        "azents://skills/github/review-pull-request/templates/review.md",
+        "azents://skills/test/sample/SKILL.md",
+        "azents://skills/test/sample/templates/template.md",
     ],
 )
 def test_canonicalize_vfs_uri_accepts_canonical_paths(uri: str) -> None:
@@ -32,16 +32,16 @@ def test_canonicalize_vfs_uri_accepts_canonical_paths(uri: str) -> None:
 @pytest.mark.parametrize(
     "uri",
     [
-        "AZENTS://skills/azents/deep-research/SKILL.md",
-        "azents://Skills/azents/deep-research/SKILL.md",
+        "AZENTS://skills/test/sample/SKILL.md",
+        "azents://Skills/test/sample/SKILL.md",
         "azents://skills/azents//SKILL.md",
         "azents://skills/azents/../SKILL.md",
         "azents://skills/azents/%2e%2e/SKILL.md",
-        "azents://skills/azents/deep-research/SKILL.md?version=1",
-        "azents://skills/azents/deep-research/SKILL.md#body",
-        "azents://user@skills/azents/deep-research/SKILL.md",
-        "azents://skills:443/azents/deep-research/SKILL.md",
-        "azents://skills/azents/deep-research\\SKILL.md",
+        "azents://skills/test/sample/SKILL.md?version=1",
+        "azents://skills/test/sample/SKILL.md#body",
+        "azents://user@skills/test/sample/SKILL.md",
+        "azents://skills:443/test/sample/SKILL.md",
+        "azents://skills/test/sample\\SKILL.md",
         "/workspace/agent/SKILL.md",
     ],
 )
@@ -59,7 +59,7 @@ def test_make_vfs_projection_is_deterministic_and_integrity_checked() -> None:
         namespace="azents",
         entries=[
             (
-                "azents://skills/azents/deep-research/SKILL.md",
+                "azents://skills/test/sample/SKILL.md",
                 b"global",
                 "text/markdown",
             )
@@ -71,7 +71,7 @@ def test_make_vfs_projection_is_deterministic_and_integrity_checked() -> None:
         namespace="github",
         entries=[
             (
-                "azents://skills/github/review-pull-request/SKILL.md",
+                "azents://skills/test/provider-sample/SKILL.md",
                 b"provider",
                 "text/markdown",
             )
@@ -85,12 +85,14 @@ def test_make_vfs_projection_is_deterministic_and_integrity_checked() -> None:
     assert [entry.canonical_uri for entry in first.entries] == sorted(
         entry.canonical_uri for entry in first.entries
     )
-    assert first.entries[0].decode_body() == b"global"
+    global_entry = first.find("azents://skills/test/sample/SKILL.md")
+    assert global_entry is not None
+    assert global_entry.decode_body() == b"global"
 
 
 def test_make_vfs_projection_rejects_cross_source_collision() -> None:
     """No source precedence hides canonical URI ownership collisions."""
-    uri = "azents://skills/azents/deep-research/SKILL.md"
+    uri = "azents://skills/test/sample/SKILL.md"
     first = make_vfs_source_revision(
         source_id="source:first",
         source_kind="global_release",
@@ -111,7 +113,7 @@ def test_make_vfs_projection_rejects_cross_source_collision() -> None:
 def test_vfs_file_entry_detects_corrupt_body() -> None:
     """Persisted Base64, size, and content hash are verified on read."""
     entry = make_vfs_file_entry(
-        canonical_uri="azents://skills/azents/deep-research/SKILL.md",
+        canonical_uri="azents://skills/test/sample/SKILL.md",
         source_id="release:azents",
         source_revision_id="revision",
         body=b"expected",
@@ -129,7 +131,7 @@ def test_vfs_file_entry_rejects_oversized_content() -> None:
     """One package resource cannot exceed the VFS per-file cap."""
     with pytest.raises(ValueError, match="exceeds"):
         make_vfs_file_entry(
-            canonical_uri="azents://skills/azents/deep-research/SKILL.md",
+            canonical_uri="azents://skills/test/sample/SKILL.md",
             source_id="release:azents",
             source_revision_id="revision",
             body=b"x" * (VFS_FILE_MAX_BYTES + 1),
