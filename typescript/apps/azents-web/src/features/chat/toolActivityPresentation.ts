@@ -26,7 +26,6 @@ export type ActivityEventKind =
   | "reasoning"
   | "tool"
   | "skill"
-  | "compaction"
   | "goal-control"
   | "other";
 
@@ -287,18 +286,11 @@ function timelineEvents(
   messages: ChatMessage[],
 ): TimelineEvent[] {
   const clientResults = new Map<string, ChatEventResponse>();
-  const compactionSummaries = new Map<string, ChatEventResponse>();
   for (const event of events) {
     if (event.kind === "client_tool_result") {
       const callId = stringField(event.payload, "call_id");
       if (callId) {
         clientResults.set(callId, event);
-      }
-    }
-    if (event.kind === "compaction_summary") {
-      const compactionId = stringField(event.payload, "compaction_id");
-      if (compactionId) {
-        compactionSummaries.set(compactionId, event);
       }
     }
   }
@@ -333,10 +325,7 @@ function timelineEvents(
         },
       ];
     }
-    if (
-      event.kind === "client_tool_result" ||
-      event.kind === "compaction_summary"
-    ) {
+    if (event.kind === "client_tool_result") {
       return [];
     }
     if (event.kind === "provider_tool_call") {
@@ -424,26 +413,27 @@ function timelineEvents(
     }
 
     if (event.kind === "compaction_marker") {
-      const compactionId = stringField(event.payload, "compaction_id");
-      const summary = compactionId
-        ? compactionSummaries.get(compactionId)
-        : null;
-      const compactionMessage = summary
-        ? messageForEvent(summary, messages)
-        : message;
       return [
         {
           id: event.id,
           event,
-          message: compactionMessage,
-          activityEvent: {
-            id: semanticKey(event),
-            kind: "compaction",
-            message: compactionMessage,
-            category: null,
-            status: event.payload.status === "failed" ? "failed" : "complete",
-          },
-          boundary: false,
+          message,
+          activityEvent: null,
+          boundary: true,
+          hidden: false,
+          usage: null,
+        },
+      ];
+    }
+
+    if (event.kind === "compaction_summary") {
+      return [
+        {
+          id: event.id,
+          event,
+          message,
+          activityEvent: null,
+          boundary: true,
           hidden: false,
           usage: null,
         },

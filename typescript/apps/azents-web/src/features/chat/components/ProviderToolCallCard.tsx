@@ -1,148 +1,200 @@
 import {
-  ActionIcon,
-  Badge,
   Box,
   Code,
   Group,
   Loader,
-  Paper,
+  rem,
+  ScrollArea,
   Stack,
   Text,
-  ThemeIcon,
+  UnstyledButton,
 } from "@mantine/core";
-import { useDisclosure } from "@mantine/hooks";
-import {
-  IconChevronDown,
-  IconChevronRight,
-  IconTool,
-} from "@tabler/icons-react";
+import { IconChevronRight, IconSearch, IconTool } from "@tabler/icons-react";
+import { useState } from "react";
 import { FileAttachmentList } from "./FileAttachmentList";
 import {
   providerToolActivityLabel,
   providerToolDisplayName,
   providerToolStatusLabel,
 } from "./providerToolCallPresentation";
+import { providerWebSearchPresentation } from "./providerWebSearchPresentation";
 import type { ProviderToolCall } from "../types";
+import type { ReactElement } from "react";
 
 interface ProviderToolCallCardProps {
   toolCall: ProviderToolCall;
   hiddenAttachmentUris?: readonly string[];
 }
 
+const flatRowBorder = "1px solid var(--mantine-color-default-border)";
+
 function statusColor(status: ProviderToolCall["status"]): string {
   switch (status) {
-    case "completed":
-      return "green";
-    case "failed":
-      return "red";
     case "running":
       return "blue";
+    case "failed":
+      return "red";
+    case "completed":
     case "unknown":
-      return "gray";
+      return "dimmed";
   }
+}
+
+function RawProviderToolDetails({
+  toolCall,
+}: {
+  toolCall: ProviderToolCall;
+}): ReactElement | null {
+  const hasArguments = toolCall.arguments.trim().length > 0;
+  const hasOutput = (toolCall.output?.trim().length ?? 0) > 0;
+  if (!hasArguments && !hasOutput) {
+    return null;
+  }
+  return (
+    <Stack gap="sm">
+      {hasArguments ? (
+        <Box>
+          <Text size="xs" c="dimmed" mb="xs">
+            Arguments
+          </Text>
+          <ScrollArea.Autosize mah={rem(240)}>
+            <Code block>{toolCall.arguments}</Code>
+          </ScrollArea.Autosize>
+        </Box>
+      ) : null}
+      {hasOutput ? (
+        <Box>
+          <Text size="xs" c="dimmed" mb="xs">
+            Output
+          </Text>
+          <ScrollArea.Autosize mah={rem(240)}>
+            <Code block>{toolCall.output}</Code>
+          </ScrollArea.Autosize>
+        </Box>
+      ) : null}
+    </Stack>
+  );
 }
 
 export function ProviderToolCallCard({
   toolCall,
   hiddenAttachmentUris = [],
-}: ProviderToolCallCardProps): React.ReactElement {
-  const [opened, { toggle }] = useDisclosure(false);
+}: ProviderToolCallCardProps): ReactElement {
+  const [opened, setOpened] = useState(false);
   const displayName = providerToolDisplayName(toolCall.name);
   const activityLabel = providerToolActivityLabel(toolCall);
-  const hasArguments = toolCall.arguments.trim().length > 0;
-  const hasOutput = (toolCall.output?.trim().length ?? 0) > 0;
+  const webSearch = providerWebSearchPresentation(toolCall);
   const visibleAttachments = (toolCall.attachments ?? []).filter(
     (attachment) => !hiddenAttachmentUris.includes(attachment.uri),
   );
-  const hasAttachments = visibleAttachments.length > 0;
   const showAttachmentsDirectly =
-    toolCall.name === "image_generation" && hasAttachments;
+    toolCall.name === "image_generation" && visibleAttachments.length > 0;
+  const hasRawDetails =
+    toolCall.arguments.trim().length > 0 ||
+    (toolCall.output?.trim().length ?? 0) > 0;
+  const rawDetails = hasRawDetails ? (
+    <RawProviderToolDetails toolCall={toolCall} />
+  ) : null;
   const hasDetails =
-    hasArguments || hasOutput || (hasAttachments && !showAttachmentsDirectly);
-
-  return (
-    <Paper
-      withBorder
-      radius="md"
-      p="sm"
-      mb="xs"
-      bg="var(--mantine-color-body)"
-      data-provider-tool-name={toolCall.name}
-      data-provider-tool-status={toolCall.status}
-    >
-      <Stack gap="xs">
-        <Group gap="xs" justify="space-between" wrap="nowrap">
-          <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
-            <ThemeIcon size="sm" variant="light" color="gray">
-              <IconTool size={14} />
-            </ThemeIcon>
-            <Box style={{ minWidth: 0 }}>
-              <Text size="sm" fw={600} truncate>
-                {displayName}
+    webSearch !== null ||
+    hasRawDetails ||
+    (visibleAttachments.length > 0 && !showAttachmentsDirectly);
+  const status = providerToolStatusLabel(toolCall.status);
+  const color = statusColor(toolCall.status);
+  const subject = webSearch?.query ?? activityLabel;
+  const ariaLabel = [displayName, subject, status].join(" · ");
+  const detail = webSearch ? (
+    <Stack gap="xs">
+      {webSearch.summary !== null ? (
+        <Text size="xs" c="dimmed">
+          {webSearch.summary}
+        </Text>
+      ) : null}
+      {webSearch.results.map((result) => (
+        <Box
+          key={result.uri}
+          p="xs"
+          style={{ border: flatRowBorder, borderRadius: rem(4) }}
+        >
+          <Stack gap={rem(2)}>
+            <Text size="sm" c="dimmed" fw={500} lineClamp={1}>
+              {result.title}
+            </Text>
+            <Text size="xs" c="dimmed" ff="monospace" truncate>
+              {result.uri}
+            </Text>
+            {result.excerpt !== null ? (
+              <Text size="xs" c="dimmed" lineClamp={2}>
+                {result.excerpt}
               </Text>
-              <Text size="xs" c="dimmed">
-                {activityLabel}
-              </Text>
-            </Box>
-          </Group>
-          <Group gap="xs" wrap="nowrap">
-            {toolCall.status === "running" ? (
-              <Loader
-                size="xs"
-                color="blue"
-                aria-label="Provider tool running"
-              />
-            ) : null}
-            <Badge
-              size="sm"
-              color={statusColor(toolCall.status)}
-              variant="light"
-            >
-              {providerToolStatusLabel(toolCall.status)}
-            </Badge>
-            {hasDetails ? (
-              <ActionIcon
-                size="sm"
-                variant="subtle"
-                onClick={toggle}
-                aria-label={opened ? "Hide tool details" : "Show tool details"}
-              >
-                {opened ? (
-                  <IconChevronDown size={14} />
-                ) : (
-                  <IconChevronRight size={14} />
-                )}
-              </ActionIcon>
-            ) : null}
-          </Group>
-        </Group>
-        {showAttachmentsDirectly ? (
-          <FileAttachmentList files={visibleAttachments} />
-        ) : null}
-        {opened ? (
-          <Stack gap="xs">
-            {hasArguments ? (
-              <Box>
-                <Text size="xs" c="dimmed" mb="xs">
-                  Arguments
-                </Text>
-                <Code block>{toolCall.arguments}</Code>
-              </Box>
-            ) : null}
-            {hasOutput ? (
-              <Box>
-                <Text size="xs" c="dimmed" mb="xs">
-                  Output
-                </Text>
-                <Code block>{toolCall.output}</Code>
-              </Box>
-            ) : null}
-            {hasAttachments && !showAttachmentsDirectly ? (
-              <FileAttachmentList files={visibleAttachments} />
             ) : null}
           </Stack>
+        </Box>
+      ))}
+    </Stack>
+  ) : (
+    rawDetails
+  );
+
+  return (
+    <>
+      <Box
+        py="xs"
+        style={{ borderBottom: flatRowBorder }}
+        data-provider-tool-name={toolCall.name}
+        data-provider-tool-status={toolCall.status}
+      >
+        <UnstyledButton
+          w="100%"
+          onClick={() => setOpened((value) => !value)}
+          aria-expanded={opened}
+          aria-label={ariaLabel}
+          disabled={!hasDetails}
+        >
+          <Group gap="xs" wrap="nowrap" align="flex-start">
+            <IconChevronRight
+              aria-hidden="true"
+              size={rem(14)}
+              color="var(--mantine-color-dimmed)"
+              style={{
+                flexShrink: 0,
+                marginTop: rem(2),
+                opacity: hasDetails ? 1 : 0,
+                transform: opened ? "rotate(90deg)" : "none",
+                transition: "transform 120ms ease",
+              }}
+            />
+            <Box c={color} style={{ flexShrink: 0, marginTop: rem(1) }}>
+              {toolCall.status === "running" ? (
+                <Loader size={rem(14)} />
+              ) : webSearch !== null ? (
+                <IconSearch size={rem(14)} />
+              ) : (
+                <IconTool size={rem(14)} />
+              )}
+            </Box>
+            <Group gap={rem(6)} flex={1} miw={0} wrap="nowrap">
+              <Text size="sm" c="dimmed" fw={500} style={{ flexShrink: 0 }}>
+                {displayName}
+              </Text>
+              <Text size="sm" c="dimmed" truncate flex={1} miw={0}>
+                {subject}
+              </Text>
+            </Group>
+            <Text size="xs" c={color} style={{ flexShrink: 0 }}>
+              {status}
+            </Text>
+          </Group>
+        </UnstyledButton>
+        {opened && detail !== null ? (
+          <Box pl={rem(54)} pr="xs" pt="xs">
+            {detail}
+          </Box>
         ) : null}
-      </Stack>
-    </Paper>
+      </Box>
+      {showAttachmentsDirectly ? (
+        <FileAttachmentList files={visibleAttachments} />
+      ) : null}
+    </>
   );
 }

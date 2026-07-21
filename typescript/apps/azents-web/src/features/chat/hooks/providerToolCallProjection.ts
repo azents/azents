@@ -1,4 +1,9 @@
-import type { ChatMessage, FileAttachment, ProviderToolCall } from "../types";
+import type {
+  ChatMessage,
+  FileAttachment,
+  ProviderToolCall,
+  ProviderToolReference,
+} from "../types";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -49,6 +54,34 @@ function attachmentFromRecord(
         : null,
     previewGeneratedAt: stringField(record, "preview_generated_at"),
   };
+}
+
+function providerToolReferences(value: unknown[]): ProviderToolReference[] {
+  return value.flatMap((reference) => {
+    if (!isRecord(reference)) {
+      return [];
+    }
+    const kind = stringField(reference, "kind");
+    if (kind !== "url" && kind !== "file" && kind !== "other") {
+      return [];
+    }
+    const metadata = isRecord(reference.metadata)
+      ? Object.fromEntries(
+          Object.entries(reference.metadata).filter(
+            (entry): entry is [string, string] => typeof entry[1] === "string",
+          ),
+        )
+      : {};
+    return [
+      {
+        kind,
+        uri: stringField(reference, "uri"),
+        title: stringField(reference, "title"),
+        excerpt: stringField(reference, "excerpt"),
+        metadata,
+      },
+    ];
+  });
 }
 
 function providerToolReferenceText(value: unknown): string | null {
@@ -184,6 +217,8 @@ export function providerToolCallFromPayload(
     arguments: input ?? "",
     status: providerToolCallStatusFromPayload(payload.status, messageStatus),
     output: providerToolOutputText(semantic.output, semantic.references),
+    semanticOutput: providerToolOutputText(semantic.output, []),
+    references: providerToolReferences(semantic.references),
     attachments: providerToolOutputAttachments(semantic.output),
   };
 }

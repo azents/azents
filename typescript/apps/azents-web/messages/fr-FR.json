@@ -1398,6 +1398,7 @@
       "interrupted": "Interrompu",
       "arguments": "Arguments",
       "result": "Résultat",
+      "genericDetails": "Détails génériques",
       "rawData": "Données brutes",
       "viewRawDataFor": "Voir les données brutes pour {action}",
       "fromCharacter": "à partir du caractère {offset}",

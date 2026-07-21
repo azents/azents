@@ -1398,6 +1398,7 @@
       "interrupted": "中断済み",
       "arguments": "引数",
       "result": "結果",
+      "genericDetails": "汎用の詳細",
       "rawData": "生データ",
       "viewRawDataFor": "{action} の生データを表示",
       "fromCharacter": "{offset} 文字目から",

@@ -1398,6 +1398,7 @@
       "interrupted": "중단됨",
       "arguments": "인자",
       "result": "결과",
+      "genericDetails": "일반 세부 정보",
       "rawData": "원본 데이터",
       "viewRawDataFor": "{action} 원본 데이터 보기",
       "fromCharacter": "문자 {offset}부터",

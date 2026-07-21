@@ -366,6 +366,497 @@ export const MultiTurnToolActivity = {
   },
 } satisfies Story;
 
+export const AllActivityRenderers = {
+  args: {
+    ...baseArgs,
+    timelineEvents: [
+      timelineEvent("overview-user", "user_message", {
+        content:
+          "Review the failing query, update the renderer, and find the relevant documentation.",
+      }),
+      timelineEvent("overview-reasoning", "reasoning", {
+        summary:
+          "I will inspect the current renderer, apply a focused patch, then validate relevant sources.",
+      }),
+      timelineEvent("overview-skill", "skill_loaded", {
+        name: "frontend-design",
+        skill_path: ".claude/skills/frontend-design/SKILL.md",
+        body: "Use the product components and preserve their existing interaction model.",
+        user_message: "Review the activity timeline UI.",
+        content_hash: "story-skill-hash",
+        source_label: "azents",
+        relative_hint: ".claude/skills/frontend-design",
+      }),
+      timelineEvent("overview-read-before", "client_tool_call", {
+        call_id: "overview-read-before-call",
+        name: "read",
+        arguments: JSON.stringify({
+          path: "/workspace/agent/azents/src/features/chat/components/ToolCallCard.tsx",
+        }),
+      }),
+      timelineEvent("overview-read-before-result", "client_tool_result", {
+        call_id: "overview-read-before-call",
+        status: "completed",
+        output: "export function ToolCallCard() { /* existing renderer */ }",
+      }),
+      timelineEvent("overview-grep", "client_tool_call", {
+        call_id: "overview-grep-call",
+        name: "grep",
+        arguments: JSON.stringify({
+          pattern: "apply_patch",
+          path: "/workspace/agent/azents/src/features/chat",
+        }),
+      }),
+      timelineEvent("overview-grep-result", "client_tool_result", {
+        call_id: "overview-grep-call",
+        status: "completed",
+        output:
+          "knownToolPresentation.ts: apply_patch\nToolCallCard.tsx: patch detail",
+      }),
+      timelineEvent("overview-edit", "client_tool_call", {
+        call_id: "overview-edit-call",
+        name: "edit",
+        arguments: JSON.stringify({
+          path: "/workspace/agent/azents/src/features/chat/components/ToolCallCard.tsx",
+          old_string: "fw={600}",
+          new_string: 'c="dimmed" fw={500}',
+        }),
+      }),
+      timelineEvent("overview-edit-result", "client_tool_result", {
+        call_id: "overview-edit-call",
+        status: "completed",
+        output: "Updated the tool row typography.",
+      }),
+      timelineEvent("overview-generic", "client_tool_call", {
+        call_id: "overview-generic-call",
+        name: "custom_database_query",
+        arguments: JSON.stringify({ query: "select status from jobs" }),
+      }),
+      timelineEvent("overview-generic-result", "client_tool_result", {
+        call_id: "overview-generic-call",
+        status: "failed",
+        output: "Connection refused",
+      }),
+      timelineEvent("overview-patch", "client_tool_call", {
+        call_id: "overview-patch-call",
+        name: "apply_patch",
+        arguments: JSON.stringify({
+          base_path: "/workspace/agent/azents",
+          patch:
+            "*** Begin Patch\n*** Update File: src/features/chat/components/ToolCallCard.tsx\n@@\n-old value\n+new value\n*** Add File: src/features/chat/components/PatchPreview.tsx\n+export const patchPreview = true;\n*** Delete File: src/features/chat/components/LegacyPatchPreview.tsx\n*** End Patch",
+        }),
+      }),
+      timelineEvent("overview-patch-result", "client_tool_result", {
+        call_id: "overview-patch-call",
+        status: "completed",
+        output: "Applied patch under /workspace/agent/azents.",
+      }),
+      timelineEvent("overview-command", "client_tool_call", {
+        call_id: "overview-command-call",
+        name: "exec_command",
+        arguments: JSON.stringify({
+          command: "pnpm --filter @azents/web test",
+        }),
+      }),
+      timelineEvent("overview-command-result", "client_tool_result", {
+        call_id: "overview-command-call",
+        status: "completed",
+        output: "66 tests passed",
+      }),
+      timelineEvent("overview-web-search", "provider_tool_call", {
+        call_id: "overview-web-search-call",
+        name: "web_search",
+        arguments: JSON.stringify({ query: "Azents agent platform" }),
+        status: "completed",
+      }),
+      timelineEvent("overview-deliverable", "client_tool_call", {
+        call_id: "overview-deliverable-call",
+        name: "present_file",
+        arguments: JSON.stringify({
+          paths: ["/workspace/agent/azents/activity-timeline-review.md"],
+        }),
+      }),
+      timelineEvent("overview-compaction-start", "compaction_marker", {
+        compaction_id: "overview-compaction-1",
+        status: "started",
+      }),
+      timelineEvent("overview-compaction-result", "compaction_summary", {
+        compaction_id: "overview-compaction-1",
+        content:
+          "The completed tool activity was summarized before the next model turn.",
+      }),
+      timelineEvent("overview-goal-updated", "goal_updated", {
+        content: "",
+        attachments: [],
+        metadata: { goal_objective: "Validate the chat activity renderer" },
+      }),
+      timelineEvent("overview-read", "client_tool_call", {
+        call_id: "overview-read-call",
+        name: "read",
+        arguments: JSON.stringify({
+          path: "/workspace/agent/azents/docs/overview.md",
+        }),
+      }),
+      timelineEvent("overview-read-result", "client_tool_result", {
+        call_id: "overview-read-call",
+        status: "completed",
+        output: "# Azents\n\nAgent platform overview.",
+      }),
+      timelineEvent("overview-answer", "assistant_message", {
+        content:
+          "The renderer now keeps generic fallbacks, shows V4A files separately, and preserves web search sources.",
+      }),
+    ],
+    messages: [
+      createChatMessage({
+        id: "overview-user",
+        role: "user",
+        content:
+          "Review the failing query, update the renderer, and find the relevant documentation.",
+      }),
+      createChatMessage({
+        id: "overview-reasoning",
+        content: null,
+        reasoningSummary:
+          "I will inspect the current renderer, apply a focused patch, then validate relevant sources.",
+        metadata: { event_render_key: "reasoning:event:overview-reasoning" },
+      }),
+      createChatMessage({
+        id: "overview-skill",
+        role: "skill_loaded",
+        content:
+          "Use the product components and preserve their existing interaction model.",
+      }),
+      createChatMessage({
+        id: "overview-read-before",
+        content: null,
+        toolCalls: [
+          {
+            id: "overview-read-before-call",
+            callId: "overview-read-before-call",
+            name: "read",
+            arguments: JSON.stringify({
+              path: "/workspace/agent/azents/src/features/chat/components/ToolCallCard.tsx",
+            }),
+            result:
+              "export function ToolCallCard() { /* existing renderer */ }",
+            status: "completed",
+          },
+        ],
+      }),
+      createChatMessage({
+        id: "overview-grep",
+        content: null,
+        toolCalls: [
+          {
+            id: "overview-grep-call",
+            callId: "overview-grep-call",
+            name: "grep",
+            arguments: JSON.stringify({
+              pattern: "apply_patch",
+              path: "/workspace/agent/azents/src/features/chat",
+            }),
+            result:
+              "knownToolPresentation.ts: apply_patch\nToolCallCard.tsx: patch detail",
+            status: "completed",
+          },
+        ],
+      }),
+      createChatMessage({
+        id: "overview-edit",
+        content: null,
+        toolCalls: [
+          {
+            id: "overview-edit-call",
+            callId: "overview-edit-call",
+            name: "edit",
+            arguments: JSON.stringify({
+              path: "/workspace/agent/azents/src/features/chat/components/ToolCallCard.tsx",
+              old_string: "fw={600}",
+              new_string: 'c="dimmed" fw={500}',
+            }),
+            result: "Updated the tool row typography.",
+            status: "completed",
+          },
+        ],
+      }),
+      createChatMessage({
+        id: "overview-generic",
+        content: null,
+        toolCalls: [
+          {
+            id: "overview-generic-call",
+            callId: "overview-generic-call",
+            name: "custom_database_query",
+            arguments: JSON.stringify({ query: "select status from jobs" }),
+            result: "Connection refused",
+            status: "failed",
+          },
+        ],
+      }),
+      createChatMessage({
+        id: "overview-patch",
+        content: null,
+        toolCalls: [
+          {
+            id: "overview-patch-call",
+            callId: "overview-patch-call",
+            name: "apply_patch",
+            arguments: JSON.stringify({
+              base_path: "/workspace/agent/azents",
+              patch:
+                "*** Begin Patch\n*** Update File: src/features/chat/components/ToolCallCard.tsx\n@@\n-old value\n+new value\n*** Add File: src/features/chat/components/PatchPreview.tsx\n+export const patchPreview = true;\n*** Delete File: src/features/chat/components/LegacyPatchPreview.tsx\n*** End Patch",
+            }),
+            result: "Applied patch under /workspace/agent/azents.",
+            resultMetadata: {
+              kind: "apply_patch_result",
+              changes: [
+                {
+                  action: "update",
+                  path: "/workspace/agent/azents/src/features/chat/components/ToolCallCard.tsx",
+                  added_lines: 1,
+                  removed_lines: 1,
+                },
+                {
+                  action: "add",
+                  path: "/workspace/agent/azents/src/features/chat/components/PatchPreview.tsx",
+                  added_lines: 1,
+                  removed_lines: 0,
+                },
+                {
+                  action: "delete",
+                  path: "/workspace/agent/azents/src/features/chat/components/LegacyPatchPreview.tsx",
+                  added_lines: 0,
+                  removed_lines: 1,
+                },
+              ],
+            },
+            status: "completed",
+          },
+        ],
+      }),
+      createChatMessage({
+        id: "overview-web-search",
+        content: null,
+        providerToolCalls: [
+          {
+            id: "overview-web-search-call",
+            callId: "overview-web-search-call",
+            name: "web_search",
+            arguments: JSON.stringify({ query: "Azents agent platform" }),
+            status: "completed",
+            semanticOutput: "Found two relevant sources.",
+            references: [
+              {
+                kind: "url",
+                uri: "https://example.com/overview",
+                title: "Azents overview",
+                excerpt: "An overview of the Azents agent platform.",
+                metadata: {},
+              },
+              {
+                kind: "url",
+                uri: "https://example.com/docs",
+                title: "Azents documentation",
+                excerpt: "Guides for configuring agent workflows.",
+                metadata: {},
+              },
+            ],
+          },
+        ],
+      }),
+      createChatMessage({
+        id: "overview-command",
+        content: null,
+        toolCalls: [
+          {
+            id: "overview-command-call",
+            callId: "overview-command-call",
+            name: "exec_command",
+            arguments: JSON.stringify({
+              command: "pnpm --filter @azents/web test",
+            }),
+            result: "66 tests passed",
+            resultMetadata: {
+              kind: "exec_command_result",
+              status: "completed",
+              exit_code: 0,
+              stdout_truncated: false,
+              stderr_truncated: false,
+            },
+            status: "completed",
+          },
+        ],
+      }),
+      createChatMessage({
+        id: "overview-deliverable",
+        content: null,
+        toolCalls: [
+          {
+            id: "overview-deliverable-call",
+            callId: "overview-deliverable-call",
+            name: "present_file",
+            arguments: JSON.stringify({
+              paths: ["/workspace/agent/azents/activity-timeline-review.md"],
+            }),
+            result: "Presented one file.",
+            status: "completed",
+            attachments: [
+              {
+                attachmentId: "overview-deliverable-attachment",
+                uri: "exchange://generated/activity-timeline-review.md",
+                mediaType: "text/markdown",
+                name: "activity-timeline-review.md",
+                textPreview:
+                  "# Activity timeline review\n\nMixed tool and compaction visual review artifact.",
+              },
+            ],
+          },
+        ],
+      }),
+      createChatMessage({
+        id: "overview-compaction-start",
+        role: "compaction_started",
+        content: null,
+      }),
+      createChatMessage({
+        id: "overview-compaction-result",
+        role: "compaction",
+        content:
+          "The completed tool activity was summarized before the next model turn.",
+      }),
+      createChatMessage({
+        id: "overview-goal-updated",
+        role: "goal_updated",
+        content: null,
+      }),
+      createChatMessage({
+        id: "overview-read",
+        content: null,
+        toolCalls: [
+          {
+            id: "overview-read-call",
+            callId: "overview-read-call",
+            name: "read",
+            arguments: JSON.stringify({
+              path: "/workspace/agent/azents/docs/overview.md",
+            }),
+            result: "# Azents\n\nAgent platform overview.",
+            status: "completed",
+          },
+        ],
+      }),
+      createChatMessage({
+        id: "overview-answer",
+        content:
+          "The renderer now keeps generic fallbacks, shows V4A files separately, and preserves web search sources.",
+      }),
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const activities = canvas.getAllByRole("button", { name: /Activity/ });
+    await expect(activities).toHaveLength(2);
+    await expect(canvas.getByRole("status")).toBeVisible();
+    await expect(
+      canvas.getByText("Previous conversation was summarized"),
+    ).toBeVisible();
+
+    const firstActivity = activities.at(0);
+    const secondActivity = activities.at(1);
+    if (!firstActivity || !secondActivity) {
+      throw new Error("Expected mixed Activity groups");
+    }
+    await userEvent.click(firstActivity);
+    await expect(
+      canvas.getByText("I will inspect the current renderer"),
+    ).toBeVisible();
+    await userEvent.click(
+      canvas.getByRole("button", { name: /custom_database_query/ }),
+    );
+    await userEvent.click(canvas.getByRole("button", { name: /Edited file/ }));
+    await userEvent.click(
+      canvas.getByRole("button", { name: /Applied patch/ }),
+    );
+    await userEvent.click(canvas.getByRole("button", { name: /Web search/ }));
+    await expect(canvas.getByText("Connection refused")).toBeVisible();
+    await expect(canvas.getByText("fw={600}")).toBeVisible();
+    await expect(
+      canvas.getByText("src/features/chat/components/PatchPreview.tsx"),
+    ).toBeVisible();
+    await expect(canvas.getByText("Azents overview")).toBeVisible();
+    await expect(secondActivity).toHaveAttribute("aria-expanded", "false");
+  },
+} satisfies Story;
+
+export const CompactionCutsActivityGroups = {
+  args: {
+    ...baseArgs,
+    timelineEvents: [
+      timelineEvent("compaction-before-tool", "client_tool_call", {
+        call_id: completedToolCall.id,
+        name: completedToolCall.name,
+        arguments: completedToolCall.arguments,
+      }),
+      timelineEvent("compaction-before-tool-result", "client_tool_result", {
+        call_id: completedToolCall.id,
+        status: "completed",
+        output: completedToolCall.result,
+      }),
+      timelineEvent("compaction-start", "compaction_marker", {
+        compaction_id: "compaction-story-1",
+        status: "started",
+      }),
+      timelineEvent("compaction-result", "compaction_summary", {
+        compaction_id: "compaction-story-1",
+        content: "Completed tool activity was compacted into this summary.",
+      }),
+      timelineEvent("compaction-after-tool", "client_tool_call", {
+        call_id: failedToolCall.id,
+        name: failedToolCall.name,
+        arguments: failedToolCall.arguments,
+      }),
+      timelineEvent("compaction-after-tool-result", "client_tool_result", {
+        call_id: failedToolCall.id,
+        status: "failed",
+        output: failedToolCall.result,
+      }),
+    ],
+    messages: [
+      createChatMessage({
+        id: "compaction-before-tool",
+        content: null,
+        toolCalls: [completedToolCall],
+      }),
+      createChatMessage({
+        id: "compaction-start",
+        role: "compaction_started",
+        content: null,
+      }),
+      createChatMessage({
+        id: "compaction-result",
+        role: "compaction",
+        content: "Completed tool activity was compacted into this summary.",
+      }),
+      createChatMessage({
+        id: "compaction-after-tool",
+        content: null,
+        toolCalls: [failedToolCall],
+      }),
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.getAllByRole("button", { name: /Activity/ }),
+    ).toHaveLength(2);
+    await expect(canvas.getByRole("status")).toBeVisible();
+    await expect(
+      canvas.getByText("Previous conversation was summarized"),
+    ).toBeVisible();
+  },
+} satisfies Story;
+
 export const SpecializedDeliverableAndApproval = {
   args: {
     ...baseArgs,

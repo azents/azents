@@ -1,9 +1,7 @@
 "use client";
 
 import {
-  Accordion,
   ActionIcon,
-  Badge,
   Box,
   Code,
   Group,
@@ -13,17 +11,13 @@ import {
   ScrollArea,
   Stack,
   Text,
-  ThemeIcon,
   UnstyledButton,
 } from "@mantine/core";
 import {
-  IconAlertTriangle,
   IconChevronRight,
-  IconCircleOff,
   IconDots,
   IconFileText,
   IconPencil,
-  IconPlayerStop,
   IconSearch,
   IconTerminal2,
   IconTool,
@@ -34,6 +28,11 @@ import { knownToolPresentation } from "../knownToolPresentation";
 import { FileAttachmentList } from "./FileAttachmentList";
 import type { KnownToolPresentation } from "../knownToolPresentation";
 import type { ActiveToolCall } from "../types";
+import type {
+  V4APatchFile,
+  V4APatchHunk,
+  V4APatchLine,
+} from "../v4aPatchPresentation";
 import type { ReactElement, ReactNode } from "react";
 
 interface ToolCallCardProps {
@@ -52,6 +51,8 @@ interface SpecializedToolCallBoundaryState {
 }
 
 type ToolCallTranslations = ReturnType<typeof useTranslations<"chat.toolCall">>;
+
+const flatRowBorder = "1px solid var(--mantine-color-default-border)";
 
 class SpecializedToolCallBoundary extends Component<
   SpecializedToolCallBoundaryProps,
@@ -85,33 +86,29 @@ function formatJson(value: string): string {
   }
 }
 
-function toolCallBadgeColor(status: ActiveToolCall["status"]): string {
+function toolCallStatusLabelColor(status: ActiveToolCall["status"]): string {
   switch (status) {
     case "preparing":
     case "running":
       return "blue";
-    case "completed":
-      return "green";
     case "failed":
-      return "red";
+      return "dimmed";
+    case "completed":
     case "cancelled":
     case "interrupted":
-      return "gray";
+      return "dimmed";
   }
 }
 
 function toolCallStatusIcon(status: ActiveToolCall["status"]): ReactElement {
   switch (status) {
     case "running":
-      return <Loader size={rem(16)} />;
-    case "failed":
-      return <IconAlertTriangle size={rem(16)} />;
-    case "cancelled":
-      return <IconCircleOff size={rem(16)} />;
-    case "interrupted":
-      return <IconPlayerStop size={rem(16)} />;
     case "preparing":
+      return <Loader size={rem(16)} />;
     case "completed":
+    case "failed":
+    case "cancelled":
+    case "interrupted":
       return <IconTool size={rem(16)} />;
   }
 }
@@ -193,6 +190,139 @@ function presentationQualifier(
   }
 }
 
+function patchLinePrefix(line: V4APatchLine): string {
+  switch (line.type) {
+    case "add":
+      return "+";
+    case "remove":
+      return "−";
+    case "context":
+      return " ";
+  }
+}
+
+function patchLineBackground(line: V4APatchLine): string {
+  switch (line.type) {
+    case "add":
+      return "var(--mantine-color-green-light)";
+    case "remove":
+      return "var(--mantine-color-red-light)";
+    case "context":
+      return "transparent";
+  }
+}
+
+function patchLineColor(line: V4APatchLine): string {
+  switch (line.type) {
+    case "add":
+      return "var(--mantine-color-green-light-color)";
+    case "remove":
+      return "var(--mantine-color-red-light-color)";
+    case "context":
+      return "dimmed";
+  }
+}
+
+function patchFileActionColor(file: V4APatchFile): string {
+  switch (file.type) {
+    case "add":
+      return "var(--mantine-color-green-light-color)";
+    case "delete":
+      return "var(--mantine-color-red-light-color)";
+    case "update":
+      return "dimmed";
+  }
+}
+
+function PatchLine({ line }: { line: V4APatchLine }): ReactElement {
+  return (
+    <Group
+      gap="xs"
+      wrap="nowrap"
+      align="flex-start"
+      px="xs"
+      bg={patchLineBackground(line)}
+    >
+      <Text
+        aria-hidden="true"
+        c={patchLineColor(line)}
+        ff="monospace"
+        size="xs"
+        w={rem(12)}
+      >
+        {patchLinePrefix(line)}
+      </Text>
+      <Text
+        component="code"
+        c={patchLineColor(line)}
+        ff="monospace"
+        size="xs"
+        style={{ overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}
+      >
+        {line.content.length > 0 ? line.content : " "}
+      </Text>
+    </Group>
+  );
+}
+
+function PatchHunk({ hunk }: { hunk: V4APatchHunk }): ReactElement {
+  return (
+    <Stack gap={0}>
+      {hunk.context !== null ? (
+        <Text px="xs" py={rem(2)} size="xs" c="dimmed" ff="monospace">
+          {hunk.context}
+        </Text>
+      ) : null}
+      {hunk.lines.map((line, index) => (
+        <PatchLine key={`${line.type}:${index}`} line={line} />
+      ))}
+    </Stack>
+  );
+}
+
+function PatchFile({ file }: { file: V4APatchFile }): ReactElement {
+  const t = useTranslations("chat.toolCall");
+  const destination = file.type === "update" ? file.moveTo : null;
+
+  return (
+    <Box
+      style={{
+        border: flatRowBorder,
+        borderRadius: "var(--mantine-radius-sm)",
+        overflow: "hidden",
+      }}
+    >
+      <Group gap="xs" wrap="nowrap" px="xs" py={rem(6)} bg="default">
+        <Text size="xs" c={patchFileActionColor(file)} fw={600}>
+          {t(`changeAction.${file.type}`)}
+        </Text>
+        <Text size="xs" ff="monospace" truncate flex={1} miw={0}>
+          {file.path}
+        </Text>
+        {destination !== null ? (
+          <Text size="xs" c="dimmed" ff="monospace" truncate miw={0}>
+            → {destination}
+          </Text>
+        ) : null}
+      </Group>
+      {file.type === "add" ? (
+        <Stack gap={0}>
+          {file.lines.map((content, index) => (
+            <PatchLine key={`add:${index}`} line={{ type: "add", content }} />
+          ))}
+        </Stack>
+      ) : null}
+      {file.type === "update" ? (
+        <Stack gap="xs" py="xs">
+          {file.hunks.map((hunk, index) => (
+            <PatchHunk key={`${hunk.context ?? "root"}:${index}`} hunk={hunk} />
+          ))}
+        </Stack>
+      ) : null}
+    </Box>
+  );
+}
+
 function presentationDetail(
   presentation: KnownToolPresentation,
   t: ToolCallTranslations,
@@ -207,17 +337,13 @@ function presentationDetail(
           <Code block>{presentation.detail.output}</Code>
         </ScrollArea.Autosize>
       );
+    case "diff":
+      return <PatchFile file={presentation.detail.file} />;
     case "patch":
       return (
-        <Stack gap={rem(4)}>
-          {presentation.detail.changes.map((change) => (
-            <Text
-              key={`${change.action}:${change.path}`}
-              size="xs"
-              ff="monospace"
-            >
-              {t(`changeAction.${change.action}`)} · {change.path}
-            </Text>
+        <Stack gap="xs">
+          {presentation.detail.files.map((file) => (
+            <PatchFile key={`${file.type}:${file.path}`} file={file} />
           ))}
         </Stack>
       );
@@ -282,68 +408,67 @@ function GenericToolCallCard({
   hiddenAttachmentUris,
 }: Required<ToolCallCardProps>): ReactElement {
   const t = useTranslations("chat.toolCall");
-  const [openedToolCallId, setOpenedToolCallId] = useState<string | null>(null);
-  const isPreparing = toolCall.status === "preparing";
-  const isOpened = openedToolCallId === toolCall.id;
+  const [opened, setOpened] = useState(false);
   const visibleAttachments = genericVisibleAttachments(
     toolCall,
     hiddenAttachmentUris,
   );
-
-  if (isPreparing) {
-    return (
-      <Box py="xs">
-        <Group gap="xs" wrap="nowrap">
-          <Loader size="sm" />
-          <Text size="sm" fw={500} c="dimmed">
-            {t("preparing")}
-          </Text>
-        </Group>
-      </Box>
-    );
-  }
+  const detail =
+    toolCall.arguments.length > 0 || (toolCall.result?.length ?? 0) > 0 ? (
+      <RawPayloadContent
+        argumentsText={toolCall.arguments}
+        outputText={toolCall.result ?? ""}
+      />
+    ) : null;
+  const status = t(toolCall.status);
+  const statusColor = toolCallStatusLabelColor(toolCall.status);
+  const ariaLabel = [toolCall.name, t("genericDetails"), status].join(" · ");
 
   return (
     <>
-      <Accordion
-        variant="contained"
-        my="xs"
-        value={openedToolCallId}
-        onChange={setOpenedToolCallId}
-        disableChevronRotation
-        chevron={
-          <IconChevronRight
-            size={rem(16)}
-            style={{
-              transform: isOpened ? "rotate(90deg)" : "rotate(0deg)",
-              transition: "transform 120ms ease",
-            }}
-          />
-        }
-      >
-        <Accordion.Item value={toolCall.id}>
-          <Accordion.Control icon={toolCallStatusIcon(toolCall.status)}>
-            <Group gap="xs">
-              <Text size="sm" fw={500}>
+      <Box py="xs" style={{ borderBottom: flatRowBorder }}>
+        <UnstyledButton
+          w="100%"
+          onClick={() => setOpened((value) => !value)}
+          aria-expanded={opened}
+          aria-label={ariaLabel}
+          disabled={detail === null}
+        >
+          <Group gap="xs" wrap="nowrap" align="flex-start">
+            <IconChevronRight
+              aria-hidden="true"
+              size={rem(14)}
+              color="var(--mantine-color-dimmed)"
+              style={{
+                flexShrink: 0,
+                marginTop: rem(2),
+                opacity: detail === null ? 0 : 1,
+                transform: opened ? "rotate(90deg)" : "none",
+                transition: "transform 120ms ease",
+              }}
+            />
+            <Box c="dimmed" style={{ flexShrink: 0 }}>
+              {toolCallStatusIcon(toolCall.status)}
+            </Box>
+            <Group gap={rem(6)} flex={1} miw={0} wrap="nowrap">
+              <Text size="sm" c="dimmed" fw={500} style={{ flexShrink: 0 }}>
                 {toolCall.name}
               </Text>
-              <Badge
-                size="xs"
-                variant="light"
-                color={toolCallBadgeColor(toolCall.status)}
-              >
-                {t(toolCall.status)}
-              </Badge>
+              <Text size="xs" c="dimmed" truncate miw={0}>
+                {t("genericDetails")}
+              </Text>
             </Group>
-          </Accordion.Control>
-          <Accordion.Panel>
-            <RawPayloadContent
-              argumentsText={toolCall.arguments}
-              outputText={toolCall.result ?? ""}
-            />
-          </Accordion.Panel>
-        </Accordion.Item>
-      </Accordion>
+            <Text size="xs" c={statusColor} style={{ flexShrink: 0 }}>
+              {status}
+            </Text>
+          </Group>
+        </UnstyledButton>
+        {opened && detail !== null ? (
+          <Box pl={rem(54)} pr="xs" pt="xs">
+            {detail}
+          </Box>
+        ) : null}
+      </Box>
       {visibleAttachments.length > 0 ? (
         <FileAttachmentList files={visibleAttachments} />
       ) : null}
@@ -371,6 +496,7 @@ function SpecializedToolCallCard({
   );
   const action = actionLabel(presentation.action, t);
   const status = t(toolCall.status);
+  const statusColor = toolCallStatusLabelColor(toolCall.status);
   const hasRawData =
     toolCall.arguments.length > 0 || (toolCall.result?.length ?? 0) > 0;
   const ariaLabel = [
@@ -389,50 +515,43 @@ function SpecializedToolCallCard({
         color="var(--mantine-color-dimmed)"
         style={{
           flexShrink: 0,
-          marginTop: rem(3),
+          marginTop: rem(2),
           opacity: detail === null ? 0 : 1,
           transform: opened ? "rotate(90deg)" : "none",
           transition: "transform 120ms ease",
         }}
       />
-      <ThemeIcon
-        size="sm"
-        radius="xl"
-        variant="light"
-        color={toolCall.status === "failed" ? "red" : "gray"}
-        style={{ flexShrink: 0 }}
-      >
+      <Box c="dimmed" style={{ flexShrink: 0, marginTop: rem(1) }}>
         {presentationIcon(presentation)}
-      </ThemeIcon>
-      <Group gap={rem(6)} flex={1} miw={0} wrap="wrap">
-        <Text size="sm" fw={600}>
+      </Box>
+      <Group gap={rem(6)} flex={1} miw={0} wrap="nowrap">
+        <Text size="sm" c="dimmed" fw={500} style={{ flexShrink: 0 }}>
           {action}
         </Text>
         {presentation.subject !== null ? (
-          <Text size="sm" c="dimmed" ff="monospace" truncate miw={0}>
+          <Text size="sm" c="dimmed" ff="monospace" truncate flex={1} miw={0}>
             {presentation.subject}
           </Text>
         ) : null}
         {qualifier !== null ? (
-          <Text size="xs" c="dimmed">
+          <Text size="xs" c="dimmed" truncate miw={0} style={{ flexShrink: 1 }}>
             {qualifier}
           </Text>
         ) : null}
       </Group>
-      <Badge
+      <Text
         size="xs"
-        variant="light"
-        color={toolCallBadgeColor(toolCall.status)}
-        style={{ flexShrink: 0 }}
+        c={statusColor}
+        style={{ flexShrink: 0, marginTop: rem(1) }}
       >
         {status}
-      </Badge>
+      </Text>
     </Group>
   );
 
   return (
     <>
-      <Box py="xs">
+      <Box py="xs" style={{ borderBottom: flatRowBorder }}>
         <Group gap={rem(4)} wrap="nowrap" align="flex-start">
           {detail === null ? (
             <Box flex={1} miw={0} aria-label={ariaLabel}>
