@@ -17,6 +17,7 @@ from azents.core.enums import (
     AgentSessionKind,
     AgentSessionStartReason,
     AgentSessionStatus,
+    ArchivedSessionPurgeParticipantPhase,
     ArchivedSessionPurgeStatus,
     ArtifactStatus,
     ExchangeFileOrigin,
@@ -123,6 +124,8 @@ class _RetentionRepository:
         next_attempt_at: datetime.datetime,
         error_kind: str,
         error_summary: str,
+        error_participant_key: str | None,
+        error_phase: ArchivedSessionPurgeParticipantPhase | None,
         now: datetime.datetime,
     ) -> None:
         del session, job_id, lease_owner, now
@@ -131,6 +134,8 @@ class _RetentionRepository:
             "next_attempt_at": next_attempt_at,
             "error_kind": error_kind,
             "error_summary": error_summary,
+            "error_participant_key": error_participant_key,
+            "error_phase": error_phase,
         }
 
     async def complete_purge_job(
@@ -482,6 +487,8 @@ def _job(now: datetime.datetime) -> ArchivedSessionPurgeJob:
         next_attempt_at=None,
         last_error_kind=None,
         last_error_summary=None,
+        last_error_participant_key=None,
+        last_error_phase=None,
         model_file_count=0,
         artifact_count=0,
         exchange_file_count=0,

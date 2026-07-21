@@ -224,6 +224,15 @@ class ArchivedSessionPurgeStatus(enum.StrEnum):
     CANCELLED = "cancelled"
 
 
+class ArchivedSessionPurgeParticipantPhase(enum.StrEnum):
+    """Last durable checkpoint completed by one purge participant."""
+
+    PENDING = "pending"
+    PREPARED = "prepared"
+    CLEANUP_COMPLETED = "cleanup_completed"
+    VERIFIED = "verified"
+
+
 class InputBufferKind(enum.StrEnum):
     """InputBuffer payload kind."""
 

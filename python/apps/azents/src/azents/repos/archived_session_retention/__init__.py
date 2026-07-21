@@ -10,18 +10,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.enums import (
     AgentSessionKind,
     AgentSessionStatus,
+    ArchivedSessionPurgeParticipantPhase,
     ArchivedSessionPurgeStatus,
     ArchivedSessionRetentionApplicationStatus,
 )
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.archived_session_retention import (
     RDBArchivedSessionPurgeJob,
+    RDBArchivedSessionPurgeParticipantExecution,
     RDBArchivedSessionRetentionApplication,
     RDBSystemFileLifecycleSetting,
 )
 
 from .data import (
     ArchivedSessionPurgeJob,
+    ArchivedSessionPurgeParticipantExecution,
+    ArchivedSessionPurgeParticipantSnapshot,
     ArchivedSessionRetentionApplication,
     RetentionBatchResult,
     RetentionImpactPreview,
@@ -103,6 +107,8 @@ class ArchivedSessionRetentionRepository:
             "next_attempt_at": None,
             "last_error_kind": None,
             "last_error_summary": None,
+            "last_error_participant_key": None,
+            "last_error_phase": None,
             "started_at": None,
             "last_attempt_at": None,
             "cancelled_at": None,
@@ -479,6 +485,8 @@ class ArchivedSessionRetentionRepository:
                 "next_attempt_at": None,
                 "last_error_kind": None,
                 "last_error_summary": None,
+                "last_error_participant_key": None,
+                "last_error_phase": None,
                 "started_at": None,
                 "last_attempt_at": None,
                 "cancelled_at": None,
@@ -679,6 +687,8 @@ class ArchivedSessionRetentionRepository:
                 next_attempt_at=None,
                 last_error_kind=None,
                 last_error_summary=None,
+                last_error_participant_key=None,
+                last_error_phase=None,
                 updated_at=now,
             )
             .returning(RDBArchivedSessionPurgeJob)
@@ -726,6 +736,8 @@ class ArchivedSessionRetentionRepository:
         next_attempt_at: datetime.datetime,
         error_kind: str,
         error_summary: str,
+        error_participant_key: str | None,
+        error_phase: ArchivedSessionPurgeParticipantPhase | None,
         now: datetime.datetime,
     ) -> None:
         """Release a purge lease into bounded retry wait."""
@@ -742,6 +754,8 @@ class ArchivedSessionRetentionRepository:
                 next_attempt_at=next_attempt_at,
                 last_error_kind=error_kind[:120],
                 last_error_summary=error_summary[:500],
+                last_error_participant_key=error_participant_key,
+                last_error_phase=error_phase,
                 updated_at=now,
             )
         )
@@ -768,12 +782,274 @@ class ArchivedSessionRetentionRepository:
                 next_attempt_at=None,
                 last_error_kind=None,
                 last_error_summary=None,
+                last_error_participant_key=None,
+                last_error_phase=None,
                 completed_at=now,
                 updated_at=now,
             )
             .returning(RDBArchivedSessionPurgeJob.id)
         )
         return result.scalar_one_or_none() is not None
+
+    async def materialize_purge_participant_executions(
+        self,
+        session: AsyncSession,
+        *,
+        job_id: str,
+        lease_owner: str,
+        participants: tuple[ArchivedSessionPurgeParticipantSnapshot, ...],
+    ) -> list[ArchivedSessionPurgeParticipantExecution]:
+        """Persist an immutable participant set for an owned fenced purge job."""
+        expected = {
+            (participant.participant_key, participant.policy_version)
+            for participant in participants
+        }
+        if len(expected) != len(participants):
+            raise ValueError("Purge participant snapshot contains duplicate keys.")
+
+        job = await session.scalar(
+            sa.select(RDBArchivedSessionPurgeJob)
+            .where(
+                RDBArchivedSessionPurgeJob.id == job_id,
+                RDBArchivedSessionPurgeJob.lease_owner == lease_owner,
+                RDBArchivedSessionPurgeJob.fencing_started_at.is_not(None),
+            )
+            .with_for_update()
+        )
+        if job is None:
+            raise RuntimeError("Purge job is not fenced by the supplied lease owner.")
+
+        rows = list(
+            (
+                await session.scalars(
+                    sa.select(RDBArchivedSessionPurgeParticipantExecution)
+                    .where(
+                        RDBArchivedSessionPurgeParticipantExecution.purge_job_id
+                        == job_id
+                    )
+                    .order_by(
+                        RDBArchivedSessionPurgeParticipantExecution.participant_key
+                    )
+                    .with_for_update()
+                )
+            ).all()
+        )
+        if rows:
+            actual = {(row.participant_key, row.policy_version) for row in rows}
+            if actual != expected:
+                raise RuntimeError(
+                    "Purge participant snapshot is immutable and does not match "
+                    "the supplied registry."
+                )
+            return [self._build_participant_execution(row) for row in rows]
+
+        session.add_all(
+            [
+                RDBArchivedSessionPurgeParticipantExecution(
+                    purge_job_id=job_id,
+                    participant_key=participant.participant_key,
+                    policy_version=participant.policy_version,
+                )
+                for participant in sorted(
+                    participants,
+                    key=lambda participant: participant.participant_key,
+                )
+            ]
+        )
+        await session.flush()
+        return await self.list_purge_participant_executions(
+            session,
+            job_id=job_id,
+        )
+
+    async def list_purge_participant_executions(
+        self,
+        session: AsyncSession,
+        *,
+        job_id: str,
+    ) -> list[ArchivedSessionPurgeParticipantExecution]:
+        """List participant checkpoints in stable key order."""
+        rows = list(
+            (
+                await session.scalars(
+                    sa.select(RDBArchivedSessionPurgeParticipantExecution)
+                    .where(
+                        RDBArchivedSessionPurgeParticipantExecution.purge_job_id
+                        == job_id
+                    )
+                    .order_by(
+                        RDBArchivedSessionPurgeParticipantExecution.participant_key
+                    )
+                )
+            ).all()
+        )
+        return [self._build_participant_execution(row) for row in rows]
+
+    async def start_purge_participant_attempt(
+        self,
+        session: AsyncSession,
+        *,
+        job_id: str,
+        lease_owner: str,
+        participant_key: str,
+        now: datetime.datetime,
+    ) -> bool:
+        """Record an actual owned participant attempt and clear stale block state."""
+        result = await session.execute(
+            sa.update(RDBArchivedSessionPurgeParticipantExecution)
+            .where(
+                RDBArchivedSessionPurgeParticipantExecution.purge_job_id == job_id,
+                RDBArchivedSessionPurgeParticipantExecution.participant_key
+                == participant_key,
+                sa.exists(
+                    sa.select(RDBArchivedSessionPurgeJob.id).where(
+                        RDBArchivedSessionPurgeJob.id == job_id,
+                        RDBArchivedSessionPurgeJob.lease_owner == lease_owner,
+                    )
+                ),
+            )
+            .values(
+                attempt_count=(
+                    RDBArchivedSessionPurgeParticipantExecution.attempt_count + 1
+                ),
+                blocked_by_participant_key=None,
+                last_error_kind=None,
+                last_error_summary=None,
+                last_attempt_at=now,
+                updated_at=now,
+            )
+            .returning(RDBArchivedSessionPurgeParticipantExecution.participant_key)
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def mark_purge_participant_blocked(
+        self,
+        session: AsyncSession,
+        *,
+        job_id: str,
+        lease_owner: str,
+        participant_key: str,
+        blocked_by_participant_key: str,
+        now: datetime.datetime,
+    ) -> bool:
+        """Record an unmet dependency without incrementing the attempt count."""
+        result = await session.execute(
+            sa.update(RDBArchivedSessionPurgeParticipantExecution)
+            .where(
+                RDBArchivedSessionPurgeParticipantExecution.purge_job_id == job_id,
+                RDBArchivedSessionPurgeParticipantExecution.participant_key
+                == participant_key,
+                sa.exists(
+                    sa.select(RDBArchivedSessionPurgeJob.id).where(
+                        RDBArchivedSessionPurgeJob.id == job_id,
+                        RDBArchivedSessionPurgeJob.lease_owner == lease_owner,
+                    )
+                ),
+            )
+            .values(
+                blocked_by_participant_key=blocked_by_participant_key,
+                updated_at=now,
+            )
+            .returning(RDBArchivedSessionPurgeParticipantExecution.participant_key)
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def checkpoint_purge_participant(
+        self,
+        session: AsyncSession,
+        *,
+        job_id: str,
+        lease_owner: str,
+        participant_key: str,
+        phase: ArchivedSessionPurgeParticipantPhase,
+        operational_summary: dict[str, object] | None,
+        now: datetime.datetime,
+    ) -> bool:
+        """Advance one participant checkpoint under the current purge lease."""
+        timestamp_values: dict[str, object] = {}
+        if phase is ArchivedSessionPurgeParticipantPhase.PREPARED:
+            timestamp_values["prepared_at"] = now
+        elif phase is ArchivedSessionPurgeParticipantPhase.CLEANUP_COMPLETED:
+            timestamp_values["cleanup_completed_at"] = now
+        elif phase is ArchivedSessionPurgeParticipantPhase.VERIFIED:
+            timestamp_values["verified_at"] = now
+
+        result = await session.execute(
+            sa.update(RDBArchivedSessionPurgeParticipantExecution)
+            .where(
+                RDBArchivedSessionPurgeParticipantExecution.purge_job_id == job_id,
+                RDBArchivedSessionPurgeParticipantExecution.participant_key
+                == participant_key,
+                sa.exists(
+                    sa.select(RDBArchivedSessionPurgeJob.id).where(
+                        RDBArchivedSessionPurgeJob.id == job_id,
+                        RDBArchivedSessionPurgeJob.lease_owner == lease_owner,
+                    )
+                ),
+            )
+            .values(
+                phase=phase,
+                blocked_by_participant_key=None,
+                last_error_kind=None,
+                last_error_summary=None,
+                operational_summary=operational_summary,
+                updated_at=now,
+                **timestamp_values,
+            )
+            .returning(RDBArchivedSessionPurgeParticipantExecution.participant_key)
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def record_purge_participant_failure(
+        self,
+        session: AsyncSession,
+        *,
+        job_id: str,
+        lease_owner: str,
+        participant_key: str,
+        phase: ArchivedSessionPurgeParticipantPhase,
+        error_kind: str,
+        error_summary: str,
+        now: datetime.datetime,
+    ) -> bool:
+        """Persist participant failure details and job-level attribution together."""
+        participant_result = await session.execute(
+            sa.update(RDBArchivedSessionPurgeParticipantExecution)
+            .where(
+                RDBArchivedSessionPurgeParticipantExecution.purge_job_id == job_id,
+                RDBArchivedSessionPurgeParticipantExecution.participant_key
+                == participant_key,
+                sa.exists(
+                    sa.select(RDBArchivedSessionPurgeJob.id).where(
+                        RDBArchivedSessionPurgeJob.id == job_id,
+                        RDBArchivedSessionPurgeJob.lease_owner == lease_owner,
+                    )
+                ),
+            )
+            .values(
+                last_error_kind=error_kind[:120],
+                last_error_summary=error_summary[:500],
+                updated_at=now,
+            )
+            .returning(RDBArchivedSessionPurgeParticipantExecution.participant_key)
+        )
+        if participant_result.scalar_one_or_none() is None:
+            return False
+        await session.execute(
+            sa.update(RDBArchivedSessionPurgeJob)
+            .where(
+                RDBArchivedSessionPurgeJob.id == job_id,
+                RDBArchivedSessionPurgeJob.lease_owner == lease_owner,
+            )
+            .values(
+                last_error_kind=error_kind[:120],
+                last_error_summary=error_summary[:500],
+                last_error_participant_key=participant_key,
+                last_error_phase=phase,
+                updated_at=now,
+            )
+        )
+        return True
 
     def _build_settings(
         self, row: RDBSystemFileLifecycleSetting
@@ -796,3 +1072,12 @@ class ArchivedSessionRetentionRepository:
 
     def _build_job(self, row: RDBArchivedSessionPurgeJob) -> ArchivedSessionPurgeJob:
         return ArchivedSessionPurgeJob.model_validate(row, from_attributes=True)
+
+    def _build_participant_execution(
+        self,
+        row: RDBArchivedSessionPurgeParticipantExecution,
+    ) -> ArchivedSessionPurgeParticipantExecution:
+        return ArchivedSessionPurgeParticipantExecution.model_validate(
+            row,
+            from_attributes=True,
+        )
