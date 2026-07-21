@@ -24,7 +24,9 @@ async function resolveAccountLocale(): Promise<string | null> {
 
   try {
     const { data } = await userV1Me({
-      client: createApiClientWithAccessToken(accessToken.token),
+      client: createApiClientWithAccessToken(accessToken.token, {
+        cache: "no-store",
+      }),
       throwOnError: true,
     });
     return isSupportedLocale(data.locale) ? data.locale : null;

@@ -10,4 +10,8 @@ export type AccountState =
       email: string;
       locale: string;
       createdAt: Date;
+      localeUpdate: {
+        isPending: boolean;
+        hasError: boolean;
+      };
     };

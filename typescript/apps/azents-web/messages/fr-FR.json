@@ -140,6 +140,7 @@
     "createdAt": "Inscription",
     "localeLabel": "Langue",
     "saveLocale": "Enregistrer la langue",
+    "saveLocaleError": "Impossible d’enregistrer votre préférence linguistique. Veuillez réessayer.",
     "sidebar": {
       "workspaces": "Espaces de travail",
       "general": "Général",

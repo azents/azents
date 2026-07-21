@@ -15,6 +15,10 @@ const loadedState: AccountState = {
   email: "alex@example.com",
   locale: "en-US",
   createdAt: new Date("2026-04-01T12:00:00.000Z"),
+  localeUpdate: {
+    isPending: false,
+    hasError: false,
+  },
 };
 
 export const Loaded = {
@@ -34,6 +38,32 @@ export const Loading = {
 export const Error = {
   args: {
     state: { type: "ERROR", message: "Failed to load account information" },
+    onSubmit: () => {},
+  },
+} satisfies Story;
+
+export const SavingLocale = {
+  args: {
+    state: {
+      ...loadedState,
+      localeUpdate: {
+        isPending: true,
+        hasError: false,
+      },
+    },
+    onSubmit: () => {},
+  },
+} satisfies Story;
+
+export const LocaleSaveError = {
+  args: {
+    state: {
+      ...loadedState,
+      localeUpdate: {
+        isPending: false,
+        hasError: true,
+      },
+    },
     onSubmit: () => {},
   },
 } satisfies Story;

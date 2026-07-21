@@ -47,6 +47,10 @@ export function useAccountContainer(): AccountContainerProps {
           email: data.email,
           locale: data.locale,
           createdAt: new Date(data.created_at),
+          localeUpdate: {
+            isPending: updateMutation.isPending,
+            hasError: updateMutation.isError,
+          },
         };
 
   return { state, onSubmit };

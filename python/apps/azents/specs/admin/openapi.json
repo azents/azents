@@ -4781,6 +4781,12 @@
           },
           "locale": {
             "type": "string",
+            "enum": [
+              "en-US",
+              "ko-KR",
+              "ja-JP",
+              "fr-FR"
+            ],
             "title": "Locale",
             "description": "Account locale (BCP 47)"
           },

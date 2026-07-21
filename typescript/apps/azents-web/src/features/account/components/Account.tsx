@@ -65,7 +65,11 @@ export function Account({
                 label={t("createdAt")}
                 value={state.createdAt.toLocaleDateString()}
               />
-              <AccountLocaleForm locale={state.locale} onSubmit={onSubmit} />
+              <AccountLocaleForm
+                locale={state.locale}
+                localeUpdate={state.localeUpdate}
+                onSubmit={onSubmit}
+              />
             </Stack>
           </Paper>
         </Container>
@@ -75,11 +79,16 @@ export function Account({
 
 interface AccountLocaleFormProps {
   locale: string;
+  localeUpdate: {
+    isPending: boolean;
+    hasError: boolean;
+  };
   onSubmit: (locale: SupportedLocale) => void;
 }
 
 function AccountLocaleForm({
   locale: initialLocale,
+  localeUpdate,
   onSubmit,
 }: AccountLocaleFormProps): React.ReactElement {
   const t = useTranslations("account");
@@ -109,6 +118,7 @@ function AccountLocaleForm({
             label: LOCALE_DISPLAY_NAMES[value],
           }))}
           value={locale}
+          disabled={localeUpdate.isPending}
           onChange={(event) => {
             const value = event.currentTarget.value;
             if (isSupportedLocale(value)) {
@@ -116,7 +126,18 @@ function AccountLocaleForm({
             }
           }}
         />
-        <Button type="submit">{t("saveLocale")}</Button>
+        <Button
+          type="submit"
+          loading={localeUpdate.isPending}
+          disabled={localeUpdate.isPending}
+        >
+          {t("saveLocale")}
+        </Button>
+        {localeUpdate.hasError ? (
+          <Text c="red" size="sm">
+            {t("saveLocaleError")}
+          </Text>
+        ) : null}
       </Stack>
     </form>
   );

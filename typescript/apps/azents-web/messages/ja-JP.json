@@ -140,6 +140,7 @@
     "createdAt": "登録日",
     "localeLabel": "言語",
     "saveLocale": "言語を保存",
+    "saveLocaleError": "言語設定を保存できませんでした。もう一度お試しください。",
     "sidebar": {
       "workspaces": "ワークスペース一覧",
       "general": "一般",
