@@ -19,7 +19,7 @@ void test("specializes a validated first-party read call", () => {
     type: "specialized",
     presentation: {
       action: "read",
-      subject: "src/example.ts",
+      subject: "example.ts",
       qualifier: null,
       detail: { type: "output", output: "export const example = true;" },
     },
@@ -143,7 +143,7 @@ void test("uses validated process metadata for terminal command detail", () => {
   });
 });
 
-void test("normalizes specialized subjects to one bounded line", () => {
+void test("uses the basename for file operation subjects", () => {
   const path = `/workspace/agent/src/with\ncontrol/${"a".repeat(120)}.ts`;
   const result = knownToolPresentation(
     toolCall({
@@ -151,9 +151,7 @@ void test("normalizes specialized subjects to one bounded line", () => {
     }),
   );
   assert.equal(result.type, "specialized");
-  assert.ok(result.presentation.subject !== null);
-  assert.equal(result.presentation.subject.includes("\n"), false);
-  assert.ok(result.presentation.subject.length <= 96);
+  assert.equal(result.presentation.subject, `${"a".repeat(120)}.ts`);
 });
 
 void test("specializes simple Phase 1 resource and search tools", () => {
@@ -210,13 +208,13 @@ void test("renders file edits as a unified diff", () => {
     type: "specialized",
     presentation: {
       action: "edit",
-      subject: "src/example.ts",
+      subject: "example.ts",
       qualifier: null,
       detail: {
         type: "diff",
         file: {
           type: "update",
-          path: "src/example.ts",
+          path: "/workspace/agent/src/example.ts",
           moveTo: null,
           hunks: [
             {
@@ -297,7 +295,7 @@ void test("specializes present_file with the first presented file", () => {
     type: "specialized",
     presentation: {
       action: "present",
-      subject: "reports/review.md",
+      subject: "review.md",
       qualifier: null,
       detail: null,
     },

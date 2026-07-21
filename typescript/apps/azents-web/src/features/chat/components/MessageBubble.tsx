@@ -14,16 +14,12 @@ import {
   Group,
   Paper,
   rem,
-  ScrollArea,
   Stack,
   Text,
   Tooltip,
-  UnstyledButton,
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import {
-  IconBook,
-  IconBubble,
   IconCheck,
   IconChevronRight,
   IconClock,
@@ -32,7 +28,7 @@ import {
   IconTargetArrow,
 } from "@tabler/icons-react";
 import { useLocale, useTranslations } from "next-intl";
-import { memo, useMemo, useRef } from "react";
+import { memo } from "react";
 import inlineControlClasses from "./ChatInlineControl.module.css";
 import {
   chatChevronTransition,
@@ -66,7 +62,6 @@ interface MessageBubbleProps {
 interface TextMessageProps {
   message: ChatMessage;
   hasContent: boolean;
-  hasReasoning: boolean;
 }
 
 type ChatTranslator = ReturnType<typeof useTranslations<"chat">>;
@@ -118,226 +113,13 @@ function formatFullDateTime(iso: string, locale: string): string {
   }).format(date);
 }
 
-const HTML_COMMENT_PATTERN =
-  /<!--[\s\S]*?-->|<!—[\s\S]*?(?:—>|-->)|<!--|-->|<!—|—>/gu;
-
-function removeHtmlComments(content: string): string {
-  return content.replace(HTML_COMMENT_PATTERN, "");
-}
-
-function markdownLineToPlainText(line: string): string {
-  return line
-    .replace(/^(?:`{3,}|~{3,})[^`~]*$/u, "")
-    .replace(/^(?:\s*[-*_]){3,}\s*$/u, "")
-    .replace(/^\s*[-+*]\s+\[[ xX]\]\s+/u, "")
-    .replace(/^\s{0,3}(?:#{1,6}\s+|>\s*|[-+*]\s+|\d+[.)]\s+)/u, "")
-    .replace(/!\[([^\]]*)\]\([^)]*\)/gu, "$1")
-    .replace(/\[([^\]]+)\]\([^)]*\)/gu, "$1")
-    .replace(/\[([^\]]+)\]\[[^\]]*\]/gu, "$1")
-    .replace(/<\/?[A-Za-z][^>]*>/gu, "")
-    .replace(/<([^>]+)>/gu, "$1")
-    .replace(/(\*\*|__|~~)(.*?)\1/gu, "$2")
-    .replace(/(^|\s)([*_])([^*_]+)\2(?=\s|[.,!?]|$)/gu, "$1$3")
-    .replace(/`([^`]*)`/gu, "$1")
-    .replace(/\\([\\`*_{}\[\]()#+\-.!>])/gu, "$1")
-    .replace(/&nbsp;/gu, " ")
-    .replace(/&amp;/gu, "&")
-    .replace(/&lt;/gu, "<")
-    .replace(/&gt;/gu, ">")
-    .replace(/&quot;/gu, '"')
-    .replace(/&#39;|&apos;/gu, "'")
-    .replace(/\s+/gu, " ")
-    .trim();
-}
-
-function getThinkingPreview(reasoningSummary: string): string | null {
-  const firstNonEmptyLine = removeHtmlComments(reasoningSummary)
-    .split(/\r?\n/u)
-    .map((line) => line.trim())
-    .find((line) => line.length > 0);
-
-  if (!firstNonEmptyLine) {
-    return null;
-  }
-
-  const preview = markdownLineToPlainText(firstNonEmptyLine);
-  return preview.length > 0 ? preview : null;
-}
-
-function isElementVisibleInViewport(element: HTMLElement): boolean {
-  const rect = element.getBoundingClientRect();
-  const viewportHeight =
-    window.innerHeight || document.documentElement.clientHeight;
-
-  return rect.top >= 0 && rect.bottom <= viewportHeight;
-}
-
-function ThinkingBlock({
-  hasContent,
-  reasoningSummary,
-}: {
-  hasContent: boolean;
-  reasoningSummary: string;
-}): React.ReactElement {
-  const t = useTranslations("chat");
-  const thinkingHeaderRef = useRef<HTMLButtonElement>(null);
-  const [thinkingOpened, { close: closeThinking, toggle: toggleThinking }] =
-    useDisclosure(false);
-  const sanitizedReasoningSummary = useMemo(
-    () => removeHtmlComments(reasoningSummary).trim(),
-    [reasoningSummary],
-  );
-  const preview = useMemo(
-    () => getThinkingPreview(sanitizedReasoningSummary),
-    [sanitizedReasoningSummary],
-  );
-  const canExpand = sanitizedReasoningSummary.length > 0;
-  const label =
-    thinkingOpened || preview === null ? t("thinkingLabel") : preview;
-
-  function collapseFromThinkingBody(): void {
-    const shouldScrollToHeader = thinkingHeaderRef.current
-      ? !isElementVisibleInViewport(thinkingHeaderRef.current)
-      : false;
-
-    closeThinking();
-
-    if (shouldScrollToHeader) {
-      requestAnimationFrame(() => {
-        thinkingHeaderRef.current?.scrollIntoView({
-          behavior: "smooth",
-          block: "start",
-        });
-      });
-    }
-  }
-
-  function handleThinkingBodyClick(
-    event: React.MouseEvent<HTMLDivElement>,
-  ): void {
-    const interactiveElement =
-      event.target instanceof Element
-        ? event.target.closest(
-            'a, button, input, select, textarea, [role="button"]',
-          )
-        : null;
-
-    if (interactiveElement && interactiveElement !== event.currentTarget) {
-      return;
-    }
-
-    collapseFromThinkingBody();
-  }
-
-  function handleThinkingBodyKeyDown(
-    event: React.KeyboardEvent<HTMLDivElement>,
-  ): void {
-    if (
-      event.target !== event.currentTarget ||
-      (event.key !== "Enter" && event.key !== " ")
-    ) {
-      return;
-    }
-
-    event.preventDefault();
-    collapseFromThinkingBody();
-  }
-
-  const headerContent = (
-    <>
-      {canExpand && (
-        <IconChevronRight
-          aria-hidden="true"
-          size={14}
-          className={classes.thinkingChevron}
-          data-opened={thinkingOpened}
-          color="var(--mantine-color-dimmed)"
-        />
-      )}
-      <IconBubble
-        aria-hidden="true"
-        size={14}
-        stroke={1.8}
-        className={classes.thinkingIcon}
-      />
-      <Text
-        key={thinkingOpened ? "opened" : "closed"}
-        component="span"
-        size="xs"
-        c="dimmed"
-        fw={500}
-        className={`${classes.thinkingLabel} ${inlineControlClasses.label}`}
-      >
-        {label}
-      </Text>
-    </>
-  );
-
-  return (
-    <Box mb={hasContent ? "xs" : 0}>
-      {canExpand ? (
-        <UnstyledButton
-          ref={thinkingHeaderRef}
-          className={classes.thinkingHeader}
-          onClick={toggleThinking}
-          aria-expanded={thinkingOpened}
-        >
-          <Group
-            gap={rem(6)}
-            wrap="nowrap"
-            className={`${classes.thinkingHeaderContent} ${inlineControlClasses.root}`}
-          >
-            {headerContent}
-          </Group>
-        </UnstyledButton>
-      ) : (
-        <Group
-          gap={rem(6)}
-          wrap="nowrap"
-          className={`${classes.thinkingHeader} ${inlineControlClasses.root}`}
-        >
-          {headerContent}
-        </Group>
-      )}
-      {canExpand && (
-        <Collapse
-          expanded={thinkingOpened}
-          keepMounted={false}
-          {...chatCollapseTransitionProps}
-        >
-          <ScrollArea.Autosize mah={rem(300)} mt={rem(4)}>
-            <Box
-              c="dimmed"
-              role="button"
-              tabIndex={0}
-              aria-label={t("collapseThinking")}
-              onClick={handleThinkingBodyClick}
-              onKeyDown={handleThinkingBodyKeyDown}
-              className={classes.thinkingBody}
-            >
-              <MarkdownContent>{sanitizedReasoningSummary}</MarkdownContent>
-            </Box>
-          </ScrollArea.Autosize>
-        </Collapse>
-      )}
-    </Box>
-  );
-}
-
 function TextMessageContent({
   message,
-  hasContent,
-  hasReasoning,
-}: TextMessageProps): React.ReactElement {
+}: {
+  message: ChatMessage;
+}): React.ReactElement {
   return (
     <>
-      {(hasReasoning || (message.status === "partial" && !message.content)) && (
-        <ThinkingBlock
-          hasContent={hasContent}
-          reasoningSummary={message.reasoningSummary ?? ""}
-        />
-      )}
-
       {message.content && (
         <>
           <MarkdownContent>{message.content}</MarkdownContent>
@@ -355,7 +137,6 @@ function TextMessageContent({
 function UserTextMessage({
   message,
   hasContent,
-  hasReasoning,
   editable = false,
   onEdit,
 }: TextMessageProps & {
@@ -423,7 +204,7 @@ function UserTextMessage({
             />
           )}
 
-          {(hasContent || hasReasoning || message.status === "partial") && (
+          {hasContent && (
             <Paper
               px="sm"
               py="2xs"
@@ -439,11 +220,7 @@ function UserTextMessage({
                 marginLeft: "auto",
               }}
             >
-              <TextMessageContent
-                message={message}
-                hasContent={hasContent}
-                hasReasoning={hasReasoning}
-              />
+              <TextMessageContent message={message} />
             </Paper>
           )}
 
@@ -550,19 +327,12 @@ function AgentMailboxMessage({
 function AssistantTextMessage({
   message,
   hasContent,
-  hasReasoning,
 }: TextMessageProps): React.ReactElement {
   return (
     <Box mb="md" w="100%" style={{ minWidth: 0 }}>
       <Box style={{ maxWidth: "100%", minWidth: 0, overflowWrap: "anywhere" }}>
         <MessageMetadataSurface>
-          {(hasContent || hasReasoning || message.status === "partial") && (
-            <TextMessageContent
-              message={message}
-              hasContent={hasContent}
-              hasReasoning={hasReasoning}
-            />
-          )}
+          {hasContent && <TextMessageContent message={message} />}
 
           {message.attachments && message.attachments.length > 0 && (
             <FileAttachmentList files={message.attachments} />
@@ -595,96 +365,6 @@ function GoalControlMessage({ label }: { label: string }): React.ReactElement {
         {label}
       </Text>
     </Group>
-  );
-}
-
-function stripMarkdownFrontmatter(content: string): string {
-  const frontmatter = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/u.exec(
-    content.replace(/^\uFEFF/u, ""),
-  );
-  if (frontmatter === null || frontmatter.index !== 0) {
-    return content;
-  }
-  return content.slice(frontmatter[0].length).trimStart();
-}
-
-function SkillLoadedControlMessage({
-  message,
-}: {
-  message: ChatMessage;
-}): React.ReactElement {
-  const t = useTranslations("chat");
-  const [opened, { toggle }] = useDisclosure(false);
-  const name = message.metadata?.name || t("skillLoaded.unknownSkill");
-  const body = useMemo(
-    () => stripMarkdownFrontmatter(message.content ?? ""),
-    [message.content],
-  );
-
-  return (
-    <Box mb="md" w="100%" style={{ minWidth: 0 }}>
-      <Stack gap={rem(6)} maw={rem(720)}>
-        <Group
-          gap={rem(6)}
-          c="dimmed"
-          wrap="nowrap"
-          role="button"
-          tabIndex={0}
-          className={inlineControlClasses.root}
-          style={{ cursor: "pointer", userSelect: "none" }}
-          onClick={toggle}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" || event.key === " ") {
-              event.preventDefault();
-              toggle();
-            }
-          }}
-        >
-          <IconChevronRight
-            aria-hidden="true"
-            size={14}
-            stroke={1.8}
-            style={{
-              transform: opened ? "rotate(90deg)" : "none",
-              transition: chatChevronTransition,
-            }}
-          />
-          <IconBook aria-hidden="true" size={14} stroke={1.8} />
-          <Text
-            size="xs"
-            fw={600}
-            lineClamp={1}
-            className={inlineControlClasses.label}
-            style={{ minWidth: 0 }}
-          >
-            {t("skillLoaded.title", { name })}
-          </Text>
-        </Group>
-        <Collapse
-          expanded={opened}
-          keepMounted={false}
-          {...chatCollapseTransitionProps}
-        >
-          <Paper
-            withBorder
-            radius="md"
-            p="sm"
-            bg="var(--mantine-color-body)"
-            style={{ minWidth: 0, overflow: "hidden" }}
-          >
-            <ScrollArea.Autosize
-              mah={rem(360)}
-              scrollbars="y"
-              style={{ maxWidth: "100%" }}
-            >
-              <Box className={classes.skillLoadedBody}>
-                <MarkdownContent>{body}</MarkdownContent>
-              </Box>
-            </ScrollArea.Autosize>
-          </Paper>
-        </Collapse>
-      </Stack>
-    </Box>
   );
 }
 
@@ -869,7 +549,6 @@ export const MessageBubble = memo(function MessageBubble({
   const hasToolCalls =
     (message.toolCalls && message.toolCalls.length > 0) ||
     (message.providerToolCalls && message.providerToolCalls.length > 0);
-  const hasReasoning = !!message.reasoningSummary;
   const hasAttachments = message.attachments && message.attachments.length > 0;
 
   if (message.role === "goal_continuation") {
@@ -884,14 +563,6 @@ export const MessageBubble = memo(function MessageBubble({
     return (
       <Box opacity={dimmed ? 0.45 : 1}>
         <GoalControlMessage label={t("goalUpdatedIndicator")} />
-      </Box>
-    );
-  }
-
-  if (message.role === "skill_loaded") {
-    return (
-      <Box opacity={dimmed ? 0.45 : 1}>
-        <SkillLoadedControlMessage message={message} />
       </Box>
     );
   }
@@ -913,13 +584,7 @@ export const MessageBubble = memo(function MessageBubble({
   }
 
   // empty message guard: displayto content if nothing exists hide
-  if (
-    !hasContent &&
-    !hasToolCalls &&
-    !hasAttachments &&
-    message.status !== "partial" &&
-    !hasReasoning
-  ) {
+  if (!hasContent && !hasToolCalls && !hasAttachments) {
     return null;
   }
 
@@ -945,7 +610,6 @@ export const MessageBubble = memo(function MessageBubble({
         <UserTextMessage
           message={message}
           hasContent={hasContent}
-          hasReasoning={hasReasoning}
           editable={editable}
           onEdit={onEdit}
         />
@@ -966,11 +630,7 @@ export const MessageBubble = memo(function MessageBubble({
 
   return (
     <Box opacity={dimmed ? 0.45 : 1}>
-      <AssistantTextMessage
-        message={message}
-        hasContent={hasContent}
-        hasReasoning={hasReasoning}
-      />
+      <AssistantTextMessage message={message} hasContent={hasContent} />
     </Box>
   );
 });

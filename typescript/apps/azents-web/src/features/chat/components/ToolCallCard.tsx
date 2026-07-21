@@ -6,7 +6,6 @@ import {
   Code,
   Collapse,
   Group,
-  Loader,
   Modal,
   rem,
   ScrollArea,
@@ -28,6 +27,7 @@ import { useTranslations } from "next-intl";
 import { Component, useState } from "react";
 import { knownToolPresentation } from "../knownToolPresentation";
 import {
+  activityDetailScrollbarSize,
   activityRowBorder,
   activityRowChevronSize,
   activityRowDetailInset,
@@ -40,6 +40,7 @@ import {
   chatCollapseTransitionProps,
 } from "./collapsiblePresentation";
 import { FileAttachmentList } from "./FileAttachmentList";
+import { ToolCallStatusIcon } from "./ToolCallStatusIcon";
 import type { KnownToolPresentation } from "../knownToolPresentation";
 import type { ActiveToolCall } from "../types";
 import type {
@@ -95,33 +96,6 @@ function formatJson(value: string): string {
     return JSON.stringify(JSON.parse(value), null, 2);
   } catch {
     return value;
-  }
-}
-
-function toolCallStatusLabelColor(status: ActiveToolCall["status"]): string {
-  switch (status) {
-    case "preparing":
-    case "running":
-      return "blue";
-    case "failed":
-      return "red.5";
-    case "completed":
-    case "cancelled":
-    case "interrupted":
-      return "dimmed";
-  }
-}
-
-function toolCallStatusIcon(status: ActiveToolCall["status"]): ReactElement {
-  switch (status) {
-    case "running":
-    case "preparing":
-      return <Loader size={activityRowIconSize} />;
-    case "completed":
-    case "failed":
-    case "cancelled":
-    case "interrupted":
-      return <IconTool size={activityRowIconSize} />;
   }
 }
 
@@ -313,11 +287,23 @@ function PatchFile({ file }: { file: V4APatchFile }): ReactElement {
         <Text size="xs" c={patchFileActionColor(file)} fw={600}>
           {t(`changeAction.${file.type}`)}
         </Text>
-        <Text size="xs" ff="monospace" truncate flex={1} miw={0}>
+        <Text
+          size="xs"
+          ff="monospace"
+          flex={1}
+          miw={0}
+          style={{ overflowWrap: "anywhere", whiteSpace: "normal" }}
+        >
           {file.path}
         </Text>
         {destination !== null ? (
-          <Text size="xs" c="dimmed" ff="monospace" truncate miw={0}>
+          <Text
+            size="xs"
+            c="dimmed"
+            ff="monospace"
+            miw={0}
+            style={{ overflowWrap: "anywhere", whiteSpace: "normal" }}
+          >
             → {destination}
           </Text>
         ) : null}
@@ -350,7 +336,10 @@ function presentationDetail(
   switch (presentation.detail.type) {
     case "output":
       return (
-        <ScrollArea.Autosize mah={rem(240)}>
+        <ScrollArea.Autosize
+          mah={rem(240)}
+          scrollbarSize={activityDetailScrollbarSize}
+        >
           <Code block>{presentation.detail.output}</Code>
         </ScrollArea.Autosize>
       );
@@ -376,7 +365,10 @@ function presentationDetail(
       return (
         <Stack gap="xs">
           {consoleOutput.length > 0 ? (
-            <ScrollArea.Autosize mah={rem(240)}>
+            <ScrollArea.Autosize
+              mah={rem(240)}
+              scrollbarSize={activityDetailScrollbarSize}
+            >
               <Code block>{consoleOutput}</Code>
             </ScrollArea.Autosize>
           ) : null}
@@ -410,7 +402,10 @@ function RawPayloadContent({
           <Text size="xs" c="dimmed" mb="xs">
             {t("arguments")}
           </Text>
-          <ScrollArea.Autosize mah={rem(240)}>
+          <ScrollArea.Autosize
+            mah={rem(240)}
+            scrollbarSize={activityDetailScrollbarSize}
+          >
             <Code block>{rawText(argumentsText)}</Code>
           </ScrollArea.Autosize>
         </Box>
@@ -420,7 +415,10 @@ function RawPayloadContent({
           <Text size="xs" c="dimmed" mb="xs">
             {t("result")}
           </Text>
-          <ScrollArea.Autosize mah={rem(240)}>
+          <ScrollArea.Autosize
+            mah={rem(240)}
+            scrollbarSize={activityDetailScrollbarSize}
+          >
             <Code block>{rawText(outputText)}</Code>
           </ScrollArea.Autosize>
         </Box>
@@ -447,7 +445,6 @@ function GenericToolCallCard({
       />
     ) : null;
   const status = t(toolCall.status);
-  const statusColor = toolCallStatusLabelColor(toolCall.status);
   const ariaLabel = [toolCall.name, t("genericDetails"), status].join(" · ");
 
   return (
@@ -474,7 +471,7 @@ function GenericToolCallCard({
               }}
             />
             <Box c="dimmed" style={{ flexShrink: 0 }}>
-              {toolCallStatusIcon(toolCall.status)}
+              <IconTool size={activityRowIconSize} />
             </Box>
             <Group gap={rem(6)} flex={1} miw={0} wrap="nowrap">
               <Text
@@ -489,16 +486,7 @@ function GenericToolCallCard({
                 {t("genericDetails")}
               </Text>
             </Group>
-            <Text
-              size={activityRowSummarySize}
-              c={statusColor}
-              style={{
-                flexShrink: 0,
-                opacity: toolCall.status === "failed" ? 0.75 : 1,
-              }}
-            >
-              {status}
-            </Text>
+            <ToolCallStatusIcon label={status} status={toolCall.status} />
           </Group>
         </UnstyledButton>
         {detail !== null ? (
@@ -540,7 +528,6 @@ function SpecializedToolCallCard({
   );
   const action = actionLabel(presentation.action, t);
   const status = t(toolCall.status);
-  const statusColor = toolCallStatusLabelColor(toolCall.status);
   const hasRawData =
     toolCall.arguments.length > 0 || (toolCall.result?.length ?? 0) > 0;
   const ariaLabel = [
@@ -600,17 +587,7 @@ function SpecializedToolCallCard({
           </Text>
         ) : null}
       </Group>
-      <Text
-        size={activityRowSummarySize}
-        c={statusColor}
-        style={{
-          flexShrink: 0,
-          marginTop: rem(1),
-          opacity: toolCall.status === "failed" ? 0.75 : 1,
-        }}
-      >
-        {status}
-      </Text>
+      <ToolCallStatusIcon label={status} status={toolCall.status} />
     </Group>
   );
 

@@ -111,8 +111,6 @@ const processResultSchema = z.object({
   stderr_truncated: z.boolean(),
   stdout_truncated: z.boolean(),
 });
-const MAX_SUBJECT_LENGTH = 96;
-
 function parsedArguments(
   value: string,
 ): { success: true; value: unknown } | { success: false } {
@@ -128,17 +126,19 @@ function displayPath(path: string): string {
     .replace(/[\u0000-\u001F\u007F]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
-  const workspacePrefix = "/workspace/agent/";
-  const subject = oneLinePath.startsWith(workspacePrefix)
-    ? oneLinePath.slice(workspacePrefix.length)
-    : (oneLinePath
-        .split("/")
-        .filter((segment) => segment.length > 0)
-        .at(-1) ?? oneLinePath);
-  if (subject.length <= MAX_SUBJECT_LENGTH) {
-    return subject;
-  }
-  return `${subject.slice(0, MAX_SUBJECT_LENGTH - 1)}…`;
+  return (
+    oneLinePath
+      .split("/")
+      .filter((segment) => segment.length > 0)
+      .at(-1) ?? oneLinePath
+  );
+}
+
+function detailPath(path: string): string {
+  return path
+    .replace(/[\u0000-\u001F\u007F]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function outputDetail(toolCall: ActiveToolCall): KnownToolDetail {
@@ -157,7 +157,7 @@ function editDiff(
 ): V4APatchFile {
   return {
     type: "update",
-    path: displayPath(path),
+    path: detailPath(path),
     moveTo: null,
     hunks: [
       {

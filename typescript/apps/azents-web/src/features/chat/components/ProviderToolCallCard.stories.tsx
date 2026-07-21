@@ -33,7 +33,7 @@ export const Running = {
     const canvas = within(canvasElement);
     await expect(canvas.getByText("Web search")).toBeVisible();
     await expect(canvas.getByText("Searching the web")).toBeVisible();
-    await expect(canvas.getByText("Running")).toBeVisible();
+    await expect(canvas.getByLabelText("Running")).toBeVisible();
   },
 } satisfies Story;
 

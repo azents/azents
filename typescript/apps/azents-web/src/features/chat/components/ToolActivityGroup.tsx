@@ -31,6 +31,8 @@ import {
   visibleElapsedDurationSeconds,
 } from "./elapsedDuration";
 import { ProviderToolCallCard } from "./ProviderToolCallCard";
+import { ReasoningActivityRow } from "./ReasoningActivityRow";
+import { SkillLoadedActivityRow } from "./SkillLoadedActivityRow";
 import { ToolCallCard } from "./ToolCallCard";
 import type {
   ActivityCategory,
@@ -139,6 +141,25 @@ function eventDetail(event: ActivityEvent): React.ReactElement | null {
       <ToolCallCard toolCall={event.toolCall.toolCall} />
     ) : (
       <ProviderToolCallCard toolCall={event.toolCall.toolCall} />
+    );
+  }
+  if (event.kind === "reasoning") {
+    return (
+      <ReasoningActivityRow
+        grouped
+        reasoningSummary={
+          event.message?.reasoningSummary ?? event.message?.content ?? ""
+        }
+      />
+    );
+  }
+  if (event.kind === "skill") {
+    return (
+      <SkillLoadedActivityRow
+        grouped
+        content={event.message?.content ?? ""}
+        name={event.message?.metadata?.name ?? null}
+      />
     );
   }
   return <ActivityMessageRow event={event} />;

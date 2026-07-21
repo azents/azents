@@ -1,62 +1,3 @@
-.thinkingHeader {
-  width: fit-content;
-  max-width: min(80vw, rem(312px));
-  min-width: 0;
-  user-select: none;
-}
-
-.thinkingHeaderContent {
-  width: 100%;
-  min-width: 0;
-}
-
-.thinkingChevron {
-  flex-shrink: 0;
-  transition: transform 160ms ease;
-}
-
-.thinkingChevron[data-opened="true"] {
-  transform: rotate(90deg);
-}
-
-.thinkingIcon {
-  flex-shrink: 0;
-  color: var(--mantine-color-dimmed);
-}
-
-.thinkingBody {
-  cursor: pointer;
-}
-
-.thinkingLabel {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  animation: thinking-label-fade 140ms ease;
-}
-
-@keyframes thinking-label-fade {
-  from {
-    opacity: 0;
-  }
-
-  to {
-    opacity: 1;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .thinkingChevron {
-    transition: none;
-  }
-
-  .thinkingLabel {
-    animation: none;
-  }
-}
-
 .errorMessageText {
   color: light-dark(var(--mantine-color-red-7), var(--mantine-color-red-4));
   font-family: var(
@@ -68,16 +9,4 @@
 .errorMessageText :where(*) {
   color: inherit;
   font-family: inherit;
-}
-
-.skillLoadedBody {
-  max-width: 100%;
-  min-width: 0;
-  overflow-x: hidden;
-}
-
-.skillLoadedBody :where(pre, code, span) {
-  white-space: pre-wrap !important;
-  overflow-wrap: anywhere;
-  word-break: break-word;
 }

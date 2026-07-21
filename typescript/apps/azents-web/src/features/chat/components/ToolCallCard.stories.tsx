@@ -170,9 +170,7 @@ export const KnownReadWithRawData = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(canvas.getByText("Read")).toBeVisible();
-    await expect(
-      canvas.getByText("azents/src/features/chat/types.ts"),
-    ).toBeVisible();
+    await expect(canvas.getByText("types.ts")).toBeVisible();
     await userEvent.click(canvas.getByRole("button", { name: /Read/ }));
     await expect(
       canvas.getByText("export interface ActiveToolCall"),
