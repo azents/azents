@@ -32,10 +32,12 @@ import { Component, useState } from "react";
 import { knownToolPresentation } from "../knownToolPresentation";
 import { ActivityRow } from "./ActivityRow";
 import {
+  activityDetailScrollAreaProps,
   activityDetailScrollbarSize,
   activityRowBorder,
   activityRowIconSize,
 } from "./activityRowPresentation";
+import { ChatCodeBlock } from "./ChatCodeBlock";
 import { FileAttachmentList } from "./FileAttachmentList";
 import { SkillContentPanel } from "./SkillContentPanel";
 import { ToolCallStatusIcon } from "./ToolCallStatusIcon";
@@ -108,12 +110,12 @@ function presentationIcon(presentation: KnownToolPresentation): ReactElement {
       return <IconSearch size={activityRowIconSize} />;
     case "edit":
     case "patch":
+    case "write":
       return <IconPencil size={activityRowIconSize} />;
     case "command":
     case "process":
       return <IconTerminal2 size={activityRowIconSize} />;
     case "read":
-    case "write":
     case "delete":
       return <IconFileText size={activityRowIconSize} />;
     case "present":
@@ -377,6 +379,8 @@ function PatchLine({ line }: { line: V4APatchLine }): ReactElement {
       align="flex-start"
       px="xs"
       bg={patchLineBackground(line)}
+      miw="100%"
+      w="max-content"
     >
       <Text
         aria-hidden="true"
@@ -392,7 +396,7 @@ function PatchLine({ line }: { line: V4APatchLine }): ReactElement {
         c={patchLineColor(line)}
         ff="monospace"
         size="xs"
-        style={{ overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}
+        style={{ whiteSpace: "pre" }}
       >
         {line.content.length > 0 ? line.content : " "}
       </Text>
@@ -404,7 +408,16 @@ function PatchHunk({ hunk }: { hunk: V4APatchHunk }): ReactElement {
   return (
     <Stack gap={0}>
       {hunk.context !== null ? (
-        <Text px="xs" py={rem(2)} size="xs" c="dimmed" ff="monospace">
+        <Text
+          px="xs"
+          py={rem(2)}
+          size="xs"
+          c="dimmed"
+          ff="monospace"
+          miw="100%"
+          w="max-content"
+          style={{ whiteSpace: "pre" }}
+        >
           {hunk.context}
         </Text>
       ) : null}
@@ -427,15 +440,13 @@ function PatchFile({ file }: { file: V4APatchFile }): ReactElement {
         overflow: "hidden",
       }}
     >
-      <Group gap="xs" wrap="nowrap" px="xs" py={rem(6)} bg="default">
+      <Stack gap={rem(2)} px="xs" py={rem(6)} bg="default">
         <Text size="xs" c={patchFileActionColor(file)} fw={600}>
           {t(`changeAction.${file.type}`)}
         </Text>
         <Text
           size="xs"
           ff="monospace"
-          flex={1}
-          miw={0}
           style={{ overflowWrap: "anywhere", whiteSpace: "normal" }}
         >
           {file.path}
@@ -445,26 +456,41 @@ function PatchFile({ file }: { file: V4APatchFile }): ReactElement {
             size="xs"
             c="dimmed"
             ff="monospace"
-            miw={0}
             style={{ overflowWrap: "anywhere", whiteSpace: "normal" }}
           >
             → {destination}
           </Text>
         ) : null}
-      </Group>
-      {file.type === "add" ? (
-        <Stack gap={0}>
-          {file.lines.map((content, index) => (
-            <PatchLine key={`add:${index}`} line={{ type: "add", content }} />
-          ))}
-        </Stack>
-      ) : null}
-      {file.type === "update" ? (
-        <Stack gap="xs" py="xs">
-          {file.hunks.map((hunk, index) => (
-            <PatchHunk key={`${hunk.context ?? "root"}:${index}`} hunk={hunk} />
-          ))}
-        </Stack>
+      </Stack>
+      {file.type !== "delete" ? (
+        <ScrollArea
+          scrollbars="x"
+          scrollbarSize={activityDetailScrollbarSize}
+          {...activityDetailScrollAreaProps}
+        >
+          <Box miw="max-content">
+            {file.type === "add" ? (
+              <Stack gap={0}>
+                {file.lines.map((content, index) => (
+                  <PatchLine
+                    key={`add:${index}`}
+                    line={{ type: "add", content }}
+                  />
+                ))}
+              </Stack>
+            ) : null}
+            {file.type === "update" ? (
+              <Stack gap="xs" py="xs">
+                {file.hunks.map((hunk, index) => (
+                  <PatchHunk
+                    key={`${hunk.context ?? "root"}:${index}`}
+                    hunk={hunk}
+                  />
+                ))}
+              </Stack>
+            ) : null}
+          </Box>
+        </ScrollArea>
       ) : null}
     </Box>
   );
@@ -483,8 +509,12 @@ function presentationDetail(
         <ScrollArea.Autosize
           mah={rem(240)}
           scrollbarSize={activityDetailScrollbarSize}
+          {...activityDetailScrollAreaProps}
         >
-          <Code block>{presentation.detail.output}</Code>
+          <ChatCodeBlock
+            code={presentation.detail.output}
+            language={presentation.detail.language}
+          />
         </ScrollArea.Autosize>
       );
     case "diff":
@@ -512,6 +542,7 @@ function presentationDetail(
             <ScrollArea.Autosize
               mah={rem(240)}
               scrollbarSize={activityDetailScrollbarSize}
+              {...activityDetailScrollAreaProps}
             >
               <Code block>{consoleOutput}</Code>
             </ScrollArea.Autosize>
@@ -528,26 +559,19 @@ function presentationDetail(
       return (
         <Stack gap="sm">
           {presentation.detail.fields.length > 0 ? (
-            <Stack gap={rem(4)}>
+            <Stack gap="sm">
               {presentation.detail.fields.map((field) => (
-                <Group
-                  key={`${field.label}:${field.value}`}
-                  gap="xs"
-                  wrap="nowrap"
-                  align="flex-start"
-                >
-                  <Text size="xs" c="dimmed" w={rem(104)}>
+                <Box key={`${field.label}:${field.value}`}>
+                  <Text size="xs" c="dimmed" mb={rem(4)}>
                     {detailLabel(field.label, t)}
                   </Text>
                   <Text
                     size="xs"
-                    flex={1}
-                    miw={0}
                     style={{ overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}
                   >
                     {field.value}
                   </Text>
-                </Group>
+                </Box>
               ))}
             </Stack>
           ) : null}
@@ -628,6 +652,7 @@ function RawPayloadContent({
           <ScrollArea.Autosize
             mah={rem(240)}
             scrollbarSize={activityDetailScrollbarSize}
+            {...activityDetailScrollAreaProps}
           >
             <Code block>{rawText(argumentsText)}</Code>
           </ScrollArea.Autosize>
@@ -641,6 +666,7 @@ function RawPayloadContent({
           <ScrollArea.Autosize
             mah={rem(240)}
             scrollbarSize={activityDetailScrollbarSize}
+            {...activityDetailScrollAreaProps}
           >
             <Code block>{rawText(outputText)}</Code>
           </ScrollArea.Autosize>

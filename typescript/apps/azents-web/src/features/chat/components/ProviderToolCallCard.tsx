@@ -14,6 +14,7 @@ import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { ActivityRow } from "./ActivityRow";
 import {
+  activityDetailScrollAreaProps,
   activityDetailScrollbarSize,
   activityRowBorder,
   activityRowIconSize,
@@ -54,6 +55,7 @@ function RawProviderToolDetails({
           <ScrollArea.Autosize
             mah={rem(240)}
             scrollbarSize={activityDetailScrollbarSize}
+            {...activityDetailScrollAreaProps}
           >
             <Code block>{toolCall.arguments}</Code>
           </ScrollArea.Autosize>
@@ -67,6 +69,7 @@ function RawProviderToolDetails({
           <ScrollArea.Autosize
             mah={rem(240)}
             scrollbarSize={activityDetailScrollbarSize}
+            {...activityDetailScrollAreaProps}
           >
             <Code block>{toolCall.output}</Code>
           </ScrollArea.Autosize>
@@ -97,12 +100,35 @@ export function ProviderToolCallCard({
     <RawProviderToolDetails toolCall={toolCall} />
   ) : null;
   const status = providerToolStatusLabel(toolCall.status);
-  const subject = webSearch?.query ?? activityLabel;
+  const subject =
+    webSearch !== null && webSearch.queries.length > 0
+      ? webSearch.queries.join(" · ")
+      : activityLabel;
   const ariaLabel = [displayName, subject, status].join(" · ");
   const webSearchDetail =
     webSearch !== null &&
-    (webSearch.summary !== null || webSearch.results.length > 0) ? (
+    (webSearch.queries.length > 0 ||
+      webSearch.summary !== null ||
+      webSearch.results.length > 0) ? (
       <Stack gap="xs">
+        {webSearch.queries.length > 0 ? (
+          <Box>
+            <Text size="xs" c="dimmed" mb={rem(4)}>
+              {t("field.query")}
+            </Text>
+            <Stack gap={rem(2)}>
+              {webSearch.queries.map((query) => (
+                <Text
+                  key={query}
+                  size="xs"
+                  style={{ overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}
+                >
+                  {query}
+                </Text>
+              ))}
+            </Stack>
+          </Box>
+        ) : null}
         {webSearch.summary !== null ? (
           <Text size="xs" c="dimmed">
             {webSearch.summary}

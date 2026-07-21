@@ -21,7 +21,11 @@ void test("specializes a validated first-party read call", () => {
       action: "read",
       subject: "example.ts",
       qualifier: null,
-      detail: { type: "output", output: "export const example = true;" },
+      detail: {
+        type: "output",
+        output: "export const example = true;",
+        language: "typescript",
+      },
     },
   });
 });
@@ -226,6 +230,53 @@ void test("renders file edits as a unified diff", () => {
             },
           ],
         },
+      },
+    },
+  });
+});
+
+void test("projects written file contents with inferred language", () => {
+  const result = knownToolPresentation(
+    toolCall({
+      name: "write",
+      arguments:
+        '{"path":"/workspace/agent/src/example.py","content":"value = True"}',
+      result: "File written.",
+    }),
+  );
+  assert.deepEqual(result, {
+    type: "specialized",
+    presentation: {
+      action: "write",
+      subject: "example.py",
+      qualifier: null,
+      detail: {
+        type: "output",
+        output: "value = True",
+        language: "python",
+      },
+    },
+  });
+});
+
+void test("chooses a supported language for ambiguous file extensions", () => {
+  const result = knownToolPresentation(
+    toolCall({
+      name: "read",
+      arguments: '{"path":"/workspace/agent/src/example.rs"}',
+      result: "fn main() {}",
+    }),
+  );
+  assert.deepEqual(result, {
+    type: "specialized",
+    presentation: {
+      action: "read",
+      subject: "example.rs",
+      qualifier: null,
+      detail: {
+        type: "output",
+        output: "fn main() {}",
+        language: "rust",
       },
     },
   });

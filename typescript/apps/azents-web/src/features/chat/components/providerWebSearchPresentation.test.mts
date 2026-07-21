@@ -26,7 +26,7 @@ function webSearchCall(
 
 void test("projects structured web search references", () => {
   assert.deepEqual(providerWebSearchPresentation(webSearchCall()), {
-    query: "Azents",
+    queries: ["Azents"],
     results: [
       {
         uri: "https://example.com/results",
@@ -41,10 +41,38 @@ void test("projects structured web search references", () => {
 void test("keeps web search identity before valid references arrive", () => {
   assert.deepEqual(
     providerWebSearchPresentation(webSearchCall({ references: [] })),
-    { query: "Azents", results: [], summary: null },
+    { queries: ["Azents"], results: [], summary: null },
   );
   assert.equal(
     providerWebSearchPresentation(webSearchCall({ name: "file_search" })),
     null,
+  );
+});
+
+void test("normalizes single and batched provider search queries", () => {
+  assert.deepEqual(
+    providerWebSearchPresentation(
+      webSearchCall({
+        arguments: JSON.stringify({
+          queries: [
+            "  npm   filename\nprogramming language detection  ",
+            { q: 'site:npmjs.com/package   "filename"' },
+            "npm filename programming language detection",
+          ],
+        }),
+      }),
+    )?.queries,
+    [
+      "npm filename programming language detection",
+      'site:npmjs.com/package "filename"',
+    ],
+  );
+  assert.deepEqual(
+    providerWebSearchPresentation(
+      webSearchCall({
+        arguments: JSON.stringify({ q: "  Azents\n tool calls  " }),
+      }),
+    )?.queries,
+    ["Azents tool calls"],
   );
 });

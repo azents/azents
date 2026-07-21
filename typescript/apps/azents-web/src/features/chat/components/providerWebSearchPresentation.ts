@@ -7,7 +7,7 @@ export interface ProviderWebSearchResult {
 }
 
 export interface ProviderWebSearchPresentation {
-  query: string | null;
+  queries: string[];
   results: ProviderWebSearchResult[];
   summary: string | null;
 }
@@ -16,16 +16,43 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function searchQuery(argumentsText: string): string | null {
+function normalizedQuery(value: string): string | null {
+  const query = value.replace(/\s+/gu, " ").trim();
+  return query.length > 0 ? query : null;
+}
+
+function queryText(value: unknown): string | null {
+  if (typeof value === "string") {
+    return normalizedQuery(value);
+  }
+  if (!isRecord(value)) {
+    return null;
+  }
+  if (typeof value.q === "string") {
+    return normalizedQuery(value.q);
+  }
+  return typeof value.query === "string" ? normalizedQuery(value.query) : null;
+}
+
+function searchQueries(argumentsText: string): string[] {
   try {
     const value: unknown = JSON.parse(argumentsText);
-    if (!isRecord(value) || typeof value.query !== "string") {
-      return null;
+    if (!isRecord(value)) {
+      return [];
     }
-    const query = value.query.trim();
-    return query.length > 0 ? query : null;
+    const candidates = Array.isArray(value.queries)
+      ? value.queries
+      : Object.hasOwn(value, "query")
+        ? [value.query]
+        : [value];
+    return candidates.reduce<string[]>((queries, candidate) => {
+      const query = queryText(candidate);
+      return query !== null && !queries.includes(query)
+        ? [...queries, query]
+        : queries;
+    }, []);
   } catch {
-    return null;
+    return [];
   }
 }
 
@@ -68,7 +95,7 @@ export function providerWebSearchPresentation(
     ];
   });
   return {
-    query: searchQuery(toolCall.arguments),
+    queries: searchQueries(toolCall.arguments),
     results,
     summary: toolCall.semanticOutput?.trim() || null,
   };

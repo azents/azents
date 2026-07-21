@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { fileCodeLanguage } from "./fileCodeLanguage.ts";
 import { parseV4APatch } from "./v4aPatchPresentation.ts";
 import type { ActiveToolCall } from "./types";
 import type { V4APatchFile } from "./v4aPatchPresentation.ts";
@@ -70,6 +71,7 @@ export type KnownToolDetailLabel =
   | "activationLimit";
 
 export interface OutputDetail {
+  language: string | null;
   type: "output";
   output: string;
 }
@@ -353,12 +355,15 @@ function skillName(path: string): string {
     : (segments.at(-1) ?? "Skill");
 }
 
-function outputDetail(toolCall: ActiveToolCall): KnownToolDetail {
+function outputDetail(
+  toolCall: ActiveToolCall,
+  language: string | null = null,
+): KnownToolDetail {
   if (toolCall.status === "running") {
     return null;
   }
   return typeof toolCall.result === "string" && toolCall.result.length > 0
-    ? { type: "output", output: toolCall.result }
+    ? { type: "output", output: toolCall.result, language }
     : null;
 }
 
@@ -610,7 +615,7 @@ export function knownToolPresentation(
               input.data.offset && input.data.offset > 0
                 ? String(input.data.offset)
                 : null,
-              outputDetail(toolCall),
+              outputDetail(toolCall, fileCodeLanguage(input.data.path)),
             )
           : generic("invalid-arguments");
       }
@@ -654,7 +659,18 @@ export function knownToolPresentation(
       case "write": {
         const input = writeInputSchema.safeParse(argumentsResult.value);
         return input.success
-          ? presentation("write", displayPath(input.data.path), null, null)
+          ? presentation(
+              "write",
+              displayPath(input.data.path),
+              null,
+              completed(toolCall)
+                ? {
+                    type: "output",
+                    output: input.data.content,
+                    language: fileCodeLanguage(input.data.path),
+                  }
+                : null,
+            )
           : generic("invalid-arguments");
       }
       case "edit": {

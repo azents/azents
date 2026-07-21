@@ -2,18 +2,12 @@
 
 /** Render chat Markdown with compact typography, GFM, code highlighting, and Mermaid diagrams. */
 
-import { Box, useComputedColorScheme } from "@mantine/core";
-import { useTranslations } from "next-intl";
 import * as React from "react";
 import Markdown from "react-markdown";
-import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
-import {
-  prism,
-  vscDarkPlus,
-} from "react-syntax-highlighter/dist/esm/styles/prism";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
-import { ChatCopyButton } from "./ChatCopyButton";
+import { normalizeCodeLanguage } from "../codeLanguage";
+import { ChatCodeBlock } from "./ChatCodeBlock";
 import classes from "./MarkdownContent.module.css";
 import { MermaidDiagram } from "./MermaidDiagram";
 import type { Components, ExtraProps } from "react-markdown";
@@ -24,13 +18,6 @@ interface MarkdownContentProps {
 
 type MarkdownAnchorProps = React.ComponentPropsWithoutRef<"a"> & ExtraProps;
 type MarkdownPreProps = React.ComponentPropsWithoutRef<"pre"> & ExtraProps;
-type CodeColorScheme = "dark" | "light";
-
-const CODE_BLOCK_THEMES = {
-  dark: vscDarkPlus,
-  light: prism,
-} as const;
-
 function collectTextContent(node: React.ReactNode): string {
   if (typeof node === "string" || typeof node === "number") {
     return String(node);
@@ -42,67 +29,6 @@ function collectTextContent(node: React.ReactNode): string {
     return collectTextContent(node.props.children);
   }
   return "";
-}
-
-function normalizeCodeLanguage(language: string): string {
-  switch (language.toLowerCase()) {
-    case "c++":
-    case "cpp":
-      return "cpp";
-    case "c#":
-    case "cs":
-    case "csharp":
-      return "csharp";
-    case "diff":
-    case "git-diff":
-    case "gitdiff":
-    case "patch":
-    case "udiff":
-      return "diff";
-    case "dockerfile":
-    case "docker":
-      return "docker";
-    case "dotenv":
-    case "env":
-      return "dotenv";
-    case "golang":
-    case "go":
-      return "go";
-    case "html":
-    case "html5":
-      return "markup";
-    case "js":
-    case "javascript":
-      return "javascript";
-    case "md":
-    case "mdx":
-    case "markdown":
-      return "markdown";
-    case "py":
-    case "python":
-      return "python";
-    case "rb":
-    case "ruby":
-      return "ruby";
-    case "rs":
-    case "rust":
-      return "rust";
-    case "sh":
-    case "shell":
-    case "zsh":
-      return "bash";
-    case "tf":
-    case "terraform":
-      return "hcl";
-    case "ts":
-    case "typescript":
-      return "typescript";
-    case "yml":
-    case "yaml":
-      return "yaml";
-    default:
-      return language.toLowerCase();
-  }
 }
 
 function getCodeLanguage(node: React.ReactNode): string | null {
@@ -145,11 +71,6 @@ function CodeBlock({
 }: MarkdownPreProps): React.ReactElement {
   void node;
 
-  const t = useTranslations("chat");
-  const computedColorScheme = useComputedColorScheme("light");
-  const codeColorScheme: CodeColorScheme =
-    computedColorScheme === "dark" ? "dark" : "light";
-  const codeTheme = CODE_BLOCK_THEMES[codeColorScheme];
   const codeText = collectTextContent(children).replace(/\n$/, "");
   const language = getCodeLanguage(children);
 
@@ -157,49 +78,8 @@ function CodeBlock({
     return <MermaidDiagram source={codeText} />;
   }
 
-  return (
-    <Box className={classes.codeBlockFrame}>
-      {language ? (
-        <SyntaxHighlighter
-          PreTag="pre"
-          CodeTag="code"
-          className={classes.codeBlockScroller}
-          language={language}
-          style={codeTheme}
-          useInlineStyles
-          customStyle={{
-            background: "transparent",
-            color: "inherit",
-            margin: 0,
-            padding: "0.6em 0.8em",
-          }}
-          codeTagProps={{
-            className: classes.highlightedCode,
-            style: {
-              background: "transparent",
-              color: "inherit",
-            },
-          }}
-        >
-          {codeText}
-        </SyntaxHighlighter>
-      ) : (
-        <Box component="pre" {...props} className={classes.codeBlockScroller}>
-          {children}
-        </Box>
-      )}
-      <Box className={classes.codeBlockCopyButton}>
-        <ChatCopyButton
-          value={codeText}
-          copyLabel={t("copy")}
-          copiedLabel={t("copied")}
-          position="left"
-          size="xs"
-          iconSize={12}
-        />
-      </Box>
-    </Box>
-  );
+  void props;
+  return <ChatCodeBlock code={codeText} language={language} />;
 }
 
 const markdownComponents: Components = {
