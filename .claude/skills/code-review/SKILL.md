@@ -56,12 +56,7 @@ Before reviewing, collect the following:
 
 ### 3. Run the review
 
-When the runtime has repo-level OpenCode configuration, prefer the **`code-review` subagent profile**.
-
-- Definition path: `.opencode/agents/code-review.md`
-- Default model: `openai/gpt-5.4`
-
-Pass this content when spawning the subagent:
+Use a code-review subagent when the runtime supports it. Pass this content when spawning the subagent:
 
 ```
 Agent(subagent_type="code-review"):
@@ -73,7 +68,7 @@ Agent(subagent_type="code-review"):
   - Dig deeper: check second-order failures, edge cases, and rollback risk.
 ```
 
-If that profile is unavailable in the runtime, fall back to `general-purpose` and pass the same constraints directly in the prompt.
+If no specialized review profile is available, use a general-purpose subagent and pass the same constraints directly in the prompt.
 
 ### 4. Review criteria
 
