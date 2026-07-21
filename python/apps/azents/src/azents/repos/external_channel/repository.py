@@ -4,6 +4,7 @@ from collections.abc import Awaitable, Callable
 from typing import TypeVar
 
 import sqlalchemy as sa
+from azcommon.uuid import uuid7
 from pydantic import BaseModel
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -182,7 +183,7 @@ class ExternalChannelRepository:
         """Atomically admit one provider event or return its prior admission."""
         result = await session.execute(
             pg_insert(RDBExternalChannelEvent)
-            .values(**create.model_dump())
+            .values(id=uuid7().hex, **create.model_dump())
             .on_conflict_do_nothing(
                 constraint="uq_external_channel_events_connection_provider_event"
             )
@@ -560,7 +561,7 @@ class ExternalChannelRepository:
         """Insert idempotently, then load the unique conflicting record."""
         result = await session.execute(
             pg_insert(model)
-            .values(**create.model_dump())
+            .values(id=uuid7().hex, **create.model_dump())
             .on_conflict_do_nothing()
             .returning(model)
         )

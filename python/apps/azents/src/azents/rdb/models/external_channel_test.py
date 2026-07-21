@@ -3,7 +3,7 @@
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine.interfaces import ReflectedForeignKeyConstraint
 from testcontainers.postgres import PostgresContainer
 
@@ -64,23 +64,85 @@ def test_external_channel_installed_schema_preserves_lifecycle_ownership(
     try:
         inspector = inspect(engine)
 
-        restrictive_roots = (
-            ("external_channel_bindings", "agent_session_id", "agent_sessions"),
-            ("external_channel_access_requests", "agent_session_id", "agent_sessions"),
-            ("external_channel_access_grants", "agent_session_id", "agent_sessions"),
-            ("external_channel_actions", "agent_session_id", "agent_sessions"),
-            ("external_channel_agent_routes", "agent_id", "agents"),
-            ("external_channel_access_grants", "agent_id", "agents"),
-            ("external_channel_blocks", "agent_id", "agents"),
-        )
-        for table_name, constrained_column, referred_table in restrictive_roots:
-            foreign_key = next(
-                candidate
-                for candidate in inspector.get_foreign_keys(table_name)
-                if candidate["constrained_columns"] == [constrained_column]
-                and candidate["referred_table"] == referred_table
-            )
-            assert _foreign_key_options(foreign_key)["ondelete"] == "RESTRICT"
+        with engine.connect() as connection:
+            restrictive_roots = {
+                (
+                    row.table_name,
+                    row.column_name,
+                    row.referred_table,
+                    row.delete_rule,
+                )
+                for row in connection.execute(
+                    text(
+                        """
+                        SELECT
+                            tc.table_name,
+                            kcu.column_name,
+                            ccu.table_name AS referred_table,
+                            rc.delete_rule
+                        FROM information_schema.table_constraints AS tc
+                        JOIN information_schema.key_column_usage AS kcu
+                          ON tc.constraint_catalog = kcu.constraint_catalog
+                         AND tc.constraint_schema = kcu.constraint_schema
+                         AND tc.constraint_name = kcu.constraint_name
+                        JOIN information_schema.referential_constraints AS rc
+                          ON tc.constraint_catalog = rc.constraint_catalog
+                         AND tc.constraint_schema = rc.constraint_schema
+                         AND tc.constraint_name = rc.constraint_name
+                        JOIN information_schema.constraint_column_usage AS ccu
+                          ON rc.unique_constraint_catalog = ccu.constraint_catalog
+                         AND rc.unique_constraint_schema = ccu.constraint_schema
+                         AND rc.unique_constraint_name = ccu.constraint_name
+                        WHERE tc.constraint_type = 'FOREIGN KEY'
+                          AND tc.table_schema = current_schema()
+                        """
+                    )
+                )
+            }
+        assert {
+            (
+                "external_channel_bindings",
+                "agent_session_id",
+                "agent_sessions",
+                "RESTRICT",
+            ),
+            (
+                "external_channel_access_requests",
+                "agent_session_id",
+                "agent_sessions",
+                "RESTRICT",
+            ),
+            (
+                "external_channel_access_grants",
+                "agent_session_id",
+                "agent_sessions",
+                "RESTRICT",
+            ),
+            (
+                "external_channel_actions",
+                "agent_session_id",
+                "agent_sessions",
+                "RESTRICT",
+            ),
+            (
+                "external_channel_agent_routes",
+                "agent_id",
+                "agents",
+                "RESTRICT",
+            ),
+            (
+                "external_channel_access_grants",
+                "agent_id",
+                "agents",
+                "RESTRICT",
+            ),
+            (
+                "external_channel_blocks",
+                "agent_id",
+                "agents",
+                "RESTRICT",
+            ),
+        }.issubset(restrictive_roots)
 
         batch_item_foreign_keys = inspector.get_foreign_keys(
             "external_channel_invocation_batch_items"
