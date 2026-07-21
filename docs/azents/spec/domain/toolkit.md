@@ -43,7 +43,7 @@ api_routes:
   - /toolkit/v1
   - /shell-environment/v1
 last_verified_at: 2026-07-21
-spec_version: 66
+spec_version: 67
 ---
 
 # Toolkit
@@ -88,6 +88,8 @@ erDiagram
 - `ToolkitType` (code-level) — one of `shell`, `mcp`, `github`, `notion`, `gcp`, `aws`, `sentry`, `google_analytics`, `kubernetes`, `envvar`. DB column is free string but runtime must match key registered in `get_toolkit_registry`. ([`core/tools.py` L71-88](../../../../python/apps/azents/src/azents/core/tools.py))
 
   `envvar` is a generic environment variable injection toolkit. Long-lived API tokens (Notion / OpenAI / Sentry, etc.) can be stored and injected as child process env during agent shell execution. It implements `Toolkit.expose_env()` protocol. Unlike MCP-based toolkit, credentials are exposed inside Runtime. See [sandbox-credential-injection design (archived)](../../design/sandbox-credential-injection-2026-04-24.md).
+
+  When an existing `envvar` Toolkit is edited, non-empty submitted values replace only their matching stored values. Empty submitted values preserve the stored value, while values whose names are removed from `config.entries` are removed from encrypted credentials. This lets the redacted edit form preserve values that a manager leaves blank while retaining explicit entry deletion semantics.
 
   `github` toolkit has `inject_runtime_environment: bool` config option. When enabled, token resolved at runtime is exposed to Runtime Runner environment variables. PAT credentials expose `GH_TOKEN` and `GITHUB_TOKEN`. GitHub App credentials store `installations[]` targets with installation ID and account login metadata. For a single GitHub App installation, Runtime also exposes `GH_TOKEN` and `GITHUB_TOKEN`; for multiple installations, Runtime exposes `GITHUB_INSTALLATION_MAP` plus `GITHUB_TOKEN_INSTALLATION_<installation_id>` variables. The git credential helper installed in agent-runtime image (`/usr/local/bin/azents-git-credential`) reads the repository owner from Git credential protocol input and chooses the matching installation token. GitHub CLI commands are not wrapped; agents must explicitly select the desired installation token at command time, for example `GH_TOKEN=$GITHUB_TOKEN_INSTALLATION_<installation_id> gh ...`. Token TTL cache defaults to 55 minutes. See [github-toolkit-shell-env design](../../design/github-toolkit-shell-env-2026-04-24.md) and [github-toolkit-multi-installation design](../../design/github-toolkit-multi-installation.md).
 - `ToolkitScopeType` — `workspace` StrEnum. ([`core/enums.py`](../../../../python/apps/azents/src/azents/core/enums.py))
