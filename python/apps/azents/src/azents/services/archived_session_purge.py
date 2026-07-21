@@ -23,12 +23,16 @@ from azents.core.enums import (
     ModelFileStatus,
 )
 from azents.core.s3.deps import get_s3_service
+from azents.core.session_lifecycle import SessionLifecycleRegistry
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
-from azents.repos.archived_session_retention.data import ArchivedSessionPurgeJob
+from azents.repos.archived_session_retention.data import (
+    ArchivedSessionPurgeJob,
+    ArchivedSessionPurgeParticipantSnapshot,
+)
 from azents.repos.artifact import ArtifactRepository
 from azents.repos.artifact.data import Artifact
 from azents.repos.exchange_file import ExchangeFileRepository
@@ -36,6 +40,7 @@ from azents.repos.exchange_file.data import ExchangeFile
 from azents.repos.model_file import ModelFileRepository
 from azents.repos.model_file.data import ModelFile
 from azents.services.session_git_worktree import SessionGitWorktreeService
+from azents.services.session_lifecycle.registry import get_session_lifecycle_registry
 
 _LEASE_DURATION = datetime.timedelta(minutes=15)
 _MAX_RETRY_DELAY = datetime.timedelta(minutes=30)
@@ -101,6 +106,10 @@ class ArchivedSessionPurgeService:
     broker: Annotated[SessionBroker, Depends(get_broker)]
     s3_service: Annotated[S3Service, Depends(get_s3_service)]
     config: Annotated[Config, Depends(get_config)]
+    lifecycle_registry: Annotated[
+        SessionLifecycleRegistry,
+        Depends(get_session_lifecycle_registry),
+    ]
 
     async def purge_once(
         self,
@@ -141,6 +150,21 @@ class ArchivedSessionPurgeService:
                     lease_owner=lease_owner,
                     lease_until=now + _LEASE_DURATION,
                 )
+                if job is not None:
+                    participant_snapshots = tuple(
+                        ArchivedSessionPurgeParticipantSnapshot(
+                            participant_key=participant.key,
+                            policy_version=participant.policy_version,
+                        )
+                        for participant in self.lifecycle_registry.participants
+                    )
+                    retention_repository = self.retention_repository
+                    await retention_repository.materialize_purge_participant_executions(
+                        session,
+                        job_id=job.id,
+                        lease_owner=lease_owner,
+                        participants=participant_snapshots,
+                    )
             if job is None:
                 break
             claimed_count += 1

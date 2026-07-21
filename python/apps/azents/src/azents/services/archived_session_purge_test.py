@@ -29,7 +29,10 @@ from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession
 from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
-from azents.repos.archived_session_retention.data import ArchivedSessionPurgeJob
+from azents.repos.archived_session_retention.data import (
+    ArchivedSessionPurgeJob,
+    ArchivedSessionPurgeParticipantSnapshot,
+)
 from azents.repos.artifact import ArtifactRepository
 from azents.repos.artifact.data import Artifact
 from azents.repos.exchange_file import ExchangeFileRepository
@@ -38,6 +41,7 @@ from azents.repos.model_file import ModelFileRepository
 from azents.repos.model_file.data import ModelFile
 from azents.services.archived_session_purge import ArchivedSessionPurgeService
 from azents.services.session_git_worktree import SessionGitWorktreeService
+from azents.services.session_lifecycle.registry import get_session_lifecycle_registry
 
 
 @asynccontextmanager
@@ -60,6 +64,9 @@ class _RetentionRepository:
         self.retry: dict[str, object] | None = None
         self.completed = False
         self.stale_job_count = 0
+        self.materialized_participants: list[
+            ArchivedSessionPurgeParticipantSnapshot
+        ] = []
 
     async def cancel_invalid_unstarted_purge_jobs(
         self,
@@ -114,6 +121,19 @@ class _RetentionRepository:
         )
         self.events.append("mark_cleaning")
         return True
+
+    async def materialize_purge_participant_executions(
+        self,
+        session: AsyncSession,
+        *,
+        job_id: str,
+        lease_owner: str,
+        participants: tuple[ArchivedSessionPurgeParticipantSnapshot, ...],
+    ) -> list[object]:
+        del session, job_id, lease_owner
+        self.events.append("materialize_participants")
+        self.materialized_participants = list(participants)
+        return []
 
     async def mark_purge_retry(
         self,
@@ -659,6 +679,7 @@ def _build_service(
             Config,
             SimpleNamespace(workspace_s3=SimpleNamespace(bucket="test-bucket")),
         ),
+        lifecycle_registry=get_session_lifecycle_registry(),
     )
     return (
         service,
@@ -689,6 +710,29 @@ async def test_purge_reconciles_stale_unstarted_jobs_before_claiming() -> None:
     assert summary.claimed_count == 0
     assert summary.stale_job_count == 2
     assert events[:2] == ["reconcile", "claim"]
+
+
+async def test_purge_materializes_participants_before_subtree_fencing() -> None:
+    """A claimed job persists the active participant set before cleanup begins."""
+    events: list[str] = []
+    service, retention_repository, *_ = _build_service(
+        events=events,
+        active_checks=[],
+    )
+
+    await service.purge_once(
+        lease_owner="worker-1",
+        deadline=_deadline(),
+    )
+
+    assert events.index("materialize_participants") < events.index("fence_generations")
+    assert retention_repository.materialized_participants == [
+        ArchivedSessionPurgeParticipantSnapshot(
+            participant_key=participant.key,
+            policy_version=participant.policy_version,
+        )
+        for participant in get_session_lifecycle_registry().participants
+    ]
 
 
 async def test_purge_stops_before_claiming_near_scheduler_deadline() -> None:
