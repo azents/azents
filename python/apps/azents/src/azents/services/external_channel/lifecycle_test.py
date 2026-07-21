@@ -205,6 +205,7 @@ async def test_archive_selects_only_active_work_for_progress_cleanup() -> None:
     """A historical finished work cannot produce a new progress-delete intent."""
     binding = SimpleNamespace(
         id="binding-1",
+        route_id="route-1",
         resource_id="resource-1",
         status=ExternalChannelBindingStatus.ACTIVE,
         disconnected_at=None,
@@ -235,6 +236,29 @@ async def test_archive_selects_only_active_work_for_progress_cleanup() -> None:
     assert active_work.desired_progress_revision == 4
     assert progress_insert["id"]
     assert progress_insert["origin_id"] == "binding-1"
+    pending_delete = str(session.execute_statements[1])
+    assert (
+        "external_channel_pending_contexts.route_id, "
+        "external_channel_pending_contexts.resource_id"
+    ) in pending_delete
+
+
+@pytest.mark.asyncio
+async def test_purge_access_requests_require_direct_session_ownership() -> None:
+    """A pre-Session approval request is not inferred from a binding pair."""
+    session = _LifecycleSessionDouble([[], [], [], []])
+
+    await ExternalChannelLifecycleRepository().prepare_session_tree_purge(
+        cast(AsyncSession, session),
+        session_ids=("session-1",),
+        now=datetime.datetime(2026, 7, 21, tzinfo=datetime.UTC),
+    )
+
+    access_request_select = str(session.scalar_statements[1])
+    assert "external_channel_access_requests.agent_session_id IN" in (
+        access_request_select
+    )
+    assert "external_channel_bindings" not in access_request_select
 
 
 @pytest.mark.asyncio

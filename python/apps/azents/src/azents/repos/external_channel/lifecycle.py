@@ -69,7 +69,9 @@ class ExternalChannelLifecycleRepository:
                 created_progress_delete_intent_count=0,
             )
         binding_ids = [binding.id for binding in bindings]
-        resource_ids = [binding.resource_id for binding in bindings]
+        binding_pairs = [
+            (binding.route_id, binding.resource_id) for binding in bindings
+        ]
         works = list(
             (
                 await session.scalars(
@@ -126,7 +128,10 @@ class ExternalChannelLifecycleRepository:
         deleted_pending_context_count = await self._delete(
             session,
             RDBExternalChannelPendingContext,
-            RDBExternalChannelPendingContext.resource_id.in_(resource_ids),
+            sa.tuple_(
+                RDBExternalChannelPendingContext.route_id,
+                RDBExternalChannelPendingContext.resource_id,
+            ).in_(binding_pairs),
         )
         await session.flush()
         return ExternalChannelArchiveTermination(
@@ -516,24 +521,14 @@ class ExternalChannelLifecycleRepository:
         *,
         session_ids: Sequence[str],
     ) -> list[str]:
-        """Lock requests directly or binding-pair-owned by the Session tree."""
-        binding_pairs = sa.select(
-            RDBExternalChannelBinding.route_id,
-            RDBExternalChannelBinding.resource_id,
-        ).where(RDBExternalChannelBinding.agent_session_id.in_(session_ids))
+        """Lock access requests directly owned by the Session tree."""
         return list(
             (
                 await session.scalars(
                     sa.select(RDBExternalChannelAccessRequest.id)
                     .where(
-                        sa.or_(
-                            RDBExternalChannelAccessRequest.agent_session_id.in_(
-                                session_ids
-                            ),
-                            sa.tuple_(
-                                RDBExternalChannelAccessRequest.route_id,
-                                RDBExternalChannelAccessRequest.resource_id,
-                            ).in_(binding_pairs),
+                        RDBExternalChannelAccessRequest.agent_session_id.in_(
+                            session_ids
                         )
                     )
                     .order_by(RDBExternalChannelAccessRequest.id)
