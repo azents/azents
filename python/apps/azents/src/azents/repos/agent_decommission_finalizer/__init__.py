@@ -16,6 +16,17 @@ from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.artifact import RDBArtifact
 from azents.rdb.models.exchange_file import RDBExchangeFile
+from azents.rdb.models.external_channel import (
+    RDBExternalChannelAccessGrant,
+    RDBExternalChannelAccessRequest,
+    RDBExternalChannelAction,
+    RDBExternalChannelAgentRoute,
+    RDBExternalChannelBinding,
+    RDBExternalChannelBlock,
+    RDBExternalChannelDeliveryAttempt,
+    RDBExternalChannelInvocationBatch,
+    RDBExternalChannelWork,
+)
 from azents.rdb.models.memory import RDBAgentMemory
 from azents.rdb.models.model_file import RDBModelFile
 from azents.rdb.models.session_agent_context import RDBSessionAgentContext
@@ -114,10 +125,94 @@ class AgentDecommissionFinalizerRepository:
             (RDBModelFile, "ModelFile"),
             (RDBSessionAgentContext, "SessionAgentContext"),
             (RDBToolkitState, "ToolkitState"),
+            (RDBExternalChannelAgentRoute, "ExternalChannelAgentRoute"),
+            (RDBExternalChannelAccessGrant, "ExternalChannelAccessGrant"),
+            (RDBExternalChannelBlock, "ExternalChannelBlock"),
         )
         for model, label in remaining:
             exists = await session.scalar(
                 sa.select(sa.exists().where(model.agent_id == agent_id))
             )
+            if exists:
+                raise RuntimeError(f"{label} lifecycle root remains")
+
+        route_owned_roots = (
+            (
+                RDBExternalChannelAccessRequest,
+                "ExternalChannelAccessRequest",
+                sa.select(
+                    sa.exists().where(
+                        RDBExternalChannelAccessRequest.route_id
+                        == RDBExternalChannelAgentRoute.id,
+                        RDBExternalChannelAgentRoute.agent_id == agent_id,
+                    )
+                ),
+            ),
+            (
+                RDBExternalChannelBinding,
+                "ExternalChannelBinding",
+                sa.select(
+                    sa.exists().where(
+                        RDBExternalChannelBinding.route_id
+                        == RDBExternalChannelAgentRoute.id,
+                        RDBExternalChannelAgentRoute.agent_id == agent_id,
+                    )
+                ),
+            ),
+            (
+                RDBExternalChannelWork,
+                "ExternalChannelWork",
+                sa.select(
+                    sa.exists().where(
+                        RDBExternalChannelWork.binding_id
+                        == RDBExternalChannelBinding.id,
+                        RDBExternalChannelBinding.route_id
+                        == RDBExternalChannelAgentRoute.id,
+                        RDBExternalChannelAgentRoute.agent_id == agent_id,
+                    )
+                ),
+            ),
+            (
+                RDBExternalChannelAction,
+                "ExternalChannelAction",
+                sa.select(
+                    sa.exists().where(
+                        RDBExternalChannelAction.binding_id
+                        == RDBExternalChannelBinding.id,
+                        RDBExternalChannelBinding.route_id
+                        == RDBExternalChannelAgentRoute.id,
+                        RDBExternalChannelAgentRoute.agent_id == agent_id,
+                    )
+                ),
+            ),
+            (
+                RDBExternalChannelDeliveryAttempt,
+                "ExternalChannelDeliveryAttempt",
+                sa.select(
+                    sa.exists().where(
+                        RDBExternalChannelDeliveryAttempt.binding_id
+                        == RDBExternalChannelBinding.id,
+                        RDBExternalChannelBinding.route_id
+                        == RDBExternalChannelAgentRoute.id,
+                        RDBExternalChannelAgentRoute.agent_id == agent_id,
+                    )
+                ),
+            ),
+            (
+                RDBExternalChannelInvocationBatch,
+                "ExternalChannelInvocationBatch",
+                sa.select(
+                    sa.exists().where(
+                        RDBExternalChannelInvocationBatch.binding_id
+                        == RDBExternalChannelBinding.id,
+                        RDBExternalChannelBinding.route_id
+                        == RDBExternalChannelAgentRoute.id,
+                        RDBExternalChannelAgentRoute.agent_id == agent_id,
+                    )
+                ),
+            ),
+        )
+        for _, label, exists_query in route_owned_roots:
+            exists = await session.scalar(exists_query)
             if exists:
                 raise RuntimeError(f"{label} lifecycle root remains")

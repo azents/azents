@@ -31,6 +31,7 @@ from azents.repos.agent_project_default import AgentProjectDefaultRepository
 from azents.repos.agent_project_preset import AgentProjectPresetRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
+from azents.repos.external_channel.lifecycle import ExternalChannelLifecycleRepository
 from azents.repos.input_buffer import InputBufferRepository
 from azents.repos.message import MessageRepository
 from azents.repos.session_git_worktree import SessionGitWorktreeRepository
@@ -47,6 +48,7 @@ from azents.services.chat.data import (
     InvalidSessionTitle,
 )
 from azents.services.exchange_file import ExchangeFileService
+from azents.services.external_channel.lifecycle import ExternalChannelLifecycleService
 from azents.services.input_buffer import InputBufferService
 from azents.services.session_git_worktree import (
     GitWorktreeArchiveIntegrityFailure,
@@ -168,6 +170,9 @@ def _service(
             _ArchiveIntegrityService(archive_integrity_failure),
         ),
         lifecycle_orchestrator=get_session_lifecycle_orchestrator(),
+        external_channel_lifecycle_service=ExternalChannelLifecycleService(
+            repository=ExternalChannelLifecycleRepository(),
+        ),
         session_manager=rdb_session_manager,
     )
 

@@ -12,6 +12,7 @@ from azents.core.session_lifecycle import (
     SessionLifecyclePurgeContext,
     SessionLifecycleRegistry,
     SessionLifecycleTransitionContext,
+    SessionLifecycleTransitionPolicy,
 )
 from azents.rdb.session import SessionManager
 from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
@@ -22,6 +23,13 @@ from azents.repos.archived_session_retention.data import (
 PurgeParticipantOperation = Callable[
     [SessionLifecycleParticipantDefinition],
     Awaitable[dict[str, object] | None],
+]
+TransitionParticipantOperation = Callable[
+    [
+        SessionLifecycleParticipantDefinition,
+        SessionLifecycleTransitionContext,
+    ],
+    Awaitable[None],
 ]
 TransitionOperation = Callable[[], Awaitable[None]]
 
@@ -83,20 +91,44 @@ class SessionLifecycleOrchestrator:
         self,
         *,
         context: SessionLifecycleTransitionContext,
+        participant_operation: TransitionParticipantOperation,
         transition: TransitionOperation,
     ) -> None:
-        """Run the archive transition after validating its participant registry."""
+        """Run participant archive operations before the locked root transition.
+
+        The caller owns the surrounding database transaction. Participant failures
+        propagate directly so the caller rolls back participant and root state
+        together.
+        """
         self._require_transition_context(context)
+        for participant in self.registry.participants:
+            if participant.archive_policy is SessionLifecycleTransitionPolicy.PRESERVE:
+                continue
+            await participant_operation(participant, context)
         await transition()
 
     async def restore(
         self,
         *,
         context: SessionLifecycleTransitionContext,
+        participant_operation: TransitionParticipantOperation,
         transition: TransitionOperation,
     ) -> None:
-        """Run the restore transition after validating its participant registry."""
+        """Run restore validation or mutation before the locked root transition.
+
+        A terminal-on-archive participant has no inverse mutation, but is dispatched
+        for validation that its terminal state remains preserved. Ordinary
+        preserve-only participants require no restore operation.
+        """
         self._require_transition_context(context)
+        for participant in reversed(self.registry.participants):
+            if (
+                participant.restore_policy is SessionLifecycleTransitionPolicy.PRESERVE
+                and participant.archive_policy
+                is not SessionLifecycleTransitionPolicy.TERMINATE
+            ):
+                continue
+            await participant_operation(participant, context)
         await transition()
 
     async def run_purge_phase(

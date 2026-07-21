@@ -42,6 +42,7 @@ from azents.repos.model_file.data import ModelFile
 from azents.repos.session_lifecycle_finalizer import (
     SessionLifecycleFinalizerRepository,
 )
+from azents.services.external_channel.lifecycle import ExternalChannelLifecycleService
 from azents.services.session_git_worktree import SessionGitWorktreeService
 from azents.services.session_lifecycle.orchestrator import (
     SessionLifecycleOrchestrator,
@@ -134,6 +135,10 @@ class ArchivedSessionPurgeService:
     lifecycle_orchestrator: Annotated[
         SessionLifecycleOrchestrator,
         Depends(get_session_lifecycle_orchestrator),
+    ]
+    external_channel_lifecycle_service: Annotated[
+        ExternalChannelLifecycleService,
+        Depends(ExternalChannelLifecycleService),
     ]
 
     async def purge_once(
@@ -344,12 +349,21 @@ class ArchivedSessionPurgeService:
             root_session_id=job.root_session_id,
             subtree_session_ids=tuple(session_ids),
         )
+
+        async def prepare_participant(
+            participant: SessionLifecycleParticipantDefinition,
+        ) -> dict[str, object] | None:
+            return await self._prepare_purge_participant(
+                participant,
+                context=context,
+            )
+
         await self.lifecycle_orchestrator.run_purge_phase(
             session_manager=self.session_manager,
             retention_repository=self.retention_repository,
             context=context,
             phase=ArchivedSessionPurgeParticipantPhase.PREPARED,
-            operation=self._prepare_purge_participant,
+            operation=prepare_participant,
         )
 
         async with self.session_manager() as session:
@@ -414,6 +428,15 @@ class ArchivedSessionPurgeService:
         ) -> dict[str, object] | None:
             nonlocal worktree_count
             match participant.key:
+                case "session.external-channel":
+                    async with self.session_manager() as session:
+                        lifecycle_service = self.external_channel_lifecycle_service
+                        summary = await lifecycle_service.cleanup_purge_participant(
+                            session,
+                            participant,
+                            context,
+                        )
+                    return summary.model_dump() if summary is not None else None
                 case "session.broker-state":
                     for session_id in session_ids:
                         await self.broker.purge_session_state(session_id)
@@ -477,6 +500,15 @@ class ArchivedSessionPurgeService:
             participant: SessionLifecycleParticipantDefinition,
         ) -> dict[str, object] | None:
             match participant.key:
+                case "session.external-channel":
+                    async with self.session_manager() as session:
+                        lifecycle_service = self.external_channel_lifecycle_service
+                        summary = await lifecycle_service.verify_purge_participant(
+                            session,
+                            participant,
+                            context,
+                        )
+                    return summary.model_dump() if summary is not None else None
                 case "session.model-files":
                     async with self.session_manager() as session:
                         files = await self.model_file_repository.list_for_session_ids(
@@ -584,6 +616,14 @@ class ArchivedSessionPurgeService:
                 session_ids=session_ids,
             ):
                 raise RuntimeError("AgentRun became active during purge cleanup")
+            external_channel_participant = self.lifecycle_orchestrator.registry.get(
+                "session.external-channel"
+            )
+            await self.external_channel_lifecycle_service.finalize_purge_participant(
+                session,
+                external_channel_participant,
+                context,
+            )
             await self.model_file_repository.delete_purged_for_session_ids(
                 session,
                 session_ids=session_ids,
@@ -622,10 +662,21 @@ class ArchivedSessionPurgeService:
     async def _prepare_purge_participant(
         self,
         participant: SessionLifecycleParticipantDefinition,
+        *,
+        context: SessionLifecyclePurgeContext,
     ) -> dict[str, object] | None:
         """Record that a fenced participant is ready for cleanup."""
-        del participant
-        return None
+        if participant.key != "session.external-channel":
+            return None
+        async with self.session_manager() as session:
+            summary = (
+                await self.external_channel_lifecycle_service.prepare_purge_participant(
+                    session,
+                    participant,
+                    context,
+                )
+            )
+        return summary.model_dump() if summary is not None else None
 
     async def _delete_file_blobs(
         self,

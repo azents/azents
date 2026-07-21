@@ -103,7 +103,7 @@ def get_session_lifecycle_registry() -> SessionLifecycleRegistry:
                         "test_session_lifecycle_external_channel",
                     ),
                 ),
-                archive_policy=SessionLifecycleTransitionPolicy.VALIDATE,
+                archive_policy=SessionLifecycleTransitionPolicy.TERMINATE,
                 restore_policy=SessionLifecycleTransitionPolicy.PRESERVE,
                 purge_policy=SessionLifecyclePurgePolicy.REQUIRED,
             ),

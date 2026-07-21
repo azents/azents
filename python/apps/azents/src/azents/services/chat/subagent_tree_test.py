@@ -34,6 +34,7 @@ from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.repos.workspace_user.data import WorkspaceUserCreate
+from azents.services.external_channel.lifecycle import ExternalChannelLifecycleService
 from azents.services.input_buffer import InputBufferService
 from azents.services.session_git_worktree import SessionGitWorktreeService
 from azents.services.session_lifecycle.registry import (
@@ -158,6 +159,10 @@ def _service(rdb_session_manager: SessionManager[AsyncSession]) -> ChatSessionSe
         input_buffer_service=cast(InputBufferService, object()),
         session_git_worktree_service=cast(SessionGitWorktreeService, object()),
         lifecycle_orchestrator=get_session_lifecycle_orchestrator(),
+        external_channel_lifecycle_service=cast(
+            ExternalChannelLifecycleService,
+            object(),
+        ),
         session_manager=rdb_session_manager,
     )
 
