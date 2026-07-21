@@ -232,6 +232,63 @@ def test_all_response_variants_serialize_discriminators_and_aware_times() -> Non
     assert unavailable_response.fetched_at.tzinfo is not None
 
 
+def test_subscription_usage_response_normalizes_timestamps_to_utc() -> None:
+    """Serialize provider timestamps with an explicit UTC offset.
+
+    Browser clients can then localize the instant correctly.
+    """
+    naive = datetime.datetime(2026, 7, 28, 2, 5)
+    offset = datetime.datetime(
+        2026,
+        7,
+        28,
+        2,
+        5,
+        tzinfo=datetime.timezone(-datetime.timedelta(hours=4)),
+    )
+    outcome = SubscriptionUsageAvailable(
+        integration_id="integration-1",
+        provider=LLMProvider.CHATGPT_OAUTH,
+        fetched_at=naive,
+        plan_label="Pro",
+        limits=(
+            SubscriptionUsageLimit(
+                id="primary",
+                label="Weekly limit",
+                used_percent=0,
+                window_minutes=7 * 24 * 60,
+                resets_at=offset,
+                primary=True,
+            ),
+        ),
+        financial_details=ChatGPTSubscriptionFinancialDetails(
+            has_credits=None,
+            unlimited=None,
+            balance=None,
+            spend_limit=None,
+            spend_used=None,
+            spend_remaining_percent=None,
+            spend_resets_at=offset,
+            reached_type=None,
+        ),
+    )
+
+    response = convert_subscription_usage_response(outcome)
+
+    assert isinstance(response, SubscriptionUsageAvailableResponse)
+    assert response.fetched_at == naive.replace(tzinfo=datetime.UTC)
+    assert response.limits[0].resets_at == datetime.datetime(
+        2026, 7, 28, 6, 5, tzinfo=datetime.UTC
+    )
+    assert isinstance(
+        response.financial_details, ChatGPTSubscriptionFinancialDetailsResponse
+    )
+    assert response.financial_details.spend_resets_at == datetime.datetime(
+        2026, 7, 28, 6, 5, tzinfo=datetime.UTC
+    )
+    assert '"resets_at":"2026-07-28T06:05:00Z"' in response.model_dump_json()
+
+
 def test_all_public_union_discriminators_are_required() -> None:
     """Require explicit wire discriminators in OpenAPI and generated clients."""
     models = [

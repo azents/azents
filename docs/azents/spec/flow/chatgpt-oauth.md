@@ -24,8 +24,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/agents/components/ModelCatalogPicker.tsx
   - typescript/apps/azents-web/src/features/llm-settings/**
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
-last_verified_at: 2026-07-19
-spec_version: 17
+last_verified_at: 2026-07-21
+spec_version: 18
 ---
 
 # ChatGPT OAuth Flow
@@ -228,7 +228,9 @@ usage snapshots, collect history, poll in the background, aggregate workspaces, 
 Agent execution entitlement.
 
 The endpoint requires `LLM_INTEGRATIONS_READ`. It returns operational limits and reset metadata to
-readers. ChatGPT credit and spend-control details are included only when the caller also has
+readers. All subscription-usage timestamps are normalized to timezone-aware UTC values before the
+public response is serialized, so browser clients receive an explicit UTC offset and localize the
+instant correctly. ChatGPT credit and spend-control details are included only when the caller also has
 `LLM_INTEGRATIONS_WRITE`. A disabled integration returns the typed `disabled` unavailable outcome
 without calling ChatGPT. Missing or cross-workspace integrations return 404, and a provider without a
 subscription-usage adapter returns 409.
@@ -303,6 +305,7 @@ error boundary.
 
 | Date | Version | Change | Rationale |
 |---|---|---|---|
+| 2026-07-21 | 18 | Normalized subscription-usage response timestamps to timezone-aware UTC before public serialization | Ensure browser clients receive an explicit offset and localize reset and freshness timestamps correctly |
 | 2026-07-19 | 17 | Added integration-scoped live subscription usage, permission-projected financial details, one-refresh retry, and card-local presentation | ADR-0169 and validated subscription usage implementation |
 | 2026-07-19 | 16 | Added one bounded Exchange attachment context item after same-native generated-image replay | Preserve local attachment discoverability without duplicating rich image input |
 | 2026-07-18 | 15 | Routed unclassified provider outcomes to internal-error handling without provider retry state | Preserve actionable incident tracebacks instead of generic unknown-provider logs |
