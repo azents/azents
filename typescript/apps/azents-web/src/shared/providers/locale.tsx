@@ -5,7 +5,7 @@
  *
  * When locale is switched on client, stores it in cookie and refreshes page.
  * In SSR, i18n/request.ts resolves locale in this order:
- * cookie → Accept-Language → default value.
+ * account preference → cookie → Accept-Language → default value.
  */
 import { createContext, type ReactNode, useContext, useMemo } from "react";
 import { LOCALE_COOKIE, type SupportedLocale } from "@/shared/lib/locale";

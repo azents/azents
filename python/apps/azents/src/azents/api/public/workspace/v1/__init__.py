@@ -63,7 +63,6 @@ async def create_workspace(
             workspace_name=request_body.workspace_name,
             workspace_handle=request_body.workspace_handle,
             owner_name=request_body.owner_name,
-            locale=request_body.locale,
         )
     )
     match result:

@@ -27,9 +27,8 @@ class WorkspaceUserUpdateRequest(BaseModel):
     WorkspaceUser update request schema.
     """ # noqa: E501
     name: Optional[StrictStr] = None
-    locale: Optional[StrictStr] = None
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["name", "locale"]
+    __properties: ClassVar[List[str]] = ["name"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -89,8 +88,7 @@ class WorkspaceUserUpdateRequest(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "name": obj.get("name"),
-            "locale": obj.get("locale")
+            "name": obj.get("name")
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

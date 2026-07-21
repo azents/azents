@@ -152,9 +152,22 @@ export function createServerContext(): Context {
 }
 
 /** Create API client with access token already prepared in Route handler. */
-export function createApiClientWithAccessToken(accessToken: string): Client {
+export function createApiClientWithAccessToken(
+  accessToken: string,
+  options?: { cache?: RequestCache },
+): Client {
+  const config = getServerConfig();
+  const fetch = options?.cache
+    ? (input: RequestInfo | URL, init?: RequestInit) =>
+        safeFetch(input, { ...init, cache: options.cache })
+    : safeFetch;
   const client = withApiErrorInterceptor(
-    createClient(getInternalApiClientConfig()),
+    createClient(
+      createConfig({
+        baseUrl: config.internalApiUrl,
+        fetch,
+      }),
+    ),
   );
   client.interceptors.request.use((request) => {
     request.headers.set("Authorization", `Bearer ${accessToken}`);

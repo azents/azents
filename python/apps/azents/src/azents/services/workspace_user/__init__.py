@@ -60,7 +60,6 @@ class WorkspaceUserService:
                     workspace_id=workspace_id,
                     user_id=create.user_id,
                     name=create.name,
-                    locale=create.locale,
                     role=create.role,
                 ),
             )

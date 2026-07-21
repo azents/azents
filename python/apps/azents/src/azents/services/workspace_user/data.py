@@ -23,7 +23,6 @@ class WorkspaceUserCreateInput(BaseModel):
     workspace_handle: str = Field(description="Owning Workspace handle")
     user_id: str = Field(description="User ID")
     name: str = Field(description="Workspace display name")
-    locale: str = Field(default="ko-KR", description="Workspace locale (BCP 47)")
     role: WorkspaceUserRole = Field(description="Role (owner, manager, member)")
 
 

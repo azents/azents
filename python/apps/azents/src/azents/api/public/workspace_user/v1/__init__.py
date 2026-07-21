@@ -67,13 +67,11 @@ async def update_my_profile(
 ) -> WorkspaceUserResponse:
     """Update the current user's workspace profile.
 
-    Name, locale, and similar fields can be changed.
+    Name and similar workspace profile fields can be changed.
     """
     update_data = WorkspaceUserUpdateInput()
     if request_body.name is not None:
         update_data["name"] = request_body.name
-    if request_body.locale is not None:
-        update_data["locale"] = request_body.locale
 
     result = await user_service.update(member.workspace_user_id, update_data)
     match result:

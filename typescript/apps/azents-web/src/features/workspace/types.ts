@@ -27,7 +27,6 @@ export interface WorkspaceMember {
   user_id: string;
   name: string;
   role: string;
-  locale: string;
   created_at: string;
   updated_at: string;
 }

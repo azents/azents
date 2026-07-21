@@ -338,7 +338,7 @@ Update My Profile
 
 Update the current user's workspace profile.
 
-Name, locale, and similar fields can be changed.
+Name and similar workspace profile fields can be changed.
 
 ### Example
 

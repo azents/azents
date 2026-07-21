@@ -135,7 +135,6 @@ class WorkspaceService:
                     workspace_id=workspace_id,
                     user_id=input.user_id,
                     name=input.owner_name,
-                    locale=input.locale,
                     role=WorkspaceUserRole.OWNER,
                 ),
             )

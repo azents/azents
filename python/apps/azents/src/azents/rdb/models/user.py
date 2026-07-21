@@ -6,6 +6,7 @@ import sqlalchemy as sa
 from azcommon.uuid import uuid7
 from sqlalchemy.orm import Mapped, mapped_column
 
+from azents.core.locale import SupportedLocale
 from azents.rdb.models.base import RDBModel
 from azents.rdb.types.datetime import TimeZoneDateTime
 
@@ -35,6 +36,11 @@ class RDBUser(RDBModel):
             initially="DEFERRED",
         ),
         nullable=False,
+    )
+    locale: Mapped[SupportedLocale] = mapped_column(
+        sa.String(35),
+        nullable=False,
+        server_default="en-US",
     )
 
     created_at: Mapped[datetime.datetime] = mapped_column(

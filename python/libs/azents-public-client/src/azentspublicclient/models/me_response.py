@@ -18,7 +18,7 @@ import re  # noqa: F401
 import json
 
 from datetime import datetime
-from pydantic import BaseModel, ConfigDict, Field, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictStr, field_validator
 from typing import Any, ClassVar, Dict, List
 from typing import Optional, Set
 from typing_extensions import Self
@@ -28,9 +28,17 @@ class MeResponse(BaseModel):
     Current user information response.
     """ # noqa: E501
     email: StrictStr = Field(description="Primary email address")
+    locale: StrictStr = Field(description="Account locale (BCP 47)")
     created_at: datetime = Field(description="Signup time")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["email", "created_at"]
+    __properties: ClassVar[List[str]] = ["email", "locale", "created_at"]
+
+    @field_validator('locale')
+    def locale_validate_enum(cls, value):
+        """Validates the enum"""
+        if value not in set(['en-US', 'ko-KR', 'ja-JP', 'fr-FR']):
+            raise ValueError("must be one of enum values ('en-US', 'ko-KR', 'ja-JP', 'fr-FR')")
+        return value
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -91,6 +99,7 @@ class MeResponse(BaseModel):
 
         _obj = cls.model_validate({
             "email": obj.get("email"),
+            "locale": obj.get("locale"),
             "created_at": obj.get("created_at")
         })
         # store additional fields in additional_properties

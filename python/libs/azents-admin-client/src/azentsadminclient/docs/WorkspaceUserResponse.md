@@ -10,7 +10,6 @@ Name | Type | Description | Notes
 **workspace_id** | **str** | Owning Workspace ID | 
 **user_id** | **str** | User ID | 
 **name** | **str** | Workspace display name | 
-**locale** | **str** | Workspace locale (BCP 47) | 
 **role** | [**WorkspaceUserRole**](WorkspaceUserRole.md) | Role (owner, manager, member) | 
 **created_at** | **datetime** | Created time | 
 **updated_at** | **datetime** | Updated time | 

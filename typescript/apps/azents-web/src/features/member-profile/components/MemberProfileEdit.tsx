@@ -6,36 +6,22 @@ import {
   Center,
   Container,
   Loader,
-  NativeSelect,
   Paper,
   Stack,
   Text,
   TextInput,
   Title,
 } from "@mantine/core";
-import {
-  IconAlertCircle,
-  IconCheck,
-  IconLanguage,
-  IconUser,
-} from "@tabler/icons-react";
+import { IconAlertCircle, IconCheck, IconUser } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 /**
  * Member profile edit UI component.
  *
- * Provides name and locale edit form.
+ * Provides name edit form.
  */
 import { useEffect, useState } from "react";
 import type { MemberProfileContainerProps } from "../containers/useMemberProfileContainer";
 import type { FormState } from "../types";
-
-/** Supported locale list */
-const LOCALE_OPTIONS = [
-  { value: "ko-KR", label: "Korean" },
-  { value: "en-US", label: "English" },
-  { value: "ja-JP", label: "日本語" },
-  { value: "fr-FR", label: "Français" },
-];
 
 export function MemberProfileEdit({
   state,
@@ -66,7 +52,6 @@ export function MemberProfileEdit({
           <Paper withBorder p="lg" radius="md">
             <ProfileForm
               name={state.profile.name}
-              locale={state.profile.locale}
               formState={state.formState}
               onSubmit={onSubmit}
               onResetForm={onResetForm}
@@ -79,30 +64,26 @@ export function MemberProfileEdit({
 
 interface ProfileFormProps {
   name: string;
-  locale: string;
   formState: FormState;
-  onSubmit: (name: string, locale: string) => void;
+  onSubmit: (name: string) => void;
   onResetForm: () => void;
 }
 
 /** Profile edit form */
 function ProfileForm({
   name: initialName,
-  locale: initialLocale,
   formState,
   onSubmit,
   onResetForm,
 }: ProfileFormProps): React.ReactElement {
   const t = useTranslations("memberProfile");
   const [name, setName] = useState(initialName);
-  const [locale, setLocale] = useState(initialLocale);
   const [nameError, setNameError] = useState<string | null>(null);
 
   // Synchronize form values when server data updates
   useEffect(() => {
     setName(initialName);
-    setLocale(initialLocale);
-  }, [initialName, initialLocale]);
+  }, [initialName]);
 
   // Reset notification after a short time on success
   useEffect(() => {
@@ -122,7 +103,7 @@ function ProfileForm({
     }
 
     setNameError(null);
-    onSubmit(trimmedName, locale);
+    onSubmit(trimmedName);
   };
 
   const isSubmitting = formState.type === "SUBMITTING";
@@ -153,15 +134,6 @@ function ProfileForm({
             }
           }}
           error={nameError}
-          disabled={isSubmitting}
-        />
-
-        <NativeSelect
-          label={t("localeLabel")}
-          leftSection={<IconLanguage size={16} />}
-          data={LOCALE_OPTIONS}
-          value={locale}
-          onChange={(e) => setLocale(e.currentTarget.value)}
           disabled={isSubmitting}
         />
 

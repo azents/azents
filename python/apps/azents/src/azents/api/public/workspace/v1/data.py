@@ -26,7 +26,6 @@ class CreateWorkspaceRequest(BaseModel):
     workspace_name: str = Field(description="Workspace name")
     workspace_handle: str = Field(description="Workspace handle")
     owner_name: str = Field(description="Owner display name")
-    locale: str = Field(default="ko-KR", description="Locale (BCP 47)")
 
 
 class CreateWorkspaceResponse(CreateWithOwnerOutput):

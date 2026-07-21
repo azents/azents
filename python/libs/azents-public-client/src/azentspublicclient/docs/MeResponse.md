@@ -7,6 +7,7 @@ Current user information response.
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **email** | **str** | Primary email address | 
+**locale** | **str** | Account locale (BCP 47) | 
 **created_at** | **datetime** | Signup time | 
 
 ## Example

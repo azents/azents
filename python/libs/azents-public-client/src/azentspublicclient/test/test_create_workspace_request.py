@@ -37,8 +37,7 @@ class TestCreateWorkspaceRequest(unittest.TestCase):
             return CreateWorkspaceRequest(
                 workspace_name = '',
                 workspace_handle = '',
-                owner_name = '',
-                locale = 'ko-KR'
+                owner_name = ''
             )
         else:
             return CreateWorkspaceRequest(

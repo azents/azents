@@ -13,7 +13,7 @@ import type { FormState, MemberProfileState } from "../types";
 export interface MemberProfileContainerProps {
   handle: string;
   state: MemberProfileState;
-  onSubmit: (name: string, locale: string) => void;
+  onSubmit: (name: string) => void;
   onResetForm: () => void;
 }
 
@@ -44,9 +44,9 @@ export function useMemberProfileContainer(props: {
   });
 
   const onSubmit = useCallback(
-    (name: string, locale: string): void => {
+    (name: string): void => {
       setFormState({ type: "SUBMITTING" });
-      updateMutation.mutate({ handle, name, locale });
+      updateMutation.mutate({ handle, name });
     },
     [handle, updateMutation],
   );
@@ -69,7 +69,6 @@ export function useMemberProfileContainer(props: {
           profile: {
             id: data.id,
             name: data.name,
-            locale: data.locale,
             role: data.role,
             createdAt: data.created_at,
             updatedAt: data.updated_at,

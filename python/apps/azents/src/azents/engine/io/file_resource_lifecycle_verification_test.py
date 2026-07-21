@@ -194,7 +194,6 @@ class _FakeWorkspaceUserRepository:
             workspace_id="workspace-1",
             user_id="user-1",
             name="Test User",
-            locale="en-US",
             role=WorkspaceUserRole.MEMBER,
             created_at=_NOW,
             updated_at=_NOW,

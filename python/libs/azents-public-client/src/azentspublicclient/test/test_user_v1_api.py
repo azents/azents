@@ -40,6 +40,13 @@ class TestUserV1Api(unittest.TestCase):
         """
         pass
 
+    def test_user_v1_update_me(self) -> None:
+        """Test case for user_v1_update_me
+
+        Update Me
+        """
+        pass
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -67,7 +67,6 @@ class TestWorkspaceUserRepository:
         assert user.user_id == created_user_id
         assert user.name == "Test user"
         assert user.role == WorkspaceUserRole.OWNER
-        assert user.locale == "ko-KR"
         assert user.id
         assert user.created_at
         assert user.updated_at

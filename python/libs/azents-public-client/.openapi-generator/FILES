@@ -299,6 +299,7 @@ azentspublicclient/docs/ToolkitScopeType.md
 azentspublicclient/docs/ToolkitV1Api.md
 azentspublicclient/docs/UnsupportedMediaPolicy.md
 azentspublicclient/docs/UpdateMyProfileRequest.md
+azentspublicclient/docs/UpdateMyUserRequest.md
 azentspublicclient/docs/UpdateWorkspaceUserRoleRequest.md
 azentspublicclient/docs/UploadResponse.md
 azentspublicclient/docs/UploadedImage.md
@@ -592,6 +593,7 @@ azentspublicclient/models/toolkit_scope_response.py
 azentspublicclient/models/toolkit_scope_type.py
 azentspublicclient/models/unsupported_media_policy.py
 azentspublicclient/models/update_my_profile_request.py
+azentspublicclient/models/update_my_user_request.py
 azentspublicclient/models/update_workspace_user_role_request.py
 azentspublicclient/models/upload_response.py
 azentspublicclient/models/uploaded_image.py
@@ -893,6 +895,7 @@ azentspublicclient/test/test_toolkit_scope_type.py
 azentspublicclient/test/test_toolkit_v1_api.py
 azentspublicclient/test/test_unsupported_media_policy.py
 azentspublicclient/test/test_update_my_profile_request.py
+azentspublicclient/test/test_update_my_user_request.py
 azentspublicclient/test/test_update_workspace_user_role_request.py
 azentspublicclient/test/test_upload_response.py
 azentspublicclient/test/test_uploaded_image.py

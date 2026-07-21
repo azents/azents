@@ -39,7 +39,6 @@ export const workspaceRouter = router({
         workspaceName: z.string().min(1).max(50),
         workspaceHandle: z.string().min(1).max(30),
         ownerName: z.string().min(1).max(50),
-        locale: z.string().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -50,7 +49,6 @@ export const workspaceRouter = router({
             workspace_name: input.workspaceName,
             workspace_handle: input.workspaceHandle,
             owner_name: input.ownerName,
-            locale: input.locale,
           },
           throwOnError: true,
         });

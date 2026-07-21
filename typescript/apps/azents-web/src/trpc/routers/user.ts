@@ -3,7 +3,11 @@
  *
  * current user information fetch.
  */
-import { userV1GetMySystemRoles, userV1Me } from "@azents/public-client";
+import {
+  userV1GetMySystemRoles,
+  userV1Me,
+  userV1UpdateMe,
+} from "@azents/public-client";
 import { z } from "zod/v4";
 import { getServerConfig } from "@/config/server";
 import { getAdminWebUrl } from "@/shared/lib/admin-access";
@@ -25,6 +29,29 @@ export const userRouter = router({
       throw mapExpectedError(e, { 401: "UNAUTHORIZED" });
     }
   }),
+
+  updateMe: publicProcedure
+    .input(
+      z.object({
+        locale: z.enum(["en-US", "ko-KR", "ja-JP", "fr-FR"]),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { data } = await userV1UpdateMe({
+          client: ctx.apiClient,
+          body: { locale: input.locale },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          401: "UNAUTHORIZED",
+          404: "NOT_FOUND",
+          422: "BAD_REQUEST",
+        });
+      }
+    }),
 
   /** Return the configured Admin Web URL only to system administrators. */
   adminAccess: publicProcedure.input(z.object({})).query(async ({ ctx }) => {

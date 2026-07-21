@@ -44,7 +44,6 @@ export const memberProfileRouter = router({
       z.object({
         handle: z.string().min(1),
         name: z.string().min(1).optional(),
-        locale: z.string().min(1).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -53,10 +52,6 @@ export const memberProfileRouter = router({
         if (input.name != null) {
           body.name = input.name;
         }
-        if (input.locale != null) {
-          body.locale = input.locale;
-        }
-
         const { data } = await workspaceuserV1UpdateMyProfile({
           client: ctx.apiClient,
           path: { handle: input.handle },

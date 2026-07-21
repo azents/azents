@@ -30,7 +30,6 @@ class UpdateMyProfileRequest(BaseModel):
     """Own workspace profile update request schema."""
 
     name: str | None = Field(default=None, description="Display name to change to")
-    locale: str | None = Field(default=None, description="Locale to change to (BCP 47)")
 
 
 class CurrentMemberResponse(BaseModel):
