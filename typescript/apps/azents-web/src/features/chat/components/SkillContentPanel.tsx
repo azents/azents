@@ -1,5 +1,8 @@
 import { Box, Paper, rem, ScrollArea } from "@mantine/core";
-import { activityDetailScrollbarSize } from "./activityRowPresentation";
+import {
+  activityDetailScrollAreaProps,
+  activityDetailScrollbarSize,
+} from "./activityRowPresentation";
 import { MarkdownContent } from "./MarkdownContent";
 import classes from "./SkillLoadedActivityRow.module.css";
 import type { ReactElement } from "react";
@@ -36,6 +39,7 @@ export function SkillContentPanel({
         scrollbars="y"
         scrollbarSize={activityDetailScrollbarSize}
         style={{ maxWidth: "100%" }}
+        {...activityDetailScrollAreaProps}
       >
         <Box className={classes.body}>
           <MarkdownContent>{body}</MarkdownContent>

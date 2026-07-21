@@ -5,7 +5,10 @@ import { IconBubble } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { useMemo } from "react";
 import { ActivityRow } from "./ActivityRow";
-import { activityDetailScrollbarSize } from "./activityRowPresentation";
+import {
+  activityDetailScrollAreaProps,
+  activityDetailScrollbarSize,
+} from "./activityRowPresentation";
 import { MarkdownContent } from "./MarkdownContent";
 import type { ReactElement } from "react";
 
@@ -77,6 +80,7 @@ export function ReasoningActivityRow({
     <ScrollArea.Autosize
       mah={rem(300)}
       scrollbarSize={activityDetailScrollbarSize}
+      {...activityDetailScrollAreaProps}
     >
       <Box c="dimmed">
         <MarkdownContent>{sanitizedReasoningSummary}</MarkdownContent>

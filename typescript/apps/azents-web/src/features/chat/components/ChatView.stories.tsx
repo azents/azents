@@ -989,6 +989,13 @@ export const LongMobileConversation = {
     ...baseArgs,
     messages: longConversationMessages,
   },
+  play: async ({ canvasElement }) => {
+    const viewport = canvasElement.querySelector("[data-chat-scroll-viewport]");
+    if (!(viewport instanceof HTMLElement)) {
+      throw new Error("Expected the Chat scroll viewport");
+    }
+    await expect(getComputedStyle(viewport).overscrollBehavior).toBe("contain");
+  },
 } satisfies Story;
 
 export const WithLiveRunRetry = {

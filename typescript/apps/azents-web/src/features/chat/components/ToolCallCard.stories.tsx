@@ -1,3 +1,4 @@
+import { Box, rem } from "@mantine/core";
 import { expect, userEvent, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import {
@@ -25,6 +26,11 @@ const meta = {
 export default meta;
 
 type Story = StoryObj<typeof meta>;
+
+const longCommandResult = Array.from(
+  { length: 80 },
+  (_, index) => `log line ${index + 1}: completed command output`,
+).join("\n");
 
 export const Preparing = {
   args: {
@@ -56,7 +62,7 @@ export const RunningCommandExpanded = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await userEvent.click(canvas.getByRole("button", { name: /Ran command/ }));
+    await userEvent.click(canvas.getByRole("button", { name: /^Ran command/ }));
     await expect(
       canvas.getByText("$ pnpm --filter @azents/web dev"),
     ).toBeVisible();
@@ -83,11 +89,54 @@ export const CompletedCommandExpanded = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await userEvent.click(canvas.getByRole("button", { name: /Ran command/ }));
+    await userEvent.click(canvas.getByRole("button", { name: /^Ran command/ }));
     await expect(
       canvas.getByText("$ pnpm --filter @azents/web test"),
     ).toBeVisible();
     await expect(canvas.getByText("66 tests passed")).toBeVisible();
+  },
+} satisfies Story;
+
+export const NestedCommandScrollContainment = {
+  args: {
+    toolCall: {
+      id: "nested-command-scroll-story",
+      callId: "nested-command-scroll-story",
+      name: "exec_command",
+      arguments: '{"command":"pnpm --filter @azents/web test"}',
+      result: longCommandResult,
+      resultMetadata: {
+        kind: "exec_command_result",
+        status: "completed",
+        exit_code: 0,
+        stdout_truncated: false,
+        stderr_truncated: false,
+      },
+      status: "completed",
+    },
+  },
+  decorators: [
+    (Story) => (
+      <Box
+        h={rem(360)}
+        data-tool-scroll-background
+        style={{ overflowY: "auto" }}
+      >
+        <Story />
+        <Box h={rem(480)} />
+      </Box>
+    ),
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(canvas.getByRole("button", { name: /^Ran command/ }));
+    const viewport = canvasElement.querySelector(
+      "[data-activity-detail-scroll-viewport]",
+    );
+    if (!(viewport instanceof HTMLElement)) {
+      throw new Error("Expected the Activity detail scroll viewport");
+    }
+    await expect(getComputedStyle(viewport).overscrollBehavior).toBe("contain");
   },
 } satisfies Story;
 
@@ -117,6 +166,33 @@ export const PresentedFiles = {
   },
 } satisfies Story;
 
+export const KnownWriteUsesEditIcon = {
+  args: {
+    toolCall: {
+      id: "known-write-story",
+      callId: "known-write-story",
+      name: "write",
+      arguments:
+        '{"path":"/workspace/agent/mobile-scroll-playwright.config.js","content":"export const mobileViewport = { width: 390, height: 844 };"}',
+      result: "File written.",
+      status: "completed",
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByText("Wrote file")).toBeVisible();
+    await expect(
+      canvas.getByText("mobile-scroll-playwright.config.js"),
+    ).toBeVisible();
+    await expect(
+      canvasElement.querySelector(".tabler-icon-pencil"),
+    ).not.toBeNull();
+    await userEvent.click(canvas.getByRole("button", { name: /^Wrote file/ }));
+    await expect(canvas.getByText(/export const mobileViewport/)).toBeVisible();
+    await expect(canvasElement.querySelector("pre code span")).not.toBeNull();
+  },
+} satisfies Story;
+
 export const Failed = {
   args: {
     toolCall: failedToolCall,
@@ -140,6 +216,43 @@ export const GenericFailureExpanded = {
       canvas.getByRole("button", { name: /custom_database_query/ }),
     );
     await expect(canvas.getByText("Connection refused")).toBeVisible();
+  },
+} satisfies Story;
+
+export const KnownGrepVerticalFields = {
+  args: {
+    toolCall: {
+      id: "known-grep-vertical-fields-story",
+      callId: "known-grep-vertical-fields-story",
+      name: "grep",
+      arguments:
+        '{"pattern":"NestedCommandScrollContainment|LongMobileConversation","path":"/workspace/agent/azents/typescript/apps/azents-web/storybook-static/index.json"}',
+      result: "Found both mobile scroll stories.",
+      status: "completed",
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(canvas.getByRole("button", { name: /^Grep/ }));
+
+    const queryLabel = canvas.getByText("Query");
+    const queryValue = canvas.getByText(
+      "NestedCommandScrollContainment|LongMobileConversation",
+    );
+    const sourceLabel = canvas.getByText("Source");
+    const sourceValue = canvas.getByText(
+      "/workspace/agent/azents/typescript/apps/azents-web/storybook-static/index.json",
+    );
+
+    await expect(queryLabel.getBoundingClientRect().bottom).toBeLessThanOrEqual(
+      queryValue.getBoundingClientRect().top,
+    );
+    await expect(
+      sourceLabel.getBoundingClientRect().bottom,
+    ).toBeLessThanOrEqual(sourceValue.getBoundingClientRect().top);
+    await expect(
+      canvas.getByText("Found both mobile scroll stories."),
+    ).toBeVisible();
   },
 } satisfies Story;
 
@@ -235,5 +348,41 @@ export const KnownEdit = {
     await userEvent.click(canvas.getByRole("button", { name: /Edited file/ }));
     await expect(canvas.getByText("fw={600}")).toBeVisible();
     await expect(canvas.getByText('c="dimmed" fw={500}')).toBeVisible();
+  },
+} satisfies Story;
+
+export const KnownEditHorizontalScroll = {
+  args: {
+    toolCall: {
+      id: "known-edit-horizontal-scroll-story",
+      callId: "known-edit-horizontal-scroll-story",
+      name: "edit",
+      arguments: JSON.stringify({
+        path: "/workspace/agent/azents/src/features/chat/components/ToolCallCard.tsx",
+        old_string: `const previousValue = "${"old-value-".repeat(32)}";`,
+        new_string: `const nextValue = "${"new-value-".repeat(32)}";`,
+      }),
+      status: "completed",
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(canvas.getByRole("button", { name: /^Edited file/ }));
+
+    const actionLabel = canvas.getByText("Update");
+    const filePath = canvas.getByText(
+      "/workspace/agent/azents/src/features/chat/components/ToolCallCard.tsx",
+    );
+    await expect(
+      actionLabel.getBoundingClientRect().bottom,
+    ).toBeLessThanOrEqual(filePath.getBoundingClientRect().top);
+
+    const longLine = canvas.getByText(/const nextValue/);
+    const viewport = longLine.closest("[data-activity-detail-scroll-viewport]");
+    if (!(viewport instanceof HTMLElement)) {
+      throw new Error("Expected the diff scroll viewport");
+    }
+    await expect(getComputedStyle(longLine).whiteSpace).toBe("pre");
+    await expect(viewport.scrollWidth).toBeGreaterThan(viewport.clientWidth);
   },
 } satisfies Story;

@@ -1411,7 +1411,7 @@
         "list": "파일 목록 조회",
         "grep": "Grep",
         "glob": "Glob",
-        "write": "파일 작성",
+        "write": "작성된 파일",
         "edit": "파일 편집",
         "patch": "패치 적용",
         "delete": "파일 삭제",

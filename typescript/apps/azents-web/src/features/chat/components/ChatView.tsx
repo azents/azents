@@ -57,6 +57,10 @@ import {
 } from "../toolActivityPresentation";
 import { WorkspacePanel } from "../workspace/components/WorkspacePanel";
 import { ActionExecutionTimelineCard } from "./ActionExecutionTimelineCard";
+import {
+  chatScrollOverscrollBehavior,
+  chatScrollViewportProps,
+} from "./activityRowPresentation";
 import { AuthorizationRequestBubble } from "./AuthorizationRequestBubble";
 import { ChatInput } from "./ChatInput";
 import { CompactionDivider } from "./CompactionDivider";
@@ -1282,6 +1286,8 @@ export function ChatView({
           mih={0}
           ref={scrollAreaRef}
           viewportRef={viewportRef}
+          overscrollBehavior={chatScrollOverscrollBehavior}
+          viewportProps={chatScrollViewportProps}
           styles={{ root: { minWidth: 0 }, viewport: { minWidth: 0 } }}
         >
           <Box

@@ -43,7 +43,8 @@ export const WebSearchResults = {
       id: "provider-search-results",
       callId: "provider-search-results",
       name: "web_search",
-      arguments: '{"query":"Azents agent platform"}',
+      arguments:
+        '{"queries":["  Azents   agent platform  ","site:docs.example.com\\nagent workflows"]}',
       status: "completed",
       semanticOutput: "Found two relevant sources.",
       references: [
@@ -67,6 +68,10 @@ export const WebSearchResults = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await userEvent.click(canvas.getByRole("button", { name: /Web search/ }));
+    await expect(canvas.getByText("Azents agent platform")).toBeVisible();
+    await expect(
+      canvas.getByText("site:docs.example.com agent workflows"),
+    ).toBeVisible();
     await expect(canvas.getByText("Azents overview")).toBeVisible();
     await expect(canvas.getByText("Azents documentation")).toBeVisible();
   },
