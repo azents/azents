@@ -26,7 +26,10 @@ import {
   IconTrash,
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
+import { formatLocalizedDate } from "@/shared/lib/date-format";
+import { useLocale } from "@/shared/providers/locale";
 import type { WorkspaceEntry, WorkspacePathStat } from "../types";
+import type { SupportedLocale } from "@/shared/lib/locale";
 
 interface FileInfoProps {
   entry: WorkspaceEntry | null;
@@ -54,7 +57,7 @@ function formatFileSize(bytes: number | null): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function formatDate(value: string | null): string {
+function formatDate(value: string | null, locale: SupportedLocale): string {
   if (value === null) {
     return "—";
   }
@@ -62,7 +65,10 @@ function formatDate(value: string | null): string {
   if (Number.isNaN(date.getTime())) {
     return value;
   }
-  return date.toLocaleString();
+  return formatLocalizedDate(date, locale, {
+    dateStyle: "medium",
+    timeStyle: "medium",
+  });
 }
 
 function canRename(entry: WorkspaceEntry): boolean {
@@ -125,6 +131,7 @@ export function FileInfo({
   onDelete,
 }: FileInfoProps): React.ReactElement {
   const t = useTranslations("chat.workspacePanel");
+  const { locale } = useLocale();
 
   if (entry === null) {
     return (
@@ -243,7 +250,7 @@ export function FileInfo({
             />
             <MetadataRow
               label={t("modifiedAt")}
-              value={formatDate(stat?.modifiedAt ?? entry.modifiedAt)}
+              value={formatDate(stat?.modifiedAt ?? entry.modifiedAt, locale)}
             />
             <MetadataRow
               label={t("symlink")}

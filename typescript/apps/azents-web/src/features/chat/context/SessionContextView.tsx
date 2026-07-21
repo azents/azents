@@ -29,6 +29,8 @@ import {
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useState } from "react";
+import { formatLocalizedDate } from "@/shared/lib/date-format";
+import { useLocale } from "@/shared/providers/locale";
 import type {
   SessionContextResponse,
   SessionContextSystemPromptFragmentResponse,
@@ -479,6 +481,7 @@ export function SessionRawEventsView({
   context,
 }: SessionRawEventsViewProps): React.ReactElement {
   const t = useTranslations("chat.context");
+  const { locale } = useLocale();
   const [openedEventId, setOpenedEventId] = useState<string | null>(null);
 
   return (
@@ -525,7 +528,10 @@ export function SessionRawEventsView({
                     {event.kind}
                   </Badge>
                   <Text size="sm" c="dimmed" truncate>
-                    {new Date(event.created_at).toLocaleString()}
+                    {formatLocalizedDate(new Date(event.created_at), locale, {
+                      dateStyle: "medium",
+                      timeStyle: "medium",
+                    })}
                   </Text>
                   {event.model && (
                     <Text size="xs" c="dimmed" truncate>

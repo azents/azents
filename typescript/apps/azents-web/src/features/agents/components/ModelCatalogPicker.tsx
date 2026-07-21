@@ -14,6 +14,8 @@ import {
 } from "@mantine/core";
 import { useTranslations } from "next-intl";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { formatLocalizedDate } from "@/shared/lib/date-format";
+import { useLocale } from "@/shared/providers/locale";
 import { trpc } from "@/trpc/client";
 import type {
   ModelCatalogAttemptState,
@@ -21,6 +23,7 @@ import type {
   ProviderIntegrationOption,
   SelectableModelCandidate,
 } from "../model-selection";
+import type { SupportedLocale } from "@/shared/lib/locale";
 
 const PAGE_SIZE = 50;
 
@@ -100,14 +103,18 @@ function catalogUiState(params: {
   return { type: "READY" };
 }
 
-function formatDate(value: string | null, neverLabel: string): string {
+function formatDate(
+  value: string | null,
+  neverLabel: string,
+  locale: SupportedLocale,
+): string {
   if (value == null) {
     return neverLabel;
   }
-  return new Intl.DateTimeFormat([], {
+  return formatLocalizedDate(new Date(value), locale, {
     dateStyle: "medium",
     timeStyle: "short",
-  }).format(new Date(value));
+  });
 }
 
 function formatCapabilityBadges(
@@ -176,6 +183,7 @@ export function ModelCatalogPicker({
   onSyncCatalog,
 }: ModelCatalogPickerProps): React.ReactElement {
   const t = useTranslations("workspace.agents.modelCatalogPicker");
+  const { locale } = useLocale();
   const [search, setSearch] = useState("");
   const [offset, setOffset] = useState(0);
   const [pages, setPages] = useState<LoadedCatalogPage[]>([]);
@@ -388,6 +396,7 @@ export function ModelCatalogPicker({
                       value: formatDate(
                         catalogState?.currentSnapshotCreatedAt ?? null,
                         t("never"),
+                        locale,
                       ),
                     })}
                   </Text>
@@ -418,7 +427,7 @@ export function ModelCatalogPicker({
               {syncThrottled && syncAvailableAt != null && (
                 <Alert color="gray">
                   {t("syncThrottledUntil", {
-                    value: formatDate(syncAvailableAt, t("never")),
+                    value: formatDate(syncAvailableAt, t("never"), locale),
                   })}
                 </Alert>
               )}

@@ -7,12 +7,19 @@ import { IconClock } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { AgentAvatar } from "@/features/agents/components/AgentAvatar";
+import { formatLocalizedDate } from "@/shared/lib/date-format";
+import { useLocale } from "@/shared/providers/locale";
 import styles from "./WorkspaceHome.module.css";
 import type { EnrichedAgent } from "../types";
+import type { SupportedLocale } from "@/shared/lib/locale";
 
 type ChatTranslator = ReturnType<typeof useTranslations<"chat">>;
 
-function formatRelative(iso: string, t: ChatTranslator): string {
+function formatRelative(
+  iso: string,
+  t: ChatTranslator,
+  locale: SupportedLocale,
+): string {
   const diff = Date.now() - new Date(iso).getTime();
   const minutes = Math.floor(diff / 60_000);
   if (minutes < 1) {
@@ -29,7 +36,7 @@ function formatRelative(iso: string, t: ChatTranslator): string {
   if (days < 30) {
     return t("daysAgo", { count: days });
   }
-  return new Date(iso).toLocaleDateString();
+  return formatLocalizedDate(new Date(iso), locale);
 }
 
 interface AgentTeamCardProps {
@@ -43,6 +50,7 @@ export function AgentTeamCard({
 }: AgentTeamCardProps): React.ReactElement {
   const t = useTranslations("chat");
   const tHome = useTranslations("workspace.home.card");
+  const { locale } = useLocale();
   const href = `/w/${handle}/agents/${agent.id}/sessions/new`;
 
   return (
@@ -102,7 +110,7 @@ export function AgentTeamCard({
       <Group gap={6} mt="auto">
         <IconClock size={14} />
         <Text size="xs" c="dimmed">
-          {formatRelative(agent.lastActiveAt, t)}
+          {formatRelative(agent.lastActiveAt, t, locale)}
         </Text>
       </Group>
     </Card>
