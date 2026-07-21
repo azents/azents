@@ -325,21 +325,17 @@ class RDBArchivedSessionPurgeParticipantExecution(RDBModel):
     __tablename__ = "archived_session_purge_participant_executions"
 
     IX_PURGE_JOB_ID_PHASE = sa.Index(
-        "ix_archived_session_purge_participant_executions_purge_job_id_phase",
+        "ix_archived_purge_part_exec_job_phase",
         "purge_job_id",
         "phase",
     )
     CK_POLICY_VERSION_POSITIVE = sa.CheckConstraint(
         "policy_version >= 1",
-        name=(
-            "ck_archived_session_purge_participant_executions_policy_version_positive"
-        ),
+        name=("ck_archived_purge_part_exec_policy_positive"),
     )
     CK_ATTEMPT_COUNT_NONNEGATIVE = sa.CheckConstraint(
         "attempt_count >= 0",
-        name=(
-            "ck_archived_session_purge_participant_executions_attempt_count_nonnegative"
-        ),
+        name=("ck_archived_purge_part_exec_attempt_nonnegative"),
     )
 
     purge_job_id: Mapped[str] = mapped_column(

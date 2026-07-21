@@ -74,17 +74,11 @@ def upgrade() -> None:
         ),
         sa.CheckConstraint(
             "attempt_count >= 0",
-            name=(
-                "ck_archived_session_purge_participant_executions_"
-                "attempt_count_nonnegative"
-            ),
+            name=("ck_archived_purge_part_exec_attempt_nonnegative"),
         ),
         sa.CheckConstraint(
             "policy_version >= 1",
-            name=(
-                "ck_archived_session_purge_participant_executions_"
-                "policy_version_positive"
-            ),
+            name=("ck_archived_purge_part_exec_policy_positive"),
         ),
         sa.ForeignKeyConstraint(
             ["purge_job_id"],
@@ -94,7 +88,7 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("purge_job_id", "participant_key"),
     )
     op.create_index(
-        "ix_archived_session_purge_participant_executions_purge_job_id_phase",
+        "ix_archived_purge_part_exec_job_phase",
         "archived_session_purge_participant_executions",
         ["purge_job_id", "phase"],
         unique=False,
@@ -104,7 +98,7 @@ def upgrade() -> None:
 def downgrade() -> None:
     """Downgrade schema."""
     op.drop_index(
-        "ix_archived_session_purge_participant_executions_purge_job_id_phase",
+        "ix_archived_purge_part_exec_job_phase",
         table_name="archived_session_purge_participant_executions",
     )
     op.drop_table("archived_session_purge_participant_executions")
