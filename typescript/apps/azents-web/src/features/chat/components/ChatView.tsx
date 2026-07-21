@@ -1270,6 +1270,7 @@ export function ChatView({
         flex={1}
         gap={0}
         style={{
+          backgroundColor: "var(--mantine-color-body)",
           position: "relative",
           overflow: "hidden",
           flexBasis: `${chatRatio * 100}%`,
@@ -1537,7 +1538,10 @@ export function ChatView({
           </Box>
         </ScrollArea>
 
-        <Box style={{ position: "relative", flexShrink: 0 }}>
+        <Box
+          bg="var(--mantine-color-body)"
+          style={{ position: "relative", flexShrink: 0 }}
+        >
           {/* new message notice chip */}
           {(showNewMessageChip || hasDetachedNewer) && (
             <Box

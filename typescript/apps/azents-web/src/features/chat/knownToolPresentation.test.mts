@@ -163,12 +163,12 @@ void test("specializes simple Phase 1 resource and search tools", () => {
     {
       name: "grep",
       arguments: '{"pattern":"ToolCall","path":"/workspace/agent/src"}',
-      action: "search",
+      action: "grep",
     },
     {
       name: "glob",
       arguments: '{"pattern":"/workspace/agent/src/**/*.ts"}',
-      action: "list",
+      action: "glob",
     },
     {
       name: "write",
@@ -300,4 +300,188 @@ void test("specializes present_file with the first presented file", () => {
       detail: null,
     },
   });
+});
+
+void test("covers every remaining source-less builtin with a validated adapter", () => {
+  const cases: Array<{
+    action: string;
+    arguments: string;
+    name: string;
+  }> = [
+    {
+      name: "read_image",
+      arguments: '{"path":"/workspace/agent/chart.png"}',
+      action: "readImage",
+    },
+    {
+      name: "import_file",
+      arguments:
+        '{"uri":"exchange://file/report.csv","path":"/workspace/agent/report.csv"}',
+      action: "importFile",
+    },
+    {
+      name: "save_memory",
+      arguments:
+        '{"scope":"user","type":"feedback","name":"style","description":"Concise","content":"Use concise answers."}',
+      action: "saveMemory",
+    },
+    {
+      name: "list_memories",
+      arguments: '{"scope":"agent","type":"project"}',
+      action: "listMemories",
+    },
+    {
+      name: "get_memory",
+      arguments: '{"scope":"agent","name":"project"}',
+      action: "getMemory",
+    },
+    {
+      name: "search_memories",
+      arguments: '{"query":"project rules","scope":"agent"}',
+      action: "searchMemories",
+    },
+    {
+      name: "delete_memory",
+      arguments: '{"scope":"user","name":"style"}',
+      action: "deleteMemory",
+    },
+    { name: "get_goal", arguments: "{}", action: "getGoal" },
+    {
+      name: "create_goal",
+      arguments: '{"objective":"Ship the presentation"}',
+      action: "createGoal",
+    },
+    {
+      name: "update_goal",
+      arguments: '{"status":"complete"}',
+      action: "updateGoal",
+    },
+    {
+      name: "update_todo",
+      arguments:
+        '{"operation":"replace","items":[{"content":"Implement","status":"in_progress"}]}',
+      action: "updateTodo",
+    },
+    {
+      name: "load_skill",
+      arguments:
+        '{"skill_path":"/workspace/agent/.azents/skills/review/SKILL.md"}',
+      action: "loadSkill",
+    },
+    {
+      name: "spawn_agent",
+      arguments: '{"name":"reviewer","task":"Review the change"}',
+      action: "spawnAgent",
+    },
+    {
+      name: "send_message",
+      arguments: '{"agent_name":"reviewer","message":"Check the UI"}',
+      action: "sendMessage",
+    },
+    {
+      name: "followup_task",
+      arguments: '{"agent_name":"reviewer","task":"Recheck mobile"}',
+      action: "followupTask",
+    },
+    {
+      name: "wait_agent",
+      arguments: '{"timeout_seconds":30}',
+      action: "waitAgent",
+    },
+    {
+      name: "interrupt_agent",
+      arguments: '{"agent_name":"reviewer"}',
+      action: "interruptAgent",
+    },
+    { name: "list_agents", arguments: "{}", action: "listAgents" },
+    {
+      name: "tool_search",
+      arguments: '{"query":"search GitHub issues","limit":5}',
+      action: "toolSearch",
+    },
+  ];
+
+  for (const item of cases) {
+    const result = knownToolPresentation(
+      toolCall({
+        name: item.name,
+        arguments: item.arguments,
+        status: "running",
+      }),
+    );
+    assert.equal(result.type, "specialized", item.name);
+    assert.equal(result.presentation.action, item.action, item.name);
+  }
+});
+
+void test("keeps sensitive builtin payloads out of collapsed summaries", () => {
+  const cases = [
+    {
+      name: "glob",
+      arguments: '{"pattern":"/workspace/private/**/*.key"}',
+      sensitive: "/workspace/private/**/*.key",
+    },
+    {
+      name: "save_memory",
+      arguments:
+        '{"scope":"user","type":"feedback","name":"style","description":"Concise","content":"secret memory body"}',
+      sensitive: "secret memory body",
+    },
+    {
+      name: "create_goal",
+      arguments: '{"objective":"secret goal objective"}',
+      sensitive: "secret goal objective",
+    },
+    {
+      name: "update_todo",
+      arguments:
+        '{"operation":"replace","items":[{"content":"secret todo item","status":"in_progress"}]}',
+      sensitive: "secret todo item",
+    },
+    {
+      name: "spawn_agent",
+      arguments:
+        '{"name":"reviewer","task":"secret task body","fork_turns":"none"}',
+      sensitive: "secret task body",
+    },
+    {
+      name: "send_message",
+      arguments: '{"agent_name":"reviewer","message":"secret agent message"}',
+      sensitive: "secret agent message",
+    },
+    {
+      name: "tool_search",
+      arguments: '{"query":"secret capability query"}',
+      sensitive: "secret capability query",
+    },
+  ];
+
+  for (const item of cases) {
+    const result = knownToolPresentation(
+      toolCall({
+        name: item.name,
+        arguments: item.arguments,
+        status: "running",
+      }),
+    );
+    assert.equal(result.type, "specialized", item.name);
+    const collapsed = JSON.stringify({
+      action: result.presentation.action,
+      subject: result.presentation.subject,
+      qualifier: result.presentation.qualifier,
+    });
+    assert.equal(collapsed.includes(item.sensitive), false, item.name);
+  }
+});
+
+void test("falls back locally when a structured builtin result drifts", () => {
+  const result = knownToolPresentation(
+    toolCall({
+      name: "tool_search",
+      arguments: '{"query":"GitHub tools"}',
+      result: '{"unexpected":true}',
+      status: "completed",
+    }),
+  );
+  assert.deepEqual(result, { type: "generic", reason: "invalid-output" });
 });

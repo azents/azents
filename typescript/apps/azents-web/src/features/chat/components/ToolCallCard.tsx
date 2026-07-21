@@ -4,45 +4,45 @@ import {
   ActionIcon,
   Box,
   Code,
-  Collapse,
   Group,
   Modal,
   rem,
   ScrollArea,
   Stack,
   Text,
-  UnstyledButton,
 } from "@mantine/core";
 import {
-  IconChevronRight,
+  IconBook,
+  IconBrain,
   IconDots,
+  IconDownload,
   IconFileExport,
   IconFileText,
   IconPencil,
+  IconPhoto,
+  IconRobot,
   IconSearch,
+  IconSquareCheck,
+  IconTargetArrow,
   IconTerminal2,
   IconTool,
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { Component, useState } from "react";
 import { knownToolPresentation } from "../knownToolPresentation";
+import { ActivityRow } from "./ActivityRow";
 import {
   activityDetailScrollbarSize,
   activityRowBorder,
-  activityRowChevronSize,
-  activityRowDetailInset,
   activityRowIconSize,
-  activityRowSummarySize,
-  activityRowVerticalPadding,
 } from "./activityRowPresentation";
-import inlineControlClasses from "./ChatInlineControl.module.css";
-import {
-  chatChevronTransition,
-  chatCollapseTransitionProps,
-} from "./collapsiblePresentation";
 import { FileAttachmentList } from "./FileAttachmentList";
+import { SkillContentPanel } from "./SkillContentPanel";
 import { ToolCallStatusIcon } from "./ToolCallStatusIcon";
-import type { KnownToolPresentation } from "../knownToolPresentation";
+import type {
+  KnownToolDetailLabel,
+  KnownToolPresentation,
+} from "../knownToolPresentation";
 import type { ActiveToolCall } from "../types";
 import type {
   V4APatchFile,
@@ -102,8 +102,9 @@ function formatJson(value: string): string {
 
 function presentationIcon(presentation: KnownToolPresentation): ReactElement {
   switch (presentation.action) {
-    case "search":
-    case "list":
+    case "grep":
+    case "glob":
+    case "toolSearch":
       return <IconSearch size={activityRowIconSize} />;
     case "edit":
     case "patch":
@@ -117,6 +118,31 @@ function presentationIcon(presentation: KnownToolPresentation): ReactElement {
       return <IconFileText size={activityRowIconSize} />;
     case "present":
       return <IconFileExport size={activityRowIconSize} />;
+    case "readImage":
+      return <IconPhoto size={activityRowIconSize} />;
+    case "importFile":
+      return <IconDownload size={activityRowIconSize} />;
+    case "saveMemory":
+    case "listMemories":
+    case "getMemory":
+    case "searchMemories":
+    case "deleteMemory":
+      return <IconBrain size={activityRowIconSize} />;
+    case "getGoal":
+    case "createGoal":
+    case "updateGoal":
+      return <IconTargetArrow size={activityRowIconSize} />;
+    case "updateTodo":
+      return <IconSquareCheck size={activityRowIconSize} />;
+    case "loadSkill":
+      return <IconBook size={activityRowIconSize} />;
+    case "spawnAgent":
+    case "sendMessage":
+    case "followupTask":
+    case "waitAgent":
+    case "interruptAgent":
+    case "listAgents":
+      return <IconRobot size={activityRowIconSize} />;
   }
 }
 
@@ -136,10 +162,10 @@ function actionLabel(
   switch (action) {
     case "read":
       return t("action.read");
-    case "search":
-      return t("action.search");
-    case "list":
-      return t("action.list");
+    case "grep":
+      return t("action.grep");
+    case "glob":
+      return t("action.glob");
     case "write":
       return t("action.write");
     case "edit":
@@ -154,6 +180,44 @@ function actionLabel(
       return t("action.process");
     case "present":
       return t("action.present");
+    case "readImage":
+      return t("action.readImage");
+    case "importFile":
+      return t("action.importFile");
+    case "saveMemory":
+      return t("action.saveMemory");
+    case "listMemories":
+      return t("action.listMemories");
+    case "getMemory":
+      return t("action.getMemory");
+    case "searchMemories":
+      return t("action.searchMemories");
+    case "deleteMemory":
+      return t("action.deleteMemory");
+    case "getGoal":
+      return t("action.getGoal");
+    case "createGoal":
+      return t("action.createGoal");
+    case "updateGoal":
+      return t("action.updateGoal");
+    case "updateTodo":
+      return t("action.updateTodo");
+    case "loadSkill":
+      return t("action.loadSkill");
+    case "spawnAgent":
+      return t("action.spawnAgent");
+    case "sendMessage":
+      return t("action.sendMessage");
+    case "followupTask":
+      return t("action.followupTask");
+    case "waitAgent":
+      return t("action.waitAgent");
+    case "interruptAgent":
+      return t("action.interruptAgent");
+    case "listAgents":
+      return t("action.listAgents");
+    case "toolSearch":
+      return t("action.toolSearch");
   }
 }
 
@@ -172,13 +236,92 @@ function presentationQualifier(
     case "command":
     case "process":
       return t("exitCode", { code: presentation.qualifier });
-    case "search":
-    case "list":
+    case "grep":
+    case "glob":
     case "write":
     case "edit":
     case "delete":
     case "present":
-      return null;
+    case "readImage":
+    case "importFile":
+    case "saveMemory":
+    case "listMemories":
+    case "getMemory":
+    case "searchMemories":
+    case "deleteMemory":
+    case "getGoal":
+    case "createGoal":
+    case "updateGoal":
+    case "updateTodo":
+    case "loadSkill":
+    case "spawnAgent":
+    case "sendMessage":
+    case "followupTask":
+    case "waitAgent":
+    case "interruptAgent":
+    case "listAgents":
+    case "toolSearch":
+      return presentation.qualifier;
+  }
+}
+
+function detailLabel(
+  label: KnownToolDetailLabel,
+  t: ToolCallTranslations,
+): string {
+  switch (label) {
+    case "source":
+      return t("field.source");
+    case "destination":
+      return t("field.destination");
+    case "overwrite":
+      return t("field.overwrite");
+    case "temporary":
+      return t("field.temporary");
+    case "scope":
+      return t("field.scope");
+    case "type":
+      return t("field.type");
+    case "description":
+      return t("field.description");
+    case "query":
+      return t("field.query");
+    case "result":
+      return t("field.result");
+    case "objective":
+      return t("field.objective");
+    case "status":
+      return t("field.status");
+    case "createdAt":
+      return t("field.createdAt");
+    case "updatedAt":
+      return t("field.updatedAt");
+    case "operation":
+      return t("field.operation");
+    case "items":
+      return t("field.items");
+    case "skill":
+      return t("field.skill");
+    case "task":
+      return t("field.task");
+    case "message":
+      return t("field.message");
+    case "agentPath":
+      return t("field.agentPath");
+    case "forkTurns":
+      return t("field.forkTurns");
+    case "modelTarget":
+      return t("field.modelTarget");
+    case "reasoningEffort":
+      return t("field.reasoningEffort");
+    case "timeout":
+      return t("field.timeout");
+    case "previousStatus":
+      return t("field.previousStatus");
+    case "requestedLimit":
+      return t("field.requestedLimit");
+    case "activationLimit":
+      return t("field.activationLimit");
   }
 }
 
@@ -381,6 +524,85 @@ function presentationDetail(
         </Stack>
       );
     }
+    case "semantic":
+      return (
+        <Stack gap="sm">
+          {presentation.detail.fields.length > 0 ? (
+            <Stack gap={rem(4)}>
+              {presentation.detail.fields.map((field) => (
+                <Group
+                  key={`${field.label}:${field.value}`}
+                  gap="xs"
+                  wrap="nowrap"
+                  align="flex-start"
+                >
+                  <Text size="xs" c="dimmed" w={rem(104)}>
+                    {detailLabel(field.label, t)}
+                  </Text>
+                  <Text
+                    size="xs"
+                    flex={1}
+                    miw={0}
+                    style={{ overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}
+                  >
+                    {field.value}
+                  </Text>
+                </Group>
+              ))}
+            </Stack>
+          ) : null}
+          {presentation.detail.sections.map((section) => (
+            <Box key={`${section.label}:${section.content}`}>
+              <Text size="xs" c="dimmed" mb={rem(4)}>
+                {detailLabel(section.label, t)}
+              </Text>
+              <Text
+                size="xs"
+                style={{ overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}
+              >
+                {section.content}
+              </Text>
+            </Box>
+          ))}
+          {presentation.detail.items.length > 0 ? (
+            <Stack gap="xs">
+              {presentation.detail.items.map((item, index) => (
+                <Box
+                  key={`${item.title}:${index}`}
+                  p="xs"
+                  style={{
+                    border: activityRowBorder,
+                    borderRadius: "var(--mantine-radius-sm)",
+                  }}
+                >
+                  <Text size="xs" fw={500}>
+                    {item.title}
+                  </Text>
+                  {item.subtitle !== null ? (
+                    <Text size="xs" c="dimmed">
+                      {item.subtitle}
+                    </Text>
+                  ) : null}
+                  {item.content !== null ? (
+                    <Text
+                      size="xs"
+                      mt={rem(4)}
+                      style={{
+                        overflowWrap: "anywhere",
+                        whiteSpace: "pre-wrap",
+                      }}
+                    >
+                      {item.content}
+                    </Text>
+                  ) : null}
+                </Box>
+              ))}
+            </Stack>
+          ) : null}
+        </Stack>
+      );
+    case "skill":
+      return <SkillContentPanel content={presentation.detail.content} />;
   }
 }
 
@@ -433,7 +655,7 @@ function GenericToolCallCard({
   hiddenAttachmentUris,
 }: Required<ToolCallCardProps>): ReactElement {
   const t = useTranslations("chat.toolCall");
-  const [opened, setOpened] = useState(false);
+  const [rawOpened, setRawOpened] = useState(false);
   const visibleAttachments = genericVisibleAttachments(
     toolCall,
     hiddenAttachmentUris,
@@ -446,72 +668,44 @@ function GenericToolCallCard({
       />
     ) : null;
   const status = t(toolCall.status);
-  const ariaLabel = [toolCall.name, t("genericDetails"), status].join(" · ");
+  const ariaLabel = [toolCall.name, status].join(" · ");
 
   return (
     <>
-      <Box py={activityRowVerticalPadding}>
-        <UnstyledButton
-          w="100%"
-          onClick={() => setOpened((value) => !value)}
-          aria-expanded={opened}
-          aria-label={ariaLabel}
-          disabled={detail === null}
-        >
-          <Group gap="xs" wrap="nowrap" className={inlineControlClasses.root}>
-            <IconChevronRight
-              aria-hidden="true"
-              size={activityRowChevronSize}
-              color="var(--mantine-color-dimmed)"
-              style={{
-                flexShrink: 0,
-                marginTop: rem(2),
-                opacity: detail === null ? 0 : 1,
-                transform: opened ? "rotate(90deg)" : "none",
-                transition: chatChevronTransition,
-              }}
-            />
-            <Box c="dimmed" style={{ display: "inline-flex", flexShrink: 0 }}>
-              <IconTool size={activityRowIconSize} />
-            </Box>
-            <Group gap={rem(6)} flex={1} miw={0} wrap="nowrap">
-              <Text
-                size={activityRowSummarySize}
-                c="dimmed"
-                fw={500}
-                className={inlineControlClasses.label}
-                style={{ flexShrink: 0 }}
-              >
-                {toolCall.name}
-              </Text>
-              <Text
-                size={activityRowSummarySize}
-                c="dimmed"
-                truncate
-                miw={0}
-                className={inlineControlClasses.label}
-              >
-                {t("genericDetails")}
-              </Text>
-            </Group>
-            <ToolCallStatusIcon label={status} status={toolCall.status} />
-          </Group>
-        </UnstyledButton>
-        {detail !== null ? (
-          <Collapse
-            expanded={opened}
-            keepMounted={false}
-            {...chatCollapseTransitionProps}
+      <ActivityRow
+        action={
+          <ActionIcon
+            size={rem(16)}
+            variant="subtle"
+            color="gray"
+            aria-label={t("viewRawDataFor", { action: toolCall.name })}
+            onClick={() => setRawOpened(true)}
           >
-            <Box pl={activityRowDetailInset} pr="xs" pt="xs">
-              {detail}
-            </Box>
-          </Collapse>
-        ) : null}
-      </Box>
+            <IconDots size={activityRowIconSize} />
+          </ActionIcon>
+        }
+        ariaLabel={ariaLabel}
+        detail={detail}
+        icon={<IconTool size={activityRowIconSize} />}
+        primary={toolCall.name}
+        status={<ToolCallStatusIcon label={status} status={toolCall.status} />}
+      />
       {visibleAttachments.length > 0 ? (
         <FileAttachmentList files={visibleAttachments} />
       ) : null}
+      <Modal
+        opened={rawOpened}
+        onClose={() => setRawOpened(false)}
+        title={t("rawData")}
+        centered
+        size="lg"
+      >
+        <RawPayloadContent
+          argumentsText={toolCall.arguments}
+          formatJsonValues={false}
+          outputText={toolCall.result ?? ""}
+        />
+      </Modal>
     </>
   );
 }
@@ -526,7 +720,6 @@ function SpecializedToolCallCard({
   hiddenAttachmentUris: readonly string[];
 }): ReactElement {
   const t = useTranslations("chat.toolCall");
-  const [opened, setOpened] = useState(false);
   const [rawOpened, setRawOpened] = useState(false);
   const detail = presentationDetail(presentation, t);
   const qualifier = presentationQualifier(presentation, t);
@@ -536,8 +729,6 @@ function SpecializedToolCallCard({
   );
   const action = actionLabel(presentation.action, t);
   const status = t(toolCall.status);
-  const hasRawData =
-    toolCall.arguments.length > 0 || (toolCall.result?.length ?? 0) > 0;
   const ariaLabel = [
     action,
     presentation.subject ?? "",
@@ -546,126 +737,45 @@ function SpecializedToolCallCard({
   ]
     .filter((value) => value.length > 0)
     .join(" · ");
-  const summary = (
-    <Group gap="xs" wrap="nowrap" className={inlineControlClasses.root}>
-      <IconChevronRight
-        aria-hidden="true"
-        size={activityRowChevronSize}
-        color="var(--mantine-color-dimmed)"
-        style={{
-          flexShrink: 0,
-          marginTop: rem(2),
-          opacity: detail === null ? 0 : 1,
-          transform: opened ? "rotate(90deg)" : "none",
-          transition: chatChevronTransition,
-        }}
-      />
-      <Box
-        c="dimmed"
-        style={{ display: "inline-flex", flexShrink: 0, marginTop: rem(1) }}
-      >
-        {presentationIcon(presentation)}
-      </Box>
-      <Group gap={rem(6)} flex={1} miw={0} wrap="nowrap">
-        <Text
-          size={activityRowSummarySize}
-          c="dimmed"
-          fw={500}
-          className={inlineControlClasses.label}
-          style={{ flexShrink: 0 }}
-        >
-          {action}
-        </Text>
-        {presentation.subject !== null ? (
-          <Text
-            size={activityRowSummarySize}
-            c="dimmed"
-            truncate
-            flex={1}
-            miw={0}
-            className={inlineControlClasses.label}
-          >
-            {presentation.subject}
-          </Text>
-        ) : null}
-        {qualifier !== null ? (
-          <Text
-            size={activityRowSummarySize}
-            c="dimmed"
-            truncate
-            miw={0}
-            className={inlineControlClasses.label}
-            style={{ flexShrink: 1 }}
-          >
-            {qualifier}
-          </Text>
-        ) : null}
-      </Group>
-      <ToolCallStatusIcon label={status} status={toolCall.status} />
-    </Group>
-  );
 
   return (
     <>
-      <Box py={activityRowVerticalPadding}>
-        <Group gap={rem(4)} wrap="nowrap" align="flex-start">
-          {detail === null ? (
-            <Box flex={1} miw={0} aria-label={ariaLabel}>
-              {summary}
-            </Box>
-          ) : (
-            <UnstyledButton
-              flex={1}
-              miw={0}
-              onClick={() => setOpened((value) => !value)}
-              aria-expanded={opened}
-              aria-label={ariaLabel}
-            >
-              {summary}
-            </UnstyledButton>
-          )}
-          {hasRawData ? (
-            <ActionIcon
-              size={rem(16)}
-              variant="subtle"
-              color="gray"
-              aria-label={t("viewRawDataFor", { action })}
-              onClick={() => setRawOpened(true)}
-            >
-              <IconDots size={activityRowIconSize} />
-            </ActionIcon>
-          ) : null}
-        </Group>
-        {detail !== null ? (
-          <Collapse
-            expanded={opened}
-            keepMounted={false}
-            {...chatCollapseTransitionProps}
+      <ActivityRow
+        action={
+          <ActionIcon
+            size={rem(16)}
+            variant="subtle"
+            color="gray"
+            aria-label={t("viewRawDataFor", { action })}
+            onClick={() => setRawOpened(true)}
           >
-            <Box pl={activityRowDetailInset} pr="xs" pt="xs">
-              {detail}
-            </Box>
-          </Collapse>
-        ) : null}
-      </Box>
+            <IconDots size={activityRowIconSize} />
+          </ActionIcon>
+        }
+        ariaLabel={ariaLabel}
+        detail={detail}
+        icon={presentationIcon(presentation)}
+        primary={action}
+        qualifier={qualifier}
+        status={<ToolCallStatusIcon label={status} status={toolCall.status} />}
+        subject={presentation.subject}
+      />
       {visibleAttachments.length > 0 ? (
         <FileAttachmentList files={visibleAttachments} />
       ) : null}
-      {hasRawData ? (
-        <Modal
-          opened={rawOpened}
-          onClose={() => setRawOpened(false)}
-          title={t("rawData")}
-          centered
-          size="lg"
-        >
-          <RawPayloadContent
-            argumentsText={toolCall.arguments}
-            formatJsonValues={false}
-            outputText={toolCall.result ?? ""}
-          />
-        </Modal>
-      ) : null}
+      <Modal
+        opened={rawOpened}
+        onClose={() => setRawOpened(false)}
+        title={t("rawData")}
+        centered
+        size="lg"
+      >
+        <RawPayloadContent
+          argumentsText={toolCall.arguments}
+          formatJsonValues={false}
+          outputText={toolCall.result ?? ""}
+        />
+      </Modal>
     </>
   );
 }

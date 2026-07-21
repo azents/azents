@@ -12,15 +12,62 @@ export type KnownToolPresentationReason =
 
 export type KnownToolAction =
   | "read"
-  | "search"
-  | "list"
+  | "grep"
+  | "glob"
   | "write"
   | "edit"
   | "patch"
   | "delete"
   | "command"
   | "process"
-  | "present";
+  | "present"
+  | "readImage"
+  | "importFile"
+  | "saveMemory"
+  | "listMemories"
+  | "getMemory"
+  | "searchMemories"
+  | "deleteMemory"
+  | "getGoal"
+  | "createGoal"
+  | "updateGoal"
+  | "updateTodo"
+  | "loadSkill"
+  | "spawnAgent"
+  | "sendMessage"
+  | "followupTask"
+  | "waitAgent"
+  | "interruptAgent"
+  | "listAgents"
+  | "toolSearch";
+
+export type KnownToolDetailLabel =
+  | "source"
+  | "destination"
+  | "overwrite"
+  | "temporary"
+  | "scope"
+  | "type"
+  | "description"
+  | "query"
+  | "result"
+  | "objective"
+  | "status"
+  | "createdAt"
+  | "updatedAt"
+  | "operation"
+  | "items"
+  | "skill"
+  | "task"
+  | "message"
+  | "agentPath"
+  | "forkTurns"
+  | "modelTarget"
+  | "reasoningEffort"
+  | "timeout"
+  | "previousStatus"
+  | "requestedLimit"
+  | "activationLimit";
 
 export interface OutputDetail {
   type: "output";
@@ -45,11 +92,41 @@ export interface ProcessDetail {
   output: string;
 }
 
+export interface SemanticField {
+  label: KnownToolDetailLabel;
+  value: string;
+}
+
+export interface SemanticSection {
+  label: KnownToolDetailLabel;
+  content: string;
+}
+
+export interface SemanticItem {
+  title: string;
+  subtitle: string | null;
+  content: string | null;
+}
+
+export interface SemanticDetail {
+  type: "semantic";
+  fields: SemanticField[];
+  sections: SemanticSection[];
+  items: SemanticItem[];
+}
+
+export interface SkillDetail {
+  type: "skill";
+  content: string;
+}
+
 export type KnownToolDetail =
   | OutputDetail
   | DiffDetail
   | PatchDetail
   | ProcessDetail
+  | SemanticDetail
+  | SkillDetail
   | null;
 
 export interface KnownToolPresentation {
@@ -63,6 +140,8 @@ export type KnownToolPresentationResult =
   | { type: "specialized"; presentation: KnownToolPresentation }
   | { type: "generic"; reason: KnownToolPresentationReason };
 
+const scopeSchema = z.union([z.literal("agent"), z.literal("user")]);
+const emptyInputSchema = z.object({}).strict();
 const pathInputSchema = z.object({ path: z.string().min(1) });
 const readInputSchema = pathInputSchema.extend({
   offset: z.number().int().nonnegative().optional(),
@@ -86,6 +165,71 @@ const execCommandInputSchema = z.object({ command: z.string().min(1) });
 const writeStdinInputSchema = z.object({ process_id: z.string().min(1) });
 const presentFileInputSchema = z.object({
   paths: z.array(z.string().min(1)).min(1),
+});
+const importFileInputSchema = z.object({
+  uri: z.string().min(1),
+  path: z.string().min(1).nullable().optional(),
+  overwrite: z.boolean().optional(),
+});
+const saveMemoryInputSchema = z.object({
+  scope: scopeSchema,
+  type: z.string().min(1),
+  name: z.string().min(1),
+  description: z.string(),
+  content: z.string(),
+});
+const listMemoriesInputSchema = z.object({
+  scope: scopeSchema.nullable().optional(),
+  type: z.string().min(1).nullable().optional(),
+});
+const namedMemoryInputSchema = z.object({
+  scope: scopeSchema,
+  name: z.string().min(1),
+});
+const searchMemoriesInputSchema = z.object({
+  query: z.string().min(1),
+  scope: scopeSchema.nullable().optional(),
+});
+const createGoalInputSchema = z.object({ objective: z.string().min(1) });
+const updateGoalInputSchema = z.object({
+  status: z.union([z.literal("complete"), z.literal("blocked")]),
+});
+const todoItemSchema = z.object({
+  content: z.string().min(1),
+  status: z.union([
+    z.literal("pending"),
+    z.literal("in_progress"),
+    z.literal("completed"),
+  ]),
+});
+const updateTodoInputSchema = z.object({
+  operation: z.union([z.literal("replace"), z.literal("clear")]),
+  items: z.array(todoItemSchema).optional(),
+});
+const loadSkillInputSchema = z.object({ skill_path: z.string().min(1) });
+const spawnAgentInputSchema = z.object({
+  name: z.string().min(1),
+  task: z.string().min(1),
+  agent_type: z.literal("default").optional(),
+  fork_turns: z.string().min(1).optional(),
+  model_target_label: z.string().min(1).nullable().optional(),
+  reasoning_effort: z.string().min(1).nullable().optional(),
+});
+const sendMessageInputSchema = z.object({
+  agent_name: z.string().min(1),
+  message: z.string().min(1),
+});
+const followupTaskInputSchema = z.object({
+  agent_name: z.string().min(1),
+  task: z.string().min(1),
+});
+const waitAgentInputSchema = z.object({
+  timeout_seconds: z.number().int().min(0).max(600).optional(),
+});
+const interruptAgentInputSchema = z.object({ agent_name: z.string().min(1) });
+const toolSearchInputSchema = z.object({
+  query: z.string().min(1),
+  limit: z.number().int().min(1).max(10).optional(),
 });
 const patchChangeSchema = z.object({
   action: z.union([z.literal("add"), z.literal("update"), z.literal("delete")]),
@@ -111,7 +255,63 @@ const processResultSchema = z.object({
   stderr_truncated: z.boolean(),
   stdout_truncated: z.boolean(),
 });
-function parsedArguments(
+const memoryMutationResultSchema = z.object({
+  status: z.union([z.literal("saved"), z.literal("deleted")]),
+  name: z.string().min(1),
+  scope: scopeSchema,
+  type: z.string().min(1).optional(),
+});
+const goalStateSchema = z.object({
+  objective: z.string().nullable(),
+  status: z
+    .union([
+      z.literal("active"),
+      z.literal("paused"),
+      z.literal("blocked"),
+      z.literal("complete"),
+    ])
+    .nullable(),
+  created_at: z.string().nullable(),
+  updated_at: z.string().nullable(),
+});
+const agentResultSchema = z.object({
+  status: z.string().min(1),
+  agent_name: z.string().min(1),
+  agent_path: z.string().min(1).optional(),
+});
+const waitResultSchema = z.object({
+  message: z.string().min(1),
+  timed_out: z.boolean(),
+});
+const interruptResultSchema = z.object({ previous_status: z.string().min(1) });
+const agentListResultSchema = z.object({
+  agents: z.array(
+    z.object({
+      agent_name: z.string().min(1),
+      agent_path: z.string().min(1),
+      agent_status: z.string().min(1),
+      last_task_message: z.string().nullable(),
+    }),
+  ),
+});
+const toolSearchResultSchema = z.object({
+  activated_tools: z.array(
+    z.object({
+      name: z.string().min(1),
+      description: z.string(),
+      source: z.string().min(1),
+    }),
+  ),
+  requested_limit: z.number().int().positive(),
+  activation_limit: z.number().int().nonnegative().nullable(),
+  limit_reduced: z.boolean(),
+});
+const skillMetadataSchema = z.object({
+  name: z.string().min(1),
+  slug: z.string().min(1),
+});
+
+function parsedJson(
   value: string,
 ): { success: true; value: unknown } | { success: false } {
   try {
@@ -141,12 +341,38 @@ function detailPath(path: string): string {
     .trim();
 }
 
+function sourceKind(uri: string): string {
+  const separator = uri.indexOf("://");
+  return separator > 0 ? uri.slice(0, separator) : "file";
+}
+
+function skillName(path: string): string {
+  const segments = detailPath(path).split("/").filter(Boolean);
+  return segments.at(-1) === "SKILL.md"
+    ? (segments.at(-2) ?? "Skill")
+    : (segments.at(-1) ?? "Skill");
+}
+
 function outputDetail(toolCall: ActiveToolCall): KnownToolDetail {
   if (toolCall.status === "running") {
     return null;
   }
   return typeof toolCall.result === "string" && toolCall.result.length > 0
     ? { type: "output", output: toolCall.result }
+    : null;
+}
+
+function semanticDetail({
+  fields = [],
+  sections = [],
+  items = [],
+}: {
+  fields?: SemanticField[];
+  sections?: SemanticSection[];
+  items?: SemanticItem[];
+}): SemanticDetail | null {
+  return fields.length > 0 || sections.length > 0 || items.length > 0
+    ? { type: "semantic", fields, sections, items }
     : null;
 }
 
@@ -179,6 +405,10 @@ function terminal(toolCall: ActiveToolCall): boolean {
   return toolCall.status !== "running" && toolCall.status !== "preparing";
 }
 
+function completed(toolCall: ActiveToolCall): boolean {
+  return toolCall.status === "completed";
+}
+
 function generic(
   reason: KnownToolPresentationReason,
 ): KnownToolPresentationResult {
@@ -195,6 +425,21 @@ function presentation(
     type: "specialized",
     presentation: { action, subject, qualifier, detail },
   };
+}
+
+function parsedResult<T extends z.ZodTypeAny>(
+  toolCall: ActiveToolCall,
+  schema: T,
+): z.infer<T> | null {
+  if (typeof toolCall.result !== "string") {
+    return null;
+  }
+  const parsed = parsedJson(toolCall.result);
+  if (!parsed.success) {
+    return null;
+  }
+  const validated = schema.safeParse(parsed.value);
+  return validated.success ? validated.data : null;
 }
 
 function patchPresentation(
@@ -259,13 +504,9 @@ function processPresentation(
     );
   }
   const metadata = processResultSchema.safeParse(toolCall.resultMetadata);
-  if (!metadata.success) {
+  if (!metadata.success || metadata.data.kind !== expectedKind) {
     return generic("invalid-output");
   }
-  if (metadata.data.kind !== expectedKind) {
-    return generic("invalid-output");
-  }
-  const output = toolCall.result ?? "";
   return presentation(
     action,
     null,
@@ -276,9 +517,70 @@ function processPresentation(
       exitCode: metadata.data.exit_code,
       truncated:
         metadata.data.stdout_truncated || metadata.data.stderr_truncated,
-      output,
+      output: toolCall.result ?? "",
     },
   );
+}
+
+function goalPresentation(
+  toolCall: ActiveToolCall,
+  action: "getGoal" | "createGoal" | "updateGoal",
+  objective: string | null,
+  requestedStatus: string | null,
+): KnownToolPresentationResult {
+  if (!completed(toolCall)) {
+    return presentation(action, null, requestedStatus, outputDetail(toolCall));
+  }
+  const state = parsedResult(toolCall, goalStateSchema);
+  if (state === null) {
+    return generic("invalid-output");
+  }
+  const fields: SemanticField[] = [];
+  if (state.status !== null) {
+    fields.push({ label: "status", value: state.status });
+  }
+  if (state.created_at !== null) {
+    fields.push({ label: "createdAt", value: state.created_at });
+  }
+  if (state.updated_at !== null) {
+    fields.push({ label: "updatedAt", value: state.updated_at });
+  }
+  const resolvedObjective = state.objective ?? objective;
+  return presentation(
+    action,
+    null,
+    state.status ?? requestedStatus,
+    semanticDetail({
+      fields,
+      sections:
+        resolvedObjective === null
+          ? []
+          : [{ label: "objective", content: resolvedObjective }],
+    }),
+  );
+}
+
+function skillResult(
+  result: string,
+): { metadata: z.infer<typeof skillMetadataSchema>; content: string } | null {
+  const match =
+    /^Skill loaded from the active projection\.\nMetadata: (\{.*\})\n\n([\s\S]*)$/u.exec(
+      result,
+    );
+  if (match === null) {
+    return null;
+  }
+  const metadataText = match[1];
+  const content = match[2];
+  if (typeof metadataText !== "string" || typeof content !== "string") {
+    return null;
+  }
+  const parsed = parsedJson(metadataText);
+  if (!parsed.success) {
+    return null;
+  }
+  const metadata = skillMetadataSchema.safeParse(parsed.value);
+  return metadata.success ? { metadata: metadata.data, content } : null;
 }
 
 export function knownToolPresentation(
@@ -293,7 +595,7 @@ export function knownToolPresentation(
   if (toolCall.status === "preparing") {
     return generic("unsupported-phase");
   }
-  const argumentsResult = parsedArguments(toolCall.arguments);
+  const argumentsResult = parsedJson(toolCall.arguments);
   if (!argumentsResult.success) {
     return generic("invalid-arguments");
   }
@@ -316,10 +618,19 @@ export function knownToolPresentation(
         const input = grepInputSchema.safeParse(argumentsResult.value);
         return input.success
           ? presentation(
-              "search",
+              "grep",
               displayPath(input.data.path),
               null,
-              outputDetail(toolCall),
+              semanticDetail({
+                fields: [
+                  { label: "query", value: input.data.pattern },
+                  { label: "source", value: detailPath(input.data.path) },
+                ],
+                sections:
+                  typeof toolCall.result === "string" && terminal(toolCall)
+                    ? [{ label: "result", content: toolCall.result }]
+                    : [],
+              }),
             )
           : generic("invalid-arguments");
       }
@@ -327,10 +638,16 @@ export function knownToolPresentation(
         const input = globInputSchema.safeParse(argumentsResult.value);
         return input.success
           ? presentation(
-              "list",
-              displayPath(input.data.pattern),
+              "glob",
               null,
-              outputDetail(toolCall),
+              null,
+              semanticDetail({
+                fields: [{ label: "query", value: input.data.pattern }],
+                sections:
+                  typeof toolCall.result === "string" && terminal(toolCall)
+                    ? [{ label: "result", content: toolCall.result }]
+                    : [],
+              }),
             )
           : generic("invalid-arguments");
       }
@@ -384,13 +701,418 @@ export function knownToolPresentation(
       }
       case "present_file": {
         const input = presentFileInputSchema.safeParse(argumentsResult.value);
+        const firstPath = input.success ? (input.data.paths[0] ?? null) : null;
+        return typeof firstPath === "string"
+          ? presentation("present", displayPath(firstPath), null, null)
+          : generic("invalid-arguments");
+      }
+      case "read_image": {
+        const input = pathInputSchema.safeParse(argumentsResult.value);
+        return input.success
+          ? presentation("readImage", displayPath(input.data.path), null, null)
+          : generic("invalid-arguments");
+      }
+      case "import_file": {
+        const input = importFileInputSchema.safeParse(argumentsResult.value);
         if (!input.success) {
           return generic("invalid-arguments");
         }
-        const firstPath = input.data.paths[0];
-        return typeof firstPath !== "string"
-          ? generic("invalid-arguments")
-          : presentation("present", displayPath(firstPath), null, null);
+        const destination = input.data.path ?? null;
+        return presentation(
+          "importFile",
+          destination === null ? null : displayPath(destination),
+          null,
+          semanticDetail({
+            fields: [
+              { label: "source", value: sourceKind(input.data.uri) },
+              ...(destination === null
+                ? []
+                : [{ label: "destination" as const, value: destination }]),
+              {
+                label: "overwrite",
+                value: String(input.data.overwrite ?? false),
+              },
+              ...(destination?.startsWith("/tmp/")
+                ? [{ label: "temporary" as const, value: "true" }]
+                : []),
+            ],
+          }),
+        );
+      }
+      case "save_memory": {
+        const input = saveMemoryInputSchema.safeParse(argumentsResult.value);
+        if (!input.success) {
+          return generic("invalid-arguments");
+        }
+        if (completed(toolCall)) {
+          const result = parsedResult(toolCall, memoryMutationResultSchema);
+          if (result === null || result.status !== "saved") {
+            return generic("invalid-output");
+          }
+        }
+        return presentation(
+          "saveMemory",
+          input.data.name,
+          input.data.scope,
+          semanticDetail({
+            fields: [
+              { label: "scope", value: input.data.scope },
+              { label: "type", value: input.data.type },
+              { label: "description", value: input.data.description },
+            ],
+          }),
+        );
+      }
+      case "list_memories": {
+        const input = listMemoriesInputSchema.safeParse(argumentsResult.value);
+        return input.success
+          ? presentation(
+              "listMemories",
+              null,
+              input.data.scope ?? input.data.type ?? null,
+              typeof toolCall.result === "string" && terminal(toolCall)
+                ? semanticDetail({
+                    sections: [{ label: "result", content: toolCall.result }],
+                  })
+                : null,
+            )
+          : generic("invalid-arguments");
+      }
+      case "get_memory": {
+        const input = namedMemoryInputSchema.safeParse(argumentsResult.value);
+        return input.success
+          ? presentation(
+              "getMemory",
+              input.data.name,
+              input.data.scope,
+              typeof toolCall.result === "string" && terminal(toolCall)
+                ? semanticDetail({
+                    sections: [{ label: "result", content: toolCall.result }],
+                  })
+                : null,
+            )
+          : generic("invalid-arguments");
+      }
+      case "search_memories": {
+        const input = searchMemoriesInputSchema.safeParse(
+          argumentsResult.value,
+        );
+        return input.success
+          ? presentation(
+              "searchMemories",
+              null,
+              input.data.scope ?? null,
+              semanticDetail({
+                fields: [{ label: "query", value: input.data.query }],
+                sections:
+                  typeof toolCall.result === "string" && terminal(toolCall)
+                    ? [{ label: "result", content: toolCall.result }]
+                    : [],
+              }),
+            )
+          : generic("invalid-arguments");
+      }
+      case "delete_memory": {
+        const input = namedMemoryInputSchema.safeParse(argumentsResult.value);
+        if (!input.success) {
+          return generic("invalid-arguments");
+        }
+        if (completed(toolCall)) {
+          const result = parsedResult(toolCall, memoryMutationResultSchema);
+          if (result === null || result.status !== "deleted") {
+            return generic("invalid-output");
+          }
+        }
+        return presentation(
+          "deleteMemory",
+          input.data.name,
+          input.data.scope,
+          null,
+        );
+      }
+      case "get_goal": {
+        const input = emptyInputSchema.safeParse(argumentsResult.value);
+        return input.success
+          ? goalPresentation(toolCall, "getGoal", null, null)
+          : generic("invalid-arguments");
+      }
+      case "create_goal": {
+        const input = createGoalInputSchema.safeParse(argumentsResult.value);
+        return input.success
+          ? goalPresentation(
+              toolCall,
+              "createGoal",
+              input.data.objective,
+              "active",
+            )
+          : generic("invalid-arguments");
+      }
+      case "update_goal": {
+        const input = updateGoalInputSchema.safeParse(argumentsResult.value);
+        return input.success
+          ? goalPresentation(toolCall, "updateGoal", null, input.data.status)
+          : generic("invalid-arguments");
+      }
+      case "update_todo": {
+        const input = updateTodoInputSchema.safeParse(argumentsResult.value);
+        if (!input.success) {
+          return generic("invalid-arguments");
+        }
+        if (completed(toolCall) && toolCall.result?.trim() !== "Done") {
+          return generic("invalid-output");
+        }
+        const items =
+          input.data.operation === "replace" ? (input.data.items ?? []) : [];
+        return presentation(
+          "updateTodo",
+          null,
+          input.data.operation === "clear" ? "clear" : String(items.length),
+          semanticDetail({
+            fields: [{ label: "operation", value: input.data.operation }],
+            items: items.map((item) => ({
+              title: item.content,
+              subtitle: item.status,
+              content: null,
+            })),
+          }),
+        );
+      }
+      case "load_skill": {
+        const input = loadSkillInputSchema.safeParse(argumentsResult.value);
+        if (!input.success) {
+          return generic("invalid-arguments");
+        }
+        if (!completed(toolCall)) {
+          return presentation(
+            "loadSkill",
+            skillName(input.data.skill_path),
+            null,
+            outputDetail(toolCall),
+          );
+        }
+        if (typeof toolCall.result !== "string") {
+          return generic("invalid-output");
+        }
+        const result = skillResult(toolCall.result);
+        return result === null
+          ? generic("invalid-output")
+          : presentation("loadSkill", result.metadata.name, null, {
+              type: "skill",
+              content: result.content,
+            });
+      }
+      case "spawn_agent": {
+        const input = spawnAgentInputSchema.safeParse(argumentsResult.value);
+        if (!input.success) {
+          return generic("invalid-arguments");
+        }
+        const result = completed(toolCall)
+          ? parsedResult(toolCall, agentResultSchema)
+          : null;
+        if (completed(toolCall) && result === null) {
+          return generic("invalid-output");
+        }
+        return presentation(
+          "spawnAgent",
+          input.data.name,
+          result?.status ?? null,
+          semanticDetail({
+            fields: [
+              { label: "forkTurns", value: input.data.fork_turns ?? "all" },
+              ...(input.data.model_target_label
+                ? [
+                    {
+                      label: "modelTarget" as const,
+                      value: input.data.model_target_label,
+                    },
+                  ]
+                : []),
+              ...(input.data.reasoning_effort
+                ? [
+                    {
+                      label: "reasoningEffort" as const,
+                      value: input.data.reasoning_effort,
+                    },
+                  ]
+                : []),
+              ...(result?.agent_path
+                ? [{ label: "agentPath" as const, value: result.agent_path }]
+                : []),
+            ],
+            sections: [{ label: "task", content: input.data.task }],
+          }),
+        );
+      }
+      case "send_message": {
+        const input = sendMessageInputSchema.safeParse(argumentsResult.value);
+        if (!input.success) {
+          return generic("invalid-arguments");
+        }
+        const result = completed(toolCall)
+          ? parsedResult(toolCall, agentResultSchema)
+          : null;
+        if (completed(toolCall) && result === null) {
+          return generic("invalid-output");
+        }
+        return presentation(
+          "sendMessage",
+          input.data.agent_name,
+          result?.status ?? null,
+          semanticDetail({
+            fields: result?.agent_path
+              ? [{ label: "agentPath", value: result.agent_path }]
+              : [],
+            sections: [{ label: "message", content: input.data.message }],
+          }),
+        );
+      }
+      case "followup_task": {
+        const input = followupTaskInputSchema.safeParse(argumentsResult.value);
+        if (!input.success) {
+          return generic("invalid-arguments");
+        }
+        const result = completed(toolCall)
+          ? parsedResult(toolCall, agentResultSchema)
+          : null;
+        if (completed(toolCall) && result === null) {
+          return generic("invalid-output");
+        }
+        return presentation(
+          "followupTask",
+          input.data.agent_name,
+          result?.status ?? null,
+          semanticDetail({
+            fields: result?.agent_path
+              ? [{ label: "agentPath", value: result.agent_path }]
+              : [],
+            sections: [{ label: "task", content: input.data.task }],
+          }),
+        );
+      }
+      case "wait_agent": {
+        const input = waitAgentInputSchema.safeParse(argumentsResult.value);
+        if (!input.success) {
+          return generic("invalid-arguments");
+        }
+        const result = completed(toolCall)
+          ? parsedResult(toolCall, waitResultSchema)
+          : null;
+        if (completed(toolCall) && result === null) {
+          return generic("invalid-output");
+        }
+        return presentation(
+          "waitAgent",
+          null,
+          result === null ? null : result.timed_out ? "timed_out" : "complete",
+          semanticDetail({
+            fields: [
+              {
+                label: "timeout",
+                value: String(input.data.timeout_seconds ?? 30),
+              },
+            ],
+            sections:
+              result === null
+                ? []
+                : [{ label: "result", content: result.message }],
+          }),
+        );
+      }
+      case "interrupt_agent": {
+        const input = interruptAgentInputSchema.safeParse(
+          argumentsResult.value,
+        );
+        if (!input.success) {
+          return generic("invalid-arguments");
+        }
+        const result = completed(toolCall)
+          ? parsedResult(toolCall, interruptResultSchema)
+          : null;
+        if (completed(toolCall) && result === null) {
+          return generic("invalid-output");
+        }
+        return presentation(
+          "interruptAgent",
+          input.data.agent_name,
+          result?.previous_status ?? null,
+          result === null
+            ? null
+            : semanticDetail({
+                fields: [
+                  {
+                    label: "previousStatus",
+                    value: result.previous_status,
+                  },
+                ],
+              }),
+        );
+      }
+      case "list_agents": {
+        const input = emptyInputSchema.safeParse(argumentsResult.value);
+        if (!input.success) {
+          return generic("invalid-arguments");
+        }
+        const result = completed(toolCall)
+          ? parsedResult(toolCall, agentListResultSchema)
+          : null;
+        if (completed(toolCall) && result === null) {
+          return generic("invalid-output");
+        }
+        return presentation(
+          "listAgents",
+          null,
+          result === null ? null : String(result.agents.length),
+          result === null
+            ? null
+            : semanticDetail({
+                items: result.agents.map((agent) => ({
+                  title: agent.agent_name,
+                  subtitle: `${agent.agent_status} · ${agent.agent_path}`,
+                  content: agent.last_task_message,
+                })),
+              }),
+        );
+      }
+      case "tool_search": {
+        const input = toolSearchInputSchema.safeParse(argumentsResult.value);
+        if (!input.success) {
+          return generic("invalid-arguments");
+        }
+        const result = completed(toolCall)
+          ? parsedResult(toolCall, toolSearchResultSchema)
+          : null;
+        if (completed(toolCall) && result === null) {
+          return generic("invalid-output");
+        }
+        return presentation(
+          "toolSearch",
+          null,
+          result === null ? null : String(result.activated_tools.length),
+          semanticDetail({
+            fields: [
+              { label: "query", value: input.data.query },
+              {
+                label: "requestedLimit",
+                value: String(result?.requested_limit ?? input.data.limit ?? 5),
+              },
+              ...(result?.activation_limit === null ||
+              typeof result?.activation_limit === "undefined"
+                ? []
+                : [
+                    {
+                      label: "activationLimit" as const,
+                      value: String(result.activation_limit),
+                    },
+                  ]),
+            ],
+            items:
+              result?.activated_tools.map((tool) => ({
+                title: tool.name,
+                subtitle: tool.source,
+                content: tool.description,
+              })) ?? [],
+          }),
+        );
       }
       default:
         return generic("unregistered");

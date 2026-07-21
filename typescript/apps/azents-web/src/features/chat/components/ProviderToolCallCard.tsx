@@ -1,30 +1,23 @@
 import {
+  ActionIcon,
+  Anchor,
   Box,
   Code,
-  Collapse,
-  Group,
+  Modal,
   rem,
   ScrollArea,
   Stack,
   Text,
-  UnstyledButton,
 } from "@mantine/core";
-import { IconChevronRight, IconSearch, IconTool } from "@tabler/icons-react";
+import { IconDots, IconTool, IconWorld } from "@tabler/icons-react";
+import { useTranslations } from "next-intl";
 import { useState } from "react";
+import { ActivityRow } from "./ActivityRow";
 import {
   activityDetailScrollbarSize,
   activityRowBorder,
-  activityRowChevronSize,
-  activityRowDetailInset,
   activityRowIconSize,
-  activityRowSummarySize,
-  activityRowVerticalPadding,
 } from "./activityRowPresentation";
-import inlineControlClasses from "./ChatInlineControl.module.css";
-import {
-  chatChevronTransition,
-  chatCollapseTransitionProps,
-} from "./collapsiblePresentation";
 import { FileAttachmentList } from "./FileAttachmentList";
 import {
   providerToolActivityLabel,
@@ -87,7 +80,8 @@ export function ProviderToolCallCard({
   toolCall,
   hiddenAttachmentUris = [],
 }: ProviderToolCallCardProps): ReactElement {
-  const [opened, setOpened] = useState(false);
+  const t = useTranslations("chat.toolCall");
+  const [rawOpened, setRawOpened] = useState(false);
   const displayName = providerToolDisplayName(toolCall.name);
   const activityLabel = providerToolActivityLabel(toolCall);
   const webSearch = providerWebSearchPresentation(toolCall);
@@ -102,126 +96,113 @@ export function ProviderToolCallCard({
   const rawDetails = hasRawDetails ? (
     <RawProviderToolDetails toolCall={toolCall} />
   ) : null;
-  const hasDetails =
-    webSearch !== null ||
-    hasRawDetails ||
-    (visibleAttachments.length > 0 && !showAttachmentsDirectly);
   const status = providerToolStatusLabel(toolCall.status);
   const subject = webSearch?.query ?? activityLabel;
   const ariaLabel = [displayName, subject, status].join(" · ");
-  const detail = webSearch ? (
-    <Stack gap="xs">
-      {webSearch.summary !== null ? (
-        <Text size="xs" c="dimmed">
-          {webSearch.summary}
-        </Text>
-      ) : null}
-      {webSearch.results.map((result) => (
-        <Box
-          key={result.uri}
-          p="xs"
-          style={{ border: activityRowBorder, borderRadius: rem(4) }}
-        >
-          <Stack gap={rem(2)}>
-            <Text size="sm" c="dimmed" fw={500} lineClamp={1}>
-              {result.title}
-            </Text>
-            <Text size="xs" c="dimmed" ff="monospace" truncate>
-              {result.uri}
-            </Text>
-            {result.excerpt !== null ? (
-              <Text size="xs" c="dimmed" lineClamp={2}>
-                {result.excerpt}
+  const webSearchDetail =
+    webSearch !== null &&
+    (webSearch.summary !== null || webSearch.results.length > 0) ? (
+      <Stack gap="xs">
+        {webSearch.summary !== null ? (
+          <Text size="xs" c="dimmed">
+            {webSearch.summary}
+          </Text>
+        ) : null}
+        {webSearch.results.map((result) => (
+          <Box
+            key={result.uri}
+            p="xs"
+            style={{ border: activityRowBorder, borderRadius: rem(4) }}
+          >
+            <Stack gap={rem(2)}>
+              <Anchor
+                href={result.uri}
+                target="_blank"
+                rel="noreferrer"
+                size="sm"
+                c="dimmed"
+                fw={500}
+                lineClamp={1}
+              >
+                {result.title}
+              </Anchor>
+              <Text size="xs" c="dimmed" truncate>
+                {new URL(result.uri).hostname}
               </Text>
-            ) : null}
-          </Stack>
-        </Box>
-      ))}
-    </Stack>
-  ) : (
-    rawDetails
-  );
+              <Anchor
+                href={result.uri}
+                target="_blank"
+                rel="noreferrer"
+                size="xs"
+                c="dimmed"
+                ff="monospace"
+                truncate
+              >
+                {result.uri}
+              </Anchor>
+              {result.excerpt !== null ? (
+                <Text size="xs" c="dimmed" lineClamp={2}>
+                  {result.excerpt}
+                </Text>
+              ) : null}
+            </Stack>
+          </Box>
+        ))}
+      </Stack>
+    ) : null;
+  const detail =
+    webSearchDetail ??
+    rawDetails ??
+    (visibleAttachments.length > 0 && !showAttachmentsDirectly ? (
+      <FileAttachmentList files={visibleAttachments} />
+    ) : null);
 
   return (
     <>
       <Box
-        py={activityRowVerticalPadding}
         data-provider-tool-name={toolCall.name}
         data-provider-tool-status={toolCall.status}
       >
-        <UnstyledButton
-          w="100%"
-          onClick={() => setOpened((value) => !value)}
-          aria-expanded={opened}
-          aria-label={ariaLabel}
-          disabled={!hasDetails}
-        >
-          <Group gap="xs" wrap="nowrap" className={inlineControlClasses.root}>
-            <IconChevronRight
-              aria-hidden="true"
-              size={activityRowChevronSize}
-              color="var(--mantine-color-dimmed)"
-              style={{
-                flexShrink: 0,
-                marginTop: rem(2),
-                opacity: hasDetails ? 1 : 0,
-                transform: opened ? "rotate(90deg)" : "none",
-                transition: chatChevronTransition,
-              }}
-            />
-            <Box
-              c="dimmed"
-              style={{
-                display: "inline-flex",
-                flexShrink: 0,
-                marginTop: rem(1),
-              }}
+        <ActivityRow
+          action={
+            <ActionIcon
+              size={rem(16)}
+              variant="subtle"
+              color="gray"
+              aria-label={t("viewRawDataFor", { action: displayName })}
+              onClick={() => setRawOpened(true)}
             >
-              {webSearch !== null ? (
-                <IconSearch size={activityRowIconSize} />
-              ) : (
-                <IconTool size={activityRowIconSize} />
-              )}
-            </Box>
-            <Group gap={rem(6)} flex={1} miw={0} wrap="nowrap">
-              <Text
-                size={activityRowSummarySize}
-                c="dimmed"
-                fw={500}
-                className={inlineControlClasses.label}
-                style={{ flexShrink: 0 }}
-              >
-                {displayName}
-              </Text>
-              <Text
-                size={activityRowSummarySize}
-                c="dimmed"
-                truncate
-                flex={1}
-                miw={0}
-                className={inlineControlClasses.label}
-              >
-                {subject}
-              </Text>
-            </Group>
+              <IconDots size={activityRowIconSize} />
+            </ActionIcon>
+          }
+          ariaLabel={ariaLabel}
+          detail={detail}
+          icon={
+            webSearch !== null ? (
+              <IconWorld size={activityRowIconSize} />
+            ) : (
+              <IconTool size={activityRowIconSize} />
+            )
+          }
+          primary={displayName}
+          status={
             <ToolCallStatusIcon label={status} status={toolCall.status} />
-          </Group>
-        </UnstyledButton>
-        {detail !== null ? (
-          <Collapse
-            expanded={opened}
-            keepMounted={false}
-            {...chatCollapseTransitionProps}
-          >
-            <Box pl={activityRowDetailInset} pr="xs" pt="xs">
-              {detail}
-            </Box>
-          </Collapse>
-        ) : null}
+          }
+          subject={subject}
+        />
       </Box>
       {showAttachmentsDirectly ? (
         <FileAttachmentList files={visibleAttachments} />
       ) : null}
+      <Modal
+        opened={rawOpened}
+        onClose={() => setRawOpened(false)}
+        title={t("rawData")}
+        centered
+        size="lg"
+      >
+        {hasRawDetails ? <RawProviderToolDetails toolCall={toolCall} /> : null}
+      </Modal>
     </>
   );
 }
