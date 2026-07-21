@@ -1,5 +1,5 @@
 import { Box, rem } from "@mantine/core";
-import { expect, userEvent, within } from "storybook/test";
+import { expect, fireEvent, userEvent, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import {
   attachmentToolCall,
@@ -30,6 +30,12 @@ type Story = StoryObj<typeof meta>;
 const longCommandResult = Array.from(
   { length: 80 },
   (_, index) => `log line ${index + 1}: completed command output`,
+).join("\n");
+
+const longJavaScriptFileContent = Array.from(
+  { length: 80 },
+  (_, index) =>
+    `export const mobileViewport${index + 1} = { width: 390, height: 844 };`,
 ).join("\n");
 
 export const Preparing = {
@@ -137,6 +143,22 @@ export const NestedCommandScrollContainment = {
       throw new Error("Expected the Activity detail scroll viewport");
     }
     await expect(getComputedStyle(viewport).overscrollBehavior).toBe("contain");
+    Object.defineProperties(viewport, {
+      clientHeight: { configurable: true, value: 120 },
+      scrollHeight: { configurable: true, value: 480 },
+      scrollTop: { configurable: true, value: 360, writable: true },
+    });
+    await expect(fireEvent.wheel(viewport, { deltaY: 80 })).toBe(false);
+    await expect(
+      fireEvent.touchStart(viewport, {
+        touches: [{ clientY: 120 }],
+      }),
+    ).toBe(true);
+    await expect(
+      fireEvent.touchMove(viewport, {
+        touches: [{ clientY: 80 }],
+      }),
+    ).toBe(false);
   },
 } satisfies Story;
 
@@ -172,8 +194,10 @@ export const KnownWriteUsesEditIcon = {
       id: "known-write-story",
       callId: "known-write-story",
       name: "write",
-      arguments:
-        '{"path":"/workspace/agent/mobile-scroll-playwright.config.js","content":"export const mobileViewport = { width: 390, height: 844 };"}',
+      arguments: JSON.stringify({
+        path: "/workspace/agent/mobile-scroll-playwright.config.js",
+        content: longJavaScriptFileContent,
+      }),
       result: "File written.",
       status: "completed",
     },
@@ -190,6 +214,17 @@ export const KnownWriteUsesEditIcon = {
     await userEvent.click(canvas.getByRole("button", { name: /^Wrote file/ }));
     await expect(canvas.getByText(/export const mobileViewport/)).toBeVisible();
     await expect(canvasElement.querySelector("pre code span")).not.toBeNull();
+    const highlightedCode = canvasElement.querySelector("pre");
+    if (!(highlightedCode instanceof HTMLElement)) {
+      throw new Error("Expected the highlighted code block");
+    }
+    const fontSizeReference = document.createElement("span");
+    fontSizeReference.style.fontSize = "var(--mantine-font-size-xs)";
+    canvasElement.append(fontSizeReference);
+    await expect(getComputedStyle(highlightedCode).fontSize).toBe(
+      getComputedStyle(fontSizeReference).fontSize,
+    );
+    fontSizeReference.remove();
   },
 } satisfies Story;
 
