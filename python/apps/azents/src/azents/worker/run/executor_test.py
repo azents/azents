@@ -34,6 +34,7 @@ from azents.core.inference_profile import (
 )
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.tools import ToolkitProvider
+from azents.core.vfs import VfsProjection, make_vfs_projection
 from azents.engine.events.action_messages import CreateGitWorktreeAction
 from azents.engine.events.engine_events import (
     RunComplete,
@@ -106,6 +107,7 @@ from azents.services.session_git_worktree import (
     SessionGitWorktreeService,
 )
 from azents.services.session_title import SessionTitleService
+from azents.services.vfs import VfsProjectionService
 from azents.testing.model_selection import (
     make_test_model_selection,
     make_test_model_settings,
@@ -158,6 +160,28 @@ async def _noop_dispatch_event(
 ) -> None:
     """Ignore a published worker event."""
     del session_id, event
+
+
+class _VfsProjectionService:
+    """Run VFS projection service test double."""
+
+    def __init__(self, order: list[str] | None = None) -> None:
+        self.order = order
+        self.calls: list[tuple[str, str, str, str]] = []
+
+    async def ensure_run_projection(
+        self,
+        *,
+        run_id: str,
+        agent_id: str,
+        session_id: str,
+        workspace_id: str,
+    ) -> VfsProjection:
+        """Record projection admission before input promotion."""
+        if self.order is not None:
+            self.order.append("vfs")
+        self.calls.append((run_id, agent_id, session_id, workspace_id))
+        return make_vfs_projection([])
 
 
 @dataclasses.dataclass(frozen=True)
@@ -416,6 +440,7 @@ class _AgentSessionRepository:
         return SimpleNamespace(
             inference_state=self.inference_state,
             session_kind=AgentSessionKind.ROOT,
+            workspace_id="workspace-001",
         )
 
     async def set_inference_state(
@@ -1018,6 +1043,7 @@ def _executor(
     agent_session_repository: _AgentSessionRepository | None = None,
     live_event_projector: _LiveEventProjector | None = None,
     session_git_worktree_service: _SessionGitWorktreeService | None = None,
+    vfs_projection_service: _VfsProjectionService | None = None,
     failed_run_max_retries: int = 10,
 ) -> RunExecutor:
     """Create a RunExecutor for resolve-failure tests."""
@@ -1062,6 +1088,8 @@ def _executor(
         live_event_projector = _LiveEventProjector()
     if session_git_worktree_service is None:
         session_git_worktree_service = _SessionGitWorktreeService()
+    if vfs_projection_service is None:
+        vfs_projection_service = _VfsProjectionService()
     return RunExecutor(
         broker=cast(SessionBroker, object()),
         session_manager=cast(SessionManager[AsyncSession], _SessionManager()),
@@ -1070,6 +1098,10 @@ def _executor(
         command_registry=command_registry,
         integration_repository=cast(LLMProviderIntegrationRepository, object()),
         toolkit_registry=cast(dict[str, ToolkitProvider[Any]], {}),
+        vfs_projection_service=cast(
+            VfsProjectionService,
+            vfs_projection_service,
+        ),
         agent_toolkit_repository=cast(AgentToolkitRepository, object()),
         toolkit_repository=cast(ToolkitRepository, object()),
         agent_runtime_repository=cast(AgentRuntimeRepository, object()),
@@ -1462,12 +1494,18 @@ async def test_execute_recovers_activated_run_before_flushing_input(
         effective_auto_compaction_threshold_tokens=51_200,
     )
     lifecycle = _SessionLifecycle(recoverable_run=recoverable)
-    executor = _executor(session_lifecycle=lifecycle)
+    order: list[str] = []
+    vfs_projection_service = _VfsProjectionService(order)
+    executor = _executor(
+        session_lifecycle=lifecycle,
+        vfs_projection_service=vfs_projection_service,
+    )
     poll_calls: list[dict[str, object]] = []
     recovered_snapshots: list[AgentModelSelection] = []
 
     async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
         del args
+        order.append("input")
         poll_calls.append(kwargs)
         return RunInputPollResult(
             context_invalidated=False,
@@ -1536,6 +1574,10 @@ async def test_execute_recovers_activated_run_before_flushing_input(
 
     assert result.run_id == recoverable.id
     assert recovered_snapshots == [selection]
+    assert order[:2] == ["vfs", "input"]
+    assert vfs_projection_service.calls == [
+        (recoverable.id, "agent-001", "session-001", "workspace-001")
+    ]
     assert lifecycle.pending_run_create_calls == 0
     assert lifecycle.activation_calls == 0
     assert poll_calls[0]["required_inference_profile"] == RequestedInferenceProfile(

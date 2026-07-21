@@ -23,6 +23,7 @@ from azents.core.inference_profile import (
     SessionInferenceState,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
+from azents.core.vfs import make_vfs_projection, make_vfs_source_revision
 from azents.engine.events.action_messages import ActionMessagePayload, GoalAction
 from azents.engine.events.filters import EventCompactor
 from azents.engine.events.types import (
@@ -804,6 +805,114 @@ class TestEventExecutionRepositories:
             )
 
         assert await repo.list_input_event_ids(rdb_session, run_id=pending.id) == []
+
+    async def test_agent_run_vfs_projection_is_set_once(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Persist the first immutable VFS projection and retain it on retry."""
+        workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
+            rdb_session,
+            "event-runtime-vfs-projection",
+        )
+        event_session = await _agent_session_repository().create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        repo = AgentRunRepository()
+        run = await repo.create_pending(
+            rdb_session,
+            session_id=event_session.id,
+            parent_agent_run_id=None,
+        )
+        first = make_vfs_projection(
+            [
+                make_vfs_source_revision(
+                    source_id="release:azents",
+                    source_kind="global_release",
+                    namespace="azents",
+                    entries=[
+                        (
+                            "azents://skills/azents/deep-research/SKILL.md",
+                            b"first",
+                            "text/markdown",
+                        )
+                    ],
+                )
+            ]
+        )
+        second = make_vfs_projection(
+            [
+                make_vfs_source_revision(
+                    source_id="release:azents",
+                    source_kind="global_release",
+                    namespace="azents",
+                    entries=[
+                        (
+                            "azents://skills/azents/deep-research/SKILL.md",
+                            b"second",
+                            "text/markdown",
+                        )
+                    ],
+                )
+            ]
+        )
+
+        saved = await repo.set_vfs_projection_if_unset(
+            rdb_session,
+            run_id=run.id,
+            session_id=event_session.id,
+            projection=first,
+        )
+        retained = await repo.set_vfs_projection_if_unset(
+            rdb_session,
+            run_id=run.id,
+            session_id=event_session.id,
+            projection=second,
+        )
+        refreshed = await repo.get_by_id(rdb_session, run.id)
+
+        assert saved == first
+        assert retained == first
+        assert refreshed is not None
+        assert refreshed.vfs_projection == first
+
+    async def test_agent_run_vfs_projection_rejects_session_mismatch(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Reject projection writes through another Session identity."""
+        workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
+            rdb_session,
+            "event-runtime-vfs-permission",
+        )
+        event_session = await _agent_session_repository().create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        repo = AgentRunRepository()
+        run = await repo.create_pending(
+            rdb_session,
+            session_id=event_session.id,
+            parent_agent_run_id=None,
+        )
+        projection = make_vfs_projection([])
+
+        with pytest.raises(ValueError, match="not found in session"):
+            await repo.set_vfs_projection_if_unset(
+                rdb_session,
+                run_id=run.id,
+                session_id="another-session",
+                projection=projection,
+            )
 
     async def test_agent_run_phase_and_terminal_update(
         self,

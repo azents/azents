@@ -1,5 +1,6 @@
 """Toolkit DI dependencies."""
 
+from collections.abc import AsyncIterator
 from typing import Annotated, Any
 
 from fastapi import Depends
@@ -7,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.config import Config
 from azents.core.crypto import CredentialCipher
-from azents.core.deps import get_config, get_credential_cipher
+from azents.core.deps import get_appctx, get_config, get_credential_cipher
 from azents.core.tools import ToolkitProvider
 from azents.engine.tools.aws import AwsToolkitProvider
 from azents.engine.tools.envvar import EnvVarToolkitProvider
@@ -23,12 +24,16 @@ from azents.engine.tools.skill import SkillStateStore, SkillToolkitProvider
 from azents.engine.tools.todo import TodoStateStore, TodoToolkitProvider
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.mcp_oauth_connection import MCPOAuthConnectionRepository
+from azents.repos.toolkit import AgentToolkitRepository, ToolkitRepository
 from azents.services.artifact import ArtifactService
 from azents.services.github_platform_system_setting.runtime import (
     PlatformGitHubAppRuntimeService,
 )
+from azents.services.vfs import ReleaseVfsCatalog, VfsProjectionService
 from azents.testing.runtime_hooks import TestenvRuntimeHookQAProvider
+from azents.utils.appctx import AppContext
 
 
 def get_toolkit_registry(
@@ -84,6 +89,38 @@ def get_toolkit_registry(
     if config.testenv_runtime_hook_qa_enabled:
         registry[TestenvRuntimeHookQAProvider.slug] = TestenvRuntimeHookQAProvider()
     return registry
+
+
+async def get_release_vfs_catalog(
+    appctx: Annotated[AppContext[Config], Depends(get_appctx)],
+) -> ReleaseVfsCatalog:
+    """Return the process-scoped release VFS catalog."""
+
+    async def create() -> AsyncIterator[ReleaseVfsCatalog]:
+        yield ReleaseVfsCatalog()
+
+    return await appctx.get_variable(f"{__name__}.release_vfs_catalog", create)
+
+
+def get_vfs_projection_service(
+    session_manager: Annotated[
+        SessionManager[AsyncSession], Depends(get_session_manager)
+    ],
+    toolkit_registry: Annotated[
+        dict[str, ToolkitProvider[Any]], Depends(get_toolkit_registry)
+    ],
+    catalog: Annotated[ReleaseVfsCatalog, Depends(get_release_vfs_catalog)],
+    cipher: Annotated[CredentialCipher, Depends(get_credential_cipher)],
+) -> VfsProjectionService:
+    """Create the run VFS projection service."""
+    return VfsProjectionService(
+        session_manager=session_manager,
+        toolkit_registry=toolkit_registry,
+        catalog=catalog,
+        agent_run_repository=AgentRunRepository(),
+        agent_toolkit_repository=AgentToolkitRepository(),
+        toolkit_repository=ToolkitRepository(cipher=cipher),
+    )
 
 
 def get_todo_toolkit_provider(

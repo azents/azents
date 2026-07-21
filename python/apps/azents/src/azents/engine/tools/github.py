@@ -859,6 +859,7 @@ class GitHubToolkitProvider(ToolkitProvider[GitHubToolkitConfig]):
         Use the available tools to interact with GitHub repositories, issues,
         pull requests, and other resources as needed.""")
     config_model = GitHubToolkitConfig
+    vfs_resource_root = "resources/vfs/providers/github"
 
     def __init__(
         self,

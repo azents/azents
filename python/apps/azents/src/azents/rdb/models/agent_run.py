@@ -114,6 +114,11 @@ class RDBAgentRun(RDBModel):
         nullable=True,
         default=None,
     )
+    vfs_projection: Mapped[dict[str, JSONValue] | None] = mapped_column(
+        JSONB,
+        nullable=True,
+        default=None,
+    )
     last_completed_event_id: Mapped[str | None] = mapped_column(
         sa.String(32),
         nullable=True,

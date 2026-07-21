@@ -18,6 +18,7 @@ from azents.core.enums import (
     EventKind,
     SessionAgentKind,
 )
+from azents.core.vfs import VfsProjection
 from azents.engine.events.action_messages import ActionMessagePayload
 from azents.engine.events.types import (
     ActiveToolCall,
@@ -883,6 +884,27 @@ class AgentRunRepository:
             return None
         return self._build(rdb)
 
+    async def set_vfs_projection_if_unset(
+        self,
+        session: AsyncSession,
+        *,
+        run_id: str,
+        session_id: str,
+        projection: VfsProjection,
+    ) -> VfsProjection:
+        """Atomically persist one immutable run VFS projection."""
+        rdb = await session.scalar(
+            sa.select(RDBAgentRun).where(RDBAgentRun.id == run_id).with_for_update()
+        )
+        if rdb is None or rdb.session_id != session_id:
+            raise ValueError("AgentRun not found in session")
+        if rdb.vfs_projection is None:
+            rdb.vfs_projection = _JSON_OBJECT_ADAPTER.validate_python(
+                projection.model_dump(mode="json")
+            )
+            await session.flush()
+        return VfsProjection.model_validate(rdb.vfs_projection)
+
     async def update(
         self,
         session: AsyncSession,
@@ -1123,6 +1145,9 @@ class AgentRunRepository:
             active_tool_calls=active_tool_calls,
             retry_state=FailedRunRetryState.model_validate(rdb.retry_state)
             if rdb.retry_state is not None
+            else None,
+            vfs_projection=VfsProjection.model_validate(rdb.vfs_projection)
+            if rdb.vfs_projection is not None
             else None,
             last_completed_event_id=rdb.last_completed_event_id,
             terminal_result_event_id=rdb.terminal_result_event_id,
