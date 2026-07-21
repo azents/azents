@@ -35,6 +35,9 @@ from azents.repos.workspace.data import WorkspaceCreate
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.repos.workspace_user.data import WorkspaceUserCreate
 from azents.services.input_buffer import InputBufferService
+from azents.services.session_lifecycle.registry import (
+    get_session_lifecycle_orchestrator,
+)
 from azents.testing.model_selection import make_test_model_selection_dict
 
 from . import (
@@ -152,6 +155,7 @@ def _service(rdb_session_manager: SessionManager[AsyncSession]) -> ChatSessionSe
         workspace_user_repository=WorkspaceUserRepository(),
         session_workspace_project_repository=SessionWorkspaceProjectRepository(),
         input_buffer_service=cast(InputBufferService, object()),
+        lifecycle_orchestrator=get_session_lifecycle_orchestrator(),
         session_manager=rdb_session_manager,
     )
 

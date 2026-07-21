@@ -31,6 +31,7 @@ from azents.repos.agent_session.data import AgentSession
 from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
 from azents.repos.archived_session_retention.data import (
     ArchivedSessionPurgeJob,
+    ArchivedSessionPurgeParticipantExecution,
     ArchivedSessionPurgeParticipantSnapshot,
 )
 from azents.repos.artifact import ArtifactRepository
@@ -70,6 +71,7 @@ class _RetentionRepository:
         self.materialized_participants: list[
             ArchivedSessionPurgeParticipantSnapshot
         ] = []
+        self.participant_executions: list[ArchivedSessionPurgeParticipantExecution] = []
 
     async def cancel_invalid_unstarted_purge_jobs(
         self,
@@ -136,7 +138,112 @@ class _RetentionRepository:
         del session, job_id, lease_owner
         self.events.append("materialize_participants")
         self.materialized_participants = list(participants)
-        return []
+        now = datetime.datetime.now(datetime.UTC)
+        self.participant_executions = [
+            ArchivedSessionPurgeParticipantExecution(
+                purge_job_id="job-1",
+                participant_key=participant.participant_key,
+                policy_version=participant.policy_version,
+                phase=ArchivedSessionPurgeParticipantPhase.PENDING,
+                attempt_count=0,
+                blocked_by_participant_key=None,
+                last_error_kind=None,
+                last_error_summary=None,
+                operational_summary=None,
+                prepared_at=None,
+                cleanup_completed_at=None,
+                verified_at=None,
+                last_attempt_at=None,
+                created_at=now,
+                updated_at=now,
+            )
+            for participant in participants
+        ]
+        return list(self.participant_executions)
+
+    async def list_purge_participant_executions(
+        self,
+        session: AsyncSession,
+        *,
+        job_id: str,
+    ) -> list[ArchivedSessionPurgeParticipantExecution]:
+        del session, job_id
+        return list(self.participant_executions)
+
+    async def start_purge_participant_attempt(
+        self,
+        session: AsyncSession,
+        *,
+        job_id: str,
+        lease_owner: str,
+        participant_key: str,
+        now: datetime.datetime,
+    ) -> bool:
+        del session, job_id, lease_owner, now
+        self.events.append(f"start:{participant_key}")
+        return True
+
+    async def mark_purge_participant_blocked(
+        self,
+        session: AsyncSession,
+        *,
+        job_id: str,
+        lease_owner: str,
+        participant_key: str,
+        blocked_by_participant_key: str,
+        now: datetime.datetime,
+    ) -> bool:
+        del session, job_id, lease_owner
+        del participant_key, blocked_by_participant_key, now
+        return True
+
+    async def checkpoint_purge_participant(
+        self,
+        session: AsyncSession,
+        *,
+        job_id: str,
+        lease_owner: str,
+        participant_key: str,
+        phase: ArchivedSessionPurgeParticipantPhase,
+        operational_summary: dict[str, object] | None,
+        now: datetime.datetime,
+    ) -> bool:
+        del session, job_id, lease_owner, now
+        self.events.append(f"checkpoint:{participant_key}:{phase}")
+        self.participant_executions = [
+            execution.model_copy(
+                update={
+                    "phase": phase,
+                    "operational_summary": operational_summary,
+                }
+            )
+            if execution.participant_key == participant_key
+            else execution
+            for execution in self.participant_executions
+        ]
+        return True
+
+    async def record_purge_participant_failure(
+        self,
+        session: AsyncSession,
+        *,
+        job_id: str,
+        lease_owner: str,
+        participant_key: str,
+        phase: ArchivedSessionPurgeParticipantPhase,
+        error_kind: str,
+        error_summary: str,
+        now: datetime.datetime,
+    ) -> bool:
+        del session, job_id, lease_owner, now
+        self.events.append(f"failure:{participant_key}:{phase}")
+        self.retry = {
+            "error_kind": error_kind,
+            "error_summary": error_summary,
+            "error_participant_key": participant_key,
+            "error_phase": phase,
+        }
+        return True
 
     async def mark_purge_retry(
         self,
@@ -854,6 +961,11 @@ async def test_object_delete_failure_preserves_tree_for_retry() -> None:
     assert summary.failed_count == 1
     assert retention_repository.retry is not None
     assert retention_repository.retry["error_kind"] == "RuntimeError"
+    assert retention_repository.retry["error_participant_key"] == "session.model-files"
+    assert (
+        retention_repository.retry["error_phase"]
+        is ArchivedSessionPurgeParticipantPhase.CLEANUP_COMPLETED
+    )
     assert agent_session_repository.deleted is False
     assert model_file_repository.files[0].status is ModelFileStatus.DELETED
     assert model_file_repository.files[0].blob_deleted_at is None
