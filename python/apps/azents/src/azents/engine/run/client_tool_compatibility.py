@@ -21,8 +21,6 @@ class ClientToolRoute:
     provider: LLMProvider
     adapter: str
     native_format: str
-    official_openai_endpoint: bool
-    api_key_available: bool
 
     def __post_init__(self) -> None:
         """Normalize route facts and reject invalid rollout configuration."""
@@ -185,12 +183,7 @@ def resolve_client_tool_profiles(
     )
     if ClientToolProfile.V4A_APPLY_PATCH_FUNCTION not in profiles:
         return frozenset()
-    key = ClientToolCompatibilityKey(
-        model_identifier=model_identifier,
-        model_developer=model_developer,
-        model_family=model_family,
-    )
-    if _custom_apply_patch_transport_eligible(key=key, route=route):
+    if _custom_apply_patch_transport_eligible(route=route):
         return frozenset({ClientToolProfile.V4A_APPLY_PATCH_PLAINTEXT_CUSTOM})
     if _function_apply_patch_transport_eligible(route):
         return frozenset({ClientToolProfile.V4A_APPLY_PATCH_FUNCTION})
@@ -199,43 +192,26 @@ def resolve_client_tool_profiles(
 
 def supports_historical_plaintext_custom_apply_patch(
     *,
-    model_identifier: str,
-    model_developer: LLMModelDeveloper | None,
-    model_family: str | None,
     route: ClientToolRoute,
 ) -> bool:
     """Return whether one route can encode existing custom apply-patch history."""
-    key = ClientToolCompatibilityKey(
-        model_identifier=model_identifier,
-        model_developer=model_developer,
-        model_family=model_family,
-    )
-    return _custom_apply_patch_transport_supported(key=key, route=route)
+    return _custom_apply_patch_transport_supported(route=route)
 
 
 def _custom_apply_patch_transport_eligible(
     *,
-    key: ClientToolCompatibilityKey,
     route: ClientToolRoute,
 ) -> bool:
-    """Return whether one exact reviewed OpenAI custom route is selected."""
-    return _custom_apply_patch_transport_supported(key=key, route=route)
+    """Return whether the native OpenAI Responses transport is selected."""
+    return _custom_apply_patch_transport_supported(route=route)
 
 
 def _custom_apply_patch_transport_supported(
     *,
-    key: ClientToolCompatibilityKey,
     route: ClientToolRoute,
 ) -> bool:
-    """Return whether one exact reviewed route can encode custom history."""
-    return (
-        route.provider is LLMProvider.OPENAI
-        and route.adapter == "openai"
-        and route.native_format == "responses"
-        and route.official_openai_endpoint
-        and route.api_key_available
-        and key.model_identifier == "gpt-5.1"
-    )
+    """Return whether one native OpenAI Responses route encodes custom history."""
+    return route.adapter == "openai" and route.native_format == "responses"
 
 
 def _function_apply_patch_transport_eligible(route: ClientToolRoute) -> bool:
