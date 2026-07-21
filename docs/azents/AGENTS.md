@@ -1,7 +1,7 @@
 ---
 title: "azents documentation structure"
 created: 2026-02-25
-updated: 2026-05-13
+updated: 2026-07-21
 tags: [documentation, process]
 ---
 # azents Documentation Structure
@@ -10,28 +10,31 @@ This directory contains all azents project documentation.
 
 ## Living Spec Overview
 
-Azents is an AI agent platform, so much of the system behavior lives outside the public API contract: runtime decisions, memory policy, tool selection, and similar behavior cannot be fully described by OpenAPI alone. The project therefore uses a three-layer documentation model.
+Azents is an AI agent platform, so much of the system behavior lives outside the public API contract: runtime decisions, memory policy, tool selection, and similar behavior cannot be fully described by OpenAPI alone. The project therefore uses a four-layer documentation model.
 
-- **ADR** (`adr/`) — why a decision was made. Append-only decision log.
-- **Design** (`design/`) — what was designed at development time and why. Design documents are not continuously updated as living specs after implementation.
+- **Requirements** (`requirements/`) — what users need for one confirmed development snapshot.
+- **ADR** (`adr/`) — why a hard-to-reverse decision was made. Append-only decision log.
+- **Design** (`design/`) — how the system was designed to satisfy the Requirements and ADR decisions at development time.
 - **SPEC.md** (`spec/domain/`, `spec/flow/`) — how the current system actually behaves. These are living documents linked to code through `code_paths`.
 
-Always read `spec/domain/` and `spec/flow/` first for current behavior. Read ADRs and design documents only when you need decision rationale, historical context, rejected options, or implementation-time background behind the current spec.
+Always read `spec/domain/` and `spec/flow/` first for current behavior. Read Requirements, ADRs, and design documents only when you need product intent, decision rationale, historical context, rejected options, or implementation-time background behind the current spec.
 
 SPEC documents use the `code_paths` frontmatter field to link the spec to source files. When code changes, update the related spec's `last_verified_at` so drift can be detected.
 
 Automation tool: `/spec-review`.
 
-ADR and design documents use their location and content as their state model; they do not need a separate status field.
+Requirements, ADR, and design documents use their location and content as their state model; they do not need a separate status field.
 
+- **Requirements**: records confirmed product intent and acceptance criteria. It is mutable until implementation is complete and verified. After `implemented` is set, keep the filename and content immutable. Later product work creates a new Requirements snapshot.
 - **ADR**: records hard-to-reverse decisions. Keep ADRs append-only. If a decision changes, do not edit the old ADR; add a new ADR instead.
-- **Design**: records design decisions from development time. It is not guaranteed to reflect the current system. Subsequent changes should be recorded in spec documents, new design documents, or ADRs. The only exception is an unimplemented design that is still moving through stacked PR phases.
+- **Design**: records development-time implementation design. It is not guaranteed to reflect the current system. Subsequent changes should be recorded in spec documents, new design documents, Requirements snapshots, or ADRs. The only exception is an unimplemented design that is still moving through stacked PR phases.
 - **Spec**: records current system behavior. Delete stale specs or merge them into the current spec instead of adding freshness/status flags.
 
 ## Directory Classification
 
 | Directory | Use When | Examples | Required Frontmatter |
 | --- | --- | --- | --- |
+| `requirements/` | Confirmed user needs, scope, constraints, and acceptance criteria for one development snapshot. | `slack-260721-channel-agent-conversation.md` | `title`, `created`, `tags`; add `implemented` after verified implementation |
 | `adr/` | Decision record for one decision, including context, options, chosen path, and consequences. Append-only. | `NNNN-{slug}.md` | `title`, `created`, `tags` |
 | `spec/domain/` | Current domain model specs such as Agent, Session, Team, Memory. | `agent.md`, `workspace.md` | plus `spec_type: domain`, `domain`, `code_paths`, `last_verified_at`, `spec_version` |
 | `spec/flow/` | Current flow specs such as the ReAct loop or message routing. | `agent-execution-loop.md`, `message-routing.md` | plus `spec_type: flow`, `code_paths`, `last_verified_at`, `spec_version` |
@@ -41,13 +44,41 @@ ADR and design documents use their location and content as their state model; th
 
 `INDEX.md` is generated from frontmatter by `scripts/gen_docs_index.py --docs-root docs/azents --project-name azents` through the pre-commit hook.
 
+### Requirements Naming and References
+
+Name Requirements snapshots:
+
+```text
+requirements/{word}-{YYMMDD}-{slug}.md
+```
+
+- Use the KST creation date.
+- Use a short lowercase feature word such as `slack`, `memory`, or `billing`.
+- Use a slug for the specific user-visible capability, not an implementation technique or broad topic.
+- Treat `{word}-{YYMMDD}` as the canonical short ID.
+- Number requirements locally as `REQ-1`, `REQ-2`, and so on.
+- Reference individual requirements as `{word}-{YYMMDD}/REQ-N`.
+- If the same word and date collide, combine the same effort or choose a more precise feature word. Do not append an arbitrary ordinal.
+
+Requirements contain product intent only: problem, actors, one primary scenario, supporting scenarios, goals, non-goals, requirements with acceptance criteria, fixed constraints, open assumptions, and requester confirmation. Keep APIs, data models, architecture, implementation choices, phases, and ADR decisions out of Requirements.
+
+### Requirements Lifecycle
+
+- Create the Requirements document after one primary scenario is established and before creating an ADR.
+- Obtain explicit requester confirmation before accepting design decisions, including in autonomous mode.
+- Before implementation, apply product-scope changes in this order: Requirements → ADR → design.
+- Add `implemented: YYYY-MM-DD` only after implementation is complete and verified.
+- After `implemented` is set, never modify the Requirements filename or content.
+- For later development on the same topic, create a new dated Requirements snapshot. Do not mark or rewrite the older snapshot.
+- Keep current behavior only in living specs.
+
 ### Removed Legacy Directories
 
 | Old Directory | Destination |
 | --- | --- |
 | `implementation/` | Keep implemented records in `design/`; current behavior belongs in `spec/`. |
-| `misc`, `discussion/` | Decisions go to `adr/`, designs to `design/`, current behavior to `spec/`. |
-| `research/`, `reference/`, `runbook/`, `testenv/`, `testing/` | Move only useful content into `design/`, `spec/`, or `issues/`. |
+| `misc`, `discussion/` | Confirmed intent goes to `requirements/`, decisions go to `adr/`, designs to `design/`, and current behavior to `spec/`. |
+| `research/`, `reference/`, `runbook/`, `testenv/`, `testing/` | Move only useful content into `requirements/`, `design/`, `spec/`, or `issues/`. |
 | `plans/` | Temporary implementation plans belong in PRs/issues and are deleted after completion. |
 
 ## Frontmatter Rules
@@ -67,13 +98,24 @@ tags: [backend, engine]
 - `tags` — related area tags such as `architecture`, `backend`, `engine`, `api`, `infra`, `frontend`, `documentation`, `process`, `testenv`, `security`
 - `updated` — last update date, optional when it equals `created`
 
+### Additional Rules for `requirements/`
+
+- The filename must match `{word}-{YYMMDD}-{slug}.md` and its date must match the KST `created` date.
+- Keep one primary end-to-end scenario. Classify other scenarios as supporting, secondary, or future scope.
+- Write solution-neutral requirements with observable acceptance criteria.
+- Use document-local `REQ-N` identifiers and qualify cross-document references with the canonical short ID.
+- Do not create an ADR or design before the requester confirms the Requirements document.
+- `implemented` is the date when implementation was completed and verified.
+- After `implemented` is set, do not modify the document. Record later product intent in a new Requirements snapshot and current behavior in specs.
+
 ### Additional Rules for `design/`
 
 - `design/` documents are development-time design decision records. Do not keep overwriting them as living documents after implementation.
-- Current system behavior always belongs in `spec/`. Changes to design rationale should be recorded in a new `design/` or `adr/` document when needed.
+- New feature designs reference the confirmed Requirements snapshot and trace `{short-id}/REQ-N` through ADR decisions to design mechanisms. Do not duplicate the Requirements source of truth in the design.
+- Current system behavior always belongs in `spec/`. Changes to design rationale should be recorded in a new Requirements, design, or ADR document when needed.
 - `implemented` is the date when the design was implemented.
-- After `implemented` is set, do not modify the design document. Record later changes in `spec/` or a new `design`/`adr` document.
-- azents feature designs must include a `## Test Strategy` section. Product behavior verification should be E2E-first. Use testenv only as fallback/diagnostic support when E2E is difficult or spot diagnosis is needed.
+- After `implemented` is set, do not modify the design document. Record later changes in `spec/` or a new Requirements/design/ADR document.
+- Azents feature designs must include a `## Test Strategy` section. Product behavior verification should be E2E-first. Use testenv only as fallback/diagnostic support when E2E is difficult or spot diagnosis is needed.
 - `Test Strategy` must describe the E2E primary verification matrix, E2E plan, whether testenv fixture/prerequisite support is needed and why, fixture/seed requirements, credential/prerequisite snapshot requirements, evidence format, CI execution policy, and skip/fail criteria for optional/live tests. If product behavior verification has no E2E coverage and only testenv support, explain why.
 
 ### `design/` Structure and Search Rules
@@ -109,32 +151,46 @@ spec_version: 1
 
 ### CI Validation
 
-The pre-commit hook runs `scripts/gen_docs_index.py --docs-root docs/azents --project-name azents`, validates frontmatter for `docs/azents/**/*.md`, and regenerates indexes. It also validates spec-only fields such as `spec_type`, `code_paths`, `last_verified_at`, and `spec_version`.
+The pre-commit hook runs `scripts/gen_docs_index.py --docs-root docs/azents --project-name azents`, validates frontmatter for `docs/azents/**/*.md`, and regenerates indexes. It validates Requirements filename/date rules and spec-only fields such as `spec_type`, `code_paths`, `last_verified_at`, and `spec_version`.
 
 ## New Document Flow
 
 Decision tree:
 
-1. Decision record? → `adr/NNNN-{slug}.md` with the next zero-padded number.
-2. Feature design? → `design/{name}.md`.
-3. Current behavior spec? → `spec/domain/{domain}.md` or `spec/flow/{flow}.md`.
-4. Bug or operational issue? → `issues/{name}.md`.
-5. Pre-design blueprint or discussion summary? → `notes/{name}.md`.
-6. Unresolved discussion? → keep discussion in GitHub Issue/Discussion, optionally summarize in `notes/`, then move decisions into ADR/design/spec when settled.
+1. Confirmed feature requirements? → `requirements/{word}-{YYMMDD}-{slug}.md`.
+2. Decision record? → `adr/NNNN-{slug}.md` with the next zero-padded number.
+3. Feature design? → `design/{name}.md`.
+4. Current behavior spec? → `spec/domain/{domain}.md` or `spec/flow/{flow}.md`.
+5. Bug or operational issue? → `issues/{name}.md`.
+6. Pre-design blueprint or discussion summary? → `notes/{name}.md`.
+7. Unresolved discussion? → keep discussion in GitHub Issue/Discussion, optionally summarize in `notes/`, then move confirmed intent and decisions into Requirements/ADR/design/spec when settled.
 
 Writing order:
 
 1. Choose the directory using the decision tree above.
-2. Write required frontmatter, including spec-only fields when applicable.
-3. Record decisions and rationale in the Decision section of an ADR or design document.
-4. Validate locally with `scripts/gen_docs_index.py --docs-root docs/azents --project-name azents --check`.
+2. Write required frontmatter, including requirements- or spec-specific fields when applicable.
+3. For a new feature, confirm Requirements before recording ADR decisions or writing the design.
+4. Record decisions and rationale in the Decision section of an ADR or design document.
+5. Validate locally with `scripts/gen_docs_index.py --docs-root docs/azents --project-name azents --check`.
 
 ## Deletion and Move Rules
 
-- **`design/`**: keep documents in place after implementation. Do not use status fields to express freshness. After `implemented` is set, do not edit the document; record later changes in `spec/` or new documents.
+- **`requirements/`**: keep implemented snapshots in place and immutable. Later changes create a new snapshot; current behavior belongs in `spec/`.
+- **`design/`**: keep documents in place after implementation. Do not use status fields to express freshness. After `implemented` is set, do not edit the document; record later changes in `spec/` or new Requirements/design/ADR documents.
 - **`spec/`**: keep only current behavior specs. Delete stale specs or merge them into the current spec rather than changing status.
 
 ## Frontmatter Examples
+
+Requirements document:
+
+```yaml
+---
+title: "Slack Channel Agent Conversation Requirements"
+created: 2026-07-21
+updated: 2026-07-21
+tags: [slack, integration, agent]
+---
+```
 
 Design document:
 
@@ -170,7 +226,7 @@ ADR document:
 
 ```yaml
 ---
-title: "ADR-0001: Adopt the Living Spec Three-Layer Model"
+title: "ADR-0001: Adopt the Living Spec Model"
 created: 2026-05-01
 tags: [architecture, process]
 ---
