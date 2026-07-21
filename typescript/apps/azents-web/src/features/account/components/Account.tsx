@@ -19,6 +19,7 @@ import {
 import { IconCalendar, IconLanguage, IconMail } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
+import { formatLocalizedDate } from "@/shared/lib/date-format";
 import {
   DEFAULT_LOCALE,
   isSupportedLocale,
@@ -26,6 +27,7 @@ import {
   SUPPORTED_LOCALES,
   type SupportedLocale,
 } from "@/shared/lib/locale";
+import { useLocale } from "@/shared/providers/locale";
 import type { AccountContainerProps } from "../containers/useAccountContainer";
 
 export function Account({
@@ -33,6 +35,7 @@ export function Account({
   onSubmit,
 }: AccountContainerProps): React.ReactElement {
   const t = useTranslations("account");
+  const { locale } = useLocale();
 
   switch (state.type) {
     case "LOADING":
@@ -63,7 +66,7 @@ export function Account({
               <AccountField
                 icon={<IconCalendar size={20} />}
                 label={t("createdAt")}
-                value={state.createdAt.toLocaleDateString()}
+                value={formatLocalizedDate(state.createdAt, locale)}
               />
               <AccountLocaleForm
                 locale={state.locale}

@@ -55,10 +55,13 @@ import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useCallback, useState } from "react";
+import { formatLocalizedDate } from "@/shared/lib/date-format";
 import { useColorMode } from "@/shared/providers/color-mode";
+import { useLocale } from "@/shared/providers/locale";
 import { AgentAvatar } from "./AgentAvatar";
 import styles from "./AgentFocusedShell.module.css";
 import type { ColorModePreference } from "@/shared/lib/color-mode";
+import type { SupportedLocale } from "@/shared/lib/locale";
 import type {
   AgentResponse,
   AgentSessionResponse,
@@ -94,18 +97,20 @@ interface AgentFocusedSidebarProps {
   onNavigate?: () => void;
 }
 
-function formatTimestamp(value: string): string {
-  const formatter = new Intl.DateTimeFormat([], {
+function formatTimestamp(value: string, locale: SupportedLocale): string {
+  return formatLocalizedDate(new Date(value), locale, {
     month: "short",
     day: "numeric",
     hour: "2-digit",
     minute: "2-digit",
   });
-  return formatter.format(new Date(value));
 }
 
-function formatSessionTimestamp(session: AgentSessionResponse): string {
-  return formatTimestamp(session.updated_at);
+function formatSessionTimestamp(
+  session: AgentSessionResponse,
+  locale: SupportedLocale,
+): string {
+  return formatTimestamp(session.updated_at, locale);
 }
 
 function getSessionDisplayTitle(
@@ -219,6 +224,7 @@ export function AgentFocusedSidebar({
   const settingsHref = `${basePath}/settings`;
   const isAgentHomeActive = pathname === basePath || pathname === agentHomeHref;
   const { mode, preference, setColorMode } = useColorMode();
+  const { locale } = useLocale();
   const { setColorScheme } = useMantineColorScheme();
   const [editingSession, setEditingSession] =
     useState<AgentSessionResponse | null>(null);
@@ -596,7 +602,7 @@ export function AgentFocusedSidebar({
                       )}
                     </Group>
                   }
-                  description={formatSessionTimestamp(session)}
+                  description={formatSessionTimestamp(session, locale)}
                   onClick={onNavigate}
                   className={styles.sessionItem}
                 />
@@ -663,7 +669,7 @@ export function AgentFocusedSidebar({
                         });
                   const purgeLabel = session.purge_after
                     ? t("sessions.purgeScheduled", {
-                        date: formatTimestamp(session.purge_after),
+                        date: formatTimestamp(session.purge_after, locale),
                       })
                     : t("sessions.purgeUnscheduled");
                   return (
@@ -680,7 +686,7 @@ export function AgentFocusedSidebar({
                           </Text>
                           <Text size="xs" c="dimmed">
                             {t("sessions.archivedAt", {
-                              date: formatTimestamp(archivedAt),
+                              date: formatTimestamp(archivedAt, locale),
                             })}
                           </Text>
                           <Text size="xs" c="dimmed">
