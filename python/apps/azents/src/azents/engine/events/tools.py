@@ -11,7 +11,8 @@ from types import MappingProxyType
 
 from pydantic import TypeAdapter
 
-from azents.core.tools import ProfiledToolkitPrompt, ToolkitStatus, TurnContext
+from azents.core.tools import ToolkitStatus, TurnContext
+from azents.engine.client_tools import ClientToolWireDialect
 from azents.engine.events.execution import ClientToolExecutor
 from azents.engine.events.generated_files import PendingGeneratedFileOutput
 from azents.engine.events.output_parts import enforce_tool_output_text_hard_cap
@@ -19,18 +20,21 @@ from azents.engine.events.system_prompt import ToolkitPromptInput
 from azents.engine.events.types import (
     ClientToolCallPayload,
     ClientToolResultPayload,
-    ClientToolWireDialect,
     OutputTextPart,
     ToolkitSourceSnapshot,
     ToolOutput,
 )
-from azents.engine.run.client_tool_compatibility import ClientToolProfile
+from azents.engine.run.client_tool_compatibility import (
+    ClientToolAdapterProfile,
+    ClientToolModelProfile,
+)
 from azents.engine.run.contracts import ToolkitBinding
 from azents.engine.run.types import (
     FunctionTool,
     FunctionToolCancelRequest,
     FunctionToolError,
     FunctionToolResult,
+    FunctionToolWireVariant,
     PlaintextCustomToolHandler,
 )
 from azents.engine.tooling.tool_search import (
@@ -83,6 +87,19 @@ class ToolCatalog:
             *self.dynamic_prompt_fragment_inputs,
         ]
 
+    def static_prompt_fragment_inputs_for(
+        self,
+        tool_names: Sequence[str],
+    ) -> list[ToolkitPromptInput]:
+        """Return static prompts whose selected tool is visible to the model."""
+        visible_tool_names = frozenset(tool_names)
+        return [
+            prompt
+            for prompt in self.static_prompt_fragment_inputs
+            if prompt.required_tool_name is None
+            or prompt.required_tool_name in visible_tool_names
+        ]
+
     @property
     def native_tools(self) -> list[dict[str, object]]:
         """Return every executable tool schema in canonical order."""
@@ -114,15 +131,20 @@ class ToolCatalog:
         tool_names: Sequence[str],
     ) -> list[dict[str, object]]:
         """Return selected provider declarations in canonical final-name order."""
-        selected: list[FunctionTool] = []
+        selected: list[tuple[FunctionTool, ClientToolWireDialect]] = []
         for name in sorted(set(tool_names)):
             tool = self.tools.get(name)
             if tool is None:
                 raise ValueError(f"Tool name is not in the prepared catalog: {name}")
-            selected.append(tool)
+            wire_dialect = self.wire_dialects.get(name)
+            if wire_dialect is None:
+                raise ValueError(
+                    f"Tool has not been projected to a wire dialect: {name}"
+                )
+            selected.append((tool, wire_dialect))
         return [
-            _native_tool_declaration(tool, self.wire_dialects[tool.spec.name])
-            for tool in selected
+            _native_tool_declaration(tool, wire_dialect)
+            for tool, wire_dialect in selected
         ]
 
 
@@ -151,73 +173,163 @@ def _native_tool_declaration(
     }
 
 
-def project_tool_catalog_for_client_profiles(
+def project_tool_catalog_for_client_compatibility(
     catalog: ToolCatalog,
-    profiles: frozenset[ClientToolProfile],
+    model_profiles: frozenset[ClientToolModelProfile],
+    adapter_profile: ClientToolAdapterProfile | None,
 ) -> ToolCatalog:
-    """Project tools, handlers, and prompts through one resolved profile set."""
-    tools = {
-        name: tool
-        for name, tool in catalog.tools.items()
+    """Select one declared wire variant for every compatible candidate tool."""
+    if catalog.wire_dialects:
+        raise ValueError("Client tool projection requires an unprepared catalog")
+    tools: dict[str, FunctionTool] = {}
+    entries: dict[str, CatalogTool] = {}
+    wire_dialects: dict[str, ClientToolWireDialect] = {}
+    variant_prompt_inputs: list[ToolkitPromptInput] = []
+    for name, tool in catalog.tools.items():
+        required_model_profile = tool.required_client_tool_model_profile
         if (
-            tool.required_client_tool_profile is None
-            or tool.required_client_tool_profile in profiles
-            or (
-                name == "apply_patch"
-                and tool.required_client_tool_profile
-                is ClientToolProfile.V4A_APPLY_PATCH_FUNCTION
-                and ClientToolProfile.V4A_APPLY_PATCH_PLAINTEXT_CUSTOM in profiles
-            )
+            required_model_profile is not None
+            and required_model_profile not in model_profiles
+        ):
+            continue
+        dialect_preferences = (
+            ()
+            if adapter_profile is None
+            else adapter_profile.wire_dialects_for(required_model_profile)
         )
-    }
-    entries = {name: catalog.entries[name] for name in tools}
-    wire_dialects: dict[str, ClientToolWireDialect] = {
-        name: catalog.wire_dialects[name] for name in tools
-    }
-    if (
-        "apply_patch" in wire_dialects
-        and ClientToolProfile.V4A_APPLY_PATCH_PLAINTEXT_CUSTOM in profiles
-    ):
-        wire_dialects["apply_patch"] = "plaintext_custom"
+        variant = tool.select_wire_variant(dialect_preferences)
+        if variant is None:
+            continue
+        _validate_selected_wire_variant(tool, variant)
+        entry = catalog.entries[name]
+        tools[name] = tool
+        entries[name] = entry
+        wire_dialects[name] = variant.wire_dialect
+        if variant.model_guidance is not None:
+            variant_prompt_inputs.append(
+                _wire_variant_prompt_input(
+                    name=name,
+                    entry=entry,
+                    variant=variant,
+                    required_model_profile=required_model_profile,
+                )
+            )
     return ToolCatalog(
         tools=MappingProxyType(tools),
         wire_dialects=MappingProxyType(wire_dialects),
         entries=MappingProxyType(entries),
         static_prompt_fragment_inputs=[
-            prompt
-            for prompt in catalog.static_prompt_fragment_inputs
-            if (
-                prompt.required_client_tool_profile is None
-                or prompt.required_client_tool_profile in profiles
-            )
+            *catalog.static_prompt_fragment_inputs,
+            *variant_prompt_inputs,
         ],
-        dynamic_prompt_fragment_inputs=[
-            prompt
-            for prompt in catalog.dynamic_prompt_fragment_inputs
-            if (
-                prompt.required_client_tool_profile is None
-                or prompt.required_client_tool_profile in profiles
-            )
-        ],
+        dynamic_prompt_fragment_inputs=catalog.dynamic_prompt_fragment_inputs,
         active_toolkit_bindings=catalog.active_toolkit_bindings,
     )
 
 
-def extend_tool_catalog(
+def _validate_selected_wire_variant(
+    tool: FunctionTool,
+    variant: FunctionToolWireVariant,
+) -> None:
+    """Reject a selected dialect that the executable handler cannot consume."""
+    if variant.wire_dialect == "plaintext_custom" and not isinstance(
+        tool.handler,
+        PlaintextCustomToolHandler,
+    ):
+        raise ValueError(
+            "Plaintext custom declaration requires a plaintext custom handler"
+        )
+
+
+def _wire_variant_prompt_input(
+    *,
+    name: str,
+    entry: CatalogTool,
+    variant: FunctionToolWireVariant,
+    required_model_profile: ClientToolModelProfile | None,
+) -> ToolkitPromptInput:
+    """Build model guidance tied to one exact selected tool variant."""
+    metadata = {
+        "prompt_layer": "static",
+        "tool_name": name,
+        "wire_dialect": variant.wire_dialect,
+        "toolkit_class": entry.source.toolkit_class,
+        "use_prefix": str(entry.source.use_prefix).lower(),
+    }
+    if required_model_profile is not None:
+        metadata["required_client_tool_model_profile"] = required_model_profile.value
+    if entry.source.slug:
+        metadata["slug"] = entry.source.slug
+    if entry.source.toolkit_type is not None:
+        metadata["toolkit_type"] = entry.source.toolkit_type
+    if entry.source.display_name:
+        metadata["display_name"] = entry.source.display_name
+    if variant.model_guidance is None:
+        raise ValueError("Selected variant prompt requires model guidance")
+    return ToolkitPromptInput(
+        id=f"client-tool-variant-{name}-{variant.wire_dialect}",
+        label=entry.source.label,
+        content=variant.model_guidance,
+        metadata=metadata,
+        required_tool_name=name,
+    )
+
+
+def extend_tool_catalog_candidates(
     catalog: ToolCatalog,
     additional_tools: Sequence[FunctionTool],
 ) -> ToolCatalog:
-    """Return a catalog extended with collision-checked auto-bound tools."""
+    """Return a candidate catalog extended with collision-checked tools."""
+    if catalog.wire_dialects:
+        raise ValueError("Candidate extension requires an unprepared catalog")
+    tools = dict(catalog.tools)
+    entries = dict(catalog.entries)
+    source = _runtime_builtin_source()
+    for tool in additional_tools:
+        name = tool.spec.name
+        if name in tools:
+            raise ValueError(f"Tool name is already bound: {name}")
+        tools[name] = tool
+        entries[name] = CatalogTool(
+            tool=tool,
+            source=source,
+            exposure=ToolExposure.DIRECT,
+        )
+    return ToolCatalog(
+        tools=MappingProxyType(tools),
+        wire_dialects=catalog.wire_dialects,
+        entries=MappingProxyType(entries),
+        static_prompt_fragment_inputs=catalog.static_prompt_fragment_inputs,
+        dynamic_prompt_fragment_inputs=catalog.dynamic_prompt_fragment_inputs,
+        active_toolkit_bindings=catalog.active_toolkit_bindings,
+    )
+
+
+def extend_prepared_tool_catalog_with_json_functions(
+    catalog: ToolCatalog,
+    additional_tools: Sequence[FunctionTool],
+) -> ToolCatalog:
+    """Extend a prepared catalog with internal unconditional JSON functions."""
+    if set(catalog.wire_dialects) != set(catalog.tools):
+        raise ValueError("Post-projection extension requires a prepared catalog")
+    for tool in additional_tools:
+        if tool.required_client_tool_model_profile is not None:
+            raise ValueError(
+                "Post-projection client tools cannot require a model profile"
+            )
+        if (
+            len(tool.wire_variants) != 1
+            or tool.wire_variants[0].wire_dialect != "json_function"
+            or tool.wire_variants[0].model_guidance is not None
+        ):
+            raise ValueError(
+                "Post-projection client tools must declare one unguided JSON "
+                "function variant"
+            )
     tools = dict(catalog.tools)
     wire_dialects = dict(catalog.wire_dialects)
     entries = dict(catalog.entries)
-    source = ToolCatalogSource(
-        slug="builtin",
-        toolkit_type=None,
-        toolkit_class="RuntimeBuiltinTool",
-        display_name="Runtime",
-        use_prefix=False,
-    )
+    source = _runtime_builtin_source()
     for tool in additional_tools:
         name = tool.spec.name
         if name in tools:
@@ -236,6 +348,17 @@ def extend_tool_catalog(
         static_prompt_fragment_inputs=catalog.static_prompt_fragment_inputs,
         dynamic_prompt_fragment_inputs=catalog.dynamic_prompt_fragment_inputs,
         active_toolkit_bindings=catalog.active_toolkit_bindings,
+    )
+
+
+def _runtime_builtin_source() -> ToolCatalogSource:
+    """Return source metadata for runtime-provided client tools."""
+    return ToolCatalogSource(
+        slug="builtin",
+        toolkit_type=None,
+        toolkit_class="RuntimeBuiltinTool",
+        display_name="Runtime",
+        use_prefix=False,
     )
 
 
@@ -284,21 +407,6 @@ async def build_tool_catalog(
                     content=prompt,
                 )
             )
-        profiled_prompts = await binding.toolkit.get_profiled_static_prompts(context)
-        for prompt_index, profiled_prompt in enumerate(profiled_prompts):
-            content = profiled_prompt.content.strip()
-            if not content:
-                continue
-            static_prompt_fragment_inputs.append(
-                _profiled_toolkit_prompt_input(
-                    binding=binding,
-                    index=index,
-                    prompt_index=prompt_index,
-                    label=label,
-                    prompt=profiled_prompt,
-                    content=content,
-                )
-            )
         dynamic_prompt = (await binding.toolkit.get_dynamic_prompt(context)).strip()
         if dynamic_prompt:
             dynamic_prompt_fragment_inputs.append(
@@ -316,7 +424,6 @@ async def build_tool_catalog(
                 tool.with_prefix(f"{binding.slug}__") if binding.use_prefix else tool
             )
             tools[bound.spec.name] = bound
-            wire_dialects[bound.spec.name] = "json_function"
             entries[bound.spec.name] = CatalogTool(
                 tool=bound,
                 source=source,
@@ -367,30 +474,7 @@ def _toolkit_prompt_input(
         label=label,
         content=content,
         metadata={**_toolkit_prompt_metadata(binding), "prompt_layer": layer},
-        required_client_tool_profile=None,
-    )
-
-
-def _profiled_toolkit_prompt_input(
-    *,
-    binding: ToolkitBinding,
-    index: int,
-    prompt_index: int,
-    label: str,
-    prompt: ProfiledToolkitPrompt,
-    content: str,
-) -> ToolkitPromptInput:
-    """Build one profile-gated static toolkit prompt input."""
-    return ToolkitPromptInput(
-        id=f"toolkit-{index}-profile-{prompt_index}",
-        label=label,
-        content=content,
-        metadata={
-            **_toolkit_prompt_metadata(binding),
-            "prompt_layer": "static",
-            "required_client_tool_profile": (prompt.required_client_tool_profile.value),
-        },
-        required_client_tool_profile=prompt.required_client_tool_profile,
+        required_tool_name=None,
     )
 
 

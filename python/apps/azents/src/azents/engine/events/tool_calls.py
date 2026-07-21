@@ -5,10 +5,10 @@ from typing import Protocol
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentRunPhase, AgentRunStatus, EventKind
+from azents.engine.client_tools import ClientToolWireDialect
 from azents.engine.events.protocols import RunStateRepository, TranscriptRepository
 from azents.engine.events.types import (
     ClientToolResultPayload,
-    ClientToolWireDialect,
     Event,
 )
 from azents.repos.agent_execution.data import EventCreate

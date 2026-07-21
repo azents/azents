@@ -7,6 +7,7 @@ owner: "@Hardtack"
 touches_domains: [agent, conversation, toolkit]
 code_paths:
   - python/apps/azents/src/azents/core/vfs.py
+  - python/apps/azents/src/azents/engine/client_tools.py
   - python/apps/azents/src/azents/engine/run/contracts.py
   - python/apps/azents/src/azents/engine/run/builtin_tools.py
   - python/apps/azents/src/azents/engine/run/errors.py
@@ -665,7 +666,17 @@ non-null deadline and pass that deadline through the reply-stream wait path. If 
 operation times out into a failed/cancelled tool result path instead of leaving a durable
 `client_tool_call` without a corresponding `client_tool_result` forever.
 
-GPT-compatible prepared calls may expose the ordinary `apply_patch({base_path, patch})` function tool alongside the unconditional `edit({path, old_string, new_string, replace_all})` tool. The Engine admits only one completed JSON function call; it does not execute streamed patch fragments or provider custom/freeform tool input. `apply_patch` delegates one complete strict V4A document to the Runner-owned `file.apply_patch` operation and does not compose Engine file-storage writes. `edit` preserves its function schema and exact-match behavior while delegating its UTF-8 validation, match counting, symlink and regular-file safety checks, and atomic replacement to the Runner-owned `file.edit` operation; Engine does not compose Runner reads and writes for an edit. Both operations return only safe result metadata, and model-visible result text and structured logs do not repeat raw patch, source, or replacement content. The chat activity presentation categorizes `apply_patch` with `write`, `edit`, and `delete` as edit activity.
+GPT-compatible prepared calls may expose `apply_patch` in exactly one selected wire dialect:
+`json_function` with structured `base_path` and patch fields, or `plaintext_custom` with one strict
+plaintext envelope. The Engine admits only one completed call in the dialect frozen by preparation;
+it does not execute streamed patch fragments. Both handler adapters delegate one complete strict V4A
+document to the same Runner-owned `file.apply_patch` operation and do not compose Engine file-storage
+writes. The unconditional `edit({path, old_string, new_string, replace_all})` tool preserves its
+ordinary function schema and exact-match behavior while delegating UTF-8 validation, match counting,
+symlink and regular-file safety checks, and atomic replacement to Runner-owned `file.edit`. Both
+operations return only safe result metadata, and model-visible result text and structured logs do
+not repeat raw patch, source, or replacement content. The chat activity presentation categorizes
+`apply_patch` with `write`, `edit`, and `delete` as edit activity.
 
 When User Stop cancels a running patch, the tool cancellation handler requests ordered Runner operation cancellation. The execution loop cancels the local wait only to begin settlement, then preserves a typed terminal result returned by the Runner instead of overwriting it with a generic cancelled result. Cancellation before commit reports no applied changes. Once commit begins, the Runner settles to success or an exact partial-failure result; already committed paths are not rolled back. Tool-result finalization still appends one deterministic `client_tool_result` and removes the call from PostgreSQL-backed `active_tool_calls`.
 
@@ -708,11 +719,41 @@ fragments.
 
 Every model step builds a fresh immutable executable Tool Catalog after current Toolkit context and client-executed built-ins are resolved. `RunRequest.tool_search_enabled` carries the current Agent setting into that immutable preparation boundary. New Agents default this setting to enabled; existing Agents retain their persisted value, and `false` remains an explicit opt-out.
 
-Toolkits may contribute candidate tools and static prompt fragments with an optional required client-tool profile. Preparation resolves the profile set from the immutable selected-model snapshot using normalized developer, family, and exact model identifier rules; exact-model rules take precedence over family rules. Provider hosting and raw substring checks are not compatibility inputs. Profile names are derived preparation policy and are not persisted in `TurnContext`, the Session snapshot, or transcript history.
+Toolkits contribute candidate `FunctionTool` values with an optional required semantic model profile
+and an immutable tuple of wire variants. Each variant declares its dialect and optional guidance.
+Ordinary tools implicitly declare one JSON-function variant. Prefixing changes only the model-visible
+name and preserves the profile, variants, schema identity, handler, and cancellation route.
 
-Preparation projects candidate tool schemas, executable handlers, catalog entries, and prompt fragments through the same resolved profile set before Tool Search indexing, declaration-budget accounting, lowerer construction, or executor freezing. A model switch therefore re-evaluates compatibility on the next prepared call while historical calls and results remain durable. `apply_patch` first requires the reviewed V4A semantic profile for an identified OpenAI GPT family, then selects exactly one provider wire dialect for the prepared route. The native OpenAI Responses adapter selects the plaintext-custom declaration. Any other independently verified eligible transport retains the JSON-function declaration. Custom selection does not use exact model identifiers, credential mode, endpoint class, session, tenant, percentage, or runtime configuration. If semantic eligibility or both transports are unavailable, the catalog exposes neither declaration nor handler. The existing `edit` tool remains unconditional.
+Preparation resolves semantic model profiles from the immutable selected-model snapshot using
+normalized developer, family, and exact model identifier rules; exact-model rules take precedence
+over family rules. It separately resolves an adapter profile from provider, adapter, and native
+format. Each adapter profile supplies an ordinary default dialect preference plus optional
+semantic-profile-specific preferences. Provider-specific adapter profiles override adapter-wide
+profiles. Equal-specificity model-rule or adapter-profile overlap is invalid code-owned
+configuration.
 
-The logical `apply_patch` name has one declaration and one handler variant in a prepared catalog: `json_function` or `plaintext_custom`. The catalog freezes the matching declaration, prompt, executor, and dialect before provider dispatch. A provider failure, incomplete call, malformed custom input, cancellation, or route change never resubmits the same logical operation through the other dialect. A received call whose dialect does not match the prepared declaration fails before handler invocation. Call/result finalization, active-call state, cancellation settlement, and recovery retain the admitted dialect and deterministic call identity, so a different dialect cannot authorize a second execution.
+Catalog projection applies the same algorithm to every candidate: verify its required semantic
+profile, obtain the matching adapter dialect preference, select the first tool-declared variant,
+validate the selected handler protocol, and freeze the declaration, guidance, executor route, and
+durable dialect. No step branches on a model-visible tool name. An unmatched adapter route, missing
+semantic profile, or empty variant intersection omits the tool. A model or route switch re-evaluates
+selection on the next prepared call while historical calls and results remain durable. Variant
+guidance is added to the system prompt only when Tool Search projection also makes that exact
+declaration provider-visible.
+
+The current `apply_patch` tool requires the reviewed V4A patch semantic profile for identified OpenAI
+GPT families and declares JSON-function and plaintext-custom variants. Native OpenAI Responses
+prefers plaintext custom before JSON function. The provider-specific OpenRouter LiteLLM Responses
+profile enables JSON function for the same semantic profile. Generic LiteLLM Responses retains JSON
+function for ordinary tools but has no V4A patch override, preserving the existing `apply_patch`
+exposure set. The existing `edit` tool remains unconditional.
+
+One prepared logical operation has one declaration and handler variant. A provider failure,
+incomplete call, malformed custom input, cancellation, or route change never resubmits that operation
+through another dialect. A received call whose dialect does not match the prepared declaration fails
+before handler invocation. Call/result finalization, active-call state, cancellation settlement, and
+recovery retain the admitted dialect and deterministic call identity, so a different dialect cannot
+authorize a second execution.
 
 When Tool Search is disabled, preparation exposes the complete projected executable client-tool catalog in canonical final-name order. It does not inject `tool_search`, apply direct/deferred membership, resolve a compatibility budget, load or mutate working-set state, or wrap execution with deferred recency tracking.
 
@@ -1025,6 +1066,7 @@ updated by the user.
 
 ## Changelog
 
+- **2026-07-21** (spec_version 123) — Generalized prepared client-tool selection across semantic model profiles, adapter profile preferences, and tool-declared wire variants while retaining durable single-dialect execution.
 - **2026-07-21** (spec_version 122) — Kept existing `apply_patch` eligibility and selected plaintext custom only for the native OpenAI Responses adapter; all other eligible transports retain the JSON-function variant.
 - **2026-07-21** (spec_version 121) — Removed percentage-based plaintext-custom `apply_patch` selection; exact reviewed route and model compatibility now select one dialect without session or runtime rollout configuration.
 - **2026-07-21** (spec_version 120) — Enabled Tool Search by default for new Agents while retaining the persisted setting and disabled execution path for explicit opt-outs; promoted route-gated dual `apply_patch` dialect selection, default-disabled plaintext-custom exposure, and dialect-preserving execution/finalization rules.

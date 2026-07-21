@@ -1,29 +1,33 @@
-"""Resolve model-specific client tool compatibility profiles."""
+"""Resolve model and adapter profiles for client tool wire variants."""
 
 import dataclasses
 import enum
 from collections.abc import Sequence
 
 from azents.core.enums import LLMModelDeveloper, LLMProvider
+from azents.engine.client_tools import ClientToolWireDialect
+
+_SUPPORTED_WIRE_DIALECTS: frozenset[ClientToolWireDialect] = frozenset(
+    {"json_function", "plaintext_custom"}
+)
 
 
-class ClientToolProfile(enum.StrEnum):
-    """Code-owned model compatibility profiles for client-executed tools."""
+class ClientToolModelProfile(enum.StrEnum):
+    """Code-owned semantic model profiles for client-executed tools."""
 
-    V4A_APPLY_PATCH_FUNCTION = "v4a_apply_patch_function"
-    V4A_APPLY_PATCH_PLAINTEXT_CUSTOM = "v4a_apply_patch_plaintext_custom"
+    V4A_PATCH = "v4a_patch"
 
 
 @dataclasses.dataclass(frozen=True)
 class ClientToolRoute:
-    """Credential-free route facts used for pre-dispatch dialect selection."""
+    """Credential-free route facts used for pre-dispatch variant selection."""
 
     provider: LLMProvider
     adapter: str
     native_format: str
 
     def __post_init__(self) -> None:
-        """Normalize route facts and reject invalid rollout configuration."""
+        """Normalize route facts."""
         object.__setattr__(self, "adapter", _normalize_required(self.adapter))
         object.__setattr__(
             self,
@@ -32,15 +36,15 @@ class ClientToolRoute:
         )
 
 
-class ClientToolCompatibilityMatchKind(enum.IntEnum):
-    """Compatibility rule specificity in ascending precedence order."""
+class ClientToolModelCompatibilityMatchKind(enum.IntEnum):
+    """Model compatibility rule specificity in ascending precedence order."""
 
     MODEL_FAMILY = 1
     EXACT_MODEL = 2
 
 
 @dataclasses.dataclass(frozen=True)
-class ClientToolCompatibilityKey:
+class ClientToolModelCompatibilityKey:
     """Normalized model identity used for client tool compatibility."""
 
     model_identifier: str
@@ -62,18 +66,18 @@ class ClientToolCompatibilityKey:
 
 
 @dataclasses.dataclass(frozen=True)
-class ClientToolCompatibilityRule:
-    """One code-owned grant or deny rule for a client tool profile."""
+class ClientToolModelCompatibilityRule:
+    """One code-owned grant or deny rule for a semantic model profile."""
 
     rule_id: str
-    profile: ClientToolProfile
+    profile: ClientToolModelProfile
     model_developer: LLMModelDeveloper
     enabled: bool
     exact_model_identifier: str | None
     model_family_root: str | None
 
     def __post_init__(self) -> None:
-        """Normalize and validate one compatibility rule."""
+        """Normalize and validate one model compatibility rule."""
         object.__setattr__(self, "rule_id", _normalize_required(self.rule_id))
         object.__setattr__(
             self,
@@ -87,17 +91,17 @@ class ClientToolCompatibilityRule:
         )
         if (self.exact_model_identifier is None) == (self.model_family_root is None):
             raise ValueError(
-                "Client tool compatibility rules require exactly one model matcher"
+                "Client tool model compatibility rules require exactly one matcher"
             )
 
     @property
-    def match_kind(self) -> ClientToolCompatibilityMatchKind:
+    def match_kind(self) -> ClientToolModelCompatibilityMatchKind:
         """Return deterministic rule specificity."""
         if self.exact_model_identifier is not None:
-            return ClientToolCompatibilityMatchKind.EXACT_MODEL
-        return ClientToolCompatibilityMatchKind.MODEL_FAMILY
+            return ClientToolModelCompatibilityMatchKind.EXACT_MODEL
+        return ClientToolModelCompatibilityMatchKind.MODEL_FAMILY
 
-    def matches(self, key: ClientToolCompatibilityKey) -> bool:
+    def matches(self, key: ClientToolModelCompatibilityKey) -> bool:
         """Return whether this rule applies to one normalized model snapshot."""
         if key.model_developer is not self.model_developer:
             return False
@@ -110,24 +114,24 @@ class ClientToolCompatibilityRule:
         return family == root or family.startswith(f"{root}-")
 
 
-class ClientToolCompatibilityConflictError(ValueError):
-    """Raised when equally specific rules select one profile ambiguously."""
+class ClientToolModelCompatibilityConflictError(ValueError):
+    """Raised when model rules select one profile ambiguously."""
 
 
-class ClientToolCompatibilityRegistry:
-    """Resolve client tool profiles from normalized model snapshots."""
+class ClientToolModelCompatibilityRegistry:
+    """Resolve semantic client tool profiles from normalized model snapshots."""
 
-    def __init__(self, rules: Sequence[ClientToolCompatibilityRule]) -> None:
+    def __init__(self, rules: Sequence[ClientToolModelCompatibilityRule]) -> None:
         self.rules = tuple(rules)
-        _validate_no_same_specificity_overlap(self.rules)
+        _validate_no_model_rule_overlap(self.rules)
 
     def resolve(
         self,
-        key: ClientToolCompatibilityKey,
-    ) -> frozenset[ClientToolProfile]:
-        """Return the immutable set of enabled profiles for one model."""
-        enabled: set[ClientToolProfile] = set()
-        for profile in ClientToolProfile:
+        key: ClientToolModelCompatibilityKey,
+    ) -> frozenset[ClientToolModelProfile]:
+        """Return the immutable set of enabled semantic profiles for one model."""
+        enabled: set[ClientToolModelProfile] = set()
+        for profile in ClientToolModelProfile:
             matching = [
                 rule
                 for rule in self.rules
@@ -139,24 +143,142 @@ class ClientToolCompatibilityRegistry:
             selected = [rule for rule in matching if rule.match_kind is highest]
             if len(selected) != 1:
                 rule_ids = ", ".join(sorted(rule.rule_id for rule in selected))
-                raise ClientToolCompatibilityConflictError(
-                    "Multiple client tool compatibility rules matched at the same "
-                    f"specificity for {profile.value}: {rule_ids}"
+                raise ClientToolModelCompatibilityConflictError(
+                    "Multiple client tool model compatibility rules matched at the "
+                    f"same specificity for {profile.value}: {rule_ids}"
                 )
             if selected[0].enabled:
                 enabled.add(profile)
         return frozenset(enabled)
 
 
-def build_default_client_tool_compatibility_registry() -> (
-    ClientToolCompatibilityRegistry
+@dataclasses.dataclass(frozen=True)
+class ClientToolAdapterModelProfilePreference:
+    """Dialect preference selected for one semantic model profile."""
+
+    model_profile: ClientToolModelProfile
+    wire_dialects: tuple[ClientToolWireDialect, ...]
+
+    def __post_init__(self) -> None:
+        """Validate and freeze the declared preference order."""
+        object.__setattr__(
+            self,
+            "wire_dialects",
+            _normalize_wire_dialects(self.wire_dialects),
+        )
+
+
+class ClientToolAdapterProfileMatchKind(enum.IntEnum):
+    """Adapter profile specificity in ascending precedence order."""
+
+    ADAPTER = 1
+    PROVIDER_ADAPTER = 2
+
+
+@dataclasses.dataclass(frozen=True)
+class ClientToolAdapterProfile:
+    """Wire-variant preferences for one normalized provider route."""
+
+    profile_id: str
+    provider: LLMProvider | None
+    adapter: str
+    native_format: str
+    default_wire_dialects: tuple[ClientToolWireDialect, ...]
+    model_profile_preferences: tuple[ClientToolAdapterModelProfilePreference, ...]
+
+    def __post_init__(self) -> None:
+        """Normalize and validate one adapter profile."""
+        object.__setattr__(self, "profile_id", _normalize_required(self.profile_id))
+        object.__setattr__(self, "adapter", _normalize_required(self.adapter))
+        object.__setattr__(
+            self,
+            "native_format",
+            _normalize_required(self.native_format),
+        )
+        object.__setattr__(
+            self,
+            "default_wire_dialects",
+            _normalize_wire_dialects(self.default_wire_dialects),
+        )
+        preferences = tuple(self.model_profile_preferences)
+        model_profiles = [preference.model_profile for preference in preferences]
+        if len(model_profiles) != len(set(model_profiles)):
+            raise ValueError(
+                "Client tool adapter profiles cannot repeat a model profile"
+            )
+        object.__setattr__(self, "model_profile_preferences", preferences)
+
+    @property
+    def match_kind(self) -> ClientToolAdapterProfileMatchKind:
+        """Return deterministic route specificity."""
+        if self.provider is not None:
+            return ClientToolAdapterProfileMatchKind.PROVIDER_ADAPTER
+        return ClientToolAdapterProfileMatchKind.ADAPTER
+
+    def matches(self, route: ClientToolRoute) -> bool:
+        """Return whether this profile applies to one normalized route."""
+        return (
+            (self.provider is None or route.provider is self.provider)
+            and route.adapter == self.adapter
+            and route.native_format == self.native_format
+        )
+
+    def wire_dialects_for(
+        self,
+        model_profile: ClientToolModelProfile | None,
+    ) -> tuple[ClientToolWireDialect, ...]:
+        """Return the ordered dialect preference for one tool profile."""
+        if model_profile is None:
+            return self.default_wire_dialects
+        for preference in self.model_profile_preferences:
+            if preference.model_profile is model_profile:
+                return preference.wire_dialects
+        return ()
+
+    def supports_wire_dialect(self, wire_dialect: ClientToolWireDialect) -> bool:
+        """Return whether any selection path on this route supports a dialect."""
+        return wire_dialect in self.default_wire_dialects or any(
+            wire_dialect in preference.wire_dialects
+            for preference in self.model_profile_preferences
+        )
+
+
+class ClientToolAdapterProfileConflictError(ValueError):
+    """Raised when adapter profiles match one route ambiguously."""
+
+
+class ClientToolAdapterProfileRegistry:
+    """Resolve one adapter profile from normalized provider route facts."""
+
+    def __init__(self, profiles: Sequence[ClientToolAdapterProfile]) -> None:
+        self.profiles = tuple(profiles)
+        _validate_no_adapter_profile_overlap(self.profiles)
+
+    def resolve(self, route: ClientToolRoute) -> ClientToolAdapterProfile | None:
+        """Return the highest-specificity adapter profile for one route."""
+        matching = [profile for profile in self.profiles if profile.matches(route)]
+        if not matching:
+            return None
+        highest = max(profile.match_kind for profile in matching)
+        selected = [profile for profile in matching if profile.match_kind is highest]
+        if len(selected) != 1:
+            profile_ids = ", ".join(sorted(profile.profile_id for profile in selected))
+            raise ClientToolAdapterProfileConflictError(
+                "Multiple client tool adapter profiles matched at the same "
+                f"specificity: {profile_ids}"
+            )
+        return selected[0]
+
+
+def build_default_client_tool_model_compatibility_registry() -> (
+    ClientToolModelCompatibilityRegistry
 ):
-    """Build the reviewed default client tool compatibility registry."""
-    return ClientToolCompatibilityRegistry(
+    """Build the reviewed default semantic model compatibility registry."""
+    return ClientToolModelCompatibilityRegistry(
         (
-            ClientToolCompatibilityRule(
-                rule_id="openai-gpt-v4a-apply-patch-function",
-                profile=ClientToolProfile.V4A_APPLY_PATCH_FUNCTION,
+            ClientToolModelCompatibilityRule(
+                rule_id="openai-gpt-v4a-patch",
+                profile=ClientToolModelProfile.V4A_PATCH,
                 model_developer=LLMModelDeveloper.OPENAI,
                 enabled=True,
                 exact_model_identifier=None,
@@ -166,94 +288,106 @@ def build_default_client_tool_compatibility_registry() -> (
     )
 
 
-def resolve_client_tool_profiles(
+def build_default_client_tool_adapter_profile_registry() -> (
+    ClientToolAdapterProfileRegistry
+):
+    """Build the reviewed default adapter wire-variant registry."""
+    v4a_profile = ClientToolModelProfile.V4A_PATCH
+    return ClientToolAdapterProfileRegistry(
+        (
+            ClientToolAdapterProfile(
+                profile_id="native-openai-responses",
+                provider=None,
+                adapter="openai",
+                native_format="responses",
+                default_wire_dialects=("json_function",),
+                model_profile_preferences=(
+                    ClientToolAdapterModelProfilePreference(
+                        model_profile=v4a_profile,
+                        wire_dialects=("plaintext_custom", "json_function"),
+                    ),
+                ),
+            ),
+            ClientToolAdapterProfile(
+                profile_id="generic-litellm-responses",
+                provider=None,
+                adapter="litellm",
+                native_format="responses",
+                default_wire_dialects=("json_function",),
+                model_profile_preferences=(),
+            ),
+            ClientToolAdapterProfile(
+                profile_id="openrouter-litellm-responses",
+                provider=LLMProvider.OPENROUTER,
+                adapter="litellm",
+                native_format="responses",
+                default_wire_dialects=("json_function",),
+                model_profile_preferences=(
+                    ClientToolAdapterModelProfilePreference(
+                        model_profile=v4a_profile,
+                        wire_dialects=("json_function",),
+                    ),
+                ),
+            ),
+        )
+    )
+
+
+def resolve_client_tool_model_profiles(
     *,
     model_identifier: str,
     model_developer: LLMModelDeveloper | None,
     model_family: str | None,
-    route: ClientToolRoute,
-) -> frozenset[ClientToolProfile]:
-    """Resolve one pre-dispatch client-tool dialect selection."""
-    profiles = build_default_client_tool_compatibility_registry().resolve(
-        ClientToolCompatibilityKey(
+) -> frozenset[ClientToolModelProfile]:
+    """Resolve semantic client-tool profiles for one selected model snapshot."""
+    return build_default_client_tool_model_compatibility_registry().resolve(
+        ClientToolModelCompatibilityKey(
             model_identifier=model_identifier,
             model_developer=model_developer,
             model_family=model_family,
         )
     )
-    if ClientToolProfile.V4A_APPLY_PATCH_FUNCTION not in profiles:
-        return frozenset()
-    if _custom_apply_patch_transport_eligible(route=route):
-        return frozenset({ClientToolProfile.V4A_APPLY_PATCH_PLAINTEXT_CUSTOM})
-    if _function_apply_patch_transport_eligible(route):
-        return frozenset({ClientToolProfile.V4A_APPLY_PATCH_FUNCTION})
-    return frozenset()
 
 
-def supports_historical_plaintext_custom_apply_patch(
+def resolve_client_tool_adapter_profile(
     *,
     route: ClientToolRoute,
-) -> bool:
-    """Return whether one route can encode existing custom apply-patch history."""
-    return _custom_apply_patch_transport_supported(route=route)
+) -> ClientToolAdapterProfile | None:
+    """Resolve one adapter profile for pre-dispatch variant selection."""
+    return build_default_client_tool_adapter_profile_registry().resolve(route)
 
 
-def _custom_apply_patch_transport_eligible(
-    *,
-    route: ClientToolRoute,
-) -> bool:
-    """Return whether the native OpenAI Responses transport is selected."""
-    return _custom_apply_patch_transport_supported(route=route)
-
-
-def _custom_apply_patch_transport_supported(
-    *,
-    route: ClientToolRoute,
-) -> bool:
-    """Return whether one native OpenAI Responses route encodes custom history."""
-    return route.adapter == "openai" and route.native_format == "responses"
-
-
-def _function_apply_patch_transport_eligible(route: ClientToolRoute) -> bool:
-    """Return whether the selected route has reviewed JSON function transport."""
-    if route.native_format != "responses":
-        return False
-    if route.provider in {LLMProvider.OPENAI, LLMProvider.CHATGPT_OAUTH}:
-        return route.adapter == "openai"
-    return route.provider is LLMProvider.OPENROUTER and route.adapter == "litellm"
-
-
-def _validate_no_same_specificity_overlap(
-    rules: Sequence[ClientToolCompatibilityRule],
+def _validate_no_model_rule_overlap(
+    rules: Sequence[ClientToolModelCompatibilityRule],
 ) -> None:
-    """Reject ambiguous compatibility rules before request preparation."""
+    """Reject ambiguous model compatibility rules before preparation."""
     seen_rule_ids: set[str] = set()
     for index, rule in enumerate(rules):
         if rule.rule_id in seen_rule_ids:
-            raise ClientToolCompatibilityConflictError(
-                f"Duplicate client tool compatibility rule ID: {rule.rule_id}"
+            raise ClientToolModelCompatibilityConflictError(
+                f"Duplicate client tool model compatibility rule ID: {rule.rule_id}"
             )
         seen_rule_ids.add(rule.rule_id)
         for other in rules[index + 1 :]:
-            if _rules_overlap_at_same_specificity(rule, other):
-                raise ClientToolCompatibilityConflictError(
-                    "Client tool compatibility rules overlap at the same "
+            if _model_rules_overlap_at_same_specificity(rule, other):
+                raise ClientToolModelCompatibilityConflictError(
+                    "Client tool model compatibility rules overlap at the same "
                     f"specificity: {rule.rule_id}, {other.rule_id}"
                 )
 
 
-def _rules_overlap_at_same_specificity(
-    left: ClientToolCompatibilityRule,
-    right: ClientToolCompatibilityRule,
+def _model_rules_overlap_at_same_specificity(
+    left: ClientToolModelCompatibilityRule,
+    right: ClientToolModelCompatibilityRule,
 ) -> bool:
-    """Return whether two rules can ambiguously select one profile."""
+    """Return whether two model rules can ambiguously select one profile."""
     if (
         left.profile is not right.profile
         or left.match_kind is not right.match_kind
         or left.model_developer is not right.model_developer
     ):
         return False
-    if left.match_kind is ClientToolCompatibilityMatchKind.EXACT_MODEL:
+    if left.match_kind is ClientToolModelCompatibilityMatchKind.EXACT_MODEL:
         return left.exact_model_identifier == right.exact_model_identifier
     left_root = left.model_family_root
     right_root = right.model_family_root
@@ -264,6 +398,56 @@ def _rules_overlap_at_same_specificity(
         or left_root.startswith(f"{right_root}-")
         or right_root.startswith(f"{left_root}-")
     )
+
+
+def _validate_no_adapter_profile_overlap(
+    profiles: Sequence[ClientToolAdapterProfile],
+) -> None:
+    """Reject duplicate IDs and equally specific route overlaps."""
+    seen_profile_ids: set[str] = set()
+    for index, profile in enumerate(profiles):
+        if profile.profile_id in seen_profile_ids:
+            raise ClientToolAdapterProfileConflictError(
+                f"Duplicate client tool adapter profile ID: {profile.profile_id}"
+            )
+        seen_profile_ids.add(profile.profile_id)
+        for other in profiles[index + 1 :]:
+            if _adapter_profiles_overlap_at_same_specificity(profile, other):
+                raise ClientToolAdapterProfileConflictError(
+                    "Client tool adapter profiles overlap at the same specificity: "
+                    f"{profile.profile_id}, {other.profile_id}"
+                )
+
+
+def _adapter_profiles_overlap_at_same_specificity(
+    left: ClientToolAdapterProfile,
+    right: ClientToolAdapterProfile,
+) -> bool:
+    """Return whether two adapter profiles can match one route ambiguously."""
+    return (
+        left.match_kind is right.match_kind
+        and left.provider is right.provider
+        and left.adapter == right.adapter
+        and left.native_format == right.native_format
+    )
+
+
+def _normalize_wire_dialects(
+    values: Sequence[ClientToolWireDialect],
+) -> tuple[ClientToolWireDialect, ...]:
+    """Validate one non-empty dialect preference without changing its order."""
+    normalized = tuple(values)
+    if not normalized:
+        raise ValueError("Client tool wire-dialect preferences must be non-empty")
+    invalid = set(normalized) - _SUPPORTED_WIRE_DIALECTS
+    if invalid:
+        names = ", ".join(sorted(invalid))
+        raise ValueError(f"Unsupported client tool wire dialects: {names}")
+    if len(normalized) != len(set(normalized)):
+        raise ValueError(
+            "Client tool wire-dialect preferences cannot contain duplicates"
+        )
+    return normalized
 
 
 def _normalize_required(value: str) -> str:

@@ -98,8 +98,9 @@ from azents.engine.events.system_prompt import build_system_prompt
 from azents.engine.events.tools import (
     ToolCatalogClientToolExecutor,
     build_tool_catalog,
-    extend_tool_catalog,
-    project_tool_catalog_for_client_profiles,
+    extend_prepared_tool_catalog_with_json_functions,
+    extend_tool_catalog_candidates,
+    project_tool_catalog_for_client_compatibility,
 )
 from azents.engine.events.types import (
     AssistantMessagePayload,
@@ -138,8 +139,8 @@ from azents.engine.run.builtin_tools import (
 )
 from azents.engine.run.client_tool_compatibility import (
     ClientToolRoute,
-    resolve_client_tool_profiles,
-    supports_historical_plaintext_custom_apply_patch,
+    resolve_client_tool_adapter_profile,
+    resolve_client_tool_model_profiles,
 )
 from azents.engine.run.contracts import RunContext, RunRequest, ToolkitBinding
 from azents.engine.run.emit import Emit, durable, ephemeral
@@ -575,7 +576,7 @@ class AgentEngineAdapter:
                 adapter=lowerer_type.adapter,
                 native_format=lowerer_type.native_format,
             )
-            client_tool_profiles = resolve_client_tool_profiles(
+            client_tool_model_profiles = resolve_client_tool_model_profiles(
                 model_identifier=(
                     model_selection.model_identifier
                     if model_selection is not None
@@ -583,11 +584,14 @@ class AgentEngineAdapter:
                 ),
                 model_developer=model_developer,
                 model_family=model_family,
+            )
+            client_tool_adapter_profile = resolve_client_tool_adapter_profile(
                 route=client_tool_route,
             )
             historical_plaintext_custom_supported = (
-                supports_historical_plaintext_custom_apply_patch(
-                    route=client_tool_route,
+                client_tool_adapter_profile is not None
+                and client_tool_adapter_profile.supports_wire_dialect(
+                    "plaintext_custom"
                 )
             )
             candidate_catalog = await build_tool_catalog(
@@ -603,25 +607,10 @@ class AgentEngineAdapter:
                     check_stop=check_stop,
                 ),
             )
-            catalog = project_tool_catalog_for_client_profiles(
+            catalog = project_tool_catalog_for_client_compatibility(
                 candidate_catalog,
-                client_tool_profiles,
-            )
-            logger.info(
-                "Projected client tools for model compatibility",
-                extra={
-                    "session_id": request.session_id,
-                    "run_id": context.run_id,
-                    "model_developer": (
-                        model_developer.value if model_developer is not None else None
-                    ),
-                    "model_family": model_family,
-                    "client_tool_profiles": sorted(
-                        profile.value for profile in client_tool_profiles
-                    ),
-                    "candidate_tool_count": len(candidate_catalog.tools),
-                    "projected_tool_count": len(catalog.tools),
-                },
+                client_tool_model_profiles,
+                client_tool_adapter_profile,
             )
             hook_providers = _runtime_hook_provider_refs(
                 catalog.active_toolkit_bindings
@@ -639,12 +628,6 @@ class AgentEngineAdapter:
             injected_prompts = [
                 injected for injected in turn_start.injected_prompts if injected.text
             ]
-            system_prompt_result = build_system_prompt(
-                agent_prompt=request.agent_prompt,
-                static_toolkit_prompts=catalog.static_prompt_fragment_inputs,
-                dynamic_toolkit_prompts=catalog.dynamic_prompt_fragment_inputs,
-                injected_prompts=injected_prompts,
-            )
             resolved_builtin_tools = resolve_builtin_tools(
                 selected=request.builtin_tools,
                 provider=request.provider,
@@ -664,7 +647,53 @@ class AgentEngineAdapter:
                     f"Client builtin tool implementation is unavailable: {tool.name}"
                 )
             if client_builtin_tools:
-                catalog = extend_tool_catalog(catalog, client_builtin_tools)
+                candidate_catalog = extend_tool_catalog_candidates(
+                    candidate_catalog,
+                    client_builtin_tools,
+                )
+                catalog = project_tool_catalog_for_client_compatibility(
+                    candidate_catalog,
+                    client_tool_model_profiles,
+                    client_tool_adapter_profile,
+                )
+            logger.info(
+                "Projected client tools for model compatibility",
+                extra={
+                    "session_id": request.session_id,
+                    "run_id": context.run_id,
+                    "model_developer": (
+                        model_developer.value if model_developer is not None else None
+                    ),
+                    "model_family": model_family,
+                    "client_tool_model_profiles": sorted(
+                        profile.value for profile in client_tool_model_profiles
+                    ),
+                    "client_tool_adapter_profile": (
+                        client_tool_adapter_profile.profile_id
+                        if client_tool_adapter_profile is not None
+                        else None
+                    ),
+                    "client_tool_adapter_default_wire_dialects": (
+                        list(client_tool_adapter_profile.default_wire_dialects)
+                        if client_tool_adapter_profile is not None
+                        else []
+                    ),
+                    "client_tool_adapter_model_profile_wire_dialects": (
+                        {
+                            preference.model_profile.value: list(
+                                preference.wire_dialects
+                            )
+                            for preference in (
+                                client_tool_adapter_profile.model_profile_preferences
+                            )
+                        }
+                        if client_tool_adapter_profile is not None
+                        else {}
+                    ),
+                    "candidate_tool_count": len(candidate_catalog.tools),
+                    "projected_tool_count": len(catalog.tools),
+                },
+            )
 
             provider_visible_tool_names: tuple[str, ...]
             deferred_tool_names: frozenset[str]
@@ -701,7 +730,10 @@ class AgentEngineAdapter:
                         session_id=request.session_id,
                         activation_capacity=activation_capacity,
                     )
-                    catalog = extend_tool_catalog(catalog, [search_tool])
+                    catalog = extend_prepared_tool_catalog_with_json_functions(
+                        catalog,
+                        [search_tool],
+                    )
 
                 working_set = await self.tool_working_set_store.load(
                     request.agent_id,
@@ -750,6 +782,14 @@ class AgentEngineAdapter:
                         "tool_count": len(provider_visible_tool_names),
                     },
                 )
+            system_prompt_result = build_system_prompt(
+                agent_prompt=request.agent_prompt,
+                static_toolkit_prompts=catalog.static_prompt_fragment_inputs_for(
+                    provider_visible_tool_names
+                ),
+                dynamic_toolkit_prompts=catalog.dynamic_prompt_fragment_inputs,
+                injected_prompts=injected_prompts,
+            )
             lowerer = lowerer_type(
                 provider=provider,
                 model=model,

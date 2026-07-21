@@ -21,7 +21,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-17 | 5 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-07-21 | 17 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-20 | 3 |
-| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-07-21 | 66 |
+| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-07-21 | 67 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-07-20 | 8 |
 | [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-07-19 | 41 |
 
@@ -250,6 +250,7 @@ Design documents are accumulated records and are not listed individually in this
 - [ADR-0178: Enable Tool Search by Default for New Agents](adr/0178-enable-tool-search-by-default.md)
 - [ADR-0179: Select Provider-Specific Tool Dialects for Apply-Patch](adr/0179-apply-patch-provider-tool-dialects.md)
 - [ADR-0180: Remove Percentage Rollout from Apply-Patch Custom Selection](adr/0180-remove-apply-patch-custom-rollout.md)
+- [ADR-0181: Generalize Client Tool Wire Variant Selection](adr/0181-generalize-client-tool-wire-variants.md)
 - [ADR-0181: Suppress Unread Indicators While Sessions Run](adr/0181-suppress-unread-indicators-while-sessions-run.md)
 - [Shared Development Snapshot Identifiers](adr/docids-260721-shared-development-snapshot-identifiers.md)
 - [Latest Session System Prompt](adr/prompt-260721-latest-session-system-prompt.md)

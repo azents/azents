@@ -4,8 +4,8 @@ Defines tools, token usage, and engine callback types.
 """
 
 import dataclasses
-from collections.abc import Awaitable, Callable
-from typing import Annotated, Literal, Protocol, TypeAlias, runtime_checkable
+from collections.abc import Awaitable, Callable, Sequence
+from typing import Annotated, Protocol, TypeAlias, runtime_checkable
 
 from azcommon.types import JSONObject
 from pydantic import (
@@ -15,10 +15,11 @@ from pydantic import (
     SkipValidation,
 )
 
+from azents.engine.client_tools import ClientToolWireDialect
 from azents.engine.events.generated_files import GeneratedFileOutput
 from azents.engine.io.attachments import RuntimeAttachment
 from azents.engine.io.user_input import RunUserMessage
-from azents.engine.run.client_tool_compatibility import ClientToolProfile
+from azents.engine.run.client_tool_compatibility import ClientToolModelProfile
 
 # ---------------------------------------------------------------------------
 # Internal helper: raw passthrough dict fields.
@@ -42,7 +43,7 @@ class FunctionToolCall(BaseModel):
     id: str
     name: str
     arguments: str
-    wire_dialect: Literal["json_function", "plaintext_custom"]
+    wire_dialect: ClientToolWireDialect
 
 
 # ---------------------------------------------------------------------------
@@ -126,6 +127,35 @@ FunctionToolCancelHandler: TypeAlias = Callable[
 ]
 
 
+@dataclasses.dataclass(frozen=True)
+class FunctionToolWireVariant:
+    """One provider-facing declaration variant for a function tool."""
+
+    wire_dialect: ClientToolWireDialect
+    model_guidance: str | None
+
+    def __post_init__(self) -> None:
+        """Normalize optional model guidance and reject unsupported dialects."""
+        if self.wire_dialect not in {"json_function", "plaintext_custom"}:
+            raise ValueError(
+                f"Unsupported function tool wire dialect: {self.wire_dialect}"
+            )
+        if self.model_guidance is None:
+            return
+        guidance = self.model_guidance.strip()
+        if not guidance:
+            raise ValueError("Function tool variant guidance must be non-empty")
+        object.__setattr__(self, "model_guidance", guidance)
+
+
+_DEFAULT_FUNCTION_TOOL_WIRE_VARIANTS = (
+    FunctionToolWireVariant(
+        wire_dialect="json_function",
+        model_guidance=None,
+    ),
+)
+
+
 class SessionDataSaver(Protocol):
     """Agent data file storage interface.
 
@@ -158,7 +188,20 @@ class FunctionTool:
     spec: FunctionToolSpec
     handler: FunctionToolHandler
     cancel_handler: FunctionToolCancelHandler | None = None
-    required_client_tool_profile: ClientToolProfile | None = None
+    required_client_tool_model_profile: ClientToolModelProfile | None = None
+    wire_variants: tuple[FunctionToolWireVariant, ...] = (
+        _DEFAULT_FUNCTION_TOOL_WIRE_VARIANTS
+    )
+
+    def __post_init__(self) -> None:
+        """Freeze variant declarations and reject duplicate dialects."""
+        variants = tuple(self.wire_variants)
+        if not variants:
+            raise ValueError("Function tools require at least one wire variant")
+        dialects = [variant.wire_dialect for variant in variants]
+        if len(dialects) != len(set(dialects)):
+            raise ValueError("Function tool wire variants cannot repeat a dialect")
+        object.__setattr__(self, "wire_variants", variants)
 
     def with_prefix(self, prefix: str) -> "FunctionTool":
         """Return shallow copy with prefix added to name.
@@ -177,15 +220,42 @@ class FunctionTool:
             ),
             handler=self.handler,
             cancel_handler=self.cancel_handler,
-            required_client_tool_profile=self.required_client_tool_profile,
+            required_client_tool_model_profile=(
+                self.required_client_tool_model_profile
+            ),
+            wire_variants=self.wire_variants,
         )
 
-    def with_required_client_tool_profile(
+    def with_required_client_tool_model_profile(
         self,
-        profile: ClientToolProfile,
+        profile: ClientToolModelProfile,
     ) -> "FunctionTool":
-        """Return a copy gated by one client tool compatibility profile."""
-        return dataclasses.replace(self, required_client_tool_profile=profile)
+        """Return a copy gated by one semantic model compatibility profile."""
+        return dataclasses.replace(
+            self,
+            required_client_tool_model_profile=profile,
+        )
+
+    def with_wire_variants(
+        self,
+        *variants: FunctionToolWireVariant,
+    ) -> "FunctionTool":
+        """Return a copy declaring an ordered set of provider wire variants."""
+        return dataclasses.replace(self, wire_variants=tuple(variants))
+
+    def select_wire_variant(
+        self,
+        dialect_preferences: Sequence[ClientToolWireDialect],
+    ) -> FunctionToolWireVariant | None:
+        """Return the first declared variant supported by adapter preference."""
+        variants_by_dialect = {
+            variant.wire_dialect: variant for variant in self.wire_variants
+        }
+        for wire_dialect in dialect_preferences:
+            variant = variants_by_dialect.get(wire_dialect)
+            if variant is not None:
+                return variant
+        return None
 
 
 class FunctionToolError(Exception):
