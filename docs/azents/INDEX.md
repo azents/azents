@@ -241,6 +241,7 @@ Design documents are accumulated records and are not listed individually in this
 - [ADR-0176: Render Known Tools Through Validated Frontend Adapters](adr/0176-render-known-tools-through-validated-frontend-adapters.md)
 - [ADR-0177: Complete Specialized Presentation Coverage for Builtin Tools](adr/0177-complete-builtin-tool-presentations.md)
 - [ADR-0178: Enable Tool Search by Default for New Agents](adr/0178-enable-tool-search-by-default.md)
+- [ADR-0179: Select Provider-Specific Tool Dialects for Apply-Patch](adr/0179-apply-patch-provider-tool-dialects.md)
 
 ## Issues (Bug Tracking)
 
