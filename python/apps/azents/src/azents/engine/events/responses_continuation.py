@@ -73,6 +73,8 @@ class ResponsesContinuationPlanner:
         delta = request_input[output_end:]
         if not delta:
             return full_plan
+        if not _tool_outputs_match_preceding_calls(comparison_input):
+            return full_plan
         return ResponsesContinuationPlan(
             input_items=delta,
             previous_response_id=state.response_id,
@@ -119,6 +121,32 @@ def _sanitize_responses_input_items(
 ) -> list[dict[str, object]]:
     """Sanitize request-local blob fields only for continuation comparison."""
     return [sanitize_responses_native_item(dict(item)) for item in items]
+
+
+def _tool_outputs_match_preceding_calls(
+    items: Sequence[Mapping[str, object]],
+) -> bool:
+    """Require continuation tool outputs to retain their originating wire item type."""
+    call_types: dict[str, str] = {}
+    expected_call_types = {
+        "function_call_output": "function_call",
+        "custom_tool_call_output": "custom_tool_call",
+    }
+    for item in items:
+        item_type = item.get("type")
+        call_id = item.get("call_id")
+        if not isinstance(item_type, str) or not isinstance(call_id, str):
+            continue
+        if item_type in {"function_call", "custom_tool_call"}:
+            call_types[call_id] = item_type
+            continue
+        expected_call_type = expected_call_types.get(item_type)
+        if (
+            expected_call_type is not None
+            and call_types.get(call_id) != expected_call_type
+        ):
+            return False
+    return True
 
 
 def sanitize_responses_native_item(

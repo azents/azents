@@ -706,6 +706,50 @@ class TestLiteLLMResponsesLowerer:
             }
         ]
 
+    def test_custom_tool_call_drops_cross_dialect_output(self) -> None:
+        """Do not pair a custom call with a JSON-function result sharing its ID."""
+        lowerer = LiteLLMResponsesLowerer(provider="openai", model="gpt-5.1")
+        transcript = [
+            _event(
+                EventKind.CLIENT_TOOL_CALL,
+                ClientToolCallPayload(
+                    call_id="call-custom",
+                    name="apply_patch",
+                    arguments="opaque-custom-input",
+                    wire_dialect="plaintext_custom",
+                    native_artifact=_artifact(
+                        {
+                            "type": "custom_tool_call",
+                            "call_id": "call-custom",
+                            "name": "apply_patch",
+                            "input": "opaque-custom-input",
+                        }
+                    ),
+                ),
+            ),
+            _event(
+                EventKind.CLIENT_TOOL_RESULT,
+                ClientToolResultPayload(
+                    call_id="call-custom",
+                    name="apply_patch",
+                    wire_dialect="json_function",
+                    status="completed",
+                    output="completed",
+                ),
+            ),
+        ]
+
+        request = lowerer.lower(transcript, model="gpt-5.1")
+
+        assert request.input == [
+            {
+                "type": "custom_tool_call",
+                "call_id": "call-custom",
+                "name": "apply_patch",
+                "input": "opaque-custom-input",
+            }
+        ]
+
     def test_skips_goal_briefing_for_model_input(self) -> None:
         """goal_briefing is UI-only durable event, so exclude it from model input."""
         lowerer = LiteLLMResponsesLowerer(provider="openai", model="gpt-5.1")
@@ -3627,6 +3671,12 @@ class TestLiteLLMResponsesOutputNormalizer:
                                 "arguments": "{}",
                             },
                             {
+                                "type": "custom_tool_call",
+                                "call_id": "call-custom",
+                                "name": "apply_patch",
+                                "input": "opaque-custom-input",
+                            },
+                            {
                                 "type": "web_search_call",
                                 "id": "ws-1",
                             },
@@ -3648,6 +3698,7 @@ class TestLiteLLMResponsesOutputNormalizer:
             EventKind.ASSISTANT_MESSAGE,
             EventKind.REASONING,
             EventKind.CLIENT_TOOL_CALL,
+            EventKind.CLIENT_TOOL_CALL,
             EventKind.PROVIDER_TOOL_CALL,
             EventKind.PROVIDER_TOOL_CALL,
             EventKind.UNKNOWN_ADAPTER_OUTPUT,
@@ -3656,7 +3707,11 @@ class TestLiteLLMResponsesOutputNormalizer:
         assert isinstance(reasoning, ReasoningPayload)
         assert reasoning.text is None
         assert reasoning.summary == "summary"
-        provider_tool_call = output.events[4].payload
+        custom_call = output.events[3].payload
+        assert isinstance(custom_call, ClientToolCallPayload)
+        assert custom_call.arguments == "opaque-custom-input"
+        assert custom_call.wire_dialect == "plaintext_custom"
+        provider_tool_call = output.events[5].payload
         assert isinstance(provider_tool_call, ProviderToolCallPayload)
         assert provider_tool_call.output == []
         assert "result" not in provider_tool_call.native_artifact.item

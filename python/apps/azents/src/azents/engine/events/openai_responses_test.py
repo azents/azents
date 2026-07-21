@@ -13,6 +13,9 @@ from openai import AsyncOpenAI, AuthenticationError, BadRequestError, OpenAIErro
 from openai.types.responses import (
     Response,
     ResponseCompletedEvent,
+    ResponseCustomToolCall,
+    ResponseCustomToolCallInputDeltaEvent,
+    ResponseCustomToolCallInputDoneEvent,
     ResponseErrorEvent,
     ResponseFailedEvent,
     ResponseFileSearchToolCall,
@@ -65,6 +68,8 @@ from azents.engine.events.responses_continuation import ResponsesContinuationPla
 from azents.engine.events.types import (
     AgentMessagePayload,
     AssistantMessagePayload,
+    ClientToolCallPayload,
+    ClientToolResultPayload,
     Event,
     FileOutputPart,
     NativeArtifact,
@@ -1607,6 +1612,148 @@ async def test_official_sdk_wire_request_sanitizes_unstored_generated_image() ->
             "result": "cmVoeWRyYXRlZA==",
         }
     ]
+
+
+def test_typed_normalizer_admits_completed_custom_tool_call() -> None:
+    """Keep custom input private until a completed matching item is received."""
+    custom_call = ResponseCustomToolCall(
+        call_id="call-custom",
+        id="item-custom",
+        input="opaque-custom-input",
+        name="apply_patch",
+        type="custom_tool_call",
+    )
+    output = OpenAIResponsesOutputNormalizer(
+        provider="openai",
+        model="gpt-5.1-codex",
+        operation="sampling",
+        integration=None,
+    ).start("session-1")
+
+    added = output.process_event(
+        ResponseOutputItemAddedEvent(
+            item=custom_call,
+            output_index=0,
+            sequence_number=1,
+            type="response.output_item.added",
+        )
+    )
+    delta = output.process_event(
+        ResponseCustomToolCallInputDeltaEvent(
+            delta="opaque-custom-input",
+            item_id="item-custom",
+            output_index=0,
+            sequence_number=2,
+            type="response.custom_tool_call_input.delta",
+        )
+    )
+    input_done = output.process_event(
+        ResponseCustomToolCallInputDoneEvent(
+            input="opaque-custom-input",
+            item_id="item-custom",
+            output_index=0,
+            sequence_number=3,
+            type="response.custom_tool_call_input.done",
+        )
+    )
+    item_done = output.process_event(
+        ResponseOutputItemDoneEvent(
+            item=custom_call,
+            output_index=0,
+            sequence_number=4,
+            type="response.output_item.done",
+        )
+    )
+    output.process_event(
+        _completed_event(_response().model_copy(update={"output": [custom_call]}))
+    )
+
+    assert added.projections == []
+    assert delta.projections == []
+    assert input_done.projections == []
+    assert item_done.projections == []
+    completed = output.complete()
+    assert len(completed.events) == 1
+    payload = completed.events[0].payload
+    assert isinstance(payload, ClientToolCallPayload)
+    assert payload.call_id == "call-custom"
+    assert payload.name == "apply_patch"
+    assert payload.arguments == "opaque-custom-input"
+    assert payload.wire_dialect == "plaintext_custom"
+
+    result = Event(
+        id="3" * 32,
+        session_id="session-1",
+        kind=EventKind.CLIENT_TOOL_RESULT,
+        payload=ClientToolResultPayload(
+            call_id="call-custom",
+            name="apply_patch",
+            wire_dialect="plaintext_custom",
+            status="completed",
+            output="completed",
+        ),
+        created_at=datetime.datetime.now(datetime.UTC),
+    )
+    request = OpenAIResponsesLowerer(
+        provider="openai",
+        model="gpt-5.1-codex",
+        provider_id=LLMProvider.OPENAI,
+        credential_kwargs={},
+    ).lower([*completed.events, result], model="gpt-5.1-codex")
+
+    assert request.input == [
+        {
+            "type": "custom_tool_call",
+            "call_id": "call-custom",
+            "id": "item-custom",
+            "input": "opaque-custom-input",
+            "name": "apply_patch",
+        },
+        {
+            "type": "custom_tool_call_output",
+            "call_id": "call-custom",
+            "output": "completed",
+        },
+    ]
+
+
+def test_typed_normalizer_rejects_inconsistent_custom_tool_input() -> None:
+    """Do not admit a custom call whose streamed and completed input disagree."""
+    custom_call = ResponseCustomToolCall(
+        call_id="call-custom",
+        id="item-custom",
+        input="final-input",
+        name="apply_patch",
+        type="custom_tool_call",
+    )
+    output = OpenAIResponsesOutputNormalizer(
+        provider="openai",
+        model="gpt-5.1-codex",
+        operation="sampling",
+        integration=None,
+    ).start("session-1")
+    output.process_event(
+        ResponseCustomToolCallInputDoneEvent(
+            input="different-input",
+            item_id="item-custom",
+            output_index=0,
+            sequence_number=1,
+            type="response.custom_tool_call_input.done",
+        )
+    )
+    output.process_event(
+        ResponseOutputItemDoneEvent(
+            item=custom_call,
+            output_index=0,
+            sequence_number=2,
+            type="response.output_item.done",
+        )
+    )
+    output.process_event(
+        _completed_event(_response().model_copy(update={"output": [custom_call]}))
+    )
+
+    assert output.complete().events == []
 
 
 def test_typed_normalizer_preserves_reasoning_stream_identity() -> None:
