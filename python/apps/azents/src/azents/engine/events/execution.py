@@ -222,6 +222,29 @@ class ModelFilePinRepositoryProtocol(Protocol):
         ...
 
 
+class SystemPromptSnapshotRepositoryProtocol(Protocol):
+    """Session-keyed system prompt snapshot persistence."""
+
+    async def replace(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        system_prompt: SystemPromptAnalysisPayload,
+    ) -> None:
+        """Replace the current snapshot."""
+        ...
+
+    async def delete(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+    ) -> None:
+        """Delete the current snapshot."""
+        ...
+
+
 @dataclass(frozen=True)
 class AgentRunExecutionRequest:
     """Agent run execution request."""
@@ -285,6 +308,8 @@ class AgentRunExecution[
         run_repo: RunStateRepository | None = None,
         transcript_repo: TranscriptRepository | None = None,
         session_repo: SessionHeadRepository | None = None,
+        system_prompt_snapshot_repo: SystemPromptSnapshotRepositoryProtocol
+        | None = None,
     ) -> None:
         """Inject loop dependencies."""
         self.session_manager = session_manager
@@ -307,6 +332,7 @@ class AgentRunExecution[
         self.run_repo = run_repo or AgentRunRepository()
         self.transcript_repo = transcript_repo or EventTranscriptRepository()
         self.session_repo = session_repo
+        self.system_prompt_snapshot_repo = system_prompt_snapshot_repo
 
     async def run(
         self,
@@ -537,8 +563,19 @@ class AgentRunExecution[
                                 request.run_id,
                                 normalized_output.usage,
                                 inference_state=prepared_call.inference_state,
-                                system_prompt=prepared_call.system_prompt_analysis,
                             )
+                            if self.system_prompt_snapshot_repo is not None:
+                                if prepared_call.system_prompt_analysis is None:
+                                    await self.system_prompt_snapshot_repo.delete(
+                                        session,
+                                        session_id=request.session_id,
+                                    )
+                                else:
+                                    await self.system_prompt_snapshot_repo.replace(
+                                        session,
+                                        session_id=request.session_id,
+                                        system_prompt=prepared_call.system_prompt_analysis,
+                                    )
                             # Successful output admission completes this model turn's
                             # retry cycle. Keep the clear in the output transaction so
                             # takeover cannot revive retry state after output commits.
@@ -1252,7 +1289,6 @@ class AgentRunExecution[
         usage: TokenUsagePayload | None,
         *,
         inference_state: SessionInferenceState | None,
-        system_prompt: SystemPromptAnalysisPayload | None = None,
     ) -> Event | None:
         """Append turn marker."""
         if usage is None:
@@ -1274,7 +1310,6 @@ class AgentRunExecution[
                 if inference_state is not None
                 else None
             ),
-            system_prompt=system_prompt,
         ).model_dump(mode="json", exclude_none=True)
         if applied_profile is not None:
             payload["applied_inference_profile"] = applied_profile.model_dump(

@@ -172,6 +172,9 @@ from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.agent_session_system_prompt_snapshot import (
+    AgentSessionSystemPromptSnapshotRepository,
+)
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.llm_provider_integration.deps import (
     get_llm_provider_integration_repository,
@@ -338,6 +341,10 @@ class AgentEngineAdapter:
     ]
     session_head_repo: Annotated[SessionHeadRepository, Depends(AgentSessionRepository)]
     transcript_repo: Annotated[TranscriptRepository, Depends(EventTranscriptRepository)]
+    system_prompt_snapshot_repo: Annotated[
+        AgentSessionSystemPromptSnapshotRepository,
+        Depends(AgentSessionSystemPromptSnapshotRepository),
+    ]
     model_file_pin_repo: Annotated[
         ModelFilePinRepository, Depends(ModelFilePinRepository)
     ]
@@ -962,6 +969,7 @@ class AgentEngineAdapter:
             run_repo=self.run_repo,
             transcript_repo=self.transcript_repo,
             session_repo=self.session_head_repo,
+            system_prompt_snapshot_repo=self.system_prompt_snapshot_repo,
         )
 
         async def execute_run() -> AgentRunStatus:

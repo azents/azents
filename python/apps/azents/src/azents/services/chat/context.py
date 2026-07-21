@@ -31,6 +31,9 @@ from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import EventTranscriptRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession
+from azents.repos.agent_session_system_prompt_snapshot import (
+    AgentSessionSystemPromptSnapshotRepository,
+)
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.services.chat.data import NotWorkspaceMember, SessionNotFound
 
@@ -190,6 +193,10 @@ class SessionContextService:
     transcript_repository: Annotated[
         EventTranscriptRepository, Depends(EventTranscriptRepository)
     ]
+    system_prompt_snapshot_repository: Annotated[
+        AgentSessionSystemPromptSnapshotRepository,
+        Depends(AgentSessionSystemPromptSnapshotRepository),
+    ]
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
     ]
@@ -230,15 +237,25 @@ class SessionContextService:
                 agent_session.id,
                 limit=bounded_limit,
             )
-            return Success(_build_context(agent_session, events))
+            system_prompt = await self.system_prompt_snapshot_repository.get(
+                session,
+                session_id=agent_session.id,
+            )
+            return Success(_build_context(agent_session, events, system_prompt))
 
 
 def _build_context(
     agent_session: AgentSession,
     events: list[Event],
+    system_prompt_analysis: SystemPromptAnalysisPayload | None,
 ) -> SessionContext:
     """Build context inspector payload from events."""
     usage = _latest_usage(events)
+    system_prompt = (
+        SessionContextSystemPrompt.from_payload(system_prompt_analysis)
+        if system_prompt_analysis is not None
+        else None
+    )
     return SessionContext(
         session=SessionContextSession(
             id=agent_session.id,
@@ -248,8 +265,8 @@ def _build_context(
         ),
         usage=usage,
         stats=_build_stats(events),
-        breakdown=_build_breakdown(events),
-        system_prompt=_latest_system_prompt(events),
+        breakdown=_build_breakdown(events, system_prompt),
+        system_prompt=system_prompt,
         raw_events=[SessionContextRawEvent.from_event(event) for event in events],
     )
 
@@ -260,17 +277,6 @@ def _latest_usage(events: list[Event]) -> TokenUsagePayload | None:
         payload = event.payload
         if isinstance(payload, TurnMarkerPayload):
             return payload.usage
-    return None
-
-
-def _latest_system_prompt(
-    events: list[Event],
-) -> SessionContextSystemPrompt | None:
-    """Return system prompt analysis payload of latest turn marker."""
-    for event in reversed(events):
-        payload = event.payload
-        if isinstance(payload, TurnMarkerPayload) and payload.system_prompt is not None:
-            return SessionContextSystemPrompt.from_payload(payload.system_prompt)
     return None
 
 
@@ -307,6 +313,7 @@ def _build_stats(events: list[Event]) -> SessionContextStats:
 
 def _build_breakdown(
     events: list[Event],
+    system_prompt: SessionContextSystemPrompt | None,
 ) -> list[SessionContextBreakdownSegment]:
     """Create prompt breakdown based on Event payload character count."""
     chars: dict[ContextBreakdownKey, int] = {
@@ -316,7 +323,6 @@ def _build_breakdown(
         "tool": 0,
         "other": 0,
     }
-    system_prompt = _latest_system_prompt(events)
     if system_prompt is not None:
         chars["system"] += _system_prompt_chars(system_prompt)
 
