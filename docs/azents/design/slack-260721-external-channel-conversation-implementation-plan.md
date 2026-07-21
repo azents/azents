@@ -113,8 +113,8 @@ Scope:
 - add an explicit terminal-on-archive transition policy while retaining symmetric restore requirements for ordinary mutable participants;
 - compose executable lifecycle participants and dispatch archive and restore validation/mutation within the existing locked transaction;
 - implement `session.external-channel` archive termination, restore preservation, purge preparation, cleanup, verification, and database finalization;
-- commit progress-delete intents during archive and perform provider attempts only after commit;
-- ensure archive succeeds despite failed, unknown, or not-attempted provider cleanup;
+- commit progress-delete intents during archive without performing provider calls;
+- keep archive authoritative and independent from the later provider execution and cleanup outcome;
 - integrate Session finalizer ordering and restrictive FK validation;
 - fence External Channel activity when an Agent becomes decommissioning;
 - terminate route-owned bindings during ordinary root retirement, remove Agent routes explicitly, preserve Workspace-owned connections, and extend Agent finalizer absence checks; and
@@ -197,8 +197,10 @@ Scope:
 - add binding-scoped Channel Work and ordered task transitions independently from Session Todo;
 - auto-bind one root-only `channel_action` tool when an active binding exists;
 - commit Channel Work, desired progress, action identity, and delivery intents before network calls;
+- consume archive-created progress-delete intents only after the archive transaction commits;
 - attempt reply, progress create/update/delete, and control operations at most once;
 - record delivered, failed, unknown, and not-attempted outcomes without rollback or automatic retry;
+- recover pending archive cleanup as not-attempted and attempting cleanup as unknown without provider re-execution;
 - recover incomplete durable client-tool calls without executing provider operations;
 - inject bounded current Channel Work into turn-time context and compaction;
 - emit one generic idle continuation for the complete active work set; and
