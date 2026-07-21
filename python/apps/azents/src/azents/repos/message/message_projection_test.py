@@ -61,6 +61,7 @@ def test_tool_result_attachment_output_part_projects_to_rest_attachment() -> Non
                     preview_summary="preview text",
                 ),
             ],
+            wire_dialect="json_function",
         ).model_dump(mode="json", exclude_none=True)
     )
     row = RDBEvent(

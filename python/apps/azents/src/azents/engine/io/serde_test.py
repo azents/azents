@@ -95,7 +95,14 @@ class TestToolCallSerde:
 
     def test_round_trip(self) -> None:
         """FunctionToolCall round-trip."""
-        tcs = [FunctionToolCall(id="tc-1", name="search", arguments='{"q": "hello"}')]
+        tcs = [
+            FunctionToolCall(
+                id="tc-1",
+                name="search",
+                arguments='{"q": "hello"}',
+                wire_dialect="json_function",
+            )
+        ]
         serialized = serialize_tool_calls(tcs)
         assert serialized is not None
         restored = deserialize_tool_calls(serialized)
@@ -103,6 +110,7 @@ class TestToolCallSerde:
         assert restored[0].id == "tc-1"
         assert restored[0].name == "search"
         assert restored[0].arguments == '{"q": "hello"}'
+        assert restored[0].wire_dialect == "json_function"
 
     def test_serialize_empty(self) -> None:
         """Empty list returns None."""
@@ -111,6 +119,15 @@ class TestToolCallSerde:
     def test_deserialize_none(self) -> None:
         """None returns None."""
         assert deserialize_tool_calls(None) is None
+
+    def test_deserialize_legacy_call_defaults_to_json_function(self) -> None:
+        """Legacy serialized calls retain their JSON-function interpretation."""
+        result = deserialize_tool_calls(
+            [{"id": "tc-legacy", "name": "read", "arguments": "{}"}]
+        )
+
+        assert result is not None
+        assert result[0].wire_dialect == "json_function"
 
     def test_deserialize_malformed_arguments_truncated_json(self) -> None:
         """Truncated JSON arguments are replaced with empty object."""

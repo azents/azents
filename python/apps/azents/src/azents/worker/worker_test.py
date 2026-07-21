@@ -1212,6 +1212,7 @@ def test_apply_active_tool_call_event_tracks_until_output() -> None:
             name="shell",
             arguments='{"cmd":"pwd"}',
             native_artifact=native_artifact,
+            wire_dialect="json_function",
         ),
         created_at=datetime.now(timezone.utc),
     )
@@ -1223,6 +1224,7 @@ def test_apply_active_tool_call_event_tracks_until_output() -> None:
             call_id="call-1",
             status="completed",
             output="/tmp",
+            wire_dialect="json_function",
         ),
         created_at=datetime.now(timezone.utc),
     )
@@ -1254,6 +1256,7 @@ async def test_replace_live_active_tool_calls_broadcasts_without_redis() -> None
         arguments='{"command":"sleep 60"}',
         started_at=datetime.now(timezone.utc),
         owner_generation=1,
+        wire_dialect="json_function",
     )
 
     await projector.replace_active_tool_calls(
@@ -1289,6 +1292,7 @@ async def test_dispatch_event_publishes_history_before_live_removal() -> None:
                 schema_version="1",
                 item={"live_projection": "client_tool_call"},
             ),
+            wire_dialect="json_function",
         ),
         created_at=datetime.now(timezone.utc),
     )
@@ -1306,6 +1310,7 @@ async def test_dispatch_event_publishes_history_before_live_removal() -> None:
             call_id="call-1",
             status="completed",
             output="done",
+            wire_dialect="json_function",
         ),
         created_at=datetime.now(timezone.utc),
     )
@@ -1456,6 +1461,7 @@ async def test_dispatch_flushes_live_partial_batch_during_event_update() -> None
             call_id="call-1",
             status="completed",
             output="done",
+            wire_dialect="json_function",
         ),
         created_at=datetime.now(timezone.utc),
     )

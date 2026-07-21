@@ -5,7 +5,7 @@ Defines tools, token usage, and engine callback types.
 
 import dataclasses
 from collections.abc import Awaitable, Callable
-from typing import Annotated, Protocol, TypeAlias
+from typing import Annotated, Literal, Protocol, TypeAlias
 
 from azcommon.types import JSONObject
 from pydantic import (
@@ -35,13 +35,14 @@ RawDict: TypeAlias = Annotated[dict[str, object], SkipValidation]
 
 
 class FunctionToolCall(BaseModel):
-    """Function tool call requested by LLM."""
+    """Historical client tool call projected through the legacy message API."""
 
     model_config = ConfigDict(frozen=True)
 
     id: str
     name: str
-    arguments: str  # JSON string
+    arguments: str
+    wire_dialect: Literal["json_function", "plaintext_custom"]
 
 
 # ---------------------------------------------------------------------------

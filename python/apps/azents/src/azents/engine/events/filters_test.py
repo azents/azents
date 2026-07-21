@@ -380,6 +380,7 @@ async def test_attachment_availability_filter_updates_tool_output_part() -> None
                     size=42,
                 )
             ],
+            wire_dialect="json_function",
         ),
     )
     transcript = [event]
@@ -452,6 +453,7 @@ async def test_filepart_placeholder_filter_rewrites_missing_tool_filepart() -> N
             name="read_image",
             status="completed",
             output=[file_part],
+            wire_dialect="json_function",
         ),
     )
     transcript = [event]
@@ -738,6 +740,7 @@ async def test_compactor_continuity_uses_concise_transcript_labels() -> None:
                 name="read_text",
                 arguments='{"path":"/tmp/report.txt"}',
                 native_artifact=_native_artifact(),
+                wire_dialect="json_function",
             ),
         ),
         _event(
@@ -748,6 +751,7 @@ async def test_compactor_continuity_uses_concise_transcript_labels() -> None:
                 name="read_text",
                 status="completed",
                 output=[OutputTextPart(text="report contents")],
+                wire_dialect="json_function",
             ),
         ),
     ]
@@ -1514,6 +1518,7 @@ async def test_auto_compaction_uses_latest_turn_marker_usage() -> None:
                 name="read_text",
                 status="completed",
                 output=[OutputTextPart(text="x" * 50_000)],
+                wire_dialect="json_function",
             ),
         ),
         _event(

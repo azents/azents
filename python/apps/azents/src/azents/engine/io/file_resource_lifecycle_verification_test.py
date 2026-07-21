@@ -351,6 +351,7 @@ async def test_artifact_output_import_and_expiration_e2e_path() -> None:
                     name="mock_mcp",
                     arguments="{}",
                     native_artifact=_artifact(),
+                    wire_dialect="json_function",
                 ),
             ),
             _event(
@@ -369,6 +370,7 @@ async def test_artifact_output_import_and_expiration_e2e_path() -> None:
                             expires_at=artifact.expires_at,
                         )
                     ],
+                    wire_dialect="json_function",
                 ),
             ),
         ],
@@ -416,6 +418,7 @@ async def test_attachment_output_lowers_as_metadata_only() -> None:
                     name="present_file",
                     arguments="{}",
                     native_artifact=_artifact(),
+                    wire_dialect="json_function",
                 ),
             ),
             _event(
@@ -434,6 +437,7 @@ async def test_attachment_output_lowers_as_metadata_only() -> None:
                             preview_summary="a,b\\n1,2",
                         )
                     ],
+                    wire_dialect="json_function",
                 ),
             ),
         ],
@@ -465,6 +469,7 @@ async def test_file_part_capability_branch_e2e_path() -> None:
                 name="inspect_image",
                 arguments="{}",
                 native_artifact=_artifact(),
+                wire_dialect="json_function",
             ),
         ),
         _event(
@@ -474,6 +479,7 @@ async def test_file_part_capability_branch_e2e_path() -> None:
                 name="inspect_image",
                 status="completed",
                 output=[file_part],
+                wire_dialect="json_function",
             ),
         ),
     ]

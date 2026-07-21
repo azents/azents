@@ -1094,6 +1094,7 @@ class _PreparedToolAllowlistExecutor:
             return ClientToolResultPayload(
                 call_id=call.call_id,
                 name=call.name,
+                wire_dialect=call.wire_dialect,
                 status="failed",
                 output=[OutputTextPart(text=f"Tool not found: {call.name}")],
             )
@@ -1174,6 +1175,7 @@ class _HookedClientToolExecutor:
             return ClientToolResultPayload(
                 call_id=call.call_id,
                 name=call.name,
+                wire_dialect=call.wire_dialect,
                 status="failed",
                 output=[OutputTextPart(text=before.message)],
             )

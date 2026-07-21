@@ -422,6 +422,7 @@ def test_active_tool_call_projection_has_stable_live_shape() -> None:
             ),
             started_at=now,
             owner_generation=1,
+            wire_dialect="json_function",
         ),
     )
 

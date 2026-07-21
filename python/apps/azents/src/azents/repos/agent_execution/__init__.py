@@ -27,7 +27,9 @@ from azents.engine.events.types import (
     EventPayload,
     TurnMarkerPayload,
     UserMessagePayload,
+    upgrade_persisted_active_tool_call,
     validate_event_payload,
+    validate_persisted_event_payload,
 )
 from azents.engine.run.failure import FailedRunRetryState
 from azents.rdb.models.agent_run import RDBAgentRun
@@ -408,7 +410,7 @@ class EventTranscriptRepository:
 
     def _build(self, rdb: RDBEvent) -> Event:
         """Convert RDB row to domain model."""
-        payload = _validate_payload(rdb.kind, rdb.payload)
+        payload = validate_persisted_event_payload(rdb.kind, rdb.payload)
         return Event(
             id=rdb.id,
             session_id=rdb.session_id,
@@ -1133,7 +1135,8 @@ class AgentRunRepository:
     def _build(self, rdb: RDBAgentRun) -> AgentRunState:
         """Convert RDB row to domain model."""
         active_tool_calls = [
-            ActiveToolCall.model_validate(call) for call in rdb.active_tool_calls
+            ActiveToolCall.model_validate(upgrade_persisted_active_tool_call(call))
+            for call in rdb.active_tool_calls
         ]
         return AgentRunState(
             id=rdb.id,

@@ -345,6 +345,7 @@ class TestChatSessionInputBuffer:
                         arguments='{"cmd":"sleep"}',
                         started_at=active_call_started_at,
                         owner_generation=1,
+                        wire_dialect="json_function",
                     )
                 ],
             )

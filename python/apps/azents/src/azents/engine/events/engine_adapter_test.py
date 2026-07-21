@@ -608,6 +608,7 @@ class _StreamingExecution:
                 native_artifact=_artifact(
                     {"type": "function_call", "call_id": "call-1"}
                 ),
+                wire_dialect="json_function",
             ),
             created_at=datetime.datetime.now(datetime.UTC),
         )
@@ -639,6 +640,7 @@ class _RecordingToolExecutor:
             name=call.name,
             status="completed",
             output=[OutputTextPart(text="ok")],
+            wire_dialect="json_function",
         )
 
     def request_cancel(self, call: ClientToolCallPayload) -> None:
@@ -830,6 +832,7 @@ def test_hooked_tool_executor_forwards_request_cancel() -> None:
         name="tool",
         arguments="{}",
         native_artifact=_artifact({"type": "function_call"}),
+        wire_dialect="json_function",
     )
 
     wrapper.request_cancel(call)
@@ -864,6 +867,7 @@ async def test_working_set_recency_refreshes_before_hook_denial() -> None:
             name="service__probe",
             arguments="{}",
             native_artifact=_artifact({"type": "function_call"}),
+            wire_dialect="json_function",
         )
     )
     state = await store.load("agent-1", "session-1")
@@ -991,6 +995,7 @@ async def test_disabled_tool_search_exposes_complete_catalog() -> None:
             name="service__probe",
             arguments="{}",
             native_artifact=_artifact({"type": "function_call"}),
+            wire_dialect="json_function",
         )
     )
 
@@ -1144,6 +1149,7 @@ async def test_tool_search_activation_updates_the_next_prepared_call() -> None:
             name="service__probe",
             arguments="{}",
             native_artifact=_artifact({"type": "function_call"}),
+            wire_dialect="json_function",
         )
     )
     assert hidden_result.status == "failed"
@@ -1155,6 +1161,7 @@ async def test_tool_search_activation_updates_the_next_prepared_call() -> None:
             name="tool_search",
             arguments='{"query":"probe operation","limit":1}',
             native_artifact=_artifact({"type": "function_call"}),
+            wire_dialect="json_function",
         )
     )
     assert search_result.status == "completed"
@@ -1166,6 +1173,7 @@ async def test_tool_search_activation_updates_the_next_prepared_call() -> None:
             name="service__new_operation",
             arguments="{}",
             native_artifact=_artifact({"type": "function_call"}),
+            wire_dialect="json_function",
         )
     )
     assert stale_result.status == "failed"
@@ -1189,6 +1197,7 @@ async def test_tool_search_activation_updates_the_next_prepared_call() -> None:
             name="service__probe",
             arguments="{}",
             native_artifact=_artifact({"type": "function_call"}),
+            wire_dialect="json_function",
         )
     )
     state = await store.load("agent-1", "session-1")
@@ -1447,6 +1456,7 @@ async def test_xai_oauth_refresh_updates_later_model_turn_credentials(
             name="image_generation",
             arguments='{"prompt":"First image"}',
             native_artifact=_artifact({"type": "function_call"}),
+            wire_dialect="json_function",
         )
     )
     assert first_result.status == "completed"
@@ -1466,6 +1476,7 @@ async def test_xai_oauth_refresh_updates_later_model_turn_credentials(
             name="image_generation",
             arguments='{"prompt":"Second image"}',
             native_artifact=_artifact({"type": "function_call"}),
+            wire_dialect="json_function",
         )
     )
 

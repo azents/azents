@@ -539,6 +539,7 @@ async def test_materializes_client_tool_image_with_shared_storage_contract() -> 
                 output_index=0,
             )
         ],
+        wire_dialect="json_function",
     )
 
     prepared = await materializer.prepare_client_result(result)

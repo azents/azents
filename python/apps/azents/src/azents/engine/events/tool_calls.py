@@ -6,7 +6,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentRunPhase, AgentRunStatus, EventKind
 from azents.engine.events.protocols import RunStateRepository, TranscriptRepository
-from azents.engine.events.types import ClientToolResultPayload, Event
+from azents.engine.events.types import (
+    ClientToolResultPayload,
+    ClientToolWireDialect,
+    Event,
+)
 from azents.repos.agent_execution.data import EventCreate
 
 
@@ -15,6 +19,7 @@ class ToolCallIdentity(Protocol):
 
     call_id: str
     name: str
+    wire_dialect: ClientToolWireDialect
 
 
 def tool_call_external_id(run_id: str, call_id: str) -> str:
@@ -40,6 +45,8 @@ async def finalize_tool_result(
     """Append one terminal result and remove only its active ownership entry."""
     if result.call_id != call.call_id:
         raise ValueError("Tool result call ID does not match admitted call")
+    if result.wire_dialect != call.wire_dialect:
+        raise ValueError("Tool result dialect does not match admitted call")
     event = await transcript_repo.append(
         session,
         EventCreate(

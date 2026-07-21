@@ -115,6 +115,7 @@ def _tool_result_event(part: FileOutputPart) -> Event:
             name="read_image",
             status="completed",
             output=[part],
+            wire_dialect="json_function",
         ),
         created_at=_NOW,
     )

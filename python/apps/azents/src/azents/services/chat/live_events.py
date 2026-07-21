@@ -178,6 +178,7 @@ def _tool_call_live_event(
     call_id: str,
     name: str,
     arguments: str,
+    wire_dialect: Literal["json_function", "plaintext_custom"],
     source: str,
     created_at: datetime.datetime,
     toolkit_source: ToolkitSourceSnapshot | None = None,
@@ -190,6 +191,7 @@ def _tool_call_live_event(
             call_id=call_id,
             name=name,
             arguments=arguments,
+            wire_dialect=wire_dialect,
             toolkit_source=toolkit_source,
             native_artifact=_live_native_artifact(
                 projection="client_tool_call",
@@ -266,6 +268,7 @@ def active_tool_call_to_live_event(
         call_id=active_tool_call.call_id,
         name=active_tool_call.name,
         arguments=active_tool_call.arguments or "",
+        wire_dialect=active_tool_call.wire_dialect,
         source="active_tool_call",
         created_at=active_tool_call.started_at,
         toolkit_source=active_tool_call.toolkit_source,

@@ -415,6 +415,7 @@ class ToolCatalogClientToolExecutor(ClientToolExecutor):
             return ClientToolResultPayload(
                 call_id=call.call_id,
                 name=call.name,
+                wire_dialect=call.wire_dialect,
                 status="failed",
                 output=enforce_tool_output_text_hard_cap(
                     [OutputTextPart(text=f"Tool not found: {call.name}")]
@@ -426,6 +427,7 @@ class ToolCatalogClientToolExecutor(ClientToolExecutor):
             return ClientToolResultPayload(
                 call_id=call.call_id,
                 name=call.name,
+                wire_dialect=call.wire_dialect,
                 status="failed",
                 output=enforce_tool_output_text_hard_cap(
                     [OutputTextPart(text=str(exc))]
@@ -468,6 +470,7 @@ def _tool_result_payload(
         return ClientToolResultPayload(
             call_id=call.call_id,
             name=call.name,
+            wire_dialect=call.wire_dialect,
             status="completed",
             output=enforce_tool_output_text_hard_cap(result),
         )
@@ -476,6 +479,7 @@ def _tool_result_payload(
     return ClientToolResultPayload(
         call_id=call.call_id,
         name=call.name,
+        wire_dialect=call.wire_dialect,
         status="completed",
         output=enforce_tool_output_text_hard_cap(output),
         metadata=dict(result.metadata),

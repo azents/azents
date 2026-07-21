@@ -12,8 +12,10 @@ from azents.core.inference_profile import (
 )
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.engine.events.types import (
+    ActiveToolCall,
     AgentMessagePayload,
     AssistantMessagePayload,
+    ClientToolCallPayload,
     ClientToolResultPayload,
     Event,
     FileOutputPart,
@@ -27,6 +29,9 @@ from azents.engine.events.types import (
     TurnMarkerPayload,
     UserMessagePayload,
     build_native_compat_key,
+    upgrade_persisted_active_tool_call,
+    validate_event_payload,
+    validate_persisted_event_payload,
 )
 from azents.engine.run.types import FunctionToolResult
 
@@ -374,6 +379,7 @@ def test_client_tool_result_metadata_requires_json_object() -> None:
         status="completed",
         output="ok",
         metadata={"nested": {"items": ["stdout", None]}},
+        wire_dialect="json_function",
     )
 
     assert payload.metadata == {"nested": {"items": ["stdout", None]}}
@@ -381,11 +387,75 @@ def test_client_tool_result_metadata_requires_json_object() -> None:
         ClientToolResultPayload.model_validate(
             {
                 "call_id": "call-1",
+                "wire_dialect": "json_function",
                 "status": "completed",
                 "output": "ok",
                 "metadata": "bad",
             }
         )
+
+
+def test_persisted_client_tool_payload_without_dialect_upgrades_to_json_function() -> (
+    None
+):
+    payload = validate_persisted_event_payload(
+        EventKind.CLIENT_TOOL_CALL,
+        {
+            "call_id": "call-1",
+            "name": "read",
+            "arguments": "{}",
+            "native_artifact": _artifact().model_dump(mode="json"),
+        },
+    )
+
+    assert isinstance(payload, ClientToolCallPayload)
+    assert payload.wire_dialect == "json_function"
+
+
+def test_new_client_tool_writer_requires_explicit_dialect() -> None:
+    with pytest.raises(ValidationError):
+        validate_event_payload(
+            EventKind.CLIENT_TOOL_CALL,
+            {
+                "call_id": "call-1",
+                "name": "read",
+                "arguments": "{}",
+                "native_artifact": _artifact().model_dump(mode="json"),
+            },
+        )
+
+
+@pytest.mark.parametrize("wire_dialect", [None, "unknown"])
+def test_persisted_client_tool_payload_rejects_nonlegacy_invalid_dialect(
+    wire_dialect: object,
+) -> None:
+    with pytest.raises(ValidationError):
+        validate_persisted_event_payload(
+            EventKind.CLIENT_TOOL_CALL,
+            {
+                "call_id": "call-1",
+                "name": "read",
+                "arguments": "{}",
+                "wire_dialect": wire_dialect,
+                "native_artifact": _artifact().model_dump(mode="json"),
+            },
+        )
+
+
+def test_persisted_active_tool_call_without_dialect_upgrades_to_json_function() -> None:
+    active = ActiveToolCall.model_validate(
+        upgrade_persisted_active_tool_call(
+            {
+                "call_id": "call-1",
+                "name": "read",
+                "arguments": "{}",
+                "started_at": datetime.datetime.now(datetime.UTC),
+                "owner_generation": 1,
+            }
+        )
+    )
+
+    assert active.wire_dialect == "json_function"
 
 
 def test_event_token_usage_requires_raw_payload() -> None:

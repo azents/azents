@@ -32,6 +32,7 @@ def apply_active_tool_call_event(
                     call_id=payload.call_id,
                     name=payload.name,
                     arguments=payload.arguments,
+                    wire_dialect=payload.wire_dialect,
                     started_at=event.created_at,
                     owner_generation=owner_generation,
                 ),

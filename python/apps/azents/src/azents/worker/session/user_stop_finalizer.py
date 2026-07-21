@@ -289,6 +289,7 @@ class UserStopFinalizer:
                 payload = ClientToolResultPayload(
                     call_id=call.call_id,
                     name=call.name,
+                    wire_dialect=call.wire_dialect,
                     status="cancelled",
                     output=[
                         OutputTextPart(
