@@ -20,6 +20,10 @@ import {
 import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useMemo, useState } from "react";
 import inlineControlClasses from "./ChatInlineControl.module.css";
+import {
+  chatChevronTransition,
+  chatCollapseTransitionProps,
+} from "./collapsiblePresentation";
 import type {
   AgentRunPhase,
   ChatLiveRunRetryState,
@@ -130,12 +134,12 @@ function AttemptHistory({
       >
         <IconChevronRight
           aria-hidden="true"
-          size={rem(14)}
+          size={14}
           stroke={1.8}
           color="var(--mantine-color-dimmed)"
           style={{
             transform: opened ? "rotate(90deg)" : "none",
-            transition: "transform 160ms",
+            transition: chatChevronTransition,
           }}
         />
         <Text
@@ -147,7 +151,11 @@ function AttemptHistory({
           {t("failedRunRecovery.history", { count: sortedAttempts.length })}
         </Text>
       </Group>
-      <Collapse expanded={opened}>
+      <Collapse
+        expanded={opened}
+        keepMounted={false}
+        {...chatCollapseTransitionProps}
+      >
         <ScrollArea.Autosize mah={rem(280)} scrollbars="y">
           <Stack gap="xs">
             {sortedAttempts.map((attempt) => (
@@ -255,7 +263,7 @@ export function RunRetryCard(props: RunRetryCardProps): React.ReactElement {
               wrap="nowrap"
               className={inlineControlClasses.root}
             >
-              <IconClock aria-hidden="true" size={rem(14)} stroke={1.8} />
+              <IconClock aria-hidden="true" size={14} stroke={1.8} />
               <Text size="xs" className={inlineControlClasses.label}>
                 {countdown > 0
                   ? t("failedRunRecovery.nextRetryCountdown", {
@@ -274,7 +282,7 @@ export function RunRetryCard(props: RunRetryCardProps): React.ReactElement {
                 size="xs"
                 variant="light"
                 color="orange"
-                leftSection={<IconRefresh size={rem(14)} />}
+                leftSection={<IconRefresh size={14} />}
                 loading={props.isRetryPending}
                 onClick={props.onRetry}
               >

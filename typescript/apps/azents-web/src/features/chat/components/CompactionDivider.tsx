@@ -9,10 +9,15 @@
 
 import { Box, Collapse, Group, rem, Text, UnstyledButton } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
-import { IconChevronDown, IconChevronRight } from "@tabler/icons-react";
+import { IconChevronRight } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { useRef } from "react";
 import inlineControlClasses from "./ChatInlineControl.module.css";
+import {
+  chatChevronTransition,
+  chatCollapseTransitionProps,
+  chatCollapsibleChevronSize,
+} from "./collapsiblePresentation";
 import { MarkdownContent } from "./MarkdownContent";
 
 const dashedLineStyle: React.CSSProperties = {
@@ -50,14 +55,14 @@ function SummaryToggleButton({
         >
           {opened ? t("compaction.collapse") : t("compaction.expand")}
         </Text>
-        {opened ? (
-          <IconChevronDown size={rem(14)} color="var(--mantine-color-dimmed)" />
-        ) : (
-          <IconChevronRight
-            size={rem(14)}
-            color="var(--mantine-color-dimmed)"
-          />
-        )}
+        <IconChevronRight
+          size={chatCollapsibleChevronSize}
+          color="var(--mantine-color-dimmed)"
+          style={{
+            transform: opened ? "rotate(90deg)" : "none",
+            transition: chatChevronTransition,
+          }}
+        />
       </Group>
     </UnstyledButton>
   );
@@ -119,7 +124,11 @@ export function CompactionDivider({
         <Box style={dashedLineStyle} />
       </Group>
       {content && (
-        <Collapse expanded={opened}>
+        <Collapse
+          expanded={opened}
+          keepMounted={false}
+          {...chatCollapseTransitionProps}
+        >
           <Box
             mt="xs"
             p="sm"

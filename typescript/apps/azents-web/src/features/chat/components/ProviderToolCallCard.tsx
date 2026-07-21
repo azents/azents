@@ -1,6 +1,7 @@
 import {
   Box,
   Code,
+  Collapse,
   Group,
   Loader,
   rem,
@@ -11,6 +12,18 @@ import {
 } from "@mantine/core";
 import { IconChevronRight, IconSearch, IconTool } from "@tabler/icons-react";
 import { useState } from "react";
+import {
+  activityRowBorder,
+  activityRowChevronSize,
+  activityRowDetailInset,
+  activityRowIconSize,
+  activityRowSummarySize,
+  activityRowVerticalPadding,
+} from "./activityRowPresentation";
+import {
+  chatChevronTransition,
+  chatCollapseTransitionProps,
+} from "./collapsiblePresentation";
 import { FileAttachmentList } from "./FileAttachmentList";
 import {
   providerToolActivityLabel,
@@ -26,14 +39,12 @@ interface ProviderToolCallCardProps {
   hiddenAttachmentUris?: readonly string[];
 }
 
-const flatRowBorder = "1px solid var(--mantine-color-default-border)";
-
 function statusColor(status: ProviderToolCall["status"]): string {
   switch (status) {
     case "running":
       return "blue";
     case "failed":
-      return "red";
+      return "red.5";
     case "completed":
     case "unknown":
       return "dimmed";
@@ -114,7 +125,7 @@ export function ProviderToolCallCard({
         <Box
           key={result.uri}
           p="xs"
-          style={{ border: flatRowBorder, borderRadius: rem(4) }}
+          style={{ border: activityRowBorder, borderRadius: rem(4) }}
         >
           <Stack gap={rem(2)}>
             <Text size="sm" c="dimmed" fw={500} lineClamp={1}>
@@ -139,8 +150,7 @@ export function ProviderToolCallCard({
   return (
     <>
       <Box
-        py="xs"
-        style={{ borderBottom: flatRowBorder }}
+        py={activityRowVerticalPadding}
         data-provider-tool-name={toolCall.name}
         data-provider-tool-status={toolCall.status}
       >
@@ -154,42 +164,69 @@ export function ProviderToolCallCard({
           <Group gap="xs" wrap="nowrap" align="flex-start">
             <IconChevronRight
               aria-hidden="true"
-              size={rem(14)}
+              size={activityRowChevronSize}
               color="var(--mantine-color-dimmed)"
               style={{
                 flexShrink: 0,
                 marginTop: rem(2),
                 opacity: hasDetails ? 1 : 0,
                 transform: opened ? "rotate(90deg)" : "none",
-                transition: "transform 120ms ease",
+                transition: chatChevronTransition,
               }}
             />
-            <Box c={color} style={{ flexShrink: 0, marginTop: rem(1) }}>
+            <Box c="dimmed" style={{ flexShrink: 0, marginTop: rem(1) }}>
               {toolCall.status === "running" ? (
-                <Loader size={rem(14)} />
+                <Loader
+                  size={activityRowIconSize}
+                  color="var(--mantine-color-dimmed)"
+                />
               ) : webSearch !== null ? (
-                <IconSearch size={rem(14)} />
+                <IconSearch size={activityRowIconSize} />
               ) : (
-                <IconTool size={rem(14)} />
+                <IconTool size={activityRowIconSize} />
               )}
             </Box>
             <Group gap={rem(6)} flex={1} miw={0} wrap="nowrap">
-              <Text size="sm" c="dimmed" fw={500} style={{ flexShrink: 0 }}>
+              <Text
+                size={activityRowSummarySize}
+                c="dimmed"
+                fw={500}
+                style={{ flexShrink: 0 }}
+              >
                 {displayName}
               </Text>
-              <Text size="sm" c="dimmed" truncate flex={1} miw={0}>
+              <Text
+                size={activityRowSummarySize}
+                c="dimmed"
+                truncate
+                flex={1}
+                miw={0}
+              >
                 {subject}
               </Text>
             </Group>
-            <Text size="xs" c={color} style={{ flexShrink: 0 }}>
+            <Text
+              size={activityRowSummarySize}
+              c={color}
+              style={{
+                flexShrink: 0,
+                opacity: toolCall.status === "failed" ? 0.75 : 1,
+              }}
+            >
               {status}
             </Text>
           </Group>
         </UnstyledButton>
-        {opened && detail !== null ? (
-          <Box pl={rem(54)} pr="xs" pt="xs">
-            {detail}
-          </Box>
+        {detail !== null ? (
+          <Collapse
+            expanded={opened}
+            keepMounted={false}
+            {...chatCollapseTransitionProps}
+          >
+            <Box pl={activityRowDetailInset} pr="xs" pt="xs">
+              {detail}
+            </Box>
+          </Collapse>
         ) : null}
       </Box>
       {showAttachmentsDirectly ? (

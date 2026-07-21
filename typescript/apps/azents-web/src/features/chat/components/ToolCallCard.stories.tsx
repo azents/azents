@@ -44,6 +44,79 @@ export const Completed = {
   },
 } satisfies Story;
 
+export const RunningCommandExpanded = {
+  args: {
+    toolCall: {
+      id: "running-command-story",
+      callId: "running-command-story",
+      name: "exec_command",
+      arguments: '{"command":"pnpm --filter @azents/web dev"}',
+      status: "running",
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(canvas.getByRole("button", { name: /Ran command/ }));
+    await expect(
+      canvas.getByText("$ pnpm --filter @azents/web dev"),
+    ).toBeVisible();
+  },
+} satisfies Story;
+
+export const CompletedCommandExpanded = {
+  args: {
+    toolCall: {
+      id: "completed-command-story",
+      callId: "completed-command-story",
+      name: "exec_command",
+      arguments: '{"command":"pnpm --filter @azents/web test"}',
+      result: "66 tests passed",
+      resultMetadata: {
+        kind: "exec_command_result",
+        status: "completed",
+        exit_code: 0,
+        stdout_truncated: false,
+        stderr_truncated: false,
+      },
+      status: "completed",
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(canvas.getByRole("button", { name: /Ran command/ }));
+    await expect(
+      canvas.getByText("$ pnpm --filter @azents/web test"),
+    ).toBeVisible();
+    await expect(canvas.getByText("66 tests passed")).toBeVisible();
+  },
+} satisfies Story;
+
+export const PresentedFiles = {
+  args: {
+    toolCall: {
+      id: "presented-files-story",
+      callId: "presented-files-story",
+      name: "present_file",
+      arguments: '{"paths":["/workspace/agent/reports/activity-review.md"]}',
+      result: "Presented one file.",
+      status: "completed",
+      attachments: [
+        {
+          attachmentId: "presented-file",
+          uri: "exchange://generated/activity-review.md",
+          mediaType: "text/markdown",
+          name: "activity-review.md",
+        },
+      ],
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByText("Presented files")).toBeVisible();
+    await expect(canvas.getByText("activity-review.md")).toBeVisible();
+  },
+} satisfies Story;
+
 export const Failed = {
   args: {
     toolCall: failedToolCall,

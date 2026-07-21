@@ -42,6 +42,10 @@ import {
   useState,
 } from "react";
 import {
+  completedCompactionIds,
+  isCompactionInProgressMarker,
+} from "../compactionPresentation";
+import {
   captureChatScrollAnchor,
   type ChatScrollAnchor,
   restorePrependScrollTop,
@@ -501,6 +505,10 @@ export function ChatView({
   );
   const latestCompactionIndex = useMemo(
     () => getLatestCompactionIndex(messages),
+    [messages],
+  );
+  const completedCompactionIdSet = useMemo(
+    () => completedCompactionIds(messages),
     [messages],
   );
   const hasDetachedNewer =
@@ -1373,6 +1381,23 @@ export function ChatView({
                     );
                   }
                   if (msg.role === "compaction_started") {
+                    if (
+                      !isCompactionInProgressMarker(
+                        msg,
+                        completedCompactionIdSet,
+                      )
+                    ) {
+                      return durableBefore.length > 0 ? (
+                        <Fragment key={item.id}>
+                          {durableBefore.map((actionExecution) => (
+                            <ActionExecutionTimelineCard
+                              key={actionExecution.execution.id}
+                              actionExecution={actionExecution}
+                            />
+                          ))}
+                        </Fragment>
+                      ) : null;
+                    }
                     return (
                       <Fragment key={item.id}>
                         {durableBefore.map((actionExecution) => (

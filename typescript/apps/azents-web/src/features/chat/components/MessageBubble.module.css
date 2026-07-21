@@ -12,7 +12,7 @@
 
 .thinkingChevron {
   flex-shrink: 0;
-  transition: transform 200ms ease;
+  transition: transform 160ms ease;
 }
 
 .thinkingChevron[data-opened="true"] {

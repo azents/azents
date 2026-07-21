@@ -1414,7 +1414,8 @@
         "patch": "Applied patch",
         "delete": "Deleted file",
         "command": "Ran command",
-        "process": "Updated process"
+        "process": "Updated process",
+        "present": "Presented files"
       },
       "changeAction": {
         "add": "Added",

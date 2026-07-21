@@ -4,6 +4,7 @@ import {
   ActionIcon,
   Box,
   Code,
+  Collapse,
   Group,
   Loader,
   Modal,
@@ -16,6 +17,7 @@ import {
 import {
   IconChevronRight,
   IconDots,
+  IconFileExport,
   IconFileText,
   IconPencil,
   IconSearch,
@@ -25,6 +27,18 @@ import {
 import { useTranslations } from "next-intl";
 import { Component, useState } from "react";
 import { knownToolPresentation } from "../knownToolPresentation";
+import {
+  activityRowBorder,
+  activityRowChevronSize,
+  activityRowDetailInset,
+  activityRowIconSize,
+  activityRowSummarySize,
+  activityRowVerticalPadding,
+} from "./activityRowPresentation";
+import {
+  chatChevronTransition,
+  chatCollapseTransitionProps,
+} from "./collapsiblePresentation";
 import { FileAttachmentList } from "./FileAttachmentList";
 import type { KnownToolPresentation } from "../knownToolPresentation";
 import type { ActiveToolCall } from "../types";
@@ -51,8 +65,6 @@ interface SpecializedToolCallBoundaryState {
 }
 
 type ToolCallTranslations = ReturnType<typeof useTranslations<"chat.toolCall">>;
-
-const flatRowBorder = "1px solid var(--mantine-color-default-border)";
 
 class SpecializedToolCallBoundary extends Component<
   SpecializedToolCallBoundaryProps,
@@ -92,7 +104,7 @@ function toolCallStatusLabelColor(status: ActiveToolCall["status"]): string {
     case "running":
       return "blue";
     case "failed":
-      return "dimmed";
+      return "red.5";
     case "completed":
     case "cancelled":
     case "interrupted":
@@ -104,12 +116,12 @@ function toolCallStatusIcon(status: ActiveToolCall["status"]): ReactElement {
   switch (status) {
     case "running":
     case "preparing":
-      return <Loader size={rem(16)} />;
+      return <Loader size={activityRowIconSize} />;
     case "completed":
     case "failed":
     case "cancelled":
     case "interrupted":
-      return <IconTool size={rem(16)} />;
+      return <IconTool size={activityRowIconSize} />;
   }
 }
 
@@ -117,17 +129,19 @@ function presentationIcon(presentation: KnownToolPresentation): ReactElement {
   switch (presentation.action) {
     case "search":
     case "list":
-      return <IconSearch size={rem(14)} />;
+      return <IconSearch size={activityRowIconSize} />;
     case "edit":
     case "patch":
-      return <IconPencil size={rem(14)} />;
+      return <IconPencil size={activityRowIconSize} />;
     case "command":
     case "process":
-      return <IconTerminal2 size={rem(14)} />;
+      return <IconTerminal2 size={activityRowIconSize} />;
     case "read":
     case "write":
     case "delete":
-      return <IconFileText size={rem(14)} />;
+      return <IconFileText size={activityRowIconSize} />;
+    case "present":
+      return <IconFileExport size={activityRowIconSize} />;
   }
 }
 
@@ -163,6 +177,8 @@ function actionLabel(
       return t("action.command");
     case "process":
       return t("action.process");
+    case "present":
+      return t("action.present");
   }
 }
 
@@ -186,6 +202,7 @@ function presentationQualifier(
     case "write":
     case "edit":
     case "delete":
+    case "present":
       return null;
   }
 }
@@ -287,7 +304,7 @@ function PatchFile({ file }: { file: V4APatchFile }): ReactElement {
   return (
     <Box
       style={{
-        border: flatRowBorder,
+        border: activityRowBorder,
         borderRadius: "var(--mantine-radius-sm)",
         overflow: "hidden",
       }}
@@ -347,21 +364,30 @@ function presentationDetail(
           ))}
         </Stack>
       );
-    case "process":
+    case "process": {
+      const consoleOutput = [
+        presentation.detail.command === null
+          ? null
+          : `$ ${presentation.detail.command}`,
+        presentation.detail.output,
+      ]
+        .filter((value): value is string => value !== null && value.length > 0)
+        .join("\n\n");
       return (
         <Stack gap="xs">
+          {consoleOutput.length > 0 ? (
+            <ScrollArea.Autosize mah={rem(240)}>
+              <Code block>{consoleOutput}</Code>
+            </ScrollArea.Autosize>
+          ) : null}
           {presentation.detail.truncated ? (
             <Text size="xs" c="dimmed">
               {t("outputTruncated")}
             </Text>
           ) : null}
-          {presentation.detail.output.length > 0 ? (
-            <ScrollArea.Autosize mah={rem(240)}>
-              <Code block>{presentation.detail.output}</Code>
-            </ScrollArea.Autosize>
-          ) : null}
         </Stack>
       );
+    }
   }
 }
 
@@ -426,7 +452,7 @@ function GenericToolCallCard({
 
   return (
     <>
-      <Box py="xs" style={{ borderBottom: flatRowBorder }}>
+      <Box py={activityRowVerticalPadding}>
         <UnstyledButton
           w="100%"
           onClick={() => setOpened((value) => !value)}
@@ -437,36 +463,54 @@ function GenericToolCallCard({
           <Group gap="xs" wrap="nowrap" align="flex-start">
             <IconChevronRight
               aria-hidden="true"
-              size={rem(14)}
+              size={activityRowChevronSize}
               color="var(--mantine-color-dimmed)"
               style={{
                 flexShrink: 0,
                 marginTop: rem(2),
                 opacity: detail === null ? 0 : 1,
                 transform: opened ? "rotate(90deg)" : "none",
-                transition: "transform 120ms ease",
+                transition: chatChevronTransition,
               }}
             />
             <Box c="dimmed" style={{ flexShrink: 0 }}>
               {toolCallStatusIcon(toolCall.status)}
             </Box>
             <Group gap={rem(6)} flex={1} miw={0} wrap="nowrap">
-              <Text size="sm" c="dimmed" fw={500} style={{ flexShrink: 0 }}>
+              <Text
+                size={activityRowSummarySize}
+                c="dimmed"
+                fw={500}
+                style={{ flexShrink: 0 }}
+              >
                 {toolCall.name}
               </Text>
-              <Text size="xs" c="dimmed" truncate miw={0}>
+              <Text size={activityRowSummarySize} c="dimmed" truncate miw={0}>
                 {t("genericDetails")}
               </Text>
             </Group>
-            <Text size="xs" c={statusColor} style={{ flexShrink: 0 }}>
+            <Text
+              size={activityRowSummarySize}
+              c={statusColor}
+              style={{
+                flexShrink: 0,
+                opacity: toolCall.status === "failed" ? 0.75 : 1,
+              }}
+            >
               {status}
             </Text>
           </Group>
         </UnstyledButton>
-        {opened && detail !== null ? (
-          <Box pl={rem(54)} pr="xs" pt="xs">
-            {detail}
-          </Box>
+        {detail !== null ? (
+          <Collapse
+            expanded={opened}
+            keepMounted={false}
+            {...chatCollapseTransitionProps}
+          >
+            <Box pl={activityRowDetailInset} pr="xs" pt="xs">
+              {detail}
+            </Box>
+          </Collapse>
         ) : null}
       </Box>
       {visibleAttachments.length > 0 ? (
@@ -511,38 +555,59 @@ function SpecializedToolCallCard({
     <Group gap="xs" wrap="nowrap" align="flex-start">
       <IconChevronRight
         aria-hidden="true"
-        size={rem(14)}
+        size={activityRowChevronSize}
         color="var(--mantine-color-dimmed)"
         style={{
           flexShrink: 0,
           marginTop: rem(2),
           opacity: detail === null ? 0 : 1,
           transform: opened ? "rotate(90deg)" : "none",
-          transition: "transform 120ms ease",
+          transition: chatChevronTransition,
         }}
       />
       <Box c="dimmed" style={{ flexShrink: 0, marginTop: rem(1) }}>
         {presentationIcon(presentation)}
       </Box>
       <Group gap={rem(6)} flex={1} miw={0} wrap="nowrap">
-        <Text size="sm" c="dimmed" fw={500} style={{ flexShrink: 0 }}>
+        <Text
+          size={activityRowSummarySize}
+          c="dimmed"
+          fw={500}
+          style={{ flexShrink: 0 }}
+        >
           {action}
         </Text>
         {presentation.subject !== null ? (
-          <Text size="sm" c="dimmed" ff="monospace" truncate flex={1} miw={0}>
+          <Text
+            size={activityRowSummarySize}
+            c="dimmed"
+            truncate
+            flex={1}
+            miw={0}
+          >
             {presentation.subject}
           </Text>
         ) : null}
         {qualifier !== null ? (
-          <Text size="xs" c="dimmed" truncate miw={0} style={{ flexShrink: 1 }}>
+          <Text
+            size={activityRowSummarySize}
+            c="dimmed"
+            truncate
+            miw={0}
+            style={{ flexShrink: 1 }}
+          >
             {qualifier}
           </Text>
         ) : null}
       </Group>
       <Text
-        size="xs"
+        size={activityRowSummarySize}
         c={statusColor}
-        style={{ flexShrink: 0, marginTop: rem(1) }}
+        style={{
+          flexShrink: 0,
+          marginTop: rem(1),
+          opacity: toolCall.status === "failed" ? 0.75 : 1,
+        }}
       >
         {status}
       </Text>
@@ -551,7 +616,7 @@ function SpecializedToolCallCard({
 
   return (
     <>
-      <Box py="xs" style={{ borderBottom: flatRowBorder }}>
+      <Box py={activityRowVerticalPadding}>
         <Group gap={rem(4)} wrap="nowrap" align="flex-start">
           {detail === null ? (
             <Box flex={1} miw={0} aria-label={ariaLabel}>
@@ -580,10 +645,16 @@ function SpecializedToolCallCard({
             </ActionIcon>
           ) : null}
         </Group>
-        {opened && detail !== null ? (
-          <Box pl={rem(54)} pr="xs" pt="xs">
-            {detail}
-          </Box>
+        {detail !== null ? (
+          <Collapse
+            expanded={opened}
+            keepMounted={false}
+            {...chatCollapseTransitionProps}
+          >
+            <Box pl={activityRowDetailInset} pr="xs" pt="xs">
+              {detail}
+            </Box>
+          </Collapse>
         ) : null}
       </Box>
       {visibleAttachments.length > 0 ? (

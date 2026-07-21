@@ -1414,7 +1414,8 @@
         "patch": "パッチを適用",
         "delete": "ファイルを削除",
         "command": "コマンドを実行",
-        "process": "プロセスを更新"
+        "process": "プロセスを更新",
+        "present": "ファイルを提示"
       },
       "changeAction": {
         "add": "追加",

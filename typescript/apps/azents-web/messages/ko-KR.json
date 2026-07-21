@@ -1414,7 +1414,8 @@
         "patch": "패치 적용",
         "delete": "파일 삭제",
         "command": "명령 실행",
-        "process": "프로세스 업데이트"
+        "process": "프로세스 업데이트",
+        "present": "파일 전달"
       },
       "changeAction": {
         "add": "추가",

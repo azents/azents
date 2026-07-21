@@ -19,7 +19,8 @@ export type KnownToolAction =
   | "patch"
   | "delete"
   | "command"
-  | "process";
+  | "process"
+  | "present";
 
 export interface OutputDetail {
   type: "output";
@@ -38,6 +39,7 @@ export interface PatchDetail {
 
 export interface ProcessDetail {
   type: "process";
+  command: string | null;
   exitCode: number | null;
   truncated: boolean;
   output: string;
@@ -82,6 +84,9 @@ const applyPatchInputSchema = z.object({
 });
 const execCommandInputSchema = z.object({ command: z.string().min(1) });
 const writeStdinInputSchema = z.object({ process_id: z.string().min(1) });
+const presentFileInputSchema = z.object({
+  paths: z.array(z.string().min(1)).min(1),
+});
 const patchChangeSchema = z.object({
   action: z.union([z.literal("add"), z.literal("update"), z.literal("delete")]),
   added_lines: z.number().int().nonnegative(),
@@ -235,9 +240,23 @@ function processPresentation(
   toolCall: ActiveToolCall,
   action: "command" | "process",
   expectedKind: "exec_command_result" | "write_stdin_result",
+  command: string | null,
 ): KnownToolPresentationResult {
   if (!terminal(toolCall)) {
-    return presentation(action, null, null, null);
+    return presentation(
+      action,
+      null,
+      null,
+      command === null
+        ? null
+        : {
+            type: "process",
+            command,
+            exitCode: null,
+            truncated: false,
+            output: "",
+          },
+    );
   }
   const metadata = processResultSchema.safeParse(toolCall.resultMetadata);
   if (!metadata.success) {
@@ -253,6 +272,7 @@ function processPresentation(
     metadata.data.exit_code === null ? null : String(metadata.data.exit_code),
     {
       type: "process",
+      command,
       exitCode: metadata.data.exit_code,
       truncated:
         metadata.data.stdout_truncated || metadata.data.stderr_truncated,
@@ -348,14 +368,29 @@ export function knownToolPresentation(
       case "exec_command": {
         const input = execCommandInputSchema.safeParse(argumentsResult.value);
         return input.success
-          ? processPresentation(toolCall, "command", "exec_command_result")
+          ? processPresentation(
+              toolCall,
+              "command",
+              "exec_command_result",
+              input.data.command,
+            )
           : generic("invalid-arguments");
       }
       case "write_stdin": {
         const input = writeStdinInputSchema.safeParse(argumentsResult.value);
         return input.success
-          ? processPresentation(toolCall, "process", "write_stdin_result")
+          ? processPresentation(toolCall, "process", "write_stdin_result", null)
           : generic("invalid-arguments");
+      }
+      case "present_file": {
+        const input = presentFileInputSchema.safeParse(argumentsResult.value);
+        if (!input.success) {
+          return generic("invalid-arguments");
+        }
+        const firstPath = input.data.paths[0];
+        return typeof firstPath !== "string"
+          ? generic("invalid-arguments")
+          : presentation("present", displayPath(firstPath), null, null);
       }
       default:
         return generic("unregistered");

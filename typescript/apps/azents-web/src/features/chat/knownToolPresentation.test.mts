@@ -134,6 +134,7 @@ void test("uses validated process metadata for terminal command detail", () => {
       qualifier: "0",
       detail: {
         type: "process",
+        command: "pnpm test",
         exitCode: 0,
         truncated: false,
         output: "status: completed\n\nstdout:\nPassed",
@@ -232,7 +233,7 @@ void test("renders file edits as a unified diff", () => {
   });
 });
 
-void test("keeps malformed process metadata generic and supports running stdin", () => {
+void test("keeps malformed process metadata generic and shows running commands", () => {
   const malformed = knownToolPresentation(
     toolCall({
       name: "exec_command",
@@ -262,16 +263,41 @@ void test("keeps malformed process metadata generic and supports running stdin",
 
   const running = knownToolPresentation(
     toolCall({
-      name: "write_stdin",
-      arguments: '{"process_id":"process-1"}',
+      name: "exec_command",
+      arguments: '{"command":"pnpm dev"}',
       status: "running",
     }),
   );
   assert.deepEqual(running, {
     type: "specialized",
     presentation: {
-      action: "process",
+      action: "command",
       subject: null,
+      qualifier: null,
+      detail: {
+        type: "process",
+        command: "pnpm dev",
+        exitCode: null,
+        truncated: false,
+        output: "",
+      },
+    },
+  });
+});
+
+void test("specializes present_file with the first presented file", () => {
+  const result = knownToolPresentation(
+    toolCall({
+      name: "present_file",
+      arguments:
+        '{"paths":["/workspace/agent/reports/review.md","/workspace/agent/reports/preview.png"]}',
+    }),
+  );
+  assert.deepEqual(result, {
+    type: "specialized",
+    presentation: {
+      action: "present",
+      subject: "reports/review.md",
       qualifier: null,
       detail: null,
     },
