@@ -1189,6 +1189,44 @@ class AgentSessionRepository:
         )
         await session.flush()
 
+    async def consume_pending_idle_continuation(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        run_id: str,
+        continue_running: bool,
+    ) -> bool:
+        """Atomically consume one matching idle continuation boundary."""
+        values: dict[str, object] = {
+            "pending_idle_continuation_run_id": None,
+            "run_state": (
+                AgentSessionRunState.RUNNING
+                if continue_running
+                else AgentSessionRunState.IDLE
+            ),
+        }
+        if continue_running:
+            values["run_heartbeat_at"] = sa.func.now()
+        else:
+            values.update(
+                stop_requested_at=None,
+                stop_requested_by=None,
+                stop_request_id=None,
+            )
+        result = await session.execute(
+            sa.update(RDBAgentSession)
+            .where(
+                RDBAgentSession.id == session_id,
+                RDBAgentSession.status == AgentSessionStatus.ACTIVE,
+                RDBAgentSession.pending_idle_continuation_run_id == run_id,
+            )
+            .values(**values)
+            .returning(RDBAgentSession.id)
+        )
+        await session.flush()
+        return result.scalar_one_or_none() is not None
+
     async def enqueue_pending_command(
         self,
         session: AsyncSession,
@@ -1536,6 +1574,7 @@ class AgentSessionRepository:
             lifecycle_started_at=rdb.lifecycle_started_at,
             run_state=rdb.run_state,
             run_heartbeat_at=rdb.run_heartbeat_at,
+            pending_idle_continuation_run_id=(rdb.pending_idle_continuation_run_id),
             owner_generation=rdb.owner_generation,
             pending_command_id=rdb.pending_command_id,
             pending_command_name=rdb.pending_command_name,

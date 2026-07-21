@@ -17,7 +17,7 @@ Design documents are accumulated records and are not listed individually in this
 |---|---|---|---|---|
 | [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-07-18 | 50 |
 | [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-21 | 125 |
-| [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-16 | 9 |
+| [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-21 | 10 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-17 | 5 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-07-21 | 17 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-20 | 3 |
@@ -29,7 +29,7 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
-| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-07-21 | 124 |
+| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-07-21 | 125 |
 | [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-07-20 | 22 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-07-03 | 3 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-21 | 40 |
@@ -40,7 +40,7 @@ Design documents are accumulated records and are not listed individually in this
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
 | [OpenRouter API Key Provider Flow](spec/flow/openrouter-api-key.md) | @Hardtack | 2026-07-19 | 3 |
 | [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-07-21 | 6 |
-| [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-07-21 | 23 |
+| [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-07-21 | 24 |
 | [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-07-21 | 18 |
 | [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-07-17 | 8 |
 | [xAI API Key Provider Flow](spec/flow/xai-api-key.md) | @Hardtack | 2026-07-18 | 3 |
@@ -165,6 +165,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Goal Pursuing Is Owned at Session Scope Historical Requirements Reconstruction](requirements/goal-260613-goal-pursuing.md) | goal-260613 | 2026-06-13 | - |
 | [Goal Continuation Uses Idle Hook and Input Buffer Historical Requirements Reconstruction](requirements/goal-260615-goal-continuation-idle-hook.md) | goal-260615 | 2026-06-15 | - |
 | [Treat Goal Actions as Model-Producing Preparation Historical Requirements Reconstruction](requirements/goal-260712-goal-actions-as-producing-preparation.md) | goal-260712 | 2026-07-12 | - |
+| [Durable Goal Idle Continuation Requirements](requirements/goal-260721-durable-idle-continuation.md) | goal-260721 | 2026-07-21 | 2026-07-21 |
 | [Add GPT-aligned apply-patch alongside the existing edit tool Historical Requirements Reconstruction](requirements/gpt-260720-gpt-patch-alongside-existing-edit.md) | gpt-260720 | 2026-07-20 | - |
 | [Group Chat Tool Activity in the Frontend Historical Requirements Reconstruction](requirements/group-260720-group-chat-activity-in-the-frontend.md) | group-260720 | 2026-07-20 | 2026-07-20 |
 | [gVisor + BYOC Sandbox Discussion Historical Requirements Reconstruction](requirements/gvisor-260403-gvisor-byoc-sandbox.md) | gvisor-260403 | 2026-04-03 | 2026-04-20 |
@@ -477,6 +478,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Goal Pursuing Is Owned at Session Scope](adr/goal-260613-goal-pursuing.md)
 - [Goal Continuation Uses Idle Hook and Input Buffer](adr/goal-260615-goal-continuation-idle-hook.md)
 - [Treat Goal Actions as Model-Producing Preparation](adr/goal-260712-goal-actions-as-producing-preparation.md)
+- [Durable Goal Idle Continuation](adr/goal-260721-durable-idle-continuation.md)
 - [Add GPT-aligned apply-patch alongside the existing edit tool](adr/gpt-260720-gpt-patch-alongside-existing-edit.md)
 - [Group Chat Tool Activity in the Frontend](adr/group-260720-group-chat-activity-in-the-frontend.md)
 - [gVisor + BYOC Sandbox Discussion](adr/gvisor-260403-gvisor-byoc-sandbox.md)

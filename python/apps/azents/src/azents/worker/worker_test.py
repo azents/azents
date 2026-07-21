@@ -356,6 +356,19 @@ class _RunExecutor:
         del session_id, exc, dispatch_event
         return None
 
+    async def resolve_idle_continuation_toolkits(
+        self,
+        message: SessionWakeUp,
+        *,
+        run_id: str,
+        prepare_toolkits: PrepareToolkits,
+        dispatch_event: Callable[[str, PublishedEvent], Awaitable[None]],
+    ) -> list[ToolkitBinding]:
+        """Return the configured recovered idle hook toolkit snapshot."""
+        del message, prepare_toolkits, dispatch_event
+        self.host.idle_continuation_resolution_run_ids.append(run_id)
+        return []
+
     async def execute(
         self,
         message: SessionWakeUp,
@@ -384,10 +397,12 @@ class _RunExecutor:
             if self.host.command_error is not None:
                 raise self.host.command_error
             self.host.pending_command_result = False
+            self.host.pending_idle_continuation_run_id = "run-001"
             return RunExecutionResult(
                 toolkits=[],
                 terminal_event_observed=True,
                 no_actionable_work=False,
+                run_id="run-001",
                 terminal_run_status=AgentRunStatus.COMPLETED,
             )
         return await self.host.process_message(
@@ -441,19 +456,25 @@ class _IdleContinuationService:
         self.host = host
         self.calls: list[tuple[SessionWakeUp, list[ToolkitBinding]]] = []
 
-    async def enqueue(
+    async def consume(
         self,
         message: SessionWakeUp,
         *,
         toolkits: Sequence[ToolkitBinding],
-        run_id: str | None,
+        run_id: str,
     ) -> bool:
-        """Record idle continuation enqueue requests."""
-        del run_id
+        """Record one durable idle continuation outcome."""
         self.calls.append((message, list(toolkits)))
         self.host.idle_continuation_calls.append((message, list(toolkits)))
+        if self.host.pending_idle_continuation_run_id != run_id:
+            return False
+        self.host.idle_mark_attempted.set()
+        if not self.host.idle_transition_allowed:
+            return False
+        self.host.pending_idle_continuation_run_id = None
+        self.host.idle_session_ids.append(message.session_id)
         self.host.lifecycle_events.append("idle_continuation")
-        return self.host.idle_continuation_result
+        return True
 
 
 class _UserStopFinalizer:
@@ -496,6 +517,7 @@ class _Host:
         self.heartbeat_session_ids: list[str] = []
         self.owner_heartbeat_session_ids: list[str] = []
         self.pending_input_session_ids: set[str] = set()
+        self.pending_idle_continuation_run_id: str | None = None
         self.terminal_result_delivery_calls: list[tuple[str, str]] = []
         self.stop_request_session_ids: set[str] = set()
         self.processed_messages: list[SessionWakeUp] = []
@@ -519,6 +541,7 @@ class _Host:
         self.dispatched_events: list[tuple[str, PublishedEvent]] = []
         self.event_dispatched = asyncio.Event()
         self.owner_generation_claims = 0
+        self.idle_continuation_resolution_run_ids: list[str] = []
 
     @property
     def shutdown_event(self) -> asyncio.Event:
@@ -564,6 +587,8 @@ class _Host:
             self.terminal_event_observed
             and message_number not in self.no_actionable_message_numbers
         )
+        if terminal_event_observed:
+            self.pending_idle_continuation_run_id = "run-001"
         return RunExecutionResult(
             toolkits=[],
             terminal_event_observed=terminal_event_observed,
@@ -632,6 +657,19 @@ class _Host:
         """Return test-specified active AgentRun existence."""
         del session_id
         return self.running_agent_run_exists
+
+    async def get_pending_idle_continuation_run_id(
+        self,
+        session_id: str,
+    ) -> str | None:
+        """Return test-configured durable idle boundary."""
+        del session_id
+        return self.pending_idle_continuation_run_id
+
+    async def has_pending_idle_continuation(self, session_id: str) -> bool:
+        """Return whether the durable idle boundary remains."""
+        del session_id
+        return self.pending_idle_continuation_run_id is not None
 
     async def heartbeat_session(self, session_id: str) -> None:
         """Store session for active owner lease refresh calls."""
@@ -909,10 +947,47 @@ async def test_terminal_run_marks_idle_before_idle_continuation() -> None:
         ("session-001", "terminal_boundary"),
     ]
     assert host.lifecycle_events == [
-        "mark_session_idle",
-        "clear_session_activity",
         "idle_continuation",
+        "clear_session_activity",
     ]
+
+
+@pytest.mark.asyncio
+async def test_shutdown_after_completed_run_hands_over_durable_idle_boundary() -> None:
+    """Shutdown after completion leaves the durable boundary for another owner."""
+    host = _Host()
+    host.shutdown_before_message_returns = True
+    runner = _start_session_runner(host)
+    message = _wake_up()
+
+    runner.enqueue(message)
+    await asyncio.wait_for(runner.terminated_event.wait(), timeout=1)
+
+    assert host.pending_idle_continuation_run_id == "run-001"
+    assert host.idle_continuation_calls == []
+    assert host.released_session_ids == ["session-001"]
+    assert host.handover_messages == [message]
+
+
+@pytest.mark.asyncio
+async def test_recovered_no_actionable_wake_up_consumes_durable_idle_boundary() -> None:
+    """A new owner resolves hooks and consumes the completed durable boundary."""
+    host = _Host()
+    host.pending_idle_continuation_run_id = "run-001"
+    host.no_actionable_message_numbers.add(1)
+    runner = _start_session_runner(host)
+    message = _wake_up()
+
+    try:
+        runner.enqueue(message)
+        await _wait_until(lambda: bool(host.idle_continuation_calls))
+    finally:
+        await runner.shutdown()
+
+    assert host.idle_continuation_resolution_run_ids == ["run-001"]
+    assert host.idle_continuation_calls == [(message, [])]
+    assert host.pending_idle_continuation_run_id is None
+    assert host.idle_session_ids == ["session-001"]
 
 
 @pytest.mark.asyncio
@@ -999,11 +1074,10 @@ async def test_noop_wake_up_after_terminal_run_finishes_delayed_idle() -> None:
     assert host.processed_messages == [first, stale]
     assert host.owner_generation_claims == 1
     assert host.idle_session_ids == ["session-001"]
-    assert host.idle_continuation_calls == [(first, [])]
+    assert host.idle_continuation_calls == [(stale, [])]
     assert host.lifecycle_events == [
-        "mark_session_idle",
-        "clear_session_activity",
         "idle_continuation",
+        "clear_session_activity",
     ]
 
 
@@ -1133,9 +1207,8 @@ async def test_session_command_runs_without_event_adapter() -> None:
     assert host.idle_session_ids == ["session-001"]
     assert host.idle_continuation_calls == [(message, [])]
     assert host.lifecycle_events == [
-        "mark_session_idle",
-        "clear_session_activity",
         "idle_continuation",
+        "clear_session_activity",
     ]
     assert host.released_session_ids == ["session-001"]
 

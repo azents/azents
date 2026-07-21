@@ -66,7 +66,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
 last_verified_at: 2026-07-21
-spec_version: 124
+spec_version: 125
 ---
 
 # Agent Execution Loop
@@ -999,13 +999,19 @@ must not overwrite them. No database row lock or transaction spans external I/O.
 
 ## Idle continuation
 
-Idle transition is allowed only at a terminal run boundary. `AgentSession.run_state` may become `idle` only
-after the runner has observed a terminal `RunComplete` boundary and has confirmed that there is no
-follow-up work: no pending command, no pending input buffer, and no queued actionable wake-up. User
-interrupt and failed terminal runs also end through `RunComplete`; after that same follow-up check
-they may transition the session to idle. Idle continuation hooks are dispatched only when the latest
-terminal run status is `completed`; failed, stopped, interrupted, cancelled, or retry-active running
-runs must not enqueue Goal continuation.
+Idle transition is allowed only at a terminal run boundary. A `completed` terminal transition records
+that Run's ID in `AgentSession.pending_idle_continuation_run_id` in the same durable transaction.
+The pointer is the session's one supersedable obligation to evaluate idle continuation at true idle;
+failed, stopped, interrupted, and cancelled transitions do not record it. Activating replacement work
+clears an earlier pointer because that earlier terminal boundary did not remain idle.
+
+`AgentSession.run_state` may become `idle` only after the runner has confirmed that no follow-up work
+exists: no pending command, no pending wake-producing input buffer, no active Run, and no queued
+actionable wake-up. For a completed boundary, the runner dispatches idle hooks only after that
+follow-up check. It then locks the Session, rechecks that the same pointer remains and that the
+session is still free of follow-up work, and atomically commits one outcome: continuation InputBuffers
+plus `running`, or pointer removal plus `idle`. Failed, stopped, interrupted, cancelled, or
+retry-active Runs must not enqueue Goal continuation.
 
 Wake-up is a signal, not work by itself. If a wake-up reaches a running session, it is a no-op signal.
 The warm runner polls input buffers at model-call turn boundaries, so accepted TurnActions are not
@@ -1022,31 +1028,38 @@ error observations without a terminal Run event.
 
 The required run-completion order is:
 
-1. Persist the terminal AgentRun state and durable terminal transcript output.
+1. Persist the terminal AgentRun state and durable terminal transcript output. For `completed`, record
+   the matching pending idle-continuation pointer atomically.
 2. Publish or observe the correlated terminal control event (`RunComplete` or `RunStopped`).
 3. For a linked subagent, attempt durable terminal `agent_result` delivery to its direct parent.
 4. Check whether follow-up work already exists as an inbox wake-up, pending command, or pending
    `wake_session` input; queue-only mailbox rows are not follow-up work.
-5. If follow-up work exists, keep or restore `running` and continue with the next run.
-6. If no follow-up work exists, transition `AgentSession.run_state` to `idle`.
-7. Clear session activity state that belongs to the completed run.
-8. Run `on_session_idle` hooks.
-9. Collect returned continuation prompts.
-10. In one locked transaction, enqueue those prompts as `wake_session` input and mark the Session
-    running; then publish pending-buffer live state.
-11. Send a payload-free broker wake-up signal.
+5. If follow-up work exists, keep or restore `running`, retain the pending pointer, and continue with
+   the next run.
+6. For a completed boundary with no follow-up work, resolve current hook providers and run
+   `on_session_idle` outside the database transaction.
+7. In one locked transaction, recheck the matching pointer, command, wake-producing input, and active
+   Run. Consume the pointer while atomically either enqueueing deterministic continuation InputBuffers
+   and marking the Session `running`, or marking it `idle` when no continuation was returned.
+8. For a non-completed terminal boundary with no follow-up work, mark the Session `idle`.
+9. Clear session activity only after the corresponding durable idle outcome commits.
+10. Publish pending-buffer live state and send a payload-free broker wake-up only after a committed
+    continuation outcome.
 
 `on_session_idle` hook providers do not write durable transcript events directly and do not send
-broker wake-ups. They return continuation input only. `IdleContinuationService` owns the atomic
-handoff from idle hook results to recoverable runner work through `InputBufferService` and the Session
-repository.
+broker wake-ups. They return continuation input only. `IdleContinuationService` owns the conditional
+pointer consume and atomic handoff from idle hook results to recoverable runner work through
+`InputBufferService` and the Session repository. Continuation InputBuffers use deterministic identity
+keys derived from the completed Run, provider slug, and provider-local ordinal, so retry or broker
+redelivery cannot duplicate the logical continuation.
 
-A graceful worker shutdown is not an idle transition. If shutdown is observed while a run is active,
-the departing worker preserves `running` state and hands over by wake-up instead of marking the
-session idle or dispatching idle hooks. The supervised foreground task receives a bounded 30-second
-completion window. Tool-call recovery may continue from its durable ownership protocol, but an
-uncertain operation TurnAction is cancelled into durable history and is never resumed by the next
-owner.
+A graceful worker shutdown is not an idle transition. If shutdown is observed while a Run is active or
+a completed Run still has a pending idle-continuation pointer, the departing worker preserves
+recoverable `running` state and hands over by wake-up instead of dispatching idle hooks. A recovering
+owner that receives a no-actionable wake-up re-resolves current hook providers and conditionally
+consumes the durable pointer. The supervised foreground task receives a bounded 30-second completion
+window. Tool-call recovery may continue from its durable ownership protocol, but an uncertain
+operation TurnAction is cancelled into durable history and is never resumed by the next owner.
 
 The first idle hook provider is Goal Toolkit. It emits continuation only for `active` Goal state.
 `paused`, `blocked`, `complete`, or empty Goal state does not enqueue a continuation and does not
@@ -1066,6 +1079,7 @@ updated by the user.
 
 ## Changelog
 
+- **2026-07-21** (spec_version 125) — Made completed-run idle continuation a durable Session boundary that recovery conditionally consumes after true idle.
 - **2026-07-21** (spec_version 124) — Moved the live non-empty Activity indicator into the summary header's completed-check slot and suppressed it for empty groups.
 - **2026-07-21** (spec_version 123) — Generalized prepared client-tool selection across semantic model profiles, adapter profile preferences, and tool-declared wire variants while retaining durable single-dialect execution.
 - **2026-07-21** (spec_version 122) — Kept existing `apply_patch` eligibility and selected plaintext custom only for the native OpenAI Responses adapter; all other eligible transports retain the JSON-function variant.
