@@ -1,13 +1,20 @@
 .root {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  min-height: rem(16px);
-  padding-right: rem(2px);
+  gap: var(--mantine-spacing-xs);
+  min-height: rem(32px);
+  margin-bottom: var(--mantine-spacing-md);
 }
 
 .dots {
   display: inline-flex;
   gap: rem(4px);
+}
+
+.duration {
+  font-family: var(--font-geist-mono), monospace;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
 }
 
 .dot {

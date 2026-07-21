@@ -1066,6 +1066,9 @@ export const WithPreparingContext = {
     await expect(
       canvas.getByText("Summarizing previous conversation…"),
     ).toBeVisible();
+    await expect(
+      canvas.getByRole("status", { name: "Agent is working" }),
+    ).toBeVisible();
   },
 } satisfies Story;
 
@@ -1093,6 +1096,9 @@ export const EmptyStreamingModelHidesWaitingRow = {
     await expect(
       canvas.queryByText(/Waiting for model response \(\d+s\)/),
     ).toBeNull();
+    await expect(
+      canvas.getByRole("status", { name: "Agent is working" }),
+    ).toBeVisible();
   },
 } satisfies Story;
 
@@ -1151,15 +1157,25 @@ export const StreamingModelWithPartialOutput = {
     const output = canvas.getByText(
       "The model is still streaming this response",
     );
+    const liveActivitySpinner = canvas.getByRole("status", {
+      name: "Live activity is running",
+    });
+    const runIndicator = canvas.getByRole("status", {
+      name: "Agent is working",
+    });
     await expect(output).toBeVisible();
+    await expect(liveActivitySpinner).toBeVisible();
+    await expect(runIndicator).toBeVisible();
     await expect(
-      canvas.getByRole("status", { name: "Agent is working" }),
-    ).toBeVisible();
-    await expect(
-      canvas.getByText(/Waiting for model response \(\d+s\)/),
-    ).toBeVisible();
+      canvas.queryByText(/Waiting for model response \(\d+s\)/),
+    ).toBeNull();
+    await expect(canvas.queryByText(/\(\d+s\)/)).toBeNull();
     await expect(
       activity.compareDocumentPosition(output) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    await expect(
+      output.compareDocumentPosition(runIndicator) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
   },
