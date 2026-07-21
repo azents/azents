@@ -25,7 +25,7 @@ code_paths:
   - infra/charts/azents/templates/server/scheduler-deployment.yaml.tpl
   - infra/charts/azents/templates/server/scheduler-pdb.yaml.tpl
 last_verified_at: 2026-07-21
-spec_version: 5
+spec_version: 6
 ---
 
 # Periodic Execution Flow Spec
@@ -205,9 +205,15 @@ wait capped at 30 minutes; successful batches advance the cursor until the appli
 
 `archived_session_purge` runs every five minutes with a ten-minute task timeout and bounded
 one-to-thirty-minute scheduler retry. Before claiming work it cancels at most 100 stale unstarted jobs
-whose root status, deadline, or policy revision no longer matches the job. It then claims at most one
-due purge job with a 15-minute durable lease. Claiming starts the irreversible purge fence; restore is
-rejected from that point even if cleanup later retries.
+whose root status, deadline, or policy revision no longer matches the job. It then claims and advances
+at most 100 due purge jobs with individual 15-minute durable leases, stopping before it claims another
+job when the scheduler deadline has less than 30 seconds remaining. Claiming starts the irreversible
+purge fence; restore is rejected from that point even if cleanup later retries.
+
+One root purge failure records the durable job retry and a structured exception log, then the same
+scheduler pass continues with the next due root. Active runs likewise schedule that root for retry
+without blocking later roots. Cancellation, failure to persist durable retry state, or other
+batch-level infrastructure failure still fails the scheduler task.
 
 The handler locks the complete root tree, increments owner generations, records stop intent, emits
 broker stop signals, and waits for active runs through durable retry rather than deleting around them.
@@ -245,3 +251,4 @@ Model catalog source sync is a later consumer of this scheduler.
 
 - **2026-07-19** — v4. Added the durable archived-session retention recalculation and purge tasks, including intervals, leases, bounded batching, stale-job reconciliation, fencing, retry, and cleanup ordering.
 - **2026-07-21** — v5. Isolated ordinary scheduler task lifecycle failures so one task cannot terminate the scheduler process; cancellation remains a scheduler shutdown signal.
+- **2026-07-21** — v6. Isolated per-root purge failures so a bounded scheduler pass logs and retries the failed root before continuing with later due roots.
