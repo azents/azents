@@ -149,6 +149,7 @@ def _create_agent(
             lightweight_model_selection=workspace.model_selection,
             type=AgentType.PUBLIC,
             shell_enabled=True,
+            tool_search_enabled=False,
         ),
         _headers=_headers(workspace.token),
     )

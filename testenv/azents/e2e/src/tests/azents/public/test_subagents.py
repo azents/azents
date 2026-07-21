@@ -187,15 +187,18 @@ def _create_agent(
     release_file_path: str | None = None,
 ) -> str:
     """Create an Agent with subagent tools and an optional release barrier."""
+    agent_create_request = AgentCreateRequest(
+        name="Subagent E2E Agent",
+        model_selection=workspace.model_selection,
+        lightweight_model_selection=workspace.model_selection,
+        type=AgentType.PUBLIC,
+        shell_enabled=True,
+    )
+    if release_file_path is not None:
+        agent_create_request.tool_search_enabled = False
     agent = AgentV1Api(public_api_client).agent_v1_create_agent(
         handle=workspace.handle,
-        agent_create_request=AgentCreateRequest(
-            name="Subagent E2E Agent",
-            model_selection=workspace.model_selection,
-            lightweight_model_selection=workspace.model_selection,
-            type=AgentType.PUBLIC,
-            shell_enabled=True,
-        ),
+        agent_create_request=agent_create_request,
         _headers=_headers(workspace.token),
     )
     if release_file_path is not None:
