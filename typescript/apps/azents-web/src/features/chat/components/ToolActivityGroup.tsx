@@ -281,7 +281,7 @@ export function ToolActivityGroup({
   );
 
   return (
-    <Box mb="xs" opacity={dimmed ? 0.45 : 1} style={{ minWidth: 0 }}>
+    <Box mb={rem(4)} opacity={dimmed ? 0.45 : 1} style={{ minWidth: 0 }}>
       <Group gap="xs" wrap="nowrap" data-tool-activity-id={activity.id}>
         {hasDetails ? (
           <UnstyledButton
@@ -306,7 +306,7 @@ export function ToolActivityGroup({
         keepMounted={false}
         {...chatCollapseTransitionProps}
       >
-        <Stack gap={0} mt={rem(4)} pl="xs">
+        <Stack gap={0} mt={rem(2)} pl="xs">
           {activity.events.map((event) => (
             <Box key={event.id}>{eventDetail(event)}</Box>
           ))}
