@@ -1,3 +1,5 @@
+import { Button, Stack } from "@mantine/core";
+import { useState } from "react";
 import { expect, userEvent, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { createChatMessage } from "../story-fixtures";
@@ -131,6 +133,48 @@ const activity: ToolActivityGroupModel = {
   usage: null,
 };
 
+const nextActivity: ToolActivityGroupModel = {
+  id: "activity:story-next-call",
+  firstMessageId: "story-next-reasoning-message",
+  startedAt: new Date(Date.now() - 8_000).toISOString(),
+  startMessageIndex: 8,
+  endMessageIndex: 8,
+  events: [
+    {
+      id: "story:next-reasoning",
+      kind: "reasoning",
+      message: createChatMessage({
+        id: "story-next-reasoning-message",
+        content: null,
+        reasoningSummary: "Next live activity details",
+      }),
+      category: { key: "reasoning", label: "reasoning" },
+      status: "complete",
+    },
+  ],
+  usage: null,
+};
+
+function LiveActivityGroupTrackingDemo(): React.ReactElement {
+  const [activeGroup, setActiveGroup] = useState<"initial" | "next">("initial");
+
+  return (
+    <Stack gap="sm">
+      <Button onClick={() => setActiveGroup("next")}>
+        Start next live group
+      </Button>
+      <ToolActivityGroup
+        activity={activity}
+        active={activeGroup === "initial"}
+      />
+      <ToolActivityGroup
+        activity={nextActivity}
+        active={activeGroup === "next"}
+      />
+    </Stack>
+  );
+}
+
 const meta = {
   component: ToolActivityGroup,
   decorators: [
@@ -193,5 +237,33 @@ export const RestoredReasoningAndActivityDetails = {
     ).toBeVisible();
     await expect(canvas.getByLabelText("Running…")).toBeVisible();
     await expect(canvas.getByLabelText("Failed")).toBeVisible();
+  },
+} satisfies Story;
+
+export const TracksLiveGroupDisclosure = {
+  args: { activity },
+  render: () => <LiveActivityGroupTrackingDemo />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.getByText("Preparing the activity presentation"),
+    ).toBeVisible();
+
+    await userEvent.click(
+      canvas.getByRole("button", { name: "Start next live group" }),
+    );
+
+    const initialGroup = canvasElement.querySelector<HTMLElement>(
+      '[data-tool-activity-id="activity:story-call"]',
+    );
+    if (initialGroup === null) {
+      throw new Error("Initial activity group was not rendered");
+    }
+    await expect(
+      within(initialGroup).queryByText("Preparing the activity presentation"),
+    ).not.toBeInTheDocument();
+    await expect(
+      await canvas.findByText("Next live activity details"),
+    ).toBeVisible();
   },
 } satisfies Story;
