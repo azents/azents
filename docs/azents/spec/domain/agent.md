@@ -14,13 +14,17 @@ code_paths:
   - python/apps/azents/src/azents/core/inference_profile.py
   - python/apps/azents/src/azents/rdb/models/agent.py
   - python/apps/azents/src/azents/rdb/models/agent_admin.py
+  - python/apps/azents/src/azents/rdb/models/agent_decommission.py
   - python/apps/azents/src/azents/rdb/models/llm_provider_integration.py
   - python/apps/azents/src/azents/rdb/models/workspace_model_settings.py
   - python/apps/azents/src/azents/repos/agent/**
   - python/apps/azents/src/azents/repos/agent_admin/**
+  - python/apps/azents/src/azents/repos/agent_decommission/**
+  - python/apps/azents/src/azents/repos/agent_decommission_finalizer/**
   - python/apps/azents/src/azents/repos/llm_provider_integration/**
   - python/apps/azents/src/azents/repos/workspace_model_settings/**
   - python/apps/azents/src/azents/services/agent/**
+  - python/apps/azents/src/azents/services/agent_decommission.py
   - python/apps/azents/src/azents/services/agent_runtime/**
   - python/apps/azents/src/azents/services/llm_provider_integration/**
   - python/apps/azents/src/azents/services/model_listing/**
@@ -47,8 +51,8 @@ api_routes:
   - /llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/start
   - /llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/{session_id}
   - /chat/v1
-last_verified_at: 2026-07-18
-spec_version: 50
+last_verified_at: 2026-07-21
+spec_version: 51
 ---
 
 # Agent Domain Spec
@@ -63,7 +67,8 @@ Agent is central execution unit of azents. Within Workspace, it bundles an order
 
 | Field | Meaning |
 |---|---|
-| `workspace_id` | owning Workspace. cascades on Workspace deletion |
+| `workspace_id` | owning Workspace. restrictive parent FK prevents Workspace deletion from bypassing Agent lifecycle |
+| `lifecycle_status` | `active` or `decommissioning`; decommissioning fences new session and runtime activity |
 | `name`, `description` | display name and description |
 | `selectable_model_options` | ordered JSONB array of selectable model options. Each option has a unique label, resolved `AgentModelSelection` snapshot, and model-scoped runtime settings |
 | `main_model_label` | selected label from `selectable_model_options` for normal model turns |
@@ -276,6 +281,22 @@ Public integration model listing uses stored model catalog projections. The pick
 
 Deterministic fixture in local/test environment is development/QA support path activated only by integration name marker. It can sync deterministic catalog entries for product tests.
 
+### 2.5 Agent decommission
+
+`DELETE /agent/v1/workspaces/{handle}/agents/{agent_id}` is an asynchronous decommission
+request, not immediate row deletion. An Agent administrator or Workspace owner can request it only
+when the archived-session retention policy is finite. The operation atomically marks the Agent
+`decommissioning`, creates or returns one content-free durable job, and returns `202 Accepted` with
+`{ job_id, status, created_at }`. Unlimited (`null`) retention returns `409 Conflict` before any
+state mutation.
+
+Decommissioning fences new session creation/recovery, input/action admission, archived-session
+restore, runtime actions, and stuck-run recovery. The coordinator retires eligible roots through the
+normal session lifecycle, waits for retention purge to own permanent Session deletion, then requires
+current-generation Runtime terminal-delete acknowledgement before finalization. The completed job
+remains a content-free tombstone; no public immediate-delete or request-specific purge-deadline
+path exists.
+
 ## 3. Runtime Resolve
 
 Every inference-bearing input has a requested inference profile: an Agent-owned `model_target_label` plus nullable `reasoning_effort`. Null effort means the selected model or provider default, not the Agent-level reasoning parameter. Normal user configuration and composer input always select a concrete effort when the selected model advertises explicit effort levels; `Default` is not a user-facing option. Agent settings place `Default reasoning effort` beside the default model control, and effort choices are rendered as raw lowercase enum values without localization. Models with an empty explicit effort list hide the control and use null. The request source is `explicit_input`, `session_last_used`, `agent_default`, `retry_original`, `parent_run`, or `spawn_override`.
@@ -334,6 +355,7 @@ Following contracts do not exist in current system.
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-07-21 | 51 | Added durable finite-retention Agent decommission, admission fencing, and Runtime acknowledgement-gated finalization |
 | 2026-07-18 | 50 | Resolved semantic built-ins to provider-hosted or client-executed ownership per selected model provider |
 | 2026-07-17 | 49 | Added per-option explicit subagent target availability and bounded parent-model selection guidance |
 | 2026-07-17 | 48 | Restored model-scoped `image_generation` selection and exhaustive OpenAI/ChatGPT/LiteLLM hosted-tool lowering |

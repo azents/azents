@@ -12,7 +12,7 @@ Details of all living specs. Synchronized from frontmatter.
 
 | Domain | Title | Owner | Last Verified | Version |
 |---|---|---|---|---|
-| agent | [Agent Domain Spec](domain/agent.md) | @Hardtack | 2026-07-18 | 50 |
+| agent | [Agent Domain Spec](domain/agent.md) | @Hardtack | 2026-07-21 | 51 |
 | conversation | [Conversation & Events](domain/conversation.md) | @Hardtack | 2026-07-21 | 125 |
 | goal | [Goal Domain Spec](domain/goal.md) | - | 2026-07-21 | 10 |
 | memory | [Memory](domain/memory.md) | @Hardtack | 2026-07-17 | 5 |
@@ -20,14 +20,14 @@ Details of all living specs. Synchronized from frontmatter.
 | system-settings | [System Settings](domain/system-settings.md) | @Hardtack | 2026-07-20 | 3 |
 | toolkit | [Toolkit](domain/toolkit.md) | @Hardtack | 2026-07-21 | 68 |
 | user-auth | [User & Authentication](domain/user-auth.md) | @Hardtack | 2026-07-20 | 8 |
-| workspace | [Workspace & Membership](domain/workspace.md) | @Hardtack | 2026-07-21 | 42 |
+| workspace | [Workspace & Membership](domain/workspace.md) | @Hardtack | 2026-07-21 | 43 |
 
 ## Flow Specs
 
 | Title | Owner | Last Verified | Version |
 |---|---|---|---|
 | [Agent Execution Loop](flow/agent-execution-loop.md) | @Hardtack | 2026-07-21 | 125 |
-| [Agent Runtime Control](flow/agent-runtime-control.md) | @Hardtack | 2026-07-20 | 22 |
+| [Agent Runtime Control](flow/agent-runtime-control.md) | @Hardtack | 2026-07-21 | 23 |
 | [Agent Runtime Persistence](flow/agent-runtime-persistence.md) | @Hardtack | 2026-07-03 | 3 |
 | [Chat Session Resync](flow/chat-session-resync.md) | @Hardtack | 2026-07-21 | 40 |
 | [ChatGPT OAuth Flow](flow/chatgpt-oauth.md) | @Hardtack | 2026-07-21 | 18 |
@@ -36,7 +36,7 @@ Details of all living specs. Synchronized from frontmatter.
 | [Kimi OAuth Flow](flow/kimi-oauth.md) | @Hardtack | 2026-07-19 | 1 |
 | [MCP OAuth Flow](flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
 | [OpenRouter API Key Provider Flow](flow/openrouter-api-key.md) | @Hardtack | 2026-07-19 | 3 |
-| [Periodic Execution Flow Spec](flow/periodic-execution.md) | - | 2026-07-21 | 6 |
+| [Periodic Execution Flow Spec](flow/periodic-execution.md) | - | 2026-07-21 | 7 |
 | [Run Resume](flow/run-resume.md) | @Hardtack | 2026-07-21 | 24 |
 | [Session Context Inspector](flow/session-context-inspector.md) | @Hardtack | 2026-07-21 | 18 |
 | [E2E Primary Test Strategy](flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-07-17 | 8 |

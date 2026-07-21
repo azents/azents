@@ -22,8 +22,8 @@ code_paths:
   - infra/charts/azents/**
   - infra/argocd/azents-runtime-provider-kubernetes/**
   - infra/argocd/azents-server/**
-last_verified_at: 2026-07-20
-spec_version: 22
+last_verified_at: 2026-07-21
+spec_version: 23
 ---
 
 # Agent Runtime Control
@@ -70,6 +70,7 @@ flowchart LR
 - runner state, runner generation, active operation ids, connection state
 - current-generation failure code/message/details
 - run state for the Agent execution loop
+- terminal-delete requested generation, acknowledged generation, and acknowledgement timestamp
 
 Server output exposes raw Runtime data only as diagnostics. UI behavior must be driven by the server-computed summary/actions:
 
@@ -120,6 +121,7 @@ Provider is lifecycle-only. It implements:
 - restart
 - reset
 - observe
+- terminal delete
 
 Provider reports backend observed state and metadata. The Agent Workspace absolute path is provider metadata and is stored on `agent_runtimes.workspace_path`. Runner registration can validate that it mounted the same path, but Runner is not the authority for choosing the Agent Workspace path.
 
@@ -128,6 +130,14 @@ Kubernetes Runtime Pod reuse compares Provider-managed configuration while allow
 If Provider is disconnected or reports no workspace path for a Runtime that needs workspace access, Control records an explicit failure/unavailable state. It must not invent a fallback path. `PROVIDER_WORKSPACE_PATH_MISSING` is the explicit error for a missing provider path.
 
 Kubernetes and Docker Providers are external components. They must not import Azents server modules, DB sessions, repositories, or in-process managers. They communicate with Control only via the runtime-control protocol and their backend APIs.
+
+Terminal delete is an internal-only command used by Agent decommission finalization. Control
+dispatches it until the Provider reports a matching terminal-delete acknowledgement. Docker removes
+the Runtime container and provider-owned root; Kubernetes removes the Runtime Pod and PVC.
+Already-absent resources acknowledge successfully, so repeated delivery is idempotent. A stale
+report cannot satisfy the request: Control persists acknowledgement only when the observed desired
+generation equals the currently requested generation. Terminal delete is not a public lifecycle
+action and does not create a user-facing permanent-delete control.
 
 ## Runner Contract
 
@@ -224,6 +234,7 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
+- **2026-07-21** (spec_version 23) — Added generation-fenced internal Provider terminal deletion and durable acknowledgement for Agent decommission finalization.
 - **2026-07-20** (spec_version 22) — Added strict Runner-owned V4A `file.apply_patch`, ordered cancellation and terminal settlement, bounded path and content safety, staged revalidation, deterministic commit ordering, and exact no-rollback partial-failure reporting.
 - **2026-07-20** (spec_version 21) — Removed chart-enforced Runtime Control replica, autoscaling, and disruption-budget availability policy so deployments own their scaling configuration.
 - **2026-07-20** (spec_version 20) — Added native Runner `file.glob` evaluation so Engine glob calls use one Runtime filesystem operation with recursive, brace, directory, exclude, and explicit tilde-rejection semantics.
