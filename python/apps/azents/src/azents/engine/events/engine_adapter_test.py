@@ -1036,7 +1036,7 @@ async def test_disabled_tool_search_exposes_complete_catalog() -> None:
     ("model_identifier", "model_developer", "model_family", "expected_tools"),
     [
         (
-            "gpt-5.1",
+            "gpt-5.2",
             LLMModelDeveloper.OPENAI,
             "gpt-5",
             ["tool_search"],
