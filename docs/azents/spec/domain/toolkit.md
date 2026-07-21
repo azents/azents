@@ -233,7 +233,7 @@ Snapshot-backed GitHub tool handlers resolve installation authorization at execu
 
 ### Model-Visible Tool Exposure and Search
 
-Each Agent stores a `tool_search_enabled` setting that defaults to `false` and is managed from the Agent Capabilities API/UI. When disabled, the complete executable client-tool catalog remains model-visible in canonical final-name order. The engine does not inject `tool_search`, defer attached service operations, apply compatibility-budget projection, or update Tool Search working-set recency.
+Each Agent stores a persisted `tool_search_enabled` setting that defaults to `true` when a new Agent is created and is managed from the Agent Capabilities API/UI. Existing Agents retain their stored value; setting the field to `false` is an explicit opt-out. When disabled, the complete executable client-tool catalog remains model-visible in canonical final-name order. The engine does not inject `tool_search`, defer attached service operations, apply compatibility-budget projection, or update Tool Search working-set recency.
 
 When `tool_search_enabled` is enabled, the executable Tool Catalog retains every currently available client function with its final model-visible name, current schema and handler, Toolkit source metadata, and an exposure class. The final name is both the executor routing key and the persisted working-set identity.
 
@@ -626,6 +626,7 @@ OpenAPI spec is authoritative for all endpoints. Major operations:
 
 ## Changelog
 
+- **2026-07-21** (spec_version 64) — Enabled Tool Search by default for newly created Agents while preserving existing persisted values and explicit per-Agent opt-outs.
 - **2026-07-20** (spec_version 62) — Persisted immutable DB-attached Toolkit source snapshots on client-tool calls and prohibited UI ownership inference from final tool names.
 - **2026-07-20** (spec_version 61) — Bound Platform GitHub App installations and Toolkits to durable App identity, moved OAuth and Worker token operations to System Settings resolution, and added the redacted Public reconnect-required projection.
 - **2026-07-20** (spec_version 61) — Reset only `tool_search/working_set` after successful context compaction while preserving all other Session Toolkit State.

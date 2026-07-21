@@ -19,7 +19,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-21 | 124 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-16 | 9 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-17 | 5 |
-| [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-07-19 | 16 |
+| [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-07-21 | 17 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-20 | 3 |
 | [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-07-21 | 64 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-07-20 | 8 |
@@ -29,7 +29,7 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
-| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-07-21 | 118 |
+| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-07-21 | 119 |
 | [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-07-20 | 22 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-07-03 | 3 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-20 | 37 |
@@ -240,6 +240,7 @@ Design documents are accumulated records and are not listed individually in this
 - [ADR-0175: Retire Legacy Platform GitHub App Bindings](adr/0175-retire-legacy-platform-github-bindings.md)
 - [ADR-0176: Render Known Tools Through Validated Frontend Adapters](adr/0176-render-known-tools-through-validated-frontend-adapters.md)
 - [ADR-0177: Complete Specialized Presentation Coverage for Builtin Tools](adr/0177-complete-builtin-tool-presentations.md)
+- [ADR-0178: Enable Tool Search by Default for New Agents](adr/0178-enable-tool-search-by-default.md)
 
 ## Issues (Bug Tracking)
 

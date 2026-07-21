@@ -27,8 +27,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/llm-settings/containers/useLlmSettingsContainer.ts
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
   - typescript/apps/azents-admin-web/src/features/model-catalog/containers/useModelCatalogPageContainer.ts
-last_verified_at: 2026-07-19
-spec_version: 16
+last_verified_at: 2026-07-21
+spec_version: 17
 ---
 
 # Model Catalog Domain Spec
@@ -138,7 +138,7 @@ Agent and Workspace model selections remain snapshots. Catalog changes do not au
 
 If an integration is deleted or disabled, runtime or configuration operations can still fail because the credential/config source is unavailable. That is an integration availability failure, not a catalog drift failure.
 
-The effective provider-request tool declaration limit is the narrow exception to saved selection snapshot authority when the current Agent has opted into Tool Search. On that enabled path, runtime resolves a reviewed rule before each prepared model call from the current provider, adapter/native request path, runtime model identifier, model developer, and normalized family. The code-owned compatibility registry is authoritative for this transport constraint so a previously saved `AgentModelSelection` cannot freeze a stale hard limit. Exact-model rules take precedence over family rules and family rules over endpoint rules; an equally specific overlap is invalid configuration. When Tool Search is disabled, runtime preserves the complete legacy client-tool catalog and does not apply registry projection.
+The effective provider-request tool declaration limit is the narrow exception to saved selection snapshot authority when the current Agent has Tool Search enabled. On that enabled path, runtime resolves a reviewed rule before each prepared model call from the current provider, adapter/native request path, runtime model identifier, model developer, and normalized family. The code-owned compatibility registry is authoritative for this transport constraint so a previously saved `AgentModelSelection` cannot freeze a stale hard limit. Exact-model rules take precedence over family rules and family rules over endpoint rules; an equally specific overlap is invalid configuration. When Tool Search is disabled, runtime preserves the complete legacy client-tool catalog and does not apply registry projection.
 
 The current registry applies xAI's documented 200 total-tools request ceiling and a conservative 128 function-declaration ceiling only to Vertex AI request paths targeting Google/Gemini models. The Vertex rule records the conflicting official 128 and 512 sources and their verification date. Direct Gemini API requests and Vertex-hosted Anthropic or other non-Google models remain unmatched. When no verified rule matches, the limit is absent and runtime does not invent a product-wide fallback cap. All other normalized capabilities, supported built-ins, limits, and settings retain normal saved-snapshot semantics.
 
@@ -154,6 +154,7 @@ For user-scoped integration catalogs, the picker can trigger integration sync. F
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-07-21 | 17 | Clarified that provider-request declaration limits apply whenever the Agent has Tool Search enabled, which is the default for newly created Agents |
 | 2026-07-19 | 15 | Added the Agent-opt-in provider-request tool-limit registry as the narrow call-time exception to saved model-selection snapshot semantics |
 | 2026-07-19 | 14 | Added direct account-scoped OpenRouter model projection with unrestricted valid model visibility and conservative capability claims |
 | 2026-07-18 | 13 | Projected effective `image_generation` capability onto selectable function-calling xAI API-key and OAuth chat entries |

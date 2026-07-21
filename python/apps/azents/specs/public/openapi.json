@@ -8633,7 +8633,7 @@
             "type": "boolean",
             "title": "Tool Search Enabled",
             "description": "Tool Search enabled state",
-            "default": false
+            "default": true
           },
           "max_turns": {
             "anyOf": [

@@ -12,7 +12,7 @@ def test_agent_constructor_materializes_complete_selectable_model_settings() -> 
         lightweight_model_selection={"model_identifier": "lightweight"},
     )
 
-    assert agent.tool_search_enabled is False
+    assert agent.tool_search_enabled is True
     assert agent.selectable_model_options is not None
     assert [option["settings"] for option in agent.selectable_model_options] == [
         {
@@ -30,3 +30,16 @@ def test_agent_constructor_materializes_complete_selectable_model_settings() -> 
             "subagent_guidance": None,
         },
     ]
+
+
+def test_agent_constructor_preserves_explicit_tool_search_opt_out() -> None:
+    """Direct constructors retain an explicit Tool Search opt-out."""
+    agent = RDBAgent(
+        workspace_id="workspace-1",
+        name="Agent",
+        model_selection={"model_identifier": "main"},
+        lightweight_model_selection={"model_identifier": "lightweight"},
+        tool_search_enabled=False,
+    )
+
+    assert agent.tool_search_enabled is False

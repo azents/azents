@@ -151,4 +151,42 @@ class TestAgentServiceModelSelection:
         assert isinstance(result, Success)
         settings_repo.set_default_model_if_empty.assert_awaited_once()
         repository_create = agent_repo.create.await_args.args[1]
+        assert repository_create.tool_search_enabled is True
+
+    async def test_create_preserves_explicit_tool_search_opt_out(self) -> None:
+        """Creation forwards an explicit Tool Search opt-out to the repository."""
+        service = _make_service()
+        selection = make_test_model_selection()
+        settings = AsyncMock()
+        settings.default_model_selection = None
+        settings.default_lightweight_model_selection = None
+        settings.default_selectable_model_options = None
+        settings.default_main_model_label = None
+        settings.default_lightweight_model_label = None
+        settings_repo = cast(Any, service.workspace_model_settings_repository)
+        catalog_read_service = cast(Any, service.model_catalog_read_service)
+        agent_repo = cast(Any, service.repository)
+        admin_repo = cast(Any, service.admin_repository)
+        settings_repo.get_or_create.return_value = settings
+        catalog_read_service.resolve_agent_model_selection.return_value = Success(
+            selection
+        )
+        agent_repo.create.return_value = _make_agent()
+        admin_repo.create.return_value = AsyncMock()
+
+        result = await service.create(
+            AgentCreateInput(
+                workspace_id="ws-1",
+                name="agent",
+                model_selection=AgentModelSelectionInput(
+                    llm_provider_integration_id="integ-1",
+                    model_identifier="gpt-4o",
+                ),
+                tool_search_enabled=False,
+            ),
+            creator_workspace_user_id="wu-1",
+        )
+
+        assert isinstance(result, Success)
+        repository_create = agent_repo.create.await_args.args[1]
         assert repository_create.tool_search_enabled is False
