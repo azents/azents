@@ -65,7 +65,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
 last_verified_at: 2026-07-21
-spec_version: 121
+spec_version: 122
 ---
 
 # Agent Execution Loop
@@ -710,7 +710,7 @@ Every model step builds a fresh immutable executable Tool Catalog after current 
 
 Toolkits may contribute candidate tools and static prompt fragments with an optional required client-tool profile. Preparation resolves the profile set from the immutable selected-model snapshot using normalized developer, family, and exact model identifier rules; exact-model rules take precedence over family rules. Provider hosting and raw substring checks are not compatibility inputs. Profile names are derived preparation policy and are not persisted in `TurnContext`, the Session snapshot, or transcript history.
 
-Preparation projects candidate tool schemas, executable handlers, catalog entries, and prompt fragments through the same resolved profile set before Tool Search indexing, declaration-budget accounting, lowerer construction, or executor freezing. A model switch therefore re-evaluates compatibility on the next prepared call while historical calls and results remain durable. `apply_patch` first requires the reviewed V4A semantic profile for an identified OpenAI GPT family, then selects exactly one provider wire dialect for the prepared route. The current plaintext-custom selection requires the exact reviewed `gpt-5.1` official OpenAI Responses API-key route. It does not use session, tenant, percentage, or runtime rollout configuration. An eligible route that does not meet every custom condition can expose the independently verified JSON-function declaration instead. If semantic eligibility or both transports are unavailable, the catalog exposes neither declaration nor handler. The existing `edit` tool remains unconditional.
+Preparation projects candidate tool schemas, executable handlers, catalog entries, and prompt fragments through the same resolved profile set before Tool Search indexing, declaration-budget accounting, lowerer construction, or executor freezing. A model switch therefore re-evaluates compatibility on the next prepared call while historical calls and results remain durable. `apply_patch` first requires the reviewed V4A semantic profile for an identified OpenAI GPT family, then selects exactly one provider wire dialect for the prepared route. The native OpenAI Responses adapter selects the plaintext-custom declaration. Any other independently verified eligible transport retains the JSON-function declaration. Custom selection does not use exact model identifiers, credential mode, endpoint class, session, tenant, percentage, or runtime configuration. If semantic eligibility or both transports are unavailable, the catalog exposes neither declaration nor handler. The existing `edit` tool remains unconditional.
 
 The logical `apply_patch` name has one declaration and one handler variant in a prepared catalog: `json_function` or `plaintext_custom`. The catalog freezes the matching declaration, prompt, executor, and dialect before provider dispatch. A provider failure, incomplete call, malformed custom input, cancellation, or route change never resubmits the same logical operation through the other dialect. A received call whose dialect does not match the prepared declaration fails before handler invocation. Call/result finalization, active-call state, cancellation settlement, and recovery retain the admitted dialect and deterministic call identity, so a different dialect cannot authorize a second execution.
 
@@ -1025,6 +1025,7 @@ updated by the user.
 
 ## Changelog
 
+- **2026-07-21** (spec_version 122) — Kept existing `apply_patch` eligibility and selected plaintext custom only for the native OpenAI Responses adapter; all other eligible transports retain the JSON-function variant.
 - **2026-07-21** (spec_version 121) — Removed percentage-based plaintext-custom `apply_patch` selection; exact reviewed route and model compatibility now select one dialect without session or runtime rollout configuration.
 - **2026-07-21** (spec_version 120) — Enabled Tool Search by default for new Agents while retaining the persisted setting and disabled execution path for explicit opt-outs; promoted route-gated dual `apply_patch` dialect selection, default-disabled plaintext-custom exposure, and dialect-preserving execution/finalization rules.
 - **2026-07-20** (spec_version 117) — Made `edit` a Runner-owned atomic `file.edit` operation while preserving its ordinary function schema and exact-match semantics.

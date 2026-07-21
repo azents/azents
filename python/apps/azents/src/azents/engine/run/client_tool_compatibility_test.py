@@ -53,24 +53,22 @@ def _route(
     provider: LLMProvider = LLMProvider.OPENAI,
     adapter: str = "openai",
     native_format: str = "responses",
-    official_openai_endpoint: bool = True,
-    api_key_available: bool = True,
 ) -> ClientToolRoute:
     return ClientToolRoute(
         provider=provider,
         adapter=adapter,
         native_format=native_format,
-        official_openai_endpoint=official_openai_endpoint,
-        api_key_available=api_key_available,
     )
 
 
-def test_default_registry_grants_openai_gpt_family() -> None:
+def test_default_registry_grants_openai_gpt_family_with_json_function_fallback() -> (
+    None
+):
     profiles = resolve_client_tool_profiles(
         model_identifier="gpt-5.2",
         model_developer=LLMModelDeveloper.OPENAI,
         model_family="gpt-5",
-        route=_route(),
+        route=_route(provider=LLMProvider.OPENROUTER, adapter="litellm"),
     )
 
     assert profiles == frozenset({_PROFILE})
@@ -97,9 +95,11 @@ def test_default_registry_excludes_non_gpt_and_non_openai_models() -> None:
     )
 
 
-def test_exact_official_openai_route_selects_custom() -> None:
+def test_native_openai_responses_route_selects_custom_without_exact_model_gate() -> (
+    None
+):
     custom_profiles = resolve_client_tool_profiles(
-        model_identifier="gpt-5.1",
+        model_identifier="gpt-5.2",
         model_developer=LLMModelDeveloper.OPENAI,
         model_family="gpt-5",
         route=_route(),
@@ -110,45 +110,48 @@ def test_exact_official_openai_route_selects_custom() -> None:
     )
 
 
-def test_exact_official_openai_route_supports_custom_history() -> None:
+def test_native_openai_responses_route_supports_custom_history() -> None:
     """Keep custom lifecycle support aligned with exact route selection."""
     assert supports_historical_plaintext_custom_apply_patch(
-        model_identifier="gpt-5.1",
-        model_developer=LLMModelDeveloper.OPENAI,
-        model_family="gpt-5",
         route=_route(),
     )
     assert not supports_historical_plaintext_custom_apply_patch(
-        model_identifier="gpt-5.1",
-        model_developer=LLMModelDeveloper.OPENAI,
-        model_family="gpt-5",
-        route=_route(official_openai_endpoint=False),
+        route=_route(adapter="litellm"),
     )
 
 
 def test_custom_route_denial_retains_only_verified_function_fallback() -> None:
-    custom_base_url = resolve_client_tool_profiles(
-        model_identifier="gpt-5.1",
+    non_native_openai = resolve_client_tool_profiles(
+        model_identifier="gpt-5.2",
         model_developer=LLMModelDeveloper.OPENAI,
         model_family="gpt-5",
         route=_route(
-            official_openai_endpoint=False,
+            adapter="litellm",
         ),
     )
     openrouter = resolve_client_tool_profiles(
-        model_identifier="gpt-5.1",
+        model_identifier="gpt-5.2",
         model_developer=LLMModelDeveloper.OPENAI,
         model_family="gpt-5",
         route=_route(
             provider=LLMProvider.OPENROUTER,
             adapter="litellm",
-            official_openai_endpoint=False,
-            api_key_available=False,
         ),
     )
 
-    assert custom_base_url == frozenset({_PROFILE})
+    assert non_native_openai == frozenset()
     assert openrouter == frozenset({_PROFILE})
+
+
+def test_chatgpt_oauth_native_openai_responses_route_selects_custom() -> None:
+    profiles = resolve_client_tool_profiles(
+        model_identifier="gpt-5.6-terra",
+        model_developer=LLMModelDeveloper.OPENAI,
+        model_family="gpt-5.6",
+        route=_route(provider=LLMProvider.CHATGPT_OAUTH),
+    )
+
+    assert profiles == frozenset({ClientToolProfile.V4A_APPLY_PATCH_PLAINTEXT_CUSTOM})
 
 
 def test_unverified_route_omits_apply_patch_instead_of_falling_back() -> None:

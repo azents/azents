@@ -43,7 +43,7 @@ api_routes:
   - /toolkit/v1
   - /shell-environment/v1
 last_verified_at: 2026-07-21
-spec_version: 65
+spec_version: 66
 ---
 
 # Toolkit
@@ -133,8 +133,8 @@ One logical catalog entry may have one route-selected provider declaration varia
 its final model-visible name, catalog identity, source metadata, Tool Search identity, and executor
 lookup. The current variant-capable entry is `apply_patch`: its reviewed compatibility profile can
 select either the ordinary JSON-function declaration or a plaintext-custom declaration. The custom
-variant is fail-closed: it requires the exact reviewed official OpenAI Responses API-key route and
-exact eligible model. Route selection never depends on session, tenant, percentage, or runtime
+variant is selected only on the native OpenAI Responses adapter. Route selection never depends on
+exact model identifiers, credential mode, endpoint class, session, tenant, percentage, or runtime
 configuration. All other eligible routes use only their independently reviewed JSON-function
 transport; unsupported routes omit `apply_patch`. A prepared catalog exposes one variant, never
 both, and Tool Search/declaration-budget projection count that selected declaration once.
@@ -636,6 +636,7 @@ OpenAPI spec is authoritative for all endpoints. Major operations:
 
 ## Changelog
 
+- **2026-07-21** (spec_version 66) — Kept existing `apply_patch` eligibility and selected plaintext custom only for the native OpenAI Responses adapter; all other eligible transports retain the JSON-function variant.
 - **2026-07-21** (spec_version 65) — Removed percentage-based plaintext-custom `apply_patch` selection; exact reviewed route and model compatibility now select one dialect without session or runtime rollout configuration.
 - **2026-07-21** (spec_version 64) — Enabled Tool Search by default for newly created Agents while preserving existing persisted values and explicit per-Agent opt-outs.
 - **2026-07-20** (spec_version 62) — Persisted immutable DB-attached Toolkit source snapshots on client-tool calls and prohibited UI ownership inference from final tool names.

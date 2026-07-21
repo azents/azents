@@ -563,27 +563,10 @@ class AgentEngineAdapter:
                 if _uses_openai_sdk(request.provider)
                 else LiteLLMResponsesLowerer
             )
-            openai_client_config = (
-                openai_responses_client_config(
-                    provider=request.provider,
-                    credential_kwargs=request.credential_kwargs,
-                )
-                if _uses_openai_sdk(request.provider)
-                else None
-            )
             client_tool_route = ClientToolRoute(
                 provider=request.provider,
                 adapter=lowerer_type.adapter,
                 native_format=lowerer_type.native_format,
-                official_openai_endpoint=(
-                    request.provider is LLMProvider.OPENAI
-                    and openai_client_config is not None
-                    and openai_client_config.base_url is None
-                ),
-                api_key_available=(
-                    openai_client_config is not None
-                    and openai_client_config.api_key is not None
-                ),
             )
             client_tool_profiles = resolve_client_tool_profiles(
                 model_identifier=(
@@ -597,13 +580,6 @@ class AgentEngineAdapter:
             )
             historical_plaintext_custom_supported = (
                 supports_historical_plaintext_custom_apply_patch(
-                    model_identifier=(
-                        model_selection.model_identifier
-                        if model_selection is not None
-                        else model
-                    ),
-                    model_developer=model_developer,
-                    model_family=model_family,
                     route=client_tool_route,
                 )
             )

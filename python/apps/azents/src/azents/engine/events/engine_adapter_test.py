@@ -1067,7 +1067,7 @@ async def test_client_tool_profile_projects_before_search_and_lowering(
     assert isinstance(native_request, OpenAIResponsesRequest)
     assert [tool["name"] for tool in native_request.tools] == expected_tools
     instructions = native_request.options.get("instructions")
-    if expected_tools:
+    if "apply_patch" in expected_tools:
         assert isinstance(instructions, str)
         assert "Use apply_patch for multi-file changes." in instructions
     else:
