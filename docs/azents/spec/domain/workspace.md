@@ -56,7 +56,7 @@ api_routes:
   - /chat/v1/agents/{agent_id}/git-refs
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-07-21
-spec_version: 42
+spec_version: 43
 ---
 
 # Workspace & Membership
@@ -223,7 +223,10 @@ Membership is created through three paths.
 2. **Invitation acceptance** — existing member (manager or higher) invites by email. When invited user accepts, WorkspaceUser is created with that role (except OWNER). Display name is automatically set to prefix before `@` of invitation email.
 3. **JoinRequest approval** — user requests to join by handle. When existing member approves, WorkspaceUser is created with role=MEMBER. Display name is automatically set to first 8 chars of `user_id[:8]` (drift candidate — needs better default).
 
-Membership is removed by `WorkspaceUserService.delete()`. When Workspace is deleted, CASCADE cleans all WorkspaceUser, Invitation, and JoinRequest rows.
+Membership is removed by `WorkspaceUserService.delete()`. Workspace has no deletion route or
+service path: restrictive parent relationships prevent Workspace deletion from bypassing Agent
+decommission and Session retention purge. Membership, invitation, and join-request cleanup remain
+their own scoped operations.
 
 ### Role Invariants
 
@@ -413,7 +416,6 @@ stateDiagram-v2
 | `workspace_v1_create_workspace` (admin) | POST | `[unique-handle]` |
 | `workspace_v1_get_workspace` | GET | — |
 | `workspace_v1_update_workspace` | PATCH | `[unique-handle]` |
-| `workspace_v1_delete_workspace` | DELETE | CASCADE propagation |
 | `workspaceuser_v1_create_workspace_user` | POST | `[unique-membership]` |
 | `workspaceuser_v1_list_workspace_users` (admin) | GET | — |
 | `workspaceuser_v1_get_workspace_user` | GET | — |
@@ -440,6 +442,7 @@ stateDiagram-v2
 
 ## Changelog
 
+- **2026-07-21 (spec_version=43)** — Removed the Workspace DELETE contract and documented restrictive parent ownership that prevents bypass of Agent decommission and Session retention purge.
 - **2026-07-19** — v41. Replaced archive-time worktree cleanup with archive preservation and cleanup-before-cascade durable root-tree purge semantics.
 - **2026-07-14** — v40. Defined worktree operation ownership fencing, live-only execution rows, atomic durable terminal handover, cancelled outcomes, and no-reexecution takeover recovery.
 - **2026-07-13** — v39. Separated instance-wide system administration from Workspace roles and documented that Admin bootstrap creates no Workspace or membership.
