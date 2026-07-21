@@ -27,9 +27,8 @@ class UpdateMyProfileRequest(BaseModel):
     Own workspace profile update request schema.
     """ # noqa: E501
     name: Optional[StrictStr] = None
-    locale: Optional[StrictStr] = None
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["name", "locale"]
+    __properties: ClassVar[List[str]] = ["name"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -82,11 +81,6 @@ class UpdateMyProfileRequest(BaseModel):
         if self.name is None and "name" in self.model_fields_set:
             _dict['name'] = None
 
-        # set to None if locale (nullable) is None
-        # and model_fields_set contains the field
-        if self.locale is None and "locale" in self.model_fields_set:
-            _dict['locale'] = None
-
         return _dict
 
     @classmethod
@@ -99,8 +93,7 @@ class UpdateMyProfileRequest(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "name": obj.get("name"),
-            "locale": obj.get("locale")
+            "name": obj.get("name")
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

@@ -138,6 +138,8 @@
     "headline": "Paramètres du compte",
     "email": "E-mail",
     "createdAt": "Inscription",
+    "localeLabel": "Langue",
+    "saveLocale": "Enregistrer la langue",
     "sidebar": {
       "workspaces": "Espaces de travail",
       "general": "Général",

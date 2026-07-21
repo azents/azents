@@ -38,7 +38,6 @@ class TestWorkspaceUserCreateRequest(unittest.TestCase):
                 workspace_handle = '',
                 user_id = '',
                 name = '',
-                locale = 'ko-KR',
                 role = 'owner'
             )
         else:

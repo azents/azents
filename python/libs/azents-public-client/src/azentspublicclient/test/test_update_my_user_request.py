@@ -14,10 +14,10 @@
 
 import unittest
 
-from azentspublicclient.models.me_response import MeResponse
+from azentspublicclient.models.update_my_user_request import UpdateMyUserRequest
 
-class TestMeResponse(unittest.TestCase):
-    """MeResponse unit test stubs"""
+class TestUpdateMyUserRequest(unittest.TestCase):
+    """UpdateMyUserRequest unit test stubs"""
 
     def setUp(self):
         pass
@@ -25,30 +25,26 @@ class TestMeResponse(unittest.TestCase):
     def tearDown(self):
         pass
 
-    def make_instance(self, include_optional) -> MeResponse:
-        """Test MeResponse
+    def make_instance(self, include_optional) -> UpdateMyUserRequest:
+        """Test UpdateMyUserRequest
             include_optional is a boolean, when False only required
             params are included, when True both required and
             optional params are included """
-        # uncomment below to create an instance of `MeResponse`
+        # uncomment below to create an instance of `UpdateMyUserRequest`
         """
-        model = MeResponse()
+        model = UpdateMyUserRequest()
         if include_optional:
-            return MeResponse(
-                email = '',
-                locale = 'en-US',
-                created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f')
+            return UpdateMyUserRequest(
+                locale = 'en-US'
             )
         else:
-            return MeResponse(
-                email = '',
+            return UpdateMyUserRequest(
                 locale = 'en-US',
-                created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
         )
         """
 
-    def testMeResponse(self):
-        """Test MeResponse"""
+    def testUpdateMyUserRequest(self):
+        """Test UpdateMyUserRequest"""
         # inst_req_only = self.make_instance(include_optional=False)
         # inst_req_and_optional = self.make_instance(include_optional=True)
 

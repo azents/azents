@@ -14,7 +14,7 @@ from azents.rdb.session import SessionManager
 from azents.repos.system_user_role.data import LastSystemAdmin
 from azents.repos.system_user_role.repository import SystemUserRoleRepository
 from azents.repos.user import UserRepository
-from azents.repos.user.data import UserCreate
+from azents.repos.user.data import NotFound, UserCreate, UserUpdate
 
 from .data import UserListOutput, UserOutput
 
@@ -64,6 +64,18 @@ class UserService:
         if user is None:
             return None
         return UserOutput.convert_from(user)
+
+    async def update(
+        self,
+        user_id: str,
+        update: UserUpdate,
+    ) -> Result[UserOutput, NotFound]:
+        """Update User."""
+        async with self.session_manager() as session:
+            user = await self.user_repository.update(session, user_id, update)
+        if user is None:
+            return Failure(NotFound(user_id=user_id))
+        return Success(UserOutput.convert_from(user))
 
     async def list_all(self, *, offset: int = 0, limit: int = 50) -> UserListOutput:
         """Fetch all Users.

@@ -310,6 +310,7 @@ __all__ = [
     "ToolkitScopeType",
     "UnsupportedMediaPolicy",
     "UpdateMyProfileRequest",
+    "UpdateMyUserRequest",
     "UpdateWorkspaceUserRoleRequest",
     "UploadResponse",
     "UploadedImage",
@@ -630,6 +631,7 @@ from azentspublicclient.models.toolkit_scope_response import ToolkitScopeRespons
 from azentspublicclient.models.toolkit_scope_type import ToolkitScopeType as ToolkitScopeType
 from azentspublicclient.models.unsupported_media_policy import UnsupportedMediaPolicy as UnsupportedMediaPolicy
 from azentspublicclient.models.update_my_profile_request import UpdateMyProfileRequest as UpdateMyProfileRequest
+from azentspublicclient.models.update_my_user_request import UpdateMyUserRequest as UpdateMyUserRequest
 from azentspublicclient.models.update_workspace_user_role_request import UpdateWorkspaceUserRoleRequest as UpdateWorkspaceUserRoleRequest
 from azentspublicclient.models.upload_response import UploadResponse as UploadResponse
 from azentspublicclient.models.uploaded_image import UploadedImage as UploadedImage

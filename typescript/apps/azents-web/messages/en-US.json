@@ -138,6 +138,8 @@
     "headline": "Account Settings",
     "email": "Email",
     "createdAt": "Joined",
+    "localeLabel": "Language",
+    "saveLocale": "Save language",
     "sidebar": {
       "workspaces": "Workspaces",
       "general": "General",

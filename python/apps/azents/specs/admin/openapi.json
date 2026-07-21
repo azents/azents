@@ -4779,6 +4779,11 @@
             "title": "Primary Email",
             "description": "Primary email address"
           },
+          "locale": {
+            "type": "string",
+            "title": "Locale",
+            "description": "Account locale (BCP 47)"
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -4797,6 +4802,7 @@
           "id",
           "primary_email_id",
           "primary_email",
+          "locale",
           "created_at",
           "updated_at"
         ],
@@ -4949,12 +4955,6 @@
             "title": "Name",
             "description": "Workspace display name"
           },
-          "locale": {
-            "type": "string",
-            "title": "Locale",
-            "description": "Workspace locale (BCP 47)",
-            "default": "ko-KR"
-          },
           "role": {
             "$ref": "#/components/schemas/WorkspaceUserRole",
             "description": "Role (owner, manager, member)"
@@ -5010,11 +5010,6 @@
             "title": "Name",
             "description": "Workspace display name"
           },
-          "locale": {
-            "type": "string",
-            "title": "Locale",
-            "description": "Workspace locale (BCP 47)"
-          },
           "role": {
             "$ref": "#/components/schemas/WorkspaceUserRole",
             "description": "Role (owner, manager, member)"
@@ -5038,7 +5033,6 @@
           "workspace_id",
           "user_id",
           "name",
-          "locale",
           "role",
           "created_at",
           "updated_at"
@@ -5061,10 +5055,6 @@
           "name": {
             "type": "string",
             "title": "Name"
-          },
-          "locale": {
-            "type": "string",
-            "title": "Locale"
           }
         },
         "type": "object",

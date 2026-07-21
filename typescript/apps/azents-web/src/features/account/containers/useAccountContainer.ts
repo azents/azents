@@ -1,6 +1,9 @@
 "use client";
 
 import { useTranslations } from "next-intl";
+import { useCallback } from "react";
+import { isSupportedLocale, type SupportedLocale } from "@/shared/lib/locale";
+import { useLocale } from "@/shared/providers/locale";
 /**
  * Account settings page container
  *
@@ -11,11 +14,27 @@ import type { AccountState } from "../types";
 
 export interface AccountContainerProps {
   state: AccountState;
+  onSubmit: (locale: SupportedLocale) => void;
 }
 
 export function useAccountContainer(): AccountContainerProps {
   const t = useTranslations("common");
+  const { setLocale } = useLocale();
   const meQuery = trpc.user.me.useQuery(void 0, { retry: false });
+  const updateMutation = trpc.user.updateMe.useMutation({
+    onSuccess: (data) => {
+      if (isSupportedLocale(data.locale)) {
+        setLocale(data.locale);
+      }
+    },
+  });
+
+  const onSubmit = useCallback(
+    (locale: SupportedLocale): void => {
+      updateMutation.mutate({ locale });
+    },
+    [updateMutation],
+  );
 
   const data = meQuery.data;
 
@@ -26,8 +45,9 @@ export function useAccountContainer(): AccountContainerProps {
       : {
           type: "LOADED",
           email: data.email,
+          locale: data.locale,
           createdAt: new Date(data.created_at),
         };
 
-  return { state };
+  return { state, onSubmit };
 }

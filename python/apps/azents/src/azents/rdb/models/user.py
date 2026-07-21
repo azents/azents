@@ -36,6 +36,11 @@ class RDBUser(RDBModel):
         ),
         nullable=False,
     )
+    locale: Mapped[str] = mapped_column(
+        sa.String(35),
+        nullable=False,
+        server_default="en-US",
+    )
 
     created_at: Mapped[datetime.datetime] = mapped_column(
         TimeZoneDateTime,

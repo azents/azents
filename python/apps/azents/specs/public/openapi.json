@@ -7523,6 +7523,51 @@
             "HTTPBearer": []
           }
         ]
+      },
+      "patch": {
+        "tags": [
+          "User v1"
+        ],
+        "summary": "Update Me",
+        "description": "Update the currently authenticated user's account settings.",
+        "operationId": "user_v1_update_me",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMyUserRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
       }
     },
     "/user/v1/me/system-roles": {
@@ -7767,7 +7812,7 @@
           "WorkspaceUser v1"
         ],
         "summary": "Update My Profile",
-        "description": "Update the current user's workspace profile.\n\nName, locale, and similar fields can be changed.",
+        "description": "Update the current user's workspace profile.\n\nName and similar workspace profile fields can be changed.",
         "operationId": "workspaceuser_v1_update_my_profile",
         "security": [
           {
@@ -12298,12 +12343,6 @@
             "type": "string",
             "title": "Owner Name",
             "description": "Owner display name"
-          },
-          "locale": {
-            "type": "string",
-            "title": "Locale",
-            "description": "Locale (BCP 47)",
-            "default": "ko-KR"
           }
         },
         "type": "object",
@@ -14070,6 +14109,11 @@
             "title": "Email",
             "description": "Primary email address"
           },
+          "locale": {
+            "type": "string",
+            "title": "Locale",
+            "description": "Account locale (BCP 47)"
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -14080,6 +14124,7 @@
         "type": "object",
         "required": [
           "email",
+          "locale",
           "created_at"
         ],
         "title": "MeResponse",
@@ -17806,23 +17851,32 @@
             ],
             "title": "Name",
             "description": "Display name to change to"
-          },
-          "locale": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Locale",
-            "description": "Locale to change to (BCP 47)"
           }
         },
         "type": "object",
         "title": "UpdateMyProfileRequest",
         "description": "Own workspace profile update request schema."
+      },
+      "UpdateMyUserRequest": {
+        "properties": {
+          "locale": {
+            "type": "string",
+            "enum": [
+              "en-US",
+              "ko-KR",
+              "ja-JP",
+              "fr-FR"
+            ],
+            "title": "Locale",
+            "description": "Account locale (BCP 47)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "locale"
+        ],
+        "title": "UpdateMyUserRequest",
+        "description": "Current user update request."
       },
       "UpdateWorkspaceUserRoleRequest": {
         "properties": {
@@ -18243,11 +18297,6 @@
             "title": "Name",
             "description": "Workspace display name"
           },
-          "locale": {
-            "type": "string",
-            "title": "Locale",
-            "description": "Workspace locale (BCP 47)"
-          },
           "role": {
             "$ref": "#/components/schemas/WorkspaceUserRole",
             "description": "Role (owner, manager, member)"
@@ -18271,7 +18320,6 @@
           "workspace_id",
           "user_id",
           "name",
-          "locale",
           "role",
           "created_at",
           "updated_at"

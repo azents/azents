@@ -35,8 +35,7 @@ class TestUpdateMyProfileRequest(unittest.TestCase):
         model = UpdateMyProfileRequest()
         if include_optional:
             return UpdateMyProfileRequest(
-                name = '',
-                locale = ''
+                name = ''
             )
         else:
             return UpdateMyProfileRequest(

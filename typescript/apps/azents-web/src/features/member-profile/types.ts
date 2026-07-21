@@ -6,7 +6,6 @@
 export interface MemberProfile {
   id: string;
   name: string;
-  locale: string;
   role: string;
   createdAt: string;
   updatedAt: string;

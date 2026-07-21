@@ -67,7 +67,6 @@ class _FakeWorkspaceUserRepository(WorkspaceUserRepository):
                 workspace_id=workspace_id,
                 user_id=user_id,
                 name="User",
-                locale="ko-KR",
                 role=WorkspaceUserRole.MEMBER,
                 created_at=_NOW,
                 updated_at=_NOW,

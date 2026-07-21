@@ -30,10 +30,11 @@ class UserResponse(BaseModel):
     id: StrictStr = Field(description="User ID (UUID7 hex)")
     primary_email_id: StrictStr = Field(description="Primary email ID")
     primary_email: StrictStr = Field(description="Primary email address")
+    locale: StrictStr = Field(description="Account locale (BCP 47)")
     created_at: datetime = Field(description="Created time")
     updated_at: datetime = Field(description="Updated time")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "primary_email_id", "primary_email", "created_at", "updated_at"]
+    __properties: ClassVar[List[str]] = ["id", "primary_email_id", "primary_email", "locale", "created_at", "updated_at"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -96,6 +97,7 @@ class UserResponse(BaseModel):
             "id": obj.get("id"),
             "primary_email_id": obj.get("primary_email_id"),
             "primary_email": obj.get("primary_email"),
+            "locale": obj.get("locale"),
             "created_at": obj.get("created_at"),
             "updated_at": obj.get("updated_at")
         })

@@ -138,6 +138,8 @@
     "headline": "계정 설정",
     "email": "이메일",
     "createdAt": "가입일",
+    "localeLabel": "언어",
+    "saveLocale": "언어 저장",
     "sidebar": {
       "workspaces": "워크스페이스 목록",
       "general": "일반",

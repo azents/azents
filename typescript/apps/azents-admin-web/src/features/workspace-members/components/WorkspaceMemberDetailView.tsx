@@ -95,13 +95,6 @@ export function WorkspaceMemberDetailView({
 
               <Stack gap="xs">
                 <Text size="sm" fw={500} c="dimmed">
-                  로케일
-                </Text>
-                <Badge variant="light">{member.locale}</Badge>
-              </Stack>
-
-              <Stack gap="xs">
-                <Text size="sm" fw={500} c="dimmed">
                   역할
                 </Text>
                 <Badge variant="light">{member.role}</Badge>

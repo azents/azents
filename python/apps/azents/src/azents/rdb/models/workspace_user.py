@@ -54,11 +54,6 @@ class RDBWorkspaceUser(RDBModel):
     role: Mapped[WorkspaceUserRole] = mapped_column(
         workspace_user_role_enum, nullable=False
     )
-    locale: Mapped[str] = mapped_column(
-        sa.String(35),
-        nullable=False,
-        default="ko-KR",
-    )
 
     created_at: Mapped[datetime.datetime] = mapped_column(
         TimeZoneDateTime,

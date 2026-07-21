@@ -55,8 +55,8 @@ api_routes:
   - /chat/v1/agents/{agent_id}/workspace/project-browser-manifest/preview
   - /chat/v1/agents/{agent_id}/git-refs
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
-last_verified_at: 2026-07-19
-spec_version: 41
+last_verified_at: 2026-07-21
+spec_version: 42
 ---
 
 # Workspace & Membership
@@ -93,7 +93,6 @@ erDiagram
         string user_id FK
         string name
         string role "OWNER|MANAGER|MEMBER"
-        string locale
     }
     WORKSPACE_INVITATION {
         string id PK
@@ -149,7 +148,7 @@ erDiagram
 ```
 
 - **Workspace** — organization container. `handle` is globally unique and used as URL identifier.
-- **WorkspaceUser** — User × Workspace membership profile. Stores role, display name, and locale.
+- **WorkspaceUser** — User × Workspace membership profile. Stores role and display name.
 - **WorkspaceInvitation** — email-based invitation. `(workspace_id, email)` is unique.
 - **WorkspaceJoinRequest** — user → Workspace join request. `(workspace_id, user_id)` is unique.
 - **SessionWorkspaceProject** — session-owned row registering an already-existing directory inside AgentRuntime's Agent Workspace as Project boundary.
@@ -429,7 +428,7 @@ stateDiagram-v2
 - **Workspace** — top-level unit of Azents service. Space where users create agents and collaborate; shared boundary for all resources.
 - **Agent Workspace** — durable Runtime working directory owned by AgentRuntime. Absolute path is Provider metadata. Current Kubernetes/Docker Provider v1 reports `/workspace/agent` by default, but server/API contract does not hardcode this value. It is not the Workspace/Membership domain in this document; lifecycle/persistence contract is covered in `spec/flow/agent-runtime-control.md` and `spec/flow/agent-runtime-persistence.md`.
 - **Handle** — globally unique URL slug identifier of Workspace.
-- **WorkspaceUser** — Workspace × User membership. Has role, display name, and locale.
+- **WorkspaceUser** — Workspace × User membership. Has role and display name.
 - **Role** — permission hierarchy OWNER / MANAGER / MEMBER (`WorkspaceUserRole`).
 - **Invitation** — email-based invitation. PENDING/ACCEPTED/DECLINED state (`InvitationStatus`).
 - **Join Request** — external user's join request. PENDING/MUTED state (`JoinRequestStatus`).

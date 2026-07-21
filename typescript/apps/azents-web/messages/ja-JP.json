@@ -138,6 +138,8 @@
     "headline": "アカウント設定",
     "email": "メールアドレス",
     "createdAt": "登録日",
+    "localeLabel": "言語",
+    "saveLocale": "言語を保存",
     "sidebar": {
       "workspaces": "ワークスペース一覧",
       "general": "一般",

@@ -19,14 +19,12 @@ const WorkspaceMemberCreateInput = z.object({
   workspace_handle: z.string(),
   user_id: z.string(),
   name: z.string().min(1).max(100),
-  locale: z.string().min(1).max(10),
   role: z.enum(["owner", "manager", "member"]),
 });
 
 const WorkspaceMemberUpdateInput = z.object({
   workspace_user_id: z.string(),
   name: z.string().min(1).max(100).optional(),
-  locale: z.string().min(1).max(10).optional(),
 });
 
 // --- Router ---

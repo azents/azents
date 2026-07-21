@@ -16,7 +16,6 @@ class WorkspaceUser(BaseModel):
     workspace_id: str = Field(description="Owning Workspace ID")
     user_id: str = Field(description="User ID")
     name: str = Field(description="Workspace display name")
-    locale: str = Field(description="Workspace locale (BCP 47)")
     role: WorkspaceUserRole = Field(description="Role (owner, manager, member)")
     created_at: datetime.datetime = Field(description="Created time")
     updated_at: datetime.datetime = Field(description="Updated time")
@@ -33,7 +32,6 @@ class WorkspaceUserCreate(BaseModel):
     workspace_id: str = Field(description="Owning Workspace ID")
     user_id: str = Field(description="User ID")
     name: str = Field(description="Workspace display name")
-    locale: str = Field(default="ko-KR", description="Workspace locale (BCP 47)")
     role: WorkspaceUserRole = Field(description="Role (owner, manager, member)")
 
 
@@ -41,7 +39,6 @@ class WorkspaceUserUpdate(TypedDict, total=False):
     """WorkspaceUser update schema (partial update)."""
 
     name: str
-    locale: str
 
 
 class WorkspaceUserList(BaseModel):
