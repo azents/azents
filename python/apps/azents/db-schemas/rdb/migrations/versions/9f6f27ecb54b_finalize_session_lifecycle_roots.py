@@ -138,11 +138,11 @@ def _replace_foreign_key(
             SELECT constraint_name
             INTO existing_constraint_name
             FROM information_schema.key_column_usage AS usage
-            JOIN information_schema.table_constraints AS constraint
-              ON constraint.constraint_catalog = usage.constraint_catalog
-             AND constraint.constraint_schema = usage.constraint_schema
-             AND constraint.constraint_name = usage.constraint_name
-            WHERE constraint.constraint_type = 'FOREIGN KEY'
+            JOIN information_schema.table_constraints AS table_constraint
+              ON table_constraint.constraint_catalog = usage.constraint_catalog
+             AND table_constraint.constraint_schema = usage.constraint_schema
+             AND table_constraint.constraint_name = usage.constraint_name
+            WHERE table_constraint.constraint_type = 'FOREIGN KEY'
               AND usage.table_schema = current_schema()
               AND usage.table_name = '{table_name}'
               AND usage.column_name = '{column_name}'
