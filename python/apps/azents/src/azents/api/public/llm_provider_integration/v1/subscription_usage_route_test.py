@@ -232,7 +232,7 @@ def test_all_response_variants_serialize_discriminators_and_aware_times() -> Non
     assert unavailable_response.fetched_at.tzinfo is not None
 
 
-def test_subscription_usage_response_normalizes_timestamps_to_utc() -> None:
+def test_subscription_usage_response_ensures_timezone_aware_timestamps() -> None:
     """Serialize provider timestamps with an explicit UTC offset.
 
     Browser clients can then localize the instant correctly.
@@ -277,16 +277,16 @@ def test_subscription_usage_response_normalizes_timestamps_to_utc() -> None:
 
     assert isinstance(response, SubscriptionUsageAvailableResponse)
     assert response.fetched_at == naive.replace(tzinfo=datetime.UTC)
-    assert response.limits[0].resets_at == datetime.datetime(
-        2026, 7, 28, 6, 5, tzinfo=datetime.UTC
-    )
+    assert response.limits[0].resets_at == offset
     assert isinstance(
         response.financial_details, ChatGPTSubscriptionFinancialDetailsResponse
     )
-    assert response.financial_details.spend_resets_at == datetime.datetime(
-        2026, 7, 28, 6, 5, tzinfo=datetime.UTC
-    )
-    assert '"resets_at":"2026-07-28T06:05:00Z"' in response.model_dump_json()
+    assert response.financial_details.spend_resets_at is not None
+    assert response.financial_details.spend_resets_at == offset
+    assert response.financial_details.spend_resets_at.utcoffset() == offset.utcoffset()
+    assert '"fetched_at":"2026-07-28T02:05:00Z"' in response.model_dump_json()
+    assert '"resets_at":"2026-07-28T02:05:00-04:00"' in response.model_dump_json()
+    assert '"spend_resets_at":"2026-07-28T02:05:00-04:00"' in response.model_dump_json()
 
 
 def test_all_public_union_discriminators_are_required() -> None:

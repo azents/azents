@@ -349,7 +349,9 @@ class SubscriptionUsageLimitResponse(BaseModel):
             used_percent=data.used_percent,
             window_minutes=data.window_minutes,
             resets_at=(
-                _utc_datetime(data.resets_at) if data.resets_at is not None else None
+                _ensure_timezone_aware_datetime(data.resets_at)
+                if data.resets_at is not None
+                else None
             ),
             primary=data.primary,
         )
@@ -382,7 +384,7 @@ class ChatGPTSubscriptionFinancialDetailsResponse(BaseModel):
             spend_used=data.spend_used,
             spend_remaining_percent=data.spend_remaining_percent,
             spend_resets_at=(
-                _utc_datetime(data.spend_resets_at)
+                _ensure_timezone_aware_datetime(data.spend_resets_at)
                 if data.spend_resets_at is not None
                 else None
             ),
@@ -476,7 +478,7 @@ class SubscriptionUsageAvailableResponse(BaseModel):
             type="available",
             integration_id=data.integration_id,
             provider=_subscription_usage_provider(data.provider),
-            fetched_at=_utc_datetime(data.fetched_at),
+            fetched_at=_ensure_timezone_aware_datetime(data.fetched_at),
             plan_label=data.plan_label,
             limits=[
                 SubscriptionUsageLimitResponse.convert_from(limit)
@@ -509,7 +511,7 @@ class SubscriptionUsageExternalResponse(BaseModel):
             type="external",
             integration_id=data.integration_id,
             provider=_subscription_usage_provider(data.provider),
-            fetched_at=_utc_datetime(data.fetched_at),
+            fetched_at=_ensure_timezone_aware_datetime(data.fetched_at),
             url=HttpUrl(data.url),
             message=data.message,
         )
@@ -535,7 +537,7 @@ class SubscriptionUsageUnavailableResponse(BaseModel):
             type="unavailable",
             integration_id=data.integration_id,
             provider=_subscription_usage_provider(data.provider),
-            fetched_at=_utc_datetime(data.fetched_at),
+            fetched_at=_ensure_timezone_aware_datetime(data.fetched_at),
             reason=data.reason,
             message=data.message,
             retryable=data.retryable,
@@ -595,8 +597,8 @@ def _subscription_usage_provider(provider: LLMProvider) -> SubscriptionUsageProv
     raise ValueError(msg)
 
 
-def _utc_datetime(value: datetime.datetime) -> datetime.datetime:
-    """Normalize subscription usage timestamps to aware UTC datetimes."""
+def _ensure_timezone_aware_datetime(value: datetime.datetime) -> datetime.datetime:
+    """Interpret naive subscription timestamps as UTC without changing offsets."""
     if value.tzinfo is None:
         return value.replace(tzinfo=datetime.UTC)
-    return value.astimezone(datetime.UTC)
+    return value
