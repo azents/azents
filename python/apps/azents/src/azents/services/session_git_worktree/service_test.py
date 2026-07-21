@@ -524,6 +524,7 @@ def _input_service(
             event_transcript_repository=EventTranscriptRepository(),
             agent_run_repository=AgentRunRepository(),
             action_execution_repository=ActionExecutionRepository(),
+            vfs_projection_service=None,
         ),
         session_manager=session_manager,
     )
@@ -552,6 +553,7 @@ async def _execute_first_setup_action(
         event_transcript_repository=EventTranscriptRepository(),
         agent_run_repository=AgentRunRepository(),
         action_execution_repository=ActionExecutionRepository(),
+        vfs_projection_service=None,
     ).flush_session_input_buffers(
         session_id=session_id,
         model=None,

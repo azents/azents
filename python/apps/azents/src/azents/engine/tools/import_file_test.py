@@ -8,6 +8,7 @@ import pytest
 from azcommon.result import Failure, Success
 
 from azents.core.enums import ArtifactStatus, ExchangeFileOrigin, ExchangeFileStatus
+from azents.core.vfs import make_vfs_projection, make_vfs_source_revision
 from azents.engine.run.types import FunctionToolError
 from azents.engine.tools.import_file import make_import_file_tool
 from azents.engine.tools.testing import FakeSharedStorage
@@ -15,6 +16,7 @@ from azents.repos.artifact.data import Artifact
 from azents.repos.exchange_file.data import ExchangeFile
 from azents.services.artifact import ArtifactDownload, ArtifactExpired
 from azents.services.exchange_file import ExchangeFileDownload, FileNotFound
+from azents.services.vfs import VfsResolvedFile
 
 _NOW = datetime.datetime.now(datetime.timezone.utc)
 
@@ -42,6 +44,36 @@ def _make_artifact() -> Artifact:
 def _make_artifact_service() -> AsyncMock:
     """Create ArtifactService mock for tests."""
     return AsyncMock()
+
+
+class _VfsService:
+    """VfsProjectionService test double for one managed resource."""
+
+    def __init__(self) -> None:
+        revision = make_vfs_source_revision(
+            source_id="release:azents",
+            source_kind="global_release",
+            namespace="azents",
+            entries=[
+                (
+                    "azents://skills/azents/deep-research/references/checklist.md",
+                    b"# Evidence checklist",
+                    "text/markdown",
+                )
+            ],
+        )
+        self.projection = make_vfs_projection([revision])
+
+    async def resolve_file(self, **kwargs: object) -> VfsResolvedFile:
+        """Return the fixture entry from the run projection."""
+        entry = self.projection.find(str(kwargs["uri"]))
+        if entry is None:
+            raise AssertionError("Missing VFS fixture entry")
+        return VfsResolvedFile(
+            projection_revision_id=self.projection.revision_id,
+            projection_hash=self.projection.projection_hash,
+            entry=entry,
+        )
 
 
 def _make_exchange_file() -> ExchangeFile:
@@ -88,8 +120,11 @@ async def test_import_file_writes_exchange_body_to_runtime() -> None:
         session_storage=storage,
         exchange_file_service=service,
         artifact_service=_make_artifact_service(),
+        vfs_projection_service=None,
         session_id="session-1",
         agent_id="agent-1",
+        workspace_id="workspace-1",
+        run_id="run-1",
         user_id="user-1",
     )
 
@@ -120,8 +155,11 @@ async def test_import_file_defaults_to_tmp_uploads_path() -> None:
         session_storage=storage,
         exchange_file_service=service,
         artifact_service=_make_artifact_service(),
+        vfs_projection_service=None,
         session_id="session-1",
         agent_id="agent-1",
+        workspace_id="workspace-1",
+        run_id="run-1",
         user_id="user-1",
     )
 
@@ -146,8 +184,11 @@ async def test_import_file_warns_for_explicit_tmp_path() -> None:
         session_storage=storage,
         exchange_file_service=service,
         artifact_service=_make_artifact_service(),
+        vfs_projection_service=None,
         session_id="session-1",
         agent_id="agent-1",
+        workspace_id="workspace-1",
+        run_id="run-1",
         user_id="user-1",
     )
 
@@ -170,8 +211,11 @@ async def test_import_file_reports_missing_exchange_file() -> None:
         session_storage=storage,
         exchange_file_service=service,
         artifact_service=_make_artifact_service(),
+        vfs_projection_service=None,
         session_id="session-1",
         agent_id="agent-1",
+        workspace_id="workspace-1",
+        run_id="run-1",
         user_id="user-1",
     )
 
@@ -194,8 +238,11 @@ async def test_import_file_allows_arbitrary_absolute_destination() -> None:
         session_storage=storage,
         exchange_file_service=service,
         artifact_service=_make_artifact_service(),
+        vfs_projection_service=None,
         session_id="session-1",
         agent_id="agent-1",
+        workspace_id="workspace-1",
+        run_id="run-1",
         user_id="user-1",
     )
 
@@ -227,8 +274,11 @@ async def test_import_file_writes_artifact_body_to_runtime() -> None:
         session_storage=storage,
         exchange_file_service=exchange_service,
         artifact_service=artifact_service,
+        vfs_projection_service=None,
         session_id="session-1",
         agent_id="agent-1",
+        workspace_id="workspace-1",
+        run_id="run-1",
         user_id="user-1",
     )
 
@@ -252,8 +302,11 @@ async def test_import_file_dedupes_default_destination() -> None:
         session_storage=storage,
         exchange_file_service=service,
         artifact_service=_make_artifact_service(),
+        vfs_projection_service=None,
         session_id="session-1",
         agent_id="agent-1",
+        workspace_id="workspace-1",
+        run_id="run-1",
         user_id="user-1",
     )
 
@@ -275,8 +328,11 @@ async def test_import_file_fails_explicit_destination_conflict() -> None:
         session_storage=storage,
         exchange_file_service=service,
         artifact_service=_make_artifact_service(),
+        vfs_projection_service=None,
         session_id="session-1",
         agent_id="agent-1",
+        workspace_id="workspace-1",
+        run_id="run-1",
         user_id="user-1",
     )
 
@@ -292,6 +348,34 @@ async def test_import_file_fails_explicit_destination_conflict() -> None:
 
 
 @pytest.mark.asyncio
+async def test_import_file_writes_current_run_vfs_resource() -> None:
+    """Materialize one verified azents:// resource through the existing path."""
+    storage = FakeSharedStorage()
+    service = _VfsService()
+    uri = "azents://skills/azents/deep-research/references/checklist.md"
+    tool = make_import_file_tool(
+        session_storage=storage,
+        exchange_file_service=AsyncMock(),
+        artifact_service=AsyncMock(),
+        vfs_projection_service=service,  # pyright: ignore[reportArgumentType]
+        session_id="session-1",
+        agent_id="agent-1",
+        workspace_id="workspace-1",
+        run_id="run-1",
+        user_id="user-1",
+    )
+
+    result = await tool.handler(json.dumps({"uri": uri}))
+
+    assert isinstance(result, str)
+    assert "azents" in result
+    assert uri in result
+    assert storage.put_calls == [
+        ("/tmp/agent/imports/checklist.md", b"# Evidence checklist")
+    ]
+
+
+@pytest.mark.asyncio
 async def test_import_file_reports_expired_artifact() -> None:
     """Propagate expired Artifact access failure as tool error."""
     storage = FakeSharedStorage()
@@ -301,8 +385,11 @@ async def test_import_file_reports_expired_artifact() -> None:
         session_storage=storage,
         exchange_file_service=AsyncMock(),
         artifact_service=artifact_service,
+        vfs_projection_service=None,
         session_id="session-1",
         agent_id="agent-1",
+        workspace_id="workspace-1",
+        run_id="run-1",
         user_id="user-1",
     )
 

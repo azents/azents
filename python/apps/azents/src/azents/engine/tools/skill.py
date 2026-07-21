@@ -5,7 +5,7 @@ import hashlib
 import json
 import logging
 import posixpath
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Any, Literal, assert_never
@@ -25,6 +25,13 @@ from azents.core.tools import (
     ToolkitState,
     ToolkitStatus,
     TurnContext,
+)
+from azents.core.vfs import (
+    AZENTS_VFS_SKILLS_MOUNT,
+    VfsFileEntry,
+    VfsProjection,
+    VfsUriError,
+    canonicalize_vfs_uri,
 )
 from azents.engine.hooks.types import (
     RunEndHookContext,
@@ -53,6 +60,7 @@ from azents.rdb.session import SessionManager
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.session_workspace_project.data import SessionWorkspaceProject
+from azents.services.vfs import VfsFileResolutionError, VfsProjectionService
 from azents.transport.chat import chat_input_actions_updated_dump
 
 logger = logging.getLogger(__name__)
@@ -66,7 +74,7 @@ SKILL_MARKDOWN_FILENAME = "SKILL.md"
 _SKILL_READ_MAX_BYTES = 512 * 1024
 _RUNNER_FILE_OPERATION_TIMEOUT_SECONDS = 10
 
-SkillSourceKind = Literal["agent", "project_agents", "project_claude"]
+SkillSourceKind = Literal["agent", "project_agents", "project_claude", "azents"]
 SyncReason = Literal[
     "session_start",
     "run_end",
@@ -89,7 +97,10 @@ class LoadSkillInput(BaseModel):
 
     skill_path: str = Field(
         min_length=1,
-        description="Exact absolute SKILL.md path from the Skills prompt.",
+        description=(
+            "Exact filesystem path or canonical azents:// SKILL.md URI from the "
+            "Skills prompt."
+        ),
     )
 
 
@@ -508,15 +519,19 @@ class SkillToolkit(Toolkit[SkillToolkitConfig]):
         self,
         *,
         store: SkillStateStore,
-        projection_service: SkillProjectionService | None = None,
-        agent_id: str = "",
-        session_id: str = "",
+        projection_service: SkillProjectionService | None,
+        vfs_projection_service: VfsProjectionService | None,
+        agent_id: str,
+        session_id: str,
+        workspace_id: str,
     ) -> None:
         """Create Skill Toolkit."""
         self.store = store
         self.projection_service = projection_service
+        self.vfs_projection_service = vfs_projection_service
         self._agent_id = agent_id
         self._session_id = session_id
+        self._workspace_id = workspace_id
         self._adopted_run_ids: set[str] = set()
         self._adopt_latest_on_next_turn = False
 
@@ -539,25 +554,42 @@ class SkillToolkit(Toolkit[SkillToolkitConfig]):
         }
 
     async def get_static_prompt(self, context: TurnContext) -> str:
-        """Render the active Skill index for the current run."""
+        """Render the combined active Skill index for the current run."""
         state = await self._active_state_for_context(context)
-        return render_skill_prompt(state.active)
+        managed = await self._managed_items(context.run_id)
+        return render_skill_items([*state.active.items, *managed])
 
     async def update_context(self, context: TurnContext) -> ToolkitState:
-        """Return load_skill only when the active projection has Skills."""
+        """Return load_skill when either Skill projection contains items."""
         state = await self._active_state_for_context(context)
-        if not state.active.items:
+        managed = await self._managed_items(context.run_id)
+        if not state.active.items and not managed:
             return ToolkitState(status=ToolkitStatus.ENABLED, tools=[])
         return ToolkitState(
             status=ToolkitStatus.ENABLED,
             tools=[
                 make_load_skill_tool(
                     store=self.store,
+                    vfs_projection_service=self.vfs_projection_service,
                     agent_id=self._agent_id,
                     session_id=self._session_id,
+                    workspace_id=self._workspace_id,
+                    run_id=context.run_id,
                 )
             ],
         )
+
+    async def _managed_items(self, run_id: str) -> list[SkillProjectionItem]:
+        """Load managed Skill entries from the exact current run projection."""
+        if self.vfs_projection_service is None:
+            return []
+        projection = await self.vfs_projection_service.load_run_projection(
+            run_id=run_id,
+            agent_id=self._agent_id,
+            session_id=self._session_id,
+            workspace_id=self._workspace_id,
+        )
+        return skill_items_from_vfs_projection(projection)
 
     async def _active_state_for_context(
         self, context: TurnContext
@@ -628,11 +660,13 @@ class SkillToolkitProvider(ToolkitProvider[SkillToolkitConfig]):
         self,
         *,
         store: SkillStateStore,
-        projection_service: SkillProjectionService | None = None,
+        projection_service: SkillProjectionService | None,
+        vfs_projection_service: VfsProjectionService | None,
     ) -> None:
         """Create Skill Toolkit provider."""
         self.store = store
         self.projection_service = projection_service
+        self.vfs_projection_service = vfs_projection_service
 
     async def resolve(
         self,
@@ -644,33 +678,133 @@ class SkillToolkitProvider(ToolkitProvider[SkillToolkitConfig]):
         return SkillToolkit(
             store=self.store,
             projection_service=self.projection_service,
+            vfs_projection_service=self.vfs_projection_service,
             agent_id=context.agent_id,
             session_id=context.session_id,
+            workspace_id=context.workspace_id,
         )
 
 
 def render_skill_prompt(snapshot: SkillProjectionSnapshot) -> str:
-    """Render stable model-visible Skill index."""
-    items = _dedupe_items_by_skill_path(snapshot.items)
-    if not items:
+    """Render a filesystem Skill snapshot for compatibility callers."""
+    return render_skill_items(snapshot.items)
+
+
+def render_skill_items(items: Sequence[SkillProjectionItem]) -> str:
+    """Render a stable model-visible Skill index from combined sources."""
+    rendered_items = _dedupe_items_by_skill_path(items)
+    if not rendered_items:
         return ""
     lines = [_SKILL_PROMPT_HEADER.rstrip(), ""]
-    for item in items:
+    for item in rendered_items:
         lines.append(f"- **{item.name}**: {item.description}")
         lines.append(f"  Path: `{item.skill_path}`")
     return "\n".join(lines)
 
 
+def skill_items_from_vfs_projection(
+    projection: VfsProjection,
+) -> list[SkillProjectionItem]:
+    """Parse managed Skill entrypoints from one immutable VFS projection."""
+    items: list[SkillProjectionItem] = []
+    for entry in projection.entries:
+        if not _managed_skill_uri_parts(entry.canonical_uri):
+            continue
+        items.append(skill_item_from_vfs_entry(entry))
+    return _sort_skill_items(items)
+
+
+def skill_item_from_vfs_entry(entry: VfsFileEntry) -> SkillProjectionItem:
+    """Parse one verified managed SKILL.md VFS entry."""
+    parts = _managed_skill_uri_parts(entry.canonical_uri)
+    if parts is None:
+        raise ValueError("VFS entry is not a managed Skill entrypoint")
+    namespace, slug = parts
+    if entry.size_bytes > _SKILL_READ_MAX_BYTES:
+        raise ValueError(
+            f"Managed SKILL.md exceeds {_SKILL_READ_MAX_BYTES} bytes: "
+            f"{entry.canonical_uri}"
+        )
+    try:
+        body = entry.decode_body().decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError(
+            f"Managed SKILL.md is not UTF-8: {entry.canonical_uri}"
+        ) from exc
+    metadata = _parse_frontmatter(body)
+    description = _metadata_string(metadata, "description")
+    if not description:
+        raise ValueError(
+            f"Managed SKILL.md requires a description: {entry.canonical_uri}"
+        )
+    return SkillProjectionItem(
+        id=_stable_item_id(entry.canonical_uri),
+        source_kind="azents",
+        project_id=None,
+        project_path=None,
+        skill_dir_path=posixpath.dirname(entry.canonical_uri),
+        skill_path=entry.canonical_uri,
+        slug=slug,
+        name=_metadata_string(metadata, "name") or slug,
+        description=description,
+        frontmatter=metadata,
+        body=body,
+        content_hash=entry.content_hash,
+        source_label=namespace,
+        relative_hint=f"{namespace}/{slug}",
+    )
+
+
 def make_load_skill_tool(
     *,
     store: SkillStateStore,
+    vfs_projection_service: VfsProjectionService | None,
     agent_id: str,
     session_id: str,
+    workspace_id: str,
+    run_id: str,
 ) -> FunctionTool:
-    """Create load_skill FunctionTool."""
+    """Create load_skill FunctionTool for filesystem and managed Skills."""
 
     async def load_skill(args: LoadSkillInput) -> str:
-        """Load a projected filesystem Skill by exact SKILL.md path."""
+        """Load a Skill by exact active filesystem path or current-run VFS URI."""
+        if args.skill_path.startswith("azents://"):
+            if vfs_projection_service is None:
+                raise FunctionToolError("Managed Skill resolution is unavailable.")
+            try:
+                canonical_uri = canonicalize_vfs_uri(args.skill_path)
+                resolved = await vfs_projection_service.resolve_file(
+                    run_id=run_id,
+                    agent_id=agent_id,
+                    session_id=session_id,
+                    workspace_id=workspace_id,
+                    uri=canonical_uri,
+                )
+                item = skill_item_from_vfs_entry(resolved.entry)
+            except (VfsUriError, ValueError) as exc:
+                raise FunctionToolError(str(exc)) from None
+            except VfsFileResolutionError as exc:
+                raise FunctionToolError(exc.message) from None
+            metadata = {
+                "name": item.name,
+                "slug": item.slug,
+                "skill_path": item.skill_path,
+                "source_kind": item.source_kind,
+                "source_label": item.source_label,
+                "relative_hint": item.relative_hint,
+                "projection_revision_id": resolved.projection_revision_id,
+                "projection_hash": resolved.projection_hash,
+                "source_id": resolved.entry.source_id,
+                "source_revision_id": resolved.entry.source_revision_id,
+                "content_hash": item.content_hash,
+            }
+            return _loaded_skill_output(item, metadata=metadata)
+
+        if not args.skill_path.startswith("/"):
+            raise FunctionToolError(
+                "Skill path must be an absolute filesystem path or canonical "
+                "azents:// Skill URI."
+            )
         state = await store.load(agent_id, session_id)
         matches = [
             item
@@ -704,11 +838,7 @@ def make_load_skill_tool(
             "projection_revision_id": state.active.revision_id,
             "content_hash": item.content_hash,
         }
-        return (
-            "Skill loaded from the active projection.\n"
-            f"Metadata: {json.dumps(metadata, ensure_ascii=False, sort_keys=True)}\n\n"
-            f"{item.body}"
-        )
+        return _loaded_skill_output(item, metadata=metadata)
 
     return make_tool(load_skill, input_model=LoadSkillInput)
 
@@ -723,15 +853,64 @@ def skill_actions_from_snapshot(
 async def load_skill_projection_for_actions(
     store: SkillStateStore,
     *,
+    vfs_projection_service: VfsProjectionService | None,
     agent_id: str,
     session_id: str,
+    workspace_id: str,
     run_state: AgentSessionRunState,
+    active_run_id: str | None,
 ) -> SkillProjectionSnapshot:
-    """Choose latest or active Skill projection for composer actions."""
+    """Combine filesystem actions with an idle preview or exact run VFS view."""
     state = await store.load(agent_id, session_id)
-    if run_state == AgentSessionRunState.RUNNING:
-        return state.active
-    return state.latest
+    filesystem = (
+        state.active if run_state == AgentSessionRunState.RUNNING else state.latest
+    )
+    if vfs_projection_service is None:
+        return filesystem
+    projection = await vfs_projection_service.projection_for_actions(
+        agent_id=agent_id,
+        session_id=session_id,
+        workspace_id=workspace_id,
+        running=run_state == AgentSessionRunState.RUNNING,
+        active_run_id=active_run_id,
+    )
+    return filesystem.model_copy(
+        update={
+            "items": [
+                *filesystem.items,
+                *skill_items_from_vfs_projection(projection),
+            ]
+        }
+    )
+
+
+def _loaded_skill_output(
+    item: SkillProjectionItem,
+    *,
+    metadata: Mapping[str, object],
+) -> str:
+    """Render one loaded Skill result with bounded projection metadata."""
+    return (
+        "Skill loaded from the active projection.\n"
+        f"Metadata: {json.dumps(metadata, ensure_ascii=False, sort_keys=True)}\n\n"
+        f"{item.body}"
+    )
+
+
+def _managed_skill_uri_parts(uri: str) -> tuple[str, str] | None:
+    """Return namespace and slug for a canonical managed Skill entrypoint."""
+    try:
+        canonical_uri = canonicalize_vfs_uri(uri)
+    except VfsUriError:
+        return None
+    prefix = f"azents://{AZENTS_VFS_SKILLS_MOUNT}/"
+    if not canonical_uri.startswith(prefix):
+        return None
+    segments = canonical_uri[len(prefix) :].split("/")
+    if len(segments) != 3 or segments[2] != SKILL_MARKDOWN_FILENAME:
+        return None
+    namespace, slug, _ = segments
+    return namespace, slug
 
 
 def skill_action_id(skill_path: str) -> str:
@@ -939,6 +1118,8 @@ def _sha256_text(value: str) -> str:
 
 
 def _normalize_path(path: str) -> str:
+    if path.startswith("azents://"):
+        return canonicalize_vfs_uri(path)
     return PurePosixPath(posixpath.normpath(path)).as_posix()
 
 
@@ -950,6 +1131,8 @@ def _source_priority(source_kind: SkillSourceKind) -> int:
             return 1
         case "project_claude":
             return 2
+        case "azents":
+            return 3
         case _:
             assert_never(source_kind)
 

@@ -114,6 +114,7 @@ from azents.services.runtime_storage_error import (
     RuntimeStorageError,
 )
 from azents.services.session_storage import guess_media_type
+from azents.services.vfs import VfsProjectionService
 
 logger = logging.getLogger(__name__)
 
@@ -605,6 +606,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         exchange_file_service: ExchangeFileService,
         artifact_service: ArtifactService,
         model_file_service: ModelFileService,
+        vfs_projection_service: VfsProjectionService | None,
         agent_id: str,
         agents_store: AgentsAppendixDedupeStateStore,
         runner_operations: RuntimeRunnerOperationClient,
@@ -617,6 +619,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         self.exchange_file_service = exchange_file_service
         self.artifact_service = artifact_service
         self.model_file_service = model_file_service
+        self.vfs_projection_service = vfs_projection_service
         self._agent_id = agent_id
         self._runtime_agent_id = agent_id
         self._session_id: str = ""
@@ -764,8 +767,11 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
                 session_storage=file_ss,
                 exchange_file_service=self.exchange_file_service,
                 artifact_service=self.artifact_service,
+                vfs_projection_service=self.vfs_projection_service,
                 session_id=self._session_id,
                 agent_id=agent_id,
+                workspace_id=context.workspace_id,
+                run_id=context.run_id,
                 user_id=user_id or "",
             ),
             make_present_file_tool(
@@ -945,6 +951,9 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
                         "future turns. If a file is needed for later work, use "
                         "`import_file` and continue from the returned local path "
                         "inside the runtime workspace.",
+                        "Managed `azents://` resources are read-only and immutable "
+                        "for the current run. Use `import_file` to materialize one "
+                        "into the runtime workspace before reading or editing it.",
                     ]
                 )
         if projects:
@@ -1008,6 +1017,8 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
 
         Files shared through `exchange://` or `artifact://` URIs are temporary and may expire. Do not rely on those URIs for long-term storage across future turns. If a file should be kept for later work, use `import_file` and continue from the returned local path inside the runtime workspace.
 
+        Managed `azents://` resources are read-only and immutable for the current run. Use `import_file` to materialize a managed resource into the runtime workspace before reading or editing it.
+
         When the user attaches an `exchange://...` or `artifact://...` file-location URI, use `import_file` to copy it into the runtime workspace before reading or editing it.
 
         After creating files, use `present_file` to export them as `exchange://...` attachments for the user.""")  # noqa: E501
@@ -1018,6 +1029,7 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
         exchange_file_service: ExchangeFileService,
         artifact_service: ArtifactService,
         model_file_service: ModelFileService,
+        vfs_projection_service: VfsProjectionService | None,
         agents_store: AgentsAppendixDedupeStateStore,
         session_manager: SessionManager[AsyncSession],
         memory_repo: MemoryRepository,
@@ -1028,6 +1040,7 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
         self.exchange_file_service = exchange_file_service
         self.artifact_service = artifact_service
         self.model_file_service = model_file_service
+        self.vfs_projection_service = vfs_projection_service
         self.session_manager = session_manager
         self.memory_repo = memory_repo
         self.agent_runtime_repo = agent_runtime_repo
@@ -1056,6 +1069,7 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
             exchange_file_service=self.exchange_file_service,
             artifact_service=self.artifact_service,
             model_file_service=self.model_file_service,
+            vfs_projection_service=self.vfs_projection_service,
             agent_id=context.agent_id,
             session_manager=self.session_manager,
             agent_runtime_repo=self.agent_runtime_repo,

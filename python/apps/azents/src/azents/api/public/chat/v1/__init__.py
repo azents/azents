@@ -63,7 +63,10 @@ from azents.engine.events.action_messages import (
 from azents.engine.events.types import FileOutputPart
 from azents.engine.run.commands import COMMAND_REGISTRY, list_registered_commands
 from azents.engine.run.input import InputMessage
-from azents.engine.tools.deps import get_skill_state_store
+from azents.engine.tools.deps import (
+    get_skill_state_store,
+    get_vfs_projection_service,
+)
 from azents.engine.tools.skill import (
     SkillStateStore,
     load_skill_projection_for_actions,
@@ -162,6 +165,7 @@ from azents.services.session_workspace_project import (
     ProjectPathConflict,
     SessionWorkspaceProjectService,
 )
+from azents.services.vfs import VfsProjectionService
 from azents.transport.chat import (
     chat_history_event_appended_dump,
     chat_live_event_removed_dump,
@@ -2102,6 +2106,10 @@ async def list_input_actions(
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
     chat_service: Annotated[ChatSessionService, Depends()],
     skill_store: Annotated[SkillStateStore, Depends(get_skill_state_store)],
+    vfs_projection_service: Annotated[
+        VfsProjectionService | None,
+        Depends(get_vfs_projection_service),
+    ],
 ) -> InputActionListResponse:
     """Return composer actions available for a session."""
     _validate_session_id(session_id)
@@ -2130,9 +2138,12 @@ async def list_input_actions(
                 )
             skill_snapshot = await load_skill_projection_for_actions(
                 skill_store,
+                vfs_projection_service=vfs_projection_service,
                 agent_id=agent_session.agent_id,
                 session_id=session_id,
+                workspace_id=agent_session.workspace_id,
                 run_state=snapshot.session_run_state,
+                active_run_id=snapshot.run.run_id if snapshot.run is not None else None,
             )
             return InputActionListResponse(
                 items=[

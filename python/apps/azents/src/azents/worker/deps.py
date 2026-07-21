@@ -29,6 +29,7 @@ from azents.engine.tools.claude_rules import (
     ClaudeRulesToolkitProvider,
     ToolkitClaudeRulesAppendixDedupeStateStore,
 )
+from azents.engine.tools.deps import get_vfs_projection_service
 from azents.engine.tools.runtime_io import (
     RuntimeRunnerOperationClient as EngineRuntimeRunnerOperationClient,
 )
@@ -58,6 +59,7 @@ from azents.services.chat.live_events import RedisLiveEventStore
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.input_buffer import InputBufferService
 from azents.services.model_file import ModelFileService
+from azents.services.vfs import VfsProjectionService
 from azents.utils.appctx import AppContext
 
 from .config import AgentWorkerConfig
@@ -106,6 +108,10 @@ def get_skill_toolkit_provider(
         SessionManager[AsyncSession], Depends(get_session_manager)
     ],
     broadcast: Annotated[WebSocketBroadcast, Depends(get_broadcast)],
+    vfs_projection_service: Annotated[
+        VfsProjectionService,
+        Depends(get_vfs_projection_service),
+    ],
 ) -> SkillToolkitProvider:
     """SkillToolkitProvider dependency for Worker with runtime sync support."""
     store = SkillStateStore(session_manager=session_manager)
@@ -119,6 +125,7 @@ def get_skill_toolkit_provider(
             project_repository=SessionWorkspaceProjectRepository(),
             broadcast=broadcast,
         ),
+        vfs_projection_service=vfs_projection_service,
     )
 
 
@@ -146,12 +153,17 @@ def get_builtin_toolkit_provider(
     exchange_file_service: Annotated[ExchangeFileService, Depends(ExchangeFileService)],
     artifact_service: Annotated[ArtifactService, Depends(ArtifactService)],
     model_file_service: Annotated[ModelFileService, Depends(ModelFileService)],
+    vfs_projection_service: Annotated[
+        VfsProjectionService,
+        Depends(get_vfs_projection_service),
+    ],
 ) -> BuiltinToolkitProvider:
     """BuiltinToolkitProvider dependency for Worker."""
     return BuiltinToolkitProvider(
         exchange_file_service=exchange_file_service,
         artifact_service=artifact_service,
         model_file_service=model_file_service,
+        vfs_projection_service=vfs_projection_service,
         agents_store=ToolkitAgentsAppendixDedupeStateStore(
             session_manager=session_manager,
         ),

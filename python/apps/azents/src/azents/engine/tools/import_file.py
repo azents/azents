@@ -10,7 +10,9 @@ from azents.engine.run.types import FunctionTool, FunctionToolError
 from azents.engine.tooling.make_tool import make_tool
 from azents.engine.tools.import_resolver import (
     ArtifactImportResolver,
+    AzentsImportResolver,
     ExchangeImportResolver,
+    ImportFileResolver,
     ImportFileResolverRegistry,
     ImportResolveError,
 )
@@ -19,6 +21,7 @@ from azents.services.artifact import ArtifactService
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.file_storage import FileStorage
 from azents.services.runtime_storage_error import RuntimeStorageError
+from azents.services.vfs import VfsProjectionService
 
 logger = logging.getLogger(__name__)
 
@@ -30,8 +33,8 @@ class ImportFileInput(BaseModel):
 
     uri: str = Field(
         description=(
-            "File-location URI to import. Supports exchange:// and artifact:// "
-            "resources."
+            "File-location URI to import. Supports exchange://, artifact://, and "
+            "azents:// resources."
         ),
     )
     path: str | None = Field(
@@ -52,23 +55,33 @@ def make_import_file_tool(
     session_storage: FileStorage,
     exchange_file_service: ExchangeFileService,
     artifact_service: ArtifactService,
+    vfs_projection_service: VfsProjectionService | None,
     session_id: str,
     agent_id: str,
+    workspace_id: str,
+    run_id: str,
     user_id: str,
 ) -> FunctionTool:
     """Create import_file tool."""
-    resolver_registry = ImportFileResolverRegistry(
-        {
-            "exchange": ExchangeImportResolver(
-                exchange_file_service=exchange_file_service,
-                user_id=user_id,
-            ),
-            "artifact": ArtifactImportResolver(
-                artifact_service=artifact_service,
-                user_id=user_id,
-            ),
-        }
-    )
+    resolvers: dict[str, ImportFileResolver] = {
+        "exchange": ExchangeImportResolver(
+            exchange_file_service=exchange_file_service,
+            user_id=user_id,
+        ),
+        "artifact": ArtifactImportResolver(
+            artifact_service=artifact_service,
+            user_id=user_id,
+        ),
+    }
+    if vfs_projection_service is not None:
+        resolvers["azents"] = AzentsImportResolver(
+            vfs_projection_service=vfs_projection_service,
+            run_id=run_id,
+            agent_id=agent_id,
+            session_id=session_id,
+            workspace_id=workspace_id,
+        )
+    resolver_registry = ImportFileResolverRegistry(resolvers)
 
     async def handler(input: ImportFileInput) -> str:
         """Copy URI file into runtime workspace."""
@@ -141,10 +154,10 @@ def make_import_file_tool(
         name="import_file",
         description=(
             "Import a file-location URI into the runtime workspace. Supports "
-            "exchange:// and artifact:// resources. If path is omitted, the file "
-            "is written under /tmp/agent/imports/. Files under /tmp/agent/imports/ "
-            "are temporary; copy important files to a durable working directory "
-            "before presenting them."
+            "exchange://, artifact://, and current-run azents:// resources. If path "
+            "is omitted, the file is written under /tmp/agent/imports/. Files under "
+            "/tmp/agent/imports/ are temporary; copy important files to a durable "
+            "working directory before presenting them."
         ),
     )
 

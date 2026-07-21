@@ -248,6 +248,7 @@ def _input_buffer_service(
         event_transcript_repository=EventTranscriptRepository(),
         agent_run_repository=AgentRunRepository(),
         action_execution_repository=ActionExecutionRepository(),
+        vfs_projection_service=None,
     )
 
 

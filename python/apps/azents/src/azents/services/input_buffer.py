@@ -40,11 +40,13 @@ from azents.engine.events.user_messages import make_run_user_message
 from azents.engine.io.attachments import RuntimeAttachment
 from azents.engine.io.user_input import RunUserMessage
 from azents.engine.run.resolve import materialize_user_input_exchange_file_attachments
+from azents.engine.tools.deps import get_vfs_projection_service
 from azents.engine.tools.goal import GoalState, GoalStateSnapshot, GoalStateStore
 from azents.engine.tools.skill import (
     SkillProjectionItem,
     SkillStateStore,
     resolve_active_skill,
+    skill_item_from_vfs_entry,
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.models.event import JSONValue
@@ -58,6 +60,7 @@ from azents.repos.input_buffer import InputBufferRepository
 from azents.repos.input_buffer.data import InputBuffer, InputBufferCreate
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.session_title import initial_title_from_event
+from azents.services.vfs import VfsFileResolutionError, VfsProjectionService
 
 logger = logging.getLogger(__name__)
 _JSON_OBJECT_ADAPTER = TypeAdapter[dict[str, JSONValue]](dict[str, JSONValue])
@@ -177,6 +180,7 @@ class InputBufferPreparationContext:
 
     session: AsyncSession
     session_id: str
+    active_run_id: str | None
     required_inference_profile: RequestedInferenceProfile | None
     prepared_inference_state: SessionInferenceState | None
     prepared_files: PreparedInputBufferFiles
@@ -223,6 +227,10 @@ class InputBufferService:
     agent_run_repository: Annotated[AgentRunRepository, Depends(AgentRunRepository)]
     action_execution_repository: Annotated[
         ActionExecutionRepository, Depends(ActionExecutionRepository)
+    ]
+    vfs_projection_service: Annotated[
+        VfsProjectionService | None,
+        Depends(get_vfs_projection_service),
     ]
 
     async def enqueue(
@@ -463,6 +471,7 @@ class InputBufferService:
                 prepared_files=prepared_files,
                 profile_resolution_failure=profile_resolution_failure,
                 include_action_messages=include_action_messages,
+                active_run_id=active_run_id,
             )
             promoted = outcome.promoted
             if (
@@ -702,6 +711,7 @@ class InputBufferService:
         prepared_files: PreparedInputBufferFiles,
         profile_resolution_failure: str | None,
         include_action_messages: bool,
+        active_run_id: str | None,
     ) -> InputBufferPreparationOutcome:
         """Dispatch exactly one FIFO head to the closed processor registry."""
         if not claimed:
@@ -731,6 +741,7 @@ class InputBufferService:
         context = InputBufferPreparationContext(
             session=session,
             session_id=session_id,
+            active_run_id=active_run_id,
             required_inference_profile=required_inference_profile,
             prepared_inference_state=prepared_inference_state,
             prepared_files=prepared_files,
@@ -840,6 +851,7 @@ class InputBufferService:
         session_id: str,
         buffer: InputBuffer,
         action: SkillAction,
+        active_run_id: str | None,
         prepared_inference_state: SessionInferenceState | None,
         prepared_files: PreparedInputBufferFiles,
     ) -> list[_PromotedInputBuffer]:
@@ -850,13 +862,38 @@ class InputBufferService:
         )
         if agent_session is None:
             return [_system_error_promoted_buffer(buffer, "Session not found.")]
-        store = SkillStateStore(session_manager=self.session_manager)
-        state = await store.load_in_session(
-            session,
-            agent_session.agent_id,
-            session_id,
-        )
-        item = resolve_active_skill(state, skill_path=action.skill_path)
+        item: SkillProjectionItem | None
+        if action.skill_path.startswith("azents://"):
+            item = None
+            if active_run_id is not None and self.vfs_projection_service is not None:
+                try:
+                    resolved = await self.vfs_projection_service.resolve_file(
+                        run_id=active_run_id,
+                        agent_id=agent_session.agent_id,
+                        session_id=session_id,
+                        workspace_id=agent_session.workspace_id,
+                        uri=action.skill_path,
+                    )
+                    item = skill_item_from_vfs_entry(resolved.entry)
+                except (VfsFileResolutionError, ValueError) as exc:
+                    logger.warning(
+                        "Managed Skill action resolution failed",
+                        extra={
+                            "agent_id": agent_session.agent_id,
+                            "session_id": session_id,
+                            "run_id": active_run_id,
+                            "skill_path": action.skill_path,
+                            "error_type": type(exc).__name__,
+                        },
+                    )
+        else:
+            store = SkillStateStore(session_manager=self.session_manager)
+            state = await store.load_in_session(
+                session,
+                agent_session.agent_id,
+                session_id,
+            )
+            item = resolve_active_skill(state, skill_path=action.skill_path)
         if item is None:
             return [
                 _system_error_promoted_buffer(
@@ -1098,6 +1135,7 @@ class _SkillActionInputBufferProcessor:
             session_id=context.session_id,
             buffer=buffer,
             action=self.action,
+            active_run_id=context.active_run_id,
             prepared_inference_state=context.prepared_inference_state,
             prepared_files=context.prepared_files,
         )
