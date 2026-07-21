@@ -109,10 +109,21 @@ class SchedulerService:
         for definition in get_task_definitions():
             if not definition.enabled_by_default:
                 continue
-            state = await self._claim_definition(definition, now)
-            if state is None:
-                continue
-            await self._execute_claimed(definition, state)
+            try:
+                state = await self._claim_definition(definition, now)
+                if state is None:
+                    continue
+                await self._execute_claimed(definition, state)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception(
+                    "Scheduled task lifecycle failed",
+                    extra={
+                        "task_key": definition.key,
+                        "scheduler_id": self.scheduler_id,
+                    },
+                )
 
     async def _claim_definition(
         self,
