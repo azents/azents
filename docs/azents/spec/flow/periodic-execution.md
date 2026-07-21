@@ -24,8 +24,8 @@ code_paths:
   - infra/argocd/azents-server/base/scheduler-pdb.yaml
   - infra/charts/azents/templates/server/scheduler-deployment.yaml.tpl
   - infra/charts/azents/templates/server/scheduler-pdb.yaml.tpl
-last_verified_at: 2026-07-19
-spec_version: 4
+last_verified_at: 2026-07-21
+spec_version: 5
 ---
 
 # Periodic Execution Flow Spec
@@ -101,7 +101,11 @@ Each loop iteration:
 5. Records success or failure and releases the lease.
 6. Sleeps until the next poll interval or shutdown signal.
 
-Shutdown stops future polling through an asyncio shutdown event. The scheduler re-raises `asyncio.CancelledError` and records ordinary handler exceptions as task failures.
+Shutdown stops future polling through an asyncio shutdown event. The scheduler re-raises
+`asyncio.CancelledError`. Every other exception in one task lifecycle—including claim, handler,
+success/failure state recording, and task-result logging—is isolated to that task and does not stop
+later registered tasks in the same scheduler process. If failure-state recording itself fails, the
+task's existing lease is left for expiry and a later scheduler loop may reclaim it.
 
 ## Row lease
 
@@ -240,3 +244,4 @@ Model catalog source sync is a later consumer of this scheduler.
 ## Changelog
 
 - **2026-07-19** — v4. Added the durable archived-session retention recalculation and purge tasks, including intervals, leases, bounded batching, stale-job reconciliation, fencing, retry, and cleanup ordering.
+- **2026-07-21** — v5. Isolated ordinary scheduler task lifecycle failures so one task cannot terminate the scheduler process; cancellation remains a scheduler shutdown signal.
