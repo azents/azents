@@ -105,11 +105,15 @@ export default async function RootAppLayout({
     initialPreference === "system" ? "auto" : initialResolvedMode;
 
   return (
-    <html lang={htmlLang} suppressHydrationWarning>
+    <html
+      lang={htmlLang}
+      className={`${GeistSans.variable} ${GeistMono.variable}`}
+      suppressHydrationWarning
+    >
       <head>
         <ColorSchemeScript defaultColorScheme={colorScheme} />
       </head>
-      <body className={`${GeistSans.variable} ${GeistMono.variable}`}>
+      <body className={GeistSans.className}>
         <NextIntlClientProvider messages={messages}>
           <AppMantineProvider defaultColorScheme={colorScheme}>
             <TRPCProvider>
