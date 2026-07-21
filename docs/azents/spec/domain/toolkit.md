@@ -7,9 +7,11 @@ domain: toolkit
 owner: "@Hardtack"
 code_paths:
   - python/apps/azents/src/azents/core/tools.py
+  - python/apps/azents/src/azents/core/vfs.py
   - python/apps/azents/src/azents/toolkit/**
   - python/apps/azents/src/azents/shell_environment/**
   - python/apps/azents/src/azents/services/toolkit/**
+  - python/apps/azents/src/azents/services/vfs.py
   - python/apps/azents/src/azents/services/github_platform_system_setting/runtime.py
   - python/apps/azents/src/azents/services/github_platform_system_setting/binding.py
   - python/apps/azents/src/azents/api/public/toolkit/v1/**
@@ -40,8 +42,8 @@ code_paths:
 api_routes:
   - /toolkit/v1
   - /shell-environment/v1
-last_verified_at: 2026-07-20
-spec_version: 62
+last_verified_at: 2026-07-21
+spec_version: 63
 ---
 
 # Toolkit
@@ -50,11 +52,12 @@ spec_version: 62
 
 Toolkit is the **tool bundle** that an azents agent mounts to interact with the outside world. One ToolkitConfig consists of (a) **tool type (`toolkit_type`)**, (b) provider-specific **config** (for example MCP server URL, GCP project ID, GitHub toolsets), and (c) encrypted **credentials**. Workspace managers create toolkits and expose them to agents through workspace-level `ToolkitScope`.
 
-This domain covers three feature groups.
+This domain covers four feature groups.
 
 1. **Toolkit bundle** — external service integration tools such as MCP / GitHub / GCP / AWS / Notion / Sentry / GoogleAnalytics / Kubernetes. Implemented by three tables: `ToolkitConfig` + `ToolkitScope` + `AgentToolkit`.
 2. **MCP OAuth2 connection** — toolkit-level OAuth2 client/token state for remote MCP servers. Implemented by `MCPOAuthConnection`.
 3. **ShellEnvironment** — Agent Runtime network domain restriction profile. Implemented by `ShellEnvironment` + `ShellEnvironmentScope`. Unlike other toolkits, Shell is **not mounted through AgentToolkit** and is injected directly into Runtime settings.
+4. **Managed Skill VFS** — immutable run-scoped `azents://` resources for release-bundled global and Toolkit Provider Skills. Managed files remain outside the Runtime filesystem until `import_file` materializes one selected entry.
 
 All credentials are stored in DB with Fernet (`AZ_CREDENTIAL_ENCRYPTION_KEY`) symmetric encryption and are never exposed in agent prompt. (`CredentialCipher`, [`python/apps/azents/src/azents/core/crypto.py`](../../../../python/apps/azents/src/azents/core/crypto.py))
 
@@ -125,6 +128,26 @@ github__azents__get_file_contents
 The slug prefix is only a tool-call namespace. Toolkit State uses its own `toolkit_namespace` field and is not derived automatically from the model-visible tool name.
 
 Final provider-facing client tools are canonicalized by model-visible tool name before lowering to the model request. Toolkit-local generation may use whatever construction order is convenient, but `ToolCatalog.native_tools` is name-sorted so identical toolkit configuration and identical successful toolkit state produce stable function-tool ordering. Provider-hosted tools are also sorted by stable semantic name/config before request lowering when more than one hosted tool is present.
+
+### Managed Skill VFS
+
+Azents-managed Skill packages use a read-only virtual filesystem distinct from the Agent Runtime filesystem. The first registered mount is `skills`, and every managed Skill entrypoint has the canonical form:
+
+```text
+azents://skills/{namespace}/{skill}/SKILL.md
+```
+
+The `azents` namespace contains global release-bundled packages. A Toolkit Provider may expose one release resource root under the namespace equal to its stable Provider slug, such as `github`. A Provider package is eligible only when the Agent has an enabled attachment to an enabled ToolkitConfig of that Provider type. Credential state, provider connection health, and the Workspace-local ToolkitConfig slug do not change content eligibility or rewrite the URI. The initial projection records source identity but not a concrete ToolkitConfig tool prefix, so managed package instructions cannot assume one Workspace-local prefix.
+
+Every AgentRun stores one self-contained immutable VFS projection in `agent_runs.vfs_projection`. The projection records schema and revision identity, deterministic source records, canonical entries, content hashes, media types, decoded sizes, and Base64 bodies. Release sources are scanned from local Python package resources. A process-local catalog may retain the last successful source slice, but recovery authority is the projection persisted on the AgentRun. Once set, retries, worker takeover, and resume never replace it with current package bytes.
+
+The Skill Toolkit combines managed entrypoints with the existing filesystem Skill snapshot. Filesystem Skills keep absolute `SKILL.md` paths and the session-scoped `latest`/`active` adoption lifecycle. Managed Skills use their exact `azents://` URI as `skill_path`; equal slugs remain separate when their locators differ. `load_skill` dispatches absolute paths only to the active filesystem projection and canonical managed URIs only to the current run VFS projection, with no cross-source fallback.
+
+Composer actions use a fresh non-persisted VFS preview while the Session is idle and the active AgentRun projection while it is running. A selected managed SkillAction stores only its exact URI. Run input preparation validates that URI against the projection ensured for the active run before emitting the durable `skill_loaded` event. Eligibility drift between an idle preview and run creation therefore produces the normal unavailable-Skill error rather than reading stale preview content.
+
+`import_file` registers an `azents` resolver alongside `exchange` and `artifact`. The resolver validates the canonical URI, current run ownership, exact projection membership, Base64 content, decoded size, and SHA-256 hash before passing bytes to the existing Runtime materialization path. Ordinary Runtime `read`, `glob`, `grep`, `write`, and `edit` tools remain path-only and never resolve `azents://` directly. Only the materialized Runtime copy follows Runtime path retention rules; the source entry remains part of the retained immutable AgentRun projection.
+
+Root and subagent executions use the same admission contract. Each AgentRun independently ensures a projection for its resolved Agent, Session, and Workspace context rather than inheriting another run's projection.
 
 ### Toolkit CRUD / Setup UI
 

@@ -102,7 +102,7 @@ api_routes:
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-07-21
-spec_version: 123
+spec_version: 124
 ---
 
 # Conversation & Events
@@ -392,6 +392,7 @@ before destructive cleanup can remove a path or branch.
 | `status`                        | enum                    | `pending`, `running`, `completed`, `stopped`, `failed`, `interrupted`, or `cancelled`                                                                        |
 | `active_tool_calls`             | JSONB array             | `call_id`, `name`, redacted/summarized `arguments`, `started_at`, and `owner_generation`                                                                     |
 | `retry_state`                   | JSONB \| null           | Durable current-model-turn retry state; cleared on successful model output admission or terminal transition                                                  |
+| `vfs_projection`                | JSONB \| null           | Self-contained immutable `azents://` source and file snapshot authorized for this run. It is ensured before input promotion and reused by recovery.           |
 | `parent_agent_run_id`           | FK `agent_runs` \| null | Parent run lineage for a subagent's first run                                                                                                                |
 | `last_completed_event_id`       | `str(32)` \| null       | Terminal run boundary event id when available                                                                                                                |
 | `terminal_result_event_id`      | `str(32)` \| null       | Terminal assistant/error event used for the terminal mailbox result and Subagent Tree preview.                                                               |
@@ -427,7 +428,7 @@ buffer, appends a deterministic `system_error`, preserves the previous Session i
 and completes the active run without retry. Only one pending run may exist for a session. Pending and
 running runs are active recovery state.
 
-The requested label is intent, while the Session-owned current inference snapshot is the execution authority at each turn boundary. `AgentRun` stores lifecycle, parentage, activity, retry, and terminal-result state; it does not own or restore model selection. A profile change arriving during an active run is prepared for the next boundary, and the same run rebuilds its physical request and effective limits from the new Session snapshot instead of creating a replacement run. Manual retry creates a new pending run, preserves the original ordered input-event associations, and re-resolves the Session's requested profile against current Agent routing before execution. A subagent's first run is precreated with `parent_agent_run_id`; child creation first stores either the exact parent Session snapshot or a statically validated spawn override on the child Session. Recovery activates the child from that Session snapshot without deriving model state from the parent run row.
+The requested label is intent, while the Session-owned current inference snapshot is the execution authority at each turn boundary. `AgentRun` stores lifecycle, parentage, activity, retry, terminal-result state, and its immutable managed-file projection; it does not own or restore model selection. A profile change arriving during an active run is prepared for the next boundary, and the same run rebuilds its physical request and effective limits from the new Session snapshot instead of creating a replacement run. Manual retry creates a new pending run, preserves the original ordered input-event associations, and re-resolves the Session's requested profile against current Agent routing before execution. A subagent's first run is precreated with `parent_agent_run_id`; child creation first stores either the exact parent Session snapshot or a statically validated spawn override on the child Session. Recovery activates the child from that Session snapshot without deriving model state from the parent run row. Each child run independently owns its VFS projection row rather than inheriting the parent run's projection.
 
 Every current subagent Run that reaches `completed`, `failed`, `stopped`, `interrupted`, or
 `cancelled` is eligible for one queue-only terminal result to its direct parent's mailbox. Delivery

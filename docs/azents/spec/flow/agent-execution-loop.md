@@ -6,6 +6,7 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, conversation, toolkit]
 code_paths:
+  - python/apps/azents/src/azents/core/vfs.py
   - python/apps/azents/src/azents/engine/run/contracts.py
   - python/apps/azents/src/azents/engine/run/builtin_tools.py
   - python/apps/azents/src/azents/engine/run/errors.py
@@ -34,6 +35,7 @@ code_paths:
   - python/apps/azents/src/azents/services/action_execution.py
   - python/apps/azents/src/azents/services/agent_runtime/**
   - python/apps/azents/src/azents/services/input_buffer.py
+  - python/apps/azents/src/azents/services/vfs.py
   - python/apps/azents/src/azents/services/agent_mailbox.py
   - python/apps/azents/src/azents/services/subagent_terminal_result.py
   - python/apps/azents/src/azents/services/model_file.py
@@ -62,8 +64,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ChatView.tsx
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
-last_verified_at: 2026-07-20
-spec_version: 117
+last_verified_at: 2026-07-21
+spec_version: 118
 ---
 
 # Agent Execution Loop
@@ -80,7 +82,7 @@ worker/UI stream boundaries, but the DB source of truth is the event transcript 
 
 Main steps:
 
-1. Worker reads exactly one FIFO InputBuffer head, resolves the requested profile and attachment metadata outside a database session, and then locks the same head for atomic preparation.
+1. Worker reads exactly one FIFO InputBuffer head, resolves the requested profile and attachment metadata outside a database session, and then locks the same head for atomic preparation. After it creates or claims the AgentRun, it ensures that run's immutable managed-file projection before calling input promotion or resolving a managed SkillAction.
 2. Preparation atomically updates the Session inference snapshot, applies Goal/Skill side effects, appends canonical events, associates run input, and deletes the source buffer. A changed FIFO head restarts preparation instead of applying a stale resolution.
 3. Worker executes buffer-keyed operation TurnActions such as `create_git_worktree` before the next model dispatch. The current Session owner generation admits the execution before buffer deletion; active state and progress remain in execution tables until one atomic terminal handover appends durable history and deletes live state.
 4. `AgentRunExecution` repeats model steps and tool steps while updating `agent_runs.phase`.
@@ -100,6 +102,18 @@ Main steps:
 11. Foreground client tools execute in parallel and results are appended as event `client_tool_result`.
 12. When no foreground client tool call or pending follow-up remains, the runner observes the
     terminal `RunComplete` boundary and then transitions `AgentSession.run_state` to idle.
+
+### Run-scoped managed-file projection
+
+`agent_runs.vfs_projection` is the durable authorization and content snapshot for `azents://` files. `RunExecutor` calls `VfsProjectionService.ensure_run_projection(...)` after it has selected the pending or recoverable run and before the first `poll_run_inputs(...)` call. The repository writes a candidate projection only when the run column is empty; an existing projection is returned unchanged. This ordering also applies to recovery, so an older nullable run receives its projection before any newly promoted input can consume a managed URI.
+
+The initial projection source set is the global Azents release bundle plus release bundles owned by Toolkit Providers that have an enabled AgentToolkit attachment and enabled ToolkitConfig for the run's Agent and Workspace. Projection construction reads only local package resources and authoritative attachment metadata; it does not call provider APIs or inspect credentials or connection health. The flattened projection stores exact file bytes inline, so retries, process restart, worker takeover, and resume do not depend on the currently deployed package after the projection has been persisted.
+
+Input promotion receives `active_run_id`. An absolute filesystem SkillAction continues to resolve from the existing session `active` Skill projection. An `azents://skills/.../SKILL.md` action resolves only from that active run's VFS projection, validates the managed Skill metadata, and emits the existing durable `skill_loaded` input before the associated user message. Failure to find or authorize the URI produces the unavailable-Skill system input and does not fall back to an idle preview or current package resources.
+
+During toolkit resolution, the Skill Toolkit renders the ordered union of filesystem and managed Skill entrypoints. `load_skill` uses the exact current run ID for managed URI resolution. Runtime tool construction registers an `azents` import resolver with the same run, Agent, Session, and Workspace identity; `import_file` verifies projection membership and integrity before creating a Runtime file. Other Runtime file tools remain unaware of the VFS.
+
+The composer action endpoint has no run snapshot while idle, so it builds a current non-persisted release preview. While a run is active, it reads that run's stored projection. The preview is advisory: action execution always validates against the projection ensured before promotion. Each subagent run follows the same ensure boundary and owns its own projection rather than inheriting the parent run's projection row.
 
 Streaming text, reasoning, function-call deltas, and provider-tool activity are UI projections only.
 The worker coalesces text and reasoning deltas for at most 75 milliseconds or 96 characters before
