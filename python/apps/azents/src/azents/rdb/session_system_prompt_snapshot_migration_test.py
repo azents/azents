@@ -49,7 +49,13 @@ def test_session_system_prompt_snapshot_migration(
                         """
                         CREATE TABLE agent_sessions (
                             id TEXT PRIMARY KEY
-                        );
+                        )
+                        """
+                    )
+                )
+                connection.execute(
+                    sa.text(
+                        """
                         CREATE TABLE events (
                             id TEXT PRIMARY KEY,
                             session_id TEXT NOT NULL REFERENCES agent_sessions(id),
@@ -65,7 +71,13 @@ def test_session_system_prompt_snapshot_migration(
                     sa.text(
                         """
                         INSERT INTO agent_sessions (id)
-                        VALUES ('session-1'), ('session-2');
+                        VALUES ('session-1'), ('session-2')
+                        """
+                    )
+                )
+                connection.execute(
+                    sa.text(
+                        """
                         INSERT INTO events (
                             id,
                             session_id,
