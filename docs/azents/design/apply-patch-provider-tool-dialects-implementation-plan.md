@@ -10,7 +10,7 @@ tags: [architecture, backend, engine, frontend, llm, testing]
 ## Purpose
 
 This document is the reviewable delivery plan for
-[ADR-0178: Select Provider-Specific Tool Dialects for Apply-Patch](../adr/0178-apply-patch-provider-tool-dialects.md)
+[ADR-0179: Select Provider-Specific Tool Dialects for Apply-Patch](../adr/0179-apply-patch-provider-tool-dialects.md)
 and the accompanying
 [provider tool dialect design](./apply-patch-provider-tool-dialects.md).
 
@@ -45,7 +45,7 @@ this order. CI failures are fixed in the owning PR before the next dependency re
 
 | PR | Title | Base | Scope | Production custom selection |
 | --- | --- | --- | --- | --- |
-| 1 | `apply-patch tool dialects [1/8]: Design` | `main` | ADR-0178 and implementable architecture | impossible |
+| 1 | `apply-patch tool dialects [1/8]: Design` | `main` | ADR-0179 and implementable architecture | impossible |
 | 2 | `apply-patch tool dialects [2/8]: Implementation plan` | PR 1 | this execution plan and acceptance matrix | impossible |
 | 3 | `apply-patch tool dialects [3/8]: Canonical dialect compatibility` | PR 2 | durable models, readers, lifecycle propagation | impossible |
 | 4 | `apply-patch tool dialects [4/8]: Dual-dialect engine lifecycle` | PR 3 | selected variants, normalizers, lowering, continuation | impossible |
@@ -233,8 +233,8 @@ integrated.
 ### Scope
 
 Run the dedicated spec review after the behavior is stable. Promote implemented current behavior to
-the relevant living specs and create an implementation audit that maps ADR-0178 decisions to code
-and test evidence. Do not edit ADR-0178.
+the relevant living specs and create an implementation audit that maps ADR-0179 decisions to code
+and test evidence. Do not edit ADR-0179.
 
 ### Expected spec updates
 
