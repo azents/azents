@@ -155,6 +155,16 @@ const nextActivity: ToolActivityGroupModel = {
   usage: null,
 };
 
+const emptyLiveActivity: ToolActivityGroupModel = {
+  id: "activity:story-empty-live",
+  firstMessageId: "story-empty-live-message",
+  startedAt: new Date(Date.now() - 8_000).toISOString(),
+  startMessageIndex: 9,
+  endMessageIndex: 9,
+  events: [],
+  usage: null,
+};
+
 function LiveActivityGroupTrackingDemo(): React.ReactElement {
   const [activeGroup, setActiveGroup] = useState<"initial" | "next">("initial");
 
@@ -264,6 +274,26 @@ export const TracksLiveGroupDisclosure = {
     ).not.toBeInTheDocument();
     await expect(
       await canvas.findByText("Next live activity details"),
+    ).toBeVisible();
+  },
+} satisfies Story;
+
+export const ActiveWithoutDetailsHidesLiveSpinner = {
+  args: { activity: emptyLiveActivity, active: true },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.queryByRole("status", { name: "Live activity is running" }),
+    ).toBeNull();
+  },
+} satisfies Story;
+
+export const ActiveWithDetailsShowsHeaderSpinner = {
+  args: { activity, active: true },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.getByRole("status", { name: "Live activity is running" }),
     ).toBeVisible();
   },
 } satisfies Story;
