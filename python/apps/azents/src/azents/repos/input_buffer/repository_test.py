@@ -1,7 +1,9 @@
 """InputBufferRepository tests."""
 
+import pytest
 import sqlalchemy as sa
 from azcommon.result import Success
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
@@ -351,11 +353,11 @@ class TestInputBufferRepository:
         assert [item.id for item in remaining] == sorted([first.id, second.id])[1:]
         assert await repo.get_by_id(rdb_session, other.id) is not None
 
-    async def test_session_delete_cascades_input_buffers(
+    async def test_direct_session_delete_is_rejected(
         self,
         rdb_session: AsyncSession,
     ) -> None:
-        """Pending buffer is also deleted by FK cascade when AgentSession is deleted."""
+        """Protect pending buffers by rejecting direct AgentSession deletion."""
         session_id, user_id, _ = await _create_agent_session(
             rdb_session,
             handle="input-buffer-cascade",
@@ -371,12 +373,17 @@ class TestInputBufferRepository:
             ),
         )
 
-        await rdb_session.execute(
-            sa.delete(RDBAgentSession).where(RDBAgentSession.id == session_id)
-        )
-        await rdb_session.flush()
+        with pytest.raises(
+            IntegrityError,
+            match="session_agents_agent_session_id_fkey",
+        ):
+            async with rdb_session.begin_nested():
+                await rdb_session.execute(
+                    sa.delete(RDBAgentSession).where(RDBAgentSession.id == session_id)
+                )
+                await rdb_session.flush()
 
-        assert await repo.get_by_id(rdb_session, created.id) is None
+        assert await repo.get_by_id(rdb_session, created.id) is not None
 
     async def test_move_by_session_id_preserves_buffer_identity(
         self,
