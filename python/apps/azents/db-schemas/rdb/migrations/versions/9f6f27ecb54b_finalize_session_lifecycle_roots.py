@@ -56,9 +56,7 @@ def upgrade() -> None:
     )
     _replace_foreign_key(
         table_name="session_agent_context_git_worktrees",
-        constraint_name=(
-            "session_agent_context_git_worktrees_session_agent_context_id_fkey"
-        ),
+        constraint_name=("session_agent_ctx_git_worktrees_context_id_fkey"),
         columns=["session_agent_context_id"],
         referent_table="session_agent_contexts",
         referent_columns=["id"],
@@ -69,9 +67,7 @@ def downgrade() -> None:
     """Downgrade schema."""
     _replace_foreign_key(
         table_name="session_agent_context_git_worktrees",
-        constraint_name=(
-            "session_agent_context_git_worktrees_session_agent_context_id_fkey"
-        ),
+        constraint_name=("session_agent_ctx_git_worktrees_context_id_fkey"),
         columns=["session_agent_context_id"],
         referent_table="session_agent_contexts",
         referent_columns=["id"],
