@@ -1105,6 +1105,7 @@ function mapEvents(
         ];
       }
       case "compaction_summary": {
+        const compactionId = stringField(payload, "compaction_id");
         return [
           ...messages,
           {
@@ -1113,11 +1114,15 @@ function mapEvents(
             content: stringField(payload, "content"),
             createdAt: event.created_at,
             status: "complete",
-            metadata: eventMetadata(event),
+            metadata: {
+              ...eventMetadata(event),
+              ...(compactionId === null ? {} : { compaction_id: compactionId }),
+            },
           },
         ];
       }
       case "compaction_marker": {
+        const compactionId = stringField(payload, "compaction_id");
         return [
           ...messages,
           {
@@ -1129,7 +1134,10 @@ function mapEvents(
               null,
             createdAt: event.created_at,
             status: "complete",
-            metadata: eventMetadata(event),
+            metadata: {
+              ...eventMetadata(event),
+              ...(compactionId === null ? {} : { compaction_id: compactionId }),
+            },
           },
         ];
       }

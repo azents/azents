@@ -718,12 +718,14 @@ export const AllActivityRenderers = {
         id: "overview-compaction-start",
         role: "compaction_started",
         content: null,
+        metadata: { compaction_id: "overview-compaction-1" },
       }),
       createChatMessage({
         id: "overview-compaction-result",
         role: "compaction",
         content:
           "The completed tool activity was summarized before the next model turn.",
+        metadata: { compaction_id: "overview-compaction-1" },
       }),
       createChatMessage({
         id: "overview-goal-updated",
@@ -757,7 +759,7 @@ export const AllActivityRenderers = {
     const canvas = within(canvasElement);
     const activities = canvas.getAllByRole("button", { name: /Activity/ });
     await expect(activities).toHaveLength(2);
-    await expect(canvas.getByRole("status")).toBeVisible();
+    await expect(canvas.queryByRole("status")).toBeNull();
     await expect(
       canvas.getByText("Previous conversation was summarized"),
     ).toBeVisible();
@@ -832,11 +834,13 @@ export const CompactionCutsActivityGroups = {
         id: "compaction-start",
         role: "compaction_started",
         content: null,
+        metadata: { compaction_id: "compaction-story-1" },
       }),
       createChatMessage({
         id: "compaction-result",
         role: "compaction",
         content: "Completed tool activity was compacted into this summary.",
+        metadata: { compaction_id: "compaction-story-1" },
       }),
       createChatMessage({
         id: "compaction-after-tool",
@@ -850,7 +854,7 @@ export const CompactionCutsActivityGroups = {
     await expect(
       canvas.getAllByRole("button", { name: /Activity/ }),
     ).toHaveLength(2);
-    await expect(canvas.getByRole("status")).toBeVisible();
+    await expect(canvas.queryByRole("status")).toBeNull();
     await expect(
       canvas.getByText("Previous conversation was summarized"),
     ).toBeVisible();

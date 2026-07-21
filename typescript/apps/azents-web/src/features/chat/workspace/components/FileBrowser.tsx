@@ -7,6 +7,7 @@ import {
   Box,
   Button,
   Checkbox,
+  Collapse,
   Group,
   Menu,
   rem,
@@ -42,6 +43,10 @@ import {
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  chatChevronTransition,
+  chatCollapseTransitionProps,
+} from "../../components/collapsiblePresentation";
 import type { WorkspaceBrowserMode, WorkspaceEntry } from "../types";
 
 interface FileBrowserProps {
@@ -441,7 +446,7 @@ function TreeNode({
               size={chevronSize}
               style={{
                 transform: open ? "rotate(90deg)" : "none",
-                transition: "transform 120ms ease",
+                transition: chatChevronTransition,
               }}
             />
           ) : null}
@@ -578,8 +583,13 @@ function TreeNode({
           </Menu.Dropdown>
         </Menu>
       </Group>
-      {isDirectory && open
-        ? node.children?.map((child) => (
+      {isDirectory ? (
+        <Collapse
+          expanded={open}
+          keepMounted={false}
+          {...chatCollapseTransitionProps}
+        >
+          {node.children?.map((child) => (
             <TreeNode
               key={child.path}
               node={child}
@@ -601,8 +611,9 @@ function TreeNode({
               onRemoveProject={onRemoveProject}
               onDeleteWorktreeProject={onDeleteWorktreeProject}
             />
-          ))
-        : null}
+          ))}
+        </Collapse>
+      ) : null}
     </>
   );
 }

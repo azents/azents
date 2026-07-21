@@ -34,6 +34,10 @@ import {
 import { useLocale, useTranslations } from "next-intl";
 import { memo, useMemo, useRef } from "react";
 import inlineControlClasses from "./ChatInlineControl.module.css";
+import {
+  chatChevronTransition,
+  chatCollapseTransitionProps,
+} from "./collapsiblePresentation";
 import { FileAttachmentList } from "./FileAttachmentList";
 import { InputBufferBubbleFrame } from "./InputBufferBubbleFrame";
 import { MarkdownContent } from "./MarkdownContent";
@@ -244,7 +248,7 @@ function ThinkingBlock({
       {canExpand && (
         <IconChevronRight
           aria-hidden="true"
-          size={rem(14)}
+          size={14}
           className={classes.thinkingChevron}
           data-opened={thinkingOpened}
           color="var(--mantine-color-dimmed)"
@@ -252,7 +256,7 @@ function ThinkingBlock({
       )}
       <IconBubble
         aria-hidden="true"
-        size={rem(14)}
+        size={14}
         stroke={1.8}
         className={classes.thinkingIcon}
       />
@@ -296,7 +300,11 @@ function ThinkingBlock({
         </Group>
       )}
       {canExpand && (
-        <Collapse expanded={thinkingOpened}>
+        <Collapse
+          expanded={thinkingOpened}
+          keepMounted={false}
+          {...chatCollapseTransitionProps}
+        >
           <ScrollArea.Autosize mah={rem(300)} mt={rem(4)}>
             <Box
               c="dimmed"
@@ -497,14 +505,14 @@ function AgentMailboxMessage({
         >
           <IconChevronRight
             aria-hidden="true"
-            size={rem(14)}
+            size={14}
             stroke={1.8}
             style={{
               transform: opened ? "rotate(90deg)" : "none",
-              transition: "transform 160ms",
+              transition: chatChevronTransition,
             }}
           />
-          <IconRobot aria-hidden="true" size={rem(14)} stroke={1.8} />
+          <IconRobot aria-hidden="true" size={14} stroke={1.8} />
           <Tooltip label={sourcePath} openDelay={500}>
             <Text
               size="xs"
@@ -517,7 +525,11 @@ function AgentMailboxMessage({
             </Text>
           </Tooltip>
         </Group>
-        <Collapse expanded={opened}>
+        <Collapse
+          expanded={opened}
+          keepMounted={false}
+          {...chatCollapseTransitionProps}
+        >
           <Paper
             withBorder
             radius="md"
@@ -578,7 +590,7 @@ function GoalControlMessage({ label }: { label: string }): React.ReactElement {
       wrap="nowrap"
       className={inlineControlClasses.root}
     >
-      <IconTargetArrow aria-hidden="true" size={rem(14)} stroke={1.8} />
+      <IconTargetArrow aria-hidden="true" size={14} stroke={1.8} />
       <Text size="xs" className={inlineControlClasses.label}>
         {label}
       </Text>
@@ -630,14 +642,14 @@ function SkillLoadedControlMessage({
         >
           <IconChevronRight
             aria-hidden="true"
-            size={rem(14)}
+            size={14}
             stroke={1.8}
             style={{
               transform: opened ? "rotate(90deg)" : "none",
-              transition: "transform 160ms",
+              transition: chatChevronTransition,
             }}
           />
-          <IconBook aria-hidden="true" size={rem(14)} stroke={1.8} />
+          <IconBook aria-hidden="true" size={14} stroke={1.8} />
           <Text
             size="xs"
             fw={600}
@@ -648,7 +660,11 @@ function SkillLoadedControlMessage({
             {t("skillLoaded.title", { name })}
           </Text>
         </Group>
-        <Collapse expanded={opened}>
+        <Collapse
+          expanded={opened}
+          keepMounted={false}
+          {...chatCollapseTransitionProps}
+        >
           <Paper
             withBorder
             radius="md"

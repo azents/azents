@@ -1414,7 +1414,8 @@
         "patch": "Patch appliqué",
         "delete": "Fichier supprimé",
         "command": "Commande exécutée",
-        "process": "Processus mis à jour"
+        "process": "Processus mis à jour",
+        "present": "Fichiers présentés"
       },
       "changeAction": {
         "add": "Ajouté",

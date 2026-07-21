@@ -13,14 +13,23 @@ import { useDisclosure } from "@mantine/hooks";
 import { IconCheck, IconChevronRight } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
+import { ActivityMessageRow } from "./ActivityMessageRow";
+import {
+  activityRowChevronSize,
+  activityRowIconSize,
+  activityRowSummarySize,
+} from "./activityRowPresentation";
 import { AgentRunIndicator } from "./AgentRunIndicator";
 import inlineControlClasses from "./ChatInlineControl.module.css";
+import {
+  chatChevronTransition,
+  chatCollapseTransitionProps,
+} from "./collapsiblePresentation";
 import {
   formatElapsedDuration,
   startElapsedDurationTimer,
   visibleElapsedDurationSeconds,
 } from "./elapsedDuration";
-import { MessageBubble } from "./MessageBubble";
 import { ProviderToolCallCard } from "./ProviderToolCallCard";
 import { ToolCallCard } from "./ToolCallCard";
 import type {
@@ -132,10 +141,7 @@ function eventDetail(event: ActivityEvent): React.ReactElement | null {
       <ProviderToolCallCard toolCall={event.toolCall.toolCall} />
     );
   }
-  if (event.message) {
-    return <MessageBubble message={event.message} />;
-  }
-  return null;
+  return <ActivityMessageRow event={event} />;
 }
 
 export function ToolActivityGroup({
@@ -218,12 +224,12 @@ export function ToolActivityGroup({
         {hasDetails ? (
           <IconChevronRight
             aria-hidden="true"
-            size={rem(14)}
+            size={activityRowChevronSize}
             color="var(--mantine-color-dimmed)"
             style={{
               flexShrink: 0,
               transform: opened ? "rotate(90deg)" : "none",
-              transition: "transform 120ms ease",
+              transition: chatChevronTransition,
             }}
           />
         ) : null}
@@ -232,19 +238,26 @@ export function ToolActivityGroup({
         ) : (
           <IconCheck
             aria-label={t("complete")}
-            size={rem(14)}
+            size={activityRowIconSize}
             color="var(--mantine-color-dimmed)"
             style={{ flexShrink: 0 }}
           />
         )}
         {summary.length > 0 ? (
-          <Text size="xs" c="dimmed" fw={500} truncate flex={1} miw={0}>
+          <Text
+            size={activityRowSummarySize}
+            c="dimmed"
+            fw={500}
+            truncate
+            flex={1}
+            miw={0}
+          >
             {summary}
           </Text>
         ) : null}
         {groupDuration !== null ? (
           <Text
-            size="xs"
+            size={activityRowSummarySize}
             c="dimmed"
             ff="monospace"
             style={{ flexShrink: 0, fontVariantNumeric: "tabular-nums" }}
@@ -255,7 +268,7 @@ export function ToolActivityGroup({
       </Group>
       {hasDetails && modelWaitingDuration !== null ? (
         <Text
-          size="xs"
+          size={activityRowSummarySize}
           c="dimmed"
           pl={rem(20)}
           ff="monospace"
@@ -288,8 +301,12 @@ export function ToolActivityGroup({
         {authorizationAction}
       </Group>
 
-      <Collapse expanded={opened}>
-        <Stack gap={0} mt={rem(4)} pl={rem(12)}>
+      <Collapse
+        expanded={opened}
+        keepMounted={false}
+        {...chatCollapseTransitionProps}
+      >
+        <Stack gap={0} mt={rem(4)} pl="xs">
           {activity.events.map((event) => (
             <Box key={event.id}>{eventDetail(event)}</Box>
           ))}
