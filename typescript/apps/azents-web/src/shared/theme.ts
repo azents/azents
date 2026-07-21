@@ -103,13 +103,13 @@ export const theme = createTheme({
     return resolved;
   },
   fontFamily:
-    "var(--font-geist-sans), -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+    "var(--font-geist-sans, -apple-system), BlinkMacSystemFont, 'Segoe UI', sans-serif",
   headings: {
     fontFamily:
-      "var(--font-geist-sans), -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+      "var(--font-geist-sans, -apple-system), BlinkMacSystemFont, 'Segoe UI', sans-serif",
     fontWeight: "600",
   },
-  fontFamilyMonospace: "var(--font-geist-mono), 'Menlo', 'Consolas', monospace",
+  fontFamilyMonospace: "var(--font-geist-mono, 'Menlo'), 'Consolas', monospace",
   components: {
     Checkbox: Checkbox.extend({
       styles: {
