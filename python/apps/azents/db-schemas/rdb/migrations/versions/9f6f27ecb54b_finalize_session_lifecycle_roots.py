@@ -135,7 +135,7 @@ def _replace_foreign_key(
         DO $$
         DECLARE existing_constraint_name text;
         BEGIN
-            SELECT constraint_name
+            SELECT usage.constraint_name
             INTO existing_constraint_name
             FROM information_schema.key_column_usage AS usage
             JOIN information_schema.table_constraints AS table_constraint
