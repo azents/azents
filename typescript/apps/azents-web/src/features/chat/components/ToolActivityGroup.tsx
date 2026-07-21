@@ -246,7 +246,26 @@ export function ToolActivityGroup({
             }}
           />
         ) : null}
-        {!active ? (
+        {active && hasDetails ? (
+          <Box
+            aria-label="Live activity is running"
+            h={rem(16)}
+            role="status"
+            w={rem(activityRowIconSize)}
+            style={{
+              alignItems: "center",
+              display: "inline-flex",
+              flexShrink: 0,
+              justifyContent: "center",
+            }}
+          >
+            <Loader
+              aria-hidden="true"
+              color="var(--mantine-color-dimmed)"
+              size={rem(activityRowIconSize)}
+            />
+          </Box>
+        ) : !active ? (
           <IconCheck
             aria-label={t("complete")}
             size={activityRowIconSize}
@@ -312,21 +331,6 @@ export function ToolActivityGroup({
           {activity.events.map((event) => (
             <Box key={event.id}>{eventDetail(event)}</Box>
           ))}
-          {active ? (
-            <Box
-              aria-label="Live activity is running"
-              h={rem(16)}
-              pl={rem(activityRowChevronSize + 6)}
-              role="status"
-              style={{ alignItems: "center", display: "inline-flex" }}
-            >
-              <Loader
-                aria-hidden="true"
-                color="var(--mantine-color-dimmed)"
-                size={rem(activityRowIconSize)}
-              />
-            </Box>
-          ) : null}
         </Stack>
       </Collapse>
     </Box>
