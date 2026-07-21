@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# stacked PR 브랜치들을 앞에서 뒤로 한 번에 rebase한다.
-# conflict 가 발생하면 해당 rebase 상태를 유지한 채 즉시 실패한다.
+# Rebase stacked PR branches from the first branch through the last.
+# Stop immediately on conflict while preserving the active rebase state.
 
 set -euo pipefail
 
