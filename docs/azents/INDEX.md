@@ -32,7 +32,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-07-21 | 122 |
 | [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-07-20 | 22 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-07-03 | 3 |
-| [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-21 | 38 |
+| [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-21 | 39 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-07-21 | 18 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-07-21 | 30 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-07-21 | 24 |
@@ -243,6 +243,7 @@ Design documents are accumulated records and are not listed individually in this
 - [ADR-0178: Enable Tool Search by Default for New Agents](adr/0178-enable-tool-search-by-default.md)
 - [ADR-0179: Select Provider-Specific Tool Dialects for Apply-Patch](adr/0179-apply-patch-provider-tool-dialects.md)
 - [ADR-0180: Remove Percentage Rollout from Apply-Patch Custom Selection](adr/0180-remove-apply-patch-custom-rollout.md)
+- [ADR-0181: Suppress Unread Indicators While Sessions Run](adr/0181-suppress-unread-indicators-while-sessions-run.md)
 
 ## Issues (Bug Tracking)
 

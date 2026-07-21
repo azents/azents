@@ -1,5 +1,5 @@
 import { rem } from "@mantine/core";
-import { userEvent, within } from "storybook/test";
+import { expect, userEvent, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { AgentFocusedSidebar } from "./AgentFocusedSidebar";
 import type {
@@ -184,7 +184,7 @@ export const Running = {
   },
 } satisfies Story;
 
-export const RunningAndUnread = {
+export const RunningWithUnreadBoundary = {
   args: {
     sessions: sessions
       .filter((session) => session.id === "sess_release")
@@ -192,6 +192,13 @@ export const RunningAndUnread = {
         ...session,
         unread_terminal_run_id: "3123456789abcdef0123456789abcdef",
       })),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByLabelText(/running/i)).toBeVisible();
+    await expect(
+      canvas.queryByRole("img", { name: /unread/i }),
+    ).not.toBeInTheDocument();
   },
 } satisfies Story;
 
