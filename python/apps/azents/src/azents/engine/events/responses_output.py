@@ -186,6 +186,33 @@ class ResponsesOutputNormalizer:
                 native_artifact=artifact,
             )
             return _event(session_id, EventKind.CLIENT_TOOL_CALL, payload)
+        if item_type == "custom_tool_call":
+            call_id = output_item.get("call_id") or output_item.get("id")
+            name = output_item.get("name")
+            input_value = output_item.get("input")
+            if not (
+                isinstance(call_id, str)
+                and call_id
+                and isinstance(name, str)
+                and name
+                and isinstance(input_value, str)
+            ):
+                return _event(
+                    session_id,
+                    EventKind.UNKNOWN_ADAPTER_OUTPUT,
+                    UnknownAdapterOutputPayload(
+                        native_artifact=artifact,
+                        reason="custom_tool_call:invalid",
+                    ),
+                )
+            payload = ClientToolCallPayload(
+                call_id=call_id,
+                name=name,
+                arguments=input_value,
+                wire_dialect="plaintext_custom",
+                native_artifact=artifact,
+            )
+            return _event(session_id, EventKind.CLIENT_TOOL_CALL, payload)
         provider_tool = normalize_responses_provider_tool_item(output_item)
         if provider_tool is not None:
             call_id = str(output_item.get("call_id") or output_item.get("id") or "")

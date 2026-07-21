@@ -375,9 +375,22 @@ class ResponsesRequestLowerer:
             case ReasoningPayload(native_artifact=artifact):
                 if artifact.compatible_with(self.compat_key):
                     return [sanitize_responses_native_item(dict(artifact.item))]
+            case ClientToolCallPayload(
+                wire_dialect=wire_dialect,
+                native_artifact=artifact,
+            ):
+                if artifact.compatible_with(self.compat_key):
+                    expected_item_type = {
+                        "json_function": "function_call",
+                        "plaintext_custom": "custom_tool_call",
+                    }[wire_dialect]
+                    if artifact.item.get("type") != expected_item_type:
+                        raise ValueError(
+                            "Client tool native artifact does not match wire dialect"
+                        )
+                    return [artifact.item]
             case (
                 AssistantMessagePayload(native_artifact=artifact)
-                | ClientToolCallPayload(native_artifact=artifact)
                 | ProviderToolCallPayload(native_artifact=artifact)
                 | UnknownAdapterOutputPayload(native_artifact=artifact)
             ):
@@ -438,16 +451,47 @@ class ResponsesRequestLowerer:
                     capabilities=self._file_part_capabilities,
                     model_file_resolver=self.model_file_resolver,
                 )
-            case ClientToolCallPayload(call_id=call_id, name=name, arguments=args):
+            case ClientToolCallPayload(
+                call_id=call_id,
+                name=name,
+                arguments=args,
+                wire_dialect="json_function",
+            ):
                 return {
                     "type": "function_call",
                     "call_id": call_id,
                     "name": name,
                     "arguments": args,
                 }
-            case ClientToolResultPayload(call_id=call_id, output=output):
+            case ClientToolCallPayload(
+                call_id=call_id,
+                name=name,
+                arguments=args,
+                wire_dialect="plaintext_custom",
+            ):
+                return {
+                    "type": "custom_tool_call",
+                    "call_id": call_id,
+                    "name": name,
+                    "input": args,
+                }
+            case ClientToolResultPayload(
+                call_id=call_id,
+                output=output,
+                wire_dialect="json_function",
+            ):
                 return {
                     "type": "function_call_output",
+                    "call_id": call_id,
+                    "output": self._lower_tool_output(output),
+                }
+            case ClientToolResultPayload(
+                call_id=call_id,
+                output=output,
+                wire_dialect="plaintext_custom",
+            ):
+                return {
+                    "type": "custom_tool_call_output",
                     "call_id": call_id,
                     "output": self._lower_tool_output(output),
                 }
@@ -596,7 +640,12 @@ def _copy_item(item: dict[str, object]) -> dict[str, object]:
 
 def _set_item_cache_control_if_absent(item: dict[str, object]) -> bool:
     """Set cache_control on a cacheable input item when absent."""
-    if item.get("type") in {"function_call", "function_call_output"}:
+    if item.get("type") in {
+        "function_call",
+        "function_call_output",
+        "custom_tool_call",
+        "custom_tool_call_output",
+    }:
         return False
     content = item.get("content")
     if isinstance(content, str):
@@ -721,18 +770,27 @@ def _hosted_tool_target(
 def _drop_orphan_tool_outputs(
     input_items: Sequence[dict[str, object]],
 ) -> list[dict[str, object]]:
-    """Remove function_call_output without matching function_call."""
-    seen_calls: set[str] = set()
+    """Remove client-tool outputs without a matching-dialect prior call."""
+    calls_by_id: dict[str, str] = {}
     filtered: list[dict[str, object]] = []
     for item in input_items:
         item_type = item.get("type")
         call_id = item.get("call_id")
-        if item_type == "function_call" and isinstance(call_id, str):
-            seen_calls.add(call_id)
+        if not isinstance(item_type, str):
             filtered.append(item)
             continue
-        if item_type == "function_call_output" and isinstance(call_id, str):
-            if call_id in seen_calls:
+        if item_type in {"function_call", "custom_tool_call"} and isinstance(
+            call_id, str
+        ):
+            calls_by_id[call_id] = item_type
+            filtered.append(item)
+            continue
+        expected_call_type = {
+            "function_call_output": "function_call",
+            "custom_tool_call_output": "custom_tool_call",
+        }.get(item_type)
+        if expected_call_type is not None and isinstance(call_id, str):
+            if calls_by_id.get(call_id) == expected_call_type:
                 filtered.append(item)
             continue
         filtered.append(item)

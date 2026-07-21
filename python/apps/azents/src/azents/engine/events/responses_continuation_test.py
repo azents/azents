@@ -77,6 +77,63 @@ def test_exact_prefix_sends_only_new_input() -> None:
     assert plan.input_items == [delta]
 
 
+def test_exact_custom_tool_prefix_sends_matching_custom_output_only() -> None:
+    """Continue an exact custom call/output pair without changing its dialect."""
+    planner = ResponsesContinuationPlanner()
+    previous = _request([{"role": "user", "content": "perform action"}])
+    custom_call = {
+        "type": "custom_tool_call",
+        "id": "item-custom",
+        "call_id": "call-custom",
+        "name": "apply_patch",
+        "input": "opaque-custom-input",
+    }
+    planner.record_completion(
+        previous,
+        response_id="resp-custom",
+        output_items=[custom_call],
+    )
+    custom_output = {
+        "type": "custom_tool_call_output",
+        "call_id": "call-custom",
+        "output": "completed",
+    }
+    current = _request([*previous.input, custom_call, custom_output])
+
+    plan = planner.plan(current)
+
+    assert plan.previous_response_id == "resp-custom"
+    assert plan.input_items == [custom_output]
+
+
+def test_custom_tool_call_does_not_continue_with_function_output() -> None:
+    """Reject a same-ID continuation whose output changes the call dialect."""
+    planner = ResponsesContinuationPlanner()
+    previous = _request([{"role": "user", "content": "perform action"}])
+    custom_call = {
+        "type": "custom_tool_call",
+        "call_id": "call-custom",
+        "name": "apply_patch",
+        "input": "opaque-custom-input",
+    }
+    planner.record_completion(
+        previous,
+        response_id="resp-custom",
+        output_items=[custom_call],
+    )
+    mismatched_output = {
+        "type": "function_call_output",
+        "call_id": "call-custom",
+        "output": "completed",
+    }
+    current = _request([*previous.input, custom_call, mismatched_output])
+
+    plan = planner.plan(current)
+
+    assert plan.previous_response_id is None
+    assert plan.input_items == current.input
+
+
 @pytest.mark.parametrize("changed", ["model", "tools", "kwargs"])
 def test_request_property_change_uses_full_input(changed: str) -> None:
     """Do not chain across any request-property change."""

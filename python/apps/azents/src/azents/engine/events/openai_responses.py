@@ -32,6 +32,8 @@ from openai.types.responses import (
     ResponseCodeInterpreterCallInProgressEvent,
     ResponseCodeInterpreterCallInterpretingEvent,
     ResponseCompletedEvent,
+    ResponseCustomToolCallInputDeltaEvent,
+    ResponseCustomToolCallInputDoneEvent,
     ResponseErrorEvent,
     ResponseFailedEvent,
     ResponseFileSearchCallCompletedEvent,
@@ -1073,6 +1075,8 @@ class _OpenAIResponsesOutputStream:
         self.normalizer = normalizer
         self._session_id = session_id
         self._tool_refs: dict[int, tuple[str, str]] = {}
+        self._custom_tool_inputs: dict[int, _CustomToolInputStreamState] = {}
+        self._rejected_custom_tool_call_ids: set[str] = set()
         self._completed_output_items: list[dict[str, object]] = []
         self._completed_response: Response | None = None
         self._completed_response_seen = False
@@ -1114,12 +1118,30 @@ class _OpenAIResponsesOutputStream:
                         delta="",
                     )
                 )
+            elif raw_item.get("type") == "custom_tool_call":
+                self._custom_tool_inputs.setdefault(
+                    native_event.output_index,
+                    _CustomToolInputStreamState(
+                        item_id=_string_value(raw_item.get("id")),
+                    ),
+                )
         elif (
             isinstance(native_event, ResponseOutputItemDoneEvent)
             and native_event.type == "response.output_item.done"
         ):
             raw_item = _sdk_model_dump(native_event.item)
             if isinstance(raw_item.get("type"), str):
+                if raw_item.get(
+                    "type"
+                ) == "custom_tool_call" and not self._completed_custom_tool_input(
+                    native_event.output_index,
+                    raw_item,
+                ):
+                    self._reject_custom_tool_call(raw_item)
+                    return NormalizedAdapterOutput(
+                        needs_follow_up=False,
+                        projections=projections,
+                    )
                 self._completed_output_items.append(
                     {
                         **raw_item,
@@ -1130,6 +1152,30 @@ class _OpenAIResponsesOutputStream:
                         ),
                     }
                 )
+        elif (
+            isinstance(native_event, ResponseCustomToolCallInputDeltaEvent)
+            and native_event.type == "response.custom_tool_call_input.delta"
+        ):
+            state = self._custom_tool_inputs.setdefault(
+                native_event.output_index,
+                _CustomToolInputStreamState(item_id=native_event.item_id),
+            )
+            if state.item_id is not None and state.item_id != native_event.item_id:
+                state.invalid = True
+            state.item_id = native_event.item_id
+            state.deltas.append(native_event.delta)
+        elif (
+            isinstance(native_event, ResponseCustomToolCallInputDoneEvent)
+            and native_event.type == "response.custom_tool_call_input.done"
+        ):
+            state = self._custom_tool_inputs.setdefault(
+                native_event.output_index,
+                _CustomToolInputStreamState(item_id=native_event.item_id),
+            )
+            if state.item_id is not None and state.item_id != native_event.item_id:
+                state.invalid = True
+            state.item_id = native_event.item_id
+            state.done_input = native_event.input
         elif (
             isinstance(native_event, ResponseFunctionCallArgumentsDeltaEvent)
             and native_event.type == "response.function_call_arguments.delta"
@@ -1254,6 +1300,10 @@ class _OpenAIResponsesOutputStream:
         """Build canonical output from all currently completed SDK items."""
         response = self._completed_response
         response_dict = _sdk_model_dump(response) if response is not None else {}
+        response_dict = _without_rejected_custom_tool_calls(
+            response_dict,
+            self._rejected_custom_tool_call_ids,
+        )
         completed = self.normalizer.normalize_completed_output(
             self._session_id,
             response_dict,
@@ -1270,6 +1320,66 @@ class _OpenAIResponsesOutputStream:
             usage=usage,
             pending_provider_files=completed.pending_provider_files,
         )
+
+    def _completed_custom_tool_input(
+        self,
+        output_index: int,
+        item: dict[str, object],
+    ) -> bool:
+        """Verify that every received custom input representation agrees."""
+        input_value = item.get("input")
+        if not isinstance(input_value, str):
+            return False
+        state = self._custom_tool_inputs.get(output_index)
+        if state is None:
+            return True
+        raw_item_id = item.get("id")
+        item_id = raw_item_id if isinstance(raw_item_id, str) else None
+        item_id_mismatch = state.item_id is not None and state.item_id != item_id
+        if state.invalid or item_id_mismatch:
+            return False
+        if state.deltas and "".join(state.deltas) != input_value:
+            return False
+        return state.done_input is None or state.done_input == input_value
+
+    def _reject_custom_tool_call(self, item: dict[str, object]) -> None:
+        """Suppress one inconsistent completed custom call without retaining input."""
+        call_id = _string_value(item.get("call_id") or item.get("id"))
+        if call_id:
+            self._rejected_custom_tool_call_ids.add(call_id)
+
+
+@dataclasses.dataclass
+class _CustomToolInputStreamState:
+    """Private streamed custom-tool input retained until item completion."""
+
+    item_id: str | None
+    deltas: list[str] = dataclasses.field(default_factory=list)
+    done_input: str | None = None
+    invalid: bool = False
+
+
+def _without_rejected_custom_tool_calls(
+    response: dict[str, object],
+    rejected_call_ids: set[str],
+) -> dict[str, object]:
+    """Drop inconsistent custom calls from a completed response before admission."""
+    if not rejected_call_ids:
+        return response
+    output = response.get("output")
+    if not isinstance(output, list):
+        return response
+    filtered_output = [
+        item
+        for item in output
+        if not (
+            isinstance(item, dict)
+            and item.get("type") == "custom_tool_call"
+            and _string_value(item.get("call_id") or item.get("id"))
+            in rejected_call_ids
+        )
+    ]
+    return {**response, "output": filtered_output}
 
 
 def _openai_provider_tool_observation(
