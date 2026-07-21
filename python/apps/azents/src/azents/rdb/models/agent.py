@@ -139,8 +139,8 @@ class RDBAgent(RDBModel):
     tool_search_enabled: Mapped[bool] = mapped_column(
         sa.Boolean,
         nullable=False,
-        default=False,
-        server_default=sa.false(),
+        default=True,
+        server_default=sa.true(),
     )
     max_turns: Mapped[int | None] = mapped_column(
         sa.Integer, nullable=True, default=None

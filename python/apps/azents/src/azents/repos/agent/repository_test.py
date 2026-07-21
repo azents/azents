@@ -23,7 +23,7 @@ class _StopAfterWrite(Exception):
     """Stop a repository write after its mapped statement is observable."""
 
 
-def _agent_create(*, tool_search_enabled: bool) -> AgentCreate:
+def _agent_create(*, tool_search_enabled: bool = True) -> AgentCreate:
     """Build one complete Agent repository create input."""
     selection = make_test_model_selection()
     option = SelectableModelOption(
@@ -43,20 +43,36 @@ def _agent_create(*, tool_search_enabled: bool) -> AgentCreate:
     )
 
 
-async def test_create_maps_tool_search_enabled_to_rdb_agent() -> None:
-    """Map the explicit create value instead of relying on the DB default."""
+async def test_create_uses_enabled_tool_search_default() -> None:
+    """Map the repository create default instead of relying on the DB default."""
     session = AsyncMock(spec=AsyncSession)
     session.flush.side_effect = _StopAfterWrite
 
     with pytest.raises(_StopAfterWrite):
         await AgentRepository().create(
             session,
-            _agent_create(tool_search_enabled=True),
+            _agent_create(),
         )
 
     rdb_agent = session.add.call_args.args[0]
     assert isinstance(rdb_agent, RDBAgent)
     assert rdb_agent.tool_search_enabled is True
+
+
+async def test_create_maps_explicit_tool_search_opt_out_to_rdb_agent() -> None:
+    """Map an explicit Tool Search opt-out to the persisted Agent row."""
+    session = AsyncMock(spec=AsyncSession)
+    session.flush.side_effect = _StopAfterWrite
+
+    with pytest.raises(_StopAfterWrite):
+        await AgentRepository().create(
+            session,
+            _agent_create(tool_search_enabled=False),
+        )
+
+    rdb_agent = session.add.call_args.args[0]
+    assert isinstance(rdb_agent, RDBAgent)
+    assert rdb_agent.tool_search_enabled is False
 
 
 async def test_update_maps_tool_search_enabled_to_update_statement() -> None:

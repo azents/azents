@@ -124,7 +124,7 @@ class AgentCreateRequest(BaseModel):
     shell_enabled: bool = Field(default=True, description="Shell enabled state")
     memory_enabled: bool = Field(default=True, description="Memory enabled state")
     tool_search_enabled: bool = Field(
-        default=False, description="Tool Search enabled state"
+        default=True, description="Tool Search enabled state"
     )
     max_turns: int | None = Field(
         default=None, gt=0, description="Maximum agent turn count"

@@ -98,7 +98,7 @@ class AgentCreate(BaseModel):
     shell_enabled: bool = Field(default=True, description="Shell Enabled flag")
     memory_enabled: bool = Field(default=True, description="Memory enabled flag")
     tool_search_enabled: bool = Field(
-        default=False, description="Tool Search enabled flag"
+        default=True, description="Tool Search enabled flag"
     )
     max_turns: int | None = Field(default=None, description="Maximum agent turn count")
     subagent_settings: SubagentSettings = Field(

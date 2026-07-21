@@ -65,7 +65,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
 last_verified_at: 2026-07-21
-spec_version: 118
+spec_version: 119
 ---
 
 # Agent Execution Loop
@@ -706,7 +706,7 @@ fragments.
 
 ### Prepared-Call Tool Projection
 
-Every model step builds a fresh immutable executable Tool Catalog after current Toolkit context and client-executed built-ins are resolved. `RunRequest.tool_search_enabled` carries the current Agent setting into that immutable preparation boundary.
+Every model step builds a fresh immutable executable Tool Catalog after current Toolkit context and client-executed built-ins are resolved. `RunRequest.tool_search_enabled` carries the current Agent setting into that immutable preparation boundary. New Agents default this setting to enabled; existing Agents retain their persisted value, and `false` remains an explicit opt-out.
 
 Toolkits may contribute candidate tools and static prompt fragments with an optional required client-tool profile. Preparation resolves the profile set from the immutable selected-model snapshot using normalized developer, family, and exact model identifier rules; exact-model rules take precedence over family rules. Provider hosting and raw substring checks are not compatibility inputs. Profile names are derived preparation policy and are not persisted in `TurnContext`, the Session snapshot, or transcript history.
 
@@ -1023,6 +1023,7 @@ updated by the user.
 
 ## Changelog
 
+- **2026-07-21** (spec_version 119) — Enabled Tool Search by default for new Agents while retaining the persisted setting and disabled execution path for explicit opt-outs.
 - **2026-07-20** (spec_version 117) — Made `edit` a Runner-owned atomic `file.edit` operation while preserving its ordinary function schema and exact-match semantics.
 - **2026-07-20** (spec_version 116) — Categorized `apply_patch` with file-edit activity in the chat tool timeline.
 - **2026-07-20** (spec_version 115) — Added selected-model client tool profile projection, GPT-only ordinary `apply_patch` exposure alongside unchanged `edit`, typed patch result metadata, and commit-sensitive cancellation settlement.

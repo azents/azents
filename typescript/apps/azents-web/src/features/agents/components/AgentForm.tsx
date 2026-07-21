@@ -124,7 +124,7 @@ export function AgentForm({
       reasoning_effort: null,
       shell_enabled: true,
       memory_enabled: true,
-      tool_search_enabled: false,
+      tool_search_enabled: true,
       max_turns: null,
       subagent_max_subagents: 3,
       subagent_max_depth: 1,
