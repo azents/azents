@@ -16,6 +16,7 @@ from azents.core.github_credentials import GitHubSecrets, GitHubSecretsAppPlatfo
 from azents.core.mcp_credentials import McpSecrets
 from azents.core.tools import McpToolkitConfig, ToolkitProvider, ToolkitType
 from azents.engine.tools.deps import get_toolkit_registry
+from azents.engine.tools.envvar import EnvVarToolkitSecrets
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
@@ -65,6 +66,9 @@ from .data import (
 
 _mcp_secrets_adapter: TypeAdapter[McpSecrets] = TypeAdapter(McpSecrets)
 _github_secrets_adapter: TypeAdapter[GitHubSecrets] = TypeAdapter(GitHubSecrets)
+_envvar_secrets_adapter: TypeAdapter[EnvVarToolkitSecrets] = TypeAdapter(
+    EnvVarToolkitSecrets
+)
 
 
 def _resolve_mcp_config(
@@ -81,6 +85,43 @@ def _resolve_mcp_config(
         return provider.to_mcp_config(typed_config)
     except ValidationError:
         return None
+
+
+def merge_envvar_credentials(
+    existing_credentials: str | None,
+    submitted_credentials: dict[str, object],
+    config: dict[str, Any],
+) -> dict[str, object]:
+    """Merge non-empty EnvVar edits into values allowed by current config."""
+    submitted = _envvar_secrets_adapter.validate_python(submitted_credentials)
+    existing_values: dict[str, str] = {}
+    if existing_credentials is not None:
+        try:
+            existing_values = _envvar_secrets_adapter.validate_json(
+                existing_credentials
+            ).values
+        except ValidationError:
+            pass
+
+    merged_values = dict(existing_values)
+    merged_values.update(
+        {name: value for name, value in submitted.values.items() if value != ""}
+    )
+    raw_entries = config.get("entries")
+    entry_names = (
+        {
+            entry["name"]
+            for entry in raw_entries
+            if isinstance(entry, dict) and isinstance(entry.get("name"), str)
+        }
+        if isinstance(raw_entries, list)
+        else set()
+    )
+    return {
+        "values": {
+            name: value for name, value in merged_values.items() if name in entry_names
+        }
+    }
 
 
 def _get_toolkit_repo(
@@ -275,6 +316,19 @@ class ToolkitService:
                 if isinstance(bound_credentials, InvalidCredentials):
                     return Failure(bound_credentials)
                 normalized_credentials = bound_credentials
+                if existing.toolkit_type == ToolkitType.ENVVAR:
+                    if normalized_credentials is None:
+                        return Failure(
+                            InvalidCredentials(
+                                "EnvVar credential updates require credentials."
+                            )
+                        )
+                    config = update["config"] if "config" in update else existing.config
+                    normalized_credentials = merge_envvar_credentials(
+                        existing.credentials,
+                        normalized_credentials,
+                        config,
+                    )
                 cred_error = self._validate_credentials(
                     existing.toolkit_type,
                     normalized_credentials,
@@ -291,6 +345,16 @@ class ToolkitService:
                         )
                     if cred_err_msg is not None:
                         return Failure(InvalidCredentials(cred_err_msg))
+        elif (
+            existing.toolkit_type == ToolkitType.ENVVAR
+            and "config" in update
+            and existing.credentials is not None
+        ):
+            normalized_credentials = merge_envvar_credentials(
+                existing.credentials,
+                {"values": {}},
+                update["config"],
+            )
 
         repo_update = ToolkitUpdate()
         if "slug" in update:
@@ -303,7 +367,7 @@ class ToolkitService:
             repo_update["config"] = update["config"]
         if "prompt" in update:
             repo_update["prompt"] = update["prompt"]
-        if "credentials" in update:
+        if "credentials" in update or normalized_credentials is not None:
             repo_update["credentials"] = (
                 json.dumps(normalized_credentials)
                 if normalized_credentials is not None
