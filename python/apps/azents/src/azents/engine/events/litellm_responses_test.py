@@ -708,7 +708,18 @@ class TestLiteLLMResponsesLowerer:
 
     def test_custom_tool_call_drops_cross_dialect_output(self) -> None:
         """Do not pair a custom call with a JSON-function result sharing its ID."""
-        lowerer = LiteLLMResponsesLowerer(provider="openai", model="gpt-5.1")
+        lowerer = LiteLLMResponsesLowerer(
+            provider="openai",
+            model="gpt-5.1",
+            tools=[
+                {
+                    "type": "custom",
+                    "name": "apply_patch",
+                    "description": "Apply a patch.",
+                    "format": {"type": "text"},
+                }
+            ],
+        )
         transcript = [
             _event(
                 EventKind.CLIENT_TOOL_CALL,
@@ -749,6 +760,71 @@ class TestLiteLLMResponsesLowerer:
                 "input": "opaque-custom-input",
             }
         ]
+
+    def test_completed_custom_history_is_non_executable_on_later_route(self) -> None:
+        """Project a completed custom pair without emitting custom wire items."""
+        lowerer = LiteLLMResponsesLowerer(
+            provider="openai",
+            model="gpt-5.1",
+            tools=[
+                {
+                    "type": "function",
+                    "name": "apply_patch",
+                    "description": "Apply a patch.",
+                    "parameters": {"type": "object"},
+                }
+            ],
+        )
+        transcript = [
+            _event(
+                EventKind.CLIENT_TOOL_CALL,
+                ClientToolCallPayload(
+                    call_id="call-custom",
+                    name="apply_patch",
+                    arguments="opaque-custom-input",
+                    wire_dialect="plaintext_custom",
+                    native_artifact=_artifact(
+                        {
+                            "type": "custom_tool_call",
+                            "call_id": "call-custom",
+                            "name": "apply_patch",
+                            "input": "opaque-custom-input",
+                        }
+                    ),
+                ),
+            ),
+            _event(
+                EventKind.CLIENT_TOOL_RESULT,
+                ClientToolResultPayload(
+                    call_id="call-custom",
+                    name="apply_patch",
+                    wire_dialect="plaintext_custom",
+                    status="completed",
+                    output="completed",
+                ),
+            ),
+        ]
+
+        request = lowerer.lower(transcript, model="gpt-5.1")
+
+        assert request.input == [
+            {
+                "role": "assistant",
+                "content": (
+                    "[Historical custom tool call: apply_patch. "
+                    "Input omitted; non-executable history.]"
+                ),
+            },
+            {
+                "role": "assistant",
+                "content": (
+                    "[Historical custom tool result: apply_patch. "
+                    "Non-executable history.]\ncompleted"
+                ),
+            },
+        ]
+        assert all(item.get("type") != "custom_tool_call" for item in request.input)
+        assert all("opaque-custom-input" not in str(item) for item in request.input)
 
     def test_skips_goal_briefing_for_model_input(self) -> None:
         """goal_briefing is UI-only durable event, so exclude it from model input."""

@@ -789,6 +789,105 @@ async def test_compactor_continuity_uses_concise_transcript_labels() -> None:
     assert "\noutput:\n" not in payload.content
 
 
+async def test_compactor_continuity_omits_plaintext_custom_input() -> None:
+    """Do not pass custom tool input through continuity or its hook context."""
+    omitted_input = "opaque-custom-input"
+    redacted_input = "[plaintext custom input omitted]"
+    events = [
+        _event(
+            "1",
+            EventKind.CLIENT_TOOL_CALL,
+            ClientToolCallPayload(
+                call_id="call-custom",
+                name="apply_patch",
+                arguments=omitted_input,
+                native_artifact=_native_artifact(),
+                wire_dialect="plaintext_custom",
+            ),
+        ),
+    ]
+    captured: dict[str, str] = {}
+
+    async def summarize(
+        old_events: Sequence[Event],
+        summary_budget: object,
+    ) -> str:
+        """Return a fixed summary without inspecting the transcript."""
+        del old_events, summary_budget
+        return "summary"
+
+    async def enrich(
+        *,
+        summary: str,
+        continuity_history: str,
+        compaction_id: str,
+        reason: str | None,
+        covered_until_event_id: str,
+    ) -> str:
+        """Capture the hook-visible continuity history."""
+        del compaction_id, reason, covered_until_event_id
+        captured["continuity_history"] = continuity_history
+        return summary
+
+    summary = await _compactor(
+        transcript_repo=_TranscriptRepo(events),
+        session_repo=_SessionRepo(),
+    ).compact(
+        session_id="session-1",
+        transcript=events,
+        compaction_id="compact-1",
+        summarize=summarize,
+        summary_enricher=enrich,
+    )
+
+    assert summary is not None
+    payload = summary.payload
+    assert isinstance(payload, CompactionSummaryPayload)
+    assert omitted_input not in captured["continuity_history"]
+    assert omitted_input not in payload.content
+    assert redacted_input in captured["continuity_history"]
+    assert redacted_input in payload.content
+
+
+async def test_plaintext_custom_input_does_not_trigger_auto_compaction() -> None:
+    """Estimate custom calls from the safe projection instead of their input."""
+    events = [
+        _event(
+            "1",
+            EventKind.CLIENT_TOOL_CALL,
+            ClientToolCallPayload(
+                call_id="call-custom",
+                name="apply_patch",
+                arguments="opaque" * 10_000,
+                native_artifact=_native_artifact(),
+                wire_dialect="plaintext_custom",
+            ),
+        )
+    ]
+
+    async def summarize(
+        old_events: Sequence[Event],
+        summary_budget: object,
+    ) -> str:
+        """Fail if custom input reaches the auto-compaction threshold."""
+        del old_events, summary_budget
+        raise AssertionError("custom input must not trigger compaction")
+
+    result = await EventAutoCompactionFilter(
+        session_id="session-1",
+        compactor=_compactor(
+            transcript_repo=_TranscriptRepo(events),
+            session_repo=_SessionRepo(),
+        ),
+        summarize=summarize,
+        max_input_tokens=2_000,
+        auto_compaction_threshold_tokens=1_000,
+        compaction_id_factory=lambda: "compact-1",
+    ).compact(events)
+
+    assert result == events
+
+
 async def test_compactor_summary_enricher_runs_before_continuity_append() -> None:
     """Summary enrichment can insert content before final continuity history."""
     events = [

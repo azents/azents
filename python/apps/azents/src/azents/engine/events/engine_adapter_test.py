@@ -817,6 +817,33 @@ def test_agent_engine_adapter_dependency_graph_is_valid() -> None:
     assert get_dependant(path="/", call=endpoint).dependencies
 
 
+def test_summary_renderer_omits_plaintext_custom_tool_input() -> None:
+    """Do not send custom tool input to the compaction summary model."""
+    omitted_input = "opaque-custom-input"
+    event = Event(
+        id="1" * 32,
+        session_id="session-1",
+        kind=EventKind.CLIENT_TOOL_CALL,
+        payload=ClientToolCallPayload(
+            call_id="call-custom",
+            name="apply_patch",
+            arguments=omitted_input,
+            native_artifact=_artifact({"type": "custom_tool_call"}),
+            wire_dialect="plaintext_custom",
+        ),
+        created_at=datetime.datetime.now(datetime.UTC),
+    )
+
+    rendered = engine_adapter_module._render_events_for_summary(  # pyright: ignore[reportPrivateUsage]  # Verify compaction summary redaction.
+        [event]
+    )
+
+    assert omitted_input not in rendered
+    assert rendered == (
+        "[Client tool call: apply_patch (plaintext custom input omitted)]"
+    )
+
+
 def test_hooked_tool_executor_forwards_request_cancel() -> None:
     """Hook wrapper forwards cancellation request to inner executor."""
     inner = _RecordingToolExecutor()

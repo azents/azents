@@ -16,7 +16,11 @@ from azents.engine.events.file_parts import (
     ModelFileResolver,
     lower_file_output_part,
 )
-from azents.engine.events.output_parts import iter_output_parts, lower_output_to_text
+from azents.engine.events.output_parts import (
+    iter_output_parts,
+    lower_output_to_text,
+    output_text_preview,
+)
 from azents.engine.events.protocols import NativeModelRequest
 from azents.engine.events.provider_tool_rendering import render_provider_tool_semantic
 from azents.engine.events.responses_continuation import sanitize_responses_native_item
@@ -64,6 +68,7 @@ _PROVIDER_NAMES_WITH_INPUT_MESSAGE_INSTRUCTIONS = {"xai", "xai_oauth"}
 _PROMPT_CACHE_KEY_PREFIX = "azs"
 _OPENAI_PROMPT_CACHE_KEY_MAX_CHARS = 64
 _REASONING_ENCRYPTED_CONTENT_INCLUDE: ResponseIncludable = "reasoning.encrypted_content"
+_HISTORICAL_CUSTOM_TOOL_OUTPUT_MAX_CHARS = 2_000
 
 
 @dataclasses.dataclass(frozen=True)
@@ -178,6 +183,7 @@ class ResponsesRequestLowerer:
         model_developer: LLMModelDeveloper | None = None,
         model_capabilities: ModelCapabilities | None = None,
         model_file_resolver: ModelFileResolver | None = None,
+        historical_plaintext_custom_supported: bool = False,
     ) -> None:
         """Set lowerer target provider/model."""
         self.provider = provider
@@ -201,6 +207,9 @@ class ResponsesRequestLowerer:
             )
         )
         self.model_file_resolver = model_file_resolver
+        self._historical_plaintext_custom_supported = (
+            historical_plaintext_custom_supported
+        )
         self.compat_key = build_native_compat_key(
             adapter=self.adapter,
             native_format=self.native_format,
@@ -230,15 +239,27 @@ class ResponsesRequestLowerer:
         else:
             kwargs["instructions"] = instructions
 
+        replayable_plaintext_custom_call_ids: set[str] = set()
         for event in transcript:
             native_items = self._compatible_native_items(event)
             if native_items is not None:
                 input_items.extend(native_items)
+                if _replays_plaintext_custom_call(event, native_items):
+                    payload = event.payload
+                    assert isinstance(payload, ClientToolCallPayload)
+                    replayable_plaintext_custom_call_ids.add(payload.call_id)
                 continue
 
-            lowered = self._lower_event(event)
+            lowered = self._lower_event(
+                event,
+                replayable_plaintext_custom_call_ids=replayable_plaintext_custom_call_ids,
+            )
             if lowered is not None:
                 input_items.append(lowered)
+                if _lowers_plaintext_custom_call(event, lowered):
+                    payload = event.payload
+                    assert isinstance(payload, ClientToolCallPayload)
+                    replayable_plaintext_custom_call_ids.add(payload.call_id)
 
         if kwargs.get("store") is False:
             # With store=False, provider response items are not persisted; replaying
@@ -376,10 +397,16 @@ class ResponsesRequestLowerer:
                 if artifact.compatible_with(self.compat_key):
                     return [sanitize_responses_native_item(dict(artifact.item))]
             case ClientToolCallPayload(
+                name=name,
                 wire_dialect=wire_dialect,
                 native_artifact=artifact,
             ):
                 if artifact.compatible_with(self.compat_key):
+                    if (
+                        wire_dialect == "plaintext_custom"
+                        and not self._can_replay_plaintext_custom_tool(name)
+                    ):
+                        return None
                     expected_item_type = {
                         "json_function": "function_call",
                         "plaintext_custom": "custom_tool_call",
@@ -400,7 +427,12 @@ class ResponsesRequestLowerer:
                 pass
         return None
 
-    def _lower_event(self, event: Event) -> dict[str, object] | None:
+    def _lower_event(
+        self,
+        event: Event,
+        *,
+        replayable_plaintext_custom_call_ids: set[str],
+    ) -> dict[str, object] | None:
         """Lower one Event to native input item."""
         if event.kind == EventKind.GOAL_CONTINUATION and isinstance(
             event.payload, UserMessagePayload
@@ -469,6 +501,8 @@ class ResponsesRequestLowerer:
                 arguments=args,
                 wire_dialect="plaintext_custom",
             ):
+                if not self._declares_plaintext_custom_tool(name):
+                    return _historical_custom_tool_call_projection(name)
                 return {
                     "type": "custom_tool_call",
                     "call_id": call_id,
@@ -486,10 +520,16 @@ class ResponsesRequestLowerer:
                     "output": self._lower_tool_output(output),
                 }
             case ClientToolResultPayload(
+                name=name,
                 call_id=call_id,
                 output=output,
                 wire_dialect="plaintext_custom",
             ):
+                if (
+                    not self._declares_plaintext_custom_tool(name)
+                    and call_id not in replayable_plaintext_custom_call_ids
+                ):
+                    return _historical_custom_tool_result_projection(name, output)
                 return {
                     "type": "custom_tool_call_output",
                     "call_id": call_id,
@@ -524,6 +564,67 @@ class ResponsesRequestLowerer:
             capabilities=self._file_part_capabilities,
             model_file_resolver=self.model_file_resolver,
         )
+
+    def _can_replay_plaintext_custom_tool(self, name: str | None) -> bool:
+        """Return whether this route can replay a compatible custom artifact."""
+        return self._historical_plaintext_custom_supported or (
+            self._declares_plaintext_custom_tool(name)
+        )
+
+    def _declares_plaintext_custom_tool(self, name: str | None) -> bool:
+        """Return whether the current request declares this custom tool dialect."""
+        return name is not None and any(
+            tool.get("type") == "custom" and tool.get("name") == name
+            for tool in self._tools
+        )
+
+
+def _historical_custom_tool_call_projection(name: str) -> dict[str, object]:
+    """Render an incompatible custom call as non-executable readable history."""
+    return {
+        "role": "assistant",
+        "content": (
+            f"[Historical custom tool call: {name}. "
+            "Input omitted; non-executable history.]"
+        ),
+    }
+
+
+def _historical_custom_tool_result_projection(
+    name: str | None,
+    output: ToolOutput,
+) -> dict[str, object]:
+    """Render an incompatible custom result as bounded non-executable history."""
+    title = name or "unknown"
+    content = f"[Historical custom tool result: {title}. Non-executable history.]"
+    preview = output_text_preview(
+        output,
+        max_chars=_HISTORICAL_CUSTOM_TOOL_OUTPUT_MAX_CHARS,
+    )
+    if preview:
+        content = f"{content}\n{preview}"
+    return {"role": "assistant", "content": content}
+
+
+def _replays_plaintext_custom_call(
+    event: Event,
+    native_items: Sequence[dict[str, object]],
+) -> bool:
+    """Return whether compatible native replay retained a custom call item."""
+    return (
+        isinstance(event.payload, ClientToolCallPayload)
+        and event.payload.wire_dialect == "plaintext_custom"
+        and any(item.get("type") == "custom_tool_call" for item in native_items)
+    )
+
+
+def _lowers_plaintext_custom_call(event: Event, item: dict[str, object]) -> bool:
+    """Return whether semantic lowering emitted a custom call item."""
+    return (
+        isinstance(event.payload, ClientToolCallPayload)
+        and event.payload.wire_dialect == "plaintext_custom"
+        and item.get("type") == "custom_tool_call"
+    )
 
 
 @dataclasses.dataclass(frozen=True)

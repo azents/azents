@@ -139,6 +139,7 @@ from azents.engine.run.builtin_tools import (
 from azents.engine.run.client_tool_compatibility import (
     ClientToolRoute,
     resolve_client_tool_profiles,
+    supports_historical_plaintext_custom_apply_patch,
 )
 from azents.engine.run.contracts import RunContext, RunRequest, ToolkitBinding
 from azents.engine.run.emit import Emit, durable, ephemeral
@@ -571,6 +572,22 @@ class AgentEngineAdapter:
                 if _uses_openai_sdk(request.provider)
                 else None
             )
+            client_tool_route = ClientToolRoute(
+                provider=request.provider,
+                adapter=lowerer_type.adapter,
+                native_format=lowerer_type.native_format,
+                official_openai_endpoint=(
+                    request.provider is LLMProvider.OPENAI
+                    and openai_client_config is not None
+                    and openai_client_config.base_url is None
+                ),
+                api_key_available=(
+                    openai_client_config is not None
+                    and openai_client_config.api_key is not None
+                ),
+                custom_rollout_percent=self.config.apply_patch_custom_rollout_percent,
+                cohort_key=request.session_id,
+            )
             client_tool_profiles = resolve_client_tool_profiles(
                 model_identifier=(
                     model_selection.model_identifier
@@ -579,24 +596,19 @@ class AgentEngineAdapter:
                 ),
                 model_developer=model_developer,
                 model_family=model_family,
-                route=ClientToolRoute(
-                    provider=request.provider,
-                    adapter=lowerer_type.adapter,
-                    native_format=lowerer_type.native_format,
-                    official_openai_endpoint=(
-                        request.provider is LLMProvider.OPENAI
-                        and openai_client_config is not None
-                        and openai_client_config.base_url is None
+                route=client_tool_route,
+            )
+            historical_plaintext_custom_supported = (
+                supports_historical_plaintext_custom_apply_patch(
+                    model_identifier=(
+                        model_selection.model_identifier
+                        if model_selection is not None
+                        else model
                     ),
-                    api_key_available=(
-                        openai_client_config is not None
-                        and openai_client_config.api_key is not None
-                    ),
-                    custom_rollout_percent=(
-                        self.config.apply_patch_custom_rollout_percent
-                    ),
-                    cohort_key=request.session_id,
-                ),
+                    model_developer=model_developer,
+                    model_family=model_family,
+                    route=client_tool_route,
+                )
             )
             candidate_catalog = await build_tool_catalog(
                 toolkit_bindings=request.toolkits,
@@ -778,6 +790,9 @@ class AgentEngineAdapter:
                 model_developer=request.model_developer,
                 model_capabilities=request.model_capabilities,
                 model_file_resolver=model_file_resolver,
+                historical_plaintext_custom_supported=(
+                    historical_plaintext_custom_supported
+                ),
             )
             tool_executor = ToolCatalogClientToolExecutor(catalog)
             hooked_tool_executor = _HookedClientToolExecutor(
@@ -1411,6 +1426,11 @@ def _render_event_for_summary(event: Event) -> str:
                 return f"[Reasoning summary]: {summary}"
             if text:
                 return f"[Reasoning]: {text}"
+        case ClientToolCallPayload(
+            name=name,
+            wire_dialect="plaintext_custom",
+        ):
+            return f"[Client tool call: {name} (plaintext custom input omitted)]"
         case ClientToolCallPayload(name=name, arguments=arguments):
             return f"[Client tool call: {name}({arguments})]"
         case ClientToolResultPayload(name=name, status=status, output=output):

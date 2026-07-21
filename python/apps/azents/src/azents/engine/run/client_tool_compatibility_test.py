@@ -11,6 +11,7 @@ from azents.engine.run.client_tool_compatibility import (
     ClientToolProfile,
     ClientToolRoute,
     resolve_client_tool_profiles,
+    supports_historical_plaintext_custom_apply_patch,
 )
 
 _PROFILE = ClientToolProfile.V4A_APPLY_PATCH_FUNCTION
@@ -117,6 +118,22 @@ def test_exact_official_openai_route_selects_custom_only_when_enabled() -> None:
         {ClientToolProfile.V4A_APPLY_PATCH_PLAINTEXT_CUSTOM}
     )
     assert fallback_profiles == frozenset({_PROFILE})
+
+
+def test_exact_official_openai_route_supports_custom_history_when_disabled() -> None:
+    """Keep custom lifecycle support independent from new-call rollout selection."""
+    assert supports_historical_plaintext_custom_apply_patch(
+        model_identifier="gpt-5.1",
+        model_developer=LLMModelDeveloper.OPENAI,
+        model_family="gpt-5",
+        route=_route(custom_rollout_percent=0),
+    )
+    assert not supports_historical_plaintext_custom_apply_patch(
+        model_identifier="gpt-5.1",
+        model_developer=LLMModelDeveloper.OPENAI,
+        model_family="gpt-5",
+        route=_route(official_openai_endpoint=False, custom_rollout_percent=100),
+    )
 
 
 def test_custom_route_denial_retains_only_verified_function_fallback() -> None:
