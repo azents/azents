@@ -171,7 +171,16 @@ export function ToolActivityGroup({
   modelCallStartedAt = null,
 }: ToolActivityGroupProps): React.ReactElement {
   const t = useTranslations("chat.toolActivity");
-  const [opened, { toggle }] = useDisclosure(false);
+  const [opened, { close, open, toggle }] = useDisclosure(active);
+
+  useEffect(() => {
+    if (active) {
+      open();
+      return;
+    }
+    close();
+  }, [active, close, open]);
+
   const hasDetails = activity.events.length > 0;
   const groupDurationSeconds = useVisibleElapsedDuration(
     activity.startedAt,
