@@ -234,6 +234,7 @@ async def _resolve_failing_registered_toolkit(
         prompt=None,
         credentials=None,
         enabled=True,
+        revision=1,
         created_at=_NOW,
         updated_at=_NOW,
     )

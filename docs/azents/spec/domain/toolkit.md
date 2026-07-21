@@ -46,7 +46,7 @@ api_routes:
   - /toolkit/v1
   - /shell-environment/v1
 last_verified_at: 2026-07-21
-spec_version: 67
+spec_version: 68
 ---
 
 # Toolkit
@@ -79,7 +79,7 @@ erDiagram
 
 ### Entities
 
-- **ToolkitConfig** — workspace-owned tool + setting bundle. Can be shared by multiple agents. (`workspace_id`, `toolkit_type`, `slug`, `config`, `prompt`, `encrypted_credentials`, `enabled`). ([`rdb/models/toolkit.py`](../../../../python/apps/azents/src/azents/rdb/models/toolkit.py))
+- **ToolkitConfig** — workspace-owned tool + setting bundle. Can be shared by multiple agents. (`workspace_id`, `toolkit_type`, `slug`, `config`, `prompt`, `encrypted_credentials`, `enabled`, `revision`). `revision` starts at `1` and increments whenever persisted ToolkitConfig state changes. ([`rdb/models/toolkit.py`](../../../../python/apps/azents/src/azents/rdb/models/toolkit.py))
 - **ToolkitScope** — workspace visibility scope for ToolkitConfig. `scope_type` is `WORKSPACE`; `scope_id` is the Workspace ID. WORKSPACE scope is automatically added on creation. ([`services/toolkit/__init__.py`](../../../../python/apps/azents/src/azents/services/toolkit/__init__.py))
 - **AgentToolkit** — Agent ↔ ToolkitConfig link. `(agent_id, toolkit_id)` is UNIQUE. Denormalized `toolkit_type` column supports enforcing **one toolkit type per Agent**.
 - **MCPOAuthConnection** — Toolkit-level MCP OAuth client registration and token state. `toolkit_id` is UNIQUE; client IDs, client secrets, access tokens, and refresh tokens are encrypted. Status is `connected` or `reconnect_required`.
@@ -515,7 +515,7 @@ Toolkit resolution receives an execution mode. Root sessions use root mode. Chil
 - `[agent-workspace-file-tool-boundary]` Shell file tools guide Provider-reported Agent Workspace subpaths and `/tmp/**` paths. External Exchange files and internal Artifacts enter Runtime through `import_file`; `/tmp/**` import result includes transient warning and original file-location URI. User-downloadable file is exported by `present_file` only from Agent Workspace subfile as `exchange://{object_key}` attachment.
 - `[agents-md-project-boundary]` Project-scoped `AGENTS.md` auto-load works only inside registered Project. Agent Workspace root instruction is separate root scope, and Agent Workspace root itself is not treated as Project.
 - `[toolkit-hook-effects]` Toolkit tool-call hook may perform `on_before_tool_call` deny and `on_after_tool_call` text output replacement within [hook-260518/ADR](../../adr/hook-260518-hook.md) scope. Arbitrary input mutation, retry/continuation wrapper, credential trace storage are not allowed.
-- `[toolkit-session-lifecycle]` Executable Toolkit instance is managed by session-scoped lifecycle registry tied to `_SessionRunner` active lifetime. New run reconciles desired toolkit snapshot, and new toolkit `__aenter__()` must complete before engine `update_context()` call. Removed toolkit is `__aexit__()` after successful reconcile.
+- `[toolkit-session-lifecycle]` Executable Toolkit instance is managed by session-scoped lifecycle registry tied to `_SessionRunner` active lifetime. Each actionable wake-up resolves a fresh desired toolkit snapshot. A binding with the same stable identity and source revision retains its entered instance; a changed revision enters a replacement before the previous instance is closed. New or replacement toolkit `__aenter__()` must complete before engine `update_context()` call. Removed and replaced toolkits are `__aexit__()` only after successful reconciliation.
 - `[toolkit-turn-context]` run/turn-scoped values such as `run_id`, current actor `user_id`, `publish_event`, `check_stop` must not remain stale in long-lived toolkit instance. If tool handler needs these values, create handler with current turn values from `update_context(TurnContext)`.
 
 ## State Transitions

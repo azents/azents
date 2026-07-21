@@ -18,9 +18,10 @@ def session_toolkit_key(
 ) -> SessionToolkitKey:
     """Create stable key used by Session lifecycle registry."""
     if binding.toolkit_type is not None:
+        toolkit_source_id = binding.toolkit_config_id or binding.slug
         return SessionToolkitKey(
             namespace=f"registered:{binding.toolkit_type}",
-            name=f"{binding.slug}:actor:{user_id or 'system'}",
+            name=f"{toolkit_source_id}:actor:{user_id or 'system'}",
         )
     return SessionToolkitKey(
         namespace="dynamic",

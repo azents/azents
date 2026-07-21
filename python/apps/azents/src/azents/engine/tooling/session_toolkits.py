@@ -64,14 +64,18 @@ class SessionToolkitLifecycle:
         desired_keys = {item.key for item in desired}
         result: list[ToolkitBinding] = []
         new_entries: dict[SessionToolkitKey, _EnteredToolkit] = {}
+        reused_entries: dict[SessionToolkitKey, _EnteredToolkit] = {}
 
         async with AsyncExitStack() as rollback_stack:
             for item in desired:
                 existing = self._entries.get(item.key)
-                if existing is not None:
+                if (
+                    existing is not None
+                    and existing.binding.source_revision == item.binding.source_revision
+                ):
                     binding = item.binding._replace(toolkit=existing.binding.toolkit)
-                    existing.binding = binding
                     result.append(binding)
+                    reused_entries[item.key] = existing
                     continue
 
                 entry = await _enter_binding(item)
@@ -81,17 +85,20 @@ class SessionToolkitLifecycle:
 
             rollback_stack.pop_all()
 
-        removed = [
-            entry for key, entry in self._entries.items() if key not in desired_keys
-        ]
-        await _close_entries(removed)
-
+        previous_entries = self._entries
         updated: dict[SessionToolkitKey, _EnteredToolkit] = {}
         for item, binding in zip(desired, result, strict=True):
-            entry = self._entries.get(item.key) or new_entries[item.key]
+            entry = reused_entries.get(item.key) or new_entries[item.key]
             entry.binding = binding
             updated[item.key] = entry
         self._entries = updated
+
+        removed = [
+            entry
+            for key, entry in previous_entries.items()
+            if key not in desired_keys or key not in reused_entries
+        ]
+        await _close_entries(removed)
 
         return result
 

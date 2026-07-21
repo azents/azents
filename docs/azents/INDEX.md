@@ -21,7 +21,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-17 | 5 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-07-21 | 17 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-20 | 3 |
-| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-07-21 | 67 |
+| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-07-21 | 68 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-07-20 | 8 |
 | [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-07-19 | 41 |
 
@@ -347,6 +347,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Manage Toolkit Lifecycle by AgentSession Lifecycle Historical Requirements Reconstruction](requirements/toolkit-260529-toolkit-lifecycle.md) | toolkit-260529 | 2026-05-29 | - |
 | [Split TodoToolkit as Always-on Toolkit Historical Requirements Reconstruction](requirements/toolkit-260613-todo-toolkit-always-on.md) | toolkit-260613 | 2026-06-13 | - |
 | [Replace MCP Per-User OAuth with Toolkit-Level OAuth Connections Historical Requirements Reconstruction](requirements/toolkit-260623-toolkit-level-mcp-oauth.md) | toolkit-260623 | 2026-06-23 | - |
+| [Toolkit Wake-Up Snapshot Revision Requirements](requirements/toolkit-260721-wakeup-snapshot-revision.md) | toolkit-260721 | 2026-07-21 | 2026-07-21 |
 | [Continue FIFO Processing After Failed TurnActions Historical Requirements Reconstruction](requirements/turn-260708-turn-action-fifo-continuation.md) | turn-260708 | 2026-07-08 | - |
 | [Expose Typed Actionable Profile Resolution Failures Historical Requirements Reconstruction](requirements/typed-260710-typed-profile-resolution-failures.md) | typed-260710 | 2026-07-10 | - |
 | [Unified OAuth Authentication Flow Historical Requirements Reconstruction](requirements/unified-260327-unified-oauth.md) | unified-260327 | 2026-03-27 | 2026-03-27 |
@@ -657,6 +658,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Manage Toolkit Lifecycle by AgentSession Lifecycle](adr/toolkit-260529-toolkit-lifecycle.md)
 - [Split TodoToolkit as Always-on Toolkit](adr/toolkit-260613-todo-toolkit-always-on.md)
 - [Replace MCP Per-User OAuth with Toolkit-Level OAuth Connections](adr/toolkit-260623-toolkit-level-mcp-oauth.md)
+- [Toolkit Wake-Up Snapshot Revision](adr/toolkit-260721-wakeup-snapshot-revision.md)
 - [Continue FIFO Processing After Failed TurnActions](adr/turn-260708-turn-action-fifo-continuation.md)
 - [Expose Typed Actionable Profile Resolution Failures](adr/typed-260710-typed-profile-resolution-failures.md)
 - [Unified OAuth Authentication Flow Historical Decision Reconstruction](adr/unified-260327-unified-oauth.md)
