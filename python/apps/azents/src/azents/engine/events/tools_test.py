@@ -251,6 +251,7 @@ async def test_catalog_enriches_registered_tool_call_with_source_snapshot() -> N
             name="github__echo",
             arguments="{}",
             native_artifact=_artifact(),
+            wire_dialect="json_function",
         )
     )
 
@@ -377,6 +378,7 @@ async def test_client_tool_executor_returns_event_result() -> None:
             name="echo",
             arguments='{"text":"hello"}',
             native_artifact=_artifact(),
+            wire_dialect="json_function",
         )
     )
 
@@ -431,6 +433,7 @@ async def test_client_tool_executor_preserves_failed_result_metadata() -> None:
             name="failing_tool",
             arguments="{}",
             native_artifact=_artifact(),
+            wire_dialect="json_function",
         )
     )
 
@@ -482,6 +485,7 @@ async def test_client_tool_executor_applies_global_text_output_cap() -> None:
             name="long_output",
             arguments="{}",
             native_artifact=_artifact(),
+            wire_dialect="json_function",
         )
     )
 
@@ -541,6 +545,7 @@ async def test_client_tool_executor_caps_structured_text_output_parts() -> None:
             name="structured_long_output",
             arguments="{}",
             native_artifact=_artifact(),
+            wire_dialect="json_function",
         )
     )
 
@@ -600,6 +605,7 @@ async def test_client_tool_executor_carries_transient_generated_files() -> None:
             name="image_generation",
             arguments="{}",
             native_artifact=_artifact(),
+            wire_dialect="json_function",
         )
     )
 
@@ -657,6 +663,7 @@ async def test_client_tool_executor_preserves_function_tool_result_metadata() ->
             name="metadata_result",
             arguments="{}",
             native_artifact=_artifact(),
+            wire_dialect="json_function",
         )
     )
 
@@ -713,6 +720,7 @@ async def test_client_tool_executor_dispatches_cancel_handler() -> None:
             name="slow",
             arguments='{"pid":123}',
             native_artifact=_artifact(),
+            wire_dialect="json_function",
         )
     )
 
@@ -751,6 +759,7 @@ async def test_client_tool_executor_migrates_function_tool_result_parts() -> Non
             name="legacy_result",
             arguments="{}",
             native_artifact=_artifact(),
+            wire_dialect="json_function",
         )
     )
 
@@ -784,6 +793,7 @@ async def test_client_tool_executor_returns_failed_for_unknown_tool() -> None:
             name="missing",
             arguments="{}",
             native_artifact=_artifact(),
+            wire_dialect="json_function",
         )
     )
 

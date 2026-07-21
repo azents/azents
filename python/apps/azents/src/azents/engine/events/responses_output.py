@@ -182,6 +182,7 @@ class ResponsesOutputNormalizer:
                 call_id=str(output_item.get("call_id") or output_item.get("id") or ""),
                 name=str(output_item.get("name") or ""),
                 arguments=str(output_item.get("arguments") or ""),
+                wire_dialect="json_function",
                 native_artifact=artifact,
             )
             return _event(session_id, EventKind.CLIENT_TOOL_CALL, payload)

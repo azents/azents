@@ -453,6 +453,7 @@ def _file_event(model_file_id: str = "m" * 32) -> Event:
                     kind="image",
                 )
             ],
+            wire_dialect="json_function",
         ),
         created_at=_NOW,
         model_order=10,

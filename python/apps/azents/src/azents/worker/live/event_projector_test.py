@@ -221,6 +221,7 @@ async def test_active_tool_calls_broadcast_without_redis_storage() -> None:
         arguments='{"cmd":"sleep"}',
         started_at=datetime.datetime(2026, 6, 4, tzinfo=datetime.UTC),
         owner_generation=1,
+        wire_dialect="json_function",
     )
 
     await projector.replace_active_tool_calls(

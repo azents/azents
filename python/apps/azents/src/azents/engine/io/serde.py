@@ -114,7 +114,13 @@ def serialize_tool_calls(
     if not tool_calls:
         return None
     return [
-        {"id": tc.id, "name": tc.name, "arguments": tc.arguments} for tc in tool_calls
+        {
+            "id": tc.id,
+            "name": tc.name,
+            "arguments": tc.arguments,
+            "wire_dialect": tc.wire_dialect,
+        }
+        for tc in tool_calls
     ]
 
 
@@ -155,6 +161,7 @@ def deserialize_tool_calls(
             id=tc["id"],
             name=tc["name"],
             arguments=_sanitize_tool_call_arguments(tc["arguments"], tc_id=tc["id"]),
+            wire_dialect=tc.get("wire_dialect", "json_function"),
         )
         for tc in raw
     ]

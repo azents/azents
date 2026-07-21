@@ -945,6 +945,7 @@ class AgentRunExecution[
             result = ClientToolResultPayload(
                 call_id=call.call_id,
                 name=call.name,
+                wire_dialect=call.wire_dialect,
                 status="failed",
                 output=[
                     OutputTextPart(
@@ -986,6 +987,7 @@ class AgentRunExecution[
                 failed = ClientToolResultPayload(
                     call_id=call.call_id,
                     name=call.name,
+                    wire_dialect=call.wire_dialect,
                     status="failed",
                     output=[
                         OutputTextPart(
@@ -1113,6 +1115,7 @@ class AgentRunExecution[
             payload = ClientToolResultPayload(
                 call_id=call.call_id,
                 name=call.name,
+                wire_dialect=call.wire_dialect,
                 status="cancelled",
                 output=[
                     OutputTextPart(
@@ -1146,6 +1149,7 @@ class AgentRunExecution[
             payload = ClientToolResultPayload(
                 call_id=call.call_id,
                 name=call.name,
+                wire_dialect=call.wire_dialect,
                 status="cancelled",
                 output=[
                     OutputTextPart(
@@ -1202,6 +1206,7 @@ class AgentRunExecution[
             return ClientToolResultPayload(
                 call_id=call.call_id,
                 name=call.name,
+                wire_dialect=call.wire_dialect,
                 status="failed",
                 output=[
                     OutputTextPart(
@@ -1495,6 +1500,7 @@ def _active_tool_call(
         call_id=call.call_id,
         name=call.name,
         arguments=call.arguments,
+        wire_dialect=call.wire_dialect,
         toolkit_source=call.toolkit_source,
         started_at=datetime.datetime.now(datetime.UTC),
         owner_generation=owner_generation,

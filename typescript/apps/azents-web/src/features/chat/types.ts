@@ -167,10 +167,13 @@ export interface InvalidToolkitSource {
   kind: "invalid";
 }
 
+export type ClientToolWireDialect = "json_function" | "plaintext_custom";
+
 export interface ClientToolCallPayload {
   call_id: string;
   name: string;
   arguments: string;
+  wire_dialect: ClientToolWireDialect;
   toolkit_source?: ToolkitSourceSnapshot | null;
 }
 
@@ -183,6 +186,7 @@ export type ToolResultStatus =
 export interface ClientToolResultPayload {
   call_id: string;
   name?: string | null;
+  wire_dialect: ClientToolWireDialect;
   status: ToolResultStatus;
   output: string | OutputPart[];
   metadata?: Record<string, unknown>;

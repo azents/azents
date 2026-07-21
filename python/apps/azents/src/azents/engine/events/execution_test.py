@@ -809,6 +809,7 @@ class _ToolExecutor:
             name=call.name,
             status="completed",
             output=[OutputTextPart(text="tool output")],
+            wire_dialect="json_function",
         )
 
     def request_cancel(self, call: ClientToolCallPayload) -> None:
@@ -838,6 +839,7 @@ class _GeneratedFileToolExecutor(_ToolExecutor):
                     body=b"generated-image",
                 )
             ],
+            wire_dialect="json_function",
         )
 
 
@@ -897,6 +899,7 @@ class _SettlingToolExecutor:
                     "not_attempted": [],
                     "exact": True,
                 },
+                wire_dialect="json_function",
             )
         raise AssertionError("settling tool unexpectedly resumed")
 
@@ -1022,6 +1025,7 @@ def _tool_call_event(
             name=name,
             arguments="{}",
             native_artifact=_artifact(),
+            wire_dialect="json_function",
         ),
         created_at=datetime.datetime.now(datetime.UTC),
     )
@@ -1038,6 +1042,7 @@ def _tool_result_event(call_id: str = "call-1") -> Event:
             name="read_text",
             status="completed",
             output=[OutputTextPart(text="done")],
+            wire_dialect="json_function",
         ),
         created_at=datetime.datetime.now(datetime.UTC),
     )
@@ -2780,6 +2785,7 @@ async def test_active_unresolved_tool_call_is_cancelled_before_lowering() -> Non
             arguments="{}",
             started_at=datetime.datetime.now(datetime.UTC),
             owner_generation=1,
+            wire_dialect="json_function",
         )
     ]
     transcript_repo = _TranscriptRepo()
@@ -2834,6 +2840,7 @@ async def test_stale_active_entry_with_result_is_removed_without_replacement() -
             arguments="{}",
             started_at=datetime.datetime.now(datetime.UTC),
             owner_generation=1,
+            wire_dialect="json_function",
         )
     ]
     transcript_repo = _TranscriptRepo()
@@ -2885,6 +2892,7 @@ async def test_active_entry_without_call_event_fails_invariant() -> None:
             arguments="{}",
             started_at=datetime.datetime.now(datetime.UTC),
             owner_generation=1,
+            wire_dialect="json_function",
         )
     ]
     execution = AgentRunExecution(

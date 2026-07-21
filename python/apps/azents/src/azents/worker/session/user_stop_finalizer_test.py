@@ -300,6 +300,7 @@ def _tool_call_event(session_id: str) -> Event:
             name="bash",
             arguments="{}",
             native_artifact=_native_artifact(),
+            wire_dialect="json_function",
         ),
         created_at=datetime.now(UTC),
     )
@@ -322,6 +323,7 @@ def _running_run(session_id: str) -> AgentRunState:
                 arguments="{}",
                 started_at=now,
                 owner_generation=1,
+                wire_dialect="json_function",
             )
         ],
         last_completed_event_id=None,

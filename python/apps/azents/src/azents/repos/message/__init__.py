@@ -32,6 +32,7 @@ from azents.engine.events.types import (
     TurnMarkerPayload,
     UnknownAdapterOutputPayload,
     UserMessagePayload,
+    upgrade_persisted_client_tool_payload,
 )
 from azents.engine.events.types import (
     Attachment as EventAttachment,
@@ -61,9 +62,13 @@ def _validate_payload(row: RDBEvent) -> EventPayload:
         case EventKind.REASONING:
             return ReasoningPayload.model_validate(row.payload)
         case EventKind.CLIENT_TOOL_CALL:
-            return ClientToolCallPayload.model_validate(row.payload)
+            return ClientToolCallPayload.model_validate(
+                upgrade_persisted_client_tool_payload(row.kind, row.payload)
+            )
         case EventKind.CLIENT_TOOL_RESULT:
-            return ClientToolResultPayload.model_validate(row.payload)
+            return ClientToolResultPayload.model_validate(
+                upgrade_persisted_client_tool_payload(row.kind, row.payload)
+            )
         case EventKind.PROVIDER_TOOL_CALL:
             return ProviderToolCallPayload.model_validate(row.payload)
         case EventKind.TURN_MARKER:
@@ -188,6 +193,7 @@ def _to_chat_message(row: RDBEvent) -> ChatMessage | None:
                         id=payload.call_id,
                         name=payload.name,
                         arguments=payload.arguments,
+                        wire_dialect=payload.wire_dialect,
                     )
                 ],
                 tool_call_id=None,
@@ -208,6 +214,7 @@ def _to_chat_message(row: RDBEvent) -> ChatMessage | None:
                         id=payload.call_id,
                         name=payload.name,
                         arguments=payload.semantic.input or "",
+                        wire_dialect="json_function",
                     )
                 ],
                 tool_call_id=None,

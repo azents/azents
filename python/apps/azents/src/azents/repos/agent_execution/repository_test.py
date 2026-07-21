@@ -958,6 +958,7 @@ class TestEventExecutionRepositories:
             arguments='{"path":"README.md"}',
             started_at=datetime.datetime.now(datetime.UTC),
             owner_generation=1,
+            wire_dialect="json_function",
         )
         executing = await repo.update_phase(
             rdb_session,

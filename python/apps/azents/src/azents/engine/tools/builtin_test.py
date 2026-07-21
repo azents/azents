@@ -1874,6 +1874,7 @@ class TestProcessToolHandler:
                         status="completed",
                         output=tool_output.output,
                         metadata=tool_output.metadata,
+                        wire_dialect="json_function",
                     ),
                     created_at=datetime.now(UTC),
                 )

@@ -34,6 +34,26 @@ from azents.engine.run.failure import (
 )
 
 RawDict: TypeAlias = Annotated[dict[str, object], SkipValidation]
+ClientToolWireDialect: TypeAlias = Literal["json_function", "plaintext_custom"]
+
+
+def upgrade_persisted_client_tool_payload(
+    kind: EventKind,
+    payload: object,
+) -> object:
+    """Add the legacy JSON-function dialect before persisted payload validation."""
+    if kind not in {EventKind.CLIENT_TOOL_CALL, EventKind.CLIENT_TOOL_RESULT}:
+        return payload
+    if not isinstance(payload, dict) or "wire_dialect" in payload:
+        return payload
+    return {**payload, "wire_dialect": "json_function"}
+
+
+def upgrade_persisted_active_tool_call(payload: object) -> object:
+    """Add the legacy JSON-function dialect before active-call validation."""
+    if not isinstance(payload, dict) or "wire_dialect" in payload:
+        return payload
+    return {**payload, "wire_dialect": "json_function"}
 
 
 def build_native_compat_key(
@@ -370,7 +390,10 @@ class ClientToolCallPayload(BaseModel):
 
     call_id: str = Field(min_length=1)
     name: str = Field(min_length=1)
-    arguments: str = Field(description="JSON string arguments")
+    arguments: str = Field(description="Exact decoded client-tool input")
+    wire_dialect: ClientToolWireDialect = Field(
+        description="Provider wire dialect selected for this call"
+    )
     toolkit_source: ToolkitSourceSnapshot | None = Field(default=None)
     native_artifact: NativeArtifact = Field(description="Native artifact")
 
@@ -423,6 +446,9 @@ class ClientToolResultPayload(BaseModel):
 
     call_id: str = Field(min_length=1)
     name: str | None = Field(default=None)
+    wire_dialect: ClientToolWireDialect = Field(
+        description="Provider wire dialect copied from the originating call"
+    )
     status: Literal["completed", "failed", "cancelled", "interrupted"]
     output: ToolOutput = Field(default_factory=list)
     metadata: JSONObject = Field(default_factory=dict)
@@ -660,6 +686,17 @@ def validate_event_payload(
     return PAYLOAD_ADAPTER_BY_KIND[kind].validate_python(payload)
 
 
+def validate_persisted_event_payload(
+    kind: EventKind,
+    payload: object,
+) -> EventPayload:
+    """Validate persisted JSON payload after applying legacy compatibility upgrades."""
+    return validate_event_payload(
+        kind,
+        upgrade_persisted_client_tool_payload(kind, payload),
+    )
+
+
 NATIVE_ARTIFACT_REQUIRED_KINDS = frozenset(
     {
         EventKind.ASSISTANT_MESSAGE,
@@ -720,6 +757,9 @@ class ActiveToolCall(BaseModel):
     call_id: str = Field(min_length=1)
     name: str = Field(min_length=1)
     arguments: str | None = Field(default=None)
+    wire_dialect: ClientToolWireDialect = Field(
+        description="Provider wire dialect selected for this active call"
+    )
     toolkit_source: ToolkitSourceSnapshot | None = Field(default=None)
     started_at: datetime.datetime
     owner_generation: int = Field(ge=1)

@@ -213,6 +213,7 @@ class TestLiteLLMResponsesLowerer:
                     name="read_text",
                     status="completed",
                     output=[OutputTextPart(text="file content")],
+                    wire_dialect="json_function",
                 ),
             ),
         ]
@@ -677,6 +678,7 @@ class TestLiteLLMResponsesLowerer:
                             "arguments": "{}",
                         }
                     ),
+                    wire_dialect="json_function",
                 ),
             ),
             _event(
@@ -686,6 +688,7 @@ class TestLiteLLMResponsesLowerer:
                     name="read",
                     status="completed",
                     output=[OutputTextPart(text="ok")],
+                    wire_dialect="json_function",
                 ),
             ),
             _event(EventKind.USER_MESSAGE, UserMessagePayload(content="next")),
@@ -930,6 +933,7 @@ class TestLiteLLMResponsesLowerer:
                             "arguments": "{}",
                         }
                     ),
+                    wire_dialect="json_function",
                 ),
             ),
             _event(
@@ -940,6 +944,7 @@ class TestLiteLLMResponsesLowerer:
                     status="completed",
                     output=[OutputTextPart(text="file content")],
                     metadata={"process_id": "proc_123", "status": "exited_unread"},
+                    wire_dialect="json_function",
                 ),
             ),
         ]
@@ -990,6 +995,7 @@ class TestLiteLLMResponsesLowerer:
                             "arguments": "{}",
                         }
                     ),
+                    wire_dialect="json_function",
                 ),
             ),
             _event(
@@ -1008,6 +1014,7 @@ class TestLiteLLMResponsesLowerer:
                             kind="image",
                         ),
                     ],
+                    wire_dialect="json_function",
                 ),
             ),
         ]
@@ -1259,6 +1266,7 @@ class TestLiteLLMResponsesLowerer:
                             "arguments": "{}",
                         }
                     ),
+                    wire_dialect="json_function",
                 ),
             ),
             _event(
@@ -1276,6 +1284,7 @@ class TestLiteLLMResponsesLowerer:
                             kind="image",
                         )
                     ],
+                    wire_dialect="json_function",
                 ),
             ),
         ]
@@ -1320,6 +1329,7 @@ class TestLiteLLMResponsesLowerer:
                             "arguments": "{}",
                         }
                     ),
+                    wire_dialect="json_function",
                 ),
             ),
             _event(
@@ -1337,6 +1347,7 @@ class TestLiteLLMResponsesLowerer:
                             kind="image",
                         )
                     ],
+                    wire_dialect="json_function",
                 ),
             ),
         ]
@@ -1400,6 +1411,7 @@ class TestLiteLLMResponsesLowerer:
                     name="read_text",
                     arguments="{}",
                     native_artifact=_artifact({"type": "function_call", "id": "raw"}),
+                    wire_dialect="json_function",
                 ),
             )
         ]
@@ -1578,6 +1590,7 @@ class TestLiteLLMResponsesLowerer:
                             "arguments": "{}",
                         }
                     ),
+                    wire_dialect="json_function",
                 ),
             )
         ]
@@ -1640,6 +1653,7 @@ class TestLiteLLMResponsesLowerer:
                             "arguments": "{}",
                         }
                     ),
+                    wire_dialect="json_function",
                 ),
             ),
             _event(
@@ -1649,6 +1663,7 @@ class TestLiteLLMResponsesLowerer:
                     name="read_text",
                     status="completed",
                     output="result",
+                    wire_dialect="json_function",
                 ),
             ),
         ]
@@ -1700,6 +1715,7 @@ class TestLiteLLMResponsesLowerer:
                             "namespace": None,
                         }
                     ),
+                    wire_dialect="json_function",
                 ),
             )
         ]
