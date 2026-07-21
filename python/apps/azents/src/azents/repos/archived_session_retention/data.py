@@ -7,6 +7,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from azents.core.enums import (
+    ArchivedSessionPurgeParticipantPhase,
     ArchivedSessionPurgeStatus,
     ArchivedSessionRetentionApplicationStatus,
 )
@@ -78,6 +79,8 @@ class ArchivedSessionPurgeJob(BaseModel):
     next_attempt_at: datetime.datetime | None
     last_error_kind: str | None
     last_error_summary: str | None
+    last_error_participant_key: str | None
+    last_error_phase: ArchivedSessionPurgeParticipantPhase | None
     model_file_count: int
     artifact_count: int
     exchange_file_count: int
@@ -88,6 +91,34 @@ class ArchivedSessionPurgeJob(BaseModel):
     completed_at: datetime.datetime | None
     created_at: datetime.datetime
     updated_at: datetime.datetime
+
+
+class ArchivedSessionPurgeParticipantExecution(BaseModel):
+    """Durable checkpoint for one participant selected by a fenced purge job."""
+
+    purge_job_id: str
+    participant_key: str
+    policy_version: int
+    phase: ArchivedSessionPurgeParticipantPhase
+    attempt_count: int
+    blocked_by_participant_key: str | None
+    last_error_kind: str | None
+    last_error_summary: str | None
+    operational_summary: dict[str, object] | None
+    prepared_at: datetime.datetime | None
+    cleanup_completed_at: datetime.datetime | None
+    verified_at: datetime.datetime | None
+    last_attempt_at: datetime.datetime | None
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+
+
+@dataclasses.dataclass(frozen=True)
+class ArchivedSessionPurgeParticipantSnapshot:
+    """One stable participant policy version materialized at purge fencing."""
+
+    participant_key: str
+    policy_version: int
 
 
 @dataclasses.dataclass(frozen=True)

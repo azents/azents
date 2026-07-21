@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     AgentSessionStatus,
+    ArchivedSessionPurgeParticipantPhase,
     ArchivedSessionPurgeStatus,
     ArchivedSessionRetentionApplicationStatus,
     LLMProvider,
@@ -17,6 +18,7 @@ from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.archived_session_retention import (
     RDBArchivedSessionPurgeJob,
+    RDBArchivedSessionPurgeParticipantExecution,
     RDBArchivedSessionRetentionApplication,
 )
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
@@ -24,6 +26,9 @@ from azents.rdb.session import SessionManager
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
+from azents.repos.archived_session_retention.data import (
+    ArchivedSessionPurgeParticipantSnapshot,
+)
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
@@ -419,6 +424,8 @@ async def test_purge_retry_completion_and_tombstone_survive_root_delete(
             next_attempt_at=retry_at,
             error_kind="S3Unavailable",
             error_summary="Object cleanup failed.",
+            error_participant_key=None,
+            error_phase=None,
             now=now,
         )
 
@@ -472,6 +479,143 @@ async def test_purge_retry_completion_and_tombstone_survive_root_delete(
     assert tombstone.worktree_count == 5
     assert tombstone.last_error_kind is None
     assert tombstone.last_error_summary is None
+    assert tombstone.last_error_participant_key is None
+    assert tombstone.last_error_phase is None
+
+
+async def test_purge_participant_snapshot_and_progress_are_durable(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """Fencing materializes immutable participant versions with durable checkpoints."""
+    repository = ArchivedSessionRetentionRepository()
+    now = datetime.datetime.now(datetime.UTC)
+    async with rdb_session_manager() as session:
+        root_session_id = await _create_archived_root(
+            session,
+            suffix="purge-participant-progress",
+            archived_at=now - datetime.timedelta(days=31),
+        )
+        root = await session.get(RDBAgentSession, root_session_id)
+        assert root is not None
+        assert root.purge_after is not None
+        session.add(
+            RDBArchivedSessionPurgeJob(
+                root_session_id=root_session_id,
+                eligible_at=root.purge_after,
+                policy_revision=1,
+            )
+        )
+
+    async with rdb_session_manager() as session:
+        claimed = await repository.claim_due_purge_job(
+            session,
+            now=now,
+            lease_owner="purge-worker-1",
+            lease_until=now + datetime.timedelta(minutes=1),
+        )
+        assert claimed is not None
+        executions = await repository.materialize_purge_participant_executions(
+            session,
+            job_id=claimed.id,
+            lease_owner="purge-worker-1",
+            participants=(
+                ArchivedSessionPurgeParticipantSnapshot(
+                    participant_key="session.execution",
+                    policy_version=1,
+                ),
+                ArchivedSessionPurgeParticipantSnapshot(
+                    participant_key="session.git-worktrees",
+                    policy_version=1,
+                ),
+            ),
+        )
+        assert [execution.participant_key for execution in executions] == [
+            "session.execution",
+            "session.git-worktrees",
+        ]
+        assert all(
+            execution.phase is ArchivedSessionPurgeParticipantPhase.PENDING
+            for execution in executions
+        )
+
+        started = await repository.start_purge_participant_attempt(
+            session,
+            job_id=claimed.id,
+            lease_owner="purge-worker-1",
+            participant_key="session.git-worktrees",
+            now=now,
+        )
+        blocked = await repository.mark_purge_participant_blocked(
+            session,
+            job_id=claimed.id,
+            lease_owner="purge-worker-1",
+            participant_key="session.git-worktrees",
+            blocked_by_participant_key="session.execution",
+            now=now,
+        )
+        checkpointed = await repository.checkpoint_purge_participant(
+            session,
+            job_id=claimed.id,
+            lease_owner="purge-worker-1",
+            participant_key="session.execution",
+            phase=ArchivedSessionPurgeParticipantPhase.PREPARED,
+            operational_summary={"prepared_count": 2},
+            now=now,
+        )
+        failed = await repository.record_purge_participant_failure(
+            session,
+            job_id=claimed.id,
+            lease_owner="purge-worker-1",
+            participant_key="session.git-worktrees",
+            phase=ArchivedSessionPurgeParticipantPhase.PENDING,
+            error_kind="RunnerUnavailable",
+            error_summary="Runner cleanup is temporarily unavailable.",
+            now=now,
+        )
+        assert started is True
+        assert blocked is True
+        assert checkpointed is True
+        assert failed is True
+
+    async with rdb_session_manager() as session:
+        execution_rows = list(
+            (
+                await session.scalars(
+                    sa.select(RDBArchivedSessionPurgeParticipantExecution).where(
+                        RDBArchivedSessionPurgeParticipantExecution.purge_job_id
+                        == claimed.id
+                    )
+                )
+            ).all()
+        )
+        job = await session.get(RDBArchivedSessionPurgeJob, claimed.id)
+        assert job is not None
+        assert job.last_error_participant_key == "session.git-worktrees"
+        assert job.last_error_phase is ArchivedSessionPurgeParticipantPhase.PENDING
+        by_key = {row.participant_key: row for row in execution_rows}
+        assert by_key["session.execution"].phase is (
+            ArchivedSessionPurgeParticipantPhase.PREPARED
+        )
+        assert by_key["session.execution"].operational_summary == {"prepared_count": 2}
+        assert by_key["session.git-worktrees"].attempt_count == 1
+        assert by_key["session.git-worktrees"].blocked_by_participant_key == (
+            "session.execution"
+        )
+        assert by_key["session.git-worktrees"].last_error_kind == "RunnerUnavailable"
+
+    async with rdb_session_manager() as session:
+        with pytest.raises(RuntimeError, match="snapshot is immutable"):
+            await repository.materialize_purge_participant_executions(
+                session,
+                job_id=claimed.id,
+                lease_owner="purge-worker-1",
+                participants=(
+                    ArchivedSessionPurgeParticipantSnapshot(
+                        participant_key="session.execution",
+                        policy_version=2,
+                    ),
+                ),
+            )
 
 
 async def test_revision_and_active_application_conflicts(

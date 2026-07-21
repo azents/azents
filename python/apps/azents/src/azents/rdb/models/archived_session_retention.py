@@ -5,10 +5,11 @@ import enum
 
 import sqlalchemy as sa
 from azcommon.uuid import uuid7
-from sqlalchemy.dialects.postgresql import ENUM
+from sqlalchemy.dialects.postgresql import ENUM, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from azents.core.enums import (
+    ArchivedSessionPurgeParticipantPhase,
     ArchivedSessionPurgeStatus,
     ArchivedSessionRetentionApplicationStatus,
 )
@@ -31,6 +32,13 @@ retention_application_status_enum = ENUM(
 purge_status_enum = ENUM(
     ArchivedSessionPurgeStatus,
     name="archived_session_purge_status",
+    create_type=False,
+    values_callable=_enum_values,
+)
+
+purge_participant_phase_enum = ENUM(
+    ArchivedSessionPurgeParticipantPhase,
+    name="archived_session_purge_participant_phase",
     create_type=False,
     values_callable=_enum_values,
 )
@@ -262,6 +270,17 @@ class RDBArchivedSessionPurgeJob(RDBModel):
     last_error_summary: Mapped[str | None] = mapped_column(
         sa.Text, init=False, nullable=True, default=None
     )
+    last_error_participant_key: Mapped[str | None] = mapped_column(
+        sa.String(120), init=False, nullable=True, default=None
+    )
+    last_error_phase: Mapped[ArchivedSessionPurgeParticipantPhase | None] = (
+        mapped_column(
+            purge_participant_phase_enum,
+            init=False,
+            nullable=True,
+            default=None,
+        )
+    )
     model_file_count: Mapped[int] = mapped_column(
         sa.Integer, init=False, nullable=False, server_default="0"
     )
@@ -298,3 +317,87 @@ class RDBArchivedSessionPurgeJob(RDBModel):
     )
 
     __table_args__ = (IX_STATUS_ELIGIBLE_AT, IX_LEASE_UNTIL, UQ_ROOT_SESSION_ID)
+
+
+class RDBArchivedSessionPurgeParticipantExecution(RDBModel):
+    """Durable immutable participant snapshot and checkpoint for one purge job."""
+
+    __tablename__ = "archived_session_purge_participant_executions"
+
+    IX_PURGE_JOB_ID_PHASE = sa.Index(
+        "ix_archived_session_purge_participant_executions_purge_job_id_phase",
+        "purge_job_id",
+        "phase",
+    )
+    CK_POLICY_VERSION_POSITIVE = sa.CheckConstraint(
+        "policy_version >= 1",
+        name=(
+            "ck_archived_session_purge_participant_executions_policy_version_positive"
+        ),
+    )
+    CK_ATTEMPT_COUNT_NONNEGATIVE = sa.CheckConstraint(
+        "attempt_count >= 0",
+        name=(
+            "ck_archived_session_purge_participant_executions_attempt_count_nonnegative"
+        ),
+    )
+
+    purge_job_id: Mapped[str] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("archived_session_purge_jobs.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    participant_key: Mapped[str] = mapped_column(
+        sa.String(120),
+        primary_key=True,
+    )
+    policy_version: Mapped[int] = mapped_column(sa.Integer, nullable=False)
+    phase: Mapped[ArchivedSessionPurgeParticipantPhase] = mapped_column(
+        purge_participant_phase_enum,
+        init=False,
+        nullable=False,
+        server_default=ArchivedSessionPurgeParticipantPhase.PENDING.value,
+    )
+    attempt_count: Mapped[int] = mapped_column(
+        sa.Integer, init=False, nullable=False, server_default="0"
+    )
+    blocked_by_participant_key: Mapped[str | None] = mapped_column(
+        sa.String(120), init=False, nullable=True, default=None
+    )
+    last_error_kind: Mapped[str | None] = mapped_column(
+        sa.String(120), init=False, nullable=True, default=None
+    )
+    last_error_summary: Mapped[str | None] = mapped_column(
+        sa.Text, init=False, nullable=True, default=None
+    )
+    operational_summary: Mapped[dict[str, object] | None] = mapped_column(
+        JSONB, init=False, nullable=True, default=None
+    )
+    prepared_at: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime, init=False, nullable=True, default=None
+    )
+    cleanup_completed_at: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime, init=False, nullable=True, default=None
+    )
+    verified_at: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime, init=False, nullable=True, default=None
+    )
+    last_attempt_at: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime, init=False, nullable=True, default=None
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TimeZoneDateTime, init=False, nullable=False, server_default=sa.func.now()
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        TimeZoneDateTime,
+        init=False,
+        nullable=False,
+        server_default=sa.func.now(),
+        onupdate=sa.func.now(),
+    )
+
+    __table_args__ = (
+        IX_PURGE_JOB_ID_PHASE,
+        CK_POLICY_VERSION_POSITIVE,
+        CK_ATTEMPT_COUNT_NONNEGATIVE,
+    )

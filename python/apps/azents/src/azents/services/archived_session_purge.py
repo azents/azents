@@ -17,6 +17,7 @@ from azents.core.config import Config
 from azents.core.deps import get_config
 from azents.core.enums import (
     AgentSessionStatus,
+    ArchivedSessionPurgeParticipantPhase,
     ArtifactStatus,
     ExchangeFileStatus,
     ModelFileStatus,
@@ -158,6 +159,8 @@ class ArchivedSessionPurgeService:
                     attempt_count=job.attempt_count,
                     error_kind=type(exc).__name__,
                     error_summary=str(exc) or type(exc).__name__,
+                    error_participant_key=None,
+                    error_phase=None,
                 )
                 failed_count += 1
                 retry_scheduled_count += 1
@@ -251,6 +254,8 @@ class ArchivedSessionPurgeService:
                 attempt_count=job.attempt_count,
                 error_kind="ActiveAgentRun",
                 error_summary="Subtree AgentRun is still active after purge fencing.",
+                error_participant_key=None,
+                error_phase=ArchivedSessionPurgeParticipantPhase.PENDING,
             )
             return _ArchivedSessionPurgeJobSummary(
                 completed=False,
@@ -487,6 +492,8 @@ class ArchivedSessionPurgeService:
         attempt_count: int,
         error_kind: str,
         error_summary: str,
+        error_participant_key: str | None,
+        error_phase: ArchivedSessionPurgeParticipantPhase | None,
     ) -> None:
         now = datetime.datetime.now(datetime.UTC)
         delay_minutes = min(2 ** max(0, attempt_count - 1), 30)
@@ -499,5 +506,7 @@ class ArchivedSessionPurgeService:
                 next_attempt_at=now + delay,
                 error_kind=error_kind,
                 error_summary=error_summary,
+                error_participant_key=error_participant_key,
+                error_phase=error_phase,
                 now=now,
             )
