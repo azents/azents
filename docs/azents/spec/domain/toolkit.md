@@ -43,7 +43,7 @@ api_routes:
   - /toolkit/v1
   - /shell-environment/v1
 last_verified_at: 2026-07-21
-spec_version: 63
+spec_version: 64
 ---
 
 # Toolkit
@@ -137,7 +137,7 @@ Azents-managed Skill packages use a read-only virtual filesystem distinct from t
 azents://skills/{namespace}/{skill}/SKILL.md
 ```
 
-The `azents` namespace contains global release-bundled packages. A Toolkit Provider may expose one release resource root under the namespace equal to its stable Provider slug, such as `github`. A Provider package is eligible only when the Agent has an enabled attachment to an enabled ToolkitConfig of that Provider type. Credential state, provider connection health, and the Workspace-local ToolkitConfig slug do not change content eligibility or rewrite the URI. The initial projection records source identity but not a concrete ToolkitConfig tool prefix, so managed package instructions cannot assume one Workspace-local prefix.
+The `azents` namespace is reserved for approved global release-bundled packages. A Toolkit Provider may declare one approved release resource root under the namespace equal to its stable Provider slug, such as `github`. A Provider package is eligible only when the Agent has an enabled attachment to an enabled ToolkitConfig of that Provider type. Credential state, provider connection health, and the Workspace-local ToolkitConfig slug do not change content eligibility or rewrite the URI. The initial projection records source identity but not a concrete ToolkitConfig tool prefix, so managed package instructions cannot assume one Workspace-local prefix.
 
 Every AgentRun stores one self-contained immutable VFS projection in `agent_runs.vfs_projection`. The projection records schema and revision identity, deterministic source records, canonical entries, content hashes, media types, decoded sizes, and Base64 bodies. Release sources are scanned from local Python package resources. A process-local catalog may retain the last successful source slice, but recovery authority is the projection persisted on the AgentRun. Once set, retries, worker takeover, and resume never replace it with current package bytes.
 
