@@ -47,10 +47,10 @@ function httpUri(value: string | null): string | null {
 export function providerWebSearchPresentation(
   toolCall: ProviderToolCall,
 ): ProviderWebSearchPresentation | null {
-  if (toolCall.name !== "web_search" || !toolCall.references) {
+  if (toolCall.name !== "web_search") {
     return null;
   }
-  const results = toolCall.references.flatMap((reference) => {
+  const results = (toolCall.references ?? []).flatMap((reference) => {
     if (reference.kind !== "url") {
       return [];
     }
@@ -67,11 +67,9 @@ export function providerWebSearchPresentation(
       },
     ];
   });
-  return results.length > 0
-    ? {
-        query: searchQuery(toolCall.arguments),
-        results,
-        summary: toolCall.semanticOutput?.trim() || null,
-      }
-    : null;
+  return {
+    query: searchQuery(toolCall.arguments),
+    results,
+    summary: toolCall.semanticOutput?.trim() || null,
+  };
 }

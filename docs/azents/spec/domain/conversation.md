@@ -101,8 +101,8 @@ api_routes:
   - /chat/v1/exchange-files/{file_id}/download
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
-last_verified_at: 2026-07-20
-spec_version: 122
+last_verified_at: 2026-07-21
+spec_version: 123
 ---
 
 # Conversation & Events
@@ -151,29 +151,29 @@ ModelFiles, artifacts, and exchange files.
 
 `rdb/models/agent_session.py` stores session identity and lifecycle.
 
-| Field | Type | Notes |
-| --- | --- | --- |
-| `id` | `str(32)` | UUID7 hex |
-| `handle` | string | Human-readable, BIP-39-derived session handle used for user-facing allocation names such as owned Git worktree paths. |
-| `workspace_id` / `agent_id` | FK | Workspace and agent boundary |
-| `current_model_target_label` / `current_reasoning_effort` | string / enum \| null | Session-owned requested profile for the next turn; null effort represents model Default. |
-| `current_model_selection` | JSONB \| null | Session-owned resolved physical model snapshot used by the next turn. |
-| `current_effective_context_window_tokens` / `current_effective_auto_compaction_threshold_tokens` | int \| null | Effective limits resolved with the current model snapshot. |
-| `current_inference_resolved_at` | timestamptz \| null | Resolution time for the complete current inference snapshot. |
-| `session_kind` | enum | `root` or `subagent`; ordinary session lists include only `root` sessions |
-| `status` | enum | `active` or `archived` |
-| `primary_kind` | enum \| null | `team_primary` marks the agent's default team conversation; future non-primary sessions may use `null` or another explicit kind. |
-| `start_reason` | enum | `initial`, `system_recovery` |
-| `title` | string \| null | Optional user-facing title. `null` means no title is available and clients should render a contextual fallback. |
-| `title_source` | enum \| null | `manual`, `auto_initial`, or `auto_generated`; null means no title source yet. |
-| `title_generated_at` | timestamptz \| null | Last automatic title generation timestamp. |
-| `title_generation_event_id` | `str(32)` \| null | Event used as the automatic title generation boundary. |
-| `last_user_input_at` | timestamptz | Latest non-reverted `user_message` timestamp used for session list ordering; initialized to `created_at` until user input exists. |
-| `end_reason` | enum \| null | Archive reason |
-| `model_input_head_event_id` | `str(32)` \| null | Event model-input head after append-only compaction |
-| `run_state` / `run_heartbeat_at` | enum / timestamptz | Session execution recovery state |
-| `pending_command_*` | mixed | Single pending idle command for this session |
-| `stop_requested_*` | mixed | Durable stop intent for this session |
+| Field                                                                                            | Type                  | Notes                                                                                                                             |
+| ------------------------------------------------------------------------------------------------ | --------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                                                                                             | `str(32)`             | UUID7 hex                                                                                                                         |
+| `handle`                                                                                         | string                | Human-readable, BIP-39-derived session handle used for user-facing allocation names such as owned Git worktree paths.             |
+| `workspace_id` / `agent_id`                                                                      | FK                    | Workspace and agent boundary                                                                                                      |
+| `current_model_target_label` / `current_reasoning_effort`                                        | string / enum \| null | Session-owned requested profile for the next turn; null effort represents model Default.                                          |
+| `current_model_selection`                                                                        | JSONB \| null         | Session-owned resolved physical model snapshot used by the next turn.                                                             |
+| `current_effective_context_window_tokens` / `current_effective_auto_compaction_threshold_tokens` | int \| null           | Effective limits resolved with the current model snapshot.                                                                        |
+| `current_inference_resolved_at`                                                                  | timestamptz \| null   | Resolution time for the complete current inference snapshot.                                                                      |
+| `session_kind`                                                                                   | enum                  | `root` or `subagent`; ordinary session lists include only `root` sessions                                                         |
+| `status`                                                                                         | enum                  | `active` or `archived`                                                                                                            |
+| `primary_kind`                                                                                   | enum \| null          | `team_primary` marks the agent's default team conversation; future non-primary sessions may use `null` or another explicit kind.  |
+| `start_reason`                                                                                   | enum                  | `initial`, `system_recovery`                                                                                                      |
+| `title`                                                                                          | string \| null        | Optional user-facing title. `null` means no title is available and clients should render a contextual fallback.                   |
+| `title_source`                                                                                   | enum \| null          | `manual`, `auto_initial`, or `auto_generated`; null means no title source yet.                                                    |
+| `title_generated_at`                                                                             | timestamptz \| null   | Last automatic title generation timestamp.                                                                                        |
+| `title_generation_event_id`                                                                      | `str(32)` \| null     | Event used as the automatic title generation boundary.                                                                            |
+| `last_user_input_at`                                                                             | timestamptz           | Latest non-reverted `user_message` timestamp used for session list ordering; initialized to `created_at` until user input exists. |
+| `end_reason`                                                                                     | enum \| null          | Archive reason                                                                                                                    |
+| `model_input_head_event_id`                                                                      | `str(32)` \| null     | Event model-input head after append-only compaction                                                                               |
+| `run_state` / `run_heartbeat_at`                                                                 | enum / timestamptz    | Session execution recovery state                                                                                                  |
+| `pending_command_*`                                                                              | mixed                 | Single pending idle command for this session                                                                                      |
+| `stop_requested_*`                                                                               | mixed                 | Durable stop intent for this session                                                                                              |
 
 Only one team primary session may exist per agent in the current product state. Additional active
 non-primary team sessions may exist under the same agent with `primary_kind = null`.
@@ -306,19 +306,19 @@ mailbox input commit atomically. Invalid target labels, unsupported explicit eff
 profile overrides, invalid fork selections, or incomplete parent run provenance leave no child
 participant, session, run, activity event, or broker wake-up.
 
-| Field | Type | Notes |
-| --- | --- | --- |
-| `id` | `str(32)` | SessionAgent ID |
-| `context_id` | FK | Root-tree context shared by all participants in the tree |
-| `root_session_agent_id` | FK self | Root participant for this tree |
-| `agent_session_id` | FK `agent_sessions` | One-to-one linked transcript/execution session |
-| `kind` | enum | `root` or `subagent` |
-| `name` | string | Tree-local name segment. Child names must start with a letter or number and contain only letters, numbers, underscores, or hyphens. |
-| `path` | text | Canonical absolute path under `/root` |
-| `agent_type` | string | Spawned agent type snapshot. Current supported value is `default`. |
-| `parent_session_agent_id` | FK self \| null | Parent participant; null only for the root participant |
-| `last_task_message` | text \| null | Latest delegated task/message preview |
-| `parent_observed_run_index` / `parent_observed_event_id` | int / `str(32)` \| null | Monotonic cursor advanced only when a terminal `agent_result` is promoted into the direct parent's durable transcript. |
+| Field                                                    | Type                    | Notes                                                                                                                               |
+| -------------------------------------------------------- | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                                                     | `str(32)`               | SessionAgent ID                                                                                                                     |
+| `context_id`                                             | FK                      | Root-tree context shared by all participants in the tree                                                                            |
+| `root_session_agent_id`                                  | FK self                 | Root participant for this tree                                                                                                      |
+| `agent_session_id`                                       | FK `agent_sessions`     | One-to-one linked transcript/execution session                                                                                      |
+| `kind`                                                   | enum                    | `root` or `subagent`                                                                                                                |
+| `name`                                                   | string                  | Tree-local name segment. Child names must start with a letter or number and contain only letters, numbers, underscores, or hyphens. |
+| `path`                                                   | text                    | Canonical absolute path under `/root`                                                                                               |
+| `agent_type`                                             | string                  | Spawned agent type snapshot. Current supported value is `default`.                                                                  |
+| `parent_session_agent_id`                                | FK self \| null         | Parent participant; null only for the root participant                                                                              |
+| `last_task_message`                                      | text \| null            | Latest delegated task/message preview                                                                                               |
+| `parent_observed_run_index` / `parent_observed_event_id` | int / `str(32)` \| null | Monotonic cursor advanced only when a terminal `agent_result` is promoted into the direct parent's durable transcript.              |
 
 The tree enforces unique `(root_session_agent_id, path)` and `(parent_session_agent_id, name)`. The
 repository resolves absolute paths such as `/root/reviewer` and current-agent-relative child paths.
@@ -383,23 +383,23 @@ before destructive cleanup can remove a path or branch.
 
 `agent_runs` is the durable execution-state table for the event loop.
 
-| Field | Type | Notes |
-| --- | --- | --- |
-| `id` | `str(32)` | UUID7 hex run id |
-| `session_id` | FK `agent_sessions` | Owning conversation |
-| `run_index` | int | Session-scoped monotonic run index |
-| `phase` | enum | UI activity source |
-| `status` | enum | `pending`, `running`, `completed`, `stopped`, `failed`, `interrupted`, or `cancelled` |
-| `active_tool_calls` | JSONB array | `call_id`, `name`, redacted/summarized `arguments`, `started_at`, and `owner_generation` |
-| `retry_state` | JSONB \| null | Durable current-model-turn retry state; cleared on successful model output admission or terminal transition |
-| `parent_agent_run_id` | FK `agent_runs` \| null | Parent run lineage for a subagent's first run |
-| `last_completed_event_id` | `str(32)` \| null | Terminal run boundary event id when available |
-| `terminal_result_event_id` | `str(32)` \| null | Terminal assistant/error event used for the terminal mailbox result and Subagent Tree preview. |
-| `terminal_result_message` | text \| null | User-safe terminal message delivered through `agent_result` and projected in the Subagent Tree. |
-| `parent_result_delivery_state` | enum \| null | `suppressed` for historical results or `enqueued` after durable direct-parent mailbox delivery; null means a current eligible result has not been finalized. |
-| `parent_result_input_buffer_id` | `str(32)` \| null | Durable identity of the terminal result buffer even after promotion deletes the buffer row. |
-| `parent_result_enqueued_at` | timestamptz \| null | Time the terminal result and delivery marker committed atomically. |
-| `created_at` / `updated_at` | timestamptz | Durable lifecycle timestamps |
+| Field                           | Type                    | Notes                                                                                                                                                        |
+| ------------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `id`                            | `str(32)`               | UUID7 hex run id                                                                                                                                             |
+| `session_id`                    | FK `agent_sessions`     | Owning conversation                                                                                                                                          |
+| `run_index`                     | int                     | Session-scoped monotonic run index                                                                                                                           |
+| `phase`                         | enum                    | UI activity source                                                                                                                                           |
+| `status`                        | enum                    | `pending`, `running`, `completed`, `stopped`, `failed`, `interrupted`, or `cancelled`                                                                        |
+| `active_tool_calls`             | JSONB array             | `call_id`, `name`, redacted/summarized `arguments`, `started_at`, and `owner_generation`                                                                     |
+| `retry_state`                   | JSONB \| null           | Durable current-model-turn retry state; cleared on successful model output admission or terminal transition                                                  |
+| `parent_agent_run_id`           | FK `agent_runs` \| null | Parent run lineage for a subagent's first run                                                                                                                |
+| `last_completed_event_id`       | `str(32)` \| null       | Terminal run boundary event id when available                                                                                                                |
+| `terminal_result_event_id`      | `str(32)` \| null       | Terminal assistant/error event used for the terminal mailbox result and Subagent Tree preview.                                                               |
+| `terminal_result_message`       | text \| null            | User-safe terminal message delivered through `agent_result` and projected in the Subagent Tree.                                                              |
+| `parent_result_delivery_state`  | enum \| null            | `suppressed` for historical results or `enqueued` after durable direct-parent mailbox delivery; null means a current eligible result has not been finalized. |
+| `parent_result_input_buffer_id` | `str(32)` \| null       | Durable identity of the terminal result buffer even after promotion deletes the buffer row.                                                                  |
+| `parent_result_enqueued_at`     | timestamptz \| null     | Time the terminal result and delivery marker committed atomically.                                                                                           |
+| `created_at` / `updated_at`     | timestamptz             | Durable lifecycle timestamps                                                                                                                                 |
 
 `agent_session_unread_runs` is a sparse shared review projection for active root Sessions. Its primary key is `session_id`; it records one terminal `run_id` and the monotonic session-local `run_index`. A row means the Session is unread through that terminal Run, while no row means read. Every first transition from a nonterminal Run to `completed`, `failed`, `stopped`, `interrupted`, or `cancelled` upserts the boundary in the same transaction, retaining only the greatest `run_index`. Subagent and archived Sessions do not create this projection. The public active Session list and detail responses expose nullable `unread_terminal_run_id`. `POST /chat/v1/agents/{agent_id}/sessions/{session_id}/read` validates an observed terminal Run and conditionally clears the boundary only when its stored run index is not newer, so acknowledgement of Run N cannot clear concurrent Run N+1.
 
@@ -608,11 +608,15 @@ DB-attached Toolkit onto the call as `toolkit_config_id`, `toolkit_type`, `toolk
 `toolkit_slug`. The same immutable snapshot is copied to the active client-tool call and its live
 projection. Built-in, auto-bound, and otherwise source-less calls retain `toolkit_source = null`.
 Presentation never infers Toolkit ownership from a model-visible tool-name prefix; historical calls
-without a snapshot remain source-less. Source-less client calls named exactly `read`, `grep`, `glob`,
-`write`, `edit`, `apply_patch`, `delete`, `exec_command`, or `write_stdin` may use a frontend-owned
-specialized renderer only after phase-aware validation of all semantic arguments and, for patch or
-process terminal detail, validated result metadata. Toolkit-owned, unknown, malformed, historical
-drifted, preparing, or incompatible calls render through the Generic card for that call only.
+without a snapshot remain source-less. Source-less client calls may use a frontend-owned specialized
+renderer only through the exact builtin allowlist: `read`, `grep`, `glob`, `write`, `edit`,
+`apply_patch`, `delete`, `exec_command`, `write_stdin`, `present_file`, `read_image`, `import_file`,
+the five Memory tools, the three Goal tools, `update_todo`, `load_skill`, the six Subagent tools, and
+`tool_search`. Selection requires phase-aware validation of semantic arguments and every structured
+terminal result consumed by the renderer. Toolkit-owned, unknown, malformed, historical drifted,
+preparing, or incompatible calls render through the Generic card for that call only. Exact provider
+`web_search` calls use their canonical provider query and validated HTTP references for a dedicated
+presentation; other provider identities retain their Generic presentation.
 
 The chat presentation layer consumes the ordered durable event stream plus the latest live partial
 stream, rather than regrouping rendered messages into semantic phases. It preserves the transcript order
@@ -628,12 +632,24 @@ tool-specific icon or title: the active Activity shows the shared animated Run i
 Run lifetime, and a completed Activity shows a check icon after the Run closes. Ordered-work categories,
 including Reasoning, remain dimmed summary text; failed events are counted in the same tone as the final
 summary item. Category overflow is summarized without hiding detail from assistive technology. Expanding
-the row reveals contextual event renderers in event order. A validated specialized client tool row shows
-its localized action, reviewed subject and qualifier, and only the minimal semantic detail; raw arguments
-and result output are available from a sibling Raw data action rather than being duplicated inline.
-Generic client and provider cards continue to expose raw arguments and output as their primary expanded
-content. The frontend may use stable generic categories for source-less built-in and provider tools, but
-does not use tool-name prefixes as a Toolkit identity heuristic.
+the row reveals contextual event renderers in event order.
+
+Reasoning, Skill, client-tool, provider-tool, and non-interactive control events use one canonical
+Activity-row grid for vertical padding, disclosure-chevron space, icon size, text baseline, status, and
+right-side action placement. A missing disclosure keeps the same leading slot, and right-side status or
+actions do not shift the left summary columns. Every client or provider Tool row reserves and renders a
+sibling Raw data `…` action even when its retained arguments and result are empty. A validated specialized
+client tool row shows its localized action, privacy-reviewed resource identity or bounded qualifier, and
+minimal semantic detail. Memory content, Goal/Todo text, Skill bodies, messages, tasks, tool-search queries,
+file URIs, and search patterns remain expanded-only or Raw-only according to the renderer. Generic rows
+show only the canonical tool name and lifecycle status in the collapsed summary, without filler copy, and
+retain raw arguments and output as their primary expanded content.
+
+Provider `web_search` rows use a globe identity and the canonical search query. Their expanded semantic
+detail renders the provider summary plus validated result title, source host, URL, excerpt, and external
+link. Provider calls without valid rich detail still retain the same Tool row and Raw data action. The
+frontend may use stable generic categories for source-less builtin and provider tools, but does not use
+tool-name prefixes as a Toolkit identity heuristic.
 
 A tool result or provider call with visible attachments closes the preceding Activity and renders through
 the normal standalone message attachment surface. The raw tool card is not duplicated inside Activity, so
@@ -758,13 +774,13 @@ associates input events with the active run, and deletes the source buffer.
 
 Canonical outcomes are:
 
-| Input buffer kind | Preparation result |
-| --- | --- |
-| `user_message` | Durable `user_message` event. |
-| `goal_continuation` | Durable `goal_continuation` event. |
-| `agent_message` | Durable `agent_message` event. |
-| Goal `action_message` | Goal side effect plus canonical goal/user events; no `action_message` event. |
-| Skill `action_message` | `skill_loaded` plus optional `user_message`; no `action_message` event. |
+| Input buffer kind         | Preparation result                                                                                                     |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `user_message`            | Durable `user_message` event.                                                                                          |
+| `goal_continuation`       | Durable `goal_continuation` event.                                                                                     |
+| `agent_message`           | Durable `agent_message` event.                                                                                         |
+| Goal `action_message`     | Goal side effect plus canonical goal/user events; no `action_message` event.                                           |
+| Skill `action_message`    | `skill_loaded` plus optional `user_message`; no `action_message` event.                                                |
 | Worktree `action_message` | Buffer-keyed live `ActionExecution` claim with action payload and current owner generation; no `action_message` event. |
 
 A handled preparation failure consumes only the failing head, appends a deterministic `system_error`,
@@ -905,6 +921,7 @@ Current verification:
 
 ## 11. Changelog
 
+- **2026-07-21** — v123. Completed validated specialized presentation coverage for source-less client builtins, added rich provider `web_search`, standardized Activity event rows and fixed Raw data action placement, removed Generic filler copy, and kept sensitive payloads out of collapsed summaries.
 - **2026-07-20** — v122. Added validated, source-aware specialized rendering for the Phase 1 Runtime client-tool set, preserved client result metadata in the frontend projection, and retained per-call Generic raw fallback with separate Raw data diagnostics.
 - **2026-07-20** — v121. Replaced phase-based Activity grouping with ordered durable/live event projection, persisted Toolkit source snapshots for client-tool identity, and rendered all attachment-bearing tool outputs as standalone deliveries.
 - **2026-07-20** — v120. Added frontend-only continuous tool activity grouping, validated semantic phases with Generic fallback, compact authorization placement, and standalone generated-image deliverables without duplicate nested attachments.

@@ -38,10 +38,10 @@ void test("projects structured web search references", () => {
   });
 });
 
-void test("falls back when a provider search has no valid web references", () => {
-  assert.equal(
+void test("keeps web search identity before valid references arrive", () => {
+  assert.deepEqual(
     providerWebSearchPresentation(webSearchCall({ references: [] })),
-    null,
+    { query: "Azents", results: [], summary: null },
   );
   assert.equal(
     providerWebSearchPresentation(webSearchCall({ name: "file_search" })),

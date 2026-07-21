@@ -1,15 +1,9 @@
 "use client";
 
-import { Box, Group, Text } from "@mantine/core";
 import { IconBubble, IconTargetArrow } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
-import {
-  activityRowChevronSize,
-  activityRowIconSize,
-  activityRowSummarySize,
-  activityRowVerticalPadding,
-} from "./activityRowPresentation";
-import inlineControlClasses from "./ChatInlineControl.module.css";
+import { ActivityRow } from "./ActivityRow";
+import { activityRowIconSize } from "./activityRowPresentation";
 import type { ActivityEvent } from "../toolActivityPresentation";
 import type { ReactElement } from "react";
 
@@ -42,32 +36,16 @@ export function ActivityMessageRow({
       : (activityPreview(event.message?.content ?? "") ?? t("agentFallback"));
 
   return (
-    <Box py={activityRowVerticalPadding}>
-      <Group gap="xs" wrap="nowrap" className={inlineControlClasses.root}>
-        <Box
-          aria-hidden="true"
-          w={activityRowChevronSize}
-          style={{ flexShrink: 0 }}
-        />
-        <Box c="dimmed" style={{ display: "inline-flex", flexShrink: 0 }}>
-          {event.kind === "goal-control" ? (
-            <IconTargetArrow aria-hidden="true" size={activityRowIconSize} />
-          ) : (
-            <IconBubble aria-hidden="true" size={activityRowIconSize} />
-          )}
-        </Box>
-        <Text
-          size={activityRowSummarySize}
-          c="dimmed"
-          fw={500}
-          truncate
-          flex={1}
-          miw={0}
-          className={inlineControlClasses.label}
-        >
-          {label}
-        </Text>
-      </Group>
-    </Box>
+    <ActivityRow
+      ariaLabel={label}
+      icon={
+        event.kind === "goal-control" ? (
+          <IconTargetArrow aria-hidden="true" size={activityRowIconSize} />
+        ) : (
+          <IconBubble aria-hidden="true" size={activityRowIconSize} />
+        )
+      }
+      primary={label}
+    />
   );
 }
