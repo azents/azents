@@ -117,6 +117,54 @@ def test_registry_rejects_asymmetric_archive_restore_mutation() -> None:
         )
 
 
+def test_external_channel_participant_declares_session_owned_foundation_state() -> None:
+    """External Channel foundation state is lifecycle-classified before activation."""
+    participant = get_session_lifecycle_registry().get("session.external-channel")
+
+    assert participant.policy_version == 1
+    assert participant.dependencies == ("session.execution",)
+    assert participant.archive_policy is SessionLifecycleTransitionPolicy.VALIDATE
+    assert participant.restore_policy is SessionLifecycleTransitionPolicy.PRESERVE
+    assert participant.purge_policy is SessionLifecyclePurgePolicy.REQUIRED
+    assert {
+        (resource.name, resource.classification)
+        for resource in participant.owned_resources
+    } == {
+        (
+            "external_channel_bindings",
+            SessionLifecycleResourceClassification.LIFECYCLE_ROOT,
+        ),
+        (
+            "external_channel_invocation_batches",
+            SessionLifecycleResourceClassification.LIFECYCLE_ROOT,
+        ),
+        (
+            "external_channel_invocation_batch_items",
+            SessionLifecycleResourceClassification.PURE_DATABASE_CHILD,
+        ),
+        (
+            "external_channel_access_requests",
+            SessionLifecycleResourceClassification.LIFECYCLE_ROOT,
+        ),
+        (
+            "external_channel_access_grants",
+            SessionLifecycleResourceClassification.LIFECYCLE_ROOT,
+        ),
+        (
+            "external_channel_works",
+            SessionLifecycleResourceClassification.LIFECYCLE_ROOT,
+        ),
+        (
+            "external_channel_actions",
+            SessionLifecycleResourceClassification.LIFECYCLE_ROOT,
+        ),
+        (
+            "external_channel_delivery_attempts",
+            SessionLifecycleResourceClassification.LIFECYCLE_ROOT,
+        ),
+    }
+
+
 def test_registry_rejects_unavailable_persisted_policy_version() -> None:
     """A fenced job cannot silently switch to a new participant contract."""
     registry = get_session_lifecycle_registry()
