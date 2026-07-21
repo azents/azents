@@ -182,7 +182,10 @@ class AgentRuntimeRepository:
         """Update Runtime desired state and generation."""
         result = await session.execute(
             sa.update(RDBAgentRuntime)
-            .where(RDBAgentRuntime.id == runtime_id)
+            .where(
+                RDBAgentRuntime.id == runtime_id,
+                RDBAgentRuntime.terminal_delete_requested_generation.is_(None),
+            )
             .values(
                 desired_state=desired_state,
                 desired_generation=RDBAgentRuntime.desired_generation + 1,
@@ -202,6 +205,99 @@ class AgentRuntimeRepository:
             command_type=command_type,
             desired_generation=runtime.desired_generation,
         )
+
+    async def request_terminal_delete(
+        self,
+        session: AsyncSession,
+        runtime_id: str,
+    ) -> AgentRuntime | None:
+        """Request idempotent terminal Provider deletion for the Runtime."""
+        result = await session.execute(
+            sa.update(RDBAgentRuntime)
+            .where(
+                RDBAgentRuntime.id == runtime_id,
+                RDBAgentRuntime.terminal_delete_requested_generation.is_(None),
+            )
+            .values(
+                desired_state=RuntimeDesiredState.STOPPED,
+                desired_generation=RDBAgentRuntime.desired_generation + 1,
+                last_lifecycle_command=RuntimeLifecycleCommandType.STOP,
+                reset_final_desired_state=None,
+                terminal_delete_requested_generation=(
+                    RDBAgentRuntime.desired_generation + 1
+                ),
+                terminal_delete_acknowledged_generation=None,
+                terminal_delete_acknowledged_at=None,
+                last_state_change_at=sa.func.now(),
+            )
+            .returning(RDBAgentRuntime)
+        )
+        rdb = result.scalar_one_or_none()
+        if rdb is not None:
+            await session.flush()
+            return self._build(rdb)
+        return await self.get_by_id(session, runtime_id)
+
+    async def record_terminal_delete_acknowledgement(
+        self,
+        session: AsyncSession,
+        runtime_id: str,
+        *,
+        provider_generation: int,
+        acknowledged_generation: int,
+    ) -> AgentRuntime | None:
+        """Persist a fenced Provider acknowledgement of terminal deletion."""
+        result = await session.execute(
+            sa.update(RDBAgentRuntime)
+            .where(
+                RDBAgentRuntime.id == runtime_id,
+                RDBAgentRuntime.desired_generation == acknowledged_generation,
+                RDBAgentRuntime.terminal_delete_requested_generation
+                == acknowledged_generation,
+                RDBAgentRuntime.provider_generation <= provider_generation,
+                RDBAgentRuntime.provider_observed_generation <= acknowledged_generation,
+            )
+            .values(
+                provider_observed_state=RuntimeProviderObservedState.STOPPED,
+                provider_generation=provider_generation,
+                provider_observed_generation=acknowledged_generation,
+                provider_observed_at=sa.func.now(),
+                workspace_path=None,
+                runner_state=RuntimeRunnerState.DISCONNECTED,
+                terminal_delete_acknowledged_generation=acknowledged_generation,
+                terminal_delete_acknowledged_at=sa.func.now(),
+                failure_generation=None,
+                failure_code=None,
+                failure_message=None,
+                last_state_change_at=sa.func.now(),
+            )
+            .returning(RDBAgentRuntime)
+        )
+        rdb = result.scalar_one_or_none()
+        if rdb is None:
+            return None
+        await session.flush()
+        return self._build(rdb)
+
+    async def get_terminal_delete_acknowledged(
+        self,
+        session: AsyncSession,
+        runtime_id: str,
+    ) -> AgentRuntime | None:
+        """Return Runtime only after its current terminal deletion is acknowledged."""
+        result = await session.execute(
+            sa.select(RDBAgentRuntime).where(
+                RDBAgentRuntime.id == runtime_id,
+                RDBAgentRuntime.terminal_delete_requested_generation
+                == RDBAgentRuntime.desired_generation,
+                RDBAgentRuntime.terminal_delete_acknowledged_generation
+                == RDBAgentRuntime.desired_generation,
+            )
+        )
+        rdb = result.scalar_one_or_none()
+        if rdb is None:
+            return None
+        return self._build(rdb)
 
     async def record_provider_observed_state(
         self,
@@ -267,6 +363,9 @@ class AgentRuntimeRepository:
                 RDBAgentRuntime.provider_generation <= provider_generation,
                 RDBAgentRuntime.provider_observed_generation <= observed_generation,
                 RDBAgentRuntime.desired_generation <= observed_generation,
+                RDBAgentRuntime.terminal_delete_acknowledged_generation.is_distinct_from(
+                    RDBAgentRuntime.desired_generation
+                ),
             )
             .values(**values)
             .returning(RDBAgentRuntime)
@@ -466,13 +565,30 @@ class AgentRuntimeRepository:
                 RDBAgentRuntime.failure_code != "START_TIMEOUT",
             ),
         )
+        terminal_delete_retry = sa.and_(
+            RDBAgentRuntime.terminal_delete_requested_generation
+            == RDBAgentRuntime.desired_generation,
+            RDBAgentRuntime.terminal_delete_acknowledged_generation.is_distinct_from(
+                RDBAgentRuntime.desired_generation
+            ),
+            RDBAgentRuntime.provider_connection_state
+            == RuntimeProviderConnectionState.CONNECTED,
+            sa.or_(
+                RDBAgentRuntime.last_state_change_at.is_(None),
+                RDBAgentRuntime.last_state_change_at < retry_cutoff,
+            ),
+        )
         result = await session.execute(
             sa.update(RDBAgentRuntime)
             .where(
                 RDBAgentRuntime.id == runtime_id,
                 RDBAgentRuntime.desired_generation == desired_generation,
                 RDBAgentRuntime.last_lifecycle_command.is_not(None),
-                sa.or_(undispatched_generation, unready_start_retry),
+                sa.or_(
+                    undispatched_generation,
+                    unready_start_retry,
+                    terminal_delete_retry,
+                ),
             )
             .values(
                 last_lifecycle_dispatch_generation=sa.case(
@@ -530,6 +646,9 @@ class AgentRuntimeRepository:
             .where(
                 RDBAgentRuntime.id == runtime_id,
                 RDBAgentRuntime.runner_generation <= runner_generation,
+                RDBAgentRuntime.terminal_delete_acknowledged_generation.is_distinct_from(
+                    RDBAgentRuntime.desired_generation
+                ),
             )
             .values(**values)
             .returning(RDBAgentRuntime)
@@ -604,11 +723,28 @@ class AgentRuntimeRepository:
                 RDBAgentRuntime.failure_code != "START_TIMEOUT",
             ),
         )
+        terminal_delete_retry = sa.and_(
+            RDBAgentRuntime.terminal_delete_requested_generation
+            == RDBAgentRuntime.desired_generation,
+            RDBAgentRuntime.terminal_delete_acknowledged_generation.is_distinct_from(
+                RDBAgentRuntime.desired_generation
+            ),
+            RDBAgentRuntime.provider_connection_state
+            == RuntimeProviderConnectionState.CONNECTED,
+            sa.or_(
+                RDBAgentRuntime.last_state_change_at.is_(None),
+                RDBAgentRuntime.last_state_change_at < retry_cutoff,
+            ),
+        )
         result = await session.execute(
             sa.select(RDBAgentRuntime)
             .where(
                 RDBAgentRuntime.last_lifecycle_command.is_not(None),
-                sa.or_(undispatched_generation, unready_start_retry),
+                sa.or_(
+                    undispatched_generation,
+                    unready_start_retry,
+                    terminal_delete_retry,
+                ),
             )
             .order_by(RDBAgentRuntime.last_state_change_at.nulls_first())
             .limit(limit)
@@ -662,6 +798,13 @@ class AgentRuntimeRepository:
             desired_generation=rdb.desired_generation,
             last_lifecycle_command=rdb.last_lifecycle_command,
             reset_final_desired_state=rdb.reset_final_desired_state,
+            terminal_delete_requested_generation=(
+                rdb.terminal_delete_requested_generation
+            ),
+            terminal_delete_acknowledged_generation=(
+                rdb.terminal_delete_acknowledged_generation
+            ),
+            terminal_delete_acknowledged_at=rdb.terminal_delete_acknowledged_at,
             provider_observed_state=rdb.provider_observed_state,
             provider_generation=rdb.provider_generation,
             provider_observed_generation=rdb.provider_observed_generation,

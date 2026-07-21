@@ -7,7 +7,7 @@ import logging
 import time
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
-from typing import Protocol, TypeAlias
+from typing import Protocol, TypeAlias, assert_never
 
 JsonValue: TypeAlias = (
     None | bool | int | float | str | list["JsonValue"] | dict[str, "JsonValue"]
@@ -30,6 +30,7 @@ class RuntimeLifecycleCommandType(enum.StrEnum):
     RESTART = "restart"
     RESET = "reset"
     OBSERVE = "observe"
+    TERMINAL_DELETE = "terminal_delete"
 
 
 class RuntimeProviderObservedState(enum.StrEnum):
@@ -90,6 +91,7 @@ class RuntimeProviderReport:
     reason: str
     diagnostic: Mapping[str, str]
     reported_at: datetime
+    terminal_delete_acknowledged: bool
 
 
 @dataclasses.dataclass(frozen=True)
@@ -218,6 +220,13 @@ class RuntimeProviderLifecycle(Protocol):
 
     async def reset(self, command: RuntimeLifecycleCommand) -> RuntimeLifecycleResult:
         """Reset a Runtime; this is the only destructive workspace operation."""
+        ...
+
+    async def terminal_delete(
+        self,
+        command: RuntimeLifecycleCommand,
+    ) -> RuntimeLifecycleResult:
+        """Permanently remove all Provider-owned Runtime resources."""
         ...
 
     async def observe(self, command: RuntimeLifecycleCommand) -> RuntimeProviderReport:
@@ -468,19 +477,25 @@ class ProviderRunLoop:
         self,
         command: RuntimeLifecycleCommand,
     ) -> RuntimeLifecycleResult:
-        if command.command_type is RuntimeLifecycleCommandType.START:
-            return await self._lifecycle.start(command)
-        if command.command_type is RuntimeLifecycleCommandType.STOP:
-            return await self._lifecycle.stop(command)
-        if command.command_type is RuntimeLifecycleCommandType.RESTART:
-            return await self._lifecycle.restart(command)
-        if command.command_type is RuntimeLifecycleCommandType.RESET:
-            return await self._lifecycle.reset(command)
-        report = await self._lifecycle.observe(command)
-        return RuntimeLifecycleResult(
-            command_type=RuntimeLifecycleCommandType.OBSERVE,
-            report=report,
-        )
+        match command.command_type:
+            case RuntimeLifecycleCommandType.START:
+                return await self._lifecycle.start(command)
+            case RuntimeLifecycleCommandType.STOP:
+                return await self._lifecycle.stop(command)
+            case RuntimeLifecycleCommandType.RESTART:
+                return await self._lifecycle.restart(command)
+            case RuntimeLifecycleCommandType.RESET:
+                return await self._lifecycle.reset(command)
+            case RuntimeLifecycleCommandType.TERMINAL_DELETE:
+                return await self._lifecycle.terminal_delete(command)
+            case RuntimeLifecycleCommandType.OBSERVE:
+                report = await self._lifecycle.observe(command)
+                return RuntimeLifecycleResult(
+                    command_type=RuntimeLifecycleCommandType.OBSERVE,
+                    report=report,
+                )
+            case _:
+                assert_never(command.command_type)
 
     def _require_accepted(self) -> ProviderRegistrationAccepted:
         accepted = self._accepted

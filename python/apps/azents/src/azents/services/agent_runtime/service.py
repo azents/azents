@@ -371,6 +371,14 @@ class AgentRuntimeService:
 
     def _calculate_actions(self, runtime: AgentRuntime) -> AgentRuntimeActions:
         """Calculate action availability from Runtime raw axes."""
+        if runtime.terminal_delete_requested_generation is not None:
+            return AgentRuntimeActions(
+                start=False,
+                stop=False,
+                restart=False,
+                reset=False,
+                use_runner=False,
+            )
         backend_running = (
             runtime.provider_observed_state == RuntimeProviderObservedState.RUNNING
         )

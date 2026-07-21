@@ -120,6 +120,68 @@ async def test_reconciler_dispatches_periodic_provider_observe(
     assert updated.provider_observe_requested_at is not None
 
 
+async def test_reconciler_dispatches_terminal_delete_until_acknowledged(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """Terminal deletion uses the internal Provider command rather than STOP."""
+    runtime_repository = AgentRuntimeRepository()
+    async with rdb_session_manager() as session:
+        workspace_id = await _create_workspace(session, "reconciler-terminal-ws")
+        agent_id = await _create_agent(
+            session,
+            workspace_id,
+            "reconciler-terminal-agent",
+            runtime_provider_id="provider-1",
+        )
+        runtime = await runtime_repository.ensure_for_agent(session, agent_id)
+        requested = await runtime_repository.request_terminal_delete(
+            session,
+            runtime.id,
+        )
+        assert requested is not None
+        connected = await runtime_repository.record_provider_connection_state(
+            session,
+            runtime.id,
+            RuntimeProviderConnectionState.CONNECTED,
+        )
+        assert connected is not None
+
+    store = InMemoryRuntimeCoordinationStore()
+    control_protocol = RuntimeControlProtocolService(
+        store,
+        request_id_factory=lambda: "terminal-request",
+    )
+    accepted = await control_protocol.register_provider(
+        _provider_registration(),
+        registered_at=datetime.datetime.now(datetime.UTC),
+    )
+    reconciler = RuntimeLifecycleReconciler(
+        runtime_repository=runtime_repository,
+        session_manager=rdb_session_manager,
+        coordination_store=store,
+        control_protocol=control_protocol,
+        config=RuntimeLifecycleDispatchConfig(
+            runner_image="runner:test",
+            runner_control_endpoint="runtime-control:9090",
+            runner_control_auth_token="control-token",
+        ),
+    )
+
+    dispatched = await reconciler.reconcile_once(limit=10)
+    claimed = await control_protocol.claim_next_provider_request(
+        provider_id="provider-1",
+        generation=accepted.generation,
+        consumer_id="provider-worker",
+        block_ms=0,
+    )
+
+    assert dispatched == 1
+    assert claimed is not None
+    assert claimed.operation_type == "provider.terminal_delete"
+    assert claimed.payload["command_type"] == "terminal_delete"
+    assert claimed.payload["desired_generation"] == requested.desired_generation
+
+
 def _provider_registration() -> RuntimeProviderRegistration:
     return RuntimeProviderRegistration(
         provider_id="provider-1",

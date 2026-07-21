@@ -114,6 +114,13 @@ class FakeLifecycle(RuntimeProviderLifecycle):
         """Reset a Runtime."""
         return await self._result(command)
 
+    async def terminal_delete(
+        self,
+        command: RuntimeLifecycleCommand,
+    ) -> RuntimeLifecycleResult:
+        """Terminally delete a Runtime."""
+        return await self._result(command)
+
     async def observe(self, command: RuntimeLifecycleCommand) -> RuntimeProviderReport:
         """Observe a Runtime."""
         result = await self._result(command)
@@ -208,6 +215,25 @@ async def test_process_next_command_dispatches_and_completes_success() -> None:
     assert lifecycle.commands == [command]
     assert client.completions == [completion]
     assert client.reports[-1].observed_state is RuntimeProviderObservedState.RUNNING
+
+
+@pytest.mark.asyncio
+async def test_process_next_command_dispatches_terminal_delete() -> None:
+    """Terminal delete uses the Provider lifecycle contract and acknowledgement."""
+    client = FakeControlClient()
+    lifecycle = FakeLifecycle()
+    command = _command(RuntimeLifecycleCommandType.TERMINAL_DELETE)
+    client.commands.append(ProviderCommandEnvelope(request_id="req-1", command=command))
+    loop = _loop(client, lifecycle)
+    await loop.start()
+
+    completion = await loop.process_next_command(block_ms=0)
+
+    assert completion is not None
+    assert completion.success
+    assert completion.report is not None
+    assert lifecycle.commands == [command]
+    assert completion.report.terminal_delete_acknowledged is True
 
 
 @pytest.mark.asyncio
@@ -325,4 +351,7 @@ def _report(command: RuntimeLifecycleCommand) -> RuntimeProviderReport:
         reason=f"{command.command_type.value}_ok",
         diagnostic=diagnostic,
         reported_at=datetime(2026, 5, 25, tzinfo=UTC),
+        terminal_delete_acknowledged=(
+            command.command_type is RuntimeLifecycleCommandType.TERMINAL_DELETE
+        ),
     )

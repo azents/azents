@@ -21,11 +21,13 @@ from azents_runtime_control.proto import (
     runtime_provider_control_pb2_grpc,
 )
 from azents_runtime_control.provider import (
+    RuntimeLifecycleCommandType as RuntimeProviderCommandType,
+)
+from azents_runtime_control.provider import (
     RuntimeProviderReport as SharedRuntimeProviderReport,
 )
 from google.protobuf import timestamp_pb2
 
-from azents.core.enums import RuntimeLifecycleCommandType
 from azents.runtime.control_protocol.data import (
     RuntimeProtocolCapabilities,
     RuntimeProviderRegistration,
@@ -640,7 +642,7 @@ def _required_int(payload: dict[str, JsonValue], key: str) -> int:
 
 def _required_command_type(payload: dict[str, JsonValue]) -> str:
     value = _required_string(payload, "command_type")
-    RuntimeLifecycleCommandType(value)
+    RuntimeProviderCommandType(value)
     return value
 
 

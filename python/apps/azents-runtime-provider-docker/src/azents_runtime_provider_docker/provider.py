@@ -183,6 +183,29 @@ class DockerRuntimeProvider:
             report=report,
         )
 
+    async def terminal_delete(
+        self,
+        command: RuntimeLifecycleCommand,
+    ) -> RuntimeLifecycleResult:
+        """Remove the Runtime container and all Provider-owned host data."""
+        await self._docker.remove_container(
+            _container_name(command.identity.runtime_id)
+        )
+        self._delete_runtime_root(command.identity.runtime_id)
+        return RuntimeLifecycleResult(
+            command_type=RuntimeLifecycleCommandType.TERMINAL_DELETE,
+            report=dataclasses.replace(
+                self._report(
+                    command,
+                    observed_state=RuntimeProviderObservedState.STOPPED,
+                    reason="terminal_resources_absent",
+                    provider_runtime_id=None,
+                ),
+                workspace_path="",
+                terminal_delete_acknowledged=True,
+            ),
+        )
+
     async def observe(
         self,
         command: RuntimeLifecycleCommand,
@@ -372,6 +395,7 @@ class DockerRuntimeProvider:
             reason=reason,
             diagnostic={},
             reported_at=datetime.now(UTC),
+            terminal_delete_acknowledged=False,
         )
 
     def _report_from_container(
@@ -395,6 +419,7 @@ class DockerRuntimeProvider:
             reason=reason,
             diagnostic={"source": "docker_container"},
             reported_at=datetime.now(UTC),
+            terminal_delete_acknowledged=False,
         )
 
     def _report_from_directory(self, runtime_id: str) -> RuntimeProviderReport:
@@ -409,6 +434,7 @@ class DockerRuntimeProvider:
             reason="workspace_directory_without_container",
             diagnostic={"source": "host_directory"},
             reported_at=datetime.now(UTC),
+            terminal_delete_acknowledged=False,
         )
 
     def _runtime_root(self, runtime_id: str) -> Path:

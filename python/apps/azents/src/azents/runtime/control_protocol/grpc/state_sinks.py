@@ -47,6 +47,28 @@ class RuntimeProviderReportRepositorySink:
             if runtime is None:
                 raise ValueError(f"AgentRuntime not found: {report.runtime_id}")
 
+            if _terminal_delete_acknowledged(
+                report=report,
+                desired_generation=runtime.desired_generation,
+            ):
+                record_acknowledgement = (
+                    self.runtime_repository.record_terminal_delete_acknowledgement
+                )
+                persisted = await record_acknowledgement(
+                    session,
+                    report.runtime_id,
+                    provider_generation=report.provider_generation,
+                    acknowledged_generation=report.observed_desired_generation,
+                )
+                if persisted is None:
+                    return
+                await self.runtime_repository.record_provider_connection_state(
+                    session,
+                    report.runtime_id,
+                    RuntimeProviderConnectionState.CONNECTED,
+                )
+                return
+
             failure = _provider_workspace_failure(
                 workspace_path=report.workspace_path,
                 desired_generation=runtime.desired_generation,
@@ -169,6 +191,19 @@ def _provider_report_clears_failure(
         report.observed_state == SharedProviderObservedState.RUNNING
         and report.observed_desired_generation >= desired_generation
         and bool(report.workspace_path)
+    )
+
+
+def _terminal_delete_acknowledged(
+    *,
+    report: SharedRuntimeProviderReport,
+    desired_generation: int,
+) -> bool:
+    return (
+        report.terminal_delete_acknowledged
+        and report.observed_state == SharedProviderObservedState.STOPPED
+        and report.provider_runtime_id is None
+        and report.observed_desired_generation == desired_generation
     )
 
 
