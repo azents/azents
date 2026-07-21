@@ -204,12 +204,42 @@ def resolve_client_tool_profiles(
     return frozenset()
 
 
+def supports_historical_plaintext_custom_apply_patch(
+    *,
+    model_identifier: str,
+    model_developer: LLMModelDeveloper | None,
+    model_family: str | None,
+    route: ClientToolRoute,
+) -> bool:
+    """Return whether one route can encode existing custom apply-patch history."""
+    key = ClientToolCompatibilityKey(
+        model_identifier=model_identifier,
+        model_developer=model_developer,
+        model_family=model_family,
+    )
+    return _custom_apply_patch_transport_supported(key=key, route=route)
+
+
 def _custom_apply_patch_transport_eligible(
     *,
     key: ClientToolCompatibilityKey,
     route: ClientToolRoute,
 ) -> bool:
     """Return whether one exact reviewed OpenAI custom route is selected."""
+    return _custom_apply_patch_transport_supported(
+        key=key, route=route
+    ) and _cohort_enabled(
+        cohort_key=route.cohort_key,
+        percent=route.custom_rollout_percent,
+    )
+
+
+def _custom_apply_patch_transport_supported(
+    *,
+    key: ClientToolCompatibilityKey,
+    route: ClientToolRoute,
+) -> bool:
+    """Return whether one exact reviewed route can encode custom history."""
     return (
         route.provider is LLMProvider.OPENAI
         and route.adapter == "openai"
@@ -217,10 +247,6 @@ def _custom_apply_patch_transport_eligible(
         and route.official_openai_endpoint
         and route.api_key_available
         and key.model_identifier == "gpt-5.1"
-        and _cohort_enabled(
-            cohort_key=route.cohort_key,
-            percent=route.custom_rollout_percent,
-        )
     )
 
 

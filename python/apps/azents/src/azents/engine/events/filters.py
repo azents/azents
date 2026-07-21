@@ -75,6 +75,7 @@ _CONTINUITY_RECENT_USER_MESSAGES = 5
 _CONTINUITY_MAX_EVENT_TOKENS = 2_000
 _CONTINUITY_MAX_EVENT_CHARS = _CONTINUITY_MAX_EVENT_TOKENS * _TOKEN_BYTES
 _CONTINUITY_TRUNCATION_MARKER = "\n\n[Event truncated by Azents continuity guard.]"
+_PLAINTEXT_CUSTOM_INPUT_OMITTED = "[plaintext custom input omitted]"
 _EXCHANGE_URI_PREFIX = "exchange://"
 
 
@@ -651,6 +652,13 @@ def _format_tool_call_text(
     return "\n".join(lines)
 
 
+def _continuity_tool_call_arguments(payload: ClientToolCallPayload) -> str:
+    """Return safe arguments for a compaction continuity tool-call excerpt."""
+    if payload.wire_dialect == "plaintext_custom":
+        return _PLAINTEXT_CUSTOM_INPUT_OMITTED
+    return payload.arguments
+
+
 def _compact_json_bytes(value: object) -> int:
     """Return compact JSON serialization byte count."""
     return len(
@@ -848,6 +856,13 @@ def _model_visible_event_value(event: Event) -> object | None:
             "content": _visible_output_content_value(payload.content),
         }
     if isinstance(payload, ClientToolCallPayload):
+        if payload.wire_dialect == "plaintext_custom":
+            return {
+                "type": "custom_tool_call",
+                "call_id": payload.call_id,
+                "name": payload.name,
+                "input": _PLAINTEXT_CUSTOM_INPUT_OMITTED,
+            }
         return {
             "type": "function_call",
             "call_id": payload.call_id,
@@ -920,7 +935,7 @@ def _model_visible_event_text(
             _format_tool_call_text(
                 title=payload.name,
                 call_id=None,
-                arguments=payload.arguments,
+                arguments=_continuity_tool_call_arguments(payload),
             ),
             include_label=include_label,
         )

@@ -240,6 +240,7 @@ class OpenAIResponsesLowerer:
         model_developer: LLMModelDeveloper | None = None,
         model_capabilities: ModelCapabilities | None = None,
         model_file_resolver: ModelFileResolver | None = None,
+        historical_plaintext_custom_supported: bool = False,
     ) -> None:
         """Configure shared event lowering and SDK-owned request validation."""
         self.request_extra_headers = _optional_credential_headers(
@@ -262,6 +263,9 @@ class OpenAIResponsesLowerer:
             model_developer=model_developer,
             model_capabilities=model_capabilities,
             model_file_resolver=model_file_resolver,
+            historical_plaintext_custom_supported=(
+                historical_plaintext_custom_supported
+            ),
         )
         self.compat_key = self._lowerer.compat_key
 

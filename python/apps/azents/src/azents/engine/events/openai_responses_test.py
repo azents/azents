@@ -453,6 +453,70 @@ def test_openai_sdk_lowerer_accepts_plaintext_custom_apply_patch_tool() -> None:
     assert request.tools == [tool]
 
 
+def test_openai_sdk_lowerer_projects_incompatible_custom_history() -> None:
+    """Do not emit a historical custom call on a function-only SDK request."""
+    lowerer = OpenAIResponsesLowerer(
+        provider="openai",
+        model="gpt-5.1",
+        provider_id=LLMProvider.OPENAI,
+        credential_kwargs={},
+        historical_plaintext_custom_supported=True,
+        tools=[
+            {
+                "type": "function",
+                "name": "apply_patch",
+                "description": "Apply a patch.",
+                "parameters": {"type": "object"},
+            }
+        ],
+    )
+    historical_call = Event(
+        id="2" * 32,
+        session_id="session-1",
+        kind=EventKind.CLIENT_TOOL_CALL,
+        payload=ClientToolCallPayload(
+            call_id="call-custom",
+            name="apply_patch",
+            arguments="opaque-custom-input",
+            wire_dialect="plaintext_custom",
+            native_artifact=NativeArtifact(
+                compat_key=build_native_compat_key(
+                    adapter="litellm",
+                    native_format="responses",
+                    provider="openai",
+                    model="gpt-5.1",
+                    schema_version="1",
+                ),
+                adapter="litellm",
+                native_format="responses",
+                provider="openai",
+                model="gpt-5.1",
+                schema_version="1",
+                item={
+                    "type": "custom_tool_call",
+                    "call_id": "call-custom",
+                    "name": "apply_patch",
+                    "input": "opaque-custom-input",
+                },
+            ),
+        ),
+        created_at=datetime.datetime.now(datetime.UTC),
+    )
+
+    request = lowerer.lower([historical_call], model="gpt-5.1")
+
+    assert request.input == [
+        {
+            "role": "assistant",
+            "content": (
+                "[Historical custom tool call: apply_patch. "
+                "Input omitted; non-executable history.]"
+            ),
+        }
+    ]
+    assert "opaque-custom-input" not in str(request.input)
+
+
 def test_chatgpt_lowerer_uses_standard_hosted_web_search_tool() -> None:
     """ChatGPT hosted web search remains in the standard tools field."""
     capabilities = ModelCapabilities()
@@ -1720,6 +1784,7 @@ def test_typed_normalizer_admits_completed_custom_tool_call() -> None:
         model="gpt-5.1-codex",
         provider_id=LLMProvider.OPENAI,
         credential_kwargs={},
+        historical_plaintext_custom_supported=True,
     ).lower([*completed.events, result], model="gpt-5.1-codex")
 
     assert request.input == [
