@@ -35,13 +35,7 @@ from azents.core.enums import (
 from azents.core.inference_profile import SessionInferenceState
 from azents.core.llm_catalog import ModelBuiltInToolCapabilities, ModelCapabilities
 from azents.core.openrouter import OPENROUTER_API_BASE_URL, OPENROUTER_APP_TITLE
-from azents.core.tools import (
-    ProfiledToolkitPrompt,
-    Toolkit,
-    ToolkitState,
-    ToolkitStatus,
-    TurnContext,
-)
+from azents.core.tools import Toolkit, ToolkitState, ToolkitStatus, TurnContext
 from azents.engine.context.compaction import (
     SummaryModelCall,
     compute_summary_budget,
@@ -105,7 +99,7 @@ from azents.engine.hooks.types import (
     TurnStartHookContext,
     TurnStartResult,
 )
-from azents.engine.run.client_tool_compatibility import ClientToolProfile
+from azents.engine.run.client_tool_compatibility import ClientToolModelProfile
 from azents.engine.run.contracts import RunContext, RunRequest, ToolkitBinding
 from azents.engine.run.emit import Emit
 from azents.engine.run.errors import CompactionFailedError, ModelCallError
@@ -117,6 +111,7 @@ from azents.engine.run.types import (
     FunctionTool,
     FunctionToolError,
     FunctionToolSpec,
+    FunctionToolWireVariant,
 )
 from azents.engine.tooling.tool_search import (
     ToolWorkingSetState,
@@ -678,8 +673,20 @@ class _DeferredToolkit(Toolkit[BaseModel]):
         return ToolkitState(status=ToolkitStatus.ENABLED, tools=tools)
 
 
+class _ProfiledCandidateHandler:
+    """Handler supporting both variants under a neutral tool name."""
+
+    async def __call__(self, arguments: str) -> str:
+        """Execute structured JSON-function input."""
+        return arguments
+
+    async def execute_plaintext_custom(self, arguments: str) -> str:
+        """Execute plaintext-custom input."""
+        return arguments
+
+
 class _ProfiledCandidateToolkit(Toolkit[BaseModel]):
-    """Toolkit exposing one profile-gated deferred tool and prompt."""
+    """Toolkit exposing one profile-gated dual-variant tool."""
 
     display_name = "Profiled Service"
 
@@ -687,39 +694,34 @@ class _ProfiledCandidateToolkit(Toolkit[BaseModel]):
         """Return one profile-gated candidate tool."""
         del context
 
-        async def handler(arguments: str) -> str:
-            return arguments
-
         return ToolkitState(
             status=ToolkitStatus.ENABLED,
             tools=[
                 FunctionTool(
                     spec=FunctionToolSpec(
-                        name="apply_patch",
-                        description="Apply one V4A patch.",
+                        name="batch_update",
+                        description="Apply one batch update.",
                         input_schema={"type": "object", "properties": {}},
                     ),
-                    handler=handler,
-                ).with_required_client_tool_profile(
-                    ClientToolProfile.V4A_APPLY_PATCH_FUNCTION
+                    handler=_ProfiledCandidateHandler(),
+                    required_client_tool_model_profile=(
+                        ClientToolModelProfile.V4A_PATCH
+                    ),
+                    wire_variants=(
+                        FunctionToolWireVariant(
+                            wire_dialect="json_function",
+                            model_guidance=(
+                                "Send structured arguments for batch updates."
+                            ),
+                        ),
+                        FunctionToolWireVariant(
+                            wire_dialect="plaintext_custom",
+                            model_guidance=("Send one plaintext batch update request."),
+                        ),
+                    ),
                 )
             ],
         )
-
-    async def get_profiled_static_prompts(
-        self,
-        context: TurnContext,
-    ) -> list[ProfiledToolkitPrompt]:
-        """Return guidance coupled to the profile-gated tool."""
-        del context
-        return [
-            ProfiledToolkitPrompt(
-                required_client_tool_profile=(
-                    ClientToolProfile.V4A_APPLY_PATCH_FUNCTION
-                ),
-                content="Use apply_patch for multi-file changes.",
-            )
-        ]
 
 
 class _DenyHookToolkit(Toolkit[BaseModel]):
@@ -1039,7 +1041,7 @@ async def test_disabled_tool_search_exposes_complete_catalog() -> None:
             "gpt-5.2",
             LLMModelDeveloper.OPENAI,
             "gpt-5",
-            ["tool_search"],
+            ["batch_update"],
         ),
         (
             "claude-sonnet-4",
@@ -1061,18 +1063,20 @@ async def test_client_tool_profile_projects_before_search_and_lowering(
         model_developer=model_developer,
         model_family=model_family,
         request_model_developer=model_developer,
+        provider=LLMProvider.OPENAI,
     )
 
     native_request = prepared.native_request
     assert isinstance(native_request, OpenAIResponsesRequest)
     assert [tool["name"] for tool in native_request.tools] == expected_tools
     instructions = native_request.options.get("instructions")
-    if "apply_patch" in expected_tools:
+    if "batch_update" in expected_tools:
         assert isinstance(instructions, str)
-        assert "Use apply_patch for multi-file changes." in instructions
+        assert "Send one plaintext batch update request." in instructions
+        assert native_request.tools[0]["type"] == "custom"
     else:
         assert isinstance(instructions, str)
-        assert "Use apply_patch for multi-file changes." not in instructions
+        assert "Send one plaintext batch update request." not in instructions
 
 
 async def test_client_tool_profile_uses_selected_snapshot_developer() -> None:
@@ -1082,11 +1086,12 @@ async def test_client_tool_profile_uses_selected_snapshot_developer() -> None:
         model_developer=LLMModelDeveloper.OPENAI,
         model_family="gpt-5",
         request_model_developer=LLMModelDeveloper.ANTHROPIC,
+        provider=LLMProvider.OPENAI,
     )
 
     native_request = prepared.native_request
     assert isinstance(native_request, OpenAIResponsesRequest)
-    assert [tool["name"] for tool in native_request.tools] == ["tool_search"]
+    assert [tool["name"] for tool in native_request.tools] == ["batch_update"]
 
 
 async def test_client_tool_profile_re_evaluates_for_changed_model_snapshot() -> None:
@@ -1096,20 +1101,49 @@ async def test_client_tool_profile_re_evaluates_for_changed_model_snapshot() -> 
         model_developer=LLMModelDeveloper.OPENAI,
         model_family="gpt-5",
         request_model_developer=LLMModelDeveloper.OPENAI,
+        provider=LLMProvider.OPENAI,
     )
     non_gpt_prepared = await _prepare_profiled_model_call(
         model_identifier="claude-sonnet-4",
         model_developer=LLMModelDeveloper.ANTHROPIC,
         model_family="claude-sonnet-4",
         request_model_developer=LLMModelDeveloper.ANTHROPIC,
+        provider=LLMProvider.OPENAI,
     )
 
     gpt_request = gpt_prepared.native_request
     non_gpt_request = non_gpt_prepared.native_request
     assert isinstance(gpt_request, OpenAIResponsesRequest)
     assert isinstance(non_gpt_request, OpenAIResponsesRequest)
-    assert [tool["name"] for tool in gpt_request.tools] == ["tool_search"]
+    assert [tool["name"] for tool in gpt_request.tools] == ["batch_update"]
     assert non_gpt_request.tools == []
+
+
+async def test_client_tool_adapter_profile_selects_json_on_openrouter() -> None:
+    """Use the provider-specific LiteLLM preference for the same semantic tool."""
+    prepared = await _prepare_profiled_model_call(
+        model_identifier="gpt-5.1",
+        model_developer=LLMModelDeveloper.OPENAI,
+        model_family="gpt-5",
+        request_model_developer=LLMModelDeveloper.OPENAI,
+        provider=LLMProvider.OPENROUTER,
+    )
+
+    native_request = prepared.native_request
+    assert isinstance(native_request, NativeModelRequest)
+    assert native_request.tools == [
+        {
+            "type": "function",
+            "name": "batch_update",
+            "description": "Apply one batch update.",
+            "parameters": {"type": "object", "properties": {}},
+            "strict": False,
+        }
+    ]
+    instructions = native_request.kwargs.get("instructions")
+    assert isinstance(instructions, str)
+    assert "Send structured arguments for batch updates." in instructions
+    assert "Send one plaintext batch update request." not in instructions
 
 
 async def test_tool_search_activation_updates_the_next_prepared_call() -> None:
@@ -1241,6 +1275,7 @@ async def _prepare_profiled_model_call(
     model_developer: LLMModelDeveloper,
     model_family: str,
     request_model_developer: LLMModelDeveloper | None,
+    provider: LLMProvider,
 ) -> PreparedModelCall[NativeRequestInspection]:
     """Prepare one call from a normalized selected-model snapshot."""
     execution = _Execution()
@@ -1276,11 +1311,12 @@ async def _prepare_profiled_model_call(
                 toolkit=_ProfiledCandidateToolkit(),
                 slug="profiled",
                 use_prefix=False,
-                toolkit_type="github",
+                toolkit_type=None,
             )
         ],
         model=model_identifier,
         model_developer=request_model_developer,
+        provider=provider,
         credential_kwargs={"api_key": "test"},
         workspace_id="workspace-1",
         agent_id="agent-1",
@@ -1354,8 +1390,11 @@ def _xai_oauth_inference_state() -> SessionInferenceState:
     )
 
 
-async def test_xai_image_generation_is_bound_as_client_function_tool() -> None:
+async def test_xai_image_generation_is_bound_as_client_function_tool(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """Expose Imagine to Grok without lowering it as a provider-hosted tool."""
+    caplog.set_level("INFO", logger=engine_adapter_module.__name__)
     execution = _Execution()
     adapter = _agent_engine_adapter(
         session_manager=_session_context,
@@ -1411,6 +1450,14 @@ async def test_xai_image_generation_is_bound_as_client_function_tool() -> None:
     assert isinstance(prepared_request, NativeModelRequest)
     assert [tool["name"] for tool in prepared_request.tools] == ["image_generation"]
     assert all(tool.get("type") == "function" for tool in prepared_request.tools)
+    projection_record = next(
+        record
+        for record in caplog.records
+        if record.getMessage() == "Projected client tools for model compatibility"
+    )
+    projection_fields = vars(projection_record)
+    assert projection_fields["candidate_tool_count"] == 1
+    assert projection_fields["projected_tool_count"] == 1
 
 
 async def test_xai_oauth_refresh_updates_later_model_turn_credentials(

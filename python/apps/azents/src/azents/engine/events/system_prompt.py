@@ -8,7 +8,6 @@ from azents.engine.events.types import (
     SystemPromptFragmentPayload,
 )
 from azents.engine.hooks.types import TurnInjectedPrompt
-from azents.engine.run.client_tool_compatibility import ClientToolProfile
 
 _PROMPT_SECTION_SEPARATOR = "\n\n"
 
@@ -21,7 +20,7 @@ class ToolkitPromptInput:
     label: str
     content: str
     metadata: dict[str, str]
-    required_client_tool_profile: ClientToolProfile | None = None
+    required_tool_name: str | None
 
 
 @dataclass(frozen=True)

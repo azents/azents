@@ -29,7 +29,6 @@ from azents.core.enums import (
     RuntimeRunnerState,
 )
 from azents.core.tools import (
-    ProfiledToolkitPrompt,
     ResolveContext,
     ShellToolkitConfig,
     Toolkit,
@@ -44,7 +43,6 @@ from azents.engine.events.engine_events import (
     RuntimeReadyEvent,
 )
 from azents.engine.io.attachments import RuntimeAttachment
-from azents.engine.run.client_tool_compatibility import ClientToolProfile
 from azents.engine.run.types import (
     FunctionTool,
     FunctionToolCancelRequest,
@@ -52,12 +50,7 @@ from azents.engine.run.types import (
     FunctionToolResult,
 )
 from azents.engine.tooling.make_tool import make_tool
-from azents.engine.tools.apply_patch import (
-    GPT_V4A_APPLY_PATCH_PROMPT,
-    GPT_V4A_PLAINTEXT_CUSTOM_APPLY_PATCH_PROMPT,
-    RuntimePatchTarget,
-    make_apply_patch_tool,
-)
+from azents.engine.tools.apply_patch import RuntimePatchTarget, make_apply_patch_tool
 from azents.engine.tools.builtin_agents import (
     AgentsAppendixDedupeStateStore,
     AgentsAppendixMixin,
@@ -863,29 +856,6 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
             user_id=context.user_id,
             projects=projects,
         )
-
-    async def get_profiled_static_prompts(
-        self,
-        context: TurnContext,
-    ) -> list[ProfiledToolkitPrompt]:
-        """Return model-profile-gated Runtime tool guidance."""
-        del context
-        if "apply_patch" in self._excluded_tools:
-            return []
-        return [
-            ProfiledToolkitPrompt(
-                required_client_tool_profile=(
-                    ClientToolProfile.V4A_APPLY_PATCH_FUNCTION
-                ),
-                content=GPT_V4A_APPLY_PATCH_PROMPT,
-            ),
-            ProfiledToolkitPrompt(
-                required_client_tool_profile=(
-                    ClientToolProfile.V4A_APPLY_PATCH_PLAINTEXT_CUSTOM
-                ),
-                content=GPT_V4A_PLAINTEXT_CUSTOM_APPLY_PATCH_PROMPT,
-            ),
-        ]
 
     async def _make_instruction_context(
         self,

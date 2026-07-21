@@ -26,6 +26,7 @@ from azents.core.inference_profile import (
     RequestedInferenceProfile,
 )
 from azents.core.vfs import VfsProjection
+from azents.engine.client_tools import ClientToolWireDialect
 from azents.engine.events.action_messages import ActionMessagePayload
 from azents.engine.events.generated_files import PendingGeneratedFileOutput
 from azents.engine.run.failure import (
@@ -34,7 +35,6 @@ from azents.engine.run.failure import (
 )
 
 RawDict: TypeAlias = Annotated[dict[str, object], SkipValidation]
-ClientToolWireDialect: TypeAlias = Literal["json_function", "plaintext_custom"]
 
 
 def upgrade_persisted_client_tool_payload(

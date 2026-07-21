@@ -19,7 +19,10 @@ code_paths:
   - python/apps/azents/src/azents/services/agent_runtime/**
   - python/apps/azents/src/azents/services/shell_environment/**
   - python/apps/azents/src/azents/engine/hooks/**
+  - python/apps/azents/src/azents/engine/client_tools.py
   - python/apps/azents/src/azents/engine/events/**
+  - python/apps/azents/src/azents/engine/run/client_tool_compatibility.py
+  - python/apps/azents/src/azents/engine/run/types.py
   - python/apps/azents/src/azents/engine/tools/**
   - python/apps/azents/src/azents/services/agent_mailbox.py
   - python/apps/azents/src/azents/services/subagent_terminal_result.py
@@ -43,7 +46,7 @@ api_routes:
   - /toolkit/v1
   - /shell-environment/v1
 last_verified_at: 2026-07-21
-spec_version: 66
+spec_version: 67
 ---
 
 # Toolkit
@@ -129,15 +132,29 @@ The slug prefix is only a tool-call namespace. Toolkit State uses its own `toolk
 
 Final provider-facing client tools are canonicalized by model-visible tool name before lowering to the model request. Toolkit-local generation may use whatever construction order is convenient, but `ToolCatalog.native_tools` is name-sorted so identical toolkit configuration and identical successful toolkit state produce stable function-tool ordering. Provider-hosted tools are also sorted by stable semantic name/config before request lowering when more than one hosted tool is present.
 
-One logical catalog entry may have one route-selected provider declaration variant while preserving
-its final model-visible name, catalog identity, source metadata, Tool Search identity, and executor
-lookup. The current variant-capable entry is `apply_patch`: its reviewed compatibility profile can
-select either the ordinary JSON-function declaration or a plaintext-custom declaration. The custom
-variant is selected only on the native OpenAI Responses adapter. Route selection never depends on
-exact model identifiers, credential mode, endpoint class, session, tenant, percentage, or runtime
-configuration. All other eligible routes use only their independently reviewed JSON-function
-transport; unsupported routes omit `apply_patch`. A prepared catalog exposes one variant, never
-both, and Tool Search/declaration-budget projection count that selected declaration once.
+One logical catalog entry may declare multiple provider wire variants while preserving its final
+model-visible name, catalog identity, source metadata, Tool Search identity, and executor lookup.
+`FunctionTool` owns the immutable variant declarations and optional guidance for each dialect.
+Ordinary tools implicitly declare one JSON-function variant.
+
+Prepared-call selection is generic. A semantic model-profile registry determines eligibility, an
+adapter-profile registry supplies the ordinary default dialect preference plus any semantic-profile
+override, and catalog projection chooses the first matching tool-declared variant. Selection never
+branches on the model-visible tool name. The selected declaration, guidance, handler route, and
+durable dialect are frozen together. Variant guidance is included only when the matching declaration
+is provider-visible after Tool Search projection.
+
+Candidate catalog construction records tool declarations without selecting a wire dialect.
+Provider declaration lowering and execution require a prepared catalog produced by compatibility
+projection. The only post-projection extension is the internal Tool Search function, which is
+validated as one unconditional JSON-function variant before it is added.
+
+The current dual-variant entry is `apply_patch`. It requires the reviewed V4A patch semantic profile
+and declares JSON-function and plaintext-custom variants. Native OpenAI Responses prefers plaintext
+custom, while the reviewed OpenRouter LiteLLM Responses profile selects JSON function. Other current
+LiteLLM routes keep ordinary JSON tools but do not enable the V4A patch semantic profile. A prepared
+catalog exposes one variant, never both, and Tool Search/declaration-budget projection counts that
+selected declaration once.
 
 ### Managed Skill VFS
 
@@ -636,6 +653,7 @@ OpenAPI spec is authoritative for all endpoints. Major operations:
 
 ## Changelog
 
+- **2026-07-21** (spec_version 67) — Generalized client-tool wire selection into semantic model profiles, adapter profile preferences, and tool-declared variants without model-visible tool-name branches.
 - **2026-07-21** (spec_version 66) — Kept existing `apply_patch` eligibility and selected plaintext custom only for the native OpenAI Responses adapter; all other eligible transports retain the JSON-function variant.
 - **2026-07-21** (spec_version 65) — Removed percentage-based plaintext-custom `apply_patch` selection; exact reviewed route and model compatibility now select one dialect without session or runtime rollout configuration.
 - **2026-07-21** (spec_version 64) — Enabled Tool Search by default for newly created Agents while preserving existing persisted values and explicit per-Agent opt-outs.

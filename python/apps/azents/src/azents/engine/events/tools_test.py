@@ -2,8 +2,10 @@
 
 import asyncio
 
+import pytest
 from pydantic import BaseModel
 
+from azents.core.enums import LLMProvider
 from azents.core.tools import Toolkit, ToolkitState, ToolkitStatus, TurnContext
 from azents.engine.events.generated_files import GeneratedFileOutput
 from azents.engine.events.litellm_responses import LiteLLMResponsesLowerer
@@ -12,10 +14,11 @@ from azents.engine.events.output_parts import (
     iter_output_parts,
 )
 from azents.engine.events.tools import (
+    ToolCatalog,
     ToolCatalogClientToolExecutor,
     build_tool_catalog,
-    extend_tool_catalog,
-    project_tool_catalog_for_client_profiles,
+    extend_prepared_tool_catalog_with_json_functions,
+    project_tool_catalog_for_client_compatibility,
     summarize_tool_arguments,
 )
 from azents.engine.events.types import (
@@ -25,7 +28,11 @@ from azents.engine.events.types import (
     OutputTextPart,
     build_native_compat_key,
 )
-from azents.engine.run.client_tool_compatibility import ClientToolProfile
+from azents.engine.run.client_tool_compatibility import (
+    ClientToolModelProfile,
+    ClientToolRoute,
+    resolve_client_tool_adapter_profile,
+)
 from azents.engine.run.contracts import ToolkitBinding
 from azents.engine.run.types import (
     FunctionTool,
@@ -33,6 +40,7 @@ from azents.engine.run.types import (
     FunctionToolError,
     FunctionToolResult,
     FunctionToolSpec,
+    FunctionToolWireVariant,
 )
 from azents.engine.tooling.tool_search import ToolExposure
 
@@ -163,6 +171,11 @@ async def test_build_tool_catalog_prefixes_and_lowers_native_schema() -> None:
         ),
     )
 
+    assert catalog.wire_dialects == {}
+    with pytest.raises(ValueError, match="has not been projected"):
+        _ = catalog.native_tools
+    catalog = _prepare_json_catalog(catalog)
+
     assert list(catalog.tools) == ["demo__echo"]
     assert catalog.static_prompt_fragment_inputs[0].label == "demo"
     assert catalog.static_prompt_fragment_inputs[0].content == "tool prompt"
@@ -278,6 +291,7 @@ async def test_extend_tool_catalog_marks_runtime_builtin_direct() -> None:
             publish_event=_noop_publish,
         ),
     )
+    catalog = _prepare_json_catalog(catalog)
     image_generation = FunctionTool(
         spec=FunctionToolSpec(
             name="image_generation",
@@ -287,7 +301,10 @@ async def test_extend_tool_catalog_marks_runtime_builtin_direct() -> None:
         handler=_echo,
     )
 
-    extended = extend_tool_catalog(catalog, [image_generation])
+    extended = extend_prepared_tool_catalog_with_json_functions(
+        catalog,
+        [image_generation],
+    )
 
     assert extended.entries["image_generation"].exposure == ToolExposure.DIRECT
     assert extended.direct_tool_names == ["image_generation"]
@@ -351,6 +368,7 @@ async def test_native_tools_are_sorted_by_function_name() -> None:
             publish_event=_noop_publish,
         ),
     )
+    catalog = _prepare_json_catalog(catalog)
 
     assert [tool["name"] for tool in catalog.native_tools] == [
         "alpha",
@@ -373,6 +391,8 @@ async def test_client_tool_executor_returns_event_result() -> None:
             publish_event=_noop_publish,
         ),
     )
+
+    catalog = _prepare_json_catalog(catalog)
 
     result = await ToolCatalogClientToolExecutor(catalog).execute(
         ClientToolCallPayload(
@@ -429,6 +449,8 @@ async def test_client_tool_executor_preserves_failed_result_metadata() -> None:
         ),
     )
 
+    catalog = _prepare_json_catalog(catalog)
+
     result = await ToolCatalogClientToolExecutor(catalog).execute(
         ClientToolCallPayload(
             call_id="call-1",
@@ -480,6 +502,8 @@ async def test_client_tool_executor_applies_global_text_output_cap() -> None:
             publish_event=_noop_publish,
         ),
     )
+
+    catalog = _prepare_json_catalog(catalog)
 
     result = await ToolCatalogClientToolExecutor(catalog).execute(
         ClientToolCallPayload(
@@ -541,6 +565,8 @@ async def test_client_tool_executor_caps_structured_text_output_parts() -> None:
         ),
     )
 
+    catalog = _prepare_json_catalog(catalog)
+
     result = await ToolCatalogClientToolExecutor(catalog).execute(
         ClientToolCallPayload(
             call_id="call-1",
@@ -601,6 +627,8 @@ async def test_client_tool_executor_carries_transient_generated_files() -> None:
         ),
     )
 
+    catalog = _prepare_json_catalog(catalog)
+
     result = await ToolCatalogClientToolExecutor(catalog).execute(
         ClientToolCallPayload(
             call_id="call-1",
@@ -659,6 +687,8 @@ async def test_client_tool_executor_preserves_function_tool_result_metadata() ->
         ),
     )
 
+    catalog = _prepare_json_catalog(catalog)
+
     result = await ToolCatalogClientToolExecutor(catalog).execute(
         ClientToolCallPayload(
             call_id="call-1",
@@ -715,6 +745,7 @@ async def test_client_tool_executor_dispatches_cancel_handler() -> None:
             publish_event=_noop_publish,
         ),
     )
+    catalog = _prepare_json_catalog(catalog)
 
     ToolCatalogClientToolExecutor(catalog).request_cancel(
         ClientToolCallPayload(
@@ -754,6 +785,8 @@ async def test_client_tool_executor_migrates_function_tool_result_parts() -> Non
             publish_event=_noop_publish,
         ),
     )
+
+    catalog = _prepare_json_catalog(catalog)
 
     result = await ToolCatalogClientToolExecutor(catalog).execute(
         ClientToolCallPayload(
@@ -838,6 +871,8 @@ async def test_client_tool_executor_rejects_dialect_mismatch_before_handler() ->
         ),
     )
 
+    catalog = _prepare_json_catalog(catalog)
+
     result = await ToolCatalogClientToolExecutor(catalog).execute(
         ClientToolCallPayload(
             call_id="call-1",
@@ -866,13 +901,24 @@ async def test_client_tool_executor_rejects_json_for_custom_declaration() -> Non
                 toolkit=_InlineToolkit(
                     FunctionTool(
                         spec=FunctionToolSpec(
-                            name="apply_patch",
-                            description="Apply one patch.",
+                            name="batch_update",
+                            description="Apply one batch update.",
                             input_schema={"type": "object"},
                         ),
                         handler=handler,
-                    ).with_required_client_tool_profile(
-                        ClientToolProfile.V4A_APPLY_PATCH_FUNCTION
+                        required_client_tool_model_profile=(
+                            ClientToolModelProfile.V4A_PATCH
+                        ),
+                        wire_variants=(
+                            FunctionToolWireVariant(
+                                wire_dialect="json_function",
+                                model_guidance=None,
+                            ),
+                            FunctionToolWireVariant(
+                                wire_dialect="plaintext_custom",
+                                model_guidance=None,
+                            ),
+                        ),
                     )
                 ),
                 slug="",
@@ -887,15 +933,24 @@ async def test_client_tool_executor_rejects_json_for_custom_declaration() -> Non
             publish_event=_noop_publish,
         ),
     )
-    catalog = project_tool_catalog_for_client_profiles(
+    adapter_profile = resolve_client_tool_adapter_profile(
+        route=ClientToolRoute(
+            provider=LLMProvider.OPENAI,
+            adapter="openai",
+            native_format="responses",
+        )
+    )
+    assert adapter_profile is not None
+    catalog = project_tool_catalog_for_client_compatibility(
         candidate,
-        frozenset({ClientToolProfile.V4A_APPLY_PATCH_PLAINTEXT_CUSTOM}),
+        frozenset({ClientToolModelProfile.V4A_PATCH}),
+        adapter_profile,
     )
 
     result = await ToolCatalogClientToolExecutor(catalog).execute(
         ClientToolCallPayload(
             call_id="call-1",
-            name="apply_patch",
+            name="batch_update",
             arguments="{}",
             native_artifact=_artifact(),
             wire_dialect="json_function",
@@ -921,6 +976,24 @@ class _DualDialectHandler:
     async def execute_plaintext_custom(self, arguments: str) -> str:
         self.calls.append(arguments)
         return arguments
+
+
+def _prepare_json_catalog(candidate: ToolCatalog) -> ToolCatalog:
+    """Project a candidate catalog through generic LiteLLM Responses."""
+    adapter_profile = resolve_client_tool_adapter_profile(
+        route=ClientToolRoute(
+            provider=LLMProvider.OPENAI,
+            adapter="litellm",
+            native_format="responses",
+        )
+    )
+    if adapter_profile is None:
+        raise AssertionError("expected adapter profile")
+    return project_tool_catalog_for_client_compatibility(
+        candidate,
+        frozenset(),
+        adapter_profile,
+    )
 
 
 def test_summarize_tool_arguments_is_stable() -> None:

@@ -7,7 +7,7 @@ from datetime import datetime
 
 import pytest
 
-from azents.engine.run.client_tool_compatibility import ClientToolProfile
+from azents.engine.run.client_tool_compatibility import ClientToolModelProfile
 from azents.engine.run.types import (
     FunctionTool,
     FunctionToolError,
@@ -120,9 +120,11 @@ async def test_apply_patch_schema_profile_and_success_result(
 
     assert tool.spec.name == "apply_patch"
     assert tool.spec.input_schema["additionalProperties"] is False
-    assert (
-        tool.required_client_tool_profile is ClientToolProfile.V4A_APPLY_PATCH_FUNCTION
-    )
+    assert tool.required_client_tool_model_profile is ClientToolModelProfile.V4A_PATCH
+    assert [variant.wire_dialect for variant in tool.wire_variants] == [
+        "json_function",
+        "plaintext_custom",
+    ]
     assert isinstance(result, FunctionToolResult)
     assert result.output == (
         "Applied patch under /workspace/project: 1 file changed (+1 -0):\nA new.txt"

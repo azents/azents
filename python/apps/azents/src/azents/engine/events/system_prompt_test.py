@@ -17,6 +17,7 @@ def test_build_system_prompt_wraps_sections_and_matches_final_prompt() -> None:
                 label="github",
                 content="github rules",
                 metadata={"slug": "github", "prompt_layer": "static"},
+                required_tool_name=None,
             )
         ],
         dynamic_toolkit_prompts=[
@@ -25,6 +26,7 @@ def test_build_system_prompt_wraps_sections_and_matches_final_prompt() -> None:
                 label="todo",
                 content="todo state",
                 metadata={"slug": "todo", "prompt_layer": "dynamic"},
+                required_tool_name=None,
             )
         ],
         injected_prompts=[

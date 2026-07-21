@@ -15,12 +15,13 @@ from azents_runtime_control.apply_patch import (
 )
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from azents.engine.run.client_tool_compatibility import ClientToolProfile
+from azents.engine.run.client_tool_compatibility import ClientToolModelProfile
 from azents.engine.run.types import (
     FunctionTool,
     FunctionToolError,
     FunctionToolResult,
     FunctionToolSpec,
+    FunctionToolWireVariant,
 )
 from azents.engine.tools.runtime_io import (
     RuntimeFileApplyPatchFailedError,
@@ -150,7 +151,18 @@ def make_apply_patch_tool(
             owner_session_id=owner_session_id,
             agent_id=agent_id,
         ),
-    ).with_required_client_tool_profile(ClientToolProfile.V4A_APPLY_PATCH_FUNCTION)
+        required_client_tool_model_profile=ClientToolModelProfile.V4A_PATCH,
+        wire_variants=(
+            FunctionToolWireVariant(
+                wire_dialect="json_function",
+                model_guidance=GPT_V4A_APPLY_PATCH_PROMPT,
+            ),
+            FunctionToolWireVariant(
+                wire_dialect="plaintext_custom",
+                model_guidance=GPT_V4A_PLAINTEXT_CUSTOM_APPLY_PATCH_PROMPT,
+            ),
+        ),
+    )
 
 
 @dataclasses.dataclass(frozen=True)
