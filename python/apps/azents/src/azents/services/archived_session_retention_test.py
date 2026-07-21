@@ -29,6 +29,9 @@ from azents.repos.archived_session_retention import ArchivedSessionRetentionRepo
 from azents.repos.archived_session_retention.data import (
     ArchivedSessionPurgeParticipantSnapshot,
 )
+from azents.repos.session_lifecycle_finalizer import (
+    SessionLifecycleFinalizerRepository,
+)
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
@@ -457,7 +460,11 @@ async def test_purge_retry_completion_and_tombstone_survive_root_delete(
             now=retry_at,
         )
         assert marked is True
-        await AgentSessionRepository().delete_by_id(session, root_session_id)
+        await SessionLifecycleFinalizerRepository().finalize_purged_root_tree(
+            session,
+            root_session_id=root_session_id,
+            session_ids=[root_session_id],
+        )
         completed = await repository.complete_purge_job(
             session,
             job_id=retried.id,

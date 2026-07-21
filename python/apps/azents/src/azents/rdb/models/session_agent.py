@@ -56,7 +56,7 @@ class RDBSessionAgent(RDBModel):
 
     context_id: Mapped[str] = mapped_column(
         sa.String(32),
-        sa.ForeignKey("session_agent_contexts.id", ondelete="CASCADE"),
+        sa.ForeignKey("session_agent_contexts.id", ondelete="RESTRICT"),
         nullable=False,
     )
     root_session_agent_id: Mapped[str] = mapped_column(
@@ -66,7 +66,7 @@ class RDBSessionAgent(RDBModel):
     )
     agent_session_id: Mapped[str] = mapped_column(
         sa.String(32),
-        sa.ForeignKey("agent_sessions.id", ondelete="CASCADE"),
+        sa.ForeignKey("agent_sessions.id", ondelete="RESTRICT"),
         nullable=False,
     )
     kind: Mapped[SessionAgentKind] = mapped_column(
@@ -78,7 +78,7 @@ class RDBSessionAgent(RDBModel):
     agent_type: Mapped[str] = mapped_column(sa.String(120), nullable=False)
     parent_session_agent_id: Mapped[str | None] = mapped_column(
         sa.String(32),
-        sa.ForeignKey("session_agents.id", ondelete="CASCADE"),
+        sa.ForeignKey("session_agents.id", ondelete="RESTRICT"),
         nullable=True,
         default=None,
     )

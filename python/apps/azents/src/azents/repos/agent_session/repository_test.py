@@ -23,6 +23,9 @@ from azents.core.inference_profile import SessionInferenceState
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
+from azents.repos.session_lifecycle_finalizer import (
+    SessionLifecycleFinalizerRepository,
+)
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
 from azents.testing.model_selection import (
@@ -702,7 +705,15 @@ class TestAgentSessionRepository:
             last_task_message=None,
         )
 
-        await repo.delete_by_id(rdb_session, root_session.id)
+        await SessionLifecycleFinalizerRepository().finalize_purged_root_tree(
+            rdb_session,
+            root_session_id=root_session.id,
+            session_ids=[
+                root_session.id,
+                child.agent_session_id,
+                nested.agent_session_id,
+            ],
+        )
 
         assert await repo.get_by_id(rdb_session, root_session.id) is None
         assert await repo.get_by_id(rdb_session, child.agent_session_id) is None

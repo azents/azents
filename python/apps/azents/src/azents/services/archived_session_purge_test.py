@@ -40,6 +40,9 @@ from azents.repos.exchange_file import ExchangeFileRepository
 from azents.repos.exchange_file.data import ExchangeFile
 from azents.repos.model_file import ModelFileRepository
 from azents.repos.model_file.data import ModelFile
+from azents.repos.session_lifecycle_finalizer import (
+    SessionLifecycleFinalizerRepository,
+)
 from azents.services.archived_session_purge import ArchivedSessionPurgeService
 from azents.services.session_git_worktree import SessionGitWorktreeService
 from azents.services.session_lifecycle.registry import (
@@ -345,6 +348,25 @@ class _AgentSessionRepository:
         del session, agent_session_id
         self.events.append("delete_session")
         self.deleted = True
+
+
+class _LifecycleFinalizerRepository:
+    """Finalizer repository double that records the root-tree boundary."""
+
+    def __init__(self, agent_session_repository: _AgentSessionRepository) -> None:
+        """Initialize with the root-tree repository double."""
+        self.agent_session_repository = agent_session_repository
+
+    async def finalize_purged_root_tree(
+        self,
+        session: AsyncSession,
+        *,
+        root_session_id: str,
+        session_ids: list[str],
+    ) -> None:
+        """Record finalization through the dedicated lifecycle boundary."""
+        del session_ids
+        await self.agent_session_repository.delete_by_id(session, root_session_id)
 
 
 class _AgentRunRepository:
@@ -778,6 +800,10 @@ def _build_service(
         exchange_file_repository=cast(
             ExchangeFileRepository,
             exchange_file_repository,
+        ),
+        lifecycle_finalizer_repository=cast(
+            SessionLifecycleFinalizerRepository,
+            _LifecycleFinalizerRepository(agent_session_repository),
         ),
         session_git_worktree_service=cast(
             SessionGitWorktreeService,
