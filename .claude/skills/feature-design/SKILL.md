@@ -103,7 +103,12 @@ Once the primary scenario is stable, create the Requirements document before cre
 docs/azents/requirements/{word}-{YYMMDD}-{slug}.md
 ```
 
-Use the KST creation date. Treat `{word}-{YYMMDD}` as the canonical short ID and reference individual requirements as `{word}-{YYMMDD}/REQ-N`.
+Use the KST Requirements creation date. Treat `{word}-{YYMMDD}` as the canonical snapshot ID and reference individual requirements as `{word}-{YYMMDD}/REQ-N`. Reserve the exact Requirements basename for the snapshot's later ADR and Design, even when those documents are created on a later date:
+
+```text
+docs/azents/adr/{same-basename}.md
+docs/azents/design/{same-basename}.md
+```
 
 - Choose a short lowercase feature word such as `slack`, `memory`, or `billing`.
 - Use a slug that names the specific user-visible capability, not an implementation method or broad topic.
@@ -137,7 +142,7 @@ Requirements → ADR → Design
 
 Return to the user whenever a discovery would add a user type, user-visible behavior, required scope, or contract; relax a confirmed constraint; or change the success signal. Do this in autonomous mode as well.
 
-When implementation is complete and verified, set the Requirements document's `implemented` date. From that point, treat its filename and content as an immutable historical snapshot. Never rewrite it to match later behavior. Create a new Requirements document for later work on the same topic. Keep current behavior only in the living specs.
+When implementation is complete and verified, set the Requirements and Design documents' `implemented` date. From that point, treat the Requirements, accepted ADR, and Design as one immutable historical snapshot. Never rewrite them to match later behavior. Create a new snapshot for later work on the same topic. Keep current behavior only in the living specs.
 
 ## Phase 3: System-grounded problem framing
 
@@ -157,6 +162,8 @@ Do not treat assumptions as current behavior. Do not let existing code structure
 ## Phase 4: ADR baseline and design decisions
 
 Create the ADR before accepting the first design decision. The initial ADR may contain unresolved questions while discussion is active.
+
+For Azents, create the ADR at `docs/azents/adr/{requirements-basename}.md`. Use `<snapshot>/ADR` for the document and `<snapshot>/ADR-DN` for accepted decisions. Keep all hard-to-reverse decisions for the snapshot in this one ADR. Do not allocate a new global ADR number. Existing numbered ADRs remain historical inputs and must not be renamed.
 
 For every decision that determines architecture or product contract:
 
@@ -182,15 +189,15 @@ Use this format:
 Please choose A/B or adjust the direction.
 ```
 
-Discuss one decision at a time. In collaborative mode, wait for the user. In autonomous mode, send each decision separately to the dedicated interviewee subagent. Reference the Requirements short ID and affected requirement IDs from the ADR; do not duplicate requirement text.
+Discuss one decision at a time. In collaborative mode, wait for the user. In autonomous mode, send each decision separately to the dedicated interviewee subagent. After acceptance, record the decision as the next `<snapshot>/ADR-DN`. Reference the affected `<snapshot>/REQ-N` items from the ADR; do not duplicate requirement text.
 
 Once the ADR defines a coherent direction, proceed to the complete design draft.
 
 ## Phase 5: Complete design draft
 
-Write the complete draft under the project-approved design location. For Azents, use `docs/azents/design/` unless a more specific rule applies.
+Write the complete draft under the project-approved design location. For Azents, use `docs/azents/design/{requirements-basename}.md` for the primary snapshot Design. Supporting plans, audits, and validation reports keep their separate descriptive naming rules.
 
-Reference the Requirements document rather than copying its requirements. Include a traceability matrix from `{requirements-short-id}/REQ-N` through ADR decisions to the proposed design mechanisms.
+Reference the Requirements document rather than copying its requirements. Include a traceability matrix from `<snapshot>/REQ-N` through `<snapshot>/ADR-DN` to the proposed design mechanisms.
 
 Include, as applicable:
 
@@ -302,6 +309,7 @@ For final output, use:
 - Do not turn benchmark patterns into requirements without user acceptance.
 - Do not create an ADR before the Requirements document is confirmed.
 - Do not duplicate the Requirements source of truth in the ADR or design.
+- Do not create a new numbered ADR or use a different primary Design basename for an Azents development snapshot.
 - Do not silently weaken a requirement to avoid a feasibility problem.
 - Do not modify implemented Requirements, adopted ADRs, or implemented designs.
 - Keep current behavior in `docs/azents/spec/`.

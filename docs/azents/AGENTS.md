@@ -26,7 +26,7 @@ Automation tool: `/spec-review`.
 Requirements, ADR, and design documents use their location and content as their state model; they do not need a separate status field.
 
 - **Requirements**: records confirmed product intent and acceptance criteria. It is mutable until implementation is complete and verified. After `implemented` is set, keep the filename and content immutable. Later product work creates a new Requirements snapshot.
-- **ADR**: records hard-to-reverse decisions. Keep ADRs append-only. If a decision changes, do not edit the old ADR; add a new ADR instead.
+- **ADR**: records hard-to-reverse decisions. Keep ADRs append-only. If an accepted decision changes, do not edit the old ADR; create a new development snapshot instead.
 - **Design**: records development-time implementation design. It is not guaranteed to reflect the current system. Subsequent changes should be recorded in spec documents, new design documents, Requirements snapshots, or ADRs. The only exception is an unimplemented design that is still moving through stacked PR phases.
 - **Spec**: records current system behavior. Delete stale specs or merge them into the current spec instead of adding freshness/status flags.
 
@@ -35,41 +35,61 @@ Requirements, ADR, and design documents use their location and content as their 
 | Directory | Use When | Examples | Required Frontmatter |
 | --- | --- | --- | --- |
 | `requirements/` | Confirmed user needs, scope, constraints, and acceptance criteria for one development snapshot. | `slack-260721-channel-agent-conversation.md` | `title`, `created`, `tags`; add `implemented` after verified implementation |
-| `adr/` | Decision record for one decision, including context, options, chosen path, and consequences. Append-only. | `NNNN-{slug}.md` | `title`, `created`, `tags` |
+| `adr/` | Hard-to-reverse decisions for one development snapshot. Keep all snapshot decisions in one append-only ADR. | `slack-260721-channel-agent-conversation.md`; legacy `NNNN-{slug}.md` remains valid | `title`, `created`, `tags` |
 | `spec/domain/` | Current domain model specs such as Agent, Session, Team, Memory. | `agent.md`, `workspace.md` | plus `spec_type: domain`, `domain`, `code_paths`, `last_verified_at`, `spec_version` |
 | `spec/flow/` | Current flow specs such as the ReAct loop or message routing. | `agent-execution-loop.md`, `message-routing.md` | plus `spec_type: flow`, `code_paths`, `last_verified_at`, `spec_version` |
-| `design/` | Development-time design or implementation decision records. A design may temporarily be unimplemented only while stacked PR work is in progress. | `architecture.md`, `agent-sandbox.md`, `agent-session-sandbox-scenarios/oncall-agent.md` | `title`, `created`, `updated`, `implemented`, `tags` |
+| `design/` | Primary development-snapshot Designs and supporting design-time records. | `slack-260721-channel-agent-conversation.md`, `feature-audit-report-YYYY-MM-DD.md` | `title`, `created`, `tags`; use `updated` while drafting and add `implemented` after verified implementation |
 | `notes/` | Pre-design product/architecture blueprints, unresolved model exploration, or discussion summaries. | `agent-thread-session-blueprint.md` | `title`, `created`, `tags` |
 | `issues/` | Bug or operational issue tracking. | `2026-05-01-agent-stuck.md` | `title`, `created`, `tags` |
 
 `INDEX.md` is generated from frontmatter by `scripts/gen_docs_index.py --docs-root docs/azents --project-name azents` through the pre-commit hook.
 
-### Requirements Naming and References
+### Shared Development Snapshot Naming and References
 
-Name Requirements snapshots:
+Name newly created Requirements, ADR, and primary Design documents with one shared basename:
 
 ```text
 requirements/{word}-{YYMMDD}-{slug}.md
+adr/{word}-{YYMMDD}-{slug}.md
+design/{word}-{YYMMDD}-{slug}.md
 ```
 
-- Use the KST creation date.
+- Use the KST date on which the Requirements snapshot is created.
+- Keep that date in the shared ADR and Design basename even when those documents are created later; their own `created` frontmatter records their actual creation date.
 - Use a short lowercase feature word such as `slack`, `memory`, or `billing`.
 - Use a slug for the specific user-visible capability, not an implementation technique or broad topic.
 - Treat `{word}-{YYMMDD}` as the canonical short ID.
-- Number requirements locally as `REQ-1`, `REQ-2`, and so on.
-- Reference individual requirements as `{word}-{YYMMDD}/REQ-N`.
+- Use exactly one Requirements, one ADR, and one primary Design per snapshot.
+- Keep multiple hard-to-reverse decisions in the snapshot ADR as `D1`, `D2`, and so on.
 - If the same word and date collide, combine the same effort or choose a more precise feature word. Do not append an arbitrary ordinal.
+
+Use snapshot-first typed references:
+
+| Reference | Target |
+| --- | --- |
+| `<snapshot>` | Complete development snapshot |
+| `<snapshot>/REQ` | Requirements document |
+| `<snapshot>/REQ-N` | Individual requirement |
+| `<snapshot>/ADR` | ADR document |
+| `<snapshot>/ADR-DN` | Individual ADR decision |
+| `<snapshot>/DESIGN` | Primary Design document |
+
+Use a Markdown link on the first meaningful cross-document mention. Later mentions may use the short reference alone.
 
 Requirements contain product intent only: problem, actors, one primary scenario, supporting scenarios, goals, non-goals, requirements with acceptance criteria, fixed constraints, open assumptions, and requester confirmation. Keep APIs, data models, architecture, implementation choices, phases, and ADR decisions out of Requirements.
 
-### Requirements Lifecycle
+The shared format applies only to the core Requirements, ADR, and primary Design for a new development snapshot. Specs, Notes, Issues, Plans, audit reports, validation reports, and other supporting records retain their existing naming rules. Existing numbered ADRs, existing Design filenames, and legacy `ADR-NNNN-DN` references remain valid and must not be renamed as part of new snapshot creation.
+
+### Development Snapshot Lifecycle
 
 - Create the Requirements document after one primary scenario is established and before creating an ADR.
 - Obtain explicit requester confirmation before accepting design decisions, including in autonomous mode.
-- Before implementation, apply product-scope changes in this order: Requirements → ADR → design.
-- Add `implemented: YYYY-MM-DD` only after implementation is complete and verified.
-- After `implemented` is set, never modify the Requirements filename or content.
-- For later development on the same topic, create a new dated Requirements snapshot. Do not mark or rewrite the older snapshot.
+- Create the same-basename ADR after Requirements confirmation, then create the same-basename Design after the ADR defines a coherent direction.
+- Before implementation, apply product-scope and design changes in this order: Requirements → ADR → Design.
+- The valid progressive states are Requirements only, Requirements plus ADR, or the complete Requirements/ADR/Design trio.
+- Add the same `implemented: YYYY-MM-DD` date to Requirements and Design only after implementation is complete and verified. An implemented new-format snapshot must contain the complete trio.
+- After implementation, treat the Requirements, accepted ADR, and Design as one immutable historical snapshot.
+- For later development on the same topic, create a new dated snapshot. Do not mark or rewrite the older snapshot.
 - Keep current behavior only in living specs.
 
 ### Removed Legacy Directories
@@ -108,10 +128,19 @@ tags: [backend, engine]
 - `implemented` is the date when implementation was completed and verified.
 - After `implemented` is set, do not modify the document. Record later product intent in a new Requirements snapshot and current behavior in specs.
 
+### Additional Rules for `adr/`
+
+- New development-snapshot ADRs must use the exact basename of their confirmed Requirements document.
+- Keep all hard-to-reverse decisions for the snapshot in one ADR and identify them as `{snapshot}/ADR-D1`, `{snapshot}/ADR-D2`, and so on.
+- Reference the affected `{snapshot}/REQ-N` items instead of duplicating Requirements text.
+- Keep the ADR append-only after acceptance. If later development changes a decision, create a new snapshot rather than rewriting the accepted ADR.
+- Existing numbered ADR filenames and `ADR-NNNN-DN` references remain valid historical records.
+
 ### Additional Rules for `design/`
 
 - `design/` documents are development-time design decision records. Do not keep overwriting them as living documents after implementation.
-- New feature designs reference the confirmed Requirements snapshot and trace `{short-id}/REQ-N` through ADR decisions to design mechanisms. Do not duplicate the Requirements source of truth in the design.
+- A new snapshot's primary Design must use the exact basename of its Requirements and ADR.
+- New feature designs reference the confirmed Requirements snapshot and trace `{snapshot}/REQ-N` through `{snapshot}/ADR-DN` to design mechanisms. Do not duplicate the Requirements source of truth in the design.
 - Current system behavior always belongs in `spec/`. Changes to design rationale should be recorded in a new Requirements, design, or ADR document when needed.
 - `implemented` is the date when the design was implemented.
 - After `implemented` is set, do not modify the design document. Record later changes in `spec/` or a new Requirements/design/ADR document.
@@ -124,7 +153,8 @@ tags: [backend, engine]
 - Root `design/*.md` files hold feature designs, implementation plans, audit reports, QA reports, and similar feature-scoped documents.
 - Add subdirectories only when a document family is large enough. Current examples include `design/agent-session-sandbox-scenarios/`.
 - Keep filenames descriptive:
-  - Feature design: `{feature}.md`
+  - New primary snapshot Design: `{word}-{YYMMDD}-{slug}.md`, matching Requirements and ADR
+  - Existing legacy Design: keep its current descriptive filename unchanged
   - Implementation plan: `{feature}-plan.md`, `{feature}-implementation-plan.md`
   - Audit/verification report: `{feature}-audit-report-YYYY-MM-DD.md`, `{feature}-spec-sync-YYYY-MM-DD.md`, `{feature}-testenv-report-YYYY-MM-DD.md`
 - When searching for a document, prefer filename prefix/slug and `tags` frontmatter over directory indexes.
@@ -151,15 +181,19 @@ spec_version: 1
 
 ### CI Validation
 
-The pre-commit hook runs `scripts/gen_docs_index.py --docs-root docs/azents --project-name azents`, validates frontmatter for `docs/azents/**/*.md`, and regenerates indexes. It validates Requirements filename/date rules and spec-only fields such as `spec_type`, `code_paths`, `last_verified_at`, and `spec_version`.
+The pre-commit hooks run snapshot validator tests and `scripts/gen_docs_index.py --docs-root docs/azents --project-name azents`, validate frontmatter for `docs/azents/**/*.md`, and regenerate indexes.
+
+For new-format snapshot documents, validation enforces the Requirements filename/date relationship, valid ADR/Design `created` dates, per-type short-ID uniqueness, same-basename siblings, and the progressive Requirements → ADR → Design lifecycle. Requirements-only and Requirements-plus-ADR states are valid while design work is in progress. An implemented snapshot must contain the full trio, and Requirements and Design must use the same implementation date. Legacy ADR and Design filenames continue through the existing common-frontmatter validation.
+
+Spec validation continues to enforce `spec_type`, `code_paths`, `last_verified_at`, and `spec_version`.
 
 ## New Document Flow
 
 Decision tree:
 
 1. Confirmed feature requirements? → `requirements/{word}-{YYMMDD}-{slug}.md`.
-2. Decision record? → `adr/NNNN-{slug}.md` with the next zero-padded number.
-3. Feature design? → `design/{name}.md`.
+2. Hard-to-reverse decisions for that snapshot? → `adr/{same-basename}.md`.
+3. Primary feature design? → `design/{same-basename}.md`.
 4. Current behavior spec? → `spec/domain/{domain}.md` or `spec/flow/{flow}.md`.
 5. Bug or operational issue? → `issues/{name}.md`.
 6. Pre-design blueprint or discussion summary? → `notes/{name}.md`.
@@ -169,13 +203,14 @@ Writing order:
 
 1. Choose the directory using the decision tree above.
 2. Write required frontmatter, including requirements- or spec-specific fields when applicable.
-3. For a new feature, confirm Requirements before recording ADR decisions or writing the design.
-4. Record decisions and rationale in the Decision section of an ADR or design document.
+3. For a new feature, choose the shared basename in Requirements and obtain requester confirmation.
+4. Create the same-basename ADR before accepting decisions, then create the same-basename Design.
 5. Validate locally with `scripts/gen_docs_index.py --docs-root docs/azents --project-name azents --check`.
 
 ## Deletion and Move Rules
 
 - **`requirements/`**: keep implemented snapshots in place and immutable. Later changes create a new snapshot; current behavior belongs in `spec/`.
+- **`adr/`**: keep accepted ADRs in place and append-only. Later decisions create a new snapshot rather than rewriting accepted history.
 - **`design/`**: keep documents in place after implementation. Do not use status fields to express freshness. After `implemented` is set, do not edit the document; record later changes in `spec/` or new Requirements/design/ADR documents.
 - **`spec/`**: keep only current behavior specs. Delete stale specs or merge them into the current spec rather than changing status.
 
@@ -226,8 +261,10 @@ ADR document:
 
 ```yaml
 ---
-title: "ADR-0001: Adopt the Living Spec Model"
-created: 2026-05-01
-tags: [architecture, process]
+title: "Slack Channel Agent Conversation"
+created: 2026-07-21
+tags: [slack, integration, architecture]
 ---
 ```
+
+The new ADR filename is `slack-260721-channel-agent-conversation.md`. Existing numbered ADRs keep their existing title and filename format.

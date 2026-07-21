@@ -12,7 +12,8 @@ tags: [<feature>, <product-area>]
 
 # <User-Visible Capability> Requirements
 
-- Short ID: `<word>-<YYMMDD>`
+- Snapshot: `<word>-<YYMMDD>`
+- Document reference: `<word>-<YYMMDD>/REQ`
 
 ## Problem
 
@@ -71,4 +72,16 @@ Confirmed by the requester on YYYY-MM-DD before ADR and design decisions began.
 
 Use `{word}-{YYMMDD}/REQ-N` when referencing an individual requirement from an ADR, design, implementation plan, or validation report.
 
-Add `implemented: YYYY-MM-DD` to frontmatter only after implementation is complete and verified. After that, do not modify the filename or content. Create a new Requirements snapshot for later changes and keep current behavior in living specs.
+Reuse the exact Requirements basename for the snapshot's primary ADR and Design:
+
+```text
+docs/azents/requirements/<word>-<YYMMDD>-<slug>.md
+docs/azents/adr/<word>-<YYMMDD>-<slug>.md
+docs/azents/design/<word>-<YYMMDD>-<slug>.md
+```
+
+The filename date remains the KST Requirements creation date. ADR and Design frontmatter use their own actual `created` dates when those documents are created later.
+
+Use `<snapshot>/ADR-DN` for accepted ADR decisions and `<snapshot>/DESIGN` for the primary Design. Supporting plans, audits, validation reports, and Specs do not use this basename rule.
+
+Add `implemented: YYYY-MM-DD` to Requirements and Design frontmatter only after implementation is complete and verified. After that, do not modify the Requirements, accepted ADR, or Design. Create a new snapshot for later changes and keep current behavior in living specs.

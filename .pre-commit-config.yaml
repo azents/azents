@@ -12,6 +12,12 @@ repos:
         entry: python scripts/gen_docs_index.py --docs-root docs/azents --project-name azents
         files: ^docs/azents/.*\.md$
         pass_filenames: false
+      - id: test-azents-docs-index
+        name: Test azents docs snapshot validation
+        language: python
+        entry: python -m unittest scripts.tests.test_gen_docs_index
+        files: ^(scripts/gen_docs_index\.py|scripts/tests/test_gen_docs_index\.py|docs/azents/AGENTS\.md)$
+        pass_filenames: false
       - id: generate-conventions-index
         name: Regenerate .claude/rules/*-conventions.md tables from convention bodies
         language: python
