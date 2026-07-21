@@ -137,6 +137,10 @@ def validate_snapshot_document(
 
     document_role = fields.get("document_role", "")
     document_type = fields.get("document_type", "")
+    if not document_role:
+        errors.append("Missing `document_role` frontmatter field")
+    if not document_type:
+        errors.append("Missing `document_type` frontmatter field")
     if document_role and document_role not in {"primary", "supporting"}:
         errors.append("`document_role` must be `primary` or `supporting`")
     if document_type and document_role == "":
@@ -156,6 +160,8 @@ def validate_snapshot_document(
         )
 
     snapshot_id = fields.get("snapshot_id", "")
+    if not snapshot_id:
+        errors.append("Missing `snapshot_id` frontmatter field")
     expected_snapshot_id = (
         f"{filename_match.group('word')}-{filename_match.group('date')}"
     )
