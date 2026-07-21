@@ -67,6 +67,12 @@ class RDBToolkitConfig(RDBModel):
         sa.Text, nullable=True, default=None
     )
     enabled: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=True)
+    revision: Mapped[int] = mapped_column(
+        sa.BigInteger,
+        nullable=False,
+        default=1,
+        server_default=sa.text("1"),
+    )
 
     created_at: Mapped[datetime.datetime] = mapped_column(
         TimeZoneDateTime,

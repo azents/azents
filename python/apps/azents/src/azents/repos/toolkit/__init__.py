@@ -134,6 +134,7 @@ class ToolkitRepository:
             if "credentials" in values:
                 raw: str | None = values.pop("credentials")  # type: ignore[assignment]  # Value type is inferred as object when converting TypedDict to dict
                 values["encrypted_credentials"] = self._encrypt(raw)
+            values["revision"] = RDBToolkitConfig.revision + 1
             result = await session.execute(
                 sa.update(RDBToolkitConfig)
                 .where(RDBToolkitConfig.id == toolkit_id)
@@ -177,7 +178,10 @@ class ToolkitRepository:
         stmt = (
             sa.update(RDBToolkitConfig)
             .where(RDBToolkitConfig.id == toolkit_id)
-            .values(encrypted_credentials=encrypted)
+            .values(
+                encrypted_credentials=encrypted,
+                revision=RDBToolkitConfig.revision + 1,
+            )
         )
         await session.execute(stmt)
 
@@ -250,6 +254,7 @@ class ToolkitRepository:
             prompt=rdb.prompt,
             credentials=self._decrypt(rdb.encrypted_credentials),
             enabled=rdb.enabled,
+            revision=rdb.revision,
             created_at=rdb.created_at,
             updated_at=rdb.updated_at,
         )

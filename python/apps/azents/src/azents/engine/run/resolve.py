@@ -5,6 +5,8 @@ and builds RunRequest.
 """
 
 import dataclasses
+import hashlib
+import json
 import logging
 import time
 from collections.abc import Awaitable
@@ -12,7 +14,7 @@ from typing import Any, Literal, assert_never
 
 from azcommon.result import Failure, Result, Success
 from azcommon.uuid import uuid7
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent import (
@@ -1053,6 +1055,7 @@ async def resolve_agent_tools(
     # (provider, resolved, config, slug, prompt, use_prefix, toolkit_type, modes)
     # toolkit_type is populated only for DB-registered toolkits; auto-binding is None
     registered_toolkit_config_ids: dict[int, str] = {}
+    registered_toolkit_revisions: dict[int, str] = {}
     pending: list[
         tuple[
             ToolkitProvider[Any],
@@ -1111,6 +1114,7 @@ async def resolve_agent_tools(
             )
             resolved.display_name = provider.name
             registered_toolkit_config_ids[id(resolved)] = at.toolkit_id
+            registered_toolkit_revisions[id(resolved)] = str(toolkit.revision)
         except ValidationError, ValueError:
             logger.warning(
                 "Skipping Toolkit with invalid persisted configuration",
@@ -1539,9 +1543,31 @@ async def resolve_agent_tools(
             use_prefix=_pfx,
             toolkit_type=_ttype,
             toolkit_config_id=registered_toolkit_config_ids.get(id(_resolved)),
+            source_revision=registered_toolkit_revisions.get(id(_resolved))
+            or _auto_toolkit_source_revision(
+                slug=_slug,
+                config=_cfg,
+                execution_mode=execution_mode,
+            ),
         )
         for _prov, _resolved, _cfg, _slug, _prompt, _pfx, _ttype, _modes in pending
         if _allows_execution_mode(_modes, execution_mode)
     ]
 
     return result
+
+
+def _auto_toolkit_source_revision(
+    *,
+    slug: str,
+    config: BaseModel,
+    execution_mode: ToolkitExecutionMode,
+) -> str:
+    """Return a stable non-secret source revision for an auto-bound Toolkit."""
+    payload = {
+        "config": config.model_dump(mode="json"),
+        "execution_mode": execution_mode.value,
+        "slug": slug,
+    }
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode()).hexdigest()
