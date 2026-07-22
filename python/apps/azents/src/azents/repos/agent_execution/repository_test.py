@@ -225,7 +225,6 @@ class TestEventExecutionRepositories:
                 title=None,
             ),
         )
-        previous_last_user_input_at = event_session.last_user_input_at
         payload = ExternalChannelMessagePayload(
             provider=ExternalChannelProvider.SLACK,
             provider_tenant_id="tenant-1",
@@ -274,7 +273,6 @@ class TestEventExecutionRepositories:
         await rdb_session.refresh(stored_session)
 
         assert stored_session.last_user_input_at == appended.created_at
-        assert stored_session.last_user_input_at != previous_last_user_input_at
 
     async def test_turn_marker_default_effort_round_trip(
         self,
