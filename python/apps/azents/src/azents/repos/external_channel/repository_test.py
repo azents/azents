@@ -61,6 +61,11 @@ def _connection_create(workspace_id: str) -> ExternalChannelConnectionCreate:
         last_verified_at=None,
         last_health_at=None,
         disconnected_at=None,
+        socket_lease_owner=None,
+        socket_lease_until=None,
+        socket_heartbeat_at=None,
+        socket_gap_detected_at=None,
+        socket_gap_reason=None,
     )
 
 
@@ -163,3 +168,106 @@ class TestExternalChannelRepository:
         assert second.created is False
         assert second.event.id == first.event.id
         assert second.event.provider_event_id == "provider-event-1"
+
+    async def test_socket_lease_fences_owner_and_reclaims_after_expiry(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Only one manager owns a socket until its durable lease expires."""
+        workspace_id = await _create_workspace(rdb_session)
+        repo = ExternalChannelRepository()
+        connection = await repo.create_connection(
+            rdb_session,
+            _connection_create(workspace_id).model_copy(
+                update={
+                    "transport": ExternalChannelTransport.SOCKET,
+                    "status": ExternalChannelConnectionStatus.ACTIVE,
+                    "http_callback_selector_hash": None,
+                }
+            ),
+        )
+
+        first = await repo.claim_socket_connection(
+            rdb_session,
+            connection_id=connection.id,
+            lease_owner="manager-1",
+            now=_at(1),
+            lease_until=_at(3),
+        )
+        fenced = await repo.claim_socket_connection(
+            rdb_session,
+            connection_id=connection.id,
+            lease_owner="manager-2",
+            now=_at(2),
+            lease_until=_at(4),
+        )
+        reclaimed = await repo.claim_socket_connection(
+            rdb_session,
+            connection_id=connection.id,
+            lease_owner="manager-2",
+            now=_at(4),
+            lease_until=_at(6),
+        )
+
+        assert first is not None
+        assert first.socket_lease_owner == "manager-1"
+        assert fenced is None
+        assert reclaimed is not None
+        assert reclaimed.socket_lease_owner == "manager-2"
+
+    async def test_socket_gap_is_visible_until_reconnection(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Record transport gaps and clear them only after a leased reconnect."""
+        workspace_id = await _create_workspace(rdb_session)
+        repo = ExternalChannelRepository()
+        connection = await repo.create_connection(
+            rdb_session,
+            _connection_create(workspace_id).model_copy(
+                update={
+                    "transport": ExternalChannelTransport.SOCKET,
+                    "status": ExternalChannelConnectionStatus.ACTIVE,
+                    "http_callback_selector_hash": None,
+                }
+            ),
+        )
+        claimed = await repo.claim_socket_connection(
+            rdb_session,
+            connection_id=connection.id,
+            lease_owner="manager-1",
+            now=_at(1),
+            lease_until=_at(5),
+        )
+        assert claimed is not None
+
+        recorded = await repo.record_socket_connection_gap(
+            rdb_session,
+            connection_id=connection.id,
+            lease_owner="manager-1",
+            now=_at(2),
+            gap_reason="connection_closed",
+        )
+        degraded = await repo.get_connection(
+            rdb_session,
+            connection_id=connection.id,
+        )
+        active = await repo.mark_socket_connection_active(
+            rdb_session,
+            connection_id=connection.id,
+            lease_owner="manager-1",
+            now=_at(3),
+        )
+        recovered = await repo.get_connection(
+            rdb_session,
+            connection_id=connection.id,
+        )
+
+        assert recorded is True
+        assert degraded is not None
+        assert degraded.status is ExternalChannelConnectionStatus.DEGRADED
+        assert degraded.socket_gap_reason == "connection_closed"
+        assert active is True
+        assert recovered is not None
+        assert recovered.status is ExternalChannelConnectionStatus.ACTIVE
+        assert recovered.socket_gap_reason is None

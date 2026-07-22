@@ -14,6 +14,7 @@ from azents.core.enums import (
     ExternalChannelBindingStatus,
     ExternalChannelConnectionStatus,
     ExternalChannelRouteStatus,
+    ExternalChannelTransport,
     ExternalChannelWorkStatus,
 )
 from azents.rdb.models.base import RDBModel
@@ -174,6 +175,237 @@ class ExternalChannelRepository:
         await session.flush()
         await session.refresh(rdb, attribute_names=["updated_at"])
         return ExternalChannelConnection.model_validate(rdb)
+
+    async def list_socket_connection_ids(
+        self,
+        session: AsyncSession,
+    ) -> list[str]:
+        """List Socket Mode connections eligible for manager ownership."""
+        result = await session.scalars(
+            sa.select(RDBExternalChannelConnection.id)
+            .where(
+                RDBExternalChannelConnection.transport
+                == ExternalChannelTransport.SOCKET,
+                RDBExternalChannelConnection.status.in_(
+                    (
+                        ExternalChannelConnectionStatus.ACTIVE,
+                        ExternalChannelConnectionStatus.DEGRADED,
+                    )
+                ),
+            )
+            .order_by(RDBExternalChannelConnection.id)
+        )
+        return list(result)
+
+    async def claim_socket_connection(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+        lease_owner: str,
+        now: datetime.datetime,
+        lease_until: datetime.datetime,
+    ) -> ExternalChannelConnectionConfiguration | None:
+        """Claim one Socket Mode connection with an empty or expired lease."""
+        result = await session.execute(
+            sa.update(RDBExternalChannelConnection)
+            .where(
+                RDBExternalChannelConnection.id == connection_id,
+                RDBExternalChannelConnection.transport
+                == ExternalChannelTransport.SOCKET,
+                RDBExternalChannelConnection.status.in_(
+                    (
+                        ExternalChannelConnectionStatus.ACTIVE,
+                        ExternalChannelConnectionStatus.DEGRADED,
+                    )
+                ),
+                sa.or_(
+                    RDBExternalChannelConnection.socket_lease_owner == lease_owner,
+                    RDBExternalChannelConnection.socket_lease_until.is_(None),
+                    RDBExternalChannelConnection.socket_lease_until < now,
+                ),
+            )
+            .values(
+                socket_lease_owner=lease_owner,
+                socket_lease_until=lease_until,
+                socket_heartbeat_at=now,
+            )
+            .returning(RDBExternalChannelConnection)
+        )
+        rdb = result.scalar_one_or_none()
+        return self._as(ExternalChannelConnectionConfiguration, rdb)
+
+    async def renew_socket_connection_lease(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+        lease_owner: str,
+        now: datetime.datetime,
+        lease_until: datetime.datetime,
+    ) -> bool:
+        """Renew a Socket Mode lease only for its current owner."""
+        result = await session.execute(
+            sa.update(RDBExternalChannelConnection)
+            .where(
+                RDBExternalChannelConnection.id == connection_id,
+                RDBExternalChannelConnection.transport
+                == ExternalChannelTransport.SOCKET,
+                RDBExternalChannelConnection.status.in_(
+                    (
+                        ExternalChannelConnectionStatus.ACTIVE,
+                        ExternalChannelConnectionStatus.DEGRADED,
+                    )
+                ),
+                RDBExternalChannelConnection.socket_lease_owner == lease_owner,
+                RDBExternalChannelConnection.socket_lease_until >= now,
+            )
+            .values(
+                socket_lease_until=lease_until,
+                socket_heartbeat_at=now,
+            )
+            .returning(RDBExternalChannelConnection.id)
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def release_socket_connection_lease(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+        lease_owner: str,
+        now: datetime.datetime,
+        gap_reason: str | None,
+        gap_status: ExternalChannelConnectionStatus | None,
+    ) -> bool:
+        """Release Socket ownership and record a visible delivery gap when present."""
+        values: dict[str, object] = {
+            "socket_lease_owner": None,
+            "socket_lease_until": None,
+            "socket_heartbeat_at": now,
+        }
+        if gap_reason is not None:
+            if gap_status is None:
+                raise ValueError("Socket gap status is required with a gap reason.")
+            values.update(
+                status=gap_status,
+                socket_gap_detected_at=now,
+                socket_gap_reason=gap_reason,
+            )
+        result = await session.execute(
+            sa.update(RDBExternalChannelConnection)
+            .where(
+                RDBExternalChannelConnection.id == connection_id,
+                RDBExternalChannelConnection.transport
+                == ExternalChannelTransport.SOCKET,
+                RDBExternalChannelConnection.status.in_(
+                    (
+                        ExternalChannelConnectionStatus.ACTIVE,
+                        ExternalChannelConnectionStatus.DEGRADED,
+                    )
+                ),
+                RDBExternalChannelConnection.socket_lease_owner == lease_owner,
+                RDBExternalChannelConnection.socket_lease_until >= now,
+            )
+            .values(**values)
+            .returning(RDBExternalChannelConnection.id)
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def record_socket_connection_gap(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+        lease_owner: str,
+        now: datetime.datetime,
+        gap_reason: str,
+    ) -> bool:
+        """Record a visible Socket Mode gap while retaining current ownership."""
+        result = await session.execute(
+            sa.update(RDBExternalChannelConnection)
+            .where(
+                RDBExternalChannelConnection.id == connection_id,
+                RDBExternalChannelConnection.transport
+                == ExternalChannelTransport.SOCKET,
+                RDBExternalChannelConnection.status.in_(
+                    (
+                        ExternalChannelConnectionStatus.ACTIVE,
+                        ExternalChannelConnectionStatus.DEGRADED,
+                    )
+                ),
+                RDBExternalChannelConnection.socket_lease_owner == lease_owner,
+                RDBExternalChannelConnection.socket_lease_until >= now,
+            )
+            .values(
+                status=ExternalChannelConnectionStatus.DEGRADED,
+                socket_heartbeat_at=now,
+                socket_gap_detected_at=now,
+                socket_gap_reason=gap_reason,
+            )
+            .returning(RDBExternalChannelConnection.id)
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def mark_socket_connection_active(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+        lease_owner: str,
+        now: datetime.datetime,
+    ) -> bool:
+        """Mark a leased socket connected and clear its prior gap indicator."""
+        result = await session.execute(
+            sa.update(RDBExternalChannelConnection)
+            .where(
+                RDBExternalChannelConnection.id == connection_id,
+                RDBExternalChannelConnection.transport
+                == ExternalChannelTransport.SOCKET,
+                RDBExternalChannelConnection.status.in_(
+                    (
+                        ExternalChannelConnectionStatus.ACTIVE,
+                        ExternalChannelConnectionStatus.DEGRADED,
+                    )
+                ),
+                RDBExternalChannelConnection.socket_lease_owner == lease_owner,
+                RDBExternalChannelConnection.socket_lease_until >= now,
+            )
+            .values(
+                status=ExternalChannelConnectionStatus.ACTIVE,
+                socket_heartbeat_at=now,
+                socket_gap_detected_at=None,
+                socket_gap_reason=None,
+            )
+            .returning(RDBExternalChannelConnection.id)
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def socket_connection_owned_active(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+        lease_owner: str,
+        now: datetime.datetime,
+    ) -> ExternalChannelConnection | None:
+        """Verify an unexpired Socket owner before provider-event admission."""
+        rdb = await session.scalar(
+            sa.select(RDBExternalChannelConnection).where(
+                RDBExternalChannelConnection.id == connection_id,
+                RDBExternalChannelConnection.transport
+                == ExternalChannelTransport.SOCKET,
+                RDBExternalChannelConnection.status.in_(
+                    (
+                        ExternalChannelConnectionStatus.ACTIVE,
+                        ExternalChannelConnectionStatus.DEGRADED,
+                    )
+                ),
+                RDBExternalChannelConnection.socket_lease_owner == lease_owner,
+                RDBExternalChannelConnection.socket_lease_until >= now,
+            )
+        )
+        return self._as(ExternalChannelConnection, rdb)
 
     async def lock_connection(
         self,

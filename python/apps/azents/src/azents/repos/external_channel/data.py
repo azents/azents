@@ -52,6 +52,11 @@ class ExternalChannelConnection(_Record):
     last_verified_at: datetime.datetime | None
     last_health_at: datetime.datetime | None
     disconnected_at: datetime.datetime | None
+    socket_lease_owner: str | None
+    socket_lease_until: datetime.datetime | None
+    socket_heartbeat_at: datetime.datetime | None
+    socket_gap_detected_at: datetime.datetime | None
+    socket_gap_reason: str | None
     created_at: datetime.datetime
     updated_at: datetime.datetime
 
@@ -73,6 +78,11 @@ class ExternalChannelConnectionCreate(_Record):
     last_verified_at: datetime.datetime | None
     last_health_at: datetime.datetime | None
     disconnected_at: datetime.datetime | None
+    socket_lease_owner: str | None
+    socket_lease_until: datetime.datetime | None
+    socket_heartbeat_at: datetime.datetime | None
+    socket_gap_detected_at: datetime.datetime | None
+    socket_gap_reason: str | None
 
 
 class ExternalChannelConnectionConfiguration(_Record):
@@ -93,6 +103,11 @@ class ExternalChannelConnectionConfiguration(_Record):
     last_verified_at: datetime.datetime | None
     last_health_at: datetime.datetime | None
     disconnected_at: datetime.datetime | None
+    socket_lease_owner: str | None
+    socket_lease_until: datetime.datetime | None
+    socket_heartbeat_at: datetime.datetime | None
+    socket_gap_detected_at: datetime.datetime | None
+    socket_gap_reason: str | None
     created_at: datetime.datetime
     updated_at: datetime.datetime
 
