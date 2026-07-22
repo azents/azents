@@ -20,6 +20,11 @@ from azents.core.enums import (
     AgentRunPhase,
     AgentRunStatus,
     EventKind,
+    ExternalChannelMessageLifecycle,
+    ExternalChannelMessageRevisionKind,
+    ExternalChannelPrincipalAuthorType,
+    ExternalChannelProvider,
+    ExternalChannelResourceType,
 )
 from azents.core.inference_profile import (
     AppliedInferenceProfile,
@@ -352,6 +357,66 @@ class AgentMessagePayload(BaseModel):
         return self
 
 
+class ExternalChannelMessagePayload(BaseModel):
+    """Canonical external provider message projected into an AgentSession."""
+
+    model_config = ConfigDict(frozen=True)
+
+    provider: ExternalChannelProvider
+    provider_tenant_id: str = Field(min_length=1)
+    resource_id: str = Field(min_length=1)
+    resource_label: str = Field(min_length=1)
+    resource_type: ExternalChannelResourceType
+    binding_id: str = Field(min_length=1)
+    invocation_batch_id: str = Field(min_length=1)
+    external_message_id: str = Field(min_length=1)
+    revision_id: str = Field(min_length=1)
+    revision_kind: ExternalChannelMessageRevisionKind
+    projection_root_id: str = Field(min_length=1)
+    provider_message_key: str = Field(min_length=1)
+    provider_position: str = Field(min_length=1)
+    principal_id: str | None
+    provider_user_id: str | None
+    sender_display_name: str | None
+    author_type: ExternalChannelPrincipalAuthorType
+    authorization: Literal["context_only", "authorized_invocation"]
+    lifecycle: ExternalChannelMessageLifecycle
+    body: str | None
+    attachment_metadata: dict[str, object]
+    provider_created_at: datetime.datetime | None
+    provider_updated_at: datetime.datetime | None
+    original_url: str | None
+    truncated_context_message_count: int = Field(ge=0)
+    truncated_context_size: int = Field(ge=0)
+    correction_of_revision_id: str | None
+
+    @model_validator(mode="after")
+    def validate_projection_identity(self) -> "ExternalChannelMessagePayload":
+        """Validate revision semantics and the stable correction root."""
+        expected_root = f"external-channel:{self.binding_id}:{self.external_message_id}"
+        if self.projection_root_id != expected_root:
+            raise ValueError("External Channel projection root is inconsistent")
+        expected_lifecycle = {
+            ExternalChannelMessageRevisionKind.ORIGINAL: (
+                ExternalChannelMessageLifecycle.CURRENT
+            ),
+            ExternalChannelMessageRevisionKind.EDIT: (
+                ExternalChannelMessageLifecycle.EDITED
+            ),
+            ExternalChannelMessageRevisionKind.DELETE: (
+                ExternalChannelMessageLifecycle.DELETED
+            ),
+        }[self.revision_kind]
+        if self.lifecycle is not expected_lifecycle:
+            raise ValueError("External Channel revision lifecycle is inconsistent")
+        if self.revision_kind is ExternalChannelMessageRevisionKind.ORIGINAL:
+            if self.correction_of_revision_id is not None:
+                raise ValueError(
+                    "Original External Channel revision cannot be a correction"
+                )
+        return self
+
+
 class AssistantMessagePayload(BaseModel):
     """Assistant message payload."""
 
@@ -628,6 +693,7 @@ class UnknownAdapterOutputPayload(BaseModel):
 EventPayload = (
     UserMessagePayload
     | AgentMessagePayload
+    | ExternalChannelMessagePayload
     | AssistantMessagePayload
     | ReasoningPayload
     | ClientToolCallPayload
@@ -653,6 +719,7 @@ PAYLOAD_BY_KIND: dict[EventKind, type[BaseModel]] = {
     EventKind.GOAL_UPDATED: UserMessagePayload,
     EventKind.ACTION_MESSAGE: ActionMessagePayload,
     EventKind.AGENT_MESSAGE: AgentMessagePayload,
+    EventKind.EXTERNAL_CHANNEL_MESSAGE: ExternalChannelMessagePayload,
     EventKind.ACTION_EXECUTION_RESULT: ActionExecutionResultPayload,
     EventKind.SKILL_LOADED: SkillLoadedPayload,
     EventKind.GOAL_BRIEFING: GoalBriefingPayload,

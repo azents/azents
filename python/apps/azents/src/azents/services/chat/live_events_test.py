@@ -57,6 +57,7 @@ def test_user_input_buffer_live_event_preserves_nullable_requested_profile() -> 
         )
     )
 
+    assert event is not None
     assert isinstance(event.payload, UserMessagePayload)
     assert event.payload.requested_inference_profile is not None
     assert event.payload.requested_inference_profile.model_target_label == "quality"
@@ -95,6 +96,7 @@ def test_agent_result_input_buffer_live_event_restores_terminal_metadata() -> No
         )
     )
 
+    assert event is not None
     assert isinstance(event.payload, AgentMessagePayload)
     assert event.payload.message_kind == "agent_result"
     assert event.payload.source_run_id == "2" * 32
@@ -126,12 +128,37 @@ def test_action_input_buffer_live_event_preserves_requested_profile() -> None:
         )
     )
 
+    assert event is not None
     assert isinstance(event.payload, ActionMessagePayload)
     assert event.payload.requested_inference_profile is not None
     assert event.payload.requested_inference_profile.model_target_label == "reasoning"
     assert event.payload.requested_inference_profile.reasoning_effort == (
         ModelReasoningEffort.HIGH
     )
+
+
+def test_external_invocation_live_projection_defers_to_durable_event() -> None:
+    """Reference-only external input does not copy untrusted message content live."""
+    event = input_buffer_to_live_event(
+        InputBuffer(
+            id="0323456789abcdef0123456789abcdef",
+            session_id="1123456789abcdef0123456789abcdef",
+            kind=InputBufferKind.EXTERNAL_CHANNEL_INVOCATION,
+            scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
+            requested_model_target_label=None,
+            requested_reasoning_effort=None,
+            actor_user_id=None,
+            content="",
+            idempotency_key="external-batch:" + "4" * 32,
+            metadata={"invocation_batch_id": "4" * 32},
+            action=None,
+            attachments=[],
+            file_parts=[],
+            created_at=datetime.datetime(2026, 7, 22, tzinfo=datetime.UTC),
+        )
+    )
+
+    assert event is None
 
 
 @pytest_asyncio.fixture

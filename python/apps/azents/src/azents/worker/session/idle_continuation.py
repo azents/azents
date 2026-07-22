@@ -106,10 +106,12 @@ class IdleContinuationService:
         for enqueue_result in enqueue_results:
             if not enqueue_result.created:
                 continue
-            await self.event_publisher.dispatch_event(
-                message.session_id,
-                input_buffer_to_live_event(enqueue_result.input_buffer),
-            )
+            event = input_buffer_to_live_event(enqueue_result.input_buffer)
+            if event is not None:
+                await self.event_publisher.dispatch_event(
+                    message.session_id,
+                    event,
+                )
         if continuation_inputs:
             await self.broker.send_message(message)
         return True

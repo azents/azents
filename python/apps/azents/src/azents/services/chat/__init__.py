@@ -1358,8 +1358,9 @@ class ChatSessionService:
                 session, session_id
             )
             input_buffer_events = [
-                input_buffer_to_live_event(input_buffer)
+                event
                 for input_buffer in input_buffers
+                if (event := input_buffer_to_live_event(input_buffer)) is not None
             ]
             run = await self.agent_run_repository.get_running_by_session_id(
                 session,

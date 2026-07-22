@@ -2,7 +2,7 @@
 
 import datetime
 from typing import cast
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import sqlalchemy as sa
 from azcommon.result import Success
@@ -39,7 +39,9 @@ from azents.rdb.models.external_channel import (
 )
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.session import SessionManager
+from azents.repos.action_execution import ActionExecutionRepository
 from azents.repos.agent import AgentRepository
+from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.external_channel.data import (
     ExternalChannelAgentRoute,
@@ -52,10 +54,12 @@ from azents.repos.external_channel.data import (
     ExternalChannelResourceCreate,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.repos.input_buffer import InputBufferRepository
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
+from azents.services.exchange_file import ExchangeFileService
 from azents.services.external_channel.access import ExternalChannelAccessService
 from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
 from azents.services.external_channel.event_processor import (
@@ -68,7 +72,9 @@ from azents.services.external_channel.slack_events import (
     SlackNormalizedMessage,
     normalize_slack_event,
 )
+from azents.services.input_buffer import InputBufferService
 from azents.testing.model_selection import make_test_model_selection_dict
+from azents.worker.session.lifecycle import SessionLifecycleService
 
 
 def _at(second: int) -> datetime.datetime:
@@ -190,6 +196,8 @@ def _service(
     session_manager: SessionManager[AsyncSession],
     repository: ExternalChannelRepository,
 ) -> _TestEventProcessorService:
+    session_lifecycle = MagicMock(spec=SessionLifecycleService)
+    session_lifecycle.send_session_wake_up = AsyncMock()
     return _TestEventProcessorService(
         session_manager=session_manager,
         repository=repository,
@@ -204,6 +212,18 @@ def _service(
         agent_repository=AgentRepository(),
         agent_session_repository=AgentSessionRepository(),
         config=Config.model_construct(web_url="https://azents.example"),
+        input_buffer_service=InputBufferService(
+            session_manager=session_manager,
+            input_buffer_repository=InputBufferRepository(),
+            exchange_file_service=cast(ExchangeFileService, MagicMock()),
+            agent_session_repository=AgentSessionRepository(),
+            event_transcript_repository=EventTranscriptRepository(),
+            agent_run_repository=AgentRunRepository(),
+            action_execution_repository=ActionExecutionRepository(),
+            vfs_projection_service=None,
+            external_channel_repository=repository,
+        ),
+        session_lifecycle=cast(SessionLifecycleService, session_lifecycle),
     )
 
 
@@ -302,6 +322,21 @@ async def test_unknown_human_mention_creates_request_without_session_or_wake(
         repository=repository,
         agent_repository=AgentRepository(),
         agent_session_repository=AgentSessionRepository(),
+        input_buffer_service=InputBufferService(
+            session_manager=rdb_session_manager,
+            input_buffer_repository=InputBufferRepository(),
+            exchange_file_service=cast(ExchangeFileService, MagicMock()),
+            agent_session_repository=AgentSessionRepository(),
+            event_transcript_repository=EventTranscriptRepository(),
+            agent_run_repository=AgentRunRepository(),
+            action_execution_repository=ActionExecutionRepository(),
+            vfs_projection_service=None,
+            external_channel_repository=repository,
+        ),
+        session_lifecycle=cast(
+            SessionLifecycleService,
+            MagicMock(send_session_wake_up=AsyncMock()),
+        ),
     )
     allowed = await access_service.allow(
         access_request_id=requests[0].id,

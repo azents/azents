@@ -16,6 +16,11 @@ from azents.core.enums import (
     AgentSessionEndReason,
     AgentSessionStatus,
     EventKind,
+    ExternalChannelMessageLifecycle,
+    ExternalChannelMessageRevisionKind,
+    ExternalChannelPrincipalAuthorType,
+    ExternalChannelProvider,
+    ExternalChannelResourceType,
     LLMProvider,
 )
 from azents.core.inference_profile import (
@@ -31,6 +36,7 @@ from azents.engine.events.types import (
     ActiveToolCall,
     CompactionSummaryPayload,
     Event,
+    ExternalChannelMessagePayload,
     TokenUsagePayload,
     TurnMarkerPayload,
     UserMessagePayload,
@@ -201,6 +207,72 @@ class TestEventExecutionRepositories:
             "model_display_name": "GPT 5.5",
             "reasoning_effort": None,
         }
+
+    async def test_external_message_updates_last_user_input_at(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Treat released external invocations as recent Session input."""
+        workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
+            rdb_session,
+            handle="external-last-input-ws",
+        )
+        event_session = await _agent_session_repository().create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        previous_last_user_input_at = event_session.last_user_input_at
+        payload = ExternalChannelMessagePayload(
+            provider=ExternalChannelProvider.SLACK,
+            provider_tenant_id="tenant-1",
+            resource_id="resource-1",
+            resource_label="C123:1.0",
+            resource_type=ExternalChannelResourceType.THREAD,
+            binding_id="binding-1",
+            invocation_batch_id="batch-1",
+            external_message_id="message-1",
+            revision_id="revision-1",
+            revision_kind=ExternalChannelMessageRevisionKind.ORIGINAL,
+            projection_root_id="external-channel:binding-1:message-1",
+            provider_message_key="C123:1.0:1",
+            provider_position="1",
+            principal_id="principal-1",
+            provider_user_id="U1",
+            sender_display_name="Alice",
+            author_type=ExternalChannelPrincipalAuthorType.HUMAN,
+            authorization="authorized_invocation",
+            lifecycle=ExternalChannelMessageLifecycle.CURRENT,
+            body="hello",
+            attachment_metadata={},
+            provider_created_at=datetime.datetime(
+                2026,
+                7,
+                22,
+                tzinfo=datetime.UTC,
+            ),
+            provider_updated_at=None,
+            original_url=None,
+            truncated_context_message_count=0,
+            truncated_context_size=0,
+            correction_of_revision_id=None,
+        )
+
+        appended = await EventTranscriptRepository().append(
+            rdb_session,
+            EventCreate(
+                session_id=event_session.id,
+                kind=EventKind.EXTERNAL_CHANNEL_MESSAGE,
+                payload=payload.model_dump(mode="json"),
+            ),
+        )
+        await rdb_session.refresh(event_session)
+
+        assert event_session.last_user_input_at == appended.created_at
+        assert event_session.last_user_input_at != previous_last_user_input_at
 
     async def test_turn_marker_default_effort_round_trip(
         self,
