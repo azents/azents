@@ -684,6 +684,10 @@
         "subagents": {
           "label": "Subagents",
           "description": "Concurrency and nesting limits for delegated agents"
+        },
+        "channels": {
+          "label": "External channels",
+          "description": "Slack connections, routes, and participant access"
         }
       },
       "settingsLayout": {
@@ -695,7 +699,8 @@
           "chat": "Chat",
           "settings": "Settings",
           "projects": "Projects",
-          "context": "Context"
+          "context": "Context",
+          "channels": "Channels"
         },
         "status": {
           "enabled": "Active",
@@ -901,6 +906,135 @@
         "subagentGuidanceDescription": "Optional guidance for appropriate task types or cost and quality constraints. Maximum {max} characters.",
         "subagentGuidancePlaceholder": "For example: Prefer for repository exploration and bounded investigation.",
         "settingsDone": "Done"
+      },
+      "externalChannels": {
+        "title": "External channels",
+        "description": "Operate dedicated Slack connections and control who can invoke this agent.",
+        "addConnection": "Add connection",
+        "connectionsTitle": "Connections",
+        "emptyConnectionsTitle": "No external channel connection",
+        "emptyConnectionsDescription": "Connect a dedicated Slack App to route supported channel conversations to this agent.",
+        "slack": "Slack",
+        "identityUnavailable": "Provider identity not validated",
+        "credentialsConfigured": "Credentials configured",
+        "credentialsMissing": "Credentials missing",
+        "lastVerified": "Last verified",
+        "lastHealth": "Last health check",
+        "botIdentity": "Bot identity",
+        "socketGapTitle": "Socket delivery gap detected",
+        "socketGapDescription": "Validate the connection and review channel history before continuing.",
+        "capabilitiesUnavailable": "Capabilities are available after validation.",
+        "validate": "Validate",
+        "switchTransport": "Switch to {transport}",
+        "reconnect": "Reconnect",
+        "disconnect": "Disconnect",
+        "disconnectConfirm": "Disconnect this connection permanently? Existing channel history remains available.",
+        "accessTitle": "Participant access",
+        "accessDescription": "Review active invocation grants and blocked external participants.",
+        "emptyAccess": "No active grants or blocks.",
+        "blockNoReason": "Blocked by an agent administrator",
+        "revoke": "Revoke",
+        "unblock": "Unblock",
+        "reconnectTitle": "Replace Slack credentials",
+        "setupTitle": "Connect a Slack App",
+        "appId": "Slack App ID",
+        "manifestTitle": "Required Slack App configuration",
+        "botScopes": "Bot token scopes",
+        "eventSubscriptions": "Event subscriptions",
+        "appTokenScope": "App-level token scope",
+        "callbackPath": "HTTP callback path",
+        "botToken": "Bot user OAuth token",
+        "signingSecret": "Signing secret",
+        "appToken": "App-level token",
+        "appTokenRequired": "Required for Socket Mode.",
+        "appTokenOptional": "Optional for HTTP transport.",
+        "credentialSafety": "Credential values are encrypted by the server and are never shown again.",
+        "cancel": "Cancel",
+        "connect": "Connect",
+        "replaceCredentials": "Replace credentials",
+        "status": {
+          "configuring": "Configuring",
+          "active": "Active",
+          "degraded": "Degraded",
+          "reconnect_required": "Reconnect required",
+          "disconnecting": "Disconnecting",
+          "disconnected": "Disconnected"
+        },
+        "transport": {
+          "http": "HTTP",
+          "socket": "Socket Mode"
+        },
+        "route": {
+          "active": "Route active",
+          "inactive": "Route inactive"
+        },
+        "grantScope": {
+          "session": "Session access",
+          "agent": "Agent access"
+        },
+        "revokeConfirm": "Revoke this participant access grant?",
+        "unblockConfirm": "Remove this participant block?"
+      },
+      "sessionChannels": {
+        "title": "Channels",
+        "description": "Inspect external channel bindings, work projection, delivery outcomes, and retained access.",
+        "archivedTitle": "Archived session",
+        "archivedDescription": "External channels were terminally disconnected at archive time. This projection is read-only.",
+        "retentionUnlimited": "Retention: unlimited",
+        "retentionDays": "Retention: {count} days",
+        "purgeAfter": "Purge after {value}",
+        "emptyTitle": "No external channel bindings",
+        "emptyDescription": "This session has not been invoked from a supported external channel.",
+        "disconnect": "Disconnect",
+        "disconnectConfirm": "Disconnect this session channel permanently? Its history remains available.",
+        "connectedAt": "Connected",
+        "latestActivity": "Latest activity",
+        "retainedContext": "Pending-context truncation",
+        "truncationSummary": "{messages} messages · {bytes} bytes removed",
+        "disconnectReason": "Disconnect reason",
+        "channelWork": "Channel Work",
+        "noWork": "No Channel Work is associated with this binding.",
+        "taskCount": "{count, plural, =1 {1 task} other {# tasks}}",
+        "progressDrift": "Progress drift",
+        "progressProjected": "Progress projected",
+        "revisionProgress": "Channel Work revision projection",
+        "revisionDetail": "State revision {current} · desired progress revision {desired}",
+        "deliveries": "Delivery outcomes",
+        "noDeliveries": "No provider delivery has been attempted.",
+        "grantsTitle": "Session access",
+        "grantsDescription": "Participants authorized specifically for this session.",
+        "noGrants": "No active session-scoped grants.",
+        "bindingStatus": {
+          "active": "Active",
+          "disconnected": "Disconnected"
+        },
+        "activationStatus": {
+          "waiting_hydration": "Waiting for history",
+          "active": "Invocation active"
+        },
+        "workStatus": {
+          "active": "Work active",
+          "finished": "Work finished"
+        },
+        "deliveryStatus": {
+          "pending": "Pending",
+          "attempting": "Attempting",
+          "delivered": "Delivered",
+          "failed": "Failed",
+          "unknown": "Unknown outcome",
+          "not_attempted": "Not attempted"
+        },
+        "operation": {
+          "reply": "Reply",
+          "progress_create": "Create progress",
+          "progress_update": "Update progress",
+          "progress_delete": "Delete progress",
+          "control_message": "Control message"
+        },
+        "grantScope": {
+          "session": "Session access",
+          "agent": "Agent access"
+        }
       }
     },
     "toolkits": {

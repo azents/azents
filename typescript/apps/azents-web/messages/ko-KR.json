@@ -684,6 +684,10 @@
         "subagents": {
           "label": "서브에이전트",
           "description": "위임된 에이전트의 동시 실행 및 중첩 제한"
+        },
+        "channels": {
+          "label": "외부 채널",
+          "description": "Slack 연결, 라우트, 참여자 접근 권한"
         }
       },
       "settingsLayout": {
@@ -695,7 +699,8 @@
           "chat": "채팅",
           "settings": "설정",
           "projects": "프로젝트",
-          "context": "컨텍스트"
+          "context": "컨텍스트",
+          "channels": "채널"
         },
         "status": {
           "enabled": "활성",
@@ -901,6 +906,135 @@
         "subagentGuidanceDescription": "적합한 작업 유형이나 비용·품질 제약을 선택적으로 안내합니다. 최대 {max}자입니다.",
         "subagentGuidancePlaceholder": "예: 저장소 탐색과 범위가 명확한 조사 작업에 우선 사용하세요.",
         "settingsDone": "완료"
+      },
+      "externalChannels": {
+        "title": "외부 채널",
+        "description": "전용 Slack 연결을 운영하고 이 에이전트를 호출할 수 있는 참여자를 관리합니다.",
+        "addConnection": "연결 추가",
+        "connectionsTitle": "연결",
+        "emptyConnectionsTitle": "외부 채널 연결이 없습니다",
+        "emptyConnectionsDescription": "전용 Slack App을 연결하여 지원되는 채널 대화를 이 에이전트로 라우팅하세요.",
+        "slack": "Slack",
+        "identityUnavailable": "Provider identity를 아직 검증하지 않았습니다",
+        "credentialsConfigured": "Credential 설정됨",
+        "credentialsMissing": "Credential 없음",
+        "lastVerified": "마지막 검증",
+        "lastHealth": "마지막 상태 확인",
+        "botIdentity": "Bot identity",
+        "socketGapTitle": "Socket delivery gap 감지됨",
+        "socketGapDescription": "계속하기 전에 연결을 검증하고 채널 기록을 확인하세요.",
+        "capabilitiesUnavailable": "검증 후 capability를 확인할 수 있습니다.",
+        "validate": "검증",
+        "switchTransport": "{transport}(으)로 전환",
+        "reconnect": "재연결",
+        "disconnect": "연결 해제",
+        "disconnectConfirm": "이 연결을 영구적으로 해제하시겠습니까? 기존 채널 기록은 유지됩니다.",
+        "accessTitle": "참여자 접근 권한",
+        "accessDescription": "활성 호출 권한과 차단된 외부 참여자를 확인합니다.",
+        "emptyAccess": "활성 grant 또는 block이 없습니다.",
+        "blockNoReason": "에이전트 관리자가 차단함",
+        "revoke": "권한 회수",
+        "unblock": "차단 해제",
+        "reconnectTitle": "Slack credential 교체",
+        "setupTitle": "Slack App 연결",
+        "appId": "Slack App ID",
+        "manifestTitle": "필수 Slack App 설정",
+        "botScopes": "Bot token scope",
+        "eventSubscriptions": "Event subscription",
+        "appTokenScope": "App-level token scope",
+        "callbackPath": "HTTP callback 경로",
+        "botToken": "Bot user OAuth token",
+        "signingSecret": "Signing secret",
+        "appToken": "App-level token",
+        "appTokenRequired": "Socket Mode에 필요합니다.",
+        "appTokenOptional": "HTTP transport에서는 선택 사항입니다.",
+        "credentialSafety": "Credential 값은 서버에서 암호화되며 다시 표시되지 않습니다.",
+        "cancel": "취소",
+        "connect": "연결",
+        "replaceCredentials": "Credential 교체",
+        "status": {
+          "configuring": "설정 중",
+          "active": "활성",
+          "degraded": "성능 저하",
+          "reconnect_required": "재연결 필요",
+          "disconnecting": "연결 해제 중",
+          "disconnected": "연결 해제됨"
+        },
+        "transport": {
+          "http": "HTTP",
+          "socket": "Socket Mode"
+        },
+        "route": {
+          "active": "Route 활성",
+          "inactive": "Route 비활성"
+        },
+        "grantScope": {
+          "session": "세션 접근",
+          "agent": "에이전트 접근"
+        },
+        "revokeConfirm": "이 참여자의 접근 권한을 회수하시겠습니까?",
+        "unblockConfirm": "이 참여자의 차단을 해제하시겠습니까?"
+      },
+      "sessionChannels": {
+        "title": "채널",
+        "description": "외부 채널 binding, work projection, delivery 결과, 유지된 접근 권한을 확인합니다.",
+        "archivedTitle": "보관된 세션",
+        "archivedDescription": "보관 시점에 외부 채널 연결이 영구적으로 해제되었습니다. 이 화면은 읽기 전용입니다.",
+        "retentionUnlimited": "보존 기간: 제한 없음",
+        "retentionDays": "보존 기간: {count}일",
+        "purgeAfter": "{value} 이후 삭제",
+        "emptyTitle": "외부 채널 binding이 없습니다",
+        "emptyDescription": "지원되는 외부 채널에서 이 세션을 호출한 적이 없습니다.",
+        "disconnect": "연결 해제",
+        "disconnectConfirm": "이 세션 채널을 영구적으로 해제하시겠습니까? 기록은 유지됩니다.",
+        "connectedAt": "연결 시각",
+        "latestActivity": "최근 활동",
+        "retainedContext": "Pending context 잘림",
+        "truncationSummary": "메시지 {messages}개 · {bytes}바이트 제거",
+        "disconnectReason": "연결 해제 사유",
+        "channelWork": "Channel Work",
+        "noWork": "이 binding에 연결된 Channel Work가 없습니다.",
+        "taskCount": "작업 {count}개",
+        "progressDrift": "Progress drift",
+        "progressProjected": "Progress 반영됨",
+        "revisionProgress": "Channel Work revision 반영",
+        "revisionDetail": "State revision {current} · desired progress revision {desired}",
+        "deliveries": "Delivery 결과",
+        "noDeliveries": "Provider delivery를 시도한 적이 없습니다.",
+        "grantsTitle": "세션 접근 권한",
+        "grantsDescription": "이 세션에 한해 허용된 참여자입니다.",
+        "noGrants": "활성 session-scoped grant가 없습니다.",
+        "bindingStatus": {
+          "active": "활성",
+          "disconnected": "연결 해제됨"
+        },
+        "activationStatus": {
+          "waiting_hydration": "기록 수집 대기",
+          "active": "호출 활성"
+        },
+        "workStatus": {
+          "active": "Work 활성",
+          "finished": "Work 완료"
+        },
+        "deliveryStatus": {
+          "pending": "대기",
+          "attempting": "시도 중",
+          "delivered": "전달됨",
+          "failed": "실패",
+          "unknown": "결과 불명",
+          "not_attempted": "시도하지 않음"
+        },
+        "operation": {
+          "reply": "답글",
+          "progress_create": "Progress 생성",
+          "progress_update": "Progress 수정",
+          "progress_delete": "Progress 삭제",
+          "control_message": "Control message"
+        },
+        "grantScope": {
+          "session": "세션 접근",
+          "agent": "에이전트 접근"
+        }
       }
     },
     "toolkits": {
