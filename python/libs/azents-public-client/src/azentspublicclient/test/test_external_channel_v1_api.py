@@ -89,6 +89,20 @@ class TestExternalChannelV1Api(unittest.TestCase):
         """
         pass
 
+    def test_external_channel_v1_remove_access_block(self) -> None:
+        """Test case for external_channel_v1_remove_access_block
+
+        Remove Access Block
+        """
+        pass
+
+    def test_external_channel_v1_revoke_access_grant(self) -> None:
+        """Test case for external_channel_v1_revoke_access_grant
+
+        Revoke Access Grant
+        """
+        pass
+
     def test_external_channel_v1_setup_slack_connection(self) -> None:
         """Test case for external_channel_v1_setup_slack_connection
 

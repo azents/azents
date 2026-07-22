@@ -441,6 +441,64 @@ class ExternalChannelManagementService:
                 agent_session_id=agent_session_id,
             )
 
+    async def revoke_grant(
+        self,
+        *,
+        workspace_id: str,
+        agent_id: str,
+        workspace_user_id: str,
+        user_id: str,
+        grant_id: str,
+    ) -> None:
+        await self._require_agent(
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+            workspace_user_id=workspace_user_id,
+            admin=True,
+        )
+        async with self.session_manager() as session:
+            owned = await self.repository.grant_belongs_to_agent(
+                session,
+                agent_id=agent_id,
+                grant_id=grant_id,
+            )
+        if not owned:
+            raise ExternalChannelManagementNotFound(grant_id)
+        await self.access_service.revoke_grant(
+            grant_id=grant_id,
+            revoked_by_user_id=user_id,
+            now=datetime.datetime.now(datetime.UTC),
+        )
+
+    async def remove_block(
+        self,
+        *,
+        workspace_id: str,
+        agent_id: str,
+        workspace_user_id: str,
+        user_id: str,
+        block_id: str,
+    ) -> None:
+        await self._require_agent(
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+            workspace_user_id=workspace_user_id,
+            admin=True,
+        )
+        async with self.session_manager() as session:
+            owned = await self.repository.block_belongs_to_agent(
+                session,
+                agent_id=agent_id,
+                block_id=block_id,
+            )
+        if not owned:
+            raise ExternalChannelManagementNotFound(block_id)
+        await self.access_service.remove_block(
+            block_id=block_id,
+            removed_by_user_id=user_id,
+            now=datetime.datetime.now(datetime.UTC),
+        )
+
     async def get_approval(
         self,
         *,

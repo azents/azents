@@ -450,6 +450,42 @@ class ExternalChannelManagementRepository:
         ).all()
         return [_block(block, principal) for block, principal in rows]
 
+    async def grant_belongs_to_agent(
+        self,
+        session: AsyncSession,
+        *,
+        agent_id: str,
+        grant_id: str,
+    ) -> bool:
+        return bool(
+            await session.scalar(
+                sa.select(
+                    sa.exists().where(
+                        RDBExternalChannelAccessGrant.id == grant_id,
+                        RDBExternalChannelAccessGrant.agent_id == agent_id,
+                    )
+                )
+            )
+        )
+
+    async def block_belongs_to_agent(
+        self,
+        session: AsyncSession,
+        *,
+        agent_id: str,
+        block_id: str,
+    ) -> bool:
+        return bool(
+            await session.scalar(
+                sa.select(
+                    sa.exists().where(
+                        RDBExternalChannelBlock.id == block_id,
+                        RDBExternalChannelBlock.agent_id == agent_id,
+                    )
+                )
+            )
+        )
+
     async def get_approval_request(
         self,
         session: AsyncSession,

@@ -257,6 +257,54 @@ async def list_agent_access(
     return ManagedAccessResponse(grants=grants, blocks=blocks)
 
 
+@router.delete(
+    "/workspaces/{handle}/agents/{agent_id}/external-channel-access/grants/{grant_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def revoke_access_grant(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[ExternalChannelManagementService, Depends()],
+    *,
+    agent_id: str,
+    grant_id: str,
+) -> None:
+    """Revoke one Agent- or Session-scoped external participant grant."""
+    try:
+        await service.revoke_grant(
+            workspace_id=member.workspace_id,
+            agent_id=agent_id,
+            workspace_user_id=member.workspace_user_id,
+            user_id=member.user_id,
+            grant_id=grant_id,
+        )
+    except ExternalChannelManagementNotFound as error:
+        raise _not_found() from error
+
+
+@router.delete(
+    "/workspaces/{handle}/agents/{agent_id}/external-channel-access/blocks/{block_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def remove_access_block(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[ExternalChannelManagementService, Depends()],
+    *,
+    agent_id: str,
+    block_id: str,
+) -> None:
+    """Remove one Agent-level external participant block."""
+    try:
+        await service.remove_block(
+            workspace_id=member.workspace_id,
+            agent_id=agent_id,
+            workspace_user_id=member.workspace_user_id,
+            user_id=member.user_id,
+            block_id=block_id,
+        )
+    except ExternalChannelManagementNotFound as error:
+        raise _not_found() from error
+
+
 @router.get(
     "/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels"
 )
