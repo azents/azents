@@ -316,6 +316,7 @@ Design documents are accumulated records and are not listed individually in this
 | [nointern Slack Integration Historical Requirements Reconstruction](requirements/slack-260310-nointern-slack-integration.md) | slack-260310 | 2026-03-10 | 2026-03-10 |
 | [Slack Toolkit Historical Requirements Reconstruction](requirements/slack-260312-slack-toolkit.md) | slack-260312 | 2026-03-12 | 2026-03-23 |
 | [Slack BYOA Discussion — Discussion Points and Decisions Historical Requirements Reconstruction](requirements/slack-260414-slack-byoa.md) | slack-260414 | 2026-04-14 | 2026-04-12 |
+| [External Channel Agent Conversation Requirements](requirements/slack-260721-external-channel-conversation.md) | slack-260721 | 2026-07-21 | - |
 | [Stage 4 (browser/web QA) Historical Requirements Reconstruction](requirements/stage4-260410-stage4-web.md) | stage4-260410 | 2026-04-10 | 2026-04-10 |
 | [Use Standard Responses for ChatGPT OAuth Historical Requirements Reconstruction](requirements/standard-260716-standard-responses-for-chatgpt-oauth.md) | standard-260716 | 2026-07-16 | - |
 | [stdio MCP Infrastructure + Google Analytics Toolkit Integration Historical Requirements Reconstruction](requirements/stdio-260326-stdio-mcp-ga4-integration.md) | stdio-260326 | 2026-03-26 | 2026-03-26 |
@@ -631,6 +632,7 @@ Design documents are accumulated records and are not listed individually in this
 - [nointern Slack Integration Historical Decision Reconstruction](adr/slack-260310-nointern-slack-integration.md)
 - [Slack Toolkit Historical Decision Reconstruction](adr/slack-260312-slack-toolkit.md)
 - [Slack BYOA Discussion — Discussion Points and Decisions](adr/slack-260414-slack-byoa.md)
+- [External Channel Agent Conversation](adr/slack-260721-external-channel-conversation.md)
 - [Stage 4 (browser/web QA) Historical Decision Reconstruction](adr/stage4-260410-stage4-web.md)
 - [Use Standard Responses for ChatGPT OAuth](adr/standard-260716-standard-responses-for-chatgpt-oauth.md)
 - [stdio MCP Infrastructure + Google Analytics Toolkit Integration Historical Decision Reconstruction](adr/stdio-260326-stdio-mcp-ga4-integration.md)
