@@ -54,6 +54,11 @@ spec:
             {{- end }}
             - name: AZ_RUNTIME_PROVIDER_AUTH_CREDENTIAL_ID
               value: {{ .Values.runtimeProviderKubernetes.providerId | quote }}
+            - name: AZ_RUNTIME_PROVIDER_CREDENTIAL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "runtimeProviderKubernetes.credential.existingSecret is required when the Kubernetes Provider is enabled" .Values.runtimeProviderKubernetes.credential.existingSecret | quote }}
+                  key: {{ required "runtimeProviderKubernetes.credential.key is required when the Kubernetes Provider is enabled" .Values.runtimeProviderKubernetes.credential.key | quote }}
             - name: AZ_RUNTIME_ENV
               value: {{ .Values.server.env.AZ_RUNTIME_ENV | quote }}
             - name: AZ_RUNTIME_PROVIDER_ID

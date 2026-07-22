@@ -11,6 +11,7 @@ _REQUIRED_ENV = {
     "AZ_RUNTIME_PROVIDER_DOCKER_NETWORK": "azents-runtime",
     "AZ_RUNTIME_PROVIDER_HOST_DATA_ROOT": "/tmp/azents",
     "AZ_RUNTIME_PROVIDER_AUTH_CREDENTIAL_ID": "provider-credential",
+    "AZ_RUNTIME_PROVIDER_CREDENTIAL": "test-provider-credential",
 }
 
 

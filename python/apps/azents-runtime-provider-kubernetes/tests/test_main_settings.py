@@ -30,6 +30,7 @@ def provider_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AZ_RUNTIME_PROVIDER_POD_NODE_SELECTOR", "{}")
     monkeypatch.setenv("AZ_RUNTIME_PROVIDER_POD_TOLERATIONS", "[]")
     monkeypatch.setenv("AZ_RUNTIME_PROVIDER_AUTH_CREDENTIAL_ID", "system-kubernetes")
+    monkeypatch.setenv("AZ_RUNTIME_PROVIDER_CREDENTIAL", "test-provider-credential")
     monkeypatch.setenv("AZ_RUNTIME_PROVIDER_LEASE_DURATION_SECONDS", "30")
 
 

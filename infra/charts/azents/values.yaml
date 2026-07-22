@@ -169,6 +169,12 @@ runtimeProviderKubernetes:
     name: azents-runtime
   replicas: 0
   providerId: system-kubernetes
+  credential:
+    existingSecret: ""
+    key: provider-credential
+    bootstrap:
+      enabled: false
+      secretName: ""
   image:
     repository: ""
     tag: ""
