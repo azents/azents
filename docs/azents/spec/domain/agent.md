@@ -51,8 +51,8 @@ api_routes:
   - /llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/start
   - /llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/{session_id}
   - /chat/v1
-last_verified_at: 2026-07-21
-spec_version: 51
+last_verified_at: 2026-07-22
+spec_version: 52
 ---
 
 # Agent Domain Spec
@@ -297,6 +297,14 @@ current-generation Runtime terminal-delete acknowledgement before finalization. 
 remains a content-free tombstone; no public immediate-delete or request-specific purge-deadline
 path exists.
 
+External Channel state follows the same irreversible coordinator boundary.
+Decommission terminalizes owned routes and active bindings, ends Channel Work,
+commits provider cleanup intents without calling the provider inside the
+lifecycle transaction, and removes direct Agent-owned grants/blocks only after
+Session lifecycle ownership is satisfied. Canonical provider resources,
+messages, revisions, and delivery audit roots are not cascade-deleted through
+the AgentSession tree.
+
 ## 3. Runtime Resolve
 
 Every inference-bearing input has a requested inference profile: an Agent-owned `model_target_label` plus nullable `reasoning_effort`. Null effort means the selected model or provider default, not the Agent-level reasoning parameter. Normal user configuration and composer input always select a concrete effort when the selected model advertises explicit effort levels; `Default` is not a user-facing option. Agent settings place `Default reasoning effort` beside the default model control, and effort choices are rendered as raw lowercase enum values without localization. Models with an empty explicit effort list hide the control and use null. The request source is `explicit_input`, `session_last_used`, `agent_default`, `retry_original`, `parent_run`, or `spawn_override`.
@@ -355,6 +363,7 @@ Following contracts do not exist in current system.
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-07-22 | 52 | Integrated External Channel route, binding, Channel Work, cleanup-intent, authorization, and restrictive ownership behavior into Agent decommission |
 | 2026-07-21 | 51 | Added durable finite-retention Agent decommission, admission fencing, and Runtime acknowledgement-gated finalization |
 | 2026-07-18 | 50 | Resolved semantic built-ins to provider-hosted or client-executed ownership per selected model provider |
 | 2026-07-17 | 49 | Added per-option explicit subagent target availability and bounded parent-model selection guidance |
