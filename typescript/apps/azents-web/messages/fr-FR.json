@@ -684,6 +684,10 @@
         "subagents": {
           "label": "Sous-agents",
           "description": "Limites de concurrence et d’imbrication des agents délégués"
+        },
+        "channels": {
+          "label": "Canaux externes",
+          "description": "Connexions Slack, routes et accès des participants"
         }
       },
       "settingsLayout": {
@@ -695,7 +699,8 @@
           "chat": "Discussion",
           "settings": "Paramètres",
           "projects": "Projets",
-          "context": "Contexte"
+          "context": "Contexte",
+          "channels": "Canaux"
         },
         "status": {
           "enabled": "Actif",
@@ -901,6 +906,135 @@
         "subagentGuidanceDescription": "Conseils facultatifs sur les types de tâches appropriés ou les contraintes de coût et de qualité. {max} caractères maximum.",
         "subagentGuidancePlaceholder": "Par exemple : privilégier ce modèle pour l'exploration du dépôt et les recherches bien délimitées.",
         "settingsDone": "Terminer"
+      },
+      "externalChannels": {
+        "title": "Canaux externes",
+        "description": "Gérez les connexions Slack dédiées et les participants autorisés à appeler cet agent.",
+        "addConnection": "Ajouter une connexion",
+        "connectionsTitle": "Connexions",
+        "emptyConnectionsTitle": "Aucune connexion de canal externe",
+        "emptyConnectionsDescription": "Connectez une Slack App dédiée pour acheminer les conversations compatibles vers cet agent.",
+        "slack": "Slack",
+        "identityUnavailable": "Identité du fournisseur non vérifiée",
+        "credentialsConfigured": "Identifiants configurés",
+        "credentialsMissing": "Identifiants manquants",
+        "lastVerified": "Dernière vérification",
+        "lastHealth": "Dernier contrôle",
+        "botIdentity": "Identité du bot",
+        "socketGapTitle": "Interruption de livraison Socket détectée",
+        "socketGapDescription": "Vérifiez la connexion et l’historique du canal avant de continuer.",
+        "capabilitiesUnavailable": "Les capacités seront disponibles après validation.",
+        "validate": "Valider",
+        "switchTransport": "Passer à {transport}",
+        "reconnect": "Reconnecter",
+        "disconnect": "Déconnecter",
+        "disconnectConfirm": "Déconnecter définitivement cette connexion ? L’historique existant sera conservé.",
+        "accessTitle": "Accès des participants",
+        "accessDescription": "Consultez les autorisations actives et les participants externes bloqués.",
+        "emptyAccess": "Aucune autorisation ni aucun blocage actif.",
+        "blockNoReason": "Bloqué par un administrateur de l’agent",
+        "revoke": "Révoquer",
+        "unblock": "Débloquer",
+        "reconnectTitle": "Remplacer les identifiants Slack",
+        "setupTitle": "Connecter une Slack App",
+        "appId": "ID de la Slack App",
+        "manifestTitle": "Configuration Slack App requise",
+        "botScopes": "Scopes du bot token",
+        "eventSubscriptions": "Abonnements aux événements",
+        "appTokenScope": "Scope du token applicatif",
+        "callbackPath": "Chemin de callback HTTP",
+        "botToken": "Token OAuth du bot",
+        "signingSecret": "Secret de signature",
+        "appToken": "Token applicatif",
+        "appTokenRequired": "Requis pour Socket Mode.",
+        "appTokenOptional": "Facultatif avec le transport HTTP.",
+        "credentialSafety": "Les identifiants sont chiffrés par le serveur et ne seront plus affichés.",
+        "cancel": "Annuler",
+        "connect": "Connecter",
+        "replaceCredentials": "Remplacer les identifiants",
+        "status": {
+          "configuring": "Configuration",
+          "active": "Active",
+          "degraded": "Dégradée",
+          "reconnect_required": "Reconnexion requise",
+          "disconnecting": "Déconnexion",
+          "disconnected": "Déconnectée"
+        },
+        "transport": {
+          "http": "HTTP",
+          "socket": "Socket Mode"
+        },
+        "route": {
+          "active": "Route active",
+          "inactive": "Route inactive"
+        },
+        "grantScope": {
+          "session": "Accès à la session",
+          "agent": "Accès à l’agent"
+        },
+        "revokeConfirm": "Révoquer l’autorisation d’accès de ce participant ?",
+        "unblockConfirm": "Débloquer ce participant ?"
+      },
+      "sessionChannels": {
+        "title": "Canaux",
+        "description": "Inspectez les liaisons externes, la projection du travail, les livraisons et les accès conservés.",
+        "archivedTitle": "Session archivée",
+        "archivedDescription": "Les canaux externes ont été définitivement déconnectés lors de l’archivage. Cette vue est en lecture seule.",
+        "retentionUnlimited": "Conservation : illimitée",
+        "retentionDays": "Conservation : {count} jours",
+        "purgeAfter": "Suppression après le {value}",
+        "emptyTitle": "Aucune liaison de canal externe",
+        "emptyDescription": "Cette session n’a pas été appelée depuis un canal externe compatible.",
+        "disconnect": "Déconnecter",
+        "disconnectConfirm": "Déconnecter définitivement ce canal de session ? Son historique sera conservé.",
+        "connectedAt": "Connexion",
+        "latestActivity": "Dernière activité",
+        "retainedContext": "Troncature du contexte en attente",
+        "truncationSummary": "{messages} messages · {bytes} octets supprimés",
+        "disconnectReason": "Motif de déconnexion",
+        "channelWork": "Channel Work",
+        "noWork": "Aucun Channel Work n’est associé à cette liaison.",
+        "taskCount": "{count, plural, =1 {1 tâche} other {# tâches}}",
+        "progressDrift": "Dérive de progression",
+        "progressProjected": "Progression projetée",
+        "revisionProgress": "Projection de la révision Channel Work",
+        "revisionDetail": "Révision d’état {current} · révision souhaitée {desired}",
+        "deliveries": "Résultats de livraison",
+        "noDeliveries": "Aucune livraison au fournisseur n’a été tentée.",
+        "grantsTitle": "Accès à la session",
+        "grantsDescription": "Participants autorisés uniquement pour cette session.",
+        "noGrants": "Aucune autorisation active limitée à la session.",
+        "bindingStatus": {
+          "active": "Active",
+          "disconnected": "Déconnectée"
+        },
+        "activationStatus": {
+          "waiting_hydration": "En attente de l’historique",
+          "active": "Invocation active"
+        },
+        "workStatus": {
+          "active": "Travail actif",
+          "finished": "Travail terminé"
+        },
+        "deliveryStatus": {
+          "pending": "En attente",
+          "attempting": "Tentative",
+          "delivered": "Livrée",
+          "failed": "Échec",
+          "unknown": "Résultat inconnu",
+          "not_attempted": "Non tentée"
+        },
+        "operation": {
+          "reply": "Réponse",
+          "progress_create": "Créer la progression",
+          "progress_update": "Mettre à jour la progression",
+          "progress_delete": "Supprimer la progression",
+          "control_message": "Message de contrôle"
+        },
+        "grantScope": {
+          "session": "Accès à la session",
+          "agent": "Accès à l’agent"
+        }
       }
     },
     "toolkits": {

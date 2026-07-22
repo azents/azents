@@ -684,6 +684,10 @@
         "subagents": {
           "label": "Subagents",
           "description": "Delegated agents の同時実行数とネスト制限"
+        },
+        "channels": {
+          "label": "外部チャンネル",
+          "description": "Slack 接続、ルート、参加者アクセス"
         }
       },
       "settingsLayout": {
@@ -695,7 +699,8 @@
           "chat": "チャット",
           "settings": "設定",
           "projects": "プロジェクト",
-          "context": "コンテキスト"
+          "context": "コンテキスト",
+          "channels": "チャンネル"
         },
         "status": {
           "enabled": "有効",
@@ -901,6 +906,135 @@
         "subagentGuidanceDescription": "適切なタスク種別やコスト・品質の制約を任意で案内します。最大 {max} 文字です。",
         "subagentGuidancePlaceholder": "例：リポジトリ探索や範囲が明確な調査に優先して使用します。",
         "settingsDone": "完了"
+      },
+      "externalChannels": {
+        "title": "外部チャンネル",
+        "description": "専用 Slack 接続を運用し、このエージェントを呼び出せる参加者を管理します。",
+        "addConnection": "接続を追加",
+        "connectionsTitle": "接続",
+        "emptyConnectionsTitle": "外部チャンネル接続がありません",
+        "emptyConnectionsDescription": "専用 Slack App を接続し、対応チャンネルの会話をこのエージェントへルーティングします。",
+        "slack": "Slack",
+        "identityUnavailable": "Provider identity は未検証です",
+        "credentialsConfigured": "Credential 設定済み",
+        "credentialsMissing": "Credential 未設定",
+        "lastVerified": "最終検証",
+        "lastHealth": "最終ヘルスチェック",
+        "botIdentity": "Bot identity",
+        "socketGapTitle": "Socket delivery gap を検出しました",
+        "socketGapDescription": "続行する前に接続を検証し、チャンネル履歴を確認してください。",
+        "capabilitiesUnavailable": "Capability は検証後に表示されます。",
+        "validate": "検証",
+        "switchTransport": "{transport} に切り替え",
+        "reconnect": "再接続",
+        "disconnect": "切断",
+        "disconnectConfirm": "この接続を完全に切断しますか？既存のチャンネル履歴は保持されます。",
+        "accessTitle": "参加者アクセス",
+        "accessDescription": "有効な呼び出し権限とブロック済みの外部参加者を確認します。",
+        "emptyAccess": "有効な grant または block はありません。",
+        "blockNoReason": "エージェント管理者がブロック",
+        "revoke": "権限を取り消す",
+        "unblock": "ブロック解除",
+        "reconnectTitle": "Slack credential を置換",
+        "setupTitle": "Slack App を接続",
+        "appId": "Slack App ID",
+        "manifestTitle": "必要な Slack App 設定",
+        "botScopes": "Bot token scope",
+        "eventSubscriptions": "Event subscription",
+        "appTokenScope": "App-level token scope",
+        "callbackPath": "HTTP callback path",
+        "botToken": "Bot user OAuth token",
+        "signingSecret": "Signing secret",
+        "appToken": "App-level token",
+        "appTokenRequired": "Socket Mode では必須です。",
+        "appTokenOptional": "HTTP transport では任意です。",
+        "credentialSafety": "Credential 値はサーバーで暗号化され、再表示されません。",
+        "cancel": "キャンセル",
+        "connect": "接続",
+        "replaceCredentials": "Credential を置換",
+        "status": {
+          "configuring": "設定中",
+          "active": "有効",
+          "degraded": "低下",
+          "reconnect_required": "再接続が必要",
+          "disconnecting": "切断中",
+          "disconnected": "切断済み"
+        },
+        "transport": {
+          "http": "HTTP",
+          "socket": "Socket Mode"
+        },
+        "route": {
+          "active": "Route 有効",
+          "inactive": "Route 無効"
+        },
+        "grantScope": {
+          "session": "セッションアクセス",
+          "agent": "エージェントアクセス"
+        },
+        "revokeConfirm": "この参加者のアクセス権限を取り消しますか？",
+        "unblockConfirm": "この参加者のブロックを解除しますか？"
+      },
+      "sessionChannels": {
+        "title": "チャンネル",
+        "description": "外部チャンネル binding、work projection、delivery 結果、保持されたアクセスを確認します。",
+        "archivedTitle": "アーカイブ済みセッション",
+        "archivedDescription": "アーカイブ時に外部チャンネルは完全に切断されました。この画面は読み取り専用です。",
+        "retentionUnlimited": "保持期間：無期限",
+        "retentionDays": "保持期間：{count}日",
+        "purgeAfter": "{value} 以降に削除",
+        "emptyTitle": "外部チャンネル binding がありません",
+        "emptyDescription": "対応する外部チャンネルからこのセッションが呼び出されたことはありません。",
+        "disconnect": "切断",
+        "disconnectConfirm": "このセッションチャンネルを完全に切断しますか？履歴は保持されます。",
+        "connectedAt": "接続日時",
+        "latestActivity": "最新アクティビティ",
+        "retainedContext": "Pending context の切り詰め",
+        "truncationSummary": "{messages}件 · {bytes}バイトを削除",
+        "disconnectReason": "切断理由",
+        "channelWork": "Channel Work",
+        "noWork": "この binding に関連する Channel Work はありません。",
+        "taskCount": "タスク {count}件",
+        "progressDrift": "Progress drift",
+        "progressProjected": "Progress 反映済み",
+        "revisionProgress": "Channel Work revision の反映",
+        "revisionDetail": "State revision {current} · desired progress revision {desired}",
+        "deliveries": "Delivery 結果",
+        "noDeliveries": "Provider delivery はまだ試行されていません。",
+        "grantsTitle": "セッションアクセス",
+        "grantsDescription": "このセッションに限定して許可された参加者です。",
+        "noGrants": "有効な session-scoped grant はありません。",
+        "bindingStatus": {
+          "active": "有効",
+          "disconnected": "切断済み"
+        },
+        "activationStatus": {
+          "waiting_hydration": "履歴の取得待ち",
+          "active": "呼び出し有効"
+        },
+        "workStatus": {
+          "active": "Work 実行中",
+          "finished": "Work 完了"
+        },
+        "deliveryStatus": {
+          "pending": "待機中",
+          "attempting": "試行中",
+          "delivered": "配信済み",
+          "failed": "失敗",
+          "unknown": "結果不明",
+          "not_attempted": "未試行"
+        },
+        "operation": {
+          "reply": "返信",
+          "progress_create": "Progress を作成",
+          "progress_update": "Progress を更新",
+          "progress_delete": "Progress を削除",
+          "control_message": "Control message"
+        },
+        "grantScope": {
+          "session": "セッションアクセス",
+          "agent": "エージェントアクセス"
+        }
       }
     },
     "toolkits": {

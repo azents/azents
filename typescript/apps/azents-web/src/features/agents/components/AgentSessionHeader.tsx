@@ -26,6 +26,7 @@ import {
   IconMenu2,
   IconMessageCircle,
   IconPencil,
+  IconPlugConnected,
   IconRobot,
   IconTrash,
 } from "@tabler/icons-react";
@@ -48,12 +49,15 @@ function isContextPage(value: string | null): boolean {
 
 function resolveActiveTab(
   page: string | null,
-): "chat" | "context" | "subagents" {
+): "chat" | "context" | "subagents" | "channels" {
   if (isContextPage(page)) {
     return "context";
   }
   if (page === "subagents") {
     return "subagents";
+  }
+  if (page === "channels") {
+    return "channels";
   }
   return "chat";
 }
@@ -187,6 +191,8 @@ export function AgentSessionHeader({
         router.push(`${basePath}/sessions/${sessionId}?page=context`);
       } else if (value === "subagents") {
         router.push(`${basePath}/sessions/${sessionId}?page=subagents`);
+      } else if (value === "channels") {
+        router.push(`${basePath}/sessions/${sessionId}?page=channels`);
       }
     },
     [router, basePath, sessionId],
@@ -337,6 +343,12 @@ export function AgentSessionHeader({
             </Tabs.Tab>
             <Tabs.Tab value="subagents" leftSection={<IconRobot size={14} />}>
               {t("subagents.title")}
+            </Tabs.Tab>
+            <Tabs.Tab
+              value="channels"
+              leftSection={<IconPlugConnected size={rem(14)} />}
+            >
+              {t("tabs.channels")}
             </Tabs.Tab>
           </Tabs.List>
         </Tabs>

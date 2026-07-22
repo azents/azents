@@ -3,10 +3,11 @@ import { notFound, redirect } from "next/navigation";
 import { AgentChatTabPage } from "@/features/agents/AgentChatTabPage";
 import { AgentContextPage } from "@/features/agents/AgentContextPage";
 import { AgentSubagentsPage } from "@/features/agents/AgentSubagentsPage";
+import { SessionChannelsPage } from "@/features/session-channels/SessionChannelsPage";
 import { trpc } from "@/trpc/server";
 import type { AgentContextPageView } from "@/features/agents/AgentContextPage";
 
-type SessionPageView = "chat" | "subagents" | AgentContextPageView;
+type SessionPageView = "chat" | "subagents" | "channels" | AgentContextPageView;
 
 function parsePageView(value?: string | string[]): SessionPageView {
   const rawValue = Array.isArray(value) ? value[0] : value;
@@ -14,7 +15,8 @@ function parsePageView(value?: string | string[]): SessionPageView {
     rawValue === "context" ||
     rawValue === "system-prompt" ||
     rawValue === "raw-events" ||
-    rawValue === "subagents"
+    rawValue === "subagents" ||
+    rawValue === "channels"
   ) {
     return rawValue;
   }
@@ -45,6 +47,15 @@ export default async function Page({
     if (view === "subagents") {
       return (
         <AgentSubagentsPage
+          handle={handle}
+          agent={agent}
+          sessionId={sessionId}
+        />
+      );
+    }
+    if (view === "channels") {
+      return (
+        <SessionChannelsPage
           handle={handle}
           agent={agent}
           sessionId={sessionId}
