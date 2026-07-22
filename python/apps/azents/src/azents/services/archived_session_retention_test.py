@@ -390,16 +390,16 @@ async def test_invalid_unstarted_purge_jobs_are_cancelled_in_bounded_batches(
     assert jobs_by_root[valid_root_id].status is ArchivedSessionPurgeStatus.PENDING
 
 
-async def test_unstarted_purge_job_with_active_child_is_cancelled(
+async def test_purge_job_with_active_status_child_is_claimable(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> None:
-    """A root schedule cannot purge a tree containing an active child Session."""
+    """An archived root remains claimable when a child status is stale."""
     repository = ArchivedSessionRetentionRepository()
     now = datetime.datetime.now(datetime.UTC)
     async with rdb_session_manager() as session:
         root_session_id = await _create_root(
             session,
-            suffix="active-child-cancel",
+            suffix="active-child-claim",
         )
         active_child_session_id = await _create_child_session(
             session,
@@ -429,28 +429,13 @@ async def test_unstarted_purge_job_with_active_child_is_cancelled(
             lease_owner="purge-worker",
             lease_until=now + datetime.timedelta(minutes=1),
         )
-    assert claimed is None
-
-    async with rdb_session_manager() as session:
-        cancelled_count = await repository.cancel_invalid_unstarted_purge_jobs(
-            session,
-            now=now,
-            limit=100,
-        )
         child = await session.get(RDBAgentSession, active_child_session_id)
-        job = await session.scalar(
-            sa.select(RDBArchivedSessionPurgeJob).where(
-                RDBArchivedSessionPurgeJob.root_session_id == root_session_id
-            )
-        )
 
-    assert cancelled_count == 1
+    assert claimed is not None
+    assert claimed.status is ArchivedSessionPurgeStatus.FENCING
+    assert claimed.fencing_started_at is not None
     assert child is not None
     assert child.status is AgentSessionStatus.ACTIVE
-    assert job is not None
-    assert job.status is ArchivedSessionPurgeStatus.CANCELLED
-    assert job.fencing_started_at is None
-    assert job.last_error_kind == "InvalidRootTree"
 
 
 async def test_purge_job_with_fully_archived_child_tree_is_claimable(
@@ -503,10 +488,10 @@ async def test_purge_job_with_fully_archived_child_tree_is_claimable(
     assert claimed.fencing_started_at is not None
 
 
-async def test_fenced_purge_job_with_active_child_is_neither_claimed_nor_cancelled(
+async def test_fenced_purge_job_with_active_status_child_is_reclaimed(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> None:
-    """An inconsistent fenced job waits for explicit repair without retry churn."""
+    """A fenced legacy job resumes from the archived root authority."""
     repository = ArchivedSessionRetentionRepository()
     now = datetime.datetime.now(datetime.UTC)
     async with rdb_session_manager() as session:
@@ -556,9 +541,11 @@ async def test_fenced_purge_job_with_active_child_is_neither_claimed_nor_cancell
         )
 
     assert cancelled_count == 0
-    assert claimed is None
+    assert claimed is not None
+    assert claimed.status is ArchivedSessionPurgeStatus.FENCING
+    assert claimed.attempt_count == 1
     assert persisted is not None
-    assert persisted.status is ArchivedSessionPurgeStatus.RETRY_WAIT
+    assert persisted.status is ArchivedSessionPurgeStatus.FENCING
     assert persisted.fencing_started_at is not None
     assert persisted.cancelled_at is None
 

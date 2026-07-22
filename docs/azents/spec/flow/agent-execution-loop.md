@@ -270,11 +270,12 @@ check is clear. Restore is permitted only before this purge fence starts. A rest
 linked session to active state and may then admit work through the ordinary boundaries.
 
 A due purge job may cross the fence only when its root archive schedule still matches the persisted
-job and every `AgentSession` in the linked root `SessionAgent` tree remains archived. An invalid
-pending or retry-wait job is cancelled only while `fencing_started_at` is still null. If a previously
-fenced job is found with a non-archived tree member, automatic cancellation and reclaim both stop; the
-job remains available for explicit operational repair rather than retrying cleanup or weakening the
-all-tree archive validation.
+job. The root `AgentSession` is the lifecycle authority for the linked `SessionAgent` tree: a stale
+child `AgentSession.status` does not independently reactivate the child or block purge after the root
+is archived. Purge snapshots and revalidates the complete tree membership, fences every linked
+session owner generation regardless of child status, stops active work, and deletes the complete tree.
+An invalid pending or retry-wait job is cancelled only when the root archive schedule no longer
+matches and `fencing_started_at` is still null.
 
 `agent_runs` replaces SDK `RunState`. Run phase is also the UI activity source.
 

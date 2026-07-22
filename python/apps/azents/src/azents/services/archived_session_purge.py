@@ -287,11 +287,18 @@ class ArchivedSessionPurgeService:
                     exchange_file_count=0,
                     worktree_count=0,
                 )
-            if any(item.status is not AgentSessionStatus.ARCHIVED for item in sessions):
-                raise RuntimeError("Purge root tree is no longer archived")
+            root_session = next(
+                (item for item in sessions if item.id == job.root_session_id),
+                None,
+            )
+            if (
+                root_session is None
+                or root_session.status is not AgentSessionStatus.ARCHIVED
+            ):
+                raise RuntimeError("Purge root session is no longer archived")
             session_ids = [item.id for item in sessions]
             fenced_count = (
-                await self.agent_session_repository.fence_archived_owner_generations(
+                await self.agent_session_repository.fence_purge_owner_generations(
                     session,
                     session_ids=session_ids,
                 )
@@ -331,7 +338,6 @@ class ArchivedSessionPurgeService:
                 worktree_count=0,
             )
 
-        root_session = next(item for item in sessions if item.id == job.root_session_id)
         context = SessionLifecyclePurgeContext(
             purge_job_id=job.id,
             lease_owner=lease_owner,
@@ -532,11 +538,15 @@ class ArchivedSessionPurgeService:
             )
             if {item.id for item in final_sessions} != set(session_ids):
                 raise RuntimeError("Purge root tree boundary changed during cleanup")
-            if any(
-                item.status is not AgentSessionStatus.ARCHIVED
-                for item in final_sessions
+            final_root_session = next(
+                (item for item in final_sessions if item.id == job.root_session_id),
+                None,
+            )
+            if (
+                final_root_session is None
+                or final_root_session.status is not AgentSessionStatus.ARCHIVED
             ):
-                raise RuntimeError("Purge root tree is no longer archived")
+                raise RuntimeError("Purge root session is no longer archived")
             model_files = await self.model_file_repository.list_for_session_ids(
                 session,
                 session_ids=session_ids,
