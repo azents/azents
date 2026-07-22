@@ -172,6 +172,10 @@ class RDBExternalChannelConnection(RDBModel):
         "workspace_id",
     )
     IX_STATUS = sa.Index("ix_external_channel_connections_status", "status")
+    IX_SOCKET_LEASE_UNTIL = sa.Index(
+        "ix_external_channel_connections_socket_lease_until",
+        "socket_lease_until",
+    )
     UQ_INSTALLATION_IDENTITY = sa.Index(
         "uq_external_channel_connections_installation_identity",
         "workspace_id",
@@ -264,6 +268,31 @@ class RDBExternalChannelConnection(RDBModel):
         nullable=True,
         default=None,
     )
+    socket_lease_owner: Mapped[str | None] = mapped_column(
+        sa.String(255),
+        nullable=True,
+        default=None,
+    )
+    socket_lease_until: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime,
+        nullable=True,
+        default=None,
+    )
+    socket_heartbeat_at: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime,
+        nullable=True,
+        default=None,
+    )
+    socket_gap_detected_at: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime,
+        nullable=True,
+        default=None,
+    )
+    socket_gap_reason: Mapped[str | None] = mapped_column(
+        sa.String(255),
+        nullable=True,
+        default=None,
+    )
     created_at: Mapped[datetime.datetime] = mapped_column(
         TimeZoneDateTime,
         init=False,
@@ -281,6 +310,7 @@ class RDBExternalChannelConnection(RDBModel):
     __table_args__ = (
         IX_WORKSPACE_ID,
         IX_STATUS,
+        IX_SOCKET_LEASE_UNTIL,
         UQ_INSTALLATION_IDENTITY,
         UQ_HTTP_CALLBACK_SELECTOR_HASH,
     )

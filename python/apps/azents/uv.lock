@@ -318,6 +318,7 @@ dependencies = [
     { name = "types-pytz" },
     { name = "tzdata" },
     { name = "uvicorn" },
+    { name = "websockets" },
 ]
 
 [package.dev-dependencies]
@@ -373,6 +374,7 @@ requires-dist = [
     { name = "types-pytz", specifier = "==2026.2.0.20260506" },
     { name = "tzdata", specifier = "==2026.2" },
     { name = "uvicorn", specifier = "==0.46.0" },
+    { name = "websockets", specifier = "==15.0.1" },
 ]
 
 [package.metadata.requires-dev]

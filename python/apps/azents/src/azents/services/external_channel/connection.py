@@ -139,6 +139,11 @@ class ExternalChannelConnectionService:
             last_verified_at=None,
             last_health_at=None,
             disconnected_at=None,
+            socket_lease_owner=None,
+            socket_lease_until=None,
+            socket_heartbeat_at=None,
+            socket_gap_detected_at=None,
+            socket_gap_reason=None,
         )
         async with self.session_manager() as session:
             connection = await self.repository.create_connection(session, create)
