@@ -70,6 +70,31 @@ class ExternalChannelConnectionCreate(_Record):
     encrypted_credentials: str | None
     capabilities: dict[str, Any] | None
     provider_config: dict[str, Any] | None
+    last_verified_at: datetime.datetime | None
+    last_health_at: datetime.datetime | None
+    disconnected_at: datetime.datetime | None
+
+
+class ExternalChannelConnectionConfiguration(_Record):
+    """Internal connection configuration including encrypted credentials."""
+
+    id: str
+    workspace_id: str
+    provider: ExternalChannelProvider
+    transport: ExternalChannelTransport
+    status: ExternalChannelConnectionStatus
+    provider_app_id: str | None
+    provider_tenant_id: str | None
+    provider_bot_user_id: str | None
+    http_callback_selector_hash: str | None
+    encrypted_credentials: str | None
+    capabilities: dict[str, Any] | None
+    provider_config: dict[str, Any] | None
+    last_verified_at: datetime.datetime | None
+    last_health_at: datetime.datetime | None
+    disconnected_at: datetime.datetime | None
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
 
 
 class ExternalChannelAgentRoute(_Record):

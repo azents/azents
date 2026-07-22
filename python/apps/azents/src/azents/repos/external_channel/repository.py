@@ -1,5 +1,6 @@
 """External Channel persistence repository."""
 
+import datetime
 from collections.abc import Awaitable, Callable
 from typing import TypeVar
 
@@ -11,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     ExternalChannelBindingStatus,
+    ExternalChannelConnectionStatus,
     ExternalChannelRouteStatus,
     ExternalChannelWorkStatus,
 )
@@ -49,6 +51,7 @@ from .data import (
     ExternalChannelBlock,
     ExternalChannelBlockCreate,
     ExternalChannelConnection,
+    ExternalChannelConnectionConfiguration,
     ExternalChannelConnectionCreate,
     ExternalChannelDeliveryAttempt,
     ExternalChannelDeliveryAttemptCreate,
@@ -113,6 +116,63 @@ class ExternalChannelRepository:
             )
         )
         return self._as(ExternalChannelConnection, rdb)
+
+    async def get_connection_configuration(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+    ) -> ExternalChannelConnectionConfiguration | None:
+        """Fetch one internal connection configuration including ciphertext."""
+        rdb = await session.get(RDBExternalChannelConnection, connection_id)
+        return self._as(ExternalChannelConnectionConfiguration, rdb)
+
+    async def get_connection_configuration_by_http_callback_selector_hash(
+        self,
+        session: AsyncSession,
+        *,
+        http_callback_selector_hash: str,
+    ) -> ExternalChannelConnectionConfiguration | None:
+        """Fetch the internal callback configuration selected by an opaque hash."""
+        rdb = await session.scalar(
+            sa.select(RDBExternalChannelConnection).where(
+                RDBExternalChannelConnection.http_callback_selector_hash
+                == http_callback_selector_hash
+            )
+        )
+        return self._as(ExternalChannelConnectionConfiguration, rdb)
+
+    async def update_connection_health(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+        status: ExternalChannelConnectionStatus,
+        provider_tenant_id: str | None,
+        provider_bot_user_id: str | None,
+        capabilities: dict[str, object] | None,
+        checked_at: datetime.datetime,
+    ) -> ExternalChannelConnection | None:
+        """Update redacted provider identity and health after validation."""
+        rdb = await session.scalar(
+            sa.select(RDBExternalChannelConnection)
+            .where(RDBExternalChannelConnection.id == connection_id)
+            .with_for_update()
+        )
+        if rdb is None:
+            return None
+        rdb.status = status
+        if provider_tenant_id is not None:
+            rdb.provider_tenant_id = provider_tenant_id
+        if provider_bot_user_id is not None:
+            rdb.provider_bot_user_id = provider_bot_user_id
+        if capabilities is not None:
+            rdb.capabilities = capabilities
+        rdb.last_health_at = checked_at
+        if status is ExternalChannelConnectionStatus.ACTIVE:
+            rdb.last_verified_at = checked_at
+        await session.flush()
+        return ExternalChannelConnection.model_validate(rdb)
 
     async def lock_connection(
         self,

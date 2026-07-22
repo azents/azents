@@ -58,6 +58,9 @@ def _connection_create(workspace_id: str) -> ExternalChannelConnectionCreate:
         encrypted_credentials="ciphertext-only",
         capabilities=None,
         provider_config=None,
+        last_verified_at=None,
+        last_health_at=None,
+        disconnected_at=None,
     )
 
 
@@ -103,6 +106,12 @@ class TestExternalChannelRepository:
         assert found == created
         assert not hasattr(created, "encrypted_credentials")
         assert created.provider is ExternalChannelProvider.SLACK
+        configuration = await repo.get_connection_configuration(
+            rdb_session,
+            connection_id=created.id,
+        )
+        assert configuration is not None
+        assert configuration.encrypted_credentials == "ciphertext-only"
 
     async def test_event_admission_returns_existing_event_for_provider_retry(
         self,
