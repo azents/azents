@@ -1,7 +1,7 @@
 ---
 title: "External Channel Agent Conversation Design"
 created: 2026-07-21
-updated: 2026-07-21
+updated: 2026-07-22
 tags: [slack, integration, agent, security, architecture, frontend, testing]
 document_role: primary
 document_type: design
@@ -929,31 +929,9 @@ Migrations introduce the External Channel domain in dependency order:
 
 Use server-side capability gating until required phases are deployed. Do not expose a connection as active before ingress, authorization, message projection, and explicit outbound action are all available.
 
-Suggested delivery phases:
-
-1. Common External Channel persistence, provider interfaces, event taxonomy, terminal-on-archive lifecycle policy, ownership manifest, and API skeleton.
-2. Slack connection setup, connection-specific HTTP callback verification, Socket manager, and durable event admission.
-3. Resource/message staging, approval, grants/blocks, bindings, invocation projection, and archive/restore/purge/decommission integration.
-4. External message lowering and Web chat presentation with original links.
-5. Channel Action, Channel Work, turn-time/compaction enrichment, continuation, and progress projection.
-6. Agent Settings, Session Channels management, archive consequences, disconnect, revocation, and failure recovery UX.
-7. Full deterministic E2E, optional live Slack verification, living-spec updates, and operational release gate.
-
-This scope requires stacked PRs rather than one focused PR.
-
 ### Rollback
 
 Before the first External Channel event is written, application rollback may return to the pre-feature binary after disabling connection activation and stopping Socket owners. After new input/event enum values or payloads exist, rollback is operational: deploy a feature-disabled build that still understands the new schema and preserves the rows. Do not downgrade to a binary that cannot parse the new event kinds, delete historical AgentSession events, or fabricate provider delivery success. Connections requiring cleanup remain visible for a forward recovery.
-
-### Required living-spec updates
-
-The implementation updates current behavior documents in the final pre-QA phase:
-
-- `docs/azents/spec/domain/conversation.md` for input, canonical external events, Web projection, and session lifecycle;
-- `docs/azents/spec/domain/toolkit.md` for the auto-bound tool, dynamic prompt, Channel Work, compaction, and continuation integration;
-- `docs/azents/spec/flow/agent-execution-loop.md` for batch lowering and Channel Action recovery;
-- `docs/azents/spec/flow/chat-session-resync.md` for external live/durable semantic identity; and
-- new External Channel domain and provider-ingress flow specs covering connection, access, work, delivery, Slack transport, and disconnect behavior.
 
 ## Test Strategy
 
