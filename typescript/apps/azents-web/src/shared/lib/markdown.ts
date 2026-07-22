@@ -1,7 +1,7 @@
-/** Convert a Goal Markdown objective into one normalized preview line. */
+/** Normalize Markdown into one whitespace-normalized plain-text string. */
 
-export function normalizeGoalPreviewText(objective: string): string {
-  return objective
+export function normalizeMarkdownToPlainText(markdown: string): string {
+  return markdown
     .replace(/\r\n?/gu, "\n")
     .replace(/<!--[\s\S]*?-->/gu, " ")
     .replace(/!\[([^\]\n]*)\]\([^)]+\)/gu, "$1")

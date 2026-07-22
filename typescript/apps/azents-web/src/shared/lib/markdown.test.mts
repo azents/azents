@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { normalizeGoalPreviewText } from "./goalText.ts";
+import { normalizeMarkdownToPlainText } from "./markdown.ts";
 
-void test("normalizes Goal Markdown into readable preview text", () => {
+void test("normalizes Markdown into readable plain text", () => {
   assert.equal(
-    normalizeGoalPreviewText(`
+    normalizeMarkdownToPlainText(`
 # Ship the **external channel** Goal
 
 - [ ] Review \`SlackTransport\` [design](https://example.com/design)
@@ -17,7 +17,7 @@ void test("normalizes Goal Markdown into readable preview text", () => {
 
 void test("preserves text content while removing Markdown-only syntax", () => {
   assert.equal(
-    normalizeGoalPreviewText(`
+    normalizeMarkdownToPlainText(`
 > ![Azents logo](https://example.com/logo.svg) **Review** the [release notes][notes].
 
 \`\`\`ts
@@ -30,9 +30,9 @@ const complete = true;
   );
 });
 
-void test("collapses all whitespace into one preview line", () => {
+void test("collapses all whitespace into one plain-text line", () => {
   assert.equal(
-    normalizeGoalPreviewText("  Complete\n\n  the\tGoal  "),
+    normalizeMarkdownToPlainText("  Complete\n\n  the\tGoal  "),
     "Complete the Goal",
   );
 });

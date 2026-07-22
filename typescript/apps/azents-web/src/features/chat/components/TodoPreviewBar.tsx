@@ -28,7 +28,7 @@ import {
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { type ReactElement, useMemo, useState } from "react";
-import { normalizeGoalPreviewText } from "./goalText";
+import { normalizeMarkdownToPlainText } from "@/shared/lib/markdown";
 import { MarkdownContent } from "./MarkdownContent";
 import type {
   GoalStateSnapshot,
@@ -616,7 +616,7 @@ export function TodoPreviewBar({
   const previewText =
     activeGoal === null
       ? (item?.content ?? null)
-      : normalizeGoalPreviewText(activeGoal.objective ?? "") || null;
+      : normalizeMarkdownToPlainText(activeGoal.objective ?? "") || null;
   const previewStatus = activeGoal?.status ?? null;
 
   const toggleExpanded = (key: string): void => {
