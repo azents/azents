@@ -45,6 +45,9 @@ def test_runtime_provider_kubernetes_default_off_render_contract() -> None:
     assert 'key: "helm/default/azents"' in rendered
     assert "providers:\n      []" in rendered
     assert "AZ_RUNTIME_DEFAULT_PROVIDER_ID" not in rendered
+    assert "AZ_RUNTIME_PROVIDER_BOOTSTRAP_SOURCE_KEY" in rendered
+    assert "AZ_RUNTIME_PROVIDER_BOOTSTRAP_SOURCE_PATH" in rendered
+    assert "mountPath: /var/run/azents/runtime-provider-bootstrap" in rendered
 
 
 def test_runtime_provider_kubernetes_enabled_render_contract() -> None:
@@ -63,6 +66,7 @@ def test_runtime_provider_kubernetes_enabled_render_contract() -> None:
     assert "providerId: system-kubernetes" in rendered
     assert "availabilityMode: platform_wide" in rendered
     assert "AZ_RUNTIME_DEFAULT_PROVIDER_ID" not in rendered
+    assert "mountPath: /var/run/azents/runtime-provider-bootstrap" in rendered
     assert "repo/provider:sha" in rendered
     assert "repo/runner:sha" in rendered
     assert "AZ_RUNTIME_CONTROL_ENDPOINT" in rendered

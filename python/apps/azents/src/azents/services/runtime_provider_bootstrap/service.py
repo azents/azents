@@ -2,8 +2,10 @@
 
 import dataclasses
 import datetime
+from typing import Annotated
 
 from azcommon.datetime import tznow
+from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
@@ -13,6 +15,16 @@ from azents.core.enums import (
     RuntimeProviderRegistrationMethod,
     RuntimeProviderScope,
 )
+from azents.core.platform_runtime_system_setting import (
+    PlatformRuntimeConfig,
+    get_platform_runtime_definition,
+)
+from azents.core.system_setting import (
+    SystemSettingAuditEventType,
+    SystemSettingAuditSource,
+    SystemSettingSection,
+)
+from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.runtime_provider.data import (
     RuntimeProvider,
@@ -24,6 +36,11 @@ from azents.repos.runtime_provider.data import (
     RuntimeProviderCreate,
 )
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
+from azents.repos.system_setting.data import (
+    SystemSettingAuditEventCreate,
+    SystemSettingCurrentWrite,
+)
+from azents.repos.system_setting.repository import SystemSettingRepository
 
 from .data import (
     RuntimeProviderBootstrapDeclarationInput,
@@ -53,8 +70,13 @@ class _DeclarationReconcileOutcome:
 class RuntimeProviderBootstrapService:
     """Reconcile successful authoritative bootstrap source snapshots."""
 
-    session_manager: SessionManager[AsyncSession]
-    repository: RuntimeProviderRepository
+    session_manager: Annotated[
+        SessionManager[AsyncSession], Depends(get_session_manager)
+    ]
+    repository: Annotated[RuntimeProviderRepository, Depends(RuntimeProviderRepository)]
+    system_setting_repository: Annotated[
+        SystemSettingRepository, Depends(SystemSettingRepository)
+    ]
 
     async def reconcile(
         self,
@@ -310,6 +332,17 @@ class RuntimeProviderBootstrapService:
                 withdrawn_at=None,
                 updated_at=now,
             )
+        await self._seed_platform_default_when_unset(
+            session=session,
+            source=source,
+            declaration=declaration,
+            creation_seeds=(
+                existing.creation_seeds
+                if existing is not None and existing.creation_seeds is not None
+                else declaration.creation_seeds
+            ),
+            now=now,
+        )
         await self.repository.append_audit_event(
             session,
             create=RuntimeProviderAuditEventCreate(
@@ -338,6 +371,89 @@ class RuntimeProviderBootstrapService:
             created_provider_id=created.id,
             reconciled_provider_id=created.id,
             conflicted_declaration_key=None,
+        )
+
+    async def _seed_platform_default_when_unset(
+        self,
+        *,
+        session: AsyncSession,
+        source: RuntimeProviderBootstrapSource,
+        declaration: RuntimeProviderBootstrapDeclarationInput,
+        creation_seeds: dict[str, object] | None,
+        now: datetime.datetime,
+    ) -> None:
+        """Apply the creation-only Platform default seed when policy is unset."""
+        if not creation_seeds or not creation_seeds.get(
+            "set_as_platform_default_when_unset",
+            False,
+        ):
+            return
+        section = SystemSettingSection.PLATFORM_RUNTIME
+        await self.system_setting_repository.acquire_section_lock(
+            session,
+            section=section,
+        )
+        current = await self.system_setting_repository.get_current(
+            session,
+            section=section,
+        )
+        candidate = await self.system_setting_repository.get_candidate(
+            session,
+            section=section,
+        )
+        if candidate is not None:
+            return
+        if current is not None:
+            current_config = PlatformRuntimeConfig.model_validate(current.config)
+            if current_config.default_provider_id is not None:
+                return
+        definition = get_platform_runtime_definition()
+        previous_version = current.version if current is not None else 0
+        next_version = previous_version + 1
+        config = PlatformRuntimeConfig(
+            default_provider_id=declaration.provider_logical_id
+        )
+        await self.system_setting_repository.write_current(
+            session,
+            write=SystemSettingCurrentWrite(
+                section=section,
+                schema_version=definition.schema_version,
+                version=next_version,
+                config=config.model_dump(mode="json"),
+                encrypted_secrets=(
+                    current.encrypted_secrets if current is not None else None
+                ),
+                secret_metadata=(
+                    current.secret_metadata if current is not None else {}
+                ),
+                validation_status=None,
+                validated_generation=None,
+                validation_metadata=None,
+                validated_at=None,
+                updated_by_user_id=None,
+            ),
+        )
+        await self.system_setting_repository.append_audit_event(
+            session,
+            create=SystemSettingAuditEventCreate(
+                section=section,
+                event_type=SystemSettingAuditEventType.ACTIVATED,
+                source=SystemSettingAuditSource.SYSTEM,
+                previous_version=previous_version,
+                new_version=next_version,
+                actor_user_id=None,
+                changed_fields=["default_provider_id"],
+                secret_actions={},
+                validation_status=None,
+                candidate_id=None,
+                impact_confirmed=False,
+                confirmation_action=None,
+                metadata={
+                    "bootstrap_source_key": source.source_key,
+                    "bootstrap_declaration_key": declaration.declaration_key,
+                },
+                created_at=now,
+            ),
         )
 
     async def _reconcile_linked_declaration(
