@@ -250,6 +250,16 @@ class RunningSessionArchiveBlocked:
 
 
 @dataclasses.dataclass(frozen=True)
+class ArchiveWorktreeIntegrityBlocked:
+    """Owned Git worktree cannot cross the archive preservation boundary."""
+
+    allocation_id: str
+    reason_code: str
+    stage: str
+    summary: str
+
+
+@dataclasses.dataclass(frozen=True)
 class PurgeStartedRestoreBlocked:
     """Restore is blocked after irreversible purge fencing starts."""
 
@@ -277,6 +287,7 @@ ArchiveSessionError = (
     | SubagentSessionReadOnly
     | PrimarySessionArchiveBlocked
     | RunningSessionArchiveBlocked
+    | ArchiveWorktreeIntegrityBlocked
 )
 RestoreSessionError = SessionNotFound | SessionAccessDenied | PurgeStartedRestoreBlocked
 UpdateSessionTitleError = (

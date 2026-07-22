@@ -62,6 +62,7 @@ from azents.services.session_git_worktree import (
     ExistingProjectWorkspaceItem,
     GitWorktreeWorkspaceItem,
     NewSessionWorkspaceItem,
+    SessionGitWorktreeService,
 )
 from azents.services.session_lifecycle.orchestrator import (
     SessionLifecycleOrchestrator,
@@ -80,6 +81,7 @@ from .data import (
     AgentNotFound,
     ArchiveSessionError,
     ArchiveSessionResult,
+    ArchiveWorktreeIntegrityBlocked,
     ChatLiveRunOperation,
     ChatLiveRunRetryAttempt,
     ChatLiveRunRetryState,
@@ -326,6 +328,10 @@ class ChatSessionService:
         Depends(SessionWorkspaceProjectRepository),
     ]
     input_buffer_service: Annotated[InputBufferService, Depends(InputBufferService)]
+    session_git_worktree_service: Annotated[
+        SessionGitWorktreeService,
+        Depends(SessionGitWorktreeService),
+    ]
     lifecycle_orchestrator: Annotated[
         SessionLifecycleOrchestrator,
         Depends(get_session_lifecycle_orchestrator),
@@ -991,6 +997,30 @@ class ChatSessionService:
                 session_ids=session_ids,
             ):
                 return Failure(RunningSessionArchiveBlocked())
+            worktree_allocations = (
+                await self.session_git_worktree_repository.lock_by_session_id(
+                    session,
+                    session_id=session_id,
+                )
+            )
+            if worktree_allocations:
+                integrity_failure = (
+                    await self.session_git_worktree_service.validate_archive_integrity(
+                        agent_id=agent_id,
+                        root_session_id=session_id,
+                        subtree_session_ids=session_ids,
+                        allocations=worktree_allocations,
+                    )
+                )
+                if integrity_failure is not None:
+                    return Failure(
+                        ArchiveWorktreeIntegrityBlocked(
+                            allocation_id=integrity_failure.allocation_id,
+                            reason_code=integrity_failure.reason_code,
+                            stage="archive_preflight",
+                            summary=integrity_failure.summary,
+                        )
+                    )
             settings = await self.archived_session_retention_repository.lock_settings(
                 session
             )

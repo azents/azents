@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import shutil
 import signal
 import subprocess
 import threading
@@ -1378,15 +1379,50 @@ async def test_git_create_remove_worktree_and_delete_branch(tmp_path: Path) -> N
 
     await operations.handle(
         _operation(
+            operation_type="inspect_git_worktree",
+            payload={
+                "source_project_path": str(repo),
+                "worktree_path": str(worktree_path),
+                "branch_name": "azents/session",
+            },
+        )
+    )
+    assert client.events[-1].payload == {
+        "worktree_path": str(worktree_path),
+        "worktree_registered": True,
+        "registered_branch_name": "azents/session",
+        "target_kind": "directory",
+        "dirty": False,
+    }
+
+    (worktree_path / "dirty.txt").write_text("preserved\n")
+    await operations.handle(
+        _operation(
+            operation_type="inspect_git_worktree",
+            payload={
+                "source_project_path": str(repo),
+                "worktree_path": str(worktree_path),
+                "branch_name": "azents/session",
+            },
+        )
+    )
+    assert client.events[-1].payload["dirty"] is True
+
+    await operations.handle(
+        _operation(
             operation_type="remove_git_worktree",
             payload={
                 "source_project_path": str(repo),
                 "worktree_path": str(worktree_path),
+                "branch_name": "azents/session",
                 "force": True,
             },
         )
     )
-    assert client.events[-1].payload == {"removed_worktree_path": str(worktree_path)}
+    assert client.events[-1].payload == {
+        "removed_worktree_path": str(worktree_path),
+        "outcome": "removed",
+    }
     assert not worktree_path.exists()
 
     await operations.handle(
@@ -1398,7 +1434,221 @@ async def test_git_create_remove_worktree_and_delete_branch(tmp_path: Path) -> N
             },
         )
     )
-    assert client.events[-1].payload == {"deleted_branch_name": "azents/session"}
+    assert client.events[-1].payload == {
+        "deleted_branch_name": "azents/session",
+        "outcome": "deleted",
+    }
+
+    await operations.handle(
+        _operation(
+            operation_type="delete_git_branch",
+            payload={
+                "source_project_path": str(repo),
+                "branch_name": "azents/session",
+            },
+        )
+    )
+    assert client.events[-1].payload == {
+        "deleted_branch_name": "azents/session",
+        "outcome": "already_absent",
+    }
+
+
+@pytest.mark.asyncio
+async def test_git_remove_worktree_treats_missing_target_as_terminal(
+    tmp_path: Path,
+) -> None:
+    repo = _init_git_repo(tmp_path / "repo")
+    worktree_path = tmp_path / "worktree"
+    _git(
+        repo,
+        "worktree",
+        "add",
+        "-b",
+        "azents/missing",
+        str(worktree_path),
+        "main",
+    )
+    shutil.rmtree(worktree_path)
+    client = _FakeClient()
+    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+
+    await operations.handle(
+        _operation(
+            operation_type="inspect_git_worktree",
+            payload={
+                "source_project_path": str(repo),
+                "worktree_path": str(worktree_path),
+                "branch_name": "azents/missing",
+            },
+        )
+    )
+    assert client.events[-1].payload == {
+        "worktree_path": str(worktree_path),
+        "worktree_registered": True,
+        "registered_branch_name": "azents/missing",
+        "target_kind": "missing",
+    }
+
+    await operations.handle(
+        _operation(
+            operation_type="remove_git_worktree",
+            payload={
+                "source_project_path": str(repo),
+                "worktree_path": str(worktree_path),
+                "branch_name": "azents/missing",
+                "force": True,
+            },
+        )
+    )
+    assert client.events[-1].payload == {
+        "removed_worktree_path": str(worktree_path),
+        "outcome": "already_absent",
+    }
+    listed = subprocess.run(
+        ["git", "worktree", "list", "--porcelain"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert str(worktree_path) not in listed.stdout
+
+
+@pytest.mark.asyncio
+async def test_git_remove_worktree_rejects_existing_unregistered_target(
+    tmp_path: Path,
+) -> None:
+    repo = _init_git_repo(tmp_path / "repo")
+    worktree_path = tmp_path / "unregistered"
+    worktree_path.mkdir()
+    marker = worktree_path / "keep.txt"
+    marker.write_text("keep\n")
+    client = _FakeClient()
+    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+
+    await operations.handle(
+        _operation(
+            operation_type="remove_git_worktree",
+            payload={
+                "source_project_path": str(repo),
+                "worktree_path": str(worktree_path),
+                "branch_name": "azents/unregistered",
+                "force": True,
+            },
+        )
+    )
+
+    assert client.events[-1].event_type == RuntimeRunnerEventType.FINAL_ERROR
+    assert client.events[-1].payload["error_code"] == "worktree_ownership_ambiguous"
+    assert marker.read_text() == "keep\n"
+
+
+@pytest.mark.asyncio
+async def test_git_remove_worktree_accepts_unregistered_missing_target(
+    tmp_path: Path,
+) -> None:
+    repo = _init_git_repo(tmp_path / "repo")
+    worktree_path = tmp_path / "missing"
+    client = _FakeClient()
+    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+
+    await operations.handle(
+        _operation(
+            operation_type="remove_git_worktree",
+            payload={
+                "source_project_path": str(repo),
+                "worktree_path": str(worktree_path),
+                "branch_name": "azents/missing",
+                "force": True,
+            },
+        )
+    )
+
+    assert client.events[-1].payload == {
+        "removed_worktree_path": str(worktree_path),
+        "outcome": "already_absent",
+    }
+
+
+@pytest.mark.asyncio
+async def test_git_remove_worktree_rejects_registered_branch_mismatch(
+    tmp_path: Path,
+) -> None:
+    repo = _init_git_repo(tmp_path / "repo")
+    worktree_path = tmp_path / "worktree"
+    _git(
+        repo,
+        "worktree",
+        "add",
+        "-b",
+        "azents/actual",
+        str(worktree_path),
+        "main",
+    )
+    client = _FakeClient()
+    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+
+    await operations.handle(
+        _operation(
+            operation_type="remove_git_worktree",
+            payload={
+                "source_project_path": str(repo),
+                "worktree_path": str(worktree_path),
+                "branch_name": "azents/expected",
+                "force": True,
+            },
+        )
+    )
+
+    assert client.events[-1].event_type == RuntimeRunnerEventType.FINAL_ERROR
+    assert client.events[-1].payload["error_code"] == "worktree_ownership_ambiguous"
+    assert worktree_path.is_dir()
+
+
+@pytest.mark.asyncio
+async def test_git_remove_worktree_rejects_missing_registered_branch_mismatch(
+    tmp_path: Path,
+) -> None:
+    """A stale registration with another branch remains untouched."""
+    repo = _init_git_repo(tmp_path / "repo")
+    worktree_path = tmp_path / "worktree"
+    _git(
+        repo,
+        "worktree",
+        "add",
+        "-b",
+        "azents/actual",
+        str(worktree_path),
+        "main",
+    )
+    shutil.rmtree(worktree_path)
+    client = _FakeClient()
+    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+
+    await operations.handle(
+        _operation(
+            operation_type="remove_git_worktree",
+            payload={
+                "source_project_path": str(repo),
+                "worktree_path": str(worktree_path),
+                "branch_name": "azents/expected",
+                "force": True,
+            },
+        )
+    )
+
+    assert client.events[-1].event_type == RuntimeRunnerEventType.FINAL_ERROR
+    assert client.events[-1].payload["error_code"] == "worktree_ownership_ambiguous"
+    listed = subprocess.run(
+        ["git", "worktree", "list", "--porcelain"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert str(worktree_path) in listed.stdout
+    assert "refs/heads/azents/actual" in listed.stdout
 
 
 @pytest.mark.asyncio

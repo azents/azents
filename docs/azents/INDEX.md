@@ -16,21 +16,21 @@ Design documents are accumulated records and are not listed individually in this
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
 | [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-07-21 | 51 |
-| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-21 | 125 |
+| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-22 | 126 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-21 | 10 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-17 | 5 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-07-21 | 17 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-20 | 3 |
 | [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-07-21 | 68 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-07-20 | 8 |
-| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-07-21 | 43 |
+| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-07-22 | 44 |
 
 ## Living Specs — Flow
 
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
 | [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-07-21 | 125 |
-| [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-07-21 | 23 |
+| [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-07-22 | 24 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-07-03 | 3 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-21 | 40 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-07-21 | 18 |
@@ -359,6 +359,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Usage-based Auto Compaction and Removal of Tool Output Omit Historical Requirements Reconstruction](requirements/usage-260612-usage-auto-compaction.md) | usage-260612 | 2026-06-12 | - |
 | [Persist the Session Last-Used Inference Profile Historical Requirements Reconstruction](requirements/used-260710-used-inference-profile.md) | used-260710 | 2026-07-10 | - |
 | [Session Web Viewer Discussion — View Discord/Slack Sessions in Web UI Historical Requirements Reconstruction](requirements/web-260416-web-viewer.md) | web-260416 | 2026-04-16 | 2026-04-16 |
+| [Session Worktree Archive and Purge Integrity Requirements](requirements/worktree-260722-archive-purge-integrity.md) | worktree-260722 | 2026-07-22 | 2026-07-22 |
 | [Explicit AgentSession Write Target Historical Requirements Reconstruction](requirements/write-260625-write-target.md) | write-260625 | 2026-06-25 | - |
 | [xAI API Key Provider Historical Requirements Reconstruction](requirements/xai-260710-xai-api-key.md) | xai-260710 | 2026-07-10 | 2026-07-10 |
 
@@ -673,6 +674,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Usage-based Auto Compaction and Removal of Tool Output Omit](adr/usage-260612-usage-auto-compaction.md)
 - [Persist the Session Last-Used Inference Profile](adr/used-260710-used-inference-profile.md)
 - [Session Web Viewer Discussion — View Discord/Slack Sessions in Web UI](adr/web-260416-web-viewer.md)
+- [Session Worktree Archive and Purge Integrity](adr/worktree-260722-archive-purge-integrity.md)
 - [Explicit AgentSession Write Target Historical Decision Reconstruction](adr/write-260625-write-target.md)
 - [xAI API Key Provider Historical Decision Reconstruction](adr/xai-260710-xai-api-key.md)
 

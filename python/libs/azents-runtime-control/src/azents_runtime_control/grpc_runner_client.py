@@ -581,12 +581,20 @@ def _operation_payload(
             "branch_name": payload.branch_name,
             "starting_ref": payload.starting_ref,
         }
+    if payload_kind == "git_inspect_worktree":
+        payload = operation.git_inspect_worktree
+        return {
+            "source_project_path": payload.source_project_path,
+            "worktree_path": payload.worktree_path,
+            "branch_name": payload.branch_name,
+        }
     if payload_kind == "git_remove_worktree":
         payload = operation.git_remove_worktree
         return {
             "source_project_path": payload.source_project_path,
             "worktree_path": payload.worktree_path,
             "force": payload.force,
+            "branch_name": payload.branch_name,
         }
     if payload_kind == "git_delete_branch":
         payload = operation.git_delete_branch
@@ -735,15 +743,31 @@ def _copy_final_success(
         worktree.worktree_path = _str_payload(payload, "worktree_path")
         worktree.branch_name = _str_payload(payload, "branch_name")
         return
+    if "worktree_registered" in payload:
+        worktree = message.git_inspect_worktree
+        worktree.worktree_path = _str_payload(payload, "worktree_path")
+        worktree.registered = _bool_payload(payload, "worktree_registered")
+        registered_branch_name = _optional_str_payload(
+            payload, "registered_branch_name"
+        )
+        if registered_branch_name is not None:
+            worktree.registered_branch_name = registered_branch_name
+        worktree.target_kind = _str_payload(payload, "target_kind")
+        dirty = payload.get("dirty")
+        if isinstance(dirty, bool):
+            worktree.dirty = dirty
+        return
     if "removed_worktree_path" in payload:
         message.git_remove_worktree.worktree_path = _str_payload(
             payload, "removed_worktree_path"
         )
+        message.git_remove_worktree.outcome = _str_payload(payload, "outcome")
         return
     if "deleted_branch_name" in payload:
         message.git_delete_branch.branch_name = _str_payload(
             payload, "deleted_branch_name"
         )
+        message.git_delete_branch.outcome = _str_payload(payload, "outcome")
         return
 
 
@@ -898,10 +922,29 @@ def _final_success_payload(
             "worktree_path": message.git_create_worktree.worktree_path,
             "branch_name": message.git_create_worktree.branch_name,
         }
+    if result_kind == "git_inspect_worktree":
+        payload: dict[str, JsonValue] = {
+            "worktree_path": message.git_inspect_worktree.worktree_path,
+            "worktree_registered": message.git_inspect_worktree.registered,
+            "target_kind": message.git_inspect_worktree.target_kind,
+        }
+        if message.git_inspect_worktree.HasField("registered_branch_name"):
+            payload["registered_branch_name"] = (
+                message.git_inspect_worktree.registered_branch_name
+            )
+        if message.git_inspect_worktree.HasField("dirty"):
+            payload["dirty"] = message.git_inspect_worktree.dirty
+        return payload
     if result_kind == "git_remove_worktree":
-        return {"removed_worktree_path": message.git_remove_worktree.worktree_path}
+        return {
+            "removed_worktree_path": message.git_remove_worktree.worktree_path,
+            "outcome": message.git_remove_worktree.outcome,
+        }
     if result_kind == "git_delete_branch":
-        return {"deleted_branch_name": message.git_delete_branch.branch_name}
+        return {
+            "deleted_branch_name": message.git_delete_branch.branch_name,
+            "outcome": message.git_delete_branch.outcome,
+        }
     return {}
 
 

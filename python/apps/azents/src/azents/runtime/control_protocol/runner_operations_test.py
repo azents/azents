@@ -1223,6 +1223,167 @@ async def test_create_git_worktree_dispatches_and_folds_text_output() -> None:
 
 
 @pytest.mark.asyncio
+async def test_git_worktree_integrity_operations_dispatch_and_decode() -> None:
+    """Inspection and guarded cleanup preserve their typed payloads and outcomes."""
+    harness = await _make_harness()
+    inspect_task = asyncio.create_task(
+        harness.client.inspect_git_worktree(
+            runtime_id="runtime-1",
+            runner_generation=harness.runner_generation,
+            owner_session_id="session-1",
+            source_project_path="/workspace/agent/repo",
+            worktree_path="/workspace/agent/.azents/worktrees/session/repo",
+            branch_name="azents/session",
+            deadline_at=_now() + timedelta(seconds=30),
+            text_output_callback=None,
+        )
+    )
+    await asyncio.sleep(0)
+    request = await harness.control.claim_next_runner_request(
+        runtime_id="runtime-1",
+        generation=harness.runner_generation,
+        consumer_id="runner-a",
+        block_ms=0,
+    )
+    assert request is not None
+    assert request.operation_type == "inspect_git_worktree"
+    assert request.payload["payload"] == {
+        "source_project_path": "/workspace/agent/repo",
+        "worktree_path": "/workspace/agent/.azents/worktrees/session/repo",
+        "branch_name": "azents/session",
+    }
+    await harness.reply(
+        request.request_id,
+        RuntimeReplyEventType.FINAL_SUCCESS,
+        {
+            "worktree_path": "/workspace/agent/.azents/worktrees/session/repo",
+            "worktree_registered": True,
+            "registered_branch_name": "azents/session",
+            "target_kind": "directory",
+            "dirty": True,
+        },
+        final=True,
+    )
+    inspection = await asyncio.wait_for(inspect_task, timeout=1)
+    assert inspection.registered is True
+    assert inspection.registered_branch_name == "azents/session"
+    assert inspection.target_kind == "directory"
+    assert inspection.dirty is True
+
+    remove_task = asyncio.create_task(
+        harness.client.remove_git_worktree(
+            runtime_id="runtime-1",
+            runner_generation=harness.runner_generation,
+            owner_session_id="session-1",
+            source_project_path="/workspace/agent/repo",
+            worktree_path="/workspace/agent/.azents/worktrees/session/repo",
+            branch_name="azents/session",
+            force=True,
+            deadline_at=_now() + timedelta(seconds=30),
+            text_output_callback=None,
+        )
+    )
+    await asyncio.sleep(0)
+    request = await harness.control.claim_next_runner_request(
+        runtime_id="runtime-1",
+        generation=harness.runner_generation,
+        consumer_id="runner-a",
+        block_ms=0,
+    )
+    assert request is not None
+    assert request.operation_type == "remove_git_worktree"
+    assert request.payload["payload"] == {
+        "source_project_path": "/workspace/agent/repo",
+        "worktree_path": "/workspace/agent/.azents/worktrees/session/repo",
+        "branch_name": "azents/session",
+        "force": True,
+    }
+    await harness.reply(
+        request.request_id,
+        RuntimeReplyEventType.FINAL_SUCCESS,
+        {
+            "removed_worktree_path": (
+                "/workspace/agent/.azents/worktrees/session/repo"
+            ),
+            "outcome": "already_absent",
+        },
+        final=True,
+    )
+    removal = await asyncio.wait_for(remove_task, timeout=1)
+    assert removal.outcome == "already_absent"
+
+    branch_task = asyncio.create_task(
+        harness.client.delete_git_branch(
+            runtime_id="runtime-1",
+            runner_generation=harness.runner_generation,
+            owner_session_id="session-1",
+            source_project_path="/workspace/agent/repo",
+            branch_name="azents/session",
+            deadline_at=_now() + timedelta(seconds=30),
+            text_output_callback=None,
+        )
+    )
+    await asyncio.sleep(0)
+    request = await harness.control.claim_next_runner_request(
+        runtime_id="runtime-1",
+        generation=harness.runner_generation,
+        consumer_id="runner-a",
+        block_ms=0,
+    )
+    assert request is not None
+    await harness.reply(
+        request.request_id,
+        RuntimeReplyEventType.FINAL_SUCCESS,
+        {
+            "deleted_branch_name": "azents/session",
+            "outcome": "already_absent",
+        },
+        final=True,
+    )
+    branch = await asyncio.wait_for(branch_task, timeout=1)
+    assert branch.outcome == "already_absent"
+
+
+@pytest.mark.asyncio
+async def test_runner_operation_failure_preserves_semantic_code() -> None:
+    """Final Runner errors expose their stable semantic code to services."""
+    harness = await _make_harness()
+    task = asyncio.create_task(
+        harness.client.inspect_git_worktree(
+            runtime_id="runtime-1",
+            runner_generation=harness.runner_generation,
+            owner_session_id="session-1",
+            source_project_path="/workspace/agent/repo",
+            worktree_path="/workspace/agent/.azents/worktrees/session/repo",
+            branch_name="azents/session",
+            deadline_at=_now() + timedelta(seconds=30),
+            text_output_callback=None,
+        )
+    )
+    await asyncio.sleep(0)
+    request = await harness.control.claim_next_runner_request(
+        runtime_id="runtime-1",
+        generation=harness.runner_generation,
+        consumer_id="runner-a",
+        block_ms=0,
+    )
+    assert request is not None
+    await harness.reply(
+        request.request_id,
+        RuntimeReplyEventType.FINAL_ERROR,
+        {
+            "error_code": "worktree_ownership_ambiguous",
+            "error_message": "Existing target is not owned.",
+        },
+        final=True,
+    )
+
+    with pytest.raises(RuntimeRunnerOperationFailedError) as error:
+        await asyncio.wait_for(task, timeout=1)
+    assert error.value.code == "worktree_ownership_ambiguous"
+
+
+@pytest.mark.asyncio
 async def test_list_git_refs_returns_final_refs() -> None:
     """Git ref discovery final payload is decoded into ref entries."""
     harness = await _make_harness()
