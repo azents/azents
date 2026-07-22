@@ -218,6 +218,35 @@ def test_external_message_payload_is_registered_for_event_kind() -> None:
     assert validated.projection_root_id == "external-channel:binding-1:message-1"
 
 
+def test_external_message_payload_preserves_required_nullable_fields() -> None:
+    payload = _external_message_payload().model_copy(
+        update={
+            "principal_id": None,
+            "provider_user_id": None,
+            "sender_display_name": None,
+            "body": None,
+            "provider_created_at": None,
+            "provider_updated_at": None,
+            "original_url": None,
+            "correction_of_revision_id": None,
+        }
+    )
+
+    serialized = payload.model_dump(mode="json", exclude_none=True)
+
+    assert serialized["principal_id"] is None
+    assert serialized["provider_user_id"] is None
+    assert serialized["sender_display_name"] is None
+    assert serialized["body"] is None
+    assert serialized["provider_created_at"] is None
+    assert serialized["provider_updated_at"] is None
+    assert serialized["original_url"] is None
+    assert serialized["correction_of_revision_id"] is None
+    assert validate_event_payload(EventKind.EXTERNAL_CHANNEL_MESSAGE, serialized) == (
+        payload
+    )
+
+
 def test_external_message_payload_rejects_inconsistent_projection_root() -> None:
     with pytest.raises(ValidationError, match="projection root"):
         _external_message_payload(projection_root_id="external-channel:wrong")

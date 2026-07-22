@@ -390,6 +390,25 @@ class ExternalChannelMessagePayload(BaseModel):
     truncated_context_size: int = Field(ge=0)
     correction_of_revision_id: str | None
 
+    @model_serializer(mode="wrap")
+    def serialize_required_nullable_fields(
+        self,
+        handler: SerializerFunctionWrapHandler,
+    ) -> dict[str, object]:
+        """Preserve explicit nullable fields in canonical event JSON."""
+        serialized: dict[str, object] = handler(self)
+        serialized.update(
+            principal_id=self.principal_id,
+            provider_user_id=self.provider_user_id,
+            sender_display_name=self.sender_display_name,
+            body=self.body,
+            provider_created_at=self.provider_created_at,
+            provider_updated_at=self.provider_updated_at,
+            original_url=self.original_url,
+            correction_of_revision_id=self.correction_of_revision_id,
+        )
+        return serialized
+
     @model_validator(mode="after")
     def validate_projection_identity(self) -> "ExternalChannelMessagePayload":
         """Validate revision semantics and the stable correction root."""
