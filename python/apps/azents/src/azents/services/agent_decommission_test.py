@@ -248,6 +248,11 @@ class _ExternalChannelLifecycleDouble:
         self.calls.append((session, definition, context))
         self.events.append("external-channel-archive")
 
+    async def consume_archive_cleanup(self, delivery_ids: object) -> int:
+        """Report no pending provider cleanup in the focused lifecycle test."""
+        del delivery_ids
+        return 0
+
 
 class _DecommissionStatusRepositoryDouble:
     """Always retain the scheduler-owned job lease."""

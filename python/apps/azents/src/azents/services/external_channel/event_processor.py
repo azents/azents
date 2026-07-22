@@ -1296,6 +1296,10 @@ class ExternalChannelEventProcessorService:
             binding=binding,
             batch=batch,
         )
+        await self.repository.ensure_active_work(
+            session,
+            binding_id=binding.id,
+        )
         await self.repository.delete_pending_context_ids(
             session,
             pending_context_ids=[item.id for item in pending],

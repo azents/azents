@@ -27,6 +27,9 @@ from azents.repos.external_channel.data import (
 from azents.repos.external_channel.lifecycle import (
     ExternalChannelLifecycleRepository,
 )
+from azents.services.external_channel.channel_action import (
+    ExternalChannelActionService,
+)
 from azents.services.external_channel.lifecycle import ExternalChannelLifecycleService
 
 
@@ -83,6 +86,7 @@ class _RepositoryDouble(ExternalChannelLifecycleRepository):
             finished_work_count=1,
             deleted_pending_context_count=1,
             created_progress_delete_intent_count=1,
+            progress_delete_intent_ids=("delivery-1",),
         )
 
     async def validate_restore_session_tree(
@@ -281,7 +285,10 @@ async def test_external_channel_dispatches_only_its_participant(
 ) -> None:
     """Archive and restore invoke only the External Channel participant."""
     repository = _RepositoryDouble()
-    service = ExternalChannelLifecycleService(repository=repository)
+    service = ExternalChannelLifecycleService(
+        repository=repository,
+        action_service=cast(ExternalChannelActionService, object()),
+    )
 
     assert (
         await service.archive_participant(
@@ -316,7 +323,10 @@ async def test_external_channel_purge_phases_are_transaction_bound(
 ) -> None:
     """Purge phase calls remain inside the caller-owned DB transaction."""
     repository = _RepositoryDouble()
-    service = ExternalChannelLifecycleService(repository=repository)
+    service = ExternalChannelLifecycleService(
+        repository=repository,
+        action_service=cast(ExternalChannelActionService, object()),
+    )
     definition = _definition("session.external-channel")
     context = _purge_context()
 

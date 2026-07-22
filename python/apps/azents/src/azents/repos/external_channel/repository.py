@@ -2109,6 +2109,28 @@ class ExternalChannelRepository:
         )
         return ExternalChannelWork.model_validate(rdb)
 
+    async def ensure_active_work(
+        self,
+        session: AsyncSession,
+        *,
+        binding_id: str,
+    ) -> ExternalChannelWork:
+        """Create or return the active Channel Work for an invoked binding."""
+        return await self.create_work_idempotent(
+            session,
+            ExternalChannelWorkCreate(
+                binding_id=binding_id,
+                status=ExternalChannelWorkStatus.ACTIVE,
+                schema_version=1,
+                tasks=[],
+                state_revision=1,
+                desired_progress_revision=0,
+                desired_progress_payload=None,
+                progress_provider_message_key=None,
+                finished_at=None,
+            ),
+        )
+
     async def lock_work_by_binding_id(
         self,
         session: AsyncSession,

@@ -438,6 +438,132 @@ class SlackConversationClient:
             error_summary=None,
         )
 
+    async def post_message(
+        self,
+        *,
+        bot_token: str,
+        tenant_id: str,
+        channel_id: str,
+        thread_ts: str,
+        text: str,
+    ) -> SlackControlMessageResult:
+        """Attempt one ordinary thread message without retry."""
+        return await self._attempt_message_operation(
+            bot_token=bot_token,
+            tenant_id=tenant_id,
+            channel_id=channel_id,
+            path="/chat.postMessage",
+            json_body={
+                "channel": channel_id,
+                "thread_ts": thread_ts,
+                "text": text,
+                "unfurl_links": False,
+                "unfurl_media": False,
+            },
+            expected_message_ts=None,
+        )
+
+    async def update_message(
+        self,
+        *,
+        bot_token: str,
+        tenant_id: str,
+        channel_id: str,
+        message_ts: str,
+        text: str,
+    ) -> SlackControlMessageResult:
+        """Attempt one message update without retry."""
+        return await self._attempt_message_operation(
+            bot_token=bot_token,
+            tenant_id=tenant_id,
+            channel_id=channel_id,
+            path="/chat.update",
+            json_body={"channel": channel_id, "ts": message_ts, "text": text},
+            expected_message_ts=message_ts,
+        )
+
+    async def delete_message(
+        self,
+        *,
+        bot_token: str,
+        tenant_id: str,
+        channel_id: str,
+        message_ts: str,
+    ) -> SlackControlMessageResult:
+        """Attempt one message delete without retry."""
+        return await self._attempt_message_operation(
+            bot_token=bot_token,
+            tenant_id=tenant_id,
+            channel_id=channel_id,
+            path="/chat.delete",
+            json_body={"channel": channel_id, "ts": message_ts},
+            expected_message_ts=message_ts,
+        )
+
+    async def _attempt_message_operation(
+        self,
+        *,
+        bot_token: str,
+        tenant_id: str,
+        channel_id: str,
+        path: str,
+        json_body: dict[str, object],
+        expected_message_ts: str | None,
+    ) -> SlackControlMessageResult:
+        """Map one Slack mutation into a sanitized at-most-once outcome."""
+        try:
+            response = await self._request(
+                "POST",
+                path,
+                bot_token=bot_token,
+                json_body=json_body,
+            )
+            payload = self._success_payload(response)
+        except SlackProviderCredentialsInvalid:
+            return SlackControlMessageResult(
+                status="failed",
+                provider_message_key=None,
+                error_kind="credentials_invalid",
+                error_summary="Slack rejected the configured credential.",
+            )
+        except SlackProviderResourceUnavailable:
+            return SlackControlMessageResult(
+                status="failed",
+                provider_message_key=None,
+                error_kind="resource_unavailable",
+                error_summary="Slack cannot mutate the linked conversation.",
+            )
+        except SlackProviderRateLimited:
+            return SlackControlMessageResult(
+                status="failed",
+                provider_message_key=None,
+                error_kind="rate_limited",
+                error_summary="Slack rate limited the provider operation.",
+            )
+        except SlackProviderTemporaryError:
+            return SlackControlMessageResult(
+                status="unknown",
+                provider_message_key=None,
+                error_kind="provider_ambiguous",
+                error_summary="Slack delivery outcome is unknown.",
+            )
+        message_ts = payload.get("ts")
+        if not isinstance(message_ts, str) or not message_ts:
+            message_ts = expected_message_ts
+        if message_ts is None:
+            return SlackControlMessageResult(
+                status="unknown",
+                provider_message_key=None,
+                error_kind="provider_response_invalid",
+                error_summary="Slack did not return a message identity.",
+            )
+        return SlackControlMessageResult(
+            status="delivered",
+            provider_message_key=(f"slack:{tenant_id}:{channel_id}:{message_ts}"),
+            error_kind=None,
+            error_summary=None,
+        )
+
     async def _request(
         self,
         method: str,

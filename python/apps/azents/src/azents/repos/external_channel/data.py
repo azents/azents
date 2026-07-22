@@ -682,6 +682,7 @@ class ExternalChannelArchiveTermination(_Record):
     finished_work_count: int
     deleted_pending_context_count: int
     created_progress_delete_intent_count: int
+    progress_delete_intent_ids: tuple[str, ...]
 
 
 class ExternalChannelRestoreValidation(_Record):
