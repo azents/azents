@@ -41,7 +41,7 @@ def upgrade() -> None:
         type_="unique",
     )
     op.create_unique_constraint(
-        "uq_external_channel_pending_contexts_route_resource_message_revision",
+        "uq_external_channel_pending_route_resource_message_revision",
         "external_channel_pending_contexts",
         ["route_id", "resource_id", "message_revision_id"],
     )
@@ -50,7 +50,7 @@ def upgrade() -> None:
 def downgrade() -> None:
     """Downgrade schema."""
     op.drop_constraint(
-        "uq_external_channel_pending_contexts_route_resource_message_revision",
+        "uq_external_channel_pending_route_resource_message_revision",
         "external_channel_pending_contexts",
         type_="unique",
     )

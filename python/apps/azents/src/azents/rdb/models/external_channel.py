@@ -867,7 +867,7 @@ class RDBExternalChannelPendingContext(RDBModel):
         "route_id",
         "resource_id",
         "message_revision_id",
-        name="uq_external_channel_pending_contexts_route_resource_message_revision",
+        name="uq_external_channel_pending_route_resource_message_revision",
     )
 
     id: Mapped[str] = mapped_column(
