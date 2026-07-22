@@ -28,6 +28,8 @@ import {
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { type ReactElement, useMemo, useState } from "react";
+import { normalizeGoalPreviewText } from "./goalText";
+import { MarkdownContent } from "./MarkdownContent";
 import type {
   GoalStateSnapshot,
   GoalStatus,
@@ -359,9 +361,9 @@ function GoalSection({
                   aria-label={t("editGoal")}
                 />
               ) : (
-                <Text size="sm" lh={rem(20)} style={{ flex: 1, minWidth: 0 }}>
-                  {goal.objective}
-                </Text>
+                <Box style={{ flex: 1, minWidth: 0, overflowWrap: "anywhere" }}>
+                  <MarkdownContent>{goal.objective ?? ""}</MarkdownContent>
+                </Box>
               )}
             </Group>
             <Badge
@@ -611,7 +613,10 @@ export function TodoPreviewBar({
     totalCount: todo.items.length,
   });
 
-  const previewText = activeGoal?.objective ?? item?.content ?? null;
+  const previewText =
+    activeGoal === null
+      ? (item?.content ?? null)
+      : normalizeGoalPreviewText(activeGoal.objective ?? "") || null;
   const previewStatus = activeGoal?.status ?? null;
 
   const toggleExpanded = (key: string): void => {

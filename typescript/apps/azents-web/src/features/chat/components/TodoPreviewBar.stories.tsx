@@ -92,6 +92,19 @@ export const LongGoal: Story = {
   },
 };
 
+export const MarkdownGoal: Story = {
+  args: {
+    goal: {
+      objective: `# Ship the **Goal** experience
+
+- [ ] Render the full objective as Markdown
+- [ ] Keep the [preview](https://example.com) as plain text`,
+      status: "active",
+    },
+    todo: { items: [] },
+  },
+};
+
 export const PausedGoal: Story = {
   args: {
     goal: {
