@@ -212,7 +212,7 @@ async def test_unknown_human_mention_creates_request_without_session_or_wake(
 ) -> None:
     """Unknown participants remain pending and do not create AgentSession state."""
     async with rdb_session_manager() as session:
-        connection_id, _, _, repository = await _setup_route(session)
+        connection_id, _, agent_id, repository = await _setup_route(session)
         admission = await repository.admit_event(
             session,
             ExternalChannelEventCreate(
@@ -268,7 +268,11 @@ async def test_unknown_human_mention_creates_request_without_session_or_wake(
             await session.scalars(sa.select(RDBExternalChannelAccessRequest))
         )
         bindings = list(await session.scalars(sa.select(RDBExternalChannelBinding)))
-        sessions = list(await session.scalars(sa.select(RDBAgentSession)))
+        sessions = list(
+            await session.scalars(
+                sa.select(RDBAgentSession).where(RDBAgentSession.agent_id == agent_id)
+            )
+        )
         pending = list(
             await session.scalars(sa.select(RDBExternalChannelPendingContext))
         )
@@ -395,7 +399,11 @@ async def test_unknown_human_mention_creates_request_without_session_or_wake(
             )
         )
         all_bindings = list(await session.scalars(sa.select(RDBExternalChannelBinding)))
-        all_sessions = list(await session.scalars(sa.select(RDBAgentSession)))
+        all_sessions = list(
+            await session.scalars(
+                sa.select(RDBAgentSession).where(RDBAgentSession.agent_id == agent_id)
+            )
+        )
         second_attempt = await session.get(
             RDBExternalChannelDeliveryAttempt,
             second_result.control_delivery_attempt_id,
@@ -462,7 +470,11 @@ async def test_unknown_human_mention_creates_request_without_session_or_wake(
     )
 
     async with rdb_session_manager() as session:
-        final_sessions = list(await session.scalars(sa.select(RDBAgentSession)))
+        final_sessions = list(
+            await session.scalars(
+                sa.select(RDBAgentSession).where(RDBAgentSession.agent_id == agent_id)
+            )
+        )
         batches = list(
             await session.scalars(sa.select(RDBExternalChannelInvocationBatch))
         )
@@ -516,7 +528,7 @@ async def test_pending_context_is_trimmed_by_count_and_size(
         )
         service = _service(rdb_session_manager, repository)
         for index in range(101):
-            timestamp = f"1721600{index:03d}.000100"
+            timestamp = f"1784678{index:03d}.000100"
             normalized = normalize_slack_event(
                 event_type="message",
                 tenant_id="T1",
@@ -543,8 +555,17 @@ async def test_pending_context_is_trimmed_by_count_and_size(
         await session.commit()
 
     async with rdb_session_manager() as session:
-        rows = list(await session.scalars(sa.select(RDBExternalChannelPendingContext)))
+        rows = list(
+            await session.scalars(
+                sa.select(RDBExternalChannelPendingContext)
+                .where(
+                    RDBExternalChannelPendingContext.route_id == route_id,
+                    RDBExternalChannelPendingContext.resource_id == resource.id,
+                )
+                .order_by(RDBExternalChannelPendingContext.provider_position)
+            )
+        )
 
     assert len(rows) <= 100
     assert sum(row.normalized_size for row in rows) <= 256 * 1024
-    assert rows[0].provider_position > "00000000001721600000.000100"
+    assert rows[0].provider_position > "00000000001784678000.000100"
