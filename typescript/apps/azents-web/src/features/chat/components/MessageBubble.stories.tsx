@@ -362,3 +362,20 @@ export const GoalBriefing = {
     }),
   },
 } satisfies Story;
+
+export const MarkdownGoalBriefing = {
+  args: {
+    message: createChatMessage({
+      id: "markdown-goal-briefing",
+      role: "goal_briefing",
+      content:
+        "# Ship the **Goal** experience\n\n- Review the preview\n- Validate Markdown",
+      metadata: {
+        objective:
+          "# Ship the **Goal** experience\n\n- Review the preview\n- Validate Markdown",
+        completed_at: "2026-06-15T12:45:00.000Z",
+        duration_seconds: "930",
+      },
+    }),
+  },
+} satisfies Story;

@@ -421,9 +421,9 @@ function GoalBriefingCard({
             <Text size="xs" c="dimmed" fw={600} tt="uppercase" lts={rem(0.4)}>
               {t("goalBriefing.goal")}
             </Text>
-            <Text size="sm" style={{ overflowWrap: "anywhere" }}>
-              {objective}
-            </Text>
+            <Box style={{ overflowWrap: "anywhere" }}>
+              <MarkdownContent>{objective}</MarkdownContent>
+            </Box>
           </Stack>
           <Group gap="lg" wrap="wrap">
             <Group gap={rem(6)} wrap="nowrap">
