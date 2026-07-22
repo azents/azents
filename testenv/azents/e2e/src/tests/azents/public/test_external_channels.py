@@ -194,7 +194,7 @@ def test_http_admission_unknown_participant_and_approval_journey(
         f"{slack_provider_fake_url}/__testenv/reset",
         timeout=5,
     ).raise_for_status()
-    root_timestamp = "1721600000.000100"
+    root_timestamp = f"{int(time.time()) - 60}.000100"
     requests.post(
         f"{slack_provider_fake_url}/__testenv/configure",
         json={
@@ -448,7 +448,7 @@ def test_socket_mode_acknowledges_after_admission_and_terminalizes_disabled_link
     """Exercise the worker-owned Socket Mode lease, durable ACK, and link fence."""
     del azents_engine_worker_container
     envelope_id = f"Env-{unique()}"
-    root_timestamp = "1721600200.000100"
+    root_timestamp = f"{int(time.time()) - 60}.000200"
     socket_payload = {
         "type": "event_callback",
         "event_id": f"Ev-{unique()}",
