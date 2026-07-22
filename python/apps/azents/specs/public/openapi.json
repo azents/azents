@@ -6867,6 +6867,48 @@
         }
       }
     },
+    "/runtime-provider-enrollment/v1/credentials/exchange": {
+      "post": {
+        "tags": [
+          "Runtime Provider Enrollment v1"
+        ],
+        "summary": "Exchange Credential",
+        "description": "Exchange one enrollment grant for one Provider credential.",
+        "operationId": "runtime_provider_enrollment_v1_exchange_credential",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuntimeProviderCredentialExchangeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeProviderCredentialExchangeResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/security/v1/auth-methods": {
       "get": {
         "tags": [
@@ -17924,6 +17966,64 @@
         "title": "RuntimeProviderConnectionState",
         "description": "Runtime Provider connection status."
       },
+      "RuntimeProviderCredentialExchangeRequest": {
+        "properties": {
+          "grant_id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Grant Id"
+          },
+          "secret": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Secret"
+          }
+        },
+        "type": "object",
+        "required": [
+          "grant_id",
+          "secret"
+        ],
+        "title": "RuntimeProviderCredentialExchangeRequest",
+        "description": "One-time enrollment grant exchange input."
+      },
+      "RuntimeProviderCredentialExchangeResponse": {
+        "properties": {
+          "credential_id": {
+            "type": "string",
+            "title": "Credential Id"
+          },
+          "provider_id": {
+            "type": "string",
+            "title": "Provider Id"
+          },
+          "credential": {
+            "type": "string",
+            "title": "Credential"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "credential_id",
+          "provider_id",
+          "credential",
+          "expires_at"
+        ],
+        "title": "RuntimeProviderCredentialExchangeResponse",
+        "description": "One-time Provider credential result returned to a controller operator."
+      },
       "RuntimeProviderObservedState": {
         "type": "string",
         "enum": [
@@ -20768,6 +20868,10 @@
     {
       "name": "LLM Provider Integration v1",
       "description": "\nLLM Provider Integration API (Public)\n\nWorkspace-scoped LLM provider integration CRUD endpoints.\nCredentials are not included in responses.\n"
+    },
+    {
+      "name": "Runtime Provider Enrollment v1",
+      "description": "\nRuntime Provider Enrollment API (Public)\n\nOperator-facing one-time enrollment grant exchange for known Providers.\n"
     },
     {
       "name": "Security v1",

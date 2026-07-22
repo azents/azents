@@ -17,6 +17,7 @@ from azents_runtime_control.provider import (
 from azents_runtime_control.provider import RuntimeProviderReport
 from google.protobuf import timestamp_pb2
 
+from azents.core.enums import RuntimeProviderKind, RuntimeProviderScope
 from azents.runtime.control_protocol.data import (
     RuntimeDispatchResult,
     RuntimeProviderCommand,
@@ -31,6 +32,10 @@ from azents.runtime.coordination.data import RuntimeReplyEventType
 from azents.runtime.coordination.memory import (
     InMemoryRuntimeCoordinationStore,
 )
+from azents.services.runtime_provider_control.data import (
+    RuntimeProviderCredentialAuthentication,
+    RuntimeProviderCredentialUnavailable,
+)
 
 
 @dataclasses.dataclass
@@ -42,6 +47,44 @@ class FakeReportSink:
     async def record_provider_report(self, report: RuntimeProviderReport) -> None:
         """Record one Provider report."""
         self.reports.append(report)
+
+
+@dataclasses.dataclass
+class FakeProviderCredentialBridge:
+    """Authenticate fixed test credentials and capture stream lifecycle calls."""
+
+    expected_secret: str = "provider-secret"
+    authentication: RuntimeProviderCredentialAuthentication = dataclasses.field(
+        default_factory=lambda: RuntimeProviderCredentialAuthentication(
+            credential_id="credential-1",
+            provider_id="provider-1",
+            provider_kind=RuntimeProviderKind.DOCKER,
+            provider_scope=RuntimeProviderScope.SYSTEM,
+            provider_workspace_id=None,
+        )
+    )
+
+    async def authenticate_credential(
+        self,
+        *,
+        secret: str,
+    ) -> RuntimeProviderCredentialAuthentication:
+        """Resolve the test Provider credential."""
+        if secret != self.expected_secret:
+            raise RuntimeProviderCredentialUnavailable("credential_unavailable")
+        return self.authentication
+
+    async def create_connection(self, **_: object) -> object:
+        """Accept a test Provider stream."""
+        return object()
+
+    async def heartbeat_connection(self, **_: object) -> bool:
+        """Accept a test Provider stream heartbeat."""
+        return True
+
+    async def disconnect_connection(self, **_: object) -> bool:
+        """Accept a test Provider stream closure."""
+        return True
 
 
 class QueueIterator:
@@ -76,9 +119,13 @@ class FakeGrpcContext:
 
     def __init__(
         self,
-        metadata: tuple[tuple[str, str], ...] = (),
+        metadata: tuple[tuple[str, str], ...] | None = None,
     ) -> None:
-        self._metadata = metadata
+        self._metadata = (
+            metadata
+            if metadata is not None
+            else (("authorization", "Bearer provider-secret"),)
+        )
 
     def invocation_metadata(self) -> tuple[tuple[str, str], ...]:
         """Return fake request metadata."""
@@ -279,15 +326,11 @@ async def test_provider_grpc_relays_commands_and_records_completion() -> None:
 @pytest.mark.asyncio
 async def test_provider_grpc_rejects_missing_control_token() -> None:
     store = InMemoryRuntimeCoordinationStore()
-    servicer = _servicer(
-        RuntimeControlProtocolService(store),
-        FakeReportSink(),
-        control_auth_token="control-token",
-    )
+    servicer = _servicer(RuntimeControlProtocolService(store), FakeReportSink())
     inbound = QueueIterator()
     await inbound.put(_register_message())
 
-    stream = servicer.ConnectProvider(inbound, FakeGrpcContext())
+    stream = servicer.ConnectProvider(inbound, FakeGrpcContext(()))
 
     with pytest.raises(RuntimeError, match="UNAUTHENTICATED"):
         await anext(stream)
@@ -296,17 +339,13 @@ async def test_provider_grpc_rejects_missing_control_token() -> None:
 @pytest.mark.asyncio
 async def test_provider_grpc_rejects_wrong_control_token() -> None:
     store = InMemoryRuntimeCoordinationStore()
-    servicer = _servicer(
-        RuntimeControlProtocolService(store),
-        FakeReportSink(),
-        control_auth_token="control-token",
-    )
+    servicer = _servicer(RuntimeControlProtocolService(store), FakeReportSink())
     inbound = QueueIterator()
     await inbound.put(_register_message())
 
     stream = servicer.ConnectProvider(
         inbound,
-        FakeGrpcContext((("x-azents-runtime-control-token", "wrong"),)),
+        FakeGrpcContext((("x-azents-runtime-control-token", "provider-secret"),)),
     )
 
     with pytest.raises(RuntimeError, match="UNAUTHENTICATED"):
@@ -314,19 +353,57 @@ async def test_provider_grpc_rejects_wrong_control_token() -> None:
 
 
 @pytest.mark.asyncio
-async def test_provider_grpc_accepts_control_token_metadata() -> None:
+async def test_provider_grpc_rejects_registration_provider_id_spoofing() -> None:
     store = InMemoryRuntimeCoordinationStore()
-    servicer = _servicer(
-        RuntimeControlProtocolService(store),
-        FakeReportSink(),
-        control_auth_token="control-token",
+    servicer = _servicer(RuntimeControlProtocolService(store), FakeReportSink())
+    inbound = QueueIterator()
+    message = _register_message()
+    message.register.provider_id = "provider-2"
+    await inbound.put(message)
+
+    stream = servicer.ConnectProvider(inbound, FakeGrpcContext())
+
+    with pytest.raises(RuntimeError, match="PERMISSION_DENIED"):
+        await anext(stream)
+
+
+@pytest.mark.asyncio
+async def test_provider_grpc_rejects_report_provider_id_spoofing() -> None:
+    store = InMemoryRuntimeCoordinationStore()
+    sink = FakeReportSink()
+    servicer = _servicer(RuntimeControlProtocolService(store), sink)
+    inbound = QueueIterator()
+    await inbound.put(_register_message())
+    report = _report_message()
+    report.provider_id = "provider-2"
+    await inbound.put(
+        runtime_provider_control_pb2.ProviderMessage(
+            connection_id="connection-1",
+            request_id="report-1",
+            generation=1,
+            report=report,
+        )
     )
+
+    stream = servicer.ConnectProvider(inbound, FakeGrpcContext())
+    await anext(stream)
+    error = await anext(stream)
+    await stream.aclose()
+
+    assert error.error.code == "PROVIDER_IDENTITY_MISMATCH"
+    assert sink.reports == []
+
+
+@pytest.mark.asyncio
+async def test_provider_grpc_accepts_provider_credential_metadata() -> None:
+    store = InMemoryRuntimeCoordinationStore()
+    servicer = _servicer(RuntimeControlProtocolService(store), FakeReportSink())
     inbound = QueueIterator()
     await inbound.put(_register_message())
 
     stream = servicer.ConnectProvider(
         inbound,
-        FakeGrpcContext((("x-azents-runtime-control-token", "control-token"),)),
+        FakeGrpcContext((("authorization", "Bearer provider-secret"),)),
     )
     accepted = await anext(stream)
     await stream.aclose()
@@ -337,15 +414,15 @@ async def test_provider_grpc_accepts_control_token_metadata() -> None:
 def _servicer(
     service: RuntimeControlProtocolService,
     sink: FakeReportSink,
-    *,
-    control_auth_token: str | None = None,
 ) -> RuntimeProviderControlGrpcServicer:
+    bridge = FakeProviderCredentialBridge()
     return RuntimeProviderControlGrpcServicer(
         control_protocol=service,
         report_sink=sink,
         owner_replica_id="control-a",
         consumer_id="provider-consumer-a",
-        control_auth_token=control_auth_token,
+        credential_authenticator=bridge,
+        connection_tracker=bridge,
         command_block_ms=1,
     )
 

@@ -92,6 +92,8 @@ Class | Method | HTTP request | Description
 *ModelCatalogV1Api* | [**model_catalog_v1_list_system_model_catalogs**](azentsadminclient/docs/ModelCatalogV1Api.md#model_catalog_v1_list_system_model_catalogs) | **GET** /model-catalog/v1/system-catalogs | List System Model Catalogs
 *ModelCatalogV1Api* | [**model_catalog_v1_refresh_system_model_catalog**](azentsadminclient/docs/ModelCatalogV1Api.md#model_catalog_v1_refresh_system_model_catalog) | **POST** /model-catalog/v1/system-catalogs/{provider}/refresh | Refresh System Model Catalog
 *ModelCatalogV1Api* | [**model_catalog_v1_refresh_system_model_catalogs**](azentsadminclient/docs/ModelCatalogV1Api.md#model_catalog_v1_refresh_system_model_catalogs) | **POST** /model-catalog/v1/system-catalogs/refresh | Refresh System Model Catalogs
+*RuntimeProviderEnrollmentV1Api* | [**runtime_provider_enrollment_v1_issue_enrollment_grant**](azentsadminclient/docs/RuntimeProviderEnrollmentV1Api.md#runtime_provider_enrollment_v1_issue_enrollment_grant) | **POST** /runtime-provider-enrollment/v1/runtime-providers/{provider_id}/enrollment-grants | Issue Enrollment Grant
+*RuntimeProviderEnrollmentV1Api* | [**runtime_provider_enrollment_v1_revoke_credential**](azentsadminclient/docs/RuntimeProviderEnrollmentV1Api.md#runtime_provider_enrollment_v1_revoke_credential) | **DELETE** /runtime-provider-enrollment/v1/runtime-provider-credentials/{credential_id} | Revoke Credential
 *SystemBootstrapV1Api* | [**system_bootstrap_v1_bootstrap_first_system_admin**](azentsadminclient/docs/SystemBootstrapV1Api.md#system_bootstrap_v1_bootstrap_first_system_admin) | **POST** /system/v1/bootstrap/first-admin | Bootstrap First System Admin
 *SystemBootstrapV1Api* | [**system_bootstrap_v1_get_system_bootstrap_status**](azentsadminclient/docs/SystemBootstrapV1Api.md#system_bootstrap_v1_get_system_bootstrap_status) | **GET** /system/v1/bootstrap/status | Get System Bootstrap Status
 *SystemSettingsV1Api* | [**system_settings_v1_cancel_platform_github_app_candidate**](azentsadminclient/docs/SystemSettingsV1Api.md#system_settings_v1_cancel_platform_github_app_candidate) | **DELETE** /system-setting/v1/sections/platform-github-app/candidate | Cancel Platform Github App Candidate
@@ -162,6 +164,9 @@ Class | Method | HTTP request | Description
  - [PlatformGitHubAppFieldResponse](azentsadminclient/docs/PlatformGitHubAppFieldResponse.md)
  - [PlatformGitHubAppHealthResponse](azentsadminclient/docs/PlatformGitHubAppHealthResponse.md)
  - [PlatformGitHubAppPatchRequest](azentsadminclient/docs/PlatformGitHubAppPatchRequest.md)
+ - [RuntimeProviderCredentialRevokeResponse](azentsadminclient/docs/RuntimeProviderCredentialRevokeResponse.md)
+ - [RuntimeProviderEnrollmentGrantIssueRequest](azentsadminclient/docs/RuntimeProviderEnrollmentGrantIssueRequest.md)
+ - [RuntimeProviderEnrollmentGrantIssueResponse](azentsadminclient/docs/RuntimeProviderEnrollmentGrantIssueResponse.md)
  - [SentryDiagnostics](azentsadminclient/docs/SentryDiagnostics.md)
  - [SignupTokenDeliveryMethod](azentsadminclient/docs/SignupTokenDeliveryMethod.md)
  - [SignupTokenListResponse](azentsadminclient/docs/SignupTokenListResponse.md)

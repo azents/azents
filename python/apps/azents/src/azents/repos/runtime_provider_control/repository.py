@@ -1,0 +1,327 @@
+"""Runtime Provider control persistence repository."""
+
+import datetime
+
+import sqlalchemy as sa
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from azents.core.enums import (
+    RuntimeProviderConnectionStatus,
+    RuntimeProviderCredentialState,
+    RuntimeProviderEnrollmentGrantState,
+)
+from azents.rdb.models.runtime_provider_control import (
+    RDBRuntimeProviderConnection,
+    RDBRuntimeProviderCredential,
+    RDBRuntimeProviderEnrollmentGrant,
+)
+
+from .data import (
+    RuntimeProviderConnection,
+    RuntimeProviderConnectionCreate,
+    RuntimeProviderCredential,
+    RuntimeProviderCredentialCreate,
+    RuntimeProviderEnrollmentGrant,
+    RuntimeProviderEnrollmentGrantCreate,
+)
+
+
+class RuntimeProviderControlRepository:
+    """Persist enrollment, credential, and connection state for known Providers."""
+
+    async def create_enrollment_grant(
+        self,
+        session: AsyncSession,
+        *,
+        create: RuntimeProviderEnrollmentGrantCreate,
+    ) -> RuntimeProviderEnrollmentGrant:
+        """Issue one verifier-backed enrollment grant."""
+        grant = RDBRuntimeProviderEnrollmentGrant(
+            provider_id=create.provider_id,
+            verifier=create.verifier,
+            state=RuntimeProviderEnrollmentGrantState.ISSUED,
+            expires_at=create.expires_at,
+            issued_by_user_id=create.issued_by_user_id,
+            issued_by_source_id=create.issued_by_source_id,
+        )
+        session.add(grant)
+        await session.flush()
+        return self._build_grant(grant)
+
+    async def get_enrollment_grant_for_update(
+        self,
+        session: AsyncSession,
+        *,
+        grant_id: str,
+    ) -> RuntimeProviderEnrollmentGrant | None:
+        """Lock one grant so a service can verify and consume it atomically."""
+        result = await session.execute(
+            sa.select(RDBRuntimeProviderEnrollmentGrant)
+            .where(RDBRuntimeProviderEnrollmentGrant.id == grant_id)
+            .with_for_update()
+        )
+        grant = result.scalar_one_or_none()
+        return self._build_grant(grant) if grant is not None else None
+
+    async def create_credential_and_consume_grant(
+        self,
+        session: AsyncSession,
+        *,
+        grant_id: str,
+        credential: RuntimeProviderCredentialCreate,
+        consumed_at: datetime.datetime,
+    ) -> RuntimeProviderCredential | None:
+        """Consume a locked issued grant and create its Provider credential."""
+        result = await session.execute(
+            sa.update(RDBRuntimeProviderEnrollmentGrant)
+            .where(
+                RDBRuntimeProviderEnrollmentGrant.id == grant_id,
+                RDBRuntimeProviderEnrollmentGrant.state
+                == RuntimeProviderEnrollmentGrantState.ISSUED,
+                RDBRuntimeProviderEnrollmentGrant.consumed_at.is_(None),
+            )
+            .values(
+                state=RuntimeProviderEnrollmentGrantState.CONSUMED,
+                consumed_at=consumed_at,
+            )
+            .returning(RDBRuntimeProviderEnrollmentGrant)
+        )
+        grant = result.scalar_one_or_none()
+        if grant is None:
+            return None
+        rdb = RDBRuntimeProviderCredential(
+            provider_id=credential.provider_id,
+            verifier=credential.verifier,
+            state=RuntimeProviderCredentialState.ACTIVE,
+            expires_at=credential.expires_at,
+            issued_grant_id=credential.issued_grant_id,
+        )
+        session.add(rdb)
+        await session.flush()
+        grant.consumed_credential_id = rdb.id
+        await session.flush()
+        return self._build_credential(rdb)
+
+    async def get_active_credential_by_verifier(
+        self,
+        session: AsyncSession,
+        *,
+        verifier: str,
+        now: datetime.datetime,
+    ) -> RuntimeProviderCredential | None:
+        """Return one active unexpired credential matching a verifier."""
+        result = await session.execute(
+            sa.select(RDBRuntimeProviderCredential).where(
+                RDBRuntimeProviderCredential.verifier == verifier,
+                RDBRuntimeProviderCredential.state
+                == RuntimeProviderCredentialState.ACTIVE,
+                sa.or_(
+                    RDBRuntimeProviderCredential.expires_at.is_(None),
+                    RDBRuntimeProviderCredential.expires_at > now,
+                ),
+            )
+        )
+        credential = result.scalar_one_or_none()
+        return self._build_credential(credential) if credential is not None else None
+
+    async def mark_credential_used(
+        self,
+        session: AsyncSession,
+        *,
+        credential_id: str,
+        used_at: datetime.datetime,
+    ) -> bool:
+        """Mark one active credential as used, unless it was revoked concurrently."""
+        result = await session.execute(
+            sa.update(RDBRuntimeProviderCredential)
+            .where(
+                RDBRuntimeProviderCredential.id == credential_id,
+                RDBRuntimeProviderCredential.state
+                == RuntimeProviderCredentialState.ACTIVE,
+                sa.or_(
+                    RDBRuntimeProviderCredential.expires_at.is_(None),
+                    RDBRuntimeProviderCredential.expires_at > used_at,
+                ),
+            )
+            .values(last_used_at=used_at)
+            .returning(RDBRuntimeProviderCredential.id)
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def revoke_credential(
+        self,
+        session: AsyncSession,
+        *,
+        credential_id: str,
+        revoked_at: datetime.datetime,
+        revoked_by_user_id: str | None,
+    ) -> RuntimeProviderCredential | None:
+        """Revoke one active credential without invalidating audit history."""
+        result = await session.execute(
+            sa.update(RDBRuntimeProviderCredential)
+            .where(
+                RDBRuntimeProviderCredential.id == credential_id,
+                RDBRuntimeProviderCredential.state
+                == RuntimeProviderCredentialState.ACTIVE,
+            )
+            .values(
+                state=RuntimeProviderCredentialState.REVOKED,
+                revoked_at=revoked_at,
+                revoked_by_user_id=revoked_by_user_id,
+            )
+            .returning(RDBRuntimeProviderCredential)
+        )
+        credential = result.scalar_one_or_none()
+        return self._build_credential(credential) if credential is not None else None
+
+    async def create_connection(
+        self,
+        session: AsyncSession,
+        *,
+        create: RuntimeProviderConnectionCreate,
+    ) -> RuntimeProviderConnection:
+        """Record one authenticated Provider Control stream connection."""
+        await session.execute(
+            sa.update(RDBRuntimeProviderConnection)
+            .where(
+                RDBRuntimeProviderConnection.provider_id == create.provider_id,
+                RDBRuntimeProviderConnection.status
+                == RuntimeProviderConnectionStatus.CONNECTED,
+            )
+            .values(
+                status=RuntimeProviderConnectionStatus.DISCONNECTED,
+                disconnected_at=create.connected_at,
+            )
+        )
+        rdb = RDBRuntimeProviderConnection(
+            provider_id=create.provider_id,
+            credential_id=create.credential_id,
+            connection_id=create.connection_id,
+            generation=create.generation,
+            status=RuntimeProviderConnectionStatus.CONNECTED,
+            reported_provider_type=create.reported_provider_type,
+            reported_protocol_version=create.reported_protocol_version,
+            connected_at=create.connected_at,
+            last_heartbeat_at=create.connected_at,
+        )
+        session.add(rdb)
+        await session.flush()
+        return self._build_connection(rdb)
+
+    async def heartbeat_connection(
+        self,
+        session: AsyncSession,
+        *,
+        provider_id: str,
+        credential_id: str,
+        generation: int,
+        heartbeat_at: datetime.datetime,
+    ) -> bool:
+        """Refresh one current authenticated connection heartbeat."""
+        result = await session.execute(
+            sa.update(RDBRuntimeProviderConnection)
+            .where(
+                RDBRuntimeProviderConnection.provider_id == provider_id,
+                RDBRuntimeProviderConnection.credential_id == credential_id,
+                RDBRuntimeProviderConnection.generation == generation,
+                RDBRuntimeProviderConnection.status
+                == RuntimeProviderConnectionStatus.CONNECTED,
+                sa.exists(
+                    sa.select(RDBRuntimeProviderCredential.id).where(
+                        RDBRuntimeProviderCredential.id
+                        == RDBRuntimeProviderConnection.credential_id,
+                        RDBRuntimeProviderCredential.state
+                        == RuntimeProviderCredentialState.ACTIVE,
+                        sa.or_(
+                            RDBRuntimeProviderCredential.expires_at.is_(None),
+                            RDBRuntimeProviderCredential.expires_at > heartbeat_at,
+                        ),
+                    )
+                ),
+            )
+            .values(last_heartbeat_at=heartbeat_at)
+            .returning(RDBRuntimeProviderConnection.id)
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def disconnect_connection(
+        self,
+        session: AsyncSession,
+        *,
+        provider_id: str,
+        credential_id: str,
+        generation: int,
+        disconnected_at: datetime.datetime,
+    ) -> bool:
+        """Disconnect only the authenticated current connection generation."""
+        result = await session.execute(
+            sa.update(RDBRuntimeProviderConnection)
+            .where(
+                RDBRuntimeProviderConnection.provider_id == provider_id,
+                RDBRuntimeProviderConnection.credential_id == credential_id,
+                RDBRuntimeProviderConnection.generation == generation,
+                RDBRuntimeProviderConnection.status
+                == RuntimeProviderConnectionStatus.CONNECTED,
+            )
+            .values(
+                status=RuntimeProviderConnectionStatus.DISCONNECTED,
+                disconnected_at=disconnected_at,
+            )
+            .returning(RDBRuntimeProviderConnection.id)
+        )
+        return result.scalar_one_or_none() is not None
+
+    @staticmethod
+    def _build_grant(
+        rdb: RDBRuntimeProviderEnrollmentGrant,
+    ) -> RuntimeProviderEnrollmentGrant:
+        return RuntimeProviderEnrollmentGrant(
+            id=rdb.id,
+            provider_id=rdb.provider_id,
+            verifier=rdb.verifier,
+            state=rdb.state,
+            expires_at=rdb.expires_at,
+            issued_by_user_id=rdb.issued_by_user_id,
+            issued_by_source_id=rdb.issued_by_source_id,
+            consumed_at=rdb.consumed_at,
+            consumed_credential_id=rdb.consumed_credential_id,
+            revoked_at=rdb.revoked_at,
+            revoked_by_user_id=rdb.revoked_by_user_id,
+            created_at=rdb.created_at,
+        )
+
+    @staticmethod
+    def _build_credential(
+        rdb: RDBRuntimeProviderCredential,
+    ) -> RuntimeProviderCredential:
+        return RuntimeProviderCredential(
+            id=rdb.id,
+            provider_id=rdb.provider_id,
+            verifier=rdb.verifier,
+            state=rdb.state,
+            expires_at=rdb.expires_at,
+            issued_grant_id=rdb.issued_grant_id,
+            last_used_at=rdb.last_used_at,
+            revoked_at=rdb.revoked_at,
+            revoked_by_user_id=rdb.revoked_by_user_id,
+            created_at=rdb.created_at,
+        )
+
+    @staticmethod
+    def _build_connection(
+        rdb: RDBRuntimeProviderConnection,
+    ) -> RuntimeProviderConnection:
+        return RuntimeProviderConnection(
+            id=rdb.id,
+            provider_id=rdb.provider_id,
+            credential_id=rdb.credential_id,
+            connection_id=rdb.connection_id,
+            generation=rdb.generation,
+            status=rdb.status,
+            reported_provider_type=rdb.reported_provider_type,
+            reported_protocol_version=rdb.reported_protocol_version,
+            connected_at=rdb.connected_at,
+            last_heartbeat_at=rdb.last_heartbeat_at,
+            disconnected_at=rdb.disconnected_at,
+            created_at=rdb.created_at,
+        )

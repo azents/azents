@@ -17,8 +17,13 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engin
 
 from azents.core.config import PostgreSQLConfig
 from azents.core.redis import create_redis_client
+from azents.core.runtime_provider_credential import RuntimeProviderCredentialVerifier
 from azents.rdb.session import SessionManager
 from azents.repos.agent_runtime import AgentRuntimeRepository
+from azents.repos.runtime_provider.repository import RuntimeProviderRepository
+from azents.repos.runtime_provider_control.repository import (
+    RuntimeProviderControlRepository,
+)
 from azents.runtime.control_protocol.grpc.provider_server import (
     add_runtime_provider_control_servicer,
 )
@@ -38,6 +43,9 @@ from azents.runtime.control_protocol.service import (
 )
 from azents.runtime.coordination.redis import (
     RedisRuntimeCoordinationStore,
+)
+from azents.services.runtime_provider_control.service import (
+    RuntimeProviderEnrollmentService,
 )
 
 _DEFAULT_PORT = 8030
@@ -73,6 +81,7 @@ class RuntimeControlSettings(BaseSettings):
     runtime_control_auth_token: str | None = None
     runtime_runner_image: str
     runtime_runner_control_endpoint: str
+    credential_encryption_key: str
     rdb_host: str = "localhost"
     rdb_port: int = 5432
     rdb_user: str = "azents"
@@ -96,6 +105,12 @@ async def runtime_control_server_lifespan(
     engine = _create_engine(settings)
     session_manager = _session_manager(engine)
     runtime_repository = AgentRuntimeRepository()
+    enrollment_service = RuntimeProviderEnrollmentService(
+        session_manager=session_manager,
+        repository=RuntimeProviderControlRepository(),
+        provider_repository=RuntimeProviderRepository(),
+        verifier=RuntimeProviderCredentialVerifier(settings.credential_encryption_key),
+    )
     provider_sink = RuntimeProviderReportRepositorySink(
         runtime_repository=runtime_repository,
         session_manager=session_manager,
@@ -137,7 +152,8 @@ async def runtime_control_server_lifespan(
         report_sink=provider_sink,
         owner_replica_id=settings.runtime_control_instance_id,
         consumer_id=f"{settings.runtime_control_instance_id}:provider",
-        control_auth_token=control_token,
+        credential_authenticator=enrollment_service,
+        connection_tracker=enrollment_service,
     )
     add_runtime_runner_control_servicer(
         server,

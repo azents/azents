@@ -60,13 +60,13 @@ class GrpcProviderControlClient(ProviderControlClient):
         *,
         channel: grpc.aio.Channel | None = None,
         heartbeat_ack_timeout_seconds: float = 10.0,
-        control_auth_token: str | None = None,
+        provider_credential: str,
     ) -> None:
         """Initialize the gRPC client with a stream callable."""
         self._stream = stream
         self._channel = channel
         self._heartbeat_ack_timeout_seconds = heartbeat_ack_timeout_seconds
-        self._metadata = _auth_metadata(control_auth_token)
+        self._metadata = _provider_credential_metadata(provider_credential)
         self._outbound: asyncio.Queue[runtime_provider_control_pb2.ProviderMessage] = (
             asyncio.Queue()
         )
@@ -84,7 +84,7 @@ class GrpcProviderControlClient(ProviderControlClient):
         endpoint: str,
         *,
         heartbeat_ack_timeout_seconds: float = 10.0,
-        control_auth_token: str | None = None,
+        provider_credential: str,
     ) -> "GrpcProviderControlClient":
         """Create a client using an insecure gRPC channel."""
         channel = grpc.aio.insecure_channel(endpoint)
@@ -93,7 +93,7 @@ class GrpcProviderControlClient(ProviderControlClient):
             stub.ConnectProvider,
             channel=channel,
             heartbeat_ack_timeout_seconds=heartbeat_ack_timeout_seconds,
-            control_auth_token=control_auth_token,
+            provider_credential=provider_credential,
         )
 
     async def register_provider(
@@ -115,10 +115,7 @@ class GrpcProviderControlClient(ProviderControlClient):
                 request_id="register",
             )
         )
-        if self._metadata is None:
-            responses = self._stream(outbound)
-        else:
-            responses = self._stream(outbound, metadata=self._metadata)
+        responses = self._stream(outbound, metadata=self._metadata)
         self._receiver_task = asyncio.create_task(self._receive(responses))
         return await self._accepted
 
@@ -300,10 +297,14 @@ class GrpcProviderControlClient(ProviderControlClient):
         return self._connection_id
 
 
-def _auth_metadata(token: str | None) -> tuple[tuple[str, str], ...] | None:
-    if token is None or not token:
-        return None
-    return (("authorization", f"Bearer {token}"),)
+def _provider_credential_metadata(
+    provider_credential: str,
+) -> tuple[tuple[str, str], ...]:
+    """Create required Provider credential metadata for Control."""
+    credential = provider_credential.strip()
+    if not credential:
+        raise ValueError("provider_credential must not be empty")
+    return (("authorization", f"Bearer {credential}"),)
 
 
 def _register_message(

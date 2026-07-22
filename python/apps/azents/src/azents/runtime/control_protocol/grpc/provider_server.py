@@ -32,7 +32,10 @@ from azents.runtime.control_protocol.data import (
     RuntimeProtocolCapabilities,
     RuntimeProviderRegistration,
 )
-from azents.runtime.control_protocol.grpc.auth import RuntimeControlGrpcAuth
+from azents.runtime.control_protocol.grpc.auth import (
+    RuntimeProviderCredentialAuthenticator,
+    RuntimeProviderCredentialGrpcAuth,
+)
 from azents.runtime.control_protocol.service import (
     RuntimeControlProtocolService,
 )
@@ -42,6 +45,10 @@ from azents.runtime.coordination.data import (
     RuntimeReplyEvent,
     RuntimeReplyEventType,
     RuntimeRequestEnvelope,
+)
+from azents.services.runtime_provider_control.data import (
+    RuntimeProviderCredentialAuthentication,
+    RuntimeProviderCredentialUnavailable,
 )
 
 _DEFAULT_COMMAND_BLOCK_MS = 500
@@ -72,6 +79,43 @@ class RuntimeProviderReportSink(Protocol):
         ...
 
 
+class RuntimeProviderConnectionTracker(Protocol):
+    """Persist authenticated Provider stream lifecycle projections."""
+
+    async def create_connection(
+        self,
+        *,
+        authentication: RuntimeProviderCredentialAuthentication,
+        connection_id: str,
+        generation: int,
+        reported_provider_type: str,
+        reported_protocol_version: str,
+        connected_at: datetime,
+    ) -> object:
+        """Record a newly authenticated Provider stream."""
+        ...
+
+    async def heartbeat_connection(
+        self,
+        *,
+        authentication: RuntimeProviderCredentialAuthentication,
+        generation: int,
+        heartbeat_at: datetime,
+    ) -> bool:
+        """Refresh an authenticated Provider stream."""
+        ...
+
+    async def disconnect_connection(
+        self,
+        *,
+        authentication: RuntimeProviderCredentialAuthentication,
+        generation: int,
+        disconnected_at: datetime,
+    ) -> bool:
+        """Record Provider stream closure."""
+        ...
+
+
 class RuntimeProviderControlGrpcServicer(
     runtime_provider_control_pb2_grpc.RuntimeProviderControlServicer
 ):
@@ -84,7 +128,8 @@ class RuntimeProviderControlGrpcServicer(
         report_sink: RuntimeProviderReportSink,
         owner_replica_id: str,
         consumer_id: str,
-        control_auth_token: str | None,
+        credential_authenticator: RuntimeProviderCredentialAuthenticator,
+        connection_tracker: RuntimeProviderConnectionTracker,
         command_block_ms: int = _DEFAULT_COMMAND_BLOCK_MS,
     ) -> None:
         """Initialize the Provider Control gRPC servicer."""
@@ -92,7 +137,8 @@ class RuntimeProviderControlGrpcServicer(
         self._report_sink = report_sink
         self._owner_replica_id = owner_replica_id
         self._consumer_id = consumer_id
-        self._auth = RuntimeControlGrpcAuth(control_auth_token)
+        self._auth = RuntimeProviderCredentialGrpcAuth(credential_authenticator)
+        self._connection_tracker = connection_tracker
         self._command_block_ms = command_block_ms
 
     async def ConnectProvider(
@@ -104,16 +150,45 @@ class RuntimeProviderControlGrpcServicer(
         ],
     ) -> AsyncIterator[runtime_provider_control_pb2.ControlMessage]:
         """Register a Provider, then bridge heartbeat/report/command messages."""
-        await self._auth.authorize(context, subject="Provider")
+        authentication = await self._auth.authenticate(context)
         first_message = await _first_register_message(request_iterator, context)
+        registration = _registration(
+            first_message,
+            owner_replica_id=self._owner_replica_id,
+        )
+        identity_error = _registration_identity_error(registration, authentication)
+        if identity_error is not None:
+            await context.abort(grpc.StatusCode.PERMISSION_DENIED, identity_error)
+            raise AssertionError("unreachable")
+        bound_registration = dataclasses.replace(
+            registration,
+            provider_id=authentication.provider_id,
+            auth_credential_id=authentication.credential_id,
+        )
         now = datetime.now(UTC)
         accepted = await self._control_protocol.register_provider(
-            _registration(
-                first_message,
-                owner_replica_id=self._owner_replica_id,
-            ),
+            bound_registration,
             registered_at=now,
         )
+        try:
+            await self._connection_tracker.create_connection(
+                authentication=authentication,
+                connection_id=accepted.connection_id,
+                generation=accepted.generation,
+                reported_provider_type=registration.provider_type,
+                reported_protocol_version=registration.protocol_version,
+                connected_at=now,
+            )
+        except RuntimeProviderCredentialUnavailable:
+            await self._control_protocol.revoke_provider(
+                provider_id=accepted.provider_id,
+                generation=accepted.generation,
+            )
+            await context.abort(
+                grpc.StatusCode.UNAUTHENTICATED,
+                "Provider credential is invalid or unavailable",
+            )
+            raise AssertionError("unreachable") from None
         _LOGGER.info(
             "Runtime Provider connected",
             extra={
@@ -130,6 +205,8 @@ class RuntimeProviderControlGrpcServicer(
                 outbound,
                 provider_id=accepted.provider_id,
                 generation=accepted.generation,
+                connection_id=accepted.connection_id,
+                authentication=authentication,
             )
         )
         command_task = asyncio.create_task(
@@ -161,6 +238,15 @@ class RuntimeProviderControlGrpcServicer(
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
+            await self._control_protocol.revoke_provider(
+                provider_id=accepted.provider_id,
+                generation=accepted.generation,
+            )
+            await self._connection_tracker.disconnect_connection(
+                authentication=authentication,
+                generation=accepted.generation,
+                disconnected_at=datetime.now(UTC),
+            )
             _LOGGER.info(
                 "Runtime Provider stream closed",
                 extra={
@@ -178,24 +264,29 @@ class RuntimeProviderControlGrpcServicer(
         *,
         provider_id: str,
         generation: int,
+        connection_id: str,
+        authentication: RuntimeProviderCredentialAuthentication,
     ) -> None:
         async for message in request_iterator:
             payload = message.WhichOneof("payload")
+            if message.connection_id != connection_id:
+                await outbound.put(
+                    _error(message.request_id, "CONNECTION_IDENTITY_MISMATCH")
+                )
+                return
             if message.generation != generation:
                 await outbound.put(
                     _error(message.request_id, "STALE_PROVIDER_GENERATION")
                 )
                 return
             if payload == "heartbeat":
-                ok = await self._control_protocol.heartbeat_provider(
+                if not await self._provider_generation_current(
                     provider_id=provider_id,
                     generation=generation,
-                    heartbeat_at=datetime.now(UTC),
-                )
-                if not ok:
-                    await outbound.put(
-                        _error(message.request_id, "STALE_PROVIDER_GENERATION")
-                    )
+                    request_id=message.request_id,
+                    outbound=outbound,
+                    authentication=authentication,
+                ):
                     return
                 await outbound.put(
                     runtime_provider_control_pb2.ControlMessage(
@@ -212,11 +303,17 @@ class RuntimeProviderControlGrpcServicer(
                         _error(message.request_id, "STALE_PROVIDER_GENERATION")
                     )
                     return
+                if message.report.provider_id != provider_id:
+                    await outbound.put(
+                        _error(message.request_id, "PROVIDER_IDENTITY_MISMATCH")
+                    )
+                    return
                 if not await self._provider_generation_current(
                     provider_id=provider_id,
                     generation=generation,
                     request_id=message.request_id,
                     outbound=outbound,
+                    authentication=authentication,
                 ):
                     return
                 await self._report_sink.record_provider_report(
@@ -238,11 +335,20 @@ class RuntimeProviderControlGrpcServicer(
                         _error(message.request_id, "STALE_PROVIDER_GENERATION")
                     )
                     return
+                if (
+                    message.command_completion.report.runtime_id
+                    and message.command_completion.report.provider_id != provider_id
+                ):
+                    await outbound.put(
+                        _error(message.request_id, "PROVIDER_IDENTITY_MISMATCH")
+                    )
+                    return
                 if not await self._provider_generation_current(
                     provider_id=provider_id,
                     generation=generation,
                     request_id=message.request_id,
                     outbound=outbound,
+                    authentication=authentication,
                 ):
                     return
                 await self._complete_provider_command(
@@ -261,16 +367,26 @@ class RuntimeProviderControlGrpcServicer(
         generation: int,
         request_id: str,
         outbound: asyncio.Queue[_ProviderOutbound],
+        authentication: RuntimeProviderCredentialAuthentication,
     ) -> bool:
-        ok = await self._control_protocol.heartbeat_provider(
+        heartbeat_at = datetime.now(UTC)
+        current = await self._control_protocol.heartbeat_provider(
             provider_id=provider_id,
             generation=generation,
-            heartbeat_at=datetime.now(UTC),
+            heartbeat_at=heartbeat_at,
         )
-        if ok:
-            return True
-        await outbound.put(_error(request_id, "STALE_PROVIDER_GENERATION"))
-        return False
+        persisted = await self._connection_tracker.heartbeat_connection(
+            authentication=authentication,
+            generation=generation,
+            heartbeat_at=heartbeat_at,
+        )
+        if not current:
+            await outbound.put(_error(request_id, "STALE_PROVIDER_GENERATION"))
+            return False
+        if not persisted:
+            await outbound.put(_error(request_id, "PROVIDER_CONNECTION_UNAVAILABLE"))
+            return False
+        return True
 
     async def _relay_provider_commands(
         self,
@@ -429,7 +545,8 @@ def add_runtime_provider_control_servicer(
     report_sink: RuntimeProviderReportSink,
     owner_replica_id: str,
     consumer_id: str,
-    control_auth_token: str | None,
+    credential_authenticator: RuntimeProviderCredentialAuthenticator,
+    connection_tracker: RuntimeProviderConnectionTracker,
     command_block_ms: int = _DEFAULT_COMMAND_BLOCK_MS,
 ) -> None:
     """Add the Agent Runtime Provider Control servicer to a gRPC server."""
@@ -439,7 +556,8 @@ def add_runtime_provider_control_servicer(
             report_sink=report_sink,
             owner_replica_id=owner_replica_id,
             consumer_id=consumer_id,
-            control_auth_token=control_auth_token,
+            credential_authenticator=credential_authenticator,
+            connection_tracker=connection_tracker,
             command_block_ms=command_block_ms,
         ),
         server,
@@ -551,6 +669,24 @@ def _registration(
         connection_id=message.connection_id,
         owner_replica_id=owner_replica_id,
     )
+
+
+def _registration_identity_error(
+    registration: RuntimeProviderRegistration,
+    authentication: RuntimeProviderCredentialAuthentication,
+) -> str | None:
+    """Return the first registration claim that conflicts with credential binding."""
+    if registration.provider_id != authentication.provider_id:
+        return "Provider ID does not match authenticated credential binding"
+    if registration.auth_credential_id != authentication.credential_id:
+        return "Provider credential ID does not match authenticated credential binding"
+    if registration.provider_type != authentication.provider_kind.value:
+        return "Provider implementation does not match authenticated Provider"
+    if registration.scope != authentication.provider_scope.value:
+        return "Provider scope does not match authenticated Provider"
+    if registration.workspace_id != authentication.provider_workspace_id:
+        return "Provider workspace does not match authenticated Provider"
+    return None
 
 
 def _provider_command(

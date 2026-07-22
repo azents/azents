@@ -18,6 +18,7 @@ def _settings(
         runtime_control_auth_token=auth_token,
         runtime_runner_image="runner:test",
         runtime_runner_control_endpoint="runtime-control:8030",
+        credential_encryption_key="test-key",
     )
 
 

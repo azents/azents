@@ -134,7 +134,7 @@ async def _run_control_loop(
     while not stop.is_set():
         control_client = GrpcProviderControlClient.from_endpoint(
             settings.control_endpoint,
-            control_auth_token=settings.control_auth_token,
+            provider_credential=settings.provider_credential,
         )
         control_connection_id = _control_connection_id(settings.connection_id)
         _LOGGER.info(
@@ -392,9 +392,7 @@ class ProviderSettings:
             "AZ_RUNTIME_PROVIDER_CONNECTION_ID",
             f"{self.provider_id}:{uuid.uuid4().hex}",
         )
-        self.control_auth_token: str | None = os.environ.get(
-            "AZ_RUNTIME_CONTROL_AUTH_TOKEN"
-        )
+        self.provider_credential: str = _required_env("AZ_RUNTIME_PROVIDER_CREDENTIAL")
 
 
 def _settings_from_env() -> ProviderSettings:
