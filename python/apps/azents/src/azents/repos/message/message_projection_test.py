@@ -202,6 +202,11 @@ def test_external_channel_message_projects_source_metadata() -> None:
     assert message.content == "updated"
     assert message.metadata is not None
     assert message.metadata["source"] == "external_channel"
+    assert message.metadata["provider"] == "slack"
+    assert message.metadata["resource_type"] == "thread"
+    assert message.metadata["provider_user_id"] == "U1"
+    assert message.metadata["provider_created_at"] == created_at.isoformat()
+    assert message.metadata["provider_updated_at"] == created_at.isoformat()
     assert message.metadata["projection_root_id"] == payload.projection_root_id
     assert message.metadata["correction_of_revision_id"] == "revision-1"
     assert message.metadata["event_render_key"] == f"event:{external_id}"

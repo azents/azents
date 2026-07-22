@@ -1790,6 +1790,28 @@
       "statusFailed": "Failed",
       "statusInterrupted": "Interrupted",
       "statusCancelled": "Cancelled"
+    },
+    "externalMessage": {
+      "expand": "Expand external message from {source}",
+      "collapse": "Collapse external message from {source}",
+      "provider": "Provider",
+      "resource": "Resource",
+      "sender": "Sender",
+      "authorType": "Author type",
+      "authorization": "Authorization",
+      "lifecycle": "Lifecycle",
+      "timestamp": "Provider time",
+      "revision": "Revision",
+      "corrects": "Corrects revision",
+      "openOriginal": "Open original message",
+      "openOriginalAccessible": "Open original message in {resource}",
+      "originalUnavailable": "The original message is unavailable.",
+      "status": {
+        "invoked": "Invoked",
+        "context": "Context",
+        "edited": "Edited",
+        "deleted": "Deleted"
+      }
     }
   },
   "oauth": {
@@ -1816,5 +1838,55 @@
     "goToWorkspaces": "Go to workspaces",
     "redirectingToSetup": "Redirecting to service authorization...",
     "toolkitRedirectError": "Failed to redirect to service setup. Please try again from your workspace settings."
+  },
+  "externalChannelApproval": {
+    "title": "External channel access request",
+    "subtitle": "Review who may invoke this Agent from Slack.",
+    "loading": "Loading access request…",
+    "notFoundTitle": "Access request not found",
+    "notFoundDescription": "This link is invalid, unavailable to your account, or no longer exists.",
+    "unauthorizedTitle": "Sign in required",
+    "unauthorizedDescription": "Sign in with an authorized Azents account to review this request.",
+    "errorTitle": "Could not load the request",
+    "errorDescription": "The request could not be loaded. Try again.",
+    "retry": "Try again",
+    "pendingDescription": "This participant is waiting for an explicit access decision. No Agent session has been invoked yet.",
+    "participant": "Participant",
+    "source": "Slack source",
+    "provider": "Provider",
+    "expiresAt": "Expires",
+    "decidedAt": "Decided",
+    "message": "Request message",
+    "openOriginal": "Open original Slack message",
+    "originalUnavailable": "The original Slack message is unavailable.",
+    "chooseAccess": "Choose the access scope",
+    "decisionSummary": "Decision note: {summary}",
+    "status": {
+      "pending": "Pending",
+      "allowed": "Allowed",
+      "denied": "Denied",
+      "blocked": "Blocked",
+      "expired": "Expired"
+    },
+    "completed": {
+      "allowed": "This request was approved. The participant can invoke the Agent within the granted scope.",
+      "denied": "This request was denied. It did not create access or invoke the Agent.",
+      "blocked": "This participant was blocked from creating future access requests for this Agent.",
+      "expired": "This request expired before a decision was made. It can no longer be approved."
+    },
+    "actions": {
+      "allowSession": "Allow for this Session",
+      "allowSessionDescription": "Grant access only to the Session created for this Slack conversation.",
+      "allowAgent": "Allow for this Agent",
+      "allowAgentDescription": "Grant this participant access across this Agent’s eligible Slack conversations.",
+      "deny": "Deny request",
+      "denyDescription": "Resolve this request without granting access.",
+      "block": "Block participant",
+      "blockDescription": "Deny this request and suppress future approval requests for this Agent."
+    },
+    "errors": {
+      "conflict": "This request can no longer be completed. It may have expired, been decided elsewhere, or belong to a disconnected channel.",
+      "action": "The decision could not be saved. Try again."
+    }
   }
 }

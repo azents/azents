@@ -29,11 +29,13 @@ import {
 } from "@tabler/icons-react";
 import { useLocale, useTranslations } from "next-intl";
 import { memo } from "react";
+import { externalChannelMessagePresentation } from "../externalChannelMessage";
 import inlineControlClasses from "./ChatInlineControl.module.css";
 import {
   chatChevronTransition,
   chatCollapseTransitionProps,
 } from "./collapsiblePresentation";
+import { ExternalChannelMessage } from "./ExternalChannelMessage";
 import { FileAttachmentList } from "./FileAttachmentList";
 import { InputBufferBubbleFrame } from "./InputBufferBubbleFrame";
 import { MarkdownContent } from "./MarkdownContent";
@@ -550,6 +552,7 @@ export const MessageBubble = memo(function MessageBubble({
     (message.toolCalls && message.toolCalls.length > 0) ||
     (message.providerToolCalls && message.providerToolCalls.length > 0);
   const hasAttachments = message.attachments && message.attachments.length > 0;
+  const externalChannelSource = externalChannelMessagePresentation(message);
 
   if (message.role === "goal_continuation") {
     return (
@@ -579,6 +582,17 @@ export const MessageBubble = memo(function MessageBubble({
     return (
       <Box opacity={dimmed ? 0.45 : 1}>
         <GoalBriefingCard message={message} />
+      </Box>
+    );
+  }
+
+  if (externalChannelSource !== null) {
+    return (
+      <Box opacity={dimmed ? 0.45 : 1}>
+        <ExternalChannelMessage
+          source={externalChannelSource}
+          partial={message.status === "partial"}
+        />
       </Box>
     );
   }
