@@ -388,6 +388,22 @@ class RuntimeProviderControlRepository:
         )
         return result.scalar_one_or_none() is not None
 
+    async def has_connected_connection(
+        self,
+        session: AsyncSession,
+        *,
+        provider_id: str,
+    ) -> bool:
+        """Return whether one Provider has a current authenticated connection."""
+        result = await session.execute(
+            sa.select(RDBRuntimeProviderConnection.id).where(
+                RDBRuntimeProviderConnection.provider_id == provider_id,
+                RDBRuntimeProviderConnection.status
+                == RuntimeProviderConnectionStatus.CONNECTED,
+            )
+        )
+        return result.scalar_one_or_none() is not None
+
     @staticmethod
     def _build_grant(
         rdb: RDBRuntimeProviderEnrollmentGrant,

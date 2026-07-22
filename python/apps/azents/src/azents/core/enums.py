@@ -537,6 +537,51 @@ class RuntimeProviderConnectionStatus(enum.StrEnum):
     DISCONNECTED = "disconnected"
 
 
+class RuntimeProviderContractStatus(enum.StrEnum):
+    """Administrative state of an immutable Provider capability contract."""
+
+    CANDIDATE = "candidate"
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+    SUPERSEDED = "superseded"
+
+
+class RuntimeProviderConfigRevisionState(enum.StrEnum):
+    """Lifecycle state of one immutable Provider configuration revision."""
+
+    CANDIDATE = "candidate"
+    PROVIDER_ACCEPTED = "provider_accepted"
+    ACTIVE = "active"
+    SUPERSEDED = "superseded"
+    REJECTED = "rejected"
+    DIVERGENT = "divergent"
+
+
+class RuntimeProviderConfigValidationStatus(enum.StrEnum):
+    """Validation outcome for a Provider configuration revision."""
+
+    PENDING = "pending"
+    VALID = "valid"
+    INVALID = "invalid"
+
+
+class RuntimeProviderBindingOrigin(enum.StrEnum):
+    """Input that resolved an immutable logical Runtime Provider binding."""
+
+    AGENT_PREFERENCE = "agent_preference"
+    PLATFORM_DEFAULT = "platform_default"
+    MIGRATION = "migration"
+
+
+class RuntimePolicySnapshotApplicationState(enum.StrEnum):
+    """Provider application projection for one immutable Runtime policy snapshot."""
+
+    PENDING = "pending"
+    APPLIED = "applied"
+    DIVERGENT = "divergent"
+    LEGACY_UNVERIFIED = "legacy_unverified"
+
+
 class SnapshotKind(enum.StrEnum):
     """Snapshot creation reason.
 

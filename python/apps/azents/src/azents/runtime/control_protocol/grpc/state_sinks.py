@@ -46,6 +46,14 @@ class RuntimeProviderReportRepositorySink:
             )
             if runtime is None:
                 raise ValueError(f"AgentRuntime not found: {report.runtime_id}")
+            if (
+                runtime.runtime_provider_id is not None
+                and runtime.runtime_provider_id != report.provider_id
+            ):
+                raise ValueError(
+                    "Runtime Provider report does not match the immutable "
+                    "Runtime Provider binding."
+                )
 
             if _terminal_delete_acknowledged(
                 report=report,
