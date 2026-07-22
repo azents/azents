@@ -366,3 +366,79 @@ async def test_control_message_reports_ambiguous_network_outcome_without_retry()
 
     assert result.status == "unknown"
     assert result.error_kind == "provider_ambiguous"
+
+
+@pytest.mark.parametrize(
+    ("operation", "expected_path", "expected_ts"),
+    [
+        ("post", "/api/chat.postMessage", "1721600001.000100"),
+        ("update", "/api/chat.update", "1721600000.000100"),
+        ("delete", "/api/chat.delete", "1721600000.000100"),
+    ],
+)
+async def test_channel_action_message_mutations_are_single_provider_requests(
+    operation: str,
+    expected_path: str,
+    expected_ts: str,
+) -> None:
+    """Reply and progress mutations issue one bounded Slack request each."""
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"ok": True, "ts": expected_ts})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        client = SlackConversationClient(http)
+        if operation == "post":
+            result = await client.post_message(
+                bot_token="xoxb-secret",
+                tenant_id="T1",
+                channel_id="C1",
+                thread_ts="1721600000.000100",
+                text="Reply",
+            )
+        elif operation == "update":
+            result = await client.update_message(
+                bot_token="xoxb-secret",
+                tenant_id="T1",
+                channel_id="C1",
+                message_ts="1721600000.000100",
+                text="Progress",
+            )
+        else:
+            result = await client.delete_message(
+                bot_token="xoxb-secret",
+                tenant_id="T1",
+                channel_id="C1",
+                message_ts="1721600000.000100",
+            )
+
+    assert result.status == "delivered"
+    assert result.provider_message_key == f"slack:T1:C1:{expected_ts}"
+    assert len(requests) == 1
+    assert requests[0].url.path == expected_path
+    assert requests[0].headers["Authorization"] == "Bearer xoxb-secret"
+
+
+async def test_channel_action_rate_limit_is_terminal_failed_without_retry() -> None:
+    """Outbound rate limiting is one failed attempt rather than inbound retry."""
+    calls = 0
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(429, headers={"Retry-After": "10"}, json={})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        result = await SlackConversationClient(http).post_message(
+            bot_token="xoxb-secret",
+            tenant_id="T1",
+            channel_id="C1",
+            thread_ts="1721600000.000100",
+            text="Reply",
+        )
+
+    assert calls == 1
+    assert result.status == "failed"
+    assert result.error_kind == "rate_limited"

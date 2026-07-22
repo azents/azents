@@ -67,6 +67,7 @@ class ExternalChannelLifecycleRepository:
                 finished_work_count=0,
                 deleted_pending_context_count=0,
                 created_progress_delete_intent_count=0,
+                progress_delete_intent_ids=(),
             )
         binding_ids = [binding.id for binding in bindings]
         binding_pairs = [
@@ -93,6 +94,7 @@ class ExternalChannelLifecycleRepository:
 
         finished_work_count = 0
         created_progress_delete_intent_count = 0
+        progress_delete_intent_ids: list[str] = []
         for work in works:
             work.status = ExternalChannelWorkStatus.FINISHED
             work.finished_at = now
@@ -122,9 +124,10 @@ class ExternalChannelLifecycleRepository:
                     .on_conflict_do_nothing()
                     .returning(RDBExternalChannelDeliveryAttempt.id)
                 )
-                created_progress_delete_intent_count += int(
-                    result.scalar_one_or_none() is not None
-                )
+                created_id = result.scalar_one_or_none()
+                if created_id is not None:
+                    created_progress_delete_intent_count += 1
+                    progress_delete_intent_ids.append(created_id)
         deleted_pending_context_count = await self._delete(
             session,
             RDBExternalChannelPendingContext,
@@ -139,6 +142,7 @@ class ExternalChannelLifecycleRepository:
             finished_work_count=finished_work_count,
             deleted_pending_context_count=deleted_pending_context_count,
             created_progress_delete_intent_count=created_progress_delete_intent_count,
+            progress_delete_intent_ids=tuple(progress_delete_intent_ids),
         )
 
     async def validate_restore_session_tree(

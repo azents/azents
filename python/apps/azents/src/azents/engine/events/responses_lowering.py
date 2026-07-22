@@ -31,9 +31,9 @@ from azents.engine.events.provider_tool_rendering import render_provider_tool_se
 from azents.engine.events.responses_continuation import sanitize_responses_native_item
 from azents.engine.events.system_reminders import (
     format_compaction_summary_reminder,
-    format_goal_continuation_reminder,
     format_goal_resumed_reminder,
     format_goal_updated_reminder,
+    format_idle_continuation_reminder,
     format_interrupted_reminder,
     format_plain_system_reminder,
 )
@@ -479,9 +479,7 @@ class ResponsesRequestLowerer:
         ):
             return {
                 "role": "user",
-                "content": format_goal_continuation_reminder(
-                    event.payload.metadata.get("goal_objective")
-                ),
+                "content": format_idle_continuation_reminder(event.payload.metadata),
             }
         if event.kind == EventKind.GOAL_UPDATED and isinstance(
             event.payload, UserMessagePayload

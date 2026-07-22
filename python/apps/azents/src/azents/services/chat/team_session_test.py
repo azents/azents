@@ -49,6 +49,9 @@ from azents.services.chat.data import (
     InvalidSessionTitle,
 )
 from azents.services.exchange_file import ExchangeFileService
+from azents.services.external_channel.channel_action import (
+    ExternalChannelActionService,
+)
 from azents.services.external_channel.lifecycle import ExternalChannelLifecycleService
 from azents.services.input_buffer import InputBufferService
 from azents.services.session_git_worktree import (
@@ -174,6 +177,7 @@ def _service(
         lifecycle_orchestrator=get_session_lifecycle_orchestrator(),
         external_channel_lifecycle_service=ExternalChannelLifecycleService(
             repository=ExternalChannelLifecycleRepository(),
+            action_service=cast(ExternalChannelActionService, _ChannelActionService()),
         ),
         session_manager=rdb_session_manager,
     )
@@ -184,6 +188,15 @@ class _ExchangeFileService(ExchangeFileService):
 
     def __init__(self) -> None:
         """Bypass Base dataclass initialization."""
+
+
+class _ChannelActionService:
+    """Return an empty archive delivery sweep for Session tests."""
+
+    async def drain_archive_cleanup(self, delivery_ids: object) -> int:
+        """Report that no provider cleanup intent was pending."""
+        del delivery_ids
+        return 0
 
 
 class _OwnedWorktreeRepository(SessionGitWorktreeRepository):

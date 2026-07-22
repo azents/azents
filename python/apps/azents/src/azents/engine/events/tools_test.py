@@ -42,6 +42,9 @@ from azents.engine.run.types import (
     FunctionToolSpec,
     FunctionToolWireVariant,
 )
+from azents.engine.tooling.execution_context import (
+    get_client_tool_execution_context,
+)
 from azents.engine.tooling.tool_search import ToolExposure
 
 
@@ -411,6 +414,55 @@ async def test_client_tool_executor_returns_event_result() -> None:
     parts = list(iter_output_parts(result.output))
     assert isinstance(parts[0], OutputTextPart)
     assert parts[0].text == '{"text":"hello"}'
+
+
+async def test_client_tool_executor_binds_exact_call_identity() -> None:
+    """Durable tools can read the exact provider call ID during execution."""
+
+    async def current_call(arguments: str) -> str:
+        del arguments
+        context = get_client_tool_execution_context()
+        return f"{context.call_id}:{context.name}"
+
+    catalog = await build_tool_catalog(
+        toolkit_bindings=[
+            ToolkitBinding(
+                toolkit=_InlineToolkit(
+                    FunctionTool(
+                        spec=FunctionToolSpec(
+                            name="current_call",
+                            description="Return current call identity.",
+                            input_schema={"type": "object"},
+                        ),
+                        handler=current_call,
+                    )
+                ),
+                slug="",
+                use_prefix=False,
+            )
+        ],
+        context=TurnContext(
+            user_id=None,
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id="run-1",
+            publish_event=_noop_publish,
+        ),
+    )
+    result = await ToolCatalogClientToolExecutor(
+        _prepare_json_catalog(catalog)
+    ).execute(
+        ClientToolCallPayload(
+            call_id="call-durable-1",
+            name="current_call",
+            arguments="{}",
+            native_artifact=_artifact(),
+            wire_dialect="json_function",
+        )
+    )
+
+    assert result.status == "completed"
+    assert result.output == "call-durable-1:current_call"
 
 
 async def test_client_tool_executor_preserves_failed_result_metadata() -> None:

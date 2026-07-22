@@ -81,6 +81,7 @@ from azents.engine.run.types import (
 )
 from azents.engine.tools.builtin import BuiltinToolkitProvider
 from azents.engine.tools.claude_rules import ClaudeRulesToolkitProvider
+from azents.engine.tools.external_channel import ExternalChannelToolkitProvider
 from azents.engine.tools.goal import GoalToolkitProvider
 from azents.engine.tools.skill import SkillToolkitProvider
 from azents.engine.tools.subagent import SubagentToolkitProvider
@@ -1138,6 +1139,10 @@ def _executor(
         claude_rules_toolkit_provider=cast(ClaudeRulesToolkitProvider, object()),
         todo_toolkit_provider=cast(TodoToolkitProvider, object()),
         goal_toolkit_provider=cast(GoalToolkitProvider, object()),
+        external_channel_toolkit_provider=cast(
+            ExternalChannelToolkitProvider,
+            object(),
+        ),
         skill_toolkit_provider=cast(SkillToolkitProvider, object()),
         subagent_toolkit_provider=cast(SubagentToolkitProvider, object()),
         broadcast=cast(WebSocketBroadcast, object()),

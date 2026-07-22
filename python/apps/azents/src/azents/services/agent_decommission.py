@@ -246,6 +246,7 @@ class AgentDecommissionService:
         """Stop and archive one root tree through the shared lifecycle registry."""
         stop_session_ids: list[str] = []
         active = False
+        archive_cleanup_ids: tuple[str, ...] = ()
         async with self.session_manager() as session:
             tree = await self.agent_session_repository.lock_root_tree_sessions(
                 session,
@@ -300,11 +301,15 @@ class AgentDecommissionService:
                     context: SessionLifecycleTransitionContext,
                 ) -> None:
                     """Apply lifecycle-owned state before archiving the root tree."""
-                    await self.external_channel_lifecycle_service.archive_participant(
+                    nonlocal archive_cleanup_ids
+                    lifecycle = self.external_channel_lifecycle_service
+                    result = await lifecycle.archive_participant(
                         session,
                         definition,
                         context,
                     )
+                    if result is not None:
+                        archive_cleanup_ids = result.progress_delete_intent_ids
 
                 await self.lifecycle_orchestrator.archive(
                     context=SessionLifecycleTransitionContext(
@@ -333,6 +338,10 @@ class AgentDecommissionService:
                     raise RuntimeError("Agent decommission lease was lost")
                 await session.commit()
 
+        if not active:
+            await self.external_channel_lifecycle_service.consume_archive_cleanup(
+                archive_cleanup_ids
+            )
         for session_id in stop_session_ids:
             await self.broker.send_message(SessionStopSignal(session_id=session_id))
         return not active

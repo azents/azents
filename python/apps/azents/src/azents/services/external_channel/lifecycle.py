@@ -2,6 +2,7 @@
 
 import dataclasses
 import datetime
+from collections.abc import Sequence
 from typing import Annotated
 
 from fastapi import Depends
@@ -23,6 +24,9 @@ from azents.repos.external_channel.data import (
 from azents.repos.external_channel.lifecycle import (
     ExternalChannelLifecycleRepository,
 )
+from azents.services.external_channel.channel_action import (
+    ExternalChannelActionService,
+)
 
 _PARTICIPANT_KEY = "session.external-channel"
 
@@ -34,6 +38,10 @@ class ExternalChannelLifecycleService:
     repository: Annotated[
         ExternalChannelLifecycleRepository,
         Depends(ExternalChannelLifecycleRepository),
+    ]
+    action_service: Annotated[
+        ExternalChannelActionService,
+        Depends(ExternalChannelActionService),
     ]
 
     async def archive_participant(
@@ -130,3 +138,10 @@ class ExternalChannelLifecycleService:
             agent_id=agent_id,
             now=now,
         )
+
+    async def consume_archive_cleanup(
+        self,
+        delivery_ids: Sequence[str],
+    ) -> int:
+        """Attempt every committed archive progress cleanup once."""
+        return await self.action_service.drain_archive_cleanup(delivery_ids)
