@@ -172,6 +172,7 @@ class ExternalChannelRepository:
         if status is ExternalChannelConnectionStatus.ACTIVE:
             rdb.last_verified_at = checked_at
         await session.flush()
+        await session.refresh(rdb, attribute_names=["updated_at"])
         return ExternalChannelConnection.model_validate(rdb)
 
     async def lock_connection(
