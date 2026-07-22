@@ -12,6 +12,7 @@ from azents.core.enums import (
     RuntimePolicySnapshotApplicationState,
     RuntimeProviderBindingOrigin,
     RuntimeProviderConfigRevisionState,
+    RuntimeProviderConfigValidationStatus,
     RuntimeProviderContractStatus,
     RuntimeProviderLifecycleState,
     RuntimeProviderScope,
@@ -78,6 +79,7 @@ class RuntimeProviderSelectionService:
         agent_id: str,
         *,
         requested_provider_id: str | None = None,
+        required_capabilities: set[str] | None = None,
     ) -> RuntimeProviderBindingResult:
         """Ensure a Runtime using one transactionally resolved exact Provider."""
         async with self.session_manager() as session:
@@ -103,7 +105,7 @@ class RuntimeProviderSelectionService:
                     selection=None,
                 )
 
-            selected_id, origin = await self._resolve_candidate_id(
+            selected_id, origin = await self.resolve_candidate_id(
                 session,
                 agent_runtime_provider_id=agent.runtime_provider_id,
                 requested_provider_id=requested_provider_id,
@@ -118,11 +120,12 @@ class RuntimeProviderSelectionService:
                     provider_id=selected_id,
                     message="The selected Runtime Provider was not found.",
                 )
-            contract, active_config = await self._validate_provider_candidate(
+            contract, active_config = await self.validate_provider_candidate(
                 session,
                 provider_logical_id=selected_id,
                 provider=provider,
                 workspace_id=agent.workspace_id,
+                required_capabilities=required_capabilities,
             )
             binding_evidence: dict[str, object] = {
                 "workspace_id": agent.workspace_id,
@@ -215,7 +218,7 @@ class RuntimeProviderSelectionService:
                 ),
             )
 
-    async def _resolve_candidate_id(
+    async def resolve_candidate_id(
         self,
         session: AsyncSession,
         *,
@@ -247,13 +250,14 @@ class RuntimeProviderSelectionService:
             )
         return default_id, RuntimeProviderBindingOrigin.PLATFORM_DEFAULT
 
-    async def _validate_provider_candidate(
+    async def validate_provider_candidate(
         self,
         session: AsyncSession,
         *,
         provider_logical_id: str,
-        provider: RuntimeProvider | None,
+        provider: RuntimeProvider,
         workspace_id: str,
+        required_capabilities: set[str] | None,
     ) -> tuple[
         RuntimeProviderContractRevision,
         RuntimeProviderConfigRevision | None,
@@ -262,12 +266,6 @@ class RuntimeProviderSelectionService:
 
         Return the accepted contract and active configuration revisions.
         """
-        if provider is None:
-            raise RuntimeProviderSelectionUnavailable(
-                code="provider_not_found",
-                provider_id=provider_logical_id,
-                message="The selected Runtime Provider was not found.",
-            )
         if provider.lifecycle_state != RuntimeProviderLifecycleState.ACTIVE:
             raise RuntimeProviderSelectionUnavailable(
                 code="provider_not_active",
@@ -286,6 +284,22 @@ class RuntimeProviderSelectionService:
                 provider_id=provider_logical_id,
                 message="The selected Provider is not a Platform Provider.",
             )
+        if required_capabilities:
+            available_capabilities = {
+                str(capability)
+                for capability in provider.capabilities.get(
+                    "optional_capabilities",
+                    provider.capabilities.get("capabilities", []),
+                )
+            }
+            if required_capabilities - available_capabilities:
+                raise RuntimeProviderSelectionUnavailable(
+                    code="provider_capability_mismatch",
+                    provider_id=provider_logical_id,
+                    message=(
+                        "The selected Provider cannot satisfy the Runtime capabilities."
+                    ),
+                )
         if provider.availability_mode.value == "selected_workspaces":
             if not await self.provider_repository.is_available_to_workspace(
                 session,
@@ -320,6 +334,7 @@ class RuntimeProviderSelectionService:
         if (
             contract is None
             or contract.status != RuntimeProviderContractStatus.ACCEPTED
+            or contract.provider_id != provider.id
         ):
             raise RuntimeProviderSelectionUnavailable(
                 code="provider_contract_unaccepted",
@@ -336,6 +351,10 @@ class RuntimeProviderSelectionService:
         if parsed_contract.configuration_fields and (
             active_config is None
             or active_config.state != RuntimeProviderConfigRevisionState.ACTIVE
+            or active_config.validation_status
+            != RuntimeProviderConfigValidationStatus.VALID
+            or active_config.provider_id != provider.id
+            or active_config.contract_revision_id != contract.id
         ):
             raise RuntimeProviderSelectionUnavailable(
                 code="provider_configuration_unavailable",

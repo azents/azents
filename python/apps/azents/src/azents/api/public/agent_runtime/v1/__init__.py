@@ -14,6 +14,7 @@ from azents.services.agent_runtime.lifecycle_data import (
     InvalidResetFinalDesiredState,
     ProviderDisconnected,
     RuntimeNotFound,
+    RuntimeProviderUnavailable,
 )
 from azents.services.agent_runtime.service import AgentRuntimeService
 from azents.utils.fastapi.route import RouteMounter
@@ -144,6 +145,8 @@ async def reset_agent_runtime(
             return AgentRuntimeLifecycleResponse.convert_from_lifecycle(value)
         case Failure(error):
             match error:
+                case RuntimeProviderUnavailable():
+                    _raise_provider_unavailable()
                 case ProviderDisconnected():
                     raise HTTPException(
                         status_code=status.HTTP_409_CONFLICT,
@@ -187,7 +190,11 @@ async def observe_agent_runtime(
 
 def _raise_lifecycle_error(
     error: (
-        AgentNotFound | AgentNotBelongToWorkspace | AgentAccessDenied | RuntimeNotFound
+        AgentNotFound
+        | AgentNotBelongToWorkspace
+        | AgentAccessDenied
+        | RuntimeNotFound
+        | RuntimeProviderUnavailable
     ),
 ) -> NoReturn:
     """Convert lifecycle service errors to HTTP errors."""
@@ -197,6 +204,8 @@ def _raise_lifecycle_error(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Agent runtime was not found.",
             )
+        case RuntimeProviderUnavailable():
+            _raise_provider_unavailable()
         case AgentNotFound() | AgentNotBelongToWorkspace() | AgentAccessDenied():
             _raise_access_error(error)
         case _:
@@ -204,7 +213,12 @@ def _raise_lifecycle_error(
 
 
 def _raise_access_error(
-    error: AgentNotFound | AgentNotBelongToWorkspace | AgentAccessDenied,
+    error: (
+        AgentNotFound
+        | AgentNotBelongToWorkspace
+        | AgentAccessDenied
+        | RuntimeProviderUnavailable
+    ),
 ) -> NoReturn:
     """Convert agent access service errors to HTTP errors."""
     match error:
@@ -213,8 +227,18 @@ def _raise_access_error(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Agent was not found.",
             )
+        case RuntimeProviderUnavailable():
+            _raise_provider_unavailable()
         case _:
             assert_never(error)
+
+
+def _raise_provider_unavailable() -> NoReturn:
+    """Return a stable conflict when no Provider can provision a Runtime."""
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail="No eligible Runtime Provider is available.",
+    )
 
 
 def mount(mounter: RouteMounter) -> None:

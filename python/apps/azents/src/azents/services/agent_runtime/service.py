@@ -7,8 +7,6 @@ from azcommon.result import Failure, Result, Success
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.config import Config
-from azents.core.deps import get_config
 from azents.core.enums import (
     AgentLifecycleStatus,
     AgentType,
@@ -31,6 +29,12 @@ from azents.repos.agent_runtime.data import (
     AgentRuntimeFailureSummary,
     AgentRuntimeSummaryState,
 )
+from azents.services.runtime_provider_selection.data import (
+    RuntimeProviderSelectionUnavailable,
+)
+from azents.services.runtime_provider_selection.service import (
+    RuntimeProviderSelectionService,
+)
 
 from .lifecycle_data import (
     AgentAccessDenied,
@@ -41,14 +45,8 @@ from .lifecycle_data import (
     InvalidResetFinalDesiredState,
     ProviderDisconnected,
     RuntimeNotFound,
+    RuntimeProviderUnavailable,
 )
-
-
-def _get_runtime_default_provider_id(
-    config: Annotated[Config, Depends(get_config)],
-) -> str | None:
-    """Agent Runtime default Provider ID DI."""
-    return config.runtime.default_provider_id
 
 
 @dataclasses.dataclass
@@ -65,9 +63,9 @@ class AgentRuntimeService:
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
     ]
-    runtime_default_provider_id: Annotated[
-        str | None,
-        Depends(_get_runtime_default_provider_id),
+    runtime_provider_selection_service: Annotated[
+        RuntimeProviderSelectionService,
+        Depends(),
     ]
 
     async def get(
@@ -79,7 +77,10 @@ class AgentRuntimeService:
         role: WorkspaceUserRole,
     ) -> Result[
         AgentRuntimeOutput,
-        AgentNotFound | AgentNotBelongToWorkspace | AgentAccessDenied,
+        AgentNotFound
+        | AgentNotBelongToWorkspace
+        | AgentAccessDenied
+        | RuntimeProviderUnavailable,
     ]:
         """Fetch Runtime status by Agent."""
         access_error = await self._authorize_agent(
@@ -91,8 +92,16 @@ class AgentRuntimeService:
         if access_error is not None:
             return Failure(access_error)
 
-        async with self.session_manager() as session:
-            runtime = await self._ensure_runtime_for_agent(session, agent_id)
+        try:
+            runtime = await self._ensure_runtime_for_agent(agent_id)
+        except RuntimeProviderSelectionUnavailable as error:
+            return Failure(
+                RuntimeProviderUnavailable(
+                    code=error.code,
+                    provider_id=error.provider_id,
+                    message=error.message,
+                )
+            )
         return Success(self._build_output(runtime))
 
     async def start(
@@ -104,7 +113,11 @@ class AgentRuntimeService:
         role: WorkspaceUserRole,
     ) -> Result[
         AgentRuntimeLifecycleOutput,
-        AgentNotFound | AgentNotBelongToWorkspace | AgentAccessDenied | RuntimeNotFound,
+        AgentNotFound
+        | AgentNotBelongToWorkspace
+        | AgentAccessDenied
+        | RuntimeNotFound
+        | RuntimeProviderUnavailable,
     ]:
         """Store Runtime start desired state."""
         return await self._set_lifecycle_command(
@@ -125,7 +138,11 @@ class AgentRuntimeService:
         role: WorkspaceUserRole,
     ) -> Result[
         AgentRuntimeLifecycleOutput,
-        AgentNotFound | AgentNotBelongToWorkspace | AgentAccessDenied | RuntimeNotFound,
+        AgentNotFound
+        | AgentNotBelongToWorkspace
+        | AgentAccessDenied
+        | RuntimeNotFound
+        | RuntimeProviderUnavailable,
     ]:
         """Store Runtime stop desired state."""
         return await self._set_lifecycle_command(
@@ -146,7 +163,11 @@ class AgentRuntimeService:
         role: WorkspaceUserRole,
     ) -> Result[
         AgentRuntimeLifecycleOutput,
-        AgentNotFound | AgentNotBelongToWorkspace | AgentAccessDenied | RuntimeNotFound,
+        AgentNotFound
+        | AgentNotBelongToWorkspace
+        | AgentAccessDenied
+        | RuntimeNotFound
+        | RuntimeProviderUnavailable,
     ]:
         """Store Runtime restart command and final running desired state."""
         return await self._set_lifecycle_command(
@@ -173,6 +194,7 @@ class AgentRuntimeService:
         | AgentAccessDenied
         | RuntimeNotFound
         | ProviderDisconnected
+        | RuntimeProviderUnavailable
         | InvalidResetFinalDesiredState,
     ]:
         """Store Runtime reset command and desired state after reset."""
@@ -193,19 +215,28 @@ class AgentRuntimeService:
         if access_error is not None:
             return Failure(access_error)
 
-        async with self.session_manager() as session:
-            runtime = await self._ensure_runtime_for_agent(session, agent_id)
-            if (
-                runtime.provider_connection_state
-                == RuntimeProviderConnectionState.DISCONNECTED
-            ):
-                return Failure(ProviderDisconnected(runtime_id=runtime.id))
-            command = await self.runtime_repository.set_desired_state(
-                session,
-                runtime.id,
-                RuntimeLifecycleCommandType.RESET,
-                final_desired_state,
-                reset_final_desired_state=final_desired_state,
+        try:
+            async with self.session_manager() as session:
+                runtime = await self._ensure_runtime_for_agent(agent_id)
+                if (
+                    runtime.provider_connection_state
+                    == RuntimeProviderConnectionState.DISCONNECTED
+                ):
+                    return Failure(ProviderDisconnected(runtime_id=runtime.id))
+                command = await self.runtime_repository.set_desired_state(
+                    session,
+                    runtime.id,
+                    RuntimeLifecycleCommandType.RESET,
+                    final_desired_state,
+                    reset_final_desired_state=final_desired_state,
+                )
+        except RuntimeProviderSelectionUnavailable as error:
+            return Failure(
+                RuntimeProviderUnavailable(
+                    code=error.code,
+                    provider_id=error.provider_id,
+                    message=error.message,
+                )
             )
         if command is None:
             return Failure(RuntimeNotFound(runtime_id=runtime.id))
@@ -227,7 +258,10 @@ class AgentRuntimeService:
         role: WorkspaceUserRole,
     ) -> Result[
         AgentRuntimeOutput,
-        AgentNotFound | AgentNotBelongToWorkspace | AgentAccessDenied,
+        AgentNotFound
+        | AgentNotBelongToWorkspace
+        | AgentAccessDenied
+        | RuntimeProviderUnavailable,
     ]:
         """Return current read model for Runtime observe request."""
         return await self.get(
@@ -248,7 +282,11 @@ class AgentRuntimeService:
         role: WorkspaceUserRole,
     ) -> Result[
         AgentRuntimeLifecycleOutput,
-        AgentNotFound | AgentNotBelongToWorkspace | AgentAccessDenied | RuntimeNotFound,
+        AgentNotFound
+        | AgentNotBelongToWorkspace
+        | AgentAccessDenied
+        | RuntimeNotFound
+        | RuntimeProviderUnavailable,
     ]:
         """Common lifecycle command storage logic."""
         access_error = await self._authorize_agent(
@@ -260,13 +298,22 @@ class AgentRuntimeService:
         if access_error is not None:
             return Failure(access_error)
 
-        async with self.session_manager() as session:
-            runtime = await self._ensure_runtime_for_agent(session, agent_id)
-            command = await self.runtime_repository.set_desired_state(
-                session,
-                runtime.id,
-                command_type,
-                desired_state,
+        try:
+            async with self.session_manager() as session:
+                runtime = await self._ensure_runtime_for_agent(agent_id)
+                command = await self.runtime_repository.set_desired_state(
+                    session,
+                    runtime.id,
+                    command_type,
+                    desired_state,
+                )
+        except RuntimeProviderSelectionUnavailable as error:
+            return Failure(
+                RuntimeProviderUnavailable(
+                    code=error.code,
+                    provider_id=error.provider_id,
+                    message=error.message,
+                )
             )
         if command is None:
             return Failure(RuntimeNotFound(runtime_id=runtime.id))
@@ -303,17 +350,12 @@ class AgentRuntimeService:
                 return AgentAccessDenied(agent_id=agent_id)
         return None
 
-    async def _ensure_runtime_for_agent(
-        self,
-        session: AsyncSession,
-        agent_id: str,
-    ) -> AgentRuntime:
-        """Ensure Agent Runtime and apply specified default provider."""
-        return await self.runtime_repository.ensure_for_agent(
-            session,
-            agent_id,
-            default_runtime_provider_id=self.runtime_default_provider_id,
+    async def _ensure_runtime_for_agent(self, agent_id: str) -> AgentRuntime:
+        """Ensure Agent Runtime through exact Provider selection."""
+        result = await self.runtime_provider_selection_service.ensure_for_agent(
+            agent_id
         )
+        return result.runtime
 
     def _build_output(self, runtime: AgentRuntime) -> AgentRuntimeOutput:
         """Combine Runtime raw state and summary."""
