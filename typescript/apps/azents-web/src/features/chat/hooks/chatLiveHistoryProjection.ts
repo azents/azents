@@ -14,6 +14,7 @@ export function isLivePartialHistoryEvent(
     case "provider_tool_call":
     case "agent_message":
     case "goal_continuation":
+    case "external_channel_message":
       return true;
     default:
       return false;

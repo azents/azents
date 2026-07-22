@@ -6,6 +6,7 @@ import { router } from "../init";
 import { agentRouter } from "./agent";
 import { authRouter } from "./auth";
 import { chatRouter } from "./chat";
+import { externalChannelRouter } from "./externalChannel";
 import { invitationRouter } from "./invitation";
 import { joinRequestRouter } from "./joinRequest";
 import { llmProviderIntegrationRouter } from "./llm-provider-integration";
@@ -21,6 +22,7 @@ export const appRouter = router({
   agent: agentRouter,
   auth: authRouter,
   chat: chatRouter,
+  externalChannel: externalChannelRouter,
   invitation: invitationRouter,
   joinRequest: joinRequestRouter,
   llmProviderIntegration: llmProviderIntegrationRouter,

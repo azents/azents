@@ -1790,6 +1790,28 @@
       "statusFailed": "失敗",
       "statusInterrupted": "中断",
       "statusCancelled": "キャンセル"
+    },
+    "externalMessage": {
+      "expand": "{source} の外部メッセージを展開",
+      "collapse": "{source} の外部メッセージを折りたたむ",
+      "provider": "プロバイダー",
+      "resource": "チャンネル／リソース",
+      "sender": "送信者",
+      "authorType": "投稿者タイプ",
+      "authorization": "認可状態",
+      "lifecycle": "メッセージ状態",
+      "timestamp": "プロバイダー時刻",
+      "revision": "変更タイプ",
+      "corrects": "修正対象リビジョン",
+      "openOriginal": "元のメッセージを開く",
+      "openOriginalAccessible": "{resource} の元のメッセージを開く",
+      "originalUnavailable": "元のメッセージは利用できません。",
+      "status": {
+        "invoked": "呼び出し",
+        "context": "コンテキスト",
+        "edited": "編集済み",
+        "deleted": "削除済み"
+      }
     }
   },
   "oauth": {
@@ -1816,5 +1838,55 @@
     "goToWorkspaces": "ワークスペース一覧へ",
     "redirectingToSetup": "サービス認証ページへ移動中...",
     "toolkitRedirectError": "サービス設定ページへの移動に失敗しました。ワークスペース設定から再度お試しください。"
+  },
+  "externalChannelApproval": {
+    "title": "外部チャンネルのアクセス要求",
+    "subtitle": "Slack からこの Agent を呼び出せるユーザーを確認します。",
+    "loading": "アクセス要求を読み込んでいます…",
+    "notFoundTitle": "アクセス要求が見つかりません",
+    "notFoundDescription": "リンクが無効か、このアカウントでは利用できないか、要求がすでに存在しません。",
+    "unauthorizedTitle": "サインインが必要です",
+    "unauthorizedDescription": "この要求を確認できる Azents アカウントでサインインしてください。",
+    "errorTitle": "要求を読み込めませんでした",
+    "errorDescription": "アクセス要求を読み込めません。もう一度お試しください。",
+    "retry": "再試行",
+    "pendingDescription": "この参加者には明示的なアクセス判断が必要です。Agent Session はまだ呼び出されていません。",
+    "participant": "参加者",
+    "source": "Slack の送信元",
+    "provider": "プロバイダー",
+    "expiresAt": "有効期限",
+    "decidedAt": "決定日時",
+    "message": "要求メッセージ",
+    "openOriginal": "Slack の元メッセージを開く",
+    "originalUnavailable": "Slack の元メッセージは利用できません。",
+    "chooseAccess": "アクセス範囲を選択",
+    "decisionSummary": "決定メモ: {summary}",
+    "status": {
+      "pending": "保留中",
+      "allowed": "許可済み",
+      "denied": "拒否済み",
+      "blocked": "ブロック済み",
+      "expired": "期限切れ"
+    },
+    "completed": {
+      "allowed": "この要求は承認されました。参加者は許可された範囲で Agent を呼び出せます。",
+      "denied": "この要求は拒否されました。アクセス権や Agent の呼び出しは作成されていません。",
+      "blocked": "この参加者が今後この Agent へのアクセス要求を作成できないようにしました。",
+      "expired": "判断前に要求の期限が切れました。承認することはできません。"
+    },
+    "actions": {
+      "allowSession": "この Session で許可",
+      "allowSessionDescription": "この Slack 会話用に作成された Session のみにアクセスを許可します。",
+      "allowAgent": "この Agent で許可",
+      "allowAgentDescription": "この Agent の対象となる Slack 会話全体で参加者のアクセスを許可します。",
+      "deny": "要求を拒否",
+      "denyDescription": "アクセスを付与せずに要求を終了します。",
+      "block": "参加者をブロック",
+      "blockDescription": "要求を拒否し、この Agent への今後の承認要求も抑止します。"
+    },
+    "errors": {
+      "conflict": "この要求は処理できません。期限切れ、別の場所で決定済み、または切断されたチャンネルの要求である可能性があります。",
+      "action": "決定を保存できませんでした。もう一度お試しください。"
+    }
   }
 }
