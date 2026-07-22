@@ -558,3 +558,62 @@ class ExternalChannelDeliveryAttemptCreate(_Record):
     error_summary: str | None
     attempted_at: datetime.datetime | None
     completed_at: datetime.datetime | None
+
+
+class ExternalChannelArchiveTermination(_Record):
+    """Transaction-local summary of one terminated Session tree."""
+
+    disconnected_binding_count: int
+    finished_work_count: int
+    deleted_pending_context_count: int
+    created_progress_delete_intent_count: int
+
+
+class ExternalChannelRestoreValidation(_Record):
+    """Proof that a restored Session tree has no reactivated channel state."""
+
+    disconnected_binding_count: int
+    finished_work_count: int
+
+
+class ExternalChannelPurgePreparation(_Record):
+    """Summary of delivery attempts made terminal without provider execution."""
+
+    not_attempted_delivery_count: int
+    unknown_delivery_count: int
+
+
+class ExternalChannelPurgeCleanup(_Record):
+    """Summary of Session-owned External Channel records removed during purge."""
+
+    deleted_delivery_attempt_count: int
+    deleted_action_count: int
+    deleted_session_grant_count: int
+    preserved_agent_grant_reference_count: int
+    deleted_access_request_count: int
+    deleted_invocation_batch_item_count: int
+    deleted_invocation_batch_count: int
+    deleted_work_count: int
+    deleted_binding_count: int
+
+
+class ExternalChannelPurgeVerification(_Record):
+    """Verified absence counts for one purged Session tree."""
+
+    remaining_binding_count: int
+    remaining_work_count: int
+    remaining_action_count: int
+    remaining_delivery_attempt_count: int
+    remaining_access_request_count: int
+    remaining_session_grant_count: int
+    remaining_invocation_batch_count: int
+
+
+class ExternalChannelAgentDecommissionCleanup(_Record):
+    """Summary of direct Agent-owned External Channel state removal."""
+
+    deleted_route_count: int
+    deleted_access_request_count: int
+    deleted_control_attempt_count: int
+    deleted_agent_grant_count: int
+    deleted_block_count: int

@@ -16,12 +16,26 @@ from azents.core.enums import (
     AgentSessionStartReason,
     AgentSessionStatus,
     AgentSessionTitleSource,
+    ExternalChannelBindingStatus,
+    ExternalChannelConnectionStatus,
+    ExternalChannelProvider,
+    ExternalChannelResourceStatus,
+    ExternalChannelResourceType,
+    ExternalChannelRouteMode,
+    ExternalChannelRouteStatus,
+    ExternalChannelTransport,
     LLMProvider,
     SessionAgentKind,
 )
 from azents.core.inference_profile import SessionInferenceState
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.rdb.models.agent import RDBAgent
+from azents.rdb.models.external_channel import (
+    RDBExternalChannelAgentRoute,
+    RDBExternalChannelBinding,
+    RDBExternalChannelConnection,
+    RDBExternalChannelResource,
+)
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.repos.session_lifecycle_finalizer import (
     SessionLifecycleFinalizerRepository,
@@ -1099,3 +1113,70 @@ class TestAgentSessionRepository:
         assert await repo.get_session_agent_by_id(rdb_session, root_agent.id) is None
         assert await repo.get_session_agent_by_id(rdb_session, child.id) is None
         assert await repo.get_session_agent_by_id(rdb_session, nested.id) is None
+
+    async def test_finalizer_requires_external_channel_roots_to_be_absent(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Finalization never relies on FK cascades for external lifecycle roots."""
+        workspace_id = await _create_workspace(
+            rdb_session,
+            "session-finalizer-external-root-ws",
+        )
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id,
+            "session-finalizer-external-root",
+        )
+        session_repository = AgentSessionRepository()
+        agent_session = await session_repository.create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        connection = RDBExternalChannelConnection(
+            workspace_id=workspace_id,
+            provider=ExternalChannelProvider.SLACK,
+            transport=ExternalChannelTransport.HTTP,
+            status=ExternalChannelConnectionStatus.ACTIVE,
+        )
+        rdb_session.add(connection)
+        await rdb_session.flush()
+        route = RDBExternalChannelAgentRoute(
+            connection_id=connection.id,
+            agent_id=agent_id,
+            status=ExternalChannelRouteStatus.ACTIVE,
+            route_mode=ExternalChannelRouteMode.DEDICATED,
+        )
+        resource = RDBExternalChannelResource(
+            connection_id=connection.id,
+            resource_type=ExternalChannelResourceType.THREAD,
+            provider_resource_key="thread-1",
+            status=ExternalChannelResourceStatus.ACTIVE,
+        )
+        rdb_session.add_all((route, resource))
+        await rdb_session.flush()
+        binding = RDBExternalChannelBinding(
+            resource_id=resource.id,
+            route_id=route.id,
+            agent_session_id=agent_session.id,
+            status=ExternalChannelBindingStatus.ACTIVE,
+        )
+        rdb_session.add(binding)
+        await rdb_session.flush()
+
+        with pytest.raises(
+            RuntimeError,
+            match="External Channel bindings remain for the purged Session tree",
+        ):
+            await SessionLifecycleFinalizerRepository().finalize_purged_root_tree(
+                rdb_session,
+                root_session_id=agent_session.id,
+                session_ids=[agent_session.id],
+            )
+
+        remaining = await session_repository.get_by_id(rdb_session, agent_session.id)
+        assert remaining is not None

@@ -28,6 +28,7 @@ class SessionLifecycleTransitionPolicy(enum.StrEnum):
     MUTATE = "mutate"
     VALIDATE = "validate"
     PRESERVE = "preserve"
+    TERMINATE = "terminate"
 
 
 class SessionLifecyclePurgePolicy(enum.StrEnum):
@@ -152,15 +153,7 @@ class SessionLifecycleRegistry:
                 raise ValueError(
                     f"Duplicate session lifecycle participant key: {participant.key}"
                 )
-            if (
-                participant.archive_policy is SessionLifecycleTransitionPolicy.MUTATE
-            ) != (
-                participant.restore_policy is SessionLifecycleTransitionPolicy.MUTATE
-            ):
-                raise ValueError(
-                    "Session lifecycle archive and restore mutation policies must "
-                    f"be symmetric: {participant.key}"
-                )
+            self._validate_transition_policies(participant)
             for resource in participant.owned_resources:
                 owner_key = (resource.kind, resource.name)
                 existing_owner = resource_owners.get(owner_key)
@@ -232,6 +225,45 @@ class SessionLifecycleRegistry:
                 f"{key}@{policy_version}"
             )
         return participant
+
+    @staticmethod
+    def _validate_transition_policies(
+        participant: SessionLifecycleParticipantDefinition,
+    ) -> None:
+        """Reject unsupported archive and restore policy combinations."""
+        archive_policy = participant.archive_policy
+        restore_policy = participant.restore_policy
+        if restore_policy is SessionLifecycleTransitionPolicy.TERMINATE:
+            raise ValueError(
+                "Session lifecycle restore policy cannot terminate a participant: "
+                f"{participant.key}"
+            )
+        if archive_policy is SessionLifecycleTransitionPolicy.TERMINATE:
+            if restore_policy is not SessionLifecycleTransitionPolicy.PRESERVE:
+                raise ValueError(
+                    "Session lifecycle termination policy requires restore preserve: "
+                    f"{participant.key}"
+                )
+            return
+        if (
+            archive_policy is SessionLifecycleTransitionPolicy.MUTATE
+            or restore_policy is SessionLifecycleTransitionPolicy.MUTATE
+        ) and (
+            archive_policy is not SessionLifecycleTransitionPolicy.MUTATE
+            or restore_policy is not SessionLifecycleTransitionPolicy.MUTATE
+        ):
+            raise ValueError(
+                "Session lifecycle archive and restore mutation policies must "
+                f"be symmetric: {participant.key}"
+            )
+        if (
+            archive_policy is SessionLifecycleTransitionPolicy.PRESERVE
+            and restore_policy is SessionLifecycleTransitionPolicy.VALIDATE
+        ):
+            raise ValueError(
+                "Session lifecycle restore validation requires archive validation: "
+                f"{participant.key}"
+            )
 
     @staticmethod
     def _topological_order(

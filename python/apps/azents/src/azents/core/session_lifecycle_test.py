@@ -103,18 +103,94 @@ def test_registry_rejects_invalid_participant_definitions(
         SessionLifecycleRegistry(participants)
 
 
-def test_registry_rejects_asymmetric_archive_restore_mutation() -> None:
-    """Archive mutation cannot be registered without a restore mutation contract."""
-    with pytest.raises(ValueError, match="must be symmetric"):
+@pytest.mark.parametrize(
+    ("archive_policy", "restore_policy"),
+    (
+        (
+            SessionLifecycleTransitionPolicy.MUTATE,
+            SessionLifecycleTransitionPolicy.PRESERVE,
+        ),
+        (
+            SessionLifecycleTransitionPolicy.PRESERVE,
+            SessionLifecycleTransitionPolicy.MUTATE,
+        ),
+        (
+            SessionLifecycleTransitionPolicy.TERMINATE,
+            SessionLifecycleTransitionPolicy.MUTATE,
+        ),
+        (
+            SessionLifecycleTransitionPolicy.TERMINATE,
+            SessionLifecycleTransitionPolicy.VALIDATE,
+        ),
+        (
+            SessionLifecycleTransitionPolicy.PRESERVE,
+            SessionLifecycleTransitionPolicy.TERMINATE,
+        ),
+        (
+            SessionLifecycleTransitionPolicy.PRESERVE,
+            SessionLifecycleTransitionPolicy.VALIDATE,
+        ),
+    ),
+)
+def test_registry_rejects_unsupported_asymmetric_transition_policies(
+    archive_policy: SessionLifecycleTransitionPolicy,
+    restore_policy: SessionLifecycleTransitionPolicy,
+) -> None:
+    """Only declared validation and terminal preservation asymmetry is valid."""
+    with pytest.raises(ValueError):
         SessionLifecycleRegistry(
             (
                 _participant(
                     "asymmetric",
-                    archive_policy=SessionLifecycleTransitionPolicy.MUTATE,
-                    restore_policy=SessionLifecycleTransitionPolicy.PRESERVE,
+                    archive_policy=archive_policy,
+                    restore_policy=restore_policy,
                 ),
             )
         )
+
+
+@pytest.mark.parametrize(
+    ("archive_policy", "restore_policy"),
+    (
+        (
+            SessionLifecycleTransitionPolicy.PRESERVE,
+            SessionLifecycleTransitionPolicy.PRESERVE,
+        ),
+        (
+            SessionLifecycleTransitionPolicy.VALIDATE,
+            SessionLifecycleTransitionPolicy.PRESERVE,
+        ),
+        (
+            SessionLifecycleTransitionPolicy.VALIDATE,
+            SessionLifecycleTransitionPolicy.VALIDATE,
+        ),
+        (
+            SessionLifecycleTransitionPolicy.MUTATE,
+            SessionLifecycleTransitionPolicy.MUTATE,
+        ),
+        (
+            SessionLifecycleTransitionPolicy.TERMINATE,
+            SessionLifecycleTransitionPolicy.PRESERVE,
+        ),
+    ),
+)
+def test_registry_accepts_supported_transition_policies(
+    archive_policy: SessionLifecycleTransitionPolicy,
+    restore_policy: SessionLifecycleTransitionPolicy,
+) -> None:
+    """Transition policy pairs encode only intentional lifecycle behavior."""
+    registry = SessionLifecycleRegistry(
+        (
+            _participant(
+                "supported",
+                archive_policy=archive_policy,
+                restore_policy=restore_policy,
+            ),
+        )
+    )
+
+    assert registry.get("supported").archive_policy is archive_policy
+    assert registry.get("supported").restore_policy is restore_policy
 
 
 def test_external_channel_participant_declares_session_owned_foundation_state() -> None:
@@ -123,7 +199,7 @@ def test_external_channel_participant_declares_session_owned_foundation_state() 
 
     assert participant.policy_version == 1
     assert participant.dependencies == ("session.execution",)
-    assert participant.archive_policy is SessionLifecycleTransitionPolicy.VALIDATE
+    assert participant.archive_policy is SessionLifecycleTransitionPolicy.TERMINATE
     assert participant.restore_policy is SessionLifecycleTransitionPolicy.PRESERVE
     assert participant.purge_policy is SessionLifecyclePurgePolicy.REQUIRED
     assert {
