@@ -950,6 +950,197 @@
         }
       }
     },
+    "/runtime-provider/v1/providers": {
+      "get": {
+        "tags": [
+          "Runtime Provider v1"
+        ],
+        "summary": "List Runtime Providers",
+        "description": "List all durable Runtime Providers for System Admin operations.",
+        "operationId": "runtime_provider_v1_list_runtime_providers",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeProviderListResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/runtime-provider/v1/providers/{provider_id}": {
+      "get": {
+        "tags": [
+          "Runtime Provider v1"
+        ],
+        "summary": "Get Runtime Provider",
+        "description": "Inspect one durable Runtime Provider.",
+        "operationId": "runtime_provider_v1_get_runtime_provider",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "provider_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeProviderResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runtime-provider/v1/providers/{provider_id}/policy": {
+      "patch": {
+        "tags": [
+          "Runtime Provider v1"
+        ],
+        "summary": "Update Runtime Provider Policy",
+        "description": "Update mutable Provider policy without moving existing Runtimes.",
+        "operationId": "runtime_provider_v1_update_runtime_provider_policy",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "provider_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuntimeProviderPolicyUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeProviderResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runtime-provider/v1/providers/{provider_id}/availability": {
+      "put": {
+        "tags": [
+          "Runtime Provider v1"
+        ],
+        "summary": "Replace Runtime Provider Availability",
+        "description": "Replace selected-Workspace availability for one Provider.",
+        "operationId": "runtime_provider_v1_replace_runtime_provider_availability",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "provider_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuntimeProviderAvailabilityRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeProviderResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/runtime-provider-enrollment/v1/runtime-providers/{provider_id}/enrollment-grants": {
       "post": {
         "tags": [
@@ -3814,6 +4005,30 @@
         "title": "PlatformGitHubAppPatchRequest",
         "description": "Optimistic partial update for the Platform GitHub App Admin base."
       },
+      "RuntimeProviderAvailabilityMode": {
+        "type": "string",
+        "enum": [
+          "platform_wide",
+          "selected_workspaces"
+        ],
+        "title": "RuntimeProviderAvailabilityMode",
+        "description": "Workspace availability policy for a Runtime Provider."
+      },
+      "RuntimeProviderAvailabilityRequest": {
+        "properties": {
+          "workspace_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true,
+            "title": "Workspace Ids"
+          }
+        },
+        "type": "object",
+        "title": "RuntimeProviderAvailabilityRequest",
+        "description": "Workspace allow-list replacement request."
+      },
       "RuntimeProviderCredentialRevokeResponse": {
         "properties": {
           "revoked": {
@@ -3872,6 +4087,181 @@
         ],
         "title": "RuntimeProviderEnrollmentGrantIssueResponse",
         "description": "One-time enrollment grant returned only to a System Admin."
+      },
+      "RuntimeProviderLifecycleState": {
+        "type": "string",
+        "enum": [
+          "active",
+          "decommissioning",
+          "decommissioned",
+          "force_retired"
+        ],
+        "title": "RuntimeProviderLifecycleState",
+        "description": "Permanent administrative lifecycle for a Runtime Provider."
+      },
+      "RuntimeProviderListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RuntimeProviderResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "RuntimeProviderListResponse",
+        "description": "Provider inventory response."
+      },
+      "RuntimeProviderPolicyUpdateRequest": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "lifecycle_state": {
+            "$ref": "#/components/schemas/RuntimeProviderLifecycleState"
+          },
+          "availability_mode": {
+            "$ref": "#/components/schemas/RuntimeProviderAvailabilityMode"
+          }
+        },
+        "type": "object",
+        "required": [
+          "enabled",
+          "lifecycle_state",
+          "availability_mode"
+        ],
+        "title": "RuntimeProviderPolicyUpdateRequest",
+        "description": "Mutable Provider administrative policy update."
+      },
+      "RuntimeProviderResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "provider_id": {
+            "type": "string",
+            "title": "Provider Id"
+          },
+          "scope": {
+            "type": "string",
+            "title": "Scope"
+          },
+          "workspace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Id"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name"
+          },
+          "registration_method": {
+            "type": "string",
+            "title": "Registration Method"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "lifecycle_state": {
+            "$ref": "#/components/schemas/RuntimeProviderLifecycleState"
+          },
+          "availability_mode": {
+            "$ref": "#/components/schemas/RuntimeProviderAvailabilityMode"
+          },
+          "accepted_contract_revision_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accepted Contract Revision Id"
+          },
+          "active_config_revision_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Config Revision Id"
+          },
+          "admin_version": {
+            "type": "integer",
+            "title": "Admin Version"
+          },
+          "capabilities": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Capabilities"
+          },
+          "config_schema": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config Schema"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "provider_id",
+          "scope",
+          "workspace_id",
+          "kind",
+          "display_name",
+          "registration_method",
+          "enabled",
+          "lifecycle_state",
+          "availability_mode",
+          "accepted_contract_revision_id",
+          "active_config_revision_id",
+          "admin_version",
+          "capabilities",
+          "config_schema",
+          "metadata"
+        ],
+        "title": "RuntimeProviderResponse",
+        "description": "Durable Runtime Provider inventory item."
       },
       "SentryDiagnostics": {
         "properties": {
@@ -5225,6 +5615,10 @@
     {
       "name": "Model Catalog v1",
       "description": "\nModel Catalog API (Admin)\n\nOperational controls for system-owned model catalog refresh.\n"
+    },
+    {
+      "name": "Runtime Provider v1",
+      "description": "\nRuntime Provider API (Admin)\n\nInventory and mutable administrative policy for durable Runtime Providers.\n"
     },
     {
       "name": "Runtime Provider Enrollment v1",

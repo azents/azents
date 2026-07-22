@@ -30,6 +30,7 @@ __all__ = [
     "KimiOAuthV1Api",
     "LLMProviderIntegrationV1Api",
     "RuntimeProviderEnrollmentV1Api",
+    "RuntimeProviderV1Api",
     "SecurityV1Api",
     "ToolkitOAuthV1Api",
     "ToolkitV1Api",
@@ -295,6 +296,8 @@ __all__ = [
     "RuntimeProviderCredentialExchangeRequest",
     "RuntimeProviderCredentialExchangeResponse",
     "RuntimeProviderObservedState",
+    "RuntimeProviderOptionListResponse",
+    "RuntimeProviderOptionResponse",
     "RuntimeRunnerState",
     "RuntimeSummary",
     "Secrets",
@@ -384,6 +387,7 @@ from azentspublicclient.api.join_request_v1_api import JoinRequestV1Api as JoinR
 from azentspublicclient.api.kimi_o_auth_v1_api import KimiOAuthV1Api as KimiOAuthV1Api
 from azentspublicclient.api.llm_provider_integration_v1_api import LLMProviderIntegrationV1Api as LLMProviderIntegrationV1Api
 from azentspublicclient.api.runtime_provider_enrollment_v1_api import RuntimeProviderEnrollmentV1Api as RuntimeProviderEnrollmentV1Api
+from azentspublicclient.api.runtime_provider_v1_api import RuntimeProviderV1Api as RuntimeProviderV1Api
 from azentspublicclient.api.security_v1_api import SecurityV1Api as SecurityV1Api
 from azentspublicclient.api.toolkit_o_auth_v1_api import ToolkitOAuthV1Api as ToolkitOAuthV1Api
 from azentspublicclient.api.toolkit_v1_api import ToolkitV1Api as ToolkitV1Api
@@ -653,6 +657,8 @@ from azentspublicclient.models.runtime_provider_connection_state import RuntimeP
 from azentspublicclient.models.runtime_provider_credential_exchange_request import RuntimeProviderCredentialExchangeRequest as RuntimeProviderCredentialExchangeRequest
 from azentspublicclient.models.runtime_provider_credential_exchange_response import RuntimeProviderCredentialExchangeResponse as RuntimeProviderCredentialExchangeResponse
 from azentspublicclient.models.runtime_provider_observed_state import RuntimeProviderObservedState as RuntimeProviderObservedState
+from azentspublicclient.models.runtime_provider_option_list_response import RuntimeProviderOptionListResponse as RuntimeProviderOptionListResponse
+from azentspublicclient.models.runtime_provider_option_response import RuntimeProviderOptionResponse as RuntimeProviderOptionResponse
 from azentspublicclient.models.runtime_runner_state import RuntimeRunnerState as RuntimeRunnerState
 from azentspublicclient.models.runtime_summary import RuntimeSummary as RuntimeSummary
 from azentspublicclient.models.secrets import Secrets as Secrets

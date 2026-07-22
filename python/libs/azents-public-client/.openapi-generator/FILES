@@ -12,6 +12,7 @@ azentspublicclient/api/join_request_v1_api.py
 azentspublicclient/api/kimi_o_auth_v1_api.py
 azentspublicclient/api/llm_provider_integration_v1_api.py
 azentspublicclient/api/runtime_provider_enrollment_v1_api.py
+azentspublicclient/api/runtime_provider_v1_api.py
 azentspublicclient/api/security_v1_api.py
 azentspublicclient/api/toolkit_o_auth_v1_api.py
 azentspublicclient/api/toolkit_v1_api.py
@@ -283,6 +284,9 @@ azentspublicclient/docs/RuntimeProviderCredentialExchangeRequest.md
 azentspublicclient/docs/RuntimeProviderCredentialExchangeResponse.md
 azentspublicclient/docs/RuntimeProviderEnrollmentV1Api.md
 azentspublicclient/docs/RuntimeProviderObservedState.md
+azentspublicclient/docs/RuntimeProviderOptionListResponse.md
+azentspublicclient/docs/RuntimeProviderOptionResponse.md
+azentspublicclient/docs/RuntimeProviderV1Api.md
 azentspublicclient/docs/RuntimeRunnerState.md
 azentspublicclient/docs/RuntimeSummary.md
 azentspublicclient/docs/Secrets.md
@@ -615,6 +619,8 @@ azentspublicclient/models/runtime_provider_connection_state.py
 azentspublicclient/models/runtime_provider_credential_exchange_request.py
 azentspublicclient/models/runtime_provider_credential_exchange_response.py
 azentspublicclient/models/runtime_provider_observed_state.py
+azentspublicclient/models/runtime_provider_option_list_response.py
+azentspublicclient/models/runtime_provider_option_response.py
 azentspublicclient/models/runtime_runner_state.py
 azentspublicclient/models/runtime_summary.py
 azentspublicclient/models/secrets.py
@@ -951,6 +957,9 @@ azentspublicclient/test/test_runtime_provider_credential_exchange_request.py
 azentspublicclient/test/test_runtime_provider_credential_exchange_response.py
 azentspublicclient/test/test_runtime_provider_enrollment_v1_api.py
 azentspublicclient/test/test_runtime_provider_observed_state.py
+azentspublicclient/test/test_runtime_provider_option_list_response.py
+azentspublicclient/test/test_runtime_provider_option_response.py
+azentspublicclient/test/test_runtime_provider_v1_api.py
 azentspublicclient/test/test_runtime_runner_state.py
 azentspublicclient/test/test_runtime_summary.py
 azentspublicclient/test/test_secrets.py

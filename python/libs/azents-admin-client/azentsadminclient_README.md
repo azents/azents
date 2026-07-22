@@ -94,6 +94,10 @@ Class | Method | HTTP request | Description
 *ModelCatalogV1Api* | [**model_catalog_v1_refresh_system_model_catalogs**](azentsadminclient/docs/ModelCatalogV1Api.md#model_catalog_v1_refresh_system_model_catalogs) | **POST** /model-catalog/v1/system-catalogs/refresh | Refresh System Model Catalogs
 *RuntimeProviderEnrollmentV1Api* | [**runtime_provider_enrollment_v1_issue_enrollment_grant**](azentsadminclient/docs/RuntimeProviderEnrollmentV1Api.md#runtime_provider_enrollment_v1_issue_enrollment_grant) | **POST** /runtime-provider-enrollment/v1/runtime-providers/{provider_id}/enrollment-grants | Issue Enrollment Grant
 *RuntimeProviderEnrollmentV1Api* | [**runtime_provider_enrollment_v1_revoke_credential**](azentsadminclient/docs/RuntimeProviderEnrollmentV1Api.md#runtime_provider_enrollment_v1_revoke_credential) | **DELETE** /runtime-provider-enrollment/v1/runtime-provider-credentials/{credential_id} | Revoke Credential
+*RuntimeProviderV1Api* | [**runtime_provider_v1_get_runtime_provider**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_get_runtime_provider) | **GET** /runtime-provider/v1/providers/{provider_id} | Get Runtime Provider
+*RuntimeProviderV1Api* | [**runtime_provider_v1_list_runtime_providers**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_list_runtime_providers) | **GET** /runtime-provider/v1/providers | List Runtime Providers
+*RuntimeProviderV1Api* | [**runtime_provider_v1_replace_runtime_provider_availability**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_replace_runtime_provider_availability) | **PUT** /runtime-provider/v1/providers/{provider_id}/availability | Replace Runtime Provider Availability
+*RuntimeProviderV1Api* | [**runtime_provider_v1_update_runtime_provider_policy**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_update_runtime_provider_policy) | **PATCH** /runtime-provider/v1/providers/{provider_id}/policy | Update Runtime Provider Policy
 *SystemBootstrapV1Api* | [**system_bootstrap_v1_bootstrap_first_system_admin**](azentsadminclient/docs/SystemBootstrapV1Api.md#system_bootstrap_v1_bootstrap_first_system_admin) | **POST** /system/v1/bootstrap/first-admin | Bootstrap First System Admin
 *SystemBootstrapV1Api* | [**system_bootstrap_v1_get_system_bootstrap_status**](azentsadminclient/docs/SystemBootstrapV1Api.md#system_bootstrap_v1_get_system_bootstrap_status) | **GET** /system/v1/bootstrap/status | Get System Bootstrap Status
 *SystemSettingsV1Api* | [**system_settings_v1_cancel_platform_github_app_candidate**](azentsadminclient/docs/SystemSettingsV1Api.md#system_settings_v1_cancel_platform_github_app_candidate) | **DELETE** /system-setting/v1/sections/platform-github-app/candidate | Cancel Platform Github App Candidate
@@ -164,9 +168,15 @@ Class | Method | HTTP request | Description
  - [PlatformGitHubAppFieldResponse](azentsadminclient/docs/PlatformGitHubAppFieldResponse.md)
  - [PlatformGitHubAppHealthResponse](azentsadminclient/docs/PlatformGitHubAppHealthResponse.md)
  - [PlatformGitHubAppPatchRequest](azentsadminclient/docs/PlatformGitHubAppPatchRequest.md)
+ - [RuntimeProviderAvailabilityMode](azentsadminclient/docs/RuntimeProviderAvailabilityMode.md)
+ - [RuntimeProviderAvailabilityRequest](azentsadminclient/docs/RuntimeProviderAvailabilityRequest.md)
  - [RuntimeProviderCredentialRevokeResponse](azentsadminclient/docs/RuntimeProviderCredentialRevokeResponse.md)
  - [RuntimeProviderEnrollmentGrantIssueRequest](azentsadminclient/docs/RuntimeProviderEnrollmentGrantIssueRequest.md)
  - [RuntimeProviderEnrollmentGrantIssueResponse](azentsadminclient/docs/RuntimeProviderEnrollmentGrantIssueResponse.md)
+ - [RuntimeProviderLifecycleState](azentsadminclient/docs/RuntimeProviderLifecycleState.md)
+ - [RuntimeProviderListResponse](azentsadminclient/docs/RuntimeProviderListResponse.md)
+ - [RuntimeProviderPolicyUpdateRequest](azentsadminclient/docs/RuntimeProviderPolicyUpdateRequest.md)
+ - [RuntimeProviderResponse](azentsadminclient/docs/RuntimeProviderResponse.md)
  - [SentryDiagnostics](azentsadminclient/docs/SentryDiagnostics.md)
  - [SignupTokenDeliveryMethod](azentsadminclient/docs/SignupTokenDeliveryMethod.md)
  - [SignupTokenListResponse](azentsadminclient/docs/SignupTokenListResponse.md)

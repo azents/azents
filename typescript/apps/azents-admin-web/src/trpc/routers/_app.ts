@@ -7,6 +7,7 @@ import { bootstrapRouter } from "./bootstrap";
 import { debugRouter } from "./debug";
 import { modelCatalogRouter } from "./modelCatalog";
 import { retentionRouter } from "./retention";
+import { runtimeProviderRouter } from "./runtimeProvider";
 import { signupTokenRouter } from "./signupToken";
 import { systemRoleRouter } from "./systemRole";
 import { systemSettingsRouter } from "./systemSettings";
@@ -27,6 +28,7 @@ export const appRouter = router({
   signupToken: signupTokenRouter,
   modelCatalog: modelCatalogRouter,
   retention: retentionRouter,
+  runtimeProvider: runtimeProviderRouter,
   systemRole: systemRoleRouter,
   systemSettings: systemSettingsRouter,
 });

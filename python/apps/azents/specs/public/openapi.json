@@ -6867,6 +6867,54 @@
         }
       }
     },
+    "/runtime-provider/v1/workspaces/{handle}/providers": {
+      "get": {
+        "tags": [
+          "Runtime Provider v1"
+        ],
+        "summary": "List Workspace Runtime Providers",
+        "description": "List eligible Runtime Providers for a Workspace.",
+        "operationId": "runtime_provider_v1_list_workspace_runtime_providers",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeProviderOptionListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/runtime-provider-enrollment/v1/credentials/exchange": {
       "post": {
         "tags": [
@@ -18148,6 +18196,87 @@
         "title": "RuntimeProviderObservedState",
         "description": "Agent Runtime status reported by provider."
       },
+      "RuntimeProviderOptionListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RuntimeProviderOptionResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "RuntimeProviderOptionListResponse",
+        "description": "Eligible Provider options response."
+      },
+      "RuntimeProviderOptionResponse": {
+        "properties": {
+          "provider_id": {
+            "type": "string",
+            "title": "Provider Id"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "scope": {
+            "type": "string",
+            "title": "Scope"
+          },
+          "availability_mode": {
+            "type": "string",
+            "title": "Availability Mode"
+          },
+          "capabilities": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Capabilities"
+          },
+          "accepted_contract_revision_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accepted Contract Revision Id"
+          },
+          "active_config_revision_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Config Revision Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider_id",
+          "display_name",
+          "kind",
+          "scope",
+          "availability_mode",
+          "capabilities",
+          "accepted_contract_revision_id",
+          "active_config_revision_id"
+        ],
+        "title": "RuntimeProviderOptionResponse",
+        "description": "Safe Provider option for Workspace and Agent preference surfaces."
+      },
       "RuntimeRunnerState": {
         "type": "string",
         "enum": [
@@ -20977,6 +21106,10 @@
     {
       "name": "LLM Provider Integration v1",
       "description": "\nLLM Provider Integration API (Public)\n\nWorkspace-scoped LLM provider integration CRUD endpoints.\nCredentials are not included in responses.\n"
+    },
+    {
+      "name": "Runtime Provider v1",
+      "description": "\nRuntime Provider API (Public)\n\nWorkspace-scoped eligible Provider discovery for Agent preference surfaces.\n"
     },
     {
       "name": "Runtime Provider Enrollment v1",

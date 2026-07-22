@@ -13,6 +13,7 @@ from azentspublicclient.api.join_request_v1_api import JoinRequestV1Api
 from azentspublicclient.api.kimi_o_auth_v1_api import KimiOAuthV1Api
 from azentspublicclient.api.llm_provider_integration_v1_api import LLMProviderIntegrationV1Api
 from azentspublicclient.api.runtime_provider_enrollment_v1_api import RuntimeProviderEnrollmentV1Api
+from azentspublicclient.api.runtime_provider_v1_api import RuntimeProviderV1Api
 from azentspublicclient.api.security_v1_api import SecurityV1Api
 from azentspublicclient.api.toolkit_o_auth_v1_api import ToolkitOAuthV1Api
 from azentspublicclient.api.toolkit_v1_api import ToolkitV1Api
