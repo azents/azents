@@ -271,6 +271,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Latest Session System Prompt Requirements](requirements/prompt-260721-latest-session-system-prompt.md) | prompt-260721 | 2026-07-21 | 2026-07-21 |
 | [Per-Prompt Inference Profile Historical Requirements Reconstruction](requirements/promptinferenceprofile-260710-prompt-inference-profile.md) | promptinferenceprofile-260710 | 2026-07-10 | 2026-07-10 |
 | [Persist Requested and Resolved AgentRun Provenance Historical Requirements Reconstruction](requirements/provenance-260710-inference-provenance.md) | provenance-260710 | 2026-07-10 | - |
+| [Platform Runtime Provider Management Requirements](requirements/provider-260722-platform-runtime-provider-management.md) | provider-260722 | 2026-07-22 | - |
 | [Use an Explicit Nested Inference Profile Request Historical Requirements Reconstruction](requirements/public-260710-public-inference-profile-request-contract.md) | public-260710 | 2026-07-10 | - |
 | [Pyright Configuration Review Historical Requirements Reconstruction](requirements/pyright-260310-pyright-config.md) | pyright-260310 | 2026-03-10 | 2026-03-10 |
 | [Memory Redesign: Filesystem → DB + Tool Call Historical Requirements Reconstruction](requirements/redesign-260426-memory-redesign-2026.md) | redesign-260426 | 2026-04-26 | 2026-04-26 |
@@ -588,6 +589,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Latest Session System Prompt](adr/prompt-260721-latest-session-system-prompt.md)
 - [Per-Prompt Inference Profile Historical Decision Reconstruction](adr/promptinferenceprofile-260710-prompt-inference-profile.md)
 - [Persist Requested and Resolved AgentRun Provenance](adr/provenance-260710-inference-provenance.md)
+- [Platform Runtime Provider Management](adr/provider-260722-platform-runtime-provider-management.md)
 - [Use an Explicit Nested Inference Profile Request](adr/public-260710-public-inference-profile-request-contract.md)
 - [Pyright Configuration Review Historical Decision Reconstruction](adr/pyright-260310-pyright-config.md)
 - [Memory Redesign: Filesystem → DB + Tool Call Historical Decision Reconstruction](adr/redesign-260426-memory-redesign-2026.md)
