@@ -461,6 +461,55 @@ class RuntimeProviderKind(enum.StrEnum):
     DOCKER = "docker"
 
 
+class RuntimeProviderRegistrationMethod(enum.StrEnum):
+    """Origin that first established a Runtime Provider."""
+
+    ADMIN = "admin"
+    BOOTSTRAP = "bootstrap"
+
+
+class RuntimeProviderLifecycleState(enum.StrEnum):
+    """Permanent administrative lifecycle for a Runtime Provider."""
+
+    ACTIVE = "active"
+    DECOMMISSIONING = "decommissioning"
+    DECOMMISSIONED = "decommissioned"
+    FORCE_RETIRED = "force_retired"
+
+
+class RuntimeProviderAvailabilityMode(enum.StrEnum):
+    """Workspace availability policy for a Runtime Provider."""
+
+    PLATFORM_WIDE = "platform_wide"
+    SELECTED_WORKSPACES = "selected_workspaces"
+
+
+class RuntimeProviderBootstrapAdapterKind(enum.StrEnum):
+    """Trusted adapter that supplies authoritative Provider declarations."""
+
+    HELM_FILE = "helm_file"
+
+
+class RuntimeProviderBootstrapDeclarationState(enum.StrEnum):
+    """Current reconciliation state of one bootstrap declaration."""
+
+    PRESENT = "present"
+    ABSENT = "absent"
+    CONFLICT = "conflict"
+
+
+class RuntimeProviderAuditEventType(enum.StrEnum):
+    """Metadata-only Provider aggregate audit event."""
+
+    REGISTERED = "registered"
+    BOOTSTRAP_RECONCILED = "bootstrap_reconciled"
+    BOOTSTRAP_WITHDRAWN = "bootstrap_withdrawn"
+    BOOTSTRAP_CONFLICT = "bootstrap_conflict"
+    ENABLED = "enabled"
+    DISABLED = "disabled"
+    AVAILABILITY_CHANGED = "availability_changed"
+
+
 class SnapshotKind(enum.StrEnum):
     """Snapshot creation reason.
 
