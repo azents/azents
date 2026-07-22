@@ -18719,6 +18719,10 @@
       "description": "\nChat API (Public)\n\nWebSocket chat and REST message lookup endpoints.\n"
     },
     {
+      "name": "External Channel v1",
+      "description": "\nExternal Channel provider callbacks.\n\nProvider callbacks are intentionally excluded from the generated\nauthenticated public-client contract.\n"
+    },
+    {
       "name": "Health v1",
       "description": "Server status API"
     },

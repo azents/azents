@@ -58,6 +58,9 @@ def _connection_create(workspace_id: str) -> ExternalChannelConnectionCreate:
         encrypted_credentials="ciphertext-only",
         capabilities=None,
         provider_config=None,
+        last_verified_at=None,
+        last_health_at=None,
+        disconnected_at=None,
     )
 
 
@@ -103,6 +106,42 @@ class TestExternalChannelRepository:
         assert found == created
         assert not hasattr(created, "encrypted_credentials")
         assert created.provider is ExternalChannelProvider.SLACK
+        configuration = await repo.get_connection_configuration(
+            rdb_session,
+            connection_id=created.id,
+        )
+        assert configuration is not None
+        assert configuration.encrypted_credentials == "ciphertext-only"
+
+    async def test_connection_health_update_returns_refreshed_projection(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Health updates return server-updated fields without lazy loading."""
+        workspace_id = await _create_workspace(rdb_session)
+        repo = ExternalChannelRepository()
+        created = await repo.create_connection(
+            rdb_session,
+            _connection_create(workspace_id),
+        )
+
+        updated = await repo.update_connection_health(
+            rdb_session,
+            connection_id=created.id,
+            status=ExternalChannelConnectionStatus.ACTIVE,
+            provider_tenant_id="tenant-1",
+            provider_bot_user_id="bot-1",
+            capabilities={"supports_reply": True},
+            checked_at=_at(3),
+        )
+
+        assert updated is not None
+        assert updated.status is ExternalChannelConnectionStatus.ACTIVE
+        assert updated.provider_tenant_id == "tenant-1"
+        assert updated.provider_bot_user_id == "bot-1"
+        assert updated.capabilities == {"supports_reply": True}
+        assert updated.last_verified_at == _at(3)
+        assert updated.last_health_at == _at(3)
 
     async def test_event_admission_returns_existing_event_for_provider_retry(
         self,
