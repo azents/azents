@@ -235,8 +235,9 @@ def test_http_admission_unknown_participant_and_approval_journey(
         _headers=headers,
     )
     assert setup.connection.credentials_configured is True
-    assert _BOT_TOKEN not in setup.to_json()
-    assert _SIGNING_SECRET not in setup.to_json()
+    setup_json = setup.model_dump_json(by_alias=True)
+    assert _BOT_TOKEN not in setup_json
+    assert _SIGNING_SECRET not in setup_json
 
     validated = external_api.external_channel_v1_validate_connection(
         agent_id=agent_id,
