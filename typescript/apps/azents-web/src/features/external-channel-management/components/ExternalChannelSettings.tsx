@@ -306,6 +306,31 @@ function CopyValueButton({
   );
 }
 
+function GuideCodeBlock({
+  children,
+  mt,
+}: {
+  children: string;
+  mt?: "xs";
+}): React.ReactElement {
+  return (
+    <Box mt={mt} style={{ maxWidth: "100%", minWidth: 0 }}>
+      <Code
+        block
+        style={{
+          display: "block",
+          maxWidth: "100%",
+          minWidth: 0,
+          overflowWrap: "anywhere",
+          whiteSpace: "pre-wrap",
+        }}
+      >
+        {children}
+      </Code>
+    </Box>
+  );
+}
+
 function SlackAppGuide({
   manifestState,
 }: {
@@ -329,18 +354,33 @@ function SlackAppGuide({
 
   const { manifest } = manifestState;
   return (
-    <Paper withBorder radius="md" p="md">
-      <Stack gap="md">
+    <Paper
+      withBorder
+      radius="md"
+      p="md"
+      style={{ maxWidth: "100%", minWidth: 0 }}
+    >
+      <Stack gap="md" style={{ minWidth: 0 }}>
         <Box>
           <Text fw={700}>{t("guideTitle")}</Text>
           <Text size="sm" c="dimmed">
             {t("guideDescription")}
           </Text>
         </Box>
-        <Tabs defaultValue="manifest">
-          <Tabs.List grow>
-            <Tabs.Tab value="manifest">{t("manifestMethod")}</Tabs.Tab>
-            <Tabs.Tab value="manual">{t("manualMethod")}</Tabs.Tab>
+        <Tabs defaultValue="manifest" style={{ minWidth: 0 }}>
+          <Tabs.List grow style={{ minWidth: 0 }}>
+            <Tabs.Tab
+              value="manifest"
+              style={{ minWidth: 0, whiteSpace: "normal" }}
+            >
+              {t("manifestMethod")}
+            </Tabs.Tab>
+            <Tabs.Tab
+              value="manual"
+              style={{ minWidth: 0, whiteSpace: "normal" }}
+            >
+              {t("manualMethod")}
+            </Tabs.Tab>
           </Tabs.List>
 
           <Tabs.Panel value="manifest" pt="md">
@@ -361,7 +401,7 @@ function SlackAppGuide({
                   label={t("copyManifest")}
                 />
               </Group>
-              <Code block>{manifest.manifest_json}</Code>
+              <GuideCodeBlock>{manifest.manifest_json}</GuideCodeBlock>
             </Stack>
           </Tabs.Panel>
 
@@ -372,9 +412,9 @@ function SlackAppGuide({
                 <List.Item>{t("manualStep1")}</List.Item>
                 <List.Item>
                   {t("manualStep2")}
-                  <Code block mt="xs">
+                  <GuideCodeBlock mt="xs">
                     {manifest.bot_scopes.join(", ")}
-                  </Code>
+                  </GuideCodeBlock>
                 </List.Item>
                 <List.Item>
                   {manifest.transport === "http"
@@ -382,7 +422,7 @@ function SlackAppGuide({
                     : t("manualSocketEventsStep")}
                   {manifest.callback_url && (
                     <Stack gap="xs" mt="xs">
-                      <Code block>{manifest.callback_url}</Code>
+                      <GuideCodeBlock>{manifest.callback_url}</GuideCodeBlock>
                       <Group justify="flex-end">
                         <CopyValueButton
                           value={manifest.callback_url}
@@ -391,9 +431,9 @@ function SlackAppGuide({
                       </Group>
                     </Stack>
                   )}
-                  <Code block mt="xs">
+                  <GuideCodeBlock mt="xs">
                     {manifest.event_subscriptions.join(", ")}
-                  </Code>
+                  </GuideCodeBlock>
                 </List.Item>
                 {manifest.transport === "socket" && (
                   <List.Item>{t("manualSocketStep")}</List.Item>
@@ -466,9 +506,13 @@ function ConnectionDialog({
       size="xl"
       closeOnClickOutside={!saving}
       closeOnEscape={!saving}
+      styles={{
+        body: { overflowX: "hidden" },
+        content: { overflowX: "hidden" },
+      }}
     >
       {state && (
-        <Stack gap="md">
+        <Stack gap="md" style={{ minWidth: 0 }}>
           <TextInput
             label={t("appId")}
             value={state.appId}
