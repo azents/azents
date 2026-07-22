@@ -46,6 +46,18 @@ def _foreign_key_options(
     return foreign_key.get("options", {})
 
 
+def _foreign_key_by_columns(
+    foreign_keys: Sequence[ReflectedForeignKeyConstraint],
+    constrained_columns: Sequence[str],
+) -> ReflectedForeignKeyConstraint:
+    """Return one installed foreign key by its constrained columns."""
+    return next(
+        foreign_key
+        for foreign_key in foreign_keys
+        if foreign_key["constrained_columns"] == list(constrained_columns)
+    )
+
+
 def test_current_revision_foreign_key_is_deferred_no_action() -> None:
     """Allow a message and its cascaded revisions to disappear atomically."""
     foreign_key = RDBExternalChannelMessage.FK_CURRENT_REVISION
@@ -164,9 +176,9 @@ def test_external_channel_installed_schema_preserves_lifecycle_ownership(
         )
         assert (
             _foreign_key_options(
-                _foreign_key(
+                _foreign_key_by_columns(
                     batch_item_foreign_keys,
-                    "external_channel_invocation_batch_items_message_revision_id_fkey",
+                    ["message_revision_id"],
                 )
             )["ondelete"]
             == "RESTRICT"
