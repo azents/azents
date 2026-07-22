@@ -58,6 +58,32 @@ async def _session_manager() -> AsyncGenerator[AsyncSession, None]:
     yield cast(AsyncSession, object())
 
 
+def _participant_execution(
+    *,
+    participant_key: str,
+    policy_version: int,
+    now: datetime.datetime,
+) -> ArchivedSessionPurgeParticipantExecution:
+    """Build one durable purge participant checkpoint."""
+    return ArchivedSessionPurgeParticipantExecution(
+        purge_job_id="job-1",
+        participant_key=participant_key,
+        policy_version=policy_version,
+        phase=ArchivedSessionPurgeParticipantPhase.PENDING,
+        attempt_count=0,
+        blocked_by_participant_key=None,
+        last_error_kind=None,
+        last_error_summary=None,
+        operational_summary=None,
+        prepared_at=None,
+        cleanup_completed_at=None,
+        verified_at=None,
+        last_attempt_at=None,
+        created_at=now,
+        updated_at=now,
+    )
+
+
 class _RetentionRepository:
     """Durable purge job repository double."""
 
@@ -76,6 +102,7 @@ class _RetentionRepository:
         self.materialized_participants: list[
             ArchivedSessionPurgeParticipantSnapshot
         ] = []
+        self.materialization_failures: dict[str, Exception] = {}
         self.participant_executions: list[ArchivedSessionPurgeParticipantExecution] = []
 
     async def cancel_invalid_unstarted_purge_jobs(
@@ -140,29 +167,20 @@ class _RetentionRepository:
         lease_owner: str,
         participants: tuple[ArchivedSessionPurgeParticipantSnapshot, ...],
     ) -> list[object]:
-        del session, job_id, lease_owner
+        del session, lease_owner
         self.events.append("materialize_participants")
+        materialization_failure = self.materialization_failures.pop(job_id, None)
+        if materialization_failure is not None:
+            raise materialization_failure
         self.materialized_participants = list(participants)
         if self.preserve_participant_executions and self.participant_executions:
             return list(self.participant_executions)
         now = datetime.datetime.now(datetime.UTC)
         self.participant_executions = [
-            ArchivedSessionPurgeParticipantExecution(
-                purge_job_id="job-1",
+            _participant_execution(
                 participant_key=participant.participant_key,
                 policy_version=participant.policy_version,
-                phase=ArchivedSessionPurgeParticipantPhase.PENDING,
-                attempt_count=0,
-                blocked_by_participant_key=None,
-                last_error_kind=None,
-                last_error_summary=None,
-                operational_summary=None,
-                prepared_at=None,
-                cleanup_completed_at=None,
-                verified_at=None,
-                last_attempt_at=None,
-                created_at=now,
-                updated_at=now,
+                now=now,
             )
             for participant in participants
         ]
@@ -957,6 +975,101 @@ async def test_purge_materializes_participants_before_subtree_fencing() -> None:
     ]
 
 
+async def test_existing_purge_snapshot_is_not_expanded_after_registry_growth() -> None:
+    """A fenced job resumes only the immutable participants it already captured."""
+    events: list[str] = []
+    service, retention_repository, agent_session_repository, *_ = _build_service(
+        events=events,
+        active_checks=[False, False],
+    )
+    now = datetime.datetime.now(datetime.UTC)
+    retention_repository.participant_executions = [
+        _participant_execution(
+            participant_key=participant.key,
+            policy_version=participant.policy_version,
+            now=now,
+        )
+        for participant in get_session_lifecycle_registry().participants
+        if participant.key != "session.external-channel"
+    ]
+    retention_repository.preserve_participant_executions = True
+    external_lifecycle_service = cast(
+        _ExternalChannelLifecycleService,
+        service.external_channel_lifecycle_service,
+    )
+
+    summary = await service.purge_once(
+        lease_owner="worker-1",
+        deadline=_deadline(),
+    )
+
+    assert summary.completed_count == 1
+    assert retention_repository.completed is True
+    assert agent_session_repository.deleted is True
+    assert external_lifecycle_service.calls == []
+    assert "session.external-channel" in {
+        participant.participant_key
+        for participant in retention_repository.materialized_participants
+    }
+    assert {
+        execution.participant_key
+        for execution in retention_repository.participant_executions
+    } == {
+        participant.key
+        for participant in get_session_lifecycle_registry().participants
+        if participant.key != "session.external-channel"
+    }
+
+
+async def test_purge_snapshot_with_missing_dependency_retries_before_cleanup() -> None:
+    """An invalid immutable snapshot stays retryable without running side effects."""
+    events: list[str] = []
+    service, retention_repository, agent_session_repository, *_ = _build_service(
+        events=events,
+        active_checks=[False],
+    )
+    external_participant = get_session_lifecycle_registry().get(
+        "session.external-channel"
+    )
+    retention_repository.participant_executions = [
+        _participant_execution(
+            participant_key=external_participant.key,
+            policy_version=external_participant.policy_version,
+            now=datetime.datetime.now(datetime.UTC),
+        )
+    ]
+    retention_repository.preserve_participant_executions = True
+    external_lifecycle_service = cast(
+        _ExternalChannelLifecycleService,
+        service.external_channel_lifecycle_service,
+    )
+
+    summary = await service.purge_once(
+        lease_owner="worker-1",
+        deadline=_deadline(),
+    )
+
+    assert summary.completed_count == 0
+    assert summary.retry_scheduled_count == 1
+    assert summary.failed_count == 1
+    assert retention_repository.retry is not None
+    assert "missing dependencies" in str(retention_repository.retry["error_summary"])
+    assert (
+        retention_repository.retry["error_participant_key"]
+        == "session.external-channel"
+    )
+    assert (
+        retention_repository.retry["error_phase"]
+        is ArchivedSessionPurgeParticipantPhase.PENDING
+    )
+    assert external_lifecycle_service.calls == []
+    assert agent_session_repository.deleted is False
+    assert "delete_session" not in events
+    assert "cleanup_worktrees" not in events
+    assert "fence_generations" not in events
+    assert not any(event.startswith(("stop:", "signal:")) for event in events)
+
+
 async def test_purge_stops_before_claiming_near_scheduler_deadline() -> None:
     """A pass does not claim another root without cleanup time remaining."""
     events: list[str] = []
@@ -1362,3 +1475,44 @@ async def test_job_failure_logs_and_continues_to_next_due_job(
     )
     assert failure_record.__dict__["purge_job_id"] == "job-1"
     assert failure_record.__dict__["root_session_id"] == "root-session"
+
+
+async def test_materialization_failure_retries_and_continues_to_next_job() -> None:
+    """Snapshot validation failure retains its lease for retry and batch isolation."""
+    events: list[str] = []
+    (
+        service,
+        retention_repository,
+        agent_session_repository,
+        _,
+        _,
+        _,
+        _,
+    ) = _build_service(
+        events=events,
+        active_checks=[False, False],
+    )
+    retention_repository.materialization_failures["job-1"] = RuntimeError(
+        "Purge participant snapshot contains an unsupported policy version."
+    )
+    retention_repository.additional_jobs.append(
+        _job(datetime.datetime.now(datetime.UTC)).model_copy(update={"id": "job-2"})
+    )
+
+    summary = await service.purge_once(
+        lease_owner="worker-1",
+        deadline=_deadline(),
+    )
+
+    assert summary.claimed_count == 2
+    assert summary.completed_count == 1
+    assert summary.retry_scheduled_count == 1
+    assert summary.failed_count == 1
+    assert retention_repository.retry is not None
+    assert retention_repository.retry["error_kind"] == "RuntimeError"
+    assert "unsupported policy version" in str(
+        retention_repository.retry["error_summary"]
+    )
+    assert retention_repository.completed is True
+    assert agent_session_repository.deleted is True
+    assert events.count("claim") == 3

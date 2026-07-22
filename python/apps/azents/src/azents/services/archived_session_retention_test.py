@@ -25,7 +25,10 @@ from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.session import SessionManager
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSessionCreate
-from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
+from azents.repos.archived_session_retention import (
+    ArchivedSessionPurgeParticipantSnapshotInvalid,
+    ArchivedSessionRetentionRepository,
+)
 from azents.repos.archived_session_retention.data import (
     ArchivedSessionPurgeParticipantSnapshot,
 )
@@ -833,7 +836,34 @@ async def test_purge_participant_snapshot_and_progress_are_durable(
         assert by_key["session.git-worktrees"].last_error_kind == "RunnerUnavailable"
 
     async with rdb_session_manager() as session:
-        with pytest.raises(RuntimeError, match="snapshot is immutable"):
+        executions = await repository.materialize_purge_participant_executions(
+            session,
+            job_id=claimed.id,
+            lease_owner="purge-worker-1",
+            participants=(
+                ArchivedSessionPurgeParticipantSnapshot(
+                    participant_key="session.execution",
+                    policy_version=1,
+                ),
+                ArchivedSessionPurgeParticipantSnapshot(
+                    participant_key="session.external-channel",
+                    policy_version=1,
+                ),
+                ArchivedSessionPurgeParticipantSnapshot(
+                    participant_key="session.git-worktrees",
+                    policy_version=1,
+                ),
+            ),
+        )
+        assert [execution.participant_key for execution in executions] == [
+            "session.execution",
+            "session.git-worktrees",
+        ]
+
+        with pytest.raises(
+            ArchivedSessionPurgeParticipantSnapshotInvalid,
+            match="policy version",
+        ) as unsupported_policy:
             await repository.materialize_purge_participant_executions(
                 session,
                 job_id=claimed.id,
@@ -843,8 +873,51 @@ async def test_purge_participant_snapshot_and_progress_are_durable(
                         participant_key="session.execution",
                         policy_version=2,
                     ),
+                    ArchivedSessionPurgeParticipantSnapshot(
+                        participant_key="session.git-worktrees",
+                        policy_version=1,
+                    ),
                 ),
             )
+        assert unsupported_policy.value.participant_key == "session.execution"
+
+        with pytest.raises(
+            ArchivedSessionPurgeParticipantSnapshotInvalid,
+            match="unavailable",
+        ) as unavailable_participant:
+            await repository.materialize_purge_participant_executions(
+                session,
+                job_id=claimed.id,
+                lease_owner="purge-worker-1",
+                participants=(
+                    ArchivedSessionPurgeParticipantSnapshot(
+                        participant_key="session.execution",
+                        policy_version=1,
+                    ),
+                ),
+            )
+        assert unavailable_participant.value.participant_key == "session.git-worktrees"
+
+        with pytest.raises(
+            ArchivedSessionPurgeParticipantSnapshotInvalid,
+            match="duplicate keys",
+        ) as duplicate_participant:
+            await repository.materialize_purge_participant_executions(
+                session,
+                job_id=claimed.id,
+                lease_owner="purge-worker-1",
+                participants=(
+                    ArchivedSessionPurgeParticipantSnapshot(
+                        participant_key="session.execution",
+                        policy_version=1,
+                    ),
+                    ArchivedSessionPurgeParticipantSnapshot(
+                        participant_key="session.execution",
+                        policy_version=2,
+                    ),
+                ),
+            )
+        assert duplicate_participant.value.participant_key == "session.execution"
 
 
 async def test_revision_and_active_application_conflicts(

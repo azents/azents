@@ -19,7 +19,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-07-22
-spec_version: 1
+spec_version: 2
 ---
 
 # External Channel Lifecycle
@@ -34,7 +34,7 @@ Provider revocation and invalid credentials move connection state through the sa
 
 ## Session Archive and Restore
 
-External Channel is registered as the immutable `session.external-channel` lifecycle participant.
+External Channel is registered as the `session.external-channel` lifecycle participant.
 
 Archive uses the explicit terminal transition policy inside the caller-owned archive transaction:
 
@@ -50,7 +50,11 @@ Restore uses `preserve`. It validates that terminal bindings, ended work, remove
 
 ## Permanent Session Purge
 
-The participant is required in the immutable purge snapshot.
+Newly fenced jobs include the participant in their immutable purge snapshot. Jobs
+that were already fenced before the participant was registered retain their
+earlier snapshot and do not retroactively add or execute it. Restrictive
+AgentSession ownership still prevents finalization if Session-owned External
+Channel roots exist outside that earlier snapshot.
 
 - **Prepare** resolves incomplete delivery bookkeeping without provider execution.
 - **Cleanup** deletes Session-owned invocation batches/items, access decisions tied directly to the Session, Channel Work/tasks/actions/delivery rows, and bindings in restrictive ownership order.
@@ -68,4 +72,5 @@ Agent Settings shows connection/route health, reconnect requirement, revocation,
 
 ## Changelog
 
+- **2026-07-22** (spec_version 2) — Preserved already-fenced participant snapshots across registry growth while retaining restrictive finalization safety.
 - **2026-07-22** (spec_version 1) — Promoted terminal disconnect, archive/restore policy, restrictive purge ownership, post-commit cleanup, and Agent decommission behavior.
