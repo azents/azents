@@ -6,6 +6,7 @@ import sqlalchemy as sa
 from azcommon.uuid import uuid7
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from azents.core.enums import (
     AgentSessionKind,
@@ -13,6 +14,7 @@ from azents.core.enums import (
     ArchivedSessionPurgeParticipantPhase,
     ArchivedSessionPurgeStatus,
     ArchivedSessionRetentionApplicationStatus,
+    SessionAgentKind,
 )
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.archived_session_retention import (
@@ -21,6 +23,7 @@ from azents.rdb.models.archived_session_retention import (
     RDBArchivedSessionRetentionApplication,
     RDBSystemFileLifecycleSetting,
 )
+from azents.rdb.models.session_agent import RDBSessionAgent
 
 from .data import (
     ArchivedSessionPurgeJob,
@@ -37,6 +40,36 @@ _ACTIVE_APPLICATION_STATUSES = (
     ArchivedSessionRetentionApplicationStatus.RUNNING,
     ArchivedSessionRetentionApplicationStatus.RETRY_WAIT,
 )
+
+
+def _archived_root_tree_condition() -> sa.ColumnElement[bool]:
+    """Return whether a root tree exists and every member is archived."""
+    root_agent = aliased(RDBSessionAgent)
+    tree_agent = aliased(RDBSessionAgent)
+    tree_session = aliased(RDBAgentSession)
+    root_tree_exists = sa.exists(
+        sa.select(root_agent.id).where(
+            root_agent.agent_session_id == RDBArchivedSessionPurgeJob.root_session_id,
+            root_agent.kind == SessionAgentKind.ROOT,
+        )
+    )
+    non_archived_tree_member = sa.exists(
+        sa.select(tree_agent.id)
+        .join(
+            tree_session,
+            tree_session.id == tree_agent.agent_session_id,
+        )
+        .join(
+            root_agent,
+            root_agent.id == tree_agent.root_session_agent_id,
+        )
+        .where(
+            root_agent.agent_session_id == RDBArchivedSessionPurgeJob.root_session_id,
+            root_agent.kind == SessionAgentKind.ROOT,
+            tree_session.status != AgentSessionStatus.ARCHIVED,
+        )
+    )
+    return sa.and_(root_tree_exists, ~non_archived_tree_member)
 
 
 class ArchivedSessionRetentionRepository:
@@ -162,7 +195,7 @@ class ArchivedSessionRetentionRepository:
         now: datetime.datetime,
         limit: int,
     ) -> int:
-        """Cancel bounded unstarted jobs whose root schedule no longer matches."""
+        """Cancel bounded unstarted jobs that no longer satisfy purge requirements."""
         valid_root_schedule = sa.exists(
             sa.select(RDBAgentSession.id).where(
                 RDBAgentSession.id == RDBArchivedSessionPurgeJob.root_session_id,
@@ -174,6 +207,7 @@ class ArchivedSessionRetentionRepository:
                 == RDBArchivedSessionPurgeJob.policy_revision,
             )
         )
+        archived_tree = _archived_root_tree_condition()
         candidates = (
             sa.select(RDBArchivedSessionPurgeJob.id)
             .where(
@@ -184,23 +218,39 @@ class ArchivedSessionRetentionRepository:
                     )
                 ),
                 RDBArchivedSessionPurgeJob.fencing_started_at.is_(None),
-                ~valid_root_schedule,
+                sa.or_(~valid_root_schedule, ~archived_tree),
             )
             .order_by(RDBArchivedSessionPurgeJob.updated_at)
             .limit(limit)
         )
         result = await session.execute(
             sa.update(RDBArchivedSessionPurgeJob)
-            .where(RDBArchivedSessionPurgeJob.id.in_(candidates))
+            .where(
+                RDBArchivedSessionPurgeJob.id.in_(candidates),
+                RDBArchivedSessionPurgeJob.status.in_(
+                    (
+                        ArchivedSessionPurgeStatus.PENDING,
+                        ArchivedSessionPurgeStatus.RETRY_WAIT,
+                    )
+                ),
+                RDBArchivedSessionPurgeJob.fencing_started_at.is_(None),
+            )
             .values(
                 status=ArchivedSessionPurgeStatus.CANCELLED,
                 cancelled_at=now,
                 lease_owner=None,
                 lease_until=None,
                 next_attempt_at=None,
-                last_error_kind="InvalidRootSchedule",
-                last_error_summary=(
-                    "Archived root schedule no longer matches this purge job."
+                last_error_kind=sa.case(
+                    (~valid_root_schedule, "InvalidRootSchedule"),
+                    else_="InvalidRootTree",
+                ),
+                last_error_summary=sa.case(
+                    (
+                        ~valid_root_schedule,
+                        "Archived root schedule no longer matches this purge job.",
+                    ),
+                    else_="Archived root tree is no longer fully archived.",
                 ),
                 updated_at=now,
             )
@@ -644,11 +694,13 @@ class ArchivedSessionRetentionRepository:
                 == RDBArchivedSessionPurgeJob.policy_revision,
             )
         )
+        archived_tree = _archived_root_tree_condition()
         candidate = (
             sa.select(RDBArchivedSessionPurgeJob.id)
             .where(
                 claimable,
                 valid_root,
+                archived_tree,
                 RDBArchivedSessionPurgeJob.eligible_at <= now,
                 sa.or_(
                     RDBArchivedSessionPurgeJob.next_attempt_at.is_(None),

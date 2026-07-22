@@ -164,8 +164,25 @@ class SubagentTerminalResultService:
     async def _deliver_one(self, run_id: str) -> bool:
         """Deliver one terminal Run in a single locked transaction."""
         async with self.session_manager() as session:
+            candidate = await self.agent_run_repository.get_by_id(session, run_id)
+            if candidate is None:
+                return False
+            source = (
+                await self.agent_session_repository.get_session_agent_by_session_id(
+                    session,
+                    candidate.session_id,
+                )
+            )
+            if source is None or source.kind != SessionAgentKind.SUBAGENT:
+                return False
+            locked_root = await self.agent_session_repository.lock_session_agent_by_id(
+                session,
+                source.root_session_agent_id,
+            )
+            if locked_root is None:
+                return False
             run = await self.agent_run_repository.lock_by_id(session, run_id)
-            if run is None:
+            if run is None or run.session_id != source.agent_session_id:
                 return False
             if run.parent_result_delivery_state is not None:
                 return False
@@ -176,14 +193,6 @@ class SubagentTerminalResultService:
                 AgentRunStatus.INTERRUPTED,
                 AgentRunStatus.CANCELLED,
             }:
-                return False
-            source = (
-                await self.agent_session_repository.get_session_agent_by_session_id(
-                    session,
-                    run.session_id,
-                )
-            )
-            if source is None or source.kind != SessionAgentKind.SUBAGENT:
                 return False
             if source.parent_session_agent_id is None:
                 raise ValueError("Subagent has no direct parent")

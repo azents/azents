@@ -428,8 +428,11 @@ Before creating a child, `spawn_agent` enforces the Agent's `subagent_settings` 
 row lock on the root `SessionAgent`, so parallel spawn calls in the same root tree serialize before
 capacity is checked. `max_subagents` limits active subagents across the root `SessionAgent` tree; a
 subagent counts as active when its linked `AgentSession.run_state` is `running` or its latest run
-status is `running`. `max_depth` limits child creation by depth below `/root`. Limit failures are
-returned as clear tool errors and do not queue the requested task.
+status is `pending` or `running`. `followup_task` uses the same root-tree lock and capacity snapshot:
+assigning more work to an already-active target remains allowed at capacity, while waking an inactive
+target that would exceed `max_subagents` fails before input or broker side effects. `max_depth` limits
+child creation by depth below `/root`. Limit failures are returned as clear tool errors and do not
+queue the requested task.
 The static toolkit prompt selects the Codex Multi-Agent V2 root or child usage hint from the current
 `SessionAgent.kind`. Both variants append the shared direct-tool-call and shared-workspace hint, the
 configured concurrency slot count as `max_subagents + 1`, and the explicit-request-only delegation
@@ -447,7 +450,12 @@ typed mailbox service. `send_message` uses `queue_only` scheduling and does not 
 running. `spawn_agent` and `followup_task` use `wake_session`, mark the target running, and send normal
 payload-free broker wake-up signals. A terminal child Run is delivered to its persisted direct parent
 as one queue-only `agent_result`; terminal content is the user-safe Run projection or a fixed status
-fallback, never internal exception or provider diagnostic text.
+fallback, never internal exception or provider diagnostic text. Mailbox writes hold the root
+`SessionAgent` row lock and require the target `AgentSession` to remain active. Wake-producing writes
+also require that no stop has already been requested. Terminal-result delivery takes the same
+root-tree lock before locking and finalizing the terminal Run, so archive, restore, stop, spawn,
+mailbox wake, and result delivery cannot cross the tree lifecycle boundary concurrently.
+`interrupt_agent` likewise locks the root tree and target `AgentSession` before recording stop intent.
 
 `wait_agent` has no `agent_name` field. Its only input is optional `timeout_seconds`, defaulting to 30
 and bounded from 0 through 600; unknown fields are rejected. Each observation first repairs eligible
