@@ -431,7 +431,7 @@ def test_http_admission_unknown_participant_and_approval_journey(
         if (
             len(connections.items) == 1
             and connections.items[0].status
-            is ExternalChannelConnectionStatus.RECONNECT_REQUIRED
+            is ExternalChannelConnectionStatus.DISCONNECTED
         ):
             return connections.items[0]
         return None
