@@ -134,8 +134,11 @@ class ExternalChannelActionService:
             await session.commit()
             return result
 
-    async def attempt_delivery(self, delivery_attempt_id: str) -> None:
-        """Attempt one pending provider operation without automatic retry."""
+    async def prepare_delivery(
+        self,
+        delivery_attempt_id: str,
+    ) -> ChannelDeliveryTarget | None:
+        """Load one pending provider target before its connection is terminalized."""
         async with self.session_manager() as session:
             target = await self.repository.get_delivery_target(
                 session,
@@ -145,10 +148,27 @@ class ExternalChannelActionService:
                 target is None
                 or target.status is not ExternalChannelDeliveryStatus.PENDING
             ):
-                return
+                return None
+            return target
+
+    async def attempt_delivery(self, delivery_attempt_id: str) -> None:
+        """Attempt one pending provider operation without automatic retry."""
+        target = await self.prepare_delivery(delivery_attempt_id)
+        if target is None:
+            return
+        await self.attempt_prepared_delivery(target)
+
+    async def attempt_prepared_delivery(
+        self,
+        target: ChannelDeliveryTarget,
+    ) -> None:
+        """Attempt a target captured before connection credentials were purged."""
+        if target.status is not ExternalChannelDeliveryStatus.PENDING:
+            return
+        async with self.session_manager() as session:
             started = await self.repository.start_delivery(
                 session,
-                delivery_attempt_id=delivery_attempt_id,
+                delivery_attempt_id=target.delivery_attempt_id,
                 now=datetime.datetime.now(datetime.UTC),
             )
             await session.commit()
@@ -158,13 +178,13 @@ class ExternalChannelActionService:
             result = await self._deliver(target)
         except asyncio.CancelledError:
             await asyncio.shield(
-                self._record_unknown_after_cancellation(delivery_attempt_id)
+                self._record_unknown_after_cancellation(target.delivery_attempt_id)
             )
             raise
         async with self.session_manager() as session:
             await self.repository.finish_delivery(
                 session,
-                delivery_attempt_id=delivery_attempt_id,
+                delivery_attempt_id=target.delivery_attempt_id,
                 status=ExternalChannelDeliveryStatus(result.status),
                 provider_message_key=result.provider_message_key,
                 error_kind=result.error_kind,

@@ -90,7 +90,19 @@ const manifest: SlackManifestGuidance = {
   event_subscriptions: ["message.channels", "message.groups"],
   socket_mode_enabled: true,
   app_token_scope: "connections:write",
-  callback_path_template: null,
+  callback_url: null,
+  manifest: {
+    display_information: { name: "Incident Coordinator" },
+    settings: { socket_mode_enabled: true },
+  },
+  manifest_json: `{
+  "display_information": {
+    "name": "Incident Coordinator"
+  },
+  "settings": {
+    "socket_mode_enabled": true
+  }
+}`,
 };
 
 const noop = (): void => {};
@@ -119,12 +131,11 @@ const meta = {
     actionTarget: null,
     actionsBusy: false,
     onOpenSetup: noop,
-    onOpenReconnect: noop,
+    onOpenEdit: noop,
     onCloseDialog: noop,
     onDialogChange: noop,
     onSubmitDialog: noop,
     onValidate: noop,
-    onSwitchTransport: noop,
     onDisconnect: noop,
     onRevokeGrant: noop,
     onRemoveBlock: noop,
@@ -167,6 +178,22 @@ export const Setup = {
       type: "SETUP",
       appId: "A0123456789",
       transport: "socket",
+      credentials: {
+        botToken: "",
+        signingSecret: "",
+        appToken: "",
+      },
+    },
+  },
+} satisfies Story;
+
+export const Edit = {
+  args: {
+    dialogState: {
+      type: "EDIT",
+      connectionId: connection.id,
+      appId: connection.provider_app_id ?? "",
+      transport: connection.transport,
       credentials: {
         botToken: "",
         signingSecret: "",

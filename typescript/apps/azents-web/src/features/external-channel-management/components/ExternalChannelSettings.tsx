@@ -7,8 +7,10 @@ import {
   Button,
   Center,
   Code,
+  CopyButton,
   Divider,
   Group,
+  List,
   Loader,
   Modal,
   Paper,
@@ -17,12 +19,15 @@ import {
   SegmentedControl,
   SimpleGrid,
   Stack,
+  Tabs,
   Text,
   TextInput,
 } from "@mantine/core";
 import {
+  IconCheck,
+  IconCopy,
+  IconPencil,
   IconPlugConnected,
-  IconRefresh,
   IconShieldCheck,
   IconShieldX,
   IconTrash,
@@ -32,7 +37,6 @@ import type { ExternalChannelSettingsContainerOutput } from "../containers/useEx
 import type { ConnectionDialogState, ManifestGuidanceState } from "../types";
 import type {
   ExternalChannelConnectionStatus,
-  ExternalChannelTransport,
   ManagedBlock,
   ManagedConnection,
   ManagedGrant,
@@ -73,27 +77,18 @@ function ConnectionRow({
   busy,
   actionsBusy,
   onValidate,
-  onSwitchTransport,
-  onReconnect,
+  onEdit,
   onDisconnect,
 }: {
   connection: ManagedConnection;
   busy: boolean;
   actionsBusy: boolean;
   onValidate: (connection: ManagedConnection) => void;
-  onSwitchTransport: (
-    connection: ManagedConnection,
-    transport: ExternalChannelTransport,
-  ) => void;
-  onReconnect: (connection: ManagedConnection) => void;
+  onEdit: (connection: ManagedConnection) => void;
   onDisconnect: (connection: ManagedConnection) => void;
 }): React.ReactElement {
   const t = useTranslations("workspace.agents.externalChannels");
   const capabilities = capabilityEntries(connection.capabilities);
-  const terminal =
-    connection.status === "disconnected" ||
-    connection.status === "disconnecting";
-  const nextTransport = connection.transport === "http" ? "socket" : "http";
 
   return (
     <Paper
@@ -187,36 +182,26 @@ function ConnectionRow({
             variant="default"
             size="xs"
             loading={busy}
-            disabled={actionsBusy || terminal}
+            disabled={actionsBusy}
             onClick={() => onValidate(connection)}
           >
             {t("validate")}
           </Button>
           <Button
-            variant="default"
-            size="xs"
-            disabled={actionsBusy || terminal}
-            onClick={() => onSwitchTransport(connection, nextTransport)}
-          >
-            {t("switchTransport", {
-              transport: t(`transport.${nextTransport}`),
-            })}
-          </Button>
-          <Button
             variant="light"
             size="xs"
-            leftSection={<IconRefresh size={rem(14)} />}
+            leftSection={<IconPencil size={rem(14)} />}
             disabled={actionsBusy}
-            onClick={() => onReconnect(connection)}
+            onClick={() => onEdit(connection)}
           >
-            {t("reconnect")}
+            {t("edit")}
           </Button>
           <Button
             color="red"
             variant="subtle"
             size="xs"
             leftSection={<IconTrash size={rem(14)} />}
-            disabled={actionsBusy || terminal}
+            disabled={actionsBusy}
             onClick={() => {
               if (window.confirm(t("disconnectConfirm"))) {
                 onDisconnect(connection);
@@ -295,6 +280,155 @@ function AccessRow({
   );
 }
 
+function CopyValueButton({
+  value,
+  label,
+}: {
+  value: string;
+  label: string;
+}): React.ReactElement {
+  const t = useTranslations("workspace.agents.externalChannels");
+  return (
+    <CopyButton value={value} timeout={1600}>
+      {({ copied, copy }) => (
+        <Button
+          variant="light"
+          size="xs"
+          leftSection={
+            copied ? <IconCheck size={rem(14)} /> : <IconCopy size={rem(14)} />
+          }
+          onClick={copy}
+        >
+          {copied ? t("copied") : label}
+        </Button>
+      )}
+    </CopyButton>
+  );
+}
+
+function SlackAppGuide({
+  manifestState,
+}: {
+  manifestState: ManifestGuidanceState;
+}): React.ReactElement {
+  const t = useTranslations("workspace.agents.externalChannels");
+
+  if (manifestState.type === "LOADING") {
+    return (
+      <Center py="md">
+        <Loader size="sm" />
+      </Center>
+    );
+  }
+  if (manifestState.type === "ERROR") {
+    return <Alert color="red">{manifestState.message}</Alert>;
+  }
+  if (manifestState.type !== "LOADED") {
+    return <></>;
+  }
+
+  const { manifest } = manifestState;
+  return (
+    <Paper withBorder radius="md" p="md">
+      <Stack gap="md">
+        <Box>
+          <Text fw={700}>{t("guideTitle")}</Text>
+          <Text size="sm" c="dimmed">
+            {t("guideDescription")}
+          </Text>
+        </Box>
+        <Tabs defaultValue="manifest">
+          <Tabs.List grow>
+            <Tabs.Tab value="manifest">{t("manifestMethod")}</Tabs.Tab>
+            <Tabs.Tab value="manual">{t("manualMethod")}</Tabs.Tab>
+          </Tabs.List>
+
+          <Tabs.Panel value="manifest" pt="md">
+            <Stack gap="sm">
+              <Text size="sm">{t("manifestIntro")}</Text>
+              <List type="ordered" size="sm" spacing="xs">
+                <List.Item>{t("manifestStep1")}</List.Item>
+                <List.Item>{t("manifestStep2")}</List.Item>
+                <List.Item>{t("manifestStep3")}</List.Item>
+                <List.Item>{t("manifestStep4")}</List.Item>
+              </List>
+              <Group justify="space-between">
+                <Text fw={700} size="sm">
+                  {t("manifestJson")}
+                </Text>
+                <CopyValueButton
+                  value={manifest.manifest_json}
+                  label={t("copyManifest")}
+                />
+              </Group>
+              <Code block>{manifest.manifest_json}</Code>
+            </Stack>
+          </Tabs.Panel>
+
+          <Tabs.Panel value="manual" pt="md">
+            <Stack gap="sm">
+              <Text size="sm">{t("manualIntro")}</Text>
+              <List type="ordered" size="sm" spacing="xs">
+                <List.Item>{t("manualStep1")}</List.Item>
+                <List.Item>
+                  {t("manualStep2")}
+                  <Code block mt="xs">
+                    {manifest.bot_scopes.join(", ")}
+                  </Code>
+                </List.Item>
+                <List.Item>
+                  {manifest.transport === "http"
+                    ? t("manualHttpStep")
+                    : t("manualSocketEventsStep")}
+                  {manifest.callback_url && (
+                    <Stack gap="xs" mt="xs">
+                      <Code block>{manifest.callback_url}</Code>
+                      <Group justify="flex-end">
+                        <CopyValueButton
+                          value={manifest.callback_url}
+                          label={t("copyCallback")}
+                        />
+                      </Group>
+                    </Stack>
+                  )}
+                  <Code block mt="xs">
+                    {manifest.event_subscriptions.join(", ")}
+                  </Code>
+                </List.Item>
+                {manifest.transport === "socket" && (
+                  <List.Item>{t("manualSocketStep")}</List.Item>
+                )}
+                <List.Item>{t("manualInstallStep")}</List.Item>
+                <List.Item>{t("manualInviteStep")}</List.Item>
+              </List>
+              <Alert color="blue">{t("reinstallNotice")}</Alert>
+            </Stack>
+          </Tabs.Panel>
+        </Tabs>
+
+        <Divider />
+        <Box>
+          <Text fw={700} size="sm">
+            {t("credentialLocationsTitle")}
+          </Text>
+          <Text size="sm" c="dimmed">
+            {t("credentialLocationsDescription")}
+          </Text>
+        </Box>
+        <List size="sm" spacing="xs">
+          <List.Item>{t("appIdLocation")}</List.Item>
+          <List.Item>{t("signingSecretLocation")}</List.Item>
+          <List.Item>{t("botTokenLocation")}</List.Item>
+          {manifest.transport === "socket" && (
+            <List.Item>{t("appTokenLocation")}</List.Item>
+          )}
+        </List>
+        <Alert color="yellow">{t("tokenPrefixes")}</Alert>
+      </Stack>
+    </Paper>
+  );
+}
+
 function ConnectionDialog({
   state,
   manifestState,
@@ -315,7 +449,7 @@ function ConnectionDialog({
   const t = useTranslations("workspace.agents.externalChannels");
   const disabled =
     state === null ||
-    (state.type === "SETUP" && state.appId.trim() === "") ||
+    state.appId.trim() === "" ||
     state.credentials.botToken.trim() === "" ||
     state.credentials.signingSecret.trim() === "" ||
     (state.transport === "socket" && state.credentials.appToken.trim() === "");
@@ -328,83 +462,37 @@ function ConnectionDialog({
           onClose();
         }
       }}
-      title={
-        state?.type === "RECONNECT" ? t("reconnectTitle") : t("setupTitle")
-      }
-      size="lg"
+      title={state?.type === "EDIT" ? t("editTitle") : t("setupTitle")}
+      size="xl"
       closeOnClickOutside={!saving}
       closeOnEscape={!saving}
     >
       {state && (
         <Stack gap="md">
-          {state.type === "SETUP" && (
-            <>
-              <TextInput
-                label={t("appId")}
-                value={state.appId}
-                disabled={saving}
-                onChange={(event) =>
-                  onChange({ ...state, appId: event.currentTarget.value })
-                }
-              />
-              <SegmentedControl
-                fullWidth
-                value={state.transport}
-                disabled={saving}
-                data={[
-                  { value: "http", label: t("transport.http") },
-                  { value: "socket", label: t("transport.socket") },
-                ]}
-                onChange={(value) =>
-                  onChange({
-                    ...state,
-                    transport: value === "socket" ? "socket" : "http",
-                  })
-                }
-              />
-            </>
-          )}
-          {manifestState.type === "LOADING" && (
-            <Center py="md">
-              <Loader size="sm" />
-            </Center>
-          )}
-          {manifestState.type === "ERROR" && (
-            <Alert color="red">{manifestState.message}</Alert>
-          )}
-          {manifestState.type === "LOADED" && (
-            <Paper withBorder radius="md" p="sm">
-              <Stack gap="xs">
-                <Text fw={700} size="sm">
-                  {t("manifestTitle")}
-                </Text>
-                <Text size="xs" c="dimmed">
-                  {t("botScopes")}
-                </Text>
-                <Code block>
-                  {manifestState.manifest.bot_scopes.join(", ")}
-                </Code>
-                <Text size="xs" c="dimmed">
-                  {t("eventSubscriptions")}
-                </Text>
-                <Code block>
-                  {manifestState.manifest.event_subscriptions.join(", ")}
-                </Code>
-                {manifestState.manifest.app_token_scope && (
-                  <Text size="xs">
-                    {t("appTokenScope")}:{" "}
-                    <Code>{manifestState.manifest.app_token_scope}</Code>
-                  </Text>
-                )}
-                {manifestState.manifest.callback_path_template && (
-                  <Text size="xs">
-                    {t("callbackPath")}:{" "}
-                    <Code>{manifestState.manifest.callback_path_template}</Code>
-                  </Text>
-                )}
-              </Stack>
-            </Paper>
-          )}
+          <TextInput
+            label={t("appId")}
+            value={state.appId}
+            disabled={saving}
+            onChange={(event) =>
+              onChange({ ...state, appId: event.currentTarget.value })
+            }
+          />
+          <SegmentedControl
+            fullWidth
+            value={state.transport}
+            disabled={saving}
+            data={[
+              { value: "http", label: t("transport.http") },
+              { value: "socket", label: t("transport.socket") },
+            ]}
+            onChange={(value) =>
+              onChange({
+                ...state,
+                transport: value === "socket" ? "socket" : "http",
+              })
+            }
+          />
+          <SlackAppGuide manifestState={manifestState} />
           <PasswordInput
             label={t("botToken")}
             value={state.credentials.botToken}
@@ -459,7 +547,7 @@ function ConnectionDialog({
               {t("cancel")}
             </Button>
             <Button loading={saving} disabled={disabled} onClick={onSubmit}>
-              {state.type === "SETUP" ? t("connect") : t("replaceCredentials")}
+              {state.type === "SETUP" ? t("connect") : t("saveChanges")}
             </Button>
           </Group>
         </Stack>
@@ -476,12 +564,11 @@ export function ExternalChannelSettings({
   actionTarget,
   actionsBusy,
   onOpenSetup,
-  onOpenReconnect,
+  onOpenEdit,
   onCloseDialog,
   onDialogChange,
   onSubmitDialog,
   onValidate,
-  onSwitchTransport,
   onDisconnect,
   onRevokeGrant,
   onRemoveBlock,
@@ -544,8 +631,7 @@ export function ExternalChannelSettings({
                     busy={actionTarget === connection.id}
                     actionsBusy={actionsBusy}
                     onValidate={onValidate}
-                    onSwitchTransport={onSwitchTransport}
-                    onReconnect={onOpenReconnect}
+                    onEdit={onOpenEdit}
                     onDisconnect={onDisconnect}
                   />
                 ))

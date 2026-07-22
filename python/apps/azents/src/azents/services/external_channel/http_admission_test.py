@@ -30,13 +30,9 @@ from azents.services.external_channel.admission import ExternalChannelAdmissionS
 from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
 from azents.services.external_channel.data import SlackConnectionCredentials
 from azents.services.external_channel.http_admission import SlackHTTPAdmissionService
-from azents.services.external_channel.slack_http import (
-    SlackHTTPUnauthorized,
-    hash_callback_selector,
-)
+from azents.services.external_channel.slack_http import SlackHTTPUnauthorized
 
 _NOW = datetime.datetime(2026, 7, 22, 1, 0, tzinfo=datetime.UTC)
-_SELECTOR = "opaque-selector"
 _SECRET = "signing-secret"
 
 
@@ -48,16 +44,24 @@ class _RepositoryDouble:
         configuration: ExternalChannelConnectionConfiguration | None,
     ) -> None:
         self.configuration = configuration
-        self.selector_hashes: list[str] = []
+        self.identities: list[tuple[str, str]] = []
 
-    async def get_connection_configuration_by_http_callback_selector_hash(
+    async def get_slack_http_configuration_by_provider_identity(
         self,
         session: AsyncSession,
         *,
-        http_callback_selector_hash: str,
+        provider_app_id: str,
+        provider_tenant_id: str,
     ) -> ExternalChannelConnectionConfiguration | None:
         del session
-        self.selector_hashes.append(http_callback_selector_hash)
+        self.identities.append((provider_app_id, provider_tenant_id))
+        if self.configuration is None:
+            return None
+        if (
+            self.configuration.provider_app_id != provider_app_id
+            or self.configuration.provider_tenant_id != provider_tenant_id
+        ):
+            return None
         return self.configuration
 
 
@@ -98,7 +102,7 @@ def _configuration(
         provider_app_id="A-1",
         provider_tenant_id="T-1",
         provider_bot_user_id="B-1",
-        http_callback_selector_hash=hash_callback_selector(_SELECTOR),
+        http_callback_selector_hash=None,
         encrypted_credentials=codec.encrypt(
             SlackConnectionCredentials(
                 bot_token="xoxb-secret",
@@ -184,27 +188,22 @@ async def test_url_verification_returns_challenge_without_admission(
     """Allow signed setup verification before provider identity activation."""
     admission = _AdmissionDouble()
     service, repository = _service(
-        configuration=_configuration(
-            codec,
-            status=ExternalChannelConnectionStatus.CONFIGURING,
-        ),
+        configuration=None,
         codec=codec,
         admission=admission,
     )
     body = json.dumps({"type": "url_verification", "challenge": "challenge-1"}).encode()
-    timestamp, signature = _signed(body)
 
     result = await service.handle(
-        selector=_SELECTOR,
         raw_body=body,
-        timestamp_header=timestamp,
-        signature_header=signature,
+        timestamp_header=None,
+        signature_header=None,
         received_at=_NOW,
     )
 
     assert result.challenge == "challenge-1"
     assert admission.events == []
-    assert repository.selector_hashes == [hash_callback_selector(_SELECTOR)]
+    assert repository.identities == []
 
 
 @pytest.mark.asyncio
@@ -225,7 +224,6 @@ async def test_matching_active_event_is_admitted_before_return(
     timestamp, signature = _signed(body)
 
     result = await service.handle(
-        selector=_SELECTOR,
         raw_body=body,
         timestamp_header=timestamp,
         signature_header=signature,
@@ -262,7 +260,6 @@ async def test_event_identity_mismatch_is_rejected_before_admission(
 
     with pytest.raises(SlackHTTPUnauthorized):
         await service.handle(
-            selector=_SELECTOR,
             raw_body=body,
             timestamp_header=timestamp,
             signature_header=signature,
@@ -273,10 +270,10 @@ async def test_event_identity_mismatch_is_rejected_before_admission(
 
 
 @pytest.mark.asyncio
-async def test_unknown_selector_is_indistinguishable_from_auth_failure(
+async def test_unknown_provider_identity_is_indistinguishable_from_auth_failure(
     codec: ExternalChannelCredentialsCodec,
 ) -> None:
-    """Reject an unknown routing hint before parsing untrusted JSON."""
+    """Reject unknown App and tenant identity before signature verification."""
     admission = _AdmissionDouble()
     service, _ = _service(
         configuration=None,
@@ -288,7 +285,6 @@ async def test_unknown_selector_is_indistinguishable_from_auth_failure(
 
     with pytest.raises(SlackHTTPUnauthorized):
         await service.handle(
-            selector="unknown",
             raw_body=body,
             timestamp_header=timestamp,
             signature_header=signature,
@@ -314,7 +310,6 @@ async def test_database_failure_propagates_without_success_acknowledgement(
 
     with pytest.raises(RuntimeError, match="database unavailable"):
         await service.handle(
-            selector=_SELECTOR,
             raw_body=body,
             timestamp_header=timestamp,
             signature_header=signature,

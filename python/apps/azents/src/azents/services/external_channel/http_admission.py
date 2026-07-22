@@ -23,10 +23,11 @@ from azents.services.external_channel.credentials import ExternalChannelCredenti
 from azents.services.external_channel.data import SlackConnectionCredentials
 from azents.services.external_channel.slack_http import (
     SlackEventCallback,
+    SlackEventRouteIdentity,
     SlackHTTPUnauthorized,
     SlackURLVerification,
-    hash_callback_selector,
     parse_slack_callback,
+    parse_slack_callback_route,
     verify_slack_signature,
 )
 
@@ -64,22 +65,28 @@ class SlackHTTPAdmissionService:
     async def handle(
         self,
         *,
-        selector: str,
         raw_body: bytes,
         timestamp_header: str | None,
         signature_header: str | None,
         received_at: datetime.datetime,
     ) -> SlackHTTPAdmissionResult:
         """Authenticate, normalize, and admit one Slack callback."""
-        selector_hash = hash_callback_selector(selector)
-        async with self.session_manager() as session:
-            repository = self.repository
-            get_configuration = (
-                repository.get_connection_configuration_by_http_callback_selector_hash
+        route = parse_slack_callback_route(raw_body)
+        if isinstance(route, SlackURLVerification):
+            return SlackHTTPAdmissionResult(
+                challenge=route.challenge,
+                event_id=None,
+                created=None,
             )
-            configuration = await get_configuration(
-                session,
-                http_callback_selector_hash=selector_hash,
+        if not isinstance(route, SlackEventRouteIdentity):
+            raise AssertionError("Slack callback route is not exhaustive.")
+        async with self.session_manager() as session:
+            configuration = (
+                await self.repository.get_slack_http_configuration_by_provider_identity(
+                    session,
+                    provider_app_id=route.app_id,
+                    provider_tenant_id=route.tenant_id,
+                )
             )
         if configuration is None:
             raise SlackHTTPUnauthorized("Slack callback could not be authenticated.")
@@ -107,11 +114,9 @@ class SlackHTTPAdmissionService:
             received_at=received_at,
         )
         match callback:
-            case SlackURLVerification(challenge=challenge):
-                return SlackHTTPAdmissionResult(
-                    challenge=challenge,
-                    event_id=None,
-                    created=None,
+            case SlackURLVerification():
+                raise SlackHTTPUnauthorized(
+                    "Slack callback could not be authenticated."
                 )
             case SlackEventCallback(app_id=app_id, tenant_id=tenant_id, event=event):
                 if configuration.status not in {

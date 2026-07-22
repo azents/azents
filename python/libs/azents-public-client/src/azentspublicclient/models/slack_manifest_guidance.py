@@ -33,9 +33,11 @@ class SlackManifestGuidance(BaseModel):
     event_subscriptions: List[StrictStr]
     socket_mode_enabled: StrictBool
     app_token_scope: Optional[StrictStr]
-    callback_path_template: Optional[StrictStr]
+    callback_url: Optional[StrictStr]
+    manifest: Dict[str, Any]
+    manifest_json: StrictStr
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["provider", "transport", "bot_scopes", "event_subscriptions", "socket_mode_enabled", "app_token_scope", "callback_path_template"]
+    __properties: ClassVar[List[str]] = ["provider", "transport", "bot_scopes", "event_subscriptions", "socket_mode_enabled", "app_token_scope", "callback_url", "manifest", "manifest_json"]
 
     @field_validator('provider')
     def provider_validate_enum(cls, value):
@@ -98,10 +100,10 @@ class SlackManifestGuidance(BaseModel):
         if self.app_token_scope is None and "app_token_scope" in self.model_fields_set:
             _dict['app_token_scope'] = None
 
-        # set to None if callback_path_template (nullable) is None
+        # set to None if callback_url (nullable) is None
         # and model_fields_set contains the field
-        if self.callback_path_template is None and "callback_path_template" in self.model_fields_set:
-            _dict['callback_path_template'] = None
+        if self.callback_url is None and "callback_url" in self.model_fields_set:
+            _dict['callback_url'] = None
 
         return _dict
 
@@ -121,7 +123,9 @@ class SlackManifestGuidance(BaseModel):
             "event_subscriptions": obj.get("event_subscriptions"),
             "socket_mode_enabled": obj.get("socket_mode_enabled"),
             "app_token_scope": obj.get("app_token_scope"),
-            "callback_path_template": obj.get("callback_path_template")
+            "callback_url": obj.get("callback_url"),
+            "manifest": obj.get("manifest"),
+            "manifest_json": obj.get("manifest_json")
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

@@ -20,9 +20,9 @@ code_paths:
   - testenv/azents/e2e/src/support/slack_provider_fake.py
   - testenv/azents/e2e/src/tests/azents/public/test_external_channels.py
 api_routes:
-  - /external-channel/v1/slack/events/{selector}
+  - /external-channel/v1/slack/events
 last_verified_at: 2026-07-22
-spec_version: 1
+spec_version: 2
 ---
 
 # External Channel Provider Ingress
@@ -33,11 +33,25 @@ The Slack adapter accepts only app-member public or private channel traffic. Sla
 
 ## HTTP Admission
 
-1. The callback selector identifies a candidate HTTP connection without exposing its secret.
-2. The adapter reads a bounded raw body and validates Slack timestamp freshness and HMAC signature against the encrypted signing secret.
-3. URL verification returns the supplied challenge after the same authentication checks.
-4. Event callbacks validate App/tenant identity and supported event shape, then persist the raw provider event idempotently.
-5. Success is acknowledged only after durable admission. Admission does not decrypt provider content into domain rows, hydrate history, authorize a participant, create an AgentSession, wake an Agent, or call a provider mutation API.
+Slack sends HTTP callbacks to the single fixed endpoint
+`POST /external-channel/v1/slack/events`.
+
+1. The adapter reads a bounded raw body and parses only the minimum routing envelope.
+2. A bounded `url_verification` request returns its challenge without connection
+   lookup, durable admission, or Agent side effects.
+3. An ordinary event uses untrusted `(api_app_id, team_id)` payload identity to select
+   exactly one active or degraded HTTP connection.
+4. The adapter validates Slack timestamp freshness and the raw-body HMAC signature
+   against that candidate's encrypted Signing Secret.
+5. The fully parsed event identity must match the selected connection before the raw
+   provider event is persisted idempotently.
+6. Success is acknowledged only after durable admission. Admission does not decrypt
+   provider content into domain rows, hydrate history, authorize a participant,
+   create an AgentSession, wake an Agent, or call a provider mutation API.
+
+Payload App/Team identity is an index key, not authentication. Missing, unknown, or
+ambiguous candidates fail closed, and ordinary events never pass admission without
+successful HMAC verification.
 
 Duplicate `(connection_id, provider_event_id)` callbacks reuse the admitted event and still receive a successful acknowledgement.
 
@@ -69,4 +83,5 @@ Deterministic E2E uses signed raw callbacks and a fake HTTP/WebSocket provider t
 
 ## Changelog
 
+- **2026-07-22** (spec_version 2) — Replaced per-connection selector callbacks with one fixed endpoint routed by Slack App/Team identity and authenticated by the selected connection's HMAC secret.
 - **2026-07-22** (spec_version 1) — Promoted signed HTTP and fenced Socket Mode admission, asynchronous normalization/hydration, provider scope, retry behavior, and credential-free deterministic validation.

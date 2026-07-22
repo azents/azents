@@ -23,6 +23,7 @@ from azents.services.external_channel.data import (
 from azents.services.external_channel.slack_endpoint import slack_api_base_url
 
 MAX_SLACK_HTTP_BODY_BYTES = 256 * 1024
+MAX_SLACK_URL_VERIFICATION_CHALLENGE_BYTES = 4 * 1024
 SLACK_SIGNATURE_TOLERANCE_SECONDS = 5 * 60
 
 
@@ -44,9 +45,17 @@ class SlackHTTPPayloadTooLarge(SlackHTTPError):
 
 @dataclass(frozen=True)
 class SlackURLVerification:
-    """Authenticated Slack URL-verification challenge."""
+    """Bounded Slack URL-verification challenge with no durable side effects."""
 
     challenge: str
+
+
+@dataclass(frozen=True)
+class SlackEventRouteIdentity:
+    """Untrusted provider identity used only to select an HMAC candidate."""
+
+    app_id: str
+    tenant_id: str
 
 
 @dataclass(frozen=True)
@@ -59,6 +68,7 @@ class SlackEventCallback:
 
 
 type SlackCallbackEnvelope = SlackURLVerification | SlackEventCallback
+type SlackCallbackRoute = SlackURLVerification | SlackEventRouteIdentity
 
 
 @dataclass(frozen=True)
@@ -71,13 +81,6 @@ class SlackConnectionValidation:
     action_hint: str | None
     identity: ExternalChannelProviderIdentity | None
     capabilities: ExternalChannelCapabilitySnapshot | None
-
-
-def hash_callback_selector(selector: str) -> str:
-    """Return the persisted SHA-256 digest for an opaque callback selector."""
-    if not selector:
-        raise SlackHTTPUnauthorized("Callback selector is missing.")
-    return hashlib.sha256(selector.encode()).hexdigest()
 
 
 def verify_slack_signature(
@@ -117,6 +120,25 @@ def verify_slack_signature(
         raise SlackHTTPUnauthorized("Slack request signature is invalid.")
 
 
+def parse_slack_callback_route(raw_body: bytes) -> SlackCallbackRoute:
+    """Parse only the bounded fields required before signature verification."""
+    payload = _parse_payload(raw_body)
+    callback_type = _required_string(payload, "type")
+    if callback_type == "url_verification":
+        challenge = _required_string(payload, "challenge")
+        if len(challenge.encode()) > MAX_SLACK_URL_VERIFICATION_CHALLENGE_BYTES:
+            raise SlackHTTPPayloadTooLarge(
+                "Slack URL verification challenge exceeds the size limit."
+            )
+        return SlackURLVerification(challenge=challenge)
+    if callback_type != "event_callback":
+        raise SlackHTTPInvalidPayload("Slack callback type is not supported.")
+    return SlackEventRouteIdentity(
+        app_id=_required_string(payload, "api_app_id"),
+        tenant_id=_required_string(payload, "team_id"),
+    )
+
+
 def parse_slack_callback(
     *,
     connection_id: str,
@@ -124,16 +146,7 @@ def parse_slack_callback(
     received_at: datetime.datetime,
 ) -> SlackCallbackEnvelope:
     """Parse one verified Slack callback into a bounded provider event."""
-    if len(raw_body) > MAX_SLACK_HTTP_BODY_BYTES:
-        raise SlackHTTPPayloadTooLarge("Slack callback body exceeds the size limit.")
-    try:
-        payload: object = json.loads(raw_body)
-    except (UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise SlackHTTPInvalidPayload(
-            "Slack callback body is not valid JSON."
-        ) from error
-    if not isinstance(payload, dict):
-        raise SlackHTTPInvalidPayload("Slack callback body must be a JSON object.")
+    payload = _parse_payload(raw_body)
 
     callback_type = _required_string(payload, "type")
     if callback_type == "url_verification":
@@ -174,6 +187,20 @@ def parse_slack_callback(
             received_at=received_at,
         ),
     )
+
+
+def _parse_payload(raw_body: bytes) -> dict[str, object]:
+    if len(raw_body) > MAX_SLACK_HTTP_BODY_BYTES:
+        raise SlackHTTPPayloadTooLarge("Slack callback body exceeds the size limit.")
+    try:
+        payload: object = json.loads(raw_body)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise SlackHTTPInvalidPayload(
+            "Slack callback body is not valid JSON."
+        ) from error
+    if not isinstance(payload, dict):
+        raise SlackHTTPInvalidPayload("Slack callback body must be a JSON object.")
+    return payload
 
 
 class SlackWebAPIClient:
@@ -227,8 +254,70 @@ class SlackWebAPIClient:
             return self._unavailable(code="slack_auth_test_response_invalid")
         if not isinstance(user_id, str) or not user_id:
             return self._unavailable(code="slack_auth_test_response_invalid")
-        if not isinstance(bot_id, str):
-            bot_id = user_id
+        if not isinstance(bot_id, str) or not bot_id:
+            return self._unavailable(code="slack_auth_test_response_invalid")
+        try:
+            bot_response = await self.http_client.get(
+                f"{slack_api_base_url()}/bots.info",
+                headers={"Authorization": f"Bearer {bot_token}"},
+                params={"bot": bot_id},
+            )
+        except httpx.RequestError:
+            return self._unavailable()
+        if bot_response.status_code == 429 or bot_response.status_code >= 500:
+            return self._unavailable()
+        bot_payload = self._json_object(bot_response)
+        if bot_response.status_code >= 400 or bot_payload.get("ok") is not True:
+            error_code = bot_payload.get("error")
+            if error_code in {
+                "account_inactive",
+                "invalid_auth",
+                "not_authed",
+                "token_revoked",
+            }:
+                return SlackConnectionValidation(
+                    status="invalid",
+                    code="slack_credentials_invalid",
+                    message="Slack rejected the configured bot token.",
+                    action_hint=(
+                        "Replace the bot token and validate the connection again."
+                    ),
+                    identity=None,
+                    capabilities=None,
+                )
+            if error_code == "missing_scope":
+                return SlackConnectionValidation(
+                    status="invalid",
+                    code="slack_bot_identity_scope_missing",
+                    message=(
+                        "Slack cannot verify the App identity because the bot token "
+                        "does not have users:read."
+                    ),
+                    action_hint=(
+                        "Add users:read, reinstall the App, replace the bot token, "
+                        "and validate again."
+                    ),
+                    identity=None,
+                    capabilities=None,
+                )
+            return self._unavailable(code="slack_bot_identity_unavailable")
+        bot = bot_payload.get("bot")
+        if not isinstance(bot, dict):
+            return self._unavailable(code="slack_bot_identity_response_invalid")
+        actual_app_id = bot.get("app_id")
+        if not isinstance(actual_app_id, str) or not actual_app_id:
+            return self._unavailable(code="slack_bot_identity_response_invalid")
+        if actual_app_id != app_id:
+            return SlackConnectionValidation(
+                status="invalid",
+                code="slack_app_id_mismatch",
+                message="The Slack App ID does not own the configured bot token.",
+                action_hint=(
+                    "Copy the App ID and Bot User OAuth Token from the same Slack App."
+                ),
+                identity=None,
+                capabilities=None,
+            )
         return SlackConnectionValidation(
             status="valid",
             code=None,
@@ -236,7 +325,7 @@ class SlackWebAPIClient:
             action_hint=None,
             identity=ExternalChannelProviderIdentity(
                 provider=ExternalChannelProvider.SLACK,
-                app_id=app_id,
+                app_id=actual_app_id,
                 tenant_id=team_id,
                 bot_user_id=bot_id,
             ),

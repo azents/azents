@@ -66,6 +66,8 @@ class ExternalChannelManagementRepository:
                 .where(
                     RDBExternalChannelConnection.workspace_id == workspace_id,
                     RDBExternalChannelAgentRoute.agent_id == agent_id,
+                    RDBExternalChannelConnection.status
+                    != ExternalChannelConnectionStatus.DISCONNECTED,
                 )
                 .order_by(RDBExternalChannelConnection.created_at)
             )
@@ -99,16 +101,18 @@ class ExternalChannelManagementRepository:
         row = (await session.execute(statement)).one_or_none()
         return None if row is None else (row[0], row[1])
 
-    async def switch_transport(
+    async def replace_slack_configuration(
         self,
         session: AsyncSession,
         *,
         workspace_id: str,
         agent_id: str,
         connection_id: str,
+        provider_app_id: str,
         transport: ExternalChannelTransport,
-        selector_hash: str | None,
+        encrypted_credentials: str,
     ) -> ManagedConnection | None:
+        """Replace one Slack connection configuration without a lifecycle guard."""
         row = await self.get_connection(
             session,
             workspace_id=workspace_id,
@@ -119,47 +123,24 @@ class ExternalChannelManagementRepository:
         if row is None:
             return None
         connection, route = row
-        if connection.status is ExternalChannelConnectionStatus.DISCONNECTED:
-            raise ValueError(
-                "Disconnected External Channel connections cannot switch transport."
-            )
+        connection.provider_app_id = provider_app_id
+        connection.provider_tenant_id = None
+        connection.provider_bot_user_id = None
         connection.transport = transport
-        connection.http_callback_selector_hash = selector_hash
+        connection.http_callback_selector_hash = None
+        connection.encrypted_credentials = encrypted_credentials
+        connection.capabilities = None
         connection.status = ExternalChannelConnectionStatus.CONFIGURING
+        connection.last_verified_at = None
+        connection.last_health_at = None
+        connection.disconnected_at = None
         connection.socket_lease_owner = None
         connection.socket_lease_until = None
         connection.socket_heartbeat_at = None
         connection.socket_gap_detected_at = None
         connection.socket_gap_reason = None
-        await session.flush()
-        return _connection(connection, route)
-
-    async def replace_credentials(
-        self,
-        session: AsyncSession,
-        *,
-        workspace_id: str,
-        agent_id: str,
-        connection_id: str,
-        encrypted_credentials: str,
-    ) -> ManagedConnection | None:
-        row = await self.get_connection(
-            session,
-            workspace_id=workspace_id,
-            agent_id=agent_id,
-            connection_id=connection_id,
-            lock=True,
-        )
-        if row is None:
-            return None
-        connection, route = row
-        if connection.status is ExternalChannelConnectionStatus.DISCONNECTED:
-            raise ValueError(
-                "Disconnected External Channel connections cannot reconnect."
-            )
-        connection.encrypted_credentials = encrypted_credentials
-        connection.status = ExternalChannelConnectionStatus.CONFIGURING
-        connection.disconnected_at = None
+        route.status = ExternalChannelRouteStatus.ACTIVE
+        route.deactivated_at = None
         await session.flush()
         return _connection(connection, route)
 
@@ -330,8 +311,6 @@ class ExternalChannelManagementRepository:
         if row is None:
             return None
         connection, route = row
-        if connection.status is ExternalChannelConnectionStatus.DISCONNECTED:
-            return ()
         connection.status = ExternalChannelConnectionStatus.DISCONNECTING
         route.status = ExternalChannelRouteStatus.INACTIVE
         route.deactivated_at = now
@@ -390,6 +369,9 @@ class ExternalChannelManagementRepository:
         connection, route = row
         connection.encrypted_credentials = None
         connection.status = ExternalChannelConnectionStatus.DISCONNECTED
+        connection.provider_tenant_id = None
+        connection.provider_bot_user_id = None
+        connection.capabilities = None
         connection.disconnected_at = now
         connection.socket_lease_owner = None
         connection.socket_lease_until = None

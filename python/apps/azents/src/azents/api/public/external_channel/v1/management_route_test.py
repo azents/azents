@@ -1,5 +1,7 @@
 """External Channel authenticated management API tests."""
 
+import json
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from fastapi.testclient import TestClient
@@ -12,6 +14,7 @@ from azents.core.auth.deps import (
     get_workspace_member,
 )
 from azents.core.auth.permissions import Permissions
+from azents.core.deps import get_config
 from azents.core.enums import (
     ExternalChannelConnectionStatus,
     ExternalChannelProvider,
@@ -64,16 +67,19 @@ def _client(service: AsyncMock) -> TestClient:
         user_id="user-1",
         session_id="auth-session-1",
     )
+    app.dependency_overrides[get_config] = lambda: SimpleNamespace(
+        external_channel_slack_callback_url=(
+            "https://callbacks.example.test/external-channel/v1/slack/events"
+        ),
+        api_url="https://api.example.test",
+    )
     return TestClient(app)
 
 
-def test_setup_returns_one_time_selector_without_echoing_credentials() -> None:
+def test_setup_returns_redacted_connection_without_echoing_credentials() -> None:
     """Secrets are accepted as input but absent from every response field."""
     service = AsyncMock(spec=ExternalChannelManagementService)
-    service.setup_slack.return_value = ManagedConnectionSetup(
-        connection=_connection(),
-        callback_selector="selector-once",
-    )
+    service.setup_slack.return_value = ManagedConnectionSetup(connection=_connection())
 
     response = _client(service).post(
         "/external-channel/v1/workspaces/ws/agents/agent-1/external-channels/slack",
@@ -90,10 +96,29 @@ def test_setup_returns_one_time_selector_without_echoing_credentials() -> None:
     )
 
     assert response.status_code == 201
-    assert response.json()["callback_selector"] == "selector-once"
     assert response.json()["connection"]["credentials_configured"] is True
     assert "xoxb-secret" not in response.text
     assert "signing-secret" not in response.text
+
+
+def test_manifest_guidance_returns_fixed_callback_and_copy_ready_json() -> None:
+    """Return a complete HTTP Manifest before a connection exists."""
+    service = AsyncMock(spec=ExternalChannelManagementService)
+    service.list_connections.return_value = []
+
+    response = _client(service).get(
+        "/external-channel/v1/workspaces/ws/agents/agent-1/external-channels/manifest",
+        params={"transport": "http", "app_name": "Incident Agent"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    callback_url = "https://callbacks.example.test/external-channel/v1/slack/events"
+    assert payload["callback_url"] == callback_url
+    manifest = json.loads(payload["manifest_json"])
+    assert manifest["settings"]["event_subscriptions"]["request_url"] == callback_url
+    assert "{selector}" not in response.text
+    assert "signing_secret" not in response.text
 
 
 def test_opaque_approval_request_is_404_safe() -> None:
@@ -110,10 +135,18 @@ def test_opaque_approval_request_is_404_safe() -> None:
 def test_openapi_includes_management_but_excludes_provider_callback() -> None:
     """Generated clients receive management operations, never raw callbacks."""
     paths = create_dummy_public_app().openapi()["paths"]
+    connection_path = (
+        "/external-channel/v1/workspaces/{handle}/agents/{agent_id}/"
+        "external-channels/{connection_id}"
+    )
 
     assert (
         "/external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels"
         in paths
     )
+    assert f"{connection_path}/slack" in paths
+    assert "put" in paths[f"{connection_path}/slack"]
+    assert f"{connection_path}/transport" not in paths
+    assert f"{connection_path}/reconnect" not in paths
     assert "/external-channel/v1/approval-requests/{access_request_id}" in paths
-    assert "/external-channel/v1/slack/events/{selector}" not in paths
+    assert "/external-channel/v1/slack/events" not in paths

@@ -82,13 +82,6 @@ class TestExternalChannelV1Api(unittest.TestCase):
         """
         pass
 
-    def test_external_channel_v1_reconnect_connection(self) -> None:
-        """Test case for external_channel_v1_reconnect_connection
-
-        Reconnect Connection
-        """
-        pass
-
     def test_external_channel_v1_remove_access_block(self) -> None:
         """Test case for external_channel_v1_remove_access_block
 
@@ -110,10 +103,10 @@ class TestExternalChannelV1Api(unittest.TestCase):
         """
         pass
 
-    def test_external_channel_v1_switch_transport(self) -> None:
-        """Test case for external_channel_v1_switch_transport
+    def test_external_channel_v1_update_slack_connection(self) -> None:
+        """Test case for external_channel_v1_update_slack_connection
 
-        Switch Transport
+        Update Slack Connection
         """
         pass
 

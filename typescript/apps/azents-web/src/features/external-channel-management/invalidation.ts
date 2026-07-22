@@ -1,8 +1,7 @@
 export type ExternalChannelSettingsMutation =
   | "setup"
   | "validate"
-  | "switchTransport"
-  | "reconnect"
+  | "update"
   | "disconnect"
   | "revokeGrant"
   | "removeBlock";
@@ -18,8 +17,7 @@ export function externalChannelSettingsInvalidationPlan(
   switch (mutation) {
     case "setup":
     case "validate":
-    case "switchTransport":
-    case "reconnect":
+    case "update":
       return ["connections"];
     case "disconnect":
       return ["connections", "sessionChannels"];

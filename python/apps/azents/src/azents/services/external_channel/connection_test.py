@@ -34,7 +34,6 @@ from azents.services.external_channel.data import (
 from azents.services.external_channel.slack_http import (
     SlackConnectionValidation,
     SlackWebAPIClient,
-    hash_callback_selector,
 )
 
 _NOW = datetime.datetime(2026, 7, 22, 1, 0, tzinfo=datetime.UTC)
@@ -242,10 +241,10 @@ def codec() -> ExternalChannelCredentialsCodec:
 
 
 @pytest.mark.asyncio
-async def test_http_setup_returns_selector_once_and_persists_only_hash(
+async def test_http_setup_uses_fixed_callback_and_encrypts_credentials(
     codec: ExternalChannelCredentialsCodec,
 ) -> None:
-    """Keep the callback routing secret out of persistent connection state."""
+    """Persist no selector while keeping provider credentials encrypted."""
     repository = _RepositoryDouble()
     session = _SessionDouble()
     service = _service(
@@ -271,12 +270,9 @@ async def test_http_setup_returns_selector_once_and_persists_only_hash(
         credentials=_credentials(),
     )
 
-    assert setup.callback_selector is not None
+    assert setup.connection.id == "connection-1"
     assert repository.create is not None
-    assert repository.create.http_callback_selector_hash == hash_callback_selector(
-        setup.callback_selector
-    )
-    assert setup.callback_selector not in repr(repository.create)
+    assert repository.create.http_callback_selector_hash is None
     assert "xoxb-secret" not in repr(repository.create)
     assert repository.create.encrypted_credentials is not None
     assert session.commits == 1

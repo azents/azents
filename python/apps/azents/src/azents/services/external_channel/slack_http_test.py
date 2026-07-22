@@ -16,11 +16,13 @@ from azents.services.external_channel.slack_endpoint import (
 from azents.services.external_channel.slack_http import (
     MAX_SLACK_HTTP_BODY_BYTES,
     SlackEventCallback,
+    SlackEventRouteIdentity,
     SlackHTTPPayloadTooLarge,
     SlackHTTPUnauthorized,
     SlackURLVerification,
     SlackWebAPIClient,
     parse_slack_callback,
+    parse_slack_callback_route,
     verify_slack_signature,
 )
 
@@ -127,15 +129,18 @@ def test_signature_verification_rejects_replay_window(offset_seconds: int) -> No
 
 def test_url_verification_does_not_require_app_identity() -> None:
     """Return the challenge because Slack omits ``api_app_id`` from this shape."""
-    result = parse_slack_callback(
-        connection_id="connection-1",
-        raw_body=json.dumps(
-            {"type": "url_verification", "challenge": "challenge-1"}
-        ).encode(),
-        received_at=_NOW,
+    result = parse_slack_callback_route(
+        json.dumps({"type": "url_verification", "challenge": "challenge-1"}).encode()
     )
 
     assert result == SlackURLVerification(challenge="challenge-1")
+
+
+def test_event_callback_exposes_untrusted_routing_identity() -> None:
+    """Extract only App and tenant identity before HMAC authentication."""
+    result = parse_slack_callback_route(_event_body())
+
+    assert result == SlackEventRouteIdentity(app_id="A-1", tenant_id="T-1")
 
 
 def test_event_callback_projects_bounded_routing_and_message_fields() -> None:
@@ -172,18 +177,25 @@ def test_event_callback_rejects_oversized_body() -> None:
 
 @pytest.mark.asyncio
 async def test_auth_test_returns_sanitized_identity() -> None:
-    """Expose only provider identity and capabilities from ``auth.test``."""
+    """Verify App ownership and expose only sanitized identity state."""
 
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.headers["Authorization"] == "Bearer xoxb-secret"
+        if request.url.path.endswith("/auth.test"):
+            return httpx.Response(
+                200,
+                json={
+                    "ok": True,
+                    "team_id": "T-1",
+                    "user_id": "U-BOT",
+                    "bot_id": "B-1",
+                },
+            )
+        assert request.url.path.endswith("/bots.info")
+        assert request.url.params["bot"] == "B-1"
         return httpx.Response(
             200,
-            json={
-                "ok": True,
-                "team_id": "T-1",
-                "user_id": "U-BOT",
-                "bot_id": "B-1",
-            },
+            json={"ok": True, "bot": {"id": "B-1", "app_id": "A-1"}},
         )
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
@@ -200,6 +212,38 @@ async def test_auth_test_returns_sanitized_identity() -> None:
     assert result.identity.bot_user_id == "B-1"
     assert result.capabilities is not None
     assert "xoxb-secret" not in repr(result)
+
+
+@pytest.mark.asyncio
+async def test_app_id_must_own_the_configured_bot_token() -> None:
+    """Reject an App ID copied from a different Slack App."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/auth.test"):
+            return httpx.Response(
+                200,
+                json={
+                    "ok": True,
+                    "team_id": "T-1",
+                    "user_id": "U-BOT",
+                    "bot_id": "B-1",
+                },
+            )
+        return httpx.Response(
+            200,
+            json={"ok": True, "bot": {"id": "B-1", "app_id": "A-ACTUAL"}},
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await SlackWebAPIClient(client).validate_connection(
+            bot_token="xoxb-secret",
+            app_id="A-WRONG",
+            transport=ExternalChannelTransport.HTTP,
+        )
+
+    assert result.status == "invalid"
+    assert result.code == "slack_app_id_mismatch"
+    assert result.identity is None
 
 
 @pytest.mark.asyncio

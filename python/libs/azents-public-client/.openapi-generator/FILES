@@ -305,7 +305,6 @@ azentspublicclient/docs/SkillAction.md
 azentspublicclient/docs/SlackConnectionCredentials.md
 azentspublicclient/docs/SlackConnectionSetupRequest.md
 azentspublicclient/docs/SlackManifestGuidance.md
-azentspublicclient/docs/SlackReconnectRequest.md
 azentspublicclient/docs/SubagentSettings.md
 azentspublicclient/docs/SubagentTreeNodeResponse.md
 azentspublicclient/docs/SubagentTreeResponse.md
@@ -331,7 +330,6 @@ azentspublicclient/docs/ToolkitScopeListResponse.md
 azentspublicclient/docs/ToolkitScopeResponse.md
 azentspublicclient/docs/ToolkitScopeType.md
 azentspublicclient/docs/ToolkitV1Api.md
-azentspublicclient/docs/TransportSwitchRequest.md
 azentspublicclient/docs/UnsupportedMediaPolicy.md
 azentspublicclient/docs/UpdateMyProfileRequest.md
 azentspublicclient/docs/UpdateMyUserRequest.md
@@ -634,7 +632,6 @@ azentspublicclient/models/skill_action.py
 azentspublicclient/models/slack_connection_credentials.py
 azentspublicclient/models/slack_connection_setup_request.py
 azentspublicclient/models/slack_manifest_guidance.py
-azentspublicclient/models/slack_reconnect_request.py
 azentspublicclient/models/subagent_settings.py
 azentspublicclient/models/subagent_tree_node_response.py
 azentspublicclient/models/subagent_tree_response.py
@@ -658,7 +655,6 @@ azentspublicclient/models/toolkit_response.py
 azentspublicclient/models/toolkit_scope_list_response.py
 azentspublicclient/models/toolkit_scope_response.py
 azentspublicclient/models/toolkit_scope_type.py
-azentspublicclient/models/transport_switch_request.py
 azentspublicclient/models/unsupported_media_policy.py
 azentspublicclient/models/update_my_profile_request.py
 azentspublicclient/models/update_my_user_request.py
@@ -968,7 +964,6 @@ azentspublicclient/test/test_skill_action.py
 azentspublicclient/test/test_slack_connection_credentials.py
 azentspublicclient/test/test_slack_connection_setup_request.py
 azentspublicclient/test/test_slack_manifest_guidance.py
-azentspublicclient/test/test_slack_reconnect_request.py
 azentspublicclient/test/test_subagent_settings.py
 azentspublicclient/test/test_subagent_tree_node_response.py
 azentspublicclient/test/test_subagent_tree_response.py
@@ -994,7 +989,6 @@ azentspublicclient/test/test_toolkit_scope_list_response.py
 azentspublicclient/test/test_toolkit_scope_response.py
 azentspublicclient/test/test_toolkit_scope_type.py
 azentspublicclient/test/test_toolkit_v1_api.py
-azentspublicclient/test/test_transport_switch_request.py
 azentspublicclient/test/test_unsupported_media_policy.py
 azentspublicclient/test/test_update_my_profile_request.py
 azentspublicclient/test/test_update_my_user_request.py

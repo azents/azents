@@ -4582,7 +4582,7 @@
           "External Channel v1"
         ],
         "summary": "Get Manifest Guidance",
-        "description": "Return minimum Slack App configuration after Agent access validation.",
+        "description": "Return copy-ready Slack App configuration after Agent access validation.",
         "operationId": "external_channel_v1_get_manifest_guidance",
         "security": [
           {
@@ -4614,6 +4614,18 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/ExternalChannelTransport"
+            }
+          },
+          {
+            "name": "app_name",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "default": "Azents Agent",
+              "title": "App Name"
             }
           }
         ],
@@ -4831,14 +4843,14 @@
         }
       }
     },
-    "/external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/transport": {
-      "patch": {
+    "/external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/slack": {
+      "put": {
         "tags": [
           "External Channel v1"
         ],
-        "summary": "Switch Transport",
-        "description": "Switch inbound transport without silently falling back.",
-        "operationId": "external_channel_v1_switch_transport",
+        "summary": "Update Slack Connection",
+        "description": "Replace the complete Slack setup and immediately validate it.",
+        "operationId": "external_channel_v1_update_slack_connection",
         "security": [
           {
             "HTTPBearer": []
@@ -4878,83 +4890,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/TransportSwitchRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ManagedConnectionSetup"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/reconnect": {
-      "post": {
-        "tags": [
-          "External Channel v1"
-        ],
-        "summary": "Reconnect Connection",
-        "description": "Replace encrypted credentials and immediately validate them.",
-        "operationId": "external_channel_v1_reconnect_connection",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "agent_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Agent Id"
-            }
-          },
-          {
-            "name": "connection_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Connection Id"
-            }
-          },
-          {
-            "name": "handle",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Handle"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SlackReconnectRequest"
+                "$ref": "#/components/schemas/SlackConnectionSetupRequest"
               }
             }
           }
@@ -15886,23 +15822,11 @@
         "properties": {
           "connection": {
             "$ref": "#/components/schemas/ManagedConnection"
-          },
-          "callback_selector": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Callback Selector"
           }
         },
         "type": "object",
         "required": [
-          "connection",
-          "callback_selector"
+          "connection"
         ],
         "title": "ManagedConnectionSetup"
       },
@@ -18915,7 +18839,7 @@
             ],
             "title": "App Token Scope"
           },
-          "callback_path_template": {
+          "callback_url": {
             "anyOf": [
               {
                 "type": "string"
@@ -18924,7 +18848,16 @@
                 "type": "null"
               }
             ],
-            "title": "Callback Path Template"
+            "title": "Callback Url"
+          },
+          "manifest": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Manifest"
+          },
+          "manifest_json": {
+            "type": "string",
+            "title": "Manifest Json"
           }
         },
         "type": "object",
@@ -18934,21 +18867,11 @@
           "event_subscriptions",
           "socket_mode_enabled",
           "app_token_scope",
-          "callback_path_template"
+          "callback_url",
+          "manifest",
+          "manifest_json"
         ],
         "title": "SlackManifestGuidance"
-      },
-      "SlackReconnectRequest": {
-        "properties": {
-          "credentials": {
-            "$ref": "#/components/schemas/SlackConnectionCredentials"
-          }
-        },
-        "type": "object",
-        "required": [
-          "credentials"
-        ],
-        "title": "SlackReconnectRequest"
       },
       "SubagentSettings": {
         "properties": {
@@ -19970,18 +19893,6 @@
         ],
         "title": "ToolkitScopeType",
         "description": "Toolkit assignment scope type."
-      },
-      "TransportSwitchRequest": {
-        "properties": {
-          "transport": {
-            "$ref": "#/components/schemas/ExternalChannelTransport"
-          }
-        },
-        "type": "object",
-        "required": [
-          "transport"
-        ],
-        "title": "TransportSwitchRequest"
       },
       "UnsupportedMediaPolicy": {
         "type": "string",

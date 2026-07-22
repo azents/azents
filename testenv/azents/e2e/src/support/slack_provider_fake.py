@@ -179,6 +179,9 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
         if operation == "chat.getPermalink":
             self._permalink(query)
             return
+        if operation == "bots.info":
+            self._bot_info(query)
+            return
         self._json_response(404, {"ok": False, "error": "not_found"})
 
     def do_POST(self) -> None:
@@ -228,6 +231,22 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
                 "team_id": "T-E2E",
                 "user_id": "U-BOT-E2E",
                 "bot_id": "B-E2E",
+            },
+        )
+
+    def _bot_info(self, query: dict[str, list[str]]) -> None:
+        scenario = self.state.auth_scenario
+        if self._common_failure(scenario):
+            return
+        bot_id = query.get("bot", [""])[0]
+        self._json_response(
+            200,
+            {
+                "ok": True,
+                "bot": {
+                    "id": bot_id,
+                    "app_id": "A-E2E",
+                },
             },
         )
 

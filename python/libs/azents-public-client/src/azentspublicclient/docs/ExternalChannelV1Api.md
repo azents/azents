@@ -12,11 +12,10 @@ Method | HTTP request | Description
 [**external_channel_v1_list_agent_access**](ExternalChannelV1Api.md#external_channel_v1_list_agent_access) | **GET** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access | List Agent Access
 [**external_channel_v1_list_connections**](ExternalChannelV1Api.md#external_channel_v1_list_connections) | **GET** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels | List Connections
 [**external_channel_v1_list_session_channels**](ExternalChannelV1Api.md#external_channel_v1_list_session_channels) | **GET** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels | List Session Channels
-[**external_channel_v1_reconnect_connection**](ExternalChannelV1Api.md#external_channel_v1_reconnect_connection) | **POST** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/reconnect | Reconnect Connection
 [**external_channel_v1_remove_access_block**](ExternalChannelV1Api.md#external_channel_v1_remove_access_block) | **DELETE** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access/blocks/{block_id} | Remove Access Block
 [**external_channel_v1_revoke_access_grant**](ExternalChannelV1Api.md#external_channel_v1_revoke_access_grant) | **DELETE** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access/grants/{grant_id} | Revoke Access Grant
 [**external_channel_v1_setup_slack_connection**](ExternalChannelV1Api.md#external_channel_v1_setup_slack_connection) | **POST** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack | Setup Slack Connection
-[**external_channel_v1_switch_transport**](ExternalChannelV1Api.md#external_channel_v1_switch_transport) | **PATCH** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/transport | Switch Transport
+[**external_channel_v1_update_slack_connection**](ExternalChannelV1Api.md#external_channel_v1_update_slack_connection) | **PUT** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/slack | Update Slack Connection
 [**external_channel_v1_validate_connection**](ExternalChannelV1Api.md#external_channel_v1_validate_connection) | **POST** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/validate | Validate Connection
 
 
@@ -350,11 +349,11 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **external_channel_v1_get_manifest_guidance**
-> SlackManifestGuidance external_channel_v1_get_manifest_guidance(agent_id, handle, transport)
+> SlackManifestGuidance external_channel_v1_get_manifest_guidance(agent_id, handle, transport, app_name=app_name)
 
 Get Manifest Guidance
 
-Return minimum Slack App configuration after Agent access validation.
+Return copy-ready Slack App configuration after Agent access validation.
 
 ### Example
 
@@ -390,10 +389,11 @@ with azentspublicclient.ApiClient(configuration) as api_client:
     agent_id = 'agent_id_example' # str | 
     handle = 'handle_example' # str | 
     transport = azentspublicclient.ExternalChannelTransport() # ExternalChannelTransport | 
+    app_name = 'Azents Agent' # str |  (optional) (default to 'Azents Agent')
 
     try:
         # Get Manifest Guidance
-        api_response = api_instance.external_channel_v1_get_manifest_guidance(agent_id, handle, transport)
+        api_response = api_instance.external_channel_v1_get_manifest_guidance(agent_id, handle, transport, app_name=app_name)
         print("The response of ExternalChannelV1Api->external_channel_v1_get_manifest_guidance:\n")
         pprint(api_response)
     except Exception as e:
@@ -410,6 +410,7 @@ Name | Type | Description  | Notes
  **agent_id** | **str**|  | 
  **handle** | **str**|  | 
  **transport** | [**ExternalChannelTransport**](.md)|  | 
+ **app_name** | **str**|  | [optional] [default to &#39;Azents Agent&#39;]
 
 ### Return type
 
@@ -678,92 +679,6 @@ Name | Type | Description  | Notes
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
-# **external_channel_v1_reconnect_connection**
-> ExternalChannelConnectionStatusSnapshot external_channel_v1_reconnect_connection(agent_id, connection_id, handle, slack_reconnect_request)
-
-Reconnect Connection
-
-Replace encrypted credentials and immediately validate them.
-
-### Example
-
-* Bearer Authentication (HTTPBearer):
-
-```python
-import azentspublicclient
-from azentspublicclient.models.external_channel_connection_status_snapshot import ExternalChannelConnectionStatusSnapshot
-from azentspublicclient.models.slack_reconnect_request import SlackReconnectRequest
-from azentspublicclient.rest import ApiException
-from pprint import pprint
-
-# Defining the host is optional and defaults to http://localhost
-# See configuration.py for a list of all supported configuration parameters.
-configuration = azentspublicclient.Configuration(
-    host = "http://localhost"
-)
-
-# The client must configure the authentication and authorization parameters
-# in accordance with the API server security policy.
-# Examples for each auth method are provided below, use the example that
-# satisfies your auth use case.
-
-# Configure Bearer authorization: HTTPBearer
-configuration = azentspublicclient.Configuration(
-    access_token = os.environ["BEARER_TOKEN"]
-)
-
-# Enter a context with an instance of the API client
-with azentspublicclient.ApiClient(configuration) as api_client:
-    # Create an instance of the API class
-    api_instance = azentspublicclient.ExternalChannelV1Api(api_client)
-    agent_id = 'agent_id_example' # str | 
-    connection_id = 'connection_id_example' # str | 
-    handle = 'handle_example' # str | 
-    slack_reconnect_request = azentspublicclient.SlackReconnectRequest() # SlackReconnectRequest | 
-
-    try:
-        # Reconnect Connection
-        api_response = api_instance.external_channel_v1_reconnect_connection(agent_id, connection_id, handle, slack_reconnect_request)
-        print("The response of ExternalChannelV1Api->external_channel_v1_reconnect_connection:\n")
-        pprint(api_response)
-    except Exception as e:
-        print("Exception when calling ExternalChannelV1Api->external_channel_v1_reconnect_connection: %s\n" % e)
-```
-
-
-
-### Parameters
-
-
-Name | Type | Description  | Notes
-------------- | ------------- | ------------- | -------------
- **agent_id** | **str**|  | 
- **connection_id** | **str**|  | 
- **handle** | **str**|  | 
- **slack_reconnect_request** | [**SlackReconnectRequest**](SlackReconnectRequest.md)|  | 
-
-### Return type
-
-[**ExternalChannelConnectionStatusSnapshot**](ExternalChannelConnectionStatusSnapshot.md)
-
-### Authorization
-
-[HTTPBearer](../README.md#HTTPBearer)
-
-### HTTP request headers
-
- - **Content-Type**: application/json
- - **Accept**: application/json
-
-### HTTP response details
-
-| Status code | Description | Response headers |
-|-------------|-------------|------------------|
-**200** | Successful Response |  -  |
-**422** | Validation Error |  -  |
-
-[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
-
 # **external_channel_v1_remove_access_block**
 > external_channel_v1_remove_access_block(agent_id, block_id, handle)
 
@@ -1008,12 +923,12 @@ Name | Type | Description  | Notes
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
-# **external_channel_v1_switch_transport**
-> ManagedConnectionSetup external_channel_v1_switch_transport(agent_id, connection_id, handle, transport_switch_request)
+# **external_channel_v1_update_slack_connection**
+> ExternalChannelConnectionStatusSnapshot external_channel_v1_update_slack_connection(agent_id, connection_id, handle, slack_connection_setup_request)
 
-Switch Transport
+Update Slack Connection
 
-Switch inbound transport without silently falling back.
+Replace the complete Slack setup and immediately validate it.
 
 ### Example
 
@@ -1021,8 +936,8 @@ Switch inbound transport without silently falling back.
 
 ```python
 import azentspublicclient
-from azentspublicclient.models.managed_connection_setup import ManagedConnectionSetup
-from azentspublicclient.models.transport_switch_request import TransportSwitchRequest
+from azentspublicclient.models.external_channel_connection_status_snapshot import ExternalChannelConnectionStatusSnapshot
+from azentspublicclient.models.slack_connection_setup_request import SlackConnectionSetupRequest
 from azentspublicclient.rest import ApiException
 from pprint import pprint
 
@@ -1049,15 +964,15 @@ with azentspublicclient.ApiClient(configuration) as api_client:
     agent_id = 'agent_id_example' # str | 
     connection_id = 'connection_id_example' # str | 
     handle = 'handle_example' # str | 
-    transport_switch_request = azentspublicclient.TransportSwitchRequest() # TransportSwitchRequest | 
+    slack_connection_setup_request = azentspublicclient.SlackConnectionSetupRequest() # SlackConnectionSetupRequest | 
 
     try:
-        # Switch Transport
-        api_response = api_instance.external_channel_v1_switch_transport(agent_id, connection_id, handle, transport_switch_request)
-        print("The response of ExternalChannelV1Api->external_channel_v1_switch_transport:\n")
+        # Update Slack Connection
+        api_response = api_instance.external_channel_v1_update_slack_connection(agent_id, connection_id, handle, slack_connection_setup_request)
+        print("The response of ExternalChannelV1Api->external_channel_v1_update_slack_connection:\n")
         pprint(api_response)
     except Exception as e:
-        print("Exception when calling ExternalChannelV1Api->external_channel_v1_switch_transport: %s\n" % e)
+        print("Exception when calling ExternalChannelV1Api->external_channel_v1_update_slack_connection: %s\n" % e)
 ```
 
 
@@ -1070,11 +985,11 @@ Name | Type | Description  | Notes
  **agent_id** | **str**|  | 
  **connection_id** | **str**|  | 
  **handle** | **str**|  | 
- **transport_switch_request** | [**TransportSwitchRequest**](TransportSwitchRequest.md)|  | 
+ **slack_connection_setup_request** | [**SlackConnectionSetupRequest**](SlackConnectionSetupRequest.md)|  | 
 
 ### Return type
 
-[**ManagedConnectionSetup**](ManagedConnectionSetup.md)
+[**ExternalChannelConnectionStatusSnapshot**](ExternalChannelConnectionStatusSnapshot.md)
 
 ### Authorization
 

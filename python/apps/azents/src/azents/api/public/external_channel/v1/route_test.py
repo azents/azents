@@ -35,7 +35,7 @@ def test_url_verification_returns_challenge() -> None:
     )
 
     response = _client(service).post(
-        "/external-channel/v1/slack/events/selector-1",
+        "/external-channel/v1/slack/events",
         content=b'{"type":"url_verification"}',
         headers={
             "X-Slack-Request-Timestamp": "1784682000",
@@ -46,17 +46,16 @@ def test_url_verification_returns_challenge() -> None:
     assert response.status_code == 200
     assert response.json() == {"challenge": "challenge-1"}
     call = service.handle.await_args.kwargs
-    assert call["selector"] == "selector-1"
     assert call["raw_body"] == b'{"type":"url_verification"}'
 
 
 def test_authentication_failure_uses_one_safe_response() -> None:
-    """Do not distinguish unknown selectors from invalid Slack signatures."""
+    """Do not distinguish unknown identities from invalid Slack signatures."""
     service = AsyncMock(spec=SlackHTTPAdmissionService)
     service.handle.side_effect = SlackHTTPUnauthorized("private detail")
 
     response = _client(service).post(
-        "/external-channel/v1/slack/events/unknown",
+        "/external-channel/v1/slack/events",
         content=b"{}",
     )
 
@@ -73,7 +72,7 @@ def test_database_failure_is_not_acknowledged_as_success() -> None:
 
     with pytest.raises(RuntimeError, match="database unavailable"):
         client.post(
-            "/external-channel/v1/slack/events/selector-1",
+            "/external-channel/v1/slack/events",
             content=b"{}",
         )
 
@@ -83,7 +82,7 @@ def test_oversized_body_is_rejected_before_service_admission() -> None:
     service = AsyncMock(spec=SlackHTTPAdmissionService)
 
     response = _client(service).post(
-        "/external-channel/v1/slack/events/selector-1",
+        "/external-channel/v1/slack/events",
         content=b"x" * (MAX_SLACK_HTTP_BODY_BYTES + 1),
     )
 
@@ -96,9 +95,9 @@ def test_callback_is_mounted_but_excluded_from_public_openapi() -> None:
     paths = {route.path for route in router.routes if isinstance(route, APIRoute)}
     app = create_dummy_public_app()
 
-    assert "/slack/events/{selector}" in paths
+    assert "/slack/events" in paths
     assert any(
-        getattr(route, "path", None) == "/external-channel/v1/slack/events/{selector}"
+        getattr(route, "path", None) == "/external-channel/v1/slack/events"
         for route in app.routes
     )
-    assert "/external-channel/v1/slack/events/{selector}" not in app.openapi()["paths"]
+    assert "/external-channel/v1/slack/events" not in app.openapi()["paths"]

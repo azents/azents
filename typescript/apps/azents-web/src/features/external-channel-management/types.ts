@@ -20,8 +20,9 @@ export type ConnectionDialogState =
       credentials: SlackCredentialDraft;
     }
   | {
-      type: "RECONNECT";
+      type: "EDIT";
       connectionId: string;
+      appId: string;
       transport: ExternalChannelTransport;
       credentials: SlackCredentialDraft;
     }

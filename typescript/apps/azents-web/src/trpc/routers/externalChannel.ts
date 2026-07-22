@@ -7,11 +7,10 @@ import {
   externalChannelV1ListAgentAccess,
   externalChannelV1ListConnections,
   externalChannelV1ListSessionChannels,
-  externalChannelV1ReconnectConnection,
   externalChannelV1RemoveAccessBlock,
   externalChannelV1RevokeAccessGrant,
   externalChannelV1SetupSlackConnection,
-  externalChannelV1SwitchTransport,
+  externalChannelV1UpdateSlackConnection,
   externalChannelV1ValidateConnection,
 } from "@azents/public-client";
 import { z } from "zod/v4";
@@ -47,6 +46,7 @@ export const externalChannelRouter = router({
       z.object({
         handle: z.string().min(1),
         agentId: z.string().min(1),
+        appName: z.string().min(1),
         transport: transportSchema,
       }),
     )
@@ -55,7 +55,10 @@ export const externalChannelRouter = router({
         const { data } = await externalChannelV1GetManifestGuidance({
           client: ctx.apiClient,
           path: { handle: input.handle, agent_id: input.agentId },
-          query: { transport: input.transport },
+          query: {
+            transport: input.transport,
+            app_name: input.appName,
+          },
           throwOnError: true,
         });
         return data;
@@ -136,45 +139,20 @@ export const externalChannelRouter = router({
       }
     }),
 
-  switchTransport: publicProcedure
+  updateSlackConnection: publicProcedure
     .input(
       z.object({
         handle: z.string().min(1),
         agentId: z.string().min(1),
         connectionId: z.string().min(1),
+        appId: z.string().min(1),
         transport: transportSchema,
-      }),
-    )
-    .mutation(async ({ ctx, input }) => {
-      try {
-        const { data } = await externalChannelV1SwitchTransport({
-          client: ctx.apiClient,
-          path: {
-            handle: input.handle,
-            agent_id: input.agentId,
-            connection_id: input.connectionId,
-          },
-          body: { transport: input.transport },
-          throwOnError: true,
-        });
-        return data;
-      } catch (error) {
-        throw mapManagementError(error);
-      }
-    }),
-
-  reconnectConnection: publicProcedure
-    .input(
-      z.object({
-        handle: z.string().min(1),
-        agentId: z.string().min(1),
-        connectionId: z.string().min(1),
         credentials: slackCredentialsSchema,
       }),
     )
     .mutation(async ({ ctx, input }) => {
       try {
-        const { data } = await externalChannelV1ReconnectConnection({
+        const { data } = await externalChannelV1UpdateSlackConnection({
           client: ctx.apiClient,
           path: {
             handle: input.handle,
@@ -182,6 +160,8 @@ export const externalChannelRouter = router({
             connection_id: input.connectionId,
           },
           body: {
+            app_id: input.appId,
+            transport: input.transport,
             credentials: {
               bot_token: input.credentials.botToken,
               signing_secret: input.credentials.signingSecret,

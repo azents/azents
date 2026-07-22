@@ -192,7 +192,6 @@ class RDBExternalChannelConnection(RDBModel):
     )
     UQ_INSTALLATION_IDENTITY = sa.Index(
         "uq_external_channel_connections_installation_identity",
-        "workspace_id",
         "provider",
         "provider_tenant_id",
         "provider_app_id",
