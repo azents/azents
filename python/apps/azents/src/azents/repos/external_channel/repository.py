@@ -1680,6 +1680,7 @@ class ExternalChannelRepository:
         )
         rdb.decision_policy_snapshot = snapshot
         await session.flush()
+        await session.refresh(rdb, attribute_names=["updated_at"])
         return ExternalChannelAccessRequest.model_validate(rdb)
 
     async def decide_access_request(
@@ -1715,6 +1716,7 @@ class ExternalChannelRepository:
         rdb.decision_summary = decision_summary
         rdb.decided_at = decided_at
         await session.flush()
+        await session.refresh(rdb, attribute_names=["updated_at"])
         return ExternalChannelAccessRequest.model_validate(rdb)
 
     async def expire_access_requests(
