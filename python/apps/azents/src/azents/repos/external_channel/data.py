@@ -9,6 +9,7 @@ from azents.core.enums import (
     ExternalChannelAccessGrantScope,
     ExternalChannelAccessRequestStatus,
     ExternalChannelActionMode,
+    ExternalChannelBindingActivationStatus,
     ExternalChannelBindingStatus,
     ExternalChannelConnectionStatus,
     ExternalChannelDeliveryOperation,
@@ -16,6 +17,7 @@ from azents.core.enums import (
     ExternalChannelDeliveryStatus,
     ExternalChannelEventEligibilityState,
     ExternalChannelEventStatus,
+    ExternalChannelHydrationStatus,
     ExternalChannelMessageLifecycle,
     ExternalChannelMessageRevisionKind,
     ExternalChannelPrincipalAuthorType,
@@ -143,6 +145,15 @@ class ExternalChannelResource(_Record):
     provider_resource_key: str
     labels: dict[str, Any] | None
     status: ExternalChannelResourceStatus
+    hydration_status: ExternalChannelHydrationStatus
+    hydration_cursor: str | None
+    hydration_high_watermark_position: str | None
+    reconciliation_boundary_received_at: datetime.datetime | None
+    reconciliation_boundary_event_id: str | None
+    hydration_error_kind: str | None
+    hydration_error_summary: str | None
+    hydration_started_at: datetime.datetime | None
+    hydration_completed_at: datetime.datetime | None
     discovered_at: datetime.datetime
     latest_activity_at: datetime.datetime | None
     unavailable_at: datetime.datetime | None
@@ -159,6 +170,15 @@ class ExternalChannelResourceCreate(_Record):
     provider_resource_key: str
     labels: dict[str, Any] | None
     status: ExternalChannelResourceStatus
+    hydration_status: ExternalChannelHydrationStatus
+    hydration_cursor: str | None
+    hydration_high_watermark_position: str | None
+    reconciliation_boundary_received_at: datetime.datetime | None
+    reconciliation_boundary_event_id: str | None
+    hydration_error_kind: str | None
+    hydration_error_summary: str | None
+    hydration_started_at: datetime.datetime | None
+    hydration_completed_at: datetime.datetime | None
     latest_activity_at: datetime.datetime | None
     unavailable_at: datetime.datetime | None
     deleted_at: datetime.datetime | None
@@ -333,6 +353,22 @@ class ExternalChannelPendingContextCreate(_Record):
     expires_at: datetime.datetime
 
 
+class ExternalChannelPendingContextTrim(_Record):
+    """Pending-context retention result for one route and resource."""
+
+    deleted_message_count: int
+    deleted_size: int
+    retained_message_count: int
+    retained_size: int
+
+
+class ExternalChannelEventBoundary(_Record):
+    """Stable received-order boundary for correlated provider events."""
+
+    received_at: datetime.datetime
+    event_id: str
+
+
 class ExternalChannelBinding(_Record):
     """Lifecycle-owned resource-to-Session relationship."""
 
@@ -341,6 +377,9 @@ class ExternalChannelBinding(_Record):
     route_id: str
     agent_session_id: str
     status: ExternalChannelBindingStatus
+    activation_status: ExternalChannelBindingActivationStatus
+    activation_trigger_message_id: str | None
+    activated_at: datetime.datetime | None
     projected_through_position: str | None
     truncated_message_count: int
     truncated_size: int
@@ -358,6 +397,9 @@ class ExternalChannelBindingCreate(_Record):
     route_id: str
     agent_session_id: str
     status: ExternalChannelBindingStatus
+    activation_status: ExternalChannelBindingActivationStatus
+    activation_trigger_message_id: str | None
+    activated_at: datetime.datetime | None
     projected_through_position: str | None
     truncated_message_count: int
     truncated_size: int

@@ -169,6 +169,121 @@ class TestExternalChannelRepository:
         assert second.event.id == first.event.id
         assert second.event.provider_event_id == "provider-event-1"
 
+    async def test_event_claim_is_fenced_and_completion_is_idempotent(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Only the current event lease owner can commit terminal processing."""
+        workspace_id = await _create_workspace(rdb_session)
+        repo = ExternalChannelRepository()
+        connection = await repo.create_connection(
+            rdb_session,
+            _connection_create(workspace_id),
+        )
+        admitted = await repo.admit_event(
+            rdb_session,
+            _event_create(connection.id),
+        )
+
+        claimed = await repo.claim_events(
+            rdb_session,
+            claim_owner="processor-1",
+            now=_at(2),
+            claim_until=_at(5),
+            limit=10,
+        )
+        fenced = await repo.claim_events(
+            rdb_session,
+            claim_owner="processor-2",
+            now=_at(3),
+            claim_until=_at(6),
+            limit=10,
+        )
+        stale_completion = await repo.complete_event(
+            rdb_session,
+            event_id=admitted.event.id,
+            claim_owner="processor-2",
+            now=_at(3),
+            eligibility_state=ExternalChannelEventEligibilityState.PROCESSED,
+            status=ExternalChannelEventStatus.PROCESSED,
+            purge_envelope=False,
+        )
+        completed = await repo.complete_event(
+            rdb_session,
+            event_id=admitted.event.id,
+            claim_owner="processor-1",
+            now=_at(4),
+            eligibility_state=ExternalChannelEventEligibilityState.PROCESSED,
+            status=ExternalChannelEventStatus.PROCESSED,
+            purge_envelope=False,
+        )
+        final = await repo.get_event_by_provider_identity(
+            rdb_session,
+            connection_id=connection.id,
+            provider_event_id="provider-event-1",
+        )
+
+        assert [event.id for event in claimed] == [admitted.event.id]
+        assert claimed[0].attempt_count == 1
+        assert fenced == []
+        assert stale_completion is False
+        assert completed is True
+        assert final is not None
+        assert final.status is ExternalChannelEventStatus.PROCESSED
+        assert final.claim_owner is None
+
+    async def test_event_defer_respects_retry_boundary(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """A deferred unlinked event cannot be reclaimed before its retry time."""
+        workspace_id = await _create_workspace(rdb_session)
+        repo = ExternalChannelRepository()
+        connection = await repo.create_connection(
+            rdb_session,
+            _connection_create(workspace_id),
+        )
+        admitted = await repo.admit_event(
+            rdb_session,
+            _event_create(connection.id),
+        )
+        await repo.claim_events(
+            rdb_session,
+            claim_owner="processor-1",
+            now=_at(2),
+            claim_until=_at(5),
+            limit=1,
+        )
+        deferred = await repo.defer_event(
+            rdb_session,
+            event_id=admitted.event.id,
+            claim_owner="processor-1",
+            now=_at(3),
+            retry_at=_at(8),
+            error_kind="awaiting_thread_mention",
+            error_summary="Waiting for a mention.",
+        )
+
+        early = await repo.claim_events(
+            rdb_session,
+            claim_owner="processor-2",
+            now=_at(7),
+            claim_until=_at(9),
+            limit=1,
+        )
+        ready = await repo.claim_events(
+            rdb_session,
+            claim_owner="processor-2",
+            now=_at(8),
+            claim_until=_at(10),
+            limit=1,
+        )
+
+        assert deferred is True
+        assert early == []
+        assert [event.id for event in ready] == [admitted.event.id]
+        assert ready[0].attempt_count == 2
+
     async def test_socket_lease_fences_owner_and_reclaims_after_expiry(
         self,
         rdb_session: AsyncSession,
