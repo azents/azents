@@ -655,6 +655,7 @@ class ExternalChannelRepository:
         rdb.hydration_error_kind = None
         rdb.hydration_error_summary = None
         await session.flush()
+        await session.refresh(rdb, attribute_names=["updated_at"])
         return ExternalChannelResource.model_validate(rdb)
 
     async def update_resource_hydration_cursor(
@@ -688,6 +689,7 @@ class ExternalChannelRepository:
             ):
                 rdb.latest_activity_at = latest_activity_at
         await session.flush()
+        await session.refresh(rdb, attribute_names=["updated_at"])
         return ExternalChannelResource.model_validate(rdb)
 
     async def complete_resource_hydration(
@@ -723,6 +725,7 @@ class ExternalChannelRepository:
         rdb.hydration_error_summary = error_summary
         rdb.hydration_completed_at = completed_at
         await session.flush()
+        await session.refresh(rdb, attribute_names=["updated_at"])
         return ExternalChannelResource.model_validate(rdb)
 
     async def mark_resource_unavailable(
@@ -1477,6 +1480,7 @@ class ExternalChannelRepository:
         rdb.truncated_message_count = 0
         rdb.truncated_size = 0
         await session.flush()
+        await session.refresh(rdb, attribute_names=["updated_at"])
         return ExternalChannelBinding.model_validate(rdb)
 
     async def advance_binding_projection(
@@ -1505,6 +1509,7 @@ class ExternalChannelRepository:
         rdb.truncated_message_count = 0
         rdb.truncated_size = 0
         await session.flush()
+        await session.refresh(rdb, attribute_names=["updated_at"])
         return ExternalChannelBinding.model_validate(rdb)
 
     async def record_binding_truncation(
@@ -1531,6 +1536,7 @@ class ExternalChannelRepository:
         rdb.truncated_message_count += truncated_message_count
         rdb.truncated_size += truncated_size
         await session.flush()
+        await session.refresh(rdb, attribute_names=["updated_at"])
         return ExternalChannelBinding.model_validate(rdb)
 
     async def create_invocation_batch_idempotent(
@@ -1860,6 +1866,7 @@ class ExternalChannelRepository:
             rdb.revoked_by_user_id = revoked_by_user_id
             rdb.revoked_at = revoked_at
             await session.flush()
+        await session.refresh(rdb, attribute_names=["updated_at"])
         return ExternalChannelAccessGrant.model_validate(rdb)
 
     async def create_block_idempotent(
@@ -1923,6 +1930,7 @@ class ExternalChannelRepository:
             rdb.removed_by_user_id = removed_by_user_id
             rdb.removed_at = removed_at
             await session.flush()
+        await session.refresh(rdb, attribute_names=["updated_at"])
         return ExternalChannelBlock.model_validate(rdb)
 
     async def create_work_idempotent(
