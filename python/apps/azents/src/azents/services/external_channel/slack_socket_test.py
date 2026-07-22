@@ -16,6 +16,7 @@ from azents.services.external_channel.slack_socket import (
     SlackSocketInvalidEnvelope,
     SlackSocketModeClient,
     SlackSocketReconnectRequired,
+    SlackSocketUnavailable,
     SlackSocketWebAPIClient,
     parse_slack_socket_envelope,
 )
@@ -154,6 +155,48 @@ async def test_open_connection_maps_rejected_token_to_sanitized_failure() -> Non
             )
 
     assert "xapp-secret" not in str(error.value)
+
+
+@pytest.mark.asyncio
+async def test_open_connection_allows_insecure_testenv_socket_only_when_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep insecure WebSockets restricted to the explicit deterministic boundary."""
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"ok": True, "url": "ws://slack-fake:8084/socket"},
+        )
+
+    monkeypatch.delenv("AZ_TESTENV_SLACK_API_BASE_URL", raising=False)
+    monkeypatch.delenv(
+        "AZ_TESTENV_SLACK_ALLOW_INSECURE_WEBSOCKET",
+        raising=False,
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
+        with pytest.raises(
+            SlackSocketUnavailable,
+            match="endpoint response is invalid",
+        ):
+            await SlackSocketWebAPIClient(http_client).open_connection(
+                app_token="xapp-secret"
+            )
+
+    monkeypatch.setenv(
+        "AZ_TESTENV_SLACK_ALLOW_INSECURE_WEBSOCKET",
+        "true",
+    )
+    monkeypatch.setenv(
+        "AZ_TESTENV_SLACK_API_BASE_URL",
+        "http://slack-fake:8083/api",
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
+        opened = await SlackSocketWebAPIClient(http_client).open_connection(
+            app_token="xapp-secret"
+        )
+
+    assert opened.url == "ws://slack-fake:8084/socket"
 
 
 @pytest.mark.asyncio

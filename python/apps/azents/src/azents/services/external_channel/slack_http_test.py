@@ -9,6 +9,10 @@ import httpx
 import pytest
 
 from azents.core.enums import ExternalChannelTransport
+from azents.services.external_channel.slack_endpoint import (
+    slack_api_base_url,
+    slack_insecure_websocket_allowed,
+)
 from azents.services.external_channel.slack_http import (
     MAX_SLACK_HTTP_BODY_BYTES,
     SlackEventCallback,
@@ -22,6 +26,30 @@ from azents.services.external_channel.slack_http import (
 
 _NOW = datetime.datetime(2026, 7, 22, 1, 0, tzinfo=datetime.UTC)
 _SECRET = "signing-secret"
+
+
+def test_testenv_endpoint_overrides_are_explicit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Use Slack defaults unless deterministic test boundaries are configured."""
+    monkeypatch.delenv("AZ_TESTENV_SLACK_API_BASE_URL", raising=False)
+    monkeypatch.delenv(
+        "AZ_TESTENV_SLACK_ALLOW_INSECURE_WEBSOCKET",
+        raising=False,
+    )
+    assert slack_api_base_url() == "https://slack.com/api"
+    assert slack_insecure_websocket_allowed() is False
+
+    monkeypatch.setenv(
+        "AZ_TESTENV_SLACK_API_BASE_URL",
+        "http://slack-fake:8083/api/",
+    )
+    monkeypatch.setenv(
+        "AZ_TESTENV_SLACK_ALLOW_INSECURE_WEBSOCKET",
+        "true",
+    )
+    assert slack_api_base_url() == "http://slack-fake:8083/api"
+    assert slack_insecure_websocket_allowed() is True
 
 
 def _signature(body: bytes, timestamp: int | None = None) -> tuple[str, str]:

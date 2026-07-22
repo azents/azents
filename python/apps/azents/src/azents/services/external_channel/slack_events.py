@@ -13,8 +13,8 @@ from azents.core.enums import (
     ExternalChannelMessageRevisionKind,
     ExternalChannelPrincipalAuthorType,
 )
+from azents.services.external_channel.slack_endpoint import slack_api_base_url
 
-_SLACK_API_BASE_URL = "https://slack.com/api"
 _MAX_NORMALIZED_TEXT_BYTES = 64 * 1024
 _MAX_ATTACHMENT_TYPES = 32
 
@@ -576,7 +576,7 @@ class SlackConversationClient:
         try:
             response = await self.http_client.request(
                 method,
-                f"{_SLACK_API_BASE_URL}{path}",
+                f"{slack_api_base_url()}{path}",
                 headers={"Authorization": f"Bearer {bot_token}"},
                 params=params,
                 json=json_body,
