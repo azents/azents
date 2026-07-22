@@ -62,6 +62,7 @@ spec:
               value: {{ include "azents.serverRuntimeRunnerImage" . | quote }}
             - name: AZ_RUNTIME_RUNNER_CONTROL_ENDPOINT
               value: {{ include "azents.runtimeControlEndpoint" . | quote }}
+            {{- include "azents.serverAuthSecretEnv" . | nindent 12 }}
             {{- include "azents.externalServiceSecretEnv" . | nindent 12 }}
           readinessProbe:
             tcpSocket:

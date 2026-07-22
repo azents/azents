@@ -718,6 +718,38 @@
         "providerId": {
           "type": "string"
         },
+        "credential": {
+          "type": "object",
+          "required": [
+            "existingSecret",
+            "key",
+            "bootstrap"
+          ],
+          "properties": {
+            "existingSecret": {
+              "type": "string"
+            },
+            "key": {
+              "type": "string",
+              "minLength": 1
+            },
+            "bootstrap": {
+              "type": "object",
+              "required": [
+                "enabled",
+                "secretName"
+              ],
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "secretName": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
         "image": {
           "$ref": "#/definitions/image"
         },

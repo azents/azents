@@ -23,6 +23,7 @@ def _helm_template(*values: str) -> str:
         "adminWeb.image.repository=repo/admin-web",
         "adminWeb.image.tag=sha",
         "secrets.existingSecrets.redis=azents-redis",
+        "runtimeProviderKubernetes.credential.existingSecret=azents-provider-credential",
     )
     for value in (*base_values, *values):
         command.extend(["--set", value])
@@ -71,6 +72,9 @@ def test_runtime_provider_kubernetes_enabled_render_contract() -> None:
     assert "repo/runner:sha" in rendered
     assert "AZ_RUNTIME_CONTROL_ENDPOINT" in rendered
     assert "AZ_RUNTIME_CONTROL_AUTH_TOKEN" not in rendered
+    assert "AZ_RUNTIME_PROVIDER_CREDENTIAL" in rendered
+    assert "azents-provider-credential" in rendered
+    assert "provider-credential" in rendered
     assert "AZ_RUNTIME_PROVIDER_LEASE_NAMESPACE" in rendered
     assert "AZ_RUNTIME_PROVIDER_WORKLOAD_NAMESPACE" in rendered
     assert "AZ_RUNTIME_PROVIDER_STORAGE_CLASS" in rendered
@@ -278,6 +282,32 @@ def test_runtime_provider_kubernetes_digest_pinning_render_contract() -> None:
 
     assert "repo/provider:sha@sha256:providerdigest" in rendered
     assert "repo/runner:sha@sha256:runnerdigest" in rendered
+
+
+def test_runtime_provider_kubernetes_credential_bootstrap_render_contract() -> None:
+    """Credential bootstrap uses one narrow short-lived Secret writer Job."""
+    rendered = _helm_template(
+        "runtimeProviderKubernetes.enabled=true",
+        "secrets.existingSecrets.auth=azents-auth",
+        "runtimeProviderKubernetes.credential.bootstrap.enabled=true",
+        "runtimeProviderKubernetes.credential.bootstrap.secretName=azents-provider-credential-bootstrap",
+        "runtimeProviderKubernetes.image.repository=repo/provider",
+        "runtimeProviderKubernetes.image.tag=sha",
+        "runtimeProviderKubernetes.runnerImage.repository=repo/runner",
+        "runtimeProviderKubernetes.runnerImage.tag=sha",
+    )
+
+    assert "kind: Job" in rendered
+    assert "runtime-provider-bootstrap-" in rendered
+    assert 'resources: ["secrets"]' in rendered
+    assert 'resourceNames: ["azents-provider-credential-bootstrap"]' in rendered
+    assert "azents-provider-credential" in rendered
+    assert 'verbs: ["get", "patch", "update"]' in rendered
+    assert 'verbs: ["create"' not in rendered
+    assert "src/cli/runtime_provider_bootstrap.py" in rendered
+    assert "AZ_CREDENTIAL_ENCRYPTION_KEY" in rendered
+    assert "kind: Secret" in rendered
+    assert 'azents.io/runtime-provider-id: "system-kubernetes"' in rendered
 
 
 def test_release_namespace_render_contract() -> None:

@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     RuntimeProviderAuditEventType,
+    RuntimeProviderBootstrapDeclarationState,
     RuntimeProviderEnrollmentGrantState,
     RuntimeProviderLifecycleState,
 )
@@ -72,6 +73,24 @@ class RuntimeProviderEnrollmentService:
             )
             if provider is None or provider.lifecycle_state in _TERMINAL:
                 raise RuntimeProviderEnrollmentUnavailable("provider_unavailable")
+            if issued_by_source_id is not None:
+                get_declaration = (
+                    self.provider_repository.get_bootstrap_declaration_by_provider_id
+                )
+                declaration = await get_declaration(
+                    session,
+                    provider_id=provider.id,
+                    for_update=True,
+                )
+                if (
+                    declaration is None
+                    or declaration.source_id != issued_by_source_id
+                    or declaration.state
+                    != RuntimeProviderBootstrapDeclarationState.PRESENT
+                ):
+                    raise RuntimeProviderEnrollmentUnavailable(
+                        "bootstrap_source_unauthorized"
+                    )
             grant = await self.repository.create_enrollment_grant(
                 session,
                 create=RuntimeProviderEnrollmentGrantCreate(
