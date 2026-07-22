@@ -5,7 +5,15 @@ import datetime
 import pytest
 from pydantic import ValidationError
 
-from azents.core.enums import AgentRunStatus, EventKind
+from azents.core.enums import (
+    AgentRunStatus,
+    EventKind,
+    ExternalChannelMessageLifecycle,
+    ExternalChannelMessageRevisionKind,
+    ExternalChannelPrincipalAuthorType,
+    ExternalChannelProvider,
+    ExternalChannelResourceType,
+)
 from azents.core.inference_profile import (
     AppliedInferenceProfile,
     RequestedInferenceProfile,
@@ -18,6 +26,7 @@ from azents.engine.events.types import (
     ClientToolCallPayload,
     ClientToolResultPayload,
     Event,
+    ExternalChannelMessagePayload,
     FileOutputPart,
     InputTextPart,
     NativeArtifact,
@@ -151,6 +160,113 @@ def test_event_rejects_payload_kind_mismatch() -> None:
                 native_artifact=_artifact(),
             ),
             created_at=now,
+        )
+
+
+def _external_message_payload(
+    *,
+    revision_kind: ExternalChannelMessageRevisionKind = (
+        ExternalChannelMessageRevisionKind.ORIGINAL
+    ),
+    lifecycle: ExternalChannelMessageLifecycle = (
+        ExternalChannelMessageLifecycle.CURRENT
+    ),
+    projection_root_id: str = "external-channel:binding-1:message-1",
+    correction_of_revision_id: str | None = None,
+) -> ExternalChannelMessagePayload:
+    """Create one canonical External Channel payload."""
+    return ExternalChannelMessagePayload(
+        provider=ExternalChannelProvider.SLACK,
+        provider_tenant_id="tenant-1",
+        resource_id="resource-1",
+        resource_label="C123:1.0",
+        resource_type=ExternalChannelResourceType.THREAD,
+        binding_id="binding-1",
+        invocation_batch_id="batch-1",
+        external_message_id="message-1",
+        revision_id="revision-1",
+        revision_kind=revision_kind,
+        projection_root_id=projection_root_id,
+        provider_message_key="C123:1.0:1",
+        provider_position="1",
+        principal_id="principal-1",
+        provider_user_id="U1",
+        sender_display_name="Alice",
+        author_type=ExternalChannelPrincipalAuthorType.HUMAN,
+        authorization="authorized_invocation",
+        lifecycle=lifecycle,
+        body="hello",
+        attachment_metadata={},
+        provider_created_at=datetime.datetime(2026, 7, 22, tzinfo=datetime.UTC),
+        provider_updated_at=None,
+        original_url=None,
+        truncated_context_message_count=0,
+        truncated_context_size=0,
+        correction_of_revision_id=correction_of_revision_id,
+    )
+
+
+def test_external_message_payload_is_registered_for_event_kind() -> None:
+    payload = _external_message_payload()
+
+    validated = validate_event_payload(
+        EventKind.EXTERNAL_CHANNEL_MESSAGE,
+        payload.model_dump(mode="json"),
+    )
+
+    assert isinstance(validated, ExternalChannelMessagePayload)
+    assert validated.projection_root_id == "external-channel:binding-1:message-1"
+
+
+def test_external_message_payload_preserves_required_nullable_fields() -> None:
+    payload = _external_message_payload().model_copy(
+        update={
+            "principal_id": None,
+            "provider_user_id": None,
+            "sender_display_name": None,
+            "body": None,
+            "provider_created_at": None,
+            "provider_updated_at": None,
+            "original_url": None,
+            "correction_of_revision_id": None,
+        }
+    )
+
+    serialized = payload.model_dump(mode="json", exclude_none=True)
+
+    assert serialized["principal_id"] is None
+    assert serialized["provider_user_id"] is None
+    assert serialized["sender_display_name"] is None
+    assert serialized["body"] is None
+    assert serialized["provider_created_at"] is None
+    assert serialized["provider_updated_at"] is None
+    assert serialized["original_url"] is None
+    assert serialized["correction_of_revision_id"] is None
+    assert validate_event_payload(EventKind.EXTERNAL_CHANNEL_MESSAGE, serialized) == (
+        payload
+    )
+
+
+def test_external_message_payload_rejects_inconsistent_projection_root() -> None:
+    with pytest.raises(ValidationError, match="projection root"):
+        _external_message_payload(projection_root_id="external-channel:wrong")
+
+
+def test_external_message_payload_allows_correction_without_known_original() -> None:
+    payload = _external_message_payload(
+        revision_kind=ExternalChannelMessageRevisionKind.EDIT,
+        lifecycle=ExternalChannelMessageLifecycle.EDITED,
+    )
+
+    assert payload.correction_of_revision_id is None
+
+
+def test_external_message_payload_rejects_revision_lifecycle_mismatch() -> None:
+    with pytest.raises(ValidationError, match="revision lifecycle"):
+        _external_message_payload(
+            revision_kind=ExternalChannelMessageRevisionKind.DELETE,
+            lifecycle=ExternalChannelMessageLifecycle.EDITED,
+            correction_of_revision_id="revision-original",
         )
 
 

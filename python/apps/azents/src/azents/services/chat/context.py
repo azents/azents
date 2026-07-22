@@ -10,12 +10,16 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentSessionStatus, EventKind
+from azents.engine.events.external_channel_rendering import (
+    render_external_channel_message,
+)
 from azents.engine.events.provider_tool_rendering import render_provider_tool_semantic
 from azents.engine.events.types import (
     AssistantMessagePayload,
     ClientToolCallPayload,
     ClientToolResultPayload,
     Event,
+    ExternalChannelMessagePayload,
     ProviderToolCallPayload,
     ReasoningPayload,
     SkillLoadedPayload,
@@ -287,7 +291,7 @@ def _build_stats(events: list[Event]) -> SessionContextStats:
     stats = SessionContextStats(total_events=len(events))
     for event in events:
         match event.kind:
-            case EventKind.USER_MESSAGE:
+            case EventKind.USER_MESSAGE | EventKind.EXTERNAL_CHANNEL_MESSAGE:
                 stats.user_messages += 1
             case EventKind.ASSISTANT_MESSAGE:
                 stats.assistant_messages += 1
@@ -330,6 +334,8 @@ def _build_breakdown(
         payload = event.payload
         if isinstance(payload, UserMessagePayload):
             chars["user"] += _content_chars(payload.content)
+        elif isinstance(payload, ExternalChannelMessagePayload):
+            chars["user"] += len(render_external_channel_message(payload))
         elif isinstance(payload, SkillLoadedPayload):
             chars["user"] += len(payload.body)
         elif isinstance(payload, AssistantMessagePayload):

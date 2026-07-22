@@ -287,8 +287,10 @@ def _input_buffer_requested_profile(
     )
 
 
-def input_buffer_to_live_event(input_buffer: InputBuffer) -> Event:
+def input_buffer_to_live_event(input_buffer: InputBuffer) -> Event | None:
     """Convert InputBuffer to non-durable live event projection."""
+    if input_buffer.kind == InputBufferKind.EXTERNAL_CHANNEL_INVOCATION:
+        return None
     if input_buffer.kind == InputBufferKind.ACTION_MESSAGE:
         if input_buffer.action is None:
             raise ValueError("Action message input buffer requires action payload")
@@ -371,6 +373,10 @@ def _event_kind_for_input_buffer(kind: InputBufferKind) -> EventKind:
             return EventKind.ACTION_MESSAGE
         case InputBufferKind.AGENT_MESSAGE:
             return EventKind.AGENT_MESSAGE
+        case InputBufferKind.EXTERNAL_CHANNEL_INVOCATION:
+            return EventKind.EXTERNAL_CHANNEL_MESSAGE
+        case _:
+            raise ValueError(f"Unsupported InputBuffer kind: {kind}")
 
 
 class LiveEventStore(Protocol):

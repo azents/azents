@@ -7,6 +7,7 @@ from typing import Annotated, Literal
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.broker.types import SessionWakeUp
 from azents.core.enums import (
     AgentLifecycleStatus,
     AgentSessionStartReason,
@@ -16,6 +17,8 @@ from azents.core.enums import (
     ExternalChannelBindingStatus,
     ExternalChannelResourceStatus,
     ExternalChannelRouteStatus,
+    InputBufferKind,
+    InputBufferSchedulingMode,
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
@@ -34,6 +37,12 @@ from azents.repos.external_channel.data import (
     ExternalChannelInvocationBatchItemCreate,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.services.input_buffer import (
+    EXTERNAL_CHANNEL_INVOCATION_BATCH_ID_METADATA_KEY,
+    InputBufferEnqueue,
+    InputBufferService,
+)
+from azents.worker.session.lifecycle import SessionLifecycleService
 
 
 class ExternalChannelAccessDecisionError(ValueError):
@@ -94,6 +103,14 @@ class ExternalChannelAccessService:
         AgentSessionRepository,
         Depends(AgentSessionRepository),
     ]
+    input_buffer_service: Annotated[
+        InputBufferService,
+        Depends(InputBufferService),
+    ]
+    session_lifecycle: Annotated[
+        SessionLifecycleService,
+        Depends(SessionLifecycleService),
+    ]
 
     async def allow(
         self,
@@ -105,6 +122,9 @@ class ExternalChannelAccessService:
         now: datetime.datetime,
     ) -> ExternalChannelAllowedAccess:
         """Allow one participant and create its Session binding atomically."""
+        wake_required = False
+        wake_session_id: str | None = None
+        wake_agent_id: str | None = None
         async with self.session_manager() as session:
             request_snapshot = await self.repository.get_access_request(
                 session,
@@ -144,6 +164,22 @@ class ExternalChannelAccessService:
                     raise ExternalChannelAccessDecisionError(
                         "The prior Allow decision no longer has its active state."
                     )
+                if (
+                    binding.activation_status
+                    is ExternalChannelBindingActivationStatus.ACTIVE
+                ):
+                    wake_required = await self._release_allowed_request(
+                        session,
+                        binding=binding,
+                        trigger_message_id=request.source_message_id,
+                        now=now,
+                    )
+                    await session.commit()
+                    if wake_required:
+                        await self._send_session_wake_up(
+                            agent_id=route.agent_id,
+                            session_id=binding.agent_session_id,
+                        )
                 return ExternalChannelAllowedAccess(
                     request=request,
                     binding=binding,
@@ -266,13 +302,24 @@ class ExternalChannelAccessService:
                 binding.activation_status
                 is ExternalChannelBindingActivationStatus.ACTIVE
             ):
-                await self._release_allowed_request(
+                wake_required = await self._release_allowed_request(
                     session,
                     binding=binding,
                     trigger_message_id=request.source_message_id,
                     now=now,
                 )
+                wake_session_id = binding.agent_session_id
+                wake_agent_id = route.agent_id
             await session.commit()
+            if (
+                wake_required
+                and wake_session_id is not None
+                and wake_agent_id is not None
+            ):
+                await self._send_session_wake_up(
+                    agent_id=wake_agent_id,
+                    session_id=wake_session_id,
+                )
             return ExternalChannelAllowedAccess(
                 request=decided,
                 binding=binding,
@@ -286,15 +333,15 @@ class ExternalChannelAccessService:
         binding: ExternalChannelBinding,
         trigger_message_id: str,
         now: datetime.datetime,
-    ) -> None:
+    ) -> bool:
         """Create the approved invocation on an already-active binding."""
         existing = await self.repository.get_invocation_batch(
             session,
             binding_id=binding.id,
             trigger_message_id=trigger_message_id,
         )
-        if existing is not None:
-            return
+        if existing is not None and existing.input_buffer_id is not None:
+            return True
         trigger = await self.repository.get_message(
             session,
             message_id=trigger_message_id,
@@ -336,6 +383,43 @@ class ExternalChannelAccessService:
                     provider_position=provider_position,
                 ),
             )
+        locked_batch = await self.repository.lock_invocation_batch(
+            session,
+            batch_id=batch.id,
+        )
+        if locked_batch is None:
+            raise ExternalChannelAccessDecisionError(
+                "The invocation batch disappeared during activation."
+            )
+        if locked_batch.input_buffer_id is None:
+            enqueue = await self.input_buffer_service.enqueue(
+                session,
+                InputBufferEnqueue(
+                    session_id=binding.agent_session_id,
+                    kind=InputBufferKind.EXTERNAL_CHANNEL_INVOCATION,
+                    scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
+                    requested_model_target_label=None,
+                    requested_reasoning_effort=None,
+                    actor_user_id=None,
+                    content="",
+                    idempotency_key=f"external-channel-invocation:{batch.id}",
+                    metadata={
+                        EXTERNAL_CHANNEL_INVOCATION_BATCH_ID_METADATA_KEY: batch.id
+                    },
+                    attachments=[],
+                    file_parts=[],
+                    action=None,
+                ),
+            )
+            await self.repository.link_invocation_batch_input_buffer(
+                session,
+                batch_id=batch.id,
+                input_buffer_id=enqueue.input_buffer.id,
+            )
+            await self.agent_session_repository.mark_running_for_input_wakeup(
+                session,
+                binding.agent_session_id,
+            )
         await self.repository.delete_pending_context_ids(
             session,
             pending_context_ids=[item.id for item in pending],
@@ -344,6 +428,26 @@ class ExternalChannelAccessService:
             session,
             binding_id=binding.id,
             projected_through_position=items[-1][1],
+        )
+        return True
+
+    async def _send_session_wake_up(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+    ) -> None:
+        """Send an idempotent post-commit wake for one released invocation."""
+        await self.session_lifecycle.send_session_wake_up(
+            SessionWakeUp(
+                agent_id=agent_id,
+                session_id=session_id,
+                user_id=None,
+                additional_system_prompt=None,
+                interface=None,
+                workspace_id=None,
+                workspace_handle=None,
+            )
         )
 
     async def deny(

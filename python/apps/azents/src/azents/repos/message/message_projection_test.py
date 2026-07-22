@@ -4,11 +4,20 @@ import datetime
 
 from pydantic import TypeAdapter
 
-from azents.core.enums import EventKind, MessageRole
+from azents.core.enums import (
+    EventKind,
+    ExternalChannelMessageLifecycle,
+    ExternalChannelMessageRevisionKind,
+    ExternalChannelPrincipalAuthorType,
+    ExternalChannelProvider,
+    ExternalChannelResourceType,
+    MessageRole,
+)
 from azents.engine.events.types import (
     Attachment,
     AttachmentOutputPart,
     ClientToolResultPayload,
+    ExternalChannelMessagePayload,
     NativeArtifact,
     OutputTextPart,
     ProviderToolCallPayload,
@@ -140,6 +149,62 @@ def test_user_message_attachment_projection_preserves_download_identity() -> Non
     assert attachment.preview_thumbnail_width == 300
     assert attachment.preview_thumbnail_height == 225
     assert attachment.preview_generated_at == created_at
+
+
+def test_external_channel_message_projects_source_metadata() -> None:
+    """REST history preserves exact external source and correction identities."""
+    created_at = datetime.datetime(2026, 7, 22, tzinfo=datetime.UTC)
+    payload = ExternalChannelMessagePayload(
+        provider=ExternalChannelProvider.SLACK,
+        provider_tenant_id="tenant-1",
+        resource_id="resource-1",
+        resource_label="C123:1.0",
+        resource_type=ExternalChannelResourceType.THREAD,
+        binding_id="binding-1",
+        invocation_batch_id="batch-1",
+        external_message_id="message-1",
+        revision_id="revision-2",
+        revision_kind=ExternalChannelMessageRevisionKind.EDIT,
+        projection_root_id="external-channel:binding-1:message-1",
+        provider_message_key="C123:1.0:1",
+        provider_position="1",
+        principal_id="principal-1",
+        provider_user_id="U1",
+        sender_display_name="Alice",
+        author_type=ExternalChannelPrincipalAuthorType.HUMAN,
+        authorization="authorized_invocation",
+        lifecycle=ExternalChannelMessageLifecycle.EDITED,
+        body="updated",
+        attachment_metadata={},
+        provider_created_at=created_at,
+        provider_updated_at=created_at,
+        original_url="https://slack.example/message",
+        truncated_context_message_count=0,
+        truncated_context_size=0,
+        correction_of_revision_id="revision-1",
+    )
+    external_id = "external-channel:binding-1:message-1:revision-2"
+    row = RDBEvent(
+        session_id="session-1",
+        kind=EventKind.EXTERNAL_CHANNEL_MESSAGE,
+        payload=_JSON_PAYLOAD_ADAPTER.validate_python(
+            payload.model_dump(mode="json", exclude_none=True)
+        ),
+        model_order=1,
+        external_id=external_id,
+    )
+    row.created_at = created_at
+
+    message = event_to_chat_message(row)
+
+    assert message is not None
+    assert message.role is MessageRole.USER
+    assert message.content == "updated"
+    assert message.metadata is not None
+    assert message.metadata["source"] == "external_channel"
+    assert message.metadata["projection_root_id"] == payload.projection_root_id
+    assert message.metadata["correction_of_revision_id"] == "revision-1"
+    assert message.metadata["event_render_key"] == f"event:{external_id}"
 
 
 def test_provider_tool_call_projects_semantic_output_and_references() -> None:

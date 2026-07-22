@@ -22,6 +22,7 @@ from azents.core.enums import (
     ExternalChannelEventStatus,
     ExternalChannelHydrationStatus,
     ExternalChannelMessageLifecycle,
+    ExternalChannelMessageRevisionKind,
     ExternalChannelPrincipalAuthorType,
     ExternalChannelResourceStatus,
     ExternalChannelRouteStatus,
@@ -75,6 +76,7 @@ from .data import (
     ExternalChannelInvocationBatchCreate,
     ExternalChannelInvocationBatchItem,
     ExternalChannelInvocationBatchItemCreate,
+    ExternalChannelInvocationProjectionItem,
     ExternalChannelMessage,
     ExternalChannelMessageCreate,
     ExternalChannelMessageRevision,
@@ -1590,6 +1592,42 @@ class ExternalChannelRepository:
         )
         return self._as(ExternalChannelInvocationBatch, rdb)
 
+    async def lock_invocation_batch(
+        self,
+        session: AsyncSession,
+        *,
+        batch_id: str,
+    ) -> ExternalChannelInvocationBatch | None:
+        """Lock one invocation batch before linking its session input."""
+        rdb = await session.scalar(
+            sa.select(RDBExternalChannelInvocationBatch)
+            .where(RDBExternalChannelInvocationBatch.id == batch_id)
+            .with_for_update()
+        )
+        return self._as(ExternalChannelInvocationBatch, rdb)
+
+    async def link_invocation_batch_input_buffer(
+        self,
+        session: AsyncSession,
+        *,
+        batch_id: str,
+        input_buffer_id: str,
+    ) -> ExternalChannelInvocationBatch | None:
+        """Link one batch to its idempotent reference-only InputBuffer."""
+        rdb = await session.scalar(
+            sa.select(RDBExternalChannelInvocationBatch)
+            .where(RDBExternalChannelInvocationBatch.id == batch_id)
+            .with_for_update()
+        )
+        if rdb is None:
+            return None
+        if rdb.input_buffer_id is None:
+            rdb.input_buffer_id = input_buffer_id
+            await session.flush()
+        elif rdb.input_buffer_id != input_buffer_id:
+            raise ValueError("Invocation batch is linked to another InputBuffer.")
+        return ExternalChannelInvocationBatch.model_validate(rdb)
+
     async def create_invocation_batch_item_idempotent(
         self,
         session: AsyncSession,
@@ -1609,6 +1647,111 @@ class ExternalChannelRepository:
             ),
         )
         return ExternalChannelInvocationBatchItem.model_validate(rdb)
+
+    async def list_invocation_projection_items(
+        self,
+        session: AsyncSession,
+        *,
+        batch_id: str,
+    ) -> list[ExternalChannelInvocationProjectionItem]:
+        """Load one invocation batch in immutable provider order."""
+        rows = await session.execute(
+            sa.select(
+                RDBExternalChannelInvocationBatch.id.label("batch_id"),
+                RDBExternalChannelInvocationBatch.binding_id,
+                RDBExternalChannelInvocationBatch.trigger_message_id,
+                RDBExternalChannelInvocationBatch.truncation_message_count,
+                RDBExternalChannelInvocationBatch.truncation_size,
+                RDBExternalChannelInvocationBatchItem.sequence,
+                RDBExternalChannelMessage.id.label("message_id"),
+                RDBExternalChannelMessageRevision.id.label("revision_id"),
+                RDBExternalChannelMessageRevision.revision_kind,
+                RDBExternalChannelMessageRevision.normalized_body.label(
+                    "revision_body"
+                ),
+                RDBExternalChannelMessageRevision.attachment_metadata,
+                RDBExternalChannelMessageRevision.provider_occurred_at,
+                RDBExternalChannelMessage.resource_id,
+                RDBExternalChannelResource.provider_resource_key,
+                RDBExternalChannelResource.resource_type,
+                RDBExternalChannelResource.labels.label("resource_labels"),
+                RDBExternalChannelConnection.provider,
+                RDBExternalChannelConnection.provider_tenant_id,
+                RDBExternalChannelMessage.provider_message_key,
+                RDBExternalChannelMessage.provider_position,
+                RDBExternalChannelMessage.principal_id,
+                RDBExternalChannelPrincipal.provider_user_id,
+                RDBExternalChannelPrincipal.display_name.label("sender_display_name"),
+                RDBExternalChannelMessage.author_type,
+                RDBExternalChannelMessage.provider_created_at,
+                RDBExternalChannelMessage.provider_updated_at,
+                RDBExternalChannelMessage.original_url,
+                sa.case(
+                    (
+                        RDBExternalChannelMessageRevision.revision_kind
+                        != ExternalChannelMessageRevisionKind.ORIGINAL,
+                        sa.select(RDBExternalChannelMessageRevision.id)
+                        .where(
+                            RDBExternalChannelMessageRevision.message_id
+                            == RDBExternalChannelMessage.id,
+                            RDBExternalChannelMessageRevision.revision_kind
+                            == ExternalChannelMessageRevisionKind.ORIGINAL,
+                        )
+                        .order_by(
+                            RDBExternalChannelMessageRevision.created_at,
+                            RDBExternalChannelMessageRevision.id,
+                        )
+                        .limit(1)
+                        .scalar_subquery(),
+                    ),
+                    else_=None,
+                ).label("correction_of_revision_id"),
+            )
+            .select_from(RDBExternalChannelInvocationBatch)
+            .join(
+                RDBExternalChannelInvocationBatchItem,
+                RDBExternalChannelInvocationBatchItem.batch_id
+                == RDBExternalChannelInvocationBatch.id,
+            )
+            .join(
+                RDBExternalChannelMessageRevision,
+                RDBExternalChannelMessageRevision.id
+                == RDBExternalChannelInvocationBatchItem.message_revision_id,
+            )
+            .join(
+                RDBExternalChannelMessage,
+                RDBExternalChannelMessage.id
+                == RDBExternalChannelMessageRevision.message_id,
+            )
+            .join(
+                RDBExternalChannelBinding,
+                RDBExternalChannelBinding.id
+                == RDBExternalChannelInvocationBatch.binding_id,
+            )
+            .join(
+                RDBExternalChannelResource,
+                RDBExternalChannelResource.id == RDBExternalChannelBinding.resource_id,
+            )
+            .join(
+                RDBExternalChannelConnection,
+                RDBExternalChannelConnection.id
+                == RDBExternalChannelResource.connection_id,
+            )
+            .outerjoin(
+                RDBExternalChannelPrincipal,
+                RDBExternalChannelPrincipal.id
+                == RDBExternalChannelMessage.principal_id,
+            )
+            .where(RDBExternalChannelInvocationBatch.id == batch_id)
+            .order_by(
+                RDBExternalChannelInvocationBatchItem.sequence,
+                RDBExternalChannelInvocationBatchItem.id,
+            )
+        )
+        return [
+            ExternalChannelInvocationProjectionItem.model_validate(row)
+            for row in rows.mappings()
+        ]
 
     async def create_access_request_idempotent(
         self,

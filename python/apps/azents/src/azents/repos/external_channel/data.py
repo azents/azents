@@ -453,6 +453,39 @@ class ExternalChannelInvocationBatchItemCreate(_Record):
     provider_position: str
 
 
+class ExternalChannelInvocationProjectionItem(_Record):
+    """Joined immutable data needed to project one invocation event."""
+
+    batch_id: str
+    binding_id: str
+    trigger_message_id: str
+    truncation_message_count: int
+    truncation_size: int
+    sequence: int
+    message_id: str
+    revision_id: str
+    revision_kind: ExternalChannelMessageRevisionKind
+    revision_body: str | None
+    attachment_metadata: dict[str, Any] | None
+    provider_occurred_at: datetime.datetime | None
+    resource_id: str
+    provider_resource_key: str
+    resource_type: ExternalChannelResourceType
+    resource_labels: dict[str, Any] | None
+    provider: ExternalChannelProvider
+    provider_tenant_id: str | None
+    provider_message_key: str
+    provider_position: str
+    principal_id: str | None
+    provider_user_id: str | None
+    sender_display_name: str | None
+    author_type: ExternalChannelPrincipalAuthorType
+    provider_created_at: datetime.datetime | None
+    provider_updated_at: datetime.datetime | None
+    original_url: str | None
+    correction_of_revision_id: str | None
+
+
 class ExternalChannelAccessRequest(_Record):
     """Durable request to authorize one external principal invocation."""
 

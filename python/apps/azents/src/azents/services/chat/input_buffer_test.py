@@ -39,6 +39,7 @@ from azents.repos.agent_project_preset import AgentProjectPresetRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
+from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.input_buffer import InputBufferRepository
 from azents.repos.input_buffer.data import InputBufferCreate
 from azents.repos.message import MessageRepository
@@ -182,6 +183,7 @@ def _service(
         agent_run_repository=AgentRunRepository(),
         action_execution_repository=ActionExecutionRepository(),
         vfs_projection_service=None,
+        external_channel_repository=ExternalChannelRepository(),
     )
     return ChatSessionService(
         message_repository=MessageRepository(),
@@ -508,6 +510,7 @@ class TestChatSessionInputBuffer:
             agent_run_repository=AgentRunRepository(),
             action_execution_repository=ActionExecutionRepository(),
             vfs_projection_service=None,
+            external_channel_repository=ExternalChannelRepository(),
         )
         promoted = await input_buffer_service.flush_session_input_buffers(
             session_id=session_id,

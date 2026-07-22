@@ -46,6 +46,7 @@ from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession, AgentSessionCreate
+from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.input_buffer import InputBufferRepository
 from azents.repos.session_git_worktree import SessionGitWorktreeRepository
 from azents.repos.session_git_worktree.data import SessionGitWorktreeCreate
@@ -572,6 +573,7 @@ def _input_service(
             agent_run_repository=AgentRunRepository(),
             action_execution_repository=ActionExecutionRepository(),
             vfs_projection_service=None,
+            external_channel_repository=ExternalChannelRepository(),
         ),
         session_manager=session_manager,
     )
@@ -601,6 +603,7 @@ async def _execute_first_setup_action(
         agent_run_repository=AgentRunRepository(),
         action_execution_repository=ActionExecutionRepository(),
         vfs_projection_service=None,
+        external_channel_repository=ExternalChannelRepository(),
     ).flush_session_input_buffers(
         session_id=session_id,
         model=None,

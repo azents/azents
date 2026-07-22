@@ -47,6 +47,7 @@ from azents.repos.chat_write_request.data import (
     ChatWriteRequest,
     ChatWriteRequestCreate,
 )
+from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.input_buffer import InputBufferRepository
 from azents.repos.message import MessageRepository
 from azents.repos.user import UserRepository
@@ -166,6 +167,7 @@ def _service(
         agent_run_repository=AgentRunRepository(),
         action_execution_repository=ActionExecutionRepository(),
         vfs_projection_service=None,
+        external_channel_repository=ExternalChannelRepository(),
     )
     return ChatWriteService(
         agent_session_repository=AgentSessionRepository(),
@@ -312,6 +314,7 @@ class TestChatWriteService:
                 agent_run_repository=AgentRunRepository(),
                 action_execution_repository=ActionExecutionRepository(),
                 vfs_projection_service=None,
+                external_channel_repository=ExternalChannelRepository(),
             ),
             session_manager=rdb_session_manager,
         )

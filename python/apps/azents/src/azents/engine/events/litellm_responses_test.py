@@ -24,6 +24,11 @@ from pydantic import ValidationError
 from azents.core.enums import (
     AgentRunStatus,
     EventKind,
+    ExternalChannelMessageLifecycle,
+    ExternalChannelMessageRevisionKind,
+    ExternalChannelPrincipalAuthorType,
+    ExternalChannelProvider,
+    ExternalChannelResourceType,
     LLMModelDeveloper,
     LLMProvider,
 )
@@ -73,6 +78,7 @@ from azents.engine.events.types import (
     CompactionSummaryPayload,
     Event,
     EventPayload,
+    ExternalChannelMessagePayload,
     FileOutputPart,
     GoalBriefingPayload,
     InputTextPart,
@@ -170,6 +176,53 @@ def _event(kind: EventKind, payload: EventPayload) -> Event:
         kind=kind,
         payload=payload,
         created_at=datetime.datetime.now(datetime.UTC),
+    )
+
+
+def _external_payload(
+    *,
+    message_id: str,
+    revision_id: str,
+    batch_id: str,
+    body: str | None,
+) -> ExternalChannelMessagePayload:
+    """Create one deterministic external message payload."""
+    return ExternalChannelMessagePayload(
+        provider=ExternalChannelProvider.SLACK,
+        provider_tenant_id="tenant-1",
+        resource_id="resource-1",
+        resource_label="#incident / thread",
+        resource_type=ExternalChannelResourceType.THREAD,
+        binding_id="binding-1",
+        invocation_batch_id=batch_id,
+        external_message_id=message_id,
+        revision_id=revision_id,
+        revision_kind=(
+            ExternalChannelMessageRevisionKind.DELETE
+            if body is None
+            else ExternalChannelMessageRevisionKind.ORIGINAL
+        ),
+        projection_root_id=f"external-channel:binding-1:{message_id}",
+        provider_message_key=f"slack:tenant-1:C1:{message_id}",
+        provider_position=f"000000000000000000{message_id}.000001",
+        principal_id="principal-1",
+        provider_user_id="U1",
+        sender_display_name="Alice",
+        author_type=ExternalChannelPrincipalAuthorType.HUMAN,
+        authorization="authorized_invocation",
+        lifecycle=(
+            ExternalChannelMessageLifecycle.DELETED
+            if body is None
+            else ExternalChannelMessageLifecycle.CURRENT
+        ),
+        body=body,
+        attachment_metadata={},
+        provider_created_at=datetime.datetime(2026, 7, 22, 12, 0, tzinfo=datetime.UTC),
+        provider_updated_at=None,
+        original_url=None,
+        truncated_context_message_count=0,
+        truncated_context_size=0,
+        correction_of_revision_id=None,
     )
 
 
@@ -4253,3 +4306,63 @@ class TestLiteLLMResponsesOutputNormalizer:
         assert len(output.projections) == 1
         assert output.projections[0].type == "content_delta"
         assert output.projections[0].delta == "hello"
+
+
+def test_litellm_lowerer_groups_contiguous_external_batch() -> None:
+    """Lower one contiguous invocation batch into one explicit user turn."""
+    lowerer = LiteLLMResponsesLowerer(provider="openai", model="gpt-5.1")
+    transcript = [
+        _event(
+            EventKind.EXTERNAL_CHANNEL_MESSAGE,
+            _external_payload(
+                message_id="1", revision_id="r1", batch_id="batch-1", body="first"
+            ),
+        ),
+        _event(
+            EventKind.EXTERNAL_CHANNEL_MESSAGE,
+            _external_payload(
+                message_id="2", revision_id="r2", batch_id="batch-1", body="second"
+            ),
+        ),
+    ]
+
+    request = lowerer.lower(transcript, model="gpt-5.1")
+    content = request.input[-1]["content"]
+    assert isinstance(content, str)
+    assert content.startswith("Message Type: EXTERNAL_CHANNEL_TURN")
+    assert content.index("Body: first") < content.index("Body: second")
+
+
+def test_litellm_lowerer_keeps_noncontiguous_batch_segments_in_order(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Report a reused batch ID without reordering transcript segments."""
+    lowerer = LiteLLMResponsesLowerer(provider="openai", model="gpt-5.1")
+    transcript = [
+        _event(
+            EventKind.EXTERNAL_CHANNEL_MESSAGE,
+            _external_payload(
+                message_id="1", revision_id="r1", batch_id="batch-1", body="first"
+            ),
+        ),
+        _event(EventKind.USER_MESSAGE, UserMessagePayload(content="middle")),
+        _event(
+            EventKind.EXTERNAL_CHANNEL_MESSAGE,
+            _external_payload(
+                message_id="2", revision_id="r2", batch_id="batch-1", body="later"
+            ),
+        ),
+    ]
+
+    with caplog.at_level(logging.WARNING):
+        request = lowerer.lower(transcript, model="gpt-5.1")
+
+    contents = [item["content"] for item in request.input if item.get("role") == "user"]
+    assert any(
+        isinstance(content, str) and "Body: first" in content for content in contents
+    )
+    assert any(isinstance(content, str) and content == "middle" for content in contents)
+    assert any(
+        isinstance(content, str) and "Body: later" in content for content in contents
+    )
+    assert "not contiguous" in caplog.text

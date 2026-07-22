@@ -12,6 +12,7 @@ import httpx
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.broker.types import SessionWakeUp
 from azents.core.config import Config
 from azents.core.deps import get_config
 from azents.core.enums import (
@@ -32,6 +33,8 @@ from azents.core.enums import (
     ExternalChannelProvider,
     ExternalChannelResourceStatus,
     ExternalChannelResourceType,
+    InputBufferKind,
+    InputBufferSchedulingMode,
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
@@ -77,6 +80,12 @@ from azents.services.external_channel.slack_events import (
     SlackProviderTemporaryError,
     normalize_slack_event,
 )
+from azents.services.input_buffer import (
+    EXTERNAL_CHANNEL_INVOCATION_BATCH_ID_METADATA_KEY,
+    InputBufferEnqueue,
+    InputBufferService,
+)
+from azents.worker.session.lifecycle import SessionLifecycleService
 
 logger = logging.getLogger(__name__)
 
@@ -117,6 +126,7 @@ class ExternalChannelPersistedMessage:
     resource_id: str
     hydration_required: bool
     control_delivery_attempt_id: str | None
+    wake_up: SessionWakeUp | None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -173,6 +183,14 @@ class ExternalChannelEventProcessorService:
         Depends(AgentSessionRepository),
     ]
     config: Annotated[Config, Depends(get_config)]
+    input_buffer_service: Annotated[
+        InputBufferService,
+        Depends(InputBufferService),
+    ]
+    session_lifecycle: Annotated[
+        SessionLifecycleService,
+        Depends(SessionLifecycleService),
+    ]
     claim_owner: str = dataclasses.field(
         init=False,
         default_factory=lambda: f"external-channel-{secrets.token_hex(8)}",
@@ -295,6 +313,17 @@ class ExternalChannelEventProcessorService:
             if batch is None:
                 return False
             await session.commit()
+            await self.session_lifecycle.send_session_wake_up(
+                SessionWakeUp(
+                    agent_id=route.agent_id,
+                    session_id=binding.agent_session_id,
+                    user_id=None,
+                    additional_system_prompt=None,
+                    interface=None,
+                    workspace_id=None,
+                    workspace_handle=None,
+                )
+            )
             return True
 
     async def _process_claimed_event_safely(
@@ -407,6 +436,8 @@ class ExternalChannelEventProcessorService:
             configuration=configuration,
             message=normalized,
         )
+        if persisted.wake_up is not None:
+            await self.session_lifecycle.send_session_wake_up(persisted.wake_up)
         if persisted.control_delivery_attempt_id is not None:
             await self._attempt_control_delivery(
                 configuration=configuration,
@@ -590,6 +621,7 @@ class ExternalChannelEventProcessorService:
                 route_id=route.id,
                 resource_id=resource.id,
             )
+            wake_session_id: str | None = None
 
             persisted_revision = await self._persist_normalized_message(
                 session,
@@ -641,13 +673,15 @@ class ExternalChannelEventProcessorService:
                     and message.revision_kind
                     is ExternalChannelMessageRevisionKind.ORIGINAL
                 ):
-                    await self._release_pending_context(
+                    released_batch = await self._release_pending_context(
                         session,
                         binding=binding,
                         trigger_message_id=canonical_message.id,
                         now=now,
                         initial_activation=False,
                     )
+                    if released_batch is not None:
+                        wake_session_id = binding.agent_session_id
                 elif message.invocation and not blocked:
                     if binding is None and grant is not None:
                         binding = await self._create_granted_initial_binding(
@@ -685,6 +719,19 @@ class ExternalChannelEventProcessorService:
                     and not _hydration_terminal(resource.hydration_status)
                 ),
                 control_delivery_attempt_id=control_delivery_attempt_id,
+                wake_up=(
+                    SessionWakeUp(
+                        agent_id=route.agent_id,
+                        session_id=wake_session_id,
+                        user_id=None,
+                        additional_system_prompt=None,
+                        interface=None,
+                        workspace_id=None,
+                        workspace_handle=None,
+                    )
+                    if wake_session_id is not None
+                    else None
+                ),
             )
 
     async def _persist_normalized_message(
@@ -1207,6 +1254,12 @@ class ExternalChannelEventProcessorService:
         )
         if trigger is None:
             raise RuntimeError("External Channel invocation trigger disappeared.")
+        if existing is not None and existing.input_buffer_id is None:
+            existing, _ = await self._ensure_invocation_input_buffer(
+                session,
+                binding=binding,
+                batch=existing,
+            )
         pending = await self.repository.list_pending_context(
             session,
             route_id=binding.route_id,
@@ -1238,6 +1291,11 @@ class ExternalChannelEventProcessorService:
                     provider_position=item.provider_position,
                 ),
             )
+        batch, _ = await self._ensure_invocation_input_buffer(
+            session,
+            binding=binding,
+            batch=batch,
+        )
         await self.repository.delete_pending_context_ids(
             session,
             pending_context_ids=[item.id for item in pending],
@@ -1256,6 +1314,53 @@ class ExternalChannelEventProcessorService:
                 projected_through_position=pending[-1].provider_position,
             )
         return batch
+
+    async def _ensure_invocation_input_buffer(
+        self,
+        session: AsyncSession,
+        *,
+        binding: ExternalChannelBinding,
+        batch: ExternalChannelInvocationBatch,
+    ) -> tuple[ExternalChannelInvocationBatch, bool]:
+        """Create and link one idempotent wake-producing batch InputBuffer."""
+        locked = await self.repository.lock_invocation_batch(
+            session,
+            batch_id=batch.id,
+        )
+        if locked is None:
+            raise RuntimeError("External Channel invocation batch disappeared.")
+        if locked.input_buffer_id is not None:
+            return locked, False
+        metadata = {EXTERNAL_CHANNEL_INVOCATION_BATCH_ID_METADATA_KEY: batch.id}
+        enqueue = await self.input_buffer_service.enqueue(
+            session,
+            InputBufferEnqueue(
+                session_id=binding.agent_session_id,
+                kind=InputBufferKind.EXTERNAL_CHANNEL_INVOCATION,
+                scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
+                requested_model_target_label=None,
+                requested_reasoning_effort=None,
+                actor_user_id=None,
+                content="",
+                idempotency_key=f"external-channel-invocation:{batch.id}",
+                metadata=metadata,
+                attachments=[],
+                file_parts=[],
+                action=None,
+            ),
+        )
+        linked = await self.repository.link_invocation_batch_input_buffer(
+            session,
+            batch_id=batch.id,
+            input_buffer_id=enqueue.input_buffer.id,
+        )
+        if linked is None:
+            raise RuntimeError("External Channel invocation batch disappeared.")
+        await self.agent_session_repository.mark_running_for_input_wakeup(
+            session,
+            binding.agent_session_id,
+        )
+        return linked, enqueue.created
 
     async def _apply_connection_revocation(
         self,
