@@ -807,6 +807,15 @@ def _copy_operation_payload(
         message.git_create_worktree.branch_name = _str_payload(payload, "branch_name")
         message.git_create_worktree.starting_ref = _str_payload(payload, "starting_ref")
         return
+    if operation_type == "inspect_git_worktree":
+        message.git_inspect_worktree.source_project_path = _str_payload(
+            payload, "source_project_path"
+        )
+        message.git_inspect_worktree.worktree_path = _str_payload(
+            payload, "worktree_path"
+        )
+        message.git_inspect_worktree.branch_name = _str_payload(payload, "branch_name")
+        return
     if operation_type == "remove_git_worktree":
         message.git_remove_worktree.source_project_path = _str_payload(
             payload, "source_project_path"
@@ -815,6 +824,7 @@ def _copy_operation_payload(
             payload, "worktree_path"
         )
         message.git_remove_worktree.force = _bool_payload(payload, "force")
+        message.git_remove_worktree.branch_name = _str_payload(payload, "branch_name")
         return
     if operation_type == "delete_git_branch":
         message.git_delete_branch.source_project_path = _str_payload(

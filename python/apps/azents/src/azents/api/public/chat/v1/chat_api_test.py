@@ -99,6 +99,7 @@ from azents.services.agent_session_input import (
 )
 from azents.services.chat.data import (
     ArchiveSessionResult,
+    ArchiveWorktreeIntegrityBlocked,
     ChatLiveRunState,
     ChatLiveStateSnapshot,
     InvalidSessionTitle,
@@ -941,6 +942,7 @@ class _AgentSessionRouteChatService:
         self.archive_result: Result[
             ArchiveSessionResult,
             SessionNotFound
+            | ArchiveWorktreeIntegrityBlocked
             | PrimarySessionArchiveBlocked
             | RunningSessionArchiveBlocked,
         ] = Success(
@@ -1088,7 +1090,10 @@ class _AgentSessionRouteChatService:
         user_id: str,
     ) -> Result[
         ArchiveSessionResult,
-        SessionNotFound | PrimarySessionArchiveBlocked | RunningSessionArchiveBlocked,
+        SessionNotFound
+        | ArchiveWorktreeIntegrityBlocked
+        | PrimarySessionArchiveBlocked
+        | RunningSessionArchiveBlocked,
     ]:
         """Return archive operation result."""
         del user_id
@@ -1369,6 +1374,39 @@ class TestAgentSessionRoutes:
         except Exception as exc:
             assert getattr(exc, "status_code", None) == 409
             assert getattr(exc, "detail", None) == "Running session cannot be archived."
+        else:
+            raise AssertionError("Expected HTTPException")
+
+    async def test_archive_worktree_integrity_returns_bounded_conflict(self) -> None:
+        """Archive exposes allocation identity without filesystem diagnostics."""
+        chat_service = _AgentSessionRouteChatService()
+        chat_service.archive_result = Failure(
+            ArchiveWorktreeIntegrityBlocked(
+                allocation_id="3123456789abcdef0123456789abcdef",
+                reason_code="target_missing",
+                stage="archive_preflight",
+                summary="Git worktree contents are no longer available.",
+            )
+        )
+
+        try:
+            await archive_agent_session(
+                agent_id="agent-1",
+                session_id="2123456789abcdef0123456789abcdef",
+                current_user=CurrentUser(user_id="user-1", session_id="auth-session"),
+                chat_service=chat_service,  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
+            )
+        except Exception as exc:
+            assert getattr(exc, "status_code", None) == 409
+            detail = getattr(exc, "detail", None)
+            assert detail == {
+                "code": "archive_worktree_integrity_blocked",
+                "allocation_id": "3123456789abcdef0123456789abcdef",
+                "reason_code": "target_missing",
+                "stage": "archive_preflight",
+                "summary": "Git worktree contents are no longer available.",
+            }
+            assert "/workspace/" not in str(detail)
         else:
             raise AssertionError("Expected HTTPException")
 

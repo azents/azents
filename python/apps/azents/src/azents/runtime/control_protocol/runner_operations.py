@@ -51,6 +51,11 @@ class RuntimeRunnerOperationGenerationError(RuntimeError):
 class RuntimeRunnerOperationFailedError(RuntimeError):
     """Runner reported a final operation error."""
 
+    def __init__(self, message: str, *, code: str | None = None) -> None:
+        """Initialize the failure with its stable semantic code."""
+        super().__init__(message)
+        self.code = code
+
 
 class RuntimeRunnerOperationCanceledError(RuntimeError):
     """Foreground Runner operation was cancelled by Control/User intent."""
@@ -334,10 +339,23 @@ class RuntimeGitCreateWorktreeResult:
 
 
 @dataclasses.dataclass(frozen=True)
+class RuntimeGitInspectWorktreeResult:
+    """Completed Git worktree inspection result."""
+
+    worktree_path: str
+    registered: bool
+    registered_branch_name: str | None
+    target_kind: Literal["directory", "missing", "other"]
+    dirty: bool | None
+    final_cursor: str
+
+
+@dataclasses.dataclass(frozen=True)
 class RuntimeGitRemoveWorktreeResult:
     """Completed Git worktree removal operation result."""
 
     worktree_path: str
+    outcome: Literal["removed", "already_absent"]
     final_cursor: str
 
 
@@ -346,6 +364,7 @@ class RuntimeGitDeleteBranchResult:
     """Completed Git branch deletion operation result."""
 
     branch_name: str
+    outcome: Literal["deleted", "already_absent"]
     final_cursor: str
 
 
@@ -366,6 +385,7 @@ type RuntimeForegroundResult = (
     | RuntimeFileBulkMoveResult
     | RuntimeGitRefsResult
     | RuntimeGitCreateWorktreeResult
+    | RuntimeGitInspectWorktreeResult
     | RuntimeGitRemoveWorktreeResult
     | RuntimeGitDeleteBranchResult
 )
@@ -1016,6 +1036,7 @@ class RuntimeRunnerOperationClient:
         owner_session_id: str | None,
         source_project_path: str,
         worktree_path: str,
+        branch_name: str,
         force: bool,
         deadline_at: datetime,
         text_output_callback: RuntimeOperationTextCallback | None,
@@ -1030,6 +1051,7 @@ class RuntimeRunnerOperationClient:
                 payload={
                     "source_project_path": source_project_path,
                     "worktree_path": worktree_path,
+                    "branch_name": branch_name,
                     "force": force,
                 },
                 deadline_at=deadline_at,
@@ -1037,6 +1059,45 @@ class RuntimeRunnerOperationClient:
             )
         )
         return await self.resume_git_remove_worktree(
+            reply_stream_id=dispatch.reply_stream_id,
+            after_cursor=None,
+            request_id=dispatch.request_id,
+            operation_id=dispatch.operation_id,
+            runtime_id=runtime_id,
+            generation=runner_generation,
+            deadline_at=deadline_at,
+            text_output_callback=text_output_callback,
+        )
+
+    async def inspect_git_worktree(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        owner_session_id: str | None,
+        source_project_path: str,
+        worktree_path: str,
+        branch_name: str,
+        deadline_at: datetime,
+        text_output_callback: RuntimeOperationTextCallback | None,
+    ) -> RuntimeGitInspectWorktreeResult:
+        """Run a foreground non-mutating Git worktree inspection operation."""
+        dispatch = await self._dispatch_runner_operation(
+            RuntimeRunnerOperation(
+                runtime_id=runtime_id,
+                runner_generation=runner_generation,
+                operation_type="inspect_git_worktree",
+                owner_session_id=owner_session_id,
+                payload={
+                    "source_project_path": source_project_path,
+                    "worktree_path": worktree_path,
+                    "branch_name": branch_name,
+                },
+                deadline_at=deadline_at,
+                body_stream_id=None,
+            )
+        )
+        return await self.resume_git_inspect_worktree(
             reply_stream_id=dispatch.reply_stream_id,
             after_cursor=None,
             request_id=dispatch.request_id,
@@ -1693,6 +1754,51 @@ class RuntimeRunnerOperationClient:
         )
         return RuntimeGitRemoveWorktreeResult(
             worktree_path=_str_payload(final.event.payload, "removed_worktree_path"),
+            outcome=_git_remove_outcome(final.event.payload.get("outcome")),
+            final_cursor=final.cursor,
+        )
+
+    async def resume_git_inspect_worktree(
+        self,
+        *,
+        reply_stream_id: str,
+        after_cursor: str | None,
+        request_id: str | None = None,
+        operation_id: str | None = None,
+        runtime_id: str | None = None,
+        generation: int | None = None,
+        deadline_at: datetime,
+        text_output_callback: RuntimeOperationTextCallback | None,
+    ) -> RuntimeGitInspectWorktreeResult:
+        """Resume reading a Git worktree inspection reply stream."""
+        folder = _ReplyFolder(
+            after_cursor=after_cursor,
+            text_output_callback=text_output_callback,
+        )
+        final = await self._read_until_final(
+            reply_stream_id,
+            folder,
+            request_id=request_id,
+            operation_id=operation_id,
+            runtime_id=runtime_id,
+            generation=generation,
+            deadline_at=deadline_at,
+        )
+        return RuntimeGitInspectWorktreeResult(
+            worktree_path=_str_payload(final.event.payload, "worktree_path"),
+            registered=_bool_payload(
+                final.event.payload,
+                "worktree_registered",
+                default=False,
+            ),
+            registered_branch_name=_optional_str_payload(
+                final.event.payload,
+                "registered_branch_name",
+            ),
+            target_kind=_git_worktree_target_kind(
+                final.event.payload.get("target_kind")
+            ),
+            dirty=_optional_bool_payload(final.event.payload, "dirty"),
             final_cursor=final.cursor,
         )
 
@@ -1724,6 +1830,7 @@ class RuntimeRunnerOperationClient:
         )
         return RuntimeGitDeleteBranchResult(
             branch_name=_str_payload(final.event.payload, "deleted_branch_name"),
+            outcome=_git_branch_delete_outcome(final.event.payload.get("outcome")),
             final_cursor=final.cursor,
         )
 
@@ -1839,7 +1946,8 @@ class RuntimeRunnerOperationClient:
                         created_at=now,
                     )
                     raise RuntimeRunnerOperationFailedError(
-                        "Runtime operation timed out"
+                        "Runtime operation timed out",
+                        code="operation_timeout",
                     )
                 if (
                     cancel_check is not None
@@ -1886,7 +1994,14 @@ class RuntimeRunnerOperationClient:
                                     failure=patch_failure,
                                 )
                             raise RuntimeRunnerOperationFailedError(
-                                _error_message(record.event.payload)
+                                _error_message(record.event.payload),
+                                code=(
+                                    _str_payload(
+                                        record.event.payload,
+                                        "error_code",
+                                    )
+                                    or None
+                                ),
                             )
                         return record
         except asyncio.CancelledError:
@@ -2033,6 +2148,44 @@ def _bool_payload(
     if isinstance(value, bool):
         return value
     return default
+
+
+def _optional_bool_payload(
+    payload: dict[str, JsonValue],
+    key: str,
+) -> bool | None:
+    value = payload.get(key)
+    return value if isinstance(value, bool) else None
+
+
+def _git_worktree_target_kind(
+    value: object,
+) -> Literal["directory", "missing", "other"]:
+    if value == "directory":
+        return "directory"
+    if value == "missing":
+        return "missing"
+    if value == "other":
+        return "other"
+    raise ValueError("Runner returned an invalid Git worktree target kind")
+
+
+def _git_remove_outcome(value: object) -> Literal["removed", "already_absent"]:
+    if value == "removed":
+        return "removed"
+    if value == "already_absent":
+        return "already_absent"
+    raise ValueError("Runner returned an invalid Git worktree removal outcome")
+
+
+def _git_branch_delete_outcome(
+    value: object,
+) -> Literal["deleted", "already_absent"]:
+    if value == "deleted":
+        return "deleted"
+    if value == "already_absent":
+        return "already_absent"
+    raise ValueError("Runner returned an invalid Git branch deletion outcome")
 
 
 def _error_message(payload: dict[str, JsonValue]) -> str:

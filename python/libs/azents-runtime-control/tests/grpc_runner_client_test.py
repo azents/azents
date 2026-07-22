@@ -831,3 +831,276 @@ async def test_grpc_client_maps_git_operation_payloads_and_results() -> None:
         == "/workspace/agent/.azents/worktrees/session/repo"
     )
     await client.close()
+
+
+@pytest.mark.asyncio
+async def test_grpc_client_maps_git_worktree_integrity_operations() -> None:
+    """Inspection and guarded cleanup fields round-trip through protobuf."""
+    sent: list[runtime_runner_control_pb2.RunnerMessage] = []
+    received: list[RunnerOperationEnvelope] = []
+    operation_received = asyncio.Event()
+
+    async def handle_operation(operation: RunnerOperationEnvelope) -> None:
+        received.append(operation)
+        operation_received.set()
+
+    async def stream(
+        requests: AsyncIterator[runtime_runner_control_pb2.RunnerMessage],
+        *,
+        metadata: Sequence[tuple[str, str]] | None = None,
+    ) -> AsyncIterator[runtime_runner_control_pb2.RunnerControlMessage]:
+        del metadata
+        register = await anext(requests)
+        yield runtime_runner_control_pb2.RunnerControlMessage(
+            request_id=register.request_id,
+            register_accepted=runtime_runner_control_pb2.RunnerRegisterAccepted(
+                runtime_id=register.register.runtime_id,
+                runner_id=register.register.runner_id,
+                connection_id=register.connection_id,
+                generation=7,
+                heartbeat_interval_seconds=20,
+            ),
+        )
+        yield runtime_runner_control_pb2.RunnerControlMessage(
+            request_id="req-inspect",
+            operation_request=runtime_runner_control_pb2.RunnerOperationRequest(
+                runtime_id="runtime-1",
+                runner_generation=7,
+                operation_type="inspect_git_worktree",
+                owner_session_id="session-1",
+                git_inspect_worktree=(
+                    runtime_runner_control_pb2.GitInspectWorktreeOperationPayload(
+                        source_project_path="/workspace/agent/repo",
+                        worktree_path=(
+                            "/workspace/agent/.azents/worktrees/session/repo"
+                        ),
+                        branch_name="azents/session",
+                    )
+                ),
+                reply_stream_id="reply:req-inspect",
+            ),
+        )
+        sent.append(await anext(requests))
+        yield runtime_runner_control_pb2.RunnerControlMessage(
+            request_id="req-remove",
+            operation_request=runtime_runner_control_pb2.RunnerOperationRequest(
+                runtime_id="runtime-1",
+                runner_generation=7,
+                operation_type="remove_git_worktree",
+                owner_session_id="session-1",
+                git_remove_worktree=(
+                    runtime_runner_control_pb2.GitRemoveWorktreeOperationPayload(
+                        source_project_path="/workspace/agent/repo",
+                        worktree_path=(
+                            "/workspace/agent/.azents/worktrees/session/repo"
+                        ),
+                        force=True,
+                        branch_name="azents/session",
+                    )
+                ),
+                reply_stream_id="reply:req-remove",
+            ),
+        )
+        sent.append(await anext(requests))
+        yield runtime_runner_control_pb2.RunnerControlMessage(
+            request_id="req-delete-branch",
+            operation_request=runtime_runner_control_pb2.RunnerOperationRequest(
+                runtime_id="runtime-1",
+                runner_generation=7,
+                operation_type="delete_git_branch",
+                owner_session_id="session-1",
+                git_delete_branch=(
+                    runtime_runner_control_pb2.GitDeleteBranchOperationPayload(
+                        source_project_path="/workspace/agent/repo",
+                        branch_name="azents/session",
+                    )
+                ),
+                reply_stream_id="reply:req-delete-branch",
+            ),
+        )
+        sent.append(await anext(requests))
+
+    client = GrpcRunnerControlClient(stream)
+    client.set_operation_handler(handle_operation)
+    accepted = await client.register_runner(
+        _registration(),
+        connection_id="connection-1",
+        registered_at=_now(),
+    )
+
+    await asyncio.wait_for(operation_received.wait(), timeout=1)
+    assert received[0].operation_type == "inspect_git_worktree"
+    assert received[0].payload == {
+        "source_project_path": "/workspace/agent/repo",
+        "worktree_path": "/workspace/agent/.azents/worktrees/session/repo",
+        "branch_name": "azents/session",
+    }
+    operation_received.clear()
+    await client.append_runner_event(
+        RunnerOperationEvent(
+            request_id="req-inspect",
+            runtime_id="runtime-1",
+            generation=accepted.generation,
+            event_type=RuntimeRunnerEventType.FINAL_SUCCESS,
+            payload={
+                "worktree_path": "/workspace/agent/.azents/worktrees/session/repo",
+                "worktree_registered": True,
+                "registered_branch_name": "azents/session",
+                "target_kind": "directory",
+                "dirty": True,
+            },
+            created_at=_now(),
+            final=True,
+        )
+    )
+
+    await asyncio.wait_for(operation_received.wait(), timeout=1)
+    assert received[1].operation_type == "remove_git_worktree"
+    assert received[1].payload == {
+        "source_project_path": "/workspace/agent/repo",
+        "worktree_path": "/workspace/agent/.azents/worktrees/session/repo",
+        "force": True,
+        "branch_name": "azents/session",
+    }
+    operation_received.clear()
+    await client.append_runner_event(
+        RunnerOperationEvent(
+            request_id="req-remove",
+            runtime_id="runtime-1",
+            generation=accepted.generation,
+            event_type=RuntimeRunnerEventType.FINAL_SUCCESS,
+            payload={
+                "removed_worktree_path": (
+                    "/workspace/agent/.azents/worktrees/session/repo"
+                ),
+                "outcome": "already_absent",
+            },
+            created_at=_now(),
+            final=True,
+        )
+    )
+
+    await asyncio.wait_for(operation_received.wait(), timeout=1)
+    assert received[2].operation_type == "delete_git_branch"
+    assert received[2].payload == {
+        "source_project_path": "/workspace/agent/repo",
+        "branch_name": "azents/session",
+    }
+    await client.append_runner_event(
+        RunnerOperationEvent(
+            request_id="req-delete-branch",
+            runtime_id="runtime-1",
+            generation=accepted.generation,
+            event_type=RuntimeRunnerEventType.FINAL_SUCCESS,
+            payload={
+                "deleted_branch_name": "azents/session",
+                "outcome": "already_absent",
+            },
+            created_at=_now(),
+            final=True,
+        )
+    )
+    for _ in range(10):
+        if len(sent) == 3:
+            break
+        await asyncio.sleep(0)
+
+    inspect = sent[0].operation_event.final_success.git_inspect_worktree
+    assert inspect.worktree_path == "/workspace/agent/.azents/worktrees/session/repo"
+    assert inspect.registered is True
+    assert inspect.registered_branch_name == "azents/session"
+    assert inspect.target_kind == "directory"
+    assert inspect.dirty is True
+
+    removal = sent[1].operation_event.final_success.git_remove_worktree
+    assert removal.worktree_path == "/workspace/agent/.azents/worktrees/session/repo"
+    assert removal.outcome == "already_absent"
+
+    branch = sent[2].operation_event.final_success.git_delete_branch
+    assert branch.branch_name == "azents/session"
+    assert branch.outcome == "already_absent"
+    await client.close()
+
+
+def test_grpc_client_reads_git_worktree_integrity_results() -> None:
+    """Typed Git integrity results survive protobuf-to-domain conversion."""
+    inspect_event = runner_event_from_message(
+        runtime_runner_control_pb2.RunnerOperationEvent(
+            runtime_id="runtime-1",
+            operation_id="operation:req-inspect",
+            generation=7,
+            event_type="final_success",
+            created_at=_timestamp(_now()),
+            final=True,
+            final_success=runtime_runner_control_pb2.RunnerOperationFinalSuccessPayload(
+                git_inspect_worktree=(
+                    runtime_runner_control_pb2.GitInspectWorktreeFinalSuccess(
+                        worktree_path=(
+                            "/workspace/agent/.azents/worktrees/session/repo"
+                        ),
+                        registered=True,
+                        registered_branch_name="azents/session",
+                        target_kind="directory",
+                        dirty=False,
+                    )
+                )
+            ),
+        ),
+        request_id="req-inspect",
+    )
+    removal_event = runner_event_from_message(
+        runtime_runner_control_pb2.RunnerOperationEvent(
+            runtime_id="runtime-1",
+            operation_id="operation:req-remove",
+            generation=7,
+            event_type="final_success",
+            created_at=_timestamp(_now()),
+            final=True,
+            final_success=runtime_runner_control_pb2.RunnerOperationFinalSuccessPayload(
+                git_remove_worktree=(
+                    runtime_runner_control_pb2.GitRemoveWorktreeFinalSuccess(
+                        worktree_path=(
+                            "/workspace/agent/.azents/worktrees/session/repo"
+                        ),
+                        outcome="removed",
+                    )
+                )
+            ),
+        ),
+        request_id="req-remove",
+    )
+    branch_event = runner_event_from_message(
+        runtime_runner_control_pb2.RunnerOperationEvent(
+            runtime_id="runtime-1",
+            operation_id="operation:req-delete-branch",
+            generation=7,
+            event_type="final_success",
+            created_at=_timestamp(_now()),
+            final=True,
+            final_success=runtime_runner_control_pb2.RunnerOperationFinalSuccessPayload(
+                git_delete_branch=(
+                    runtime_runner_control_pb2.GitDeleteBranchFinalSuccess(
+                        branch_name="azents/session",
+                        outcome="deleted",
+                    )
+                )
+            ),
+        ),
+        request_id="req-delete-branch",
+    )
+
+    assert inspect_event.payload == {
+        "worktree_path": "/workspace/agent/.azents/worktrees/session/repo",
+        "worktree_registered": True,
+        "registered_branch_name": "azents/session",
+        "target_kind": "directory",
+        "dirty": False,
+    }
+    assert removal_event.payload == {
+        "removed_worktree_path": "/workspace/agent/.azents/worktrees/session/repo",
+        "outcome": "removed",
+    }
+    assert branch_event.payload == {
+        "deleted_branch_name": "azents/session",
+        "outcome": "deleted",
+    }

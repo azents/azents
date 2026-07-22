@@ -94,6 +94,25 @@ class _GitCommandResult:
     stderr: str
 
 
+@dataclass(frozen=True)
+class _GitWorktreeInspection:
+    """Content-free Git worktree registration and filesystem observation."""
+
+    worktree_path: Path
+    registered: bool
+    registered_branch_name: str | None
+    target_kind: Literal["directory", "missing", "other"]
+    dirty: bool | None
+
+
+@dataclass(frozen=True)
+class _GitWorktreeRegistration:
+    """Exact Git worktree registration observation."""
+
+    registered: bool
+    branch_name: str | None
+
+
 class _FileOperationSemanticError(Exception):
     """Typed filesystem failure rendered as a Runner final error."""
 
@@ -286,6 +305,9 @@ class RunnerOperations:
                 return
             if operation.operation_type == "create_git_worktree":
                 await self._git_create_worktree(operation)
+                return
+            if operation.operation_type == "inspect_git_worktree":
+                await self._git_inspect_worktree(operation)
                 return
             if operation.operation_type == "remove_git_worktree":
                 await self._git_remove_worktree(operation)
@@ -1089,22 +1111,79 @@ class RunnerOperations:
             },
         )
 
+    async def _git_inspect_worktree(self, operation: RunnerOperationEnvelope) -> None:
+        source_path = await self._git_source_path(operation)
+        if source_path is None:
+            return
+        inspection = await self._inspect_git_worktree(operation, source_path)
+        if inspection is None:
+            return
+        payload: dict[str, JsonValue] = {
+            "worktree_path": str(inspection.worktree_path),
+            "worktree_registered": inspection.registered,
+            "target_kind": inspection.target_kind,
+        }
+        if inspection.registered_branch_name is not None:
+            payload["registered_branch_name"] = inspection.registered_branch_name
+        if inspection.dirty is not None:
+            payload["dirty"] = inspection.dirty
+        await self._final_success(operation, payload)
+
     async def _git_remove_worktree(self, operation: RunnerOperationEnvelope) -> None:
         source_path = await self._git_source_path(operation)
         if source_path is None:
             return
-        try:
-            worktree_path = _resolve_lexical_path(
-                operation.payload.get("worktree_path"),
-                workspace=self._workspace,
+        inspection = await self._inspect_git_worktree(operation, source_path)
+        if inspection is None:
+            return
+        expected_branch_name = _str_payload(operation.payload, "branch_name")
+        if not expected_branch_name:
+            await self._final_error(
+                operation,
+                "invalid_branch",
+                "branch_name is required",
             )
-        except ValueError as exc:
-            await self._final_error(operation, "invalid_worktree_path", str(exc))
+            return
+        if inspection.target_kind == "other":
+            await self._final_error(
+                operation,
+                "worktree_ownership_ambiguous",
+                "Recorded worktree target is not a directory.",
+            )
+            return
+        if (
+            inspection.registered
+            and inspection.registered_branch_name != expected_branch_name
+        ):
+            await self._final_error(
+                operation,
+                "worktree_ownership_ambiguous",
+                ("Git worktree registration does not match the recorded branch."),
+            )
+            return
+        if inspection.target_kind == "directory" and not inspection.registered:
+            await self._final_error(
+                operation,
+                "worktree_ownership_ambiguous",
+                (
+                    "Existing worktree target does not match the recorded Git "
+                    "registration."
+                ),
+            )
+            return
+        if inspection.target_kind == "missing" and not inspection.registered:
+            await self._final_success(
+                operation,
+                {
+                    "removed_worktree_path": str(inspection.worktree_path),
+                    "outcome": "already_absent",
+                },
+            )
             return
         argv = ["worktree", "remove"]
         if _bool_payload(operation.payload, "force", default=False):
             argv.append("--force")
-        argv.append(str(worktree_path))
+        argv.append(str(inspection.worktree_path))
         result = await self._run_git_streaming(operation, tuple(argv), cwd=source_path)
         if result is None:
             return
@@ -1117,7 +1196,14 @@ class RunnerOperations:
             return
         await self._final_success(
             operation,
-            {"removed_worktree_path": str(worktree_path)},
+            {
+                "removed_worktree_path": str(inspection.worktree_path),
+                "outcome": (
+                    "already_absent"
+                    if inspection.target_kind == "missing"
+                    else "removed"
+                ),
+            },
         )
 
     async def _git_delete_branch(self, operation: RunnerOperationEnvelope) -> None:
@@ -1130,6 +1216,20 @@ class RunnerOperations:
                 operation,
                 "invalid_branch",
                 "branch_name is required",
+            )
+            return
+        branch_exists = await self._git_branch_exists(
+            operation, source_path, branch_name
+        )
+        if branch_exists is None:
+            return
+        if not branch_exists:
+            await self._final_success(
+                operation,
+                {
+                    "deleted_branch_name": branch_name,
+                    "outcome": "already_absent",
+                },
             )
             return
         result = await self._run_git_streaming(
@@ -1148,7 +1248,7 @@ class RunnerOperations:
             return
         await self._final_success(
             operation,
-            {"deleted_branch_name": branch_name},
+            {"deleted_branch_name": branch_name, "outcome": "deleted"},
         )
 
     async def _process_start(self, operation: RunnerOperationEnvelope) -> None:
@@ -1825,6 +1925,71 @@ class RunnerOperations:
         )
         return None
 
+    async def _inspect_git_worktree(
+        self,
+        operation: RunnerOperationEnvelope,
+        source_path: Path,
+    ) -> _GitWorktreeInspection | None:
+        """Inspect exact Git registration and physical target state."""
+        try:
+            worktree_path = _resolve_lexical_path(
+                operation.payload.get("worktree_path"),
+                workspace=self._workspace,
+            )
+        except ValueError as exc:
+            await self._final_error(operation, "invalid_worktree_path", str(exc))
+            return None
+        result = await self._run_git_capture(
+            operation,
+            ("worktree", "list", "--porcelain", "-z"),
+            cwd=source_path,
+        )
+        if result is None:
+            return None
+        if result.exit_code != 0:
+            await self._final_error(
+                operation,
+                "git_command_failed",
+                _git_command_error_message(result),
+            )
+            return None
+        registration = _registered_worktree(
+            result.stdout,
+            worktree_path=worktree_path,
+        )
+        if worktree_path.is_symlink():
+            target_kind: Literal["directory", "missing", "other"] = "other"
+        elif worktree_path.is_dir():
+            target_kind = "directory"
+        elif worktree_path.exists():
+            target_kind = "other"
+        else:
+            target_kind = "missing"
+        dirty: bool | None = None
+        if registration.registered and target_kind == "directory":
+            status = await self._run_git_capture(
+                operation,
+                ("status", "--porcelain", "--untracked-files=normal"),
+                cwd=worktree_path,
+            )
+            if status is None:
+                return None
+            if status.exit_code != 0:
+                await self._final_error(
+                    operation,
+                    "git_command_failed",
+                    _git_command_error_message(status),
+                )
+                return None
+            dirty = bool(status.stdout)
+        return _GitWorktreeInspection(
+            worktree_path=worktree_path,
+            registered=registration.registered,
+            registered_branch_name=registration.branch_name,
+            target_kind=target_kind,
+            dirty=dirty,
+        )
+
     async def _default_branch(
         self,
         operation: RunnerOperationEnvelope,
@@ -2085,6 +2250,42 @@ def _git_command_error_message(result: _GitCommandResult) -> str:
     if text:
         return text
     return f"Git command failed with exit code {result.exit_code}"
+
+
+def _registered_worktree(
+    porcelain: str,
+    *,
+    worktree_path: Path,
+) -> _GitWorktreeRegistration:
+    """Return exact Git worktree registration and local branch name."""
+    for record in porcelain.split("\0\0"):
+        fields = [field for field in record.split("\0") if field]
+        if not fields or not fields[0].startswith("worktree "):
+            continue
+        registered_path = Path(fields[0].removeprefix("worktree "))
+        if registered_path != worktree_path:
+            continue
+        branch_ref = next(
+            (
+                field.removeprefix("branch ")
+                for field in fields[1:]
+                if field.startswith("branch ")
+            ),
+            None,
+        )
+        branch_name = (
+            branch_ref.removeprefix("refs/heads/")
+            if branch_ref is not None and branch_ref.startswith("refs/heads/")
+            else branch_ref
+        )
+        return _GitWorktreeRegistration(
+            registered=True,
+            branch_name=branch_name,
+        )
+    return _GitWorktreeRegistration(
+        registered=False,
+        branch_name=None,
+    )
 
 
 def _git_ref_display_name(ref: str, short_name: str) -> str:

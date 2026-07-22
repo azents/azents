@@ -57,6 +57,7 @@ from azents.runtime.control_protocol.runner_operations import (
     RuntimeGitRefEntry,
     RuntimeOperationTextCallback,
     RuntimeOperationTextDelta,
+    RuntimeRunnerOperationCanceledError,
     RuntimeRunnerOperationClient,
     RuntimeRunnerOperationFailedError,
     RuntimeRunnerOperationGenerationError,
@@ -200,6 +201,15 @@ GitWorktreeCleanupRequestError = (
 
 
 @dataclasses.dataclass(frozen=True)
+class GitWorktreeArchiveIntegrityFailure:
+    """Bounded archive preflight failure for one worktree allocation."""
+
+    allocation_id: str
+    reason_code: str
+    summary: str
+
+
+@dataclasses.dataclass(frozen=True)
 class GitWorktreeActionExecutionResult:
     """Result of executing one create_git_worktree TurnAction."""
 
@@ -318,6 +328,125 @@ class SessionGitWorktreeService:
                 head_commit=result.head_commit,
             )
         )
+
+    async def validate_archive_integrity(
+        self,
+        *,
+        agent_id: str,
+        root_session_id: str,
+        subtree_session_ids: Sequence[str],
+        allocations: Sequence[SessionGitWorktree],
+    ) -> GitWorktreeArchiveIntegrityFailure | None:
+        """Validate preserved worktrees before the root-tree archive mutation."""
+        allowed_session_ids = set(subtree_session_ids)
+        if root_session_id not in allowed_session_ids:
+            raise ValueError("Root session must belong to its archive subtree")
+        targets = [
+            allocation
+            for allocation in allocations
+            if allocation.status is not SessionGitWorktreeStatus.CLEANED
+        ]
+        for allocation in targets:
+            creator_session_id = allocation.created_by_agent_session_id
+            if creator_session_id not in allowed_session_ids:
+                return _archive_integrity_failure(
+                    allocation,
+                    reason_code="allocation_outside_root_tree",
+                    summary=(
+                        "Git worktree ownership does not match the archived root tree."
+                    ),
+                )
+            ownership_error = _cleanup_ownership_error(
+                allocation=allocation,
+                session_id=creator_session_id,
+            )
+            if ownership_error is not None:
+                return _archive_integrity_failure(
+                    allocation,
+                    reason_code="invalid_allocation_ownership",
+                    summary="Git worktree ownership metadata is incomplete.",
+                )
+        if not targets:
+            return None
+        runtime = await self._get_runtime(agent_id=agent_id)
+        if runtime is None or runtime.runner_state != RuntimeRunnerState.READY:
+            return _archive_integrity_failure(
+                targets[0],
+                reason_code="runtime_unavailable",
+                summary="Runtime runner is unavailable for Git worktree validation.",
+            )
+        runner_operations = self.runner_operations
+        if runner_operations is None:
+            return _archive_integrity_failure(
+                targets[0],
+                reason_code="runtime_unavailable",
+                summary="Runtime runner is unavailable for Git worktree validation.",
+            )
+        for allocation in targets:
+            try:
+                inspection = await runner_operations.inspect_git_worktree(
+                    runtime_id=runtime.id,
+                    runner_generation=runtime.runner_generation,
+                    owner_session_id=allocation.created_by_agent_session_id,
+                    source_project_path=allocation.source_project_path,
+                    worktree_path=allocation.worktree_path,
+                    branch_name=allocation.branch_name,
+                    deadline_at=_git_operation_deadline(),
+                    text_output_callback=None,
+                )
+            except (
+                RuntimeRunnerOperationUnavailable,
+                RuntimeRunnerOperationGenerationError,
+            ):
+                return _archive_integrity_failure(
+                    allocation,
+                    reason_code="runtime_unavailable",
+                    summary=(
+                        "Runtime runner is unavailable for Git worktree validation."
+                    ),
+                )
+            except (
+                RuntimeRunnerOperationCanceledError,
+                RuntimeRunnerOperationFailedError,
+            ):
+                return _archive_integrity_failure(
+                    allocation,
+                    reason_code="inspection_failed",
+                    summary="Git worktree integrity could not be verified.",
+                )
+            if inspection.worktree_path != allocation.worktree_path:
+                return _archive_integrity_failure(
+                    allocation,
+                    reason_code="path_mismatch",
+                    summary="Git worktree inspection returned a different target.",
+                )
+            if inspection.target_kind == "missing":
+                return _archive_integrity_failure(
+                    allocation,
+                    reason_code="target_missing",
+                    summary="Git worktree contents are no longer available.",
+                )
+            if inspection.target_kind != "directory":
+                return _archive_integrity_failure(
+                    allocation,
+                    reason_code="target_kind_invalid",
+                    summary="Git worktree target is not a directory.",
+                )
+            if not inspection.registered:
+                return _archive_integrity_failure(
+                    allocation,
+                    reason_code="registration_missing",
+                    summary="Git worktree registration is missing.",
+                )
+            if inspection.registered_branch_name != allocation.branch_name:
+                return _archive_integrity_failure(
+                    allocation,
+                    reason_code="branch_mismatch",
+                    summary=(
+                        "Git worktree registration does not match its owned branch."
+                    ),
+                )
+        return None
 
     async def _create_and_link_workspace_project(
         self,
@@ -1303,6 +1432,7 @@ class SessionGitWorktreeService:
                 session_id=session_id,
                 runtime=runtime,
                 allocation=allocation,
+                force=False,
             )
             if cleaned is not None:
                 last_cleaned = cleaned
@@ -1372,6 +1502,7 @@ class SessionGitWorktreeService:
                     session_id=creator_session_id,
                     runtime=runtime,
                     allocation=allocation,
+                    force=True,
                 )
 
         async with self.session_manager() as session:
@@ -1393,6 +1524,7 @@ class SessionGitWorktreeService:
         session_id: str,
         runtime: AgentRuntime,
         allocation: SessionGitWorktree,
+        force: bool,
     ) -> SessionGitWorktree | None:
         """Run cleanup for one session-owned Git worktree allocation."""
         ownership_error = _cleanup_ownership_error(
@@ -1409,13 +1541,14 @@ class SessionGitWorktreeService:
         if runner_operations is None:
             raise RuntimeError("Runtime runner operations are unavailable")
         try:
-            await runner_operations.remove_git_worktree(
+            removal = await runner_operations.remove_git_worktree(
                 runtime_id=runtime.id,
                 runner_generation=runtime.runner_generation,
                 owner_session_id=session_id,
                 source_project_path=allocation.source_project_path,
                 worktree_path=allocation.worktree_path,
-                force=False,
+                branch_name=allocation.branch_name,
+                force=force,
                 deadline_at=_git_operation_deadline(),
                 text_output_callback=None,
             )
@@ -1443,7 +1576,10 @@ class SessionGitWorktreeService:
                 cleaned = await self.session_git_worktree_repository.mark_cleaned(
                     session,
                     worktree_id=allocation.id,
-                    cleanup_summary="Git worktree cleanup completed.",
+                    cleanup_summary=_cleanup_terminal_summary(
+                        removal_outcome=removal.outcome,
+                        force=force,
+                    ),
                     cleaned_at=cleaned_at,
                 )
                 if allocation.session_workspace_project_id is not None:
@@ -1454,13 +1590,14 @@ class SessionGitWorktreeService:
                     )
             return cleaned
         except (
+            RuntimeRunnerOperationCanceledError,
             RuntimeRunnerOperationFailedError,
             RuntimeRunnerOperationUnavailable,
             RuntimeRunnerOperationGenerationError,
         ) as exc:
             await self._mark_cleanup_failed(
                 worktree_id=allocation.id,
-                reason=str(exc) or type(exc).__name__,
+                reason=_cleanup_operation_failure_summary(exc),
             )
             return None
 
@@ -1667,6 +1804,51 @@ def _cleanup_ownership_error(
     if allocation.branch_created_by is not SessionGitWorktreeBranchCreatedBy.AZENTS:
         return "Recorded Git branch is not Azents-created."
     return None
+
+
+def _archive_integrity_failure(
+    allocation: SessionGitWorktree,
+    *,
+    reason_code: str,
+    summary: str,
+) -> GitWorktreeArchiveIntegrityFailure:
+    """Build one content-free archive preflight failure."""
+    return GitWorktreeArchiveIntegrityFailure(
+        allocation_id=allocation.id,
+        reason_code=reason_code,
+        summary=summary,
+    )
+
+
+def _cleanup_terminal_summary(
+    *,
+    removal_outcome: Literal["removed", "already_absent"],
+    force: bool,
+) -> str:
+    """Return a stable durable cleanup terminal classification."""
+    if removal_outcome == "already_absent":
+        return "Git worktree cleanup completed: confirmed_absent."
+    if force:
+        return "Git worktree cleanup completed: removed_force."
+    return "Git worktree cleanup completed: removed."
+
+
+def _cleanup_operation_failure_summary(
+    error: (
+        RuntimeRunnerOperationCanceledError
+        | RuntimeRunnerOperationFailedError
+        | RuntimeRunnerOperationUnavailable
+        | RuntimeRunnerOperationGenerationError
+    ),
+) -> str:
+    """Return a bounded cleanup failure without Runner path diagnostics."""
+    if isinstance(error, RuntimeRunnerOperationFailedError):
+        if error.code == "worktree_ownership_ambiguous":
+            return "Git worktree cleanup blocked: ambiguous_target_ownership."
+        return "Git worktree cleanup failed: runner_operation_failed."
+    if isinstance(error, RuntimeRunnerOperationCanceledError):
+        return "Git worktree cleanup failed: runner_operation_failed."
+    return "Git worktree cleanup failed: runtime_unavailable."
 
 
 def _collision_kind(message: str) -> Literal["branch", "path"] | None:

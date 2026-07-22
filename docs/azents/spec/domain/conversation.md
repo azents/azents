@@ -101,8 +101,8 @@ api_routes:
   - /chat/v1/exchange-files/{file_id}/download
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
-last_verified_at: 2026-07-21
-spec_version: 125
+last_verified_at: 2026-07-22
+spec_version: 126
 ---
 
 # Conversation & Events
@@ -261,7 +261,13 @@ Every linked descendant `AgentSession` is marked archived so direct worker, comm
 and recovery boundaries can reject it without resolving the tree again. Zero-day retention completes
 the archive transaction and only makes the root eligible for the next asynchronous purge pass.
 Archive preserves durable transcript data, run rows, file metadata, project registry rows, and all
-Azents-owned worktree allocations.
+Azents-owned worktree allocations. Before mutating the root tree, archive locks the shared-context
+worktree allocations and asks the current-generation Runner to inspect every non-cleaned target.
+Archive accepts an exactly registered directory whose Git branch matches the allocation even when the
+worktree contains modified or untracked files. Missing targets, unregistered existing directories,
+branch mismatches, invalid target kinds, invalid ownership metadata, and unavailable inspection block
+the complete archive with a bounded `409 Conflict` containing the allocation ID and stable reason.
+The response excludes worktree paths, branch names, Git output, and repository contents.
 
 `GET /chat/v1/agents/{agent_id}/sessions/archived` returns archived roots separately from the active
 session list. Each item includes `archived_at`, `purge_after`, and the immutable retention snapshot;
@@ -284,8 +290,13 @@ exposes no permanent-delete action.
 The public `DELETE /chat/v1/sessions/{session_id}` route is absent. Permanent deletion is owned only
 by durable purge after fencing. Purge deletes subtree ModelFile, Artifact, bound ExchangeFile and
 preview blobs, broker state, and every owned worktree path/branch before the database subtree is
-removed. A cleanup failure retains ownership metadata and retry state rather than cascading database
-deletion.
+removed. Retention purge force-removes an exactly registered owned worktree so archive-preserved local
+changes cross the irreversible retention boundary. A missing target and an already-absent owned
+branch are terminal idempotent outcomes. An existing path without exact Git registration, a registered
+path whose branch differs from the allocation, or another ambiguous ownership state is never deleted.
+The worktree participant records a bounded durable classification, retains allocation ownership and
+retry state on failure, and resumes only its incomplete checkpoint through the ordinary retry
+workflow. Final Session deletion still requires every allocation to be cleaned.
 
 Direct session writes are session-scoped. When a route contains `session_id`, input buffers, live
 projections, broker wake-up, and the REST response use that same session id. Runtime current/active
@@ -945,6 +956,7 @@ Current verification:
 
 ## 11. Changelog
 
+- **2026-07-22** — v126. Added archive-time worktree integrity inspection, dirty-worktree preservation, purge-only forced cleanup, terminal absence classification, ambiguous-target safety, and ordinary retry convergence.
 - **2026-07-21** — v125. Added closed client-tool wire dialect persistence, same-dialect replay and pairing, and bounded non-executable custom history projection.
 - **2026-07-21** — v123. Completed validated specialized presentation coverage for source-less client builtins, added rich provider `web_search`, standardized Activity event rows and fixed Raw data action placement, removed Generic filler copy, and kept sensitive payloads out of collapsed summaries.
 - **2026-07-20** — v122. Added validated, source-aware specialized rendering for the Phase 1 Runtime client-tool set, preserved client result metadata in the frontend projection, and retained per-call Generic raw fallback with separate Raw data diagnostics.

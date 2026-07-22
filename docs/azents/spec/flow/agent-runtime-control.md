@@ -22,8 +22,8 @@ code_paths:
   - infra/charts/azents/**
   - infra/argocd/azents-runtime-provider-kubernetes/**
   - infra/argocd/azents-server/**
-last_verified_at: 2026-07-21
-spec_version: 23
+last_verified_at: 2026-07-22
+spec_version: 24
 ---
 
 # Agent Runtime Control
@@ -168,7 +168,25 @@ Terminal success returns ordered changes with path, action, added and removed li
 Runner executes blocking file read/download, write/upload, stat, list, glob, grep, delete, mkdir, move, bulk-delete, and bulk-move sections through a dedicated `ThreadPoolExecutor` instead of on the asyncio event loop. The production default is eight filesystem workers, bounded independently from ordinary Runner admission and owner scheduling limits. This prevents one admitted recursive traversal or regex scan from blocking unrelated async operations after fair scheduling has dispatched them.
 Recursive list and grep helpers receive a thread-safe cancellation signal. Cancelling the async handler sets that signal, and traversal plus line scanning check it between blocking operations. Cancellation is cooperative and does not preempt an operating-system filesystem call already executing in a worker thread. Existing final payloads and semantic file error mappings remain unchanged.
 
-Git operations are typed Runner operations, not arbitrary shell strings. `list_git_refs` previews local branches, remote branches, tags, default branch, and HEAD commit for a source Project path. `create_git_worktree` creates a branch-backed worktree from a source Project and starting ref and returns the final worktree path, branch name, and base commit. `remove_git_worktree` removes an owned worktree path with explicit force policy. `delete_git_branch` deletes only the requested branch in the source repository. These operations return semantic failures for non-Git paths, invalid refs, collisions, and Git command failures so product services can show user-safe setup or cleanup summaries.
+Git operations are typed Runner operations, not arbitrary shell strings. `list_git_refs` previews local
+branches, remote branches, tags, default branch, and HEAD commit for a source Project path.
+`create_git_worktree` creates a branch-backed worktree from a source Project and starting ref and
+returns the final worktree path, branch name, and base commit. `inspect_git_worktree` is
+non-mutating: it resolves the exact workspace target, reads `git worktree list --porcelain`, reports
+whether that path is registered and which local branch it uses, classifies the physical target as
+`directory`, `missing`, or `other`, and returns only a nullable dirty boolean for an exact registered
+directory. It never returns status paths, diff content, or repository contents.
+
+`remove_git_worktree` requires the recorded branch and repeats registration plus physical-target
+inspection immediately before mutation. An exact registered directory may be removed under the
+caller's explicit force policy. A missing target returns terminal `already_absent`, clearing stale Git
+registration when present. An existing unregistered target, an existing registered target with a
+different branch, a missing target whose stale registration names a different branch, and a
+non-directory target return `worktree_ownership_ambiguous` without deletion.
+`delete_git_branch` deletes only the requested branch in the valid source repository and returns
+`already_absent` when that exact branch no longer exists. These operations return semantic failures
+for non-Git paths, invalid refs, collisions, ownership ambiguity, and Git command failures so product
+services can persist bounded setup or cleanup classifications.
 
 Runner registration and state reports include a mounted workspace path. Control compares it with the provider-reported path and records an explicit failure if they differ. A Runner `busy` report means it is healthy and actively executing an operation, so Control persists it as `ready` rather than treating it as a Runtime failure. Operation routing uses runner generation fencing so stale runner streams cannot complete newer operations.
 
@@ -234,6 +252,7 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
+- **2026-07-22** (spec_version 24) — Added content-free Git worktree inspection, branch-fenced removal, terminal missing-target and missing-branch outcomes, and non-destructive ambiguous-target rejection.
 - **2026-07-21** (spec_version 23) — Added generation-fenced internal Provider terminal deletion and durable acknowledgement for Agent decommission finalization.
 - **2026-07-20** (spec_version 22) — Added strict Runner-owned V4A `file.apply_patch`, ordered cancellation and terminal settlement, bounded path and content safety, staged revalidation, deterministic commit ordering, and exact no-rollback partial-failure reporting.
 - **2026-07-20** (spec_version 21) — Removed chart-enforced Runtime Control replica, autoscaling, and disruption-budget availability policy so deployments own their scaling configuration.

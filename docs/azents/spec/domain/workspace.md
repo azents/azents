@@ -55,8 +55,8 @@ api_routes:
   - /chat/v1/agents/{agent_id}/workspace/project-browser-manifest/preview
   - /chat/v1/agents/{agent_id}/git-refs
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
-last_verified_at: 2026-07-21
-spec_version: 43
+last_verified_at: 2026-07-22
+spec_version: 44
 ---
 
 # Workspace & Membership
@@ -286,6 +286,14 @@ A non-primary session can own a Git worktree allocation created by a `create_git
 
 Each created worktree is prompt-eligible only through its session-owned `SessionWorkspaceProject` row, just like manually selected Projects. The `SessionGitWorktree` row is retained for lifecycle and cleanup, and links to the registered Project row after registration succeeds. Archive preserves every allocation in the complete root tree. Explicit user-requested cleanup remains session-scoped, while durable purge iterates every non-cleaned subtree allocation before database deletion, removes each owned worktree and Azents-created branch, removes the session-scoped reserved worktree parent directory when it becomes empty, deletes catalog entries for the worktree paths, and marks allocations cleaned. Cleanup failure aborts purge finalization and retains ownership metadata and retry state.
 
+Archive validates each preserved allocation through a non-mutating Runner inspection before the
+root-tree transition. An exact registered directory remains archive-eligible when modified or
+untracked; missing, unregistered, branch-mismatched, non-directory, or otherwise unverifiable
+allocations block archive without destructive cleanup. Durable purge alone uses forced removal after
+the allocation, reserved-root path, exact Git registration, and recorded branch agree. Missing targets
+and already-absent owned branches converge as terminal cleanup. Existing unregistered, mismatched, or
+non-directory targets are retained untouched with a bounded ambiguous-ownership failure for retry.
+
 ## Business Rules
 
 At least 7 rules — all actually verified in code:
@@ -442,6 +450,7 @@ stateDiagram-v2
 
 ## Changelog
 
+- **2026-07-22 (spec_version=44)** — Added non-destructive archive inspection, dirty-worktree preservation, purge-only forced cleanup, terminal absence handling, and ambiguous existing-target protection.
 - **2026-07-21 (spec_version=43)** — Removed the Workspace DELETE contract and documented restrictive parent ownership that prevents bypass of Agent decommission and Session retention purge.
 - **2026-07-19** — v41. Replaced archive-time worktree cleanup with archive preservation and cleanup-before-cascade durable root-tree purge semantics.
 - **2026-07-14** — v40. Defined worktree operation ownership fencing, live-only execution rows, atomic durable terminal handover, cancelled outcomes, and no-reexecution takeover recovery.

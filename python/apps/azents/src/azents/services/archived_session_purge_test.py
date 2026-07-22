@@ -71,6 +71,7 @@ class _RetentionRepository:
         self.retry: dict[str, object] | None = None
         self.completed = False
         self.stale_job_count = 0
+        self.preserve_participant_executions = False
         self.materialized_participants: list[
             ArchivedSessionPurgeParticipantSnapshot
         ] = []
@@ -141,6 +142,8 @@ class _RetentionRepository:
         del session, job_id, lease_owner
         self.events.append("materialize_participants")
         self.materialized_participants = list(participants)
+        if self.preserve_participant_executions and self.participant_executions:
+            return list(self.participant_executions)
         now = datetime.datetime.now(datetime.UTC)
         self.participant_executions = [
             ArchivedSessionPurgeParticipantExecution(
@@ -572,9 +575,16 @@ class _ExchangeFileRepository:
 class _WorktreeService:
     """Root-tree worktree cleanup double."""
 
-    def __init__(self, events: list[str], *, count: int = 0) -> None:
+    def __init__(
+        self,
+        events: list[str],
+        *,
+        count: int = 0,
+        failure_count: int = 0,
+    ) -> None:
         self.events = events
         self.count = count
+        self.failure_count = failure_count
         self.calls = 0
 
     async def run_cleanup_for_root_tree(
@@ -587,6 +597,9 @@ class _WorktreeService:
         del agent_id, root_session_id, subtree_session_ids
         self.calls += 1
         self.events.append("cleanup_worktrees")
+        if self.failure_count > 0:
+            self.failure_count -= 1
+            raise RuntimeError("Git worktree cleanup is incomplete")
         return self.count
 
 
@@ -751,6 +764,7 @@ def _build_service(
     child_status: AgentSessionStatus = AgentSessionStatus.ARCHIVED,
     pinned_model_file: bool = False,
     s3_fail_key: str | None = None,
+    worktree_failure_count: int = 0,
 ) -> tuple[
     ArchivedSessionPurgeService,
     _RetentionRepository,
@@ -780,7 +794,11 @@ def _build_service(
     )
     artifact_repository = _ArtifactRepository([_artifact(now)], events)
     exchange_file_repository = _ExchangeFileRepository([_exchange_file(now)], events)
-    worktree_service = _WorktreeService(events, count=2)
+    worktree_service = _WorktreeService(
+        events,
+        count=2,
+        failure_count=worktree_failure_count,
+    )
     broker = _Broker(events)
     s3_service = _S3Service(events, fail_key=s3_fail_key)
     service = ArchivedSessionPurgeService(
@@ -1032,6 +1050,69 @@ async def test_object_delete_failure_preserves_tree_for_retry() -> None:
     assert model_file_repository.files[0].blob_deleted_at is None
     assert s3_service.deleted_keys == []
     assert "delete_session" not in events
+
+
+async def test_worktree_cleanup_retry_preserves_checkpoints_and_converges() -> None:
+    """An incomplete worktree participant resumes through the ordinary retry job."""
+    events: list[str] = []
+    (
+        service,
+        retention_repository,
+        agent_session_repository,
+        _,
+        worktree_service,
+        _,
+        s3_service,
+    ) = _build_service(
+        events=events,
+        active_checks=[False, False, False],
+        worktree_failure_count=1,
+    )
+    retention_repository.preserve_participant_executions = True
+
+    first = await service.purge_once(
+        lease_owner="worker-1",
+        deadline=_deadline(),
+    )
+
+    assert first.completed_count == 0
+    assert first.retry_scheduled_count == 1
+    assert first.failed_count == 1
+    assert retention_repository.retry is not None
+    assert (
+        retention_repository.retry["error_participant_key"] == "session.git-worktrees"
+    )
+    assert (
+        retention_repository.retry["error_phase"]
+        is ArchivedSessionPurgeParticipantPhase.CLEANUP_COMPLETED
+    )
+    assert agent_session_repository.deleted is False
+    assert worktree_service.calls == 1
+
+    retry_job = _job(datetime.datetime.now(datetime.UTC)).model_copy(
+        update={"attempt_count": 2}
+    )
+    retention_repository.job = retry_job
+
+    second = await service.purge_once(
+        lease_owner="worker-1",
+        deadline=_deadline(),
+    )
+
+    assert second.completed_count == 1
+    assert second.retry_scheduled_count == 0
+    assert second.failed_count == 0
+    assert retention_repository.completed is True
+    assert agent_session_repository.deleted is True
+    assert worktree_service.calls == 2
+    assert s3_service.deleted_keys == [
+        "model-key",
+        "artifact-key",
+        "exchange-key",
+    ]
+    assert events.count("delete_blob:model-key") == 1
+    assert events.count("delete_blob:artifact-key") == 1
+    assert events.count("delete_blob:exchange-key") == 1
 
 
 async def test_pinned_model_file_is_not_deleted_and_blocks_finalization() -> None:

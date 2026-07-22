@@ -91,6 +91,7 @@ from azents.services.chat import ChatSessionService
 from azents.services.chat.context import SessionContextService
 from azents.services.chat.data import (
     AgentNotFound,
+    ArchiveWorktreeIntegrityBlocked,
     DeleteInputBufferError,
     InvalidGoalStatusTransition,
     InvalidSessionTitle,
@@ -1816,6 +1817,17 @@ async def archive_agent_session(
                     raise HTTPException(
                         status_code=409,
                         detail="Running session cannot be archived.",
+                    )
+                case ArchiveWorktreeIntegrityBlocked():
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "code": "archive_worktree_integrity_blocked",
+                            "allocation_id": error.allocation_id,
+                            "reason_code": error.reason_code,
+                            "stage": error.stage,
+                            "summary": error.summary,
+                        },
                     )
                 case _:
                     assert_never(error)

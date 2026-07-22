@@ -1,6 +1,7 @@
 """ChatSessionService team session tests."""
 
 import datetime
+from typing import cast
 
 import sqlalchemy as sa
 from azcommon.result import Failure, Success
@@ -13,6 +14,8 @@ from azents.core.enums import (
     AgentSessionTitleSource,
     EventKind,
     LLMProvider,
+    SessionGitWorktreeBranchCreatedBy,
+    SessionGitWorktreeStatus,
     WorkspaceUserRole,
 )
 from azents.rdb.models.agent import RDBAgent
@@ -31,6 +34,7 @@ from azents.repos.archived_session_retention import ArchivedSessionRetentionRepo
 from azents.repos.input_buffer import InputBufferRepository
 from azents.repos.message import MessageRepository
 from azents.repos.session_git_worktree import SessionGitWorktreeRepository
+from azents.repos.session_git_worktree.data import SessionGitWorktree
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
@@ -38,9 +42,16 @@ from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.repos.workspace_user.data import WorkspaceUserCreate
-from azents.services.chat.data import InvalidSessionTitle
+from azents.services.chat.data import (
+    ArchiveWorktreeIntegrityBlocked,
+    InvalidSessionTitle,
+)
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.input_buffer import InputBufferService
+from azents.services.session_git_worktree import (
+    GitWorktreeArchiveIntegrityFailure,
+    SessionGitWorktreeService,
+)
 from azents.services.session_lifecycle.registry import (
     get_session_lifecycle_orchestrator,
 )
@@ -123,6 +134,7 @@ def _service(
     rdb_session_manager: SessionManager[AsyncSession],
     *,
     session_git_worktree_repository: SessionGitWorktreeRepository | None = None,
+    archive_integrity_failure: GitWorktreeArchiveIntegrityFailure | None = None,
 ) -> ChatSessionService:
     """Create ChatSessionService for tests."""
     return ChatSessionService(
@@ -150,6 +162,10 @@ def _service(
             agent_run_repository=AgentRunRepository(),
             action_execution_repository=ActionExecutionRepository(),
             vfs_projection_service=None,
+        ),
+        session_git_worktree_service=cast(
+            SessionGitWorktreeService,
+            _ArchiveIntegrityService(archive_integrity_failure),
         ),
         lifecycle_orchestrator=get_session_lifecycle_orchestrator(),
         session_manager=rdb_session_manager,
@@ -179,6 +195,68 @@ class _OwnedWorktreeRepository(SessionGitWorktreeRepository):
         """Return whether the path is an owned worktree."""
         del session
         return worktree_path in self.paths
+
+
+class _ArchiveAllocationRepository(SessionGitWorktreeRepository):
+    """Return one ready allocation owned by the requested root Session."""
+
+    async def lock_by_session_id(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+    ) -> list[SessionGitWorktree]:
+        """Return a deterministic allocation without database mutation."""
+        del session
+        now = datetime.datetime.now(datetime.UTC)
+        return [
+            SessionGitWorktree(
+                id="01900000000070008000000000000009",
+                session_id=session_id,
+                session_agent_context_id="context-1",
+                created_by_session_agent_id="session-agent-1",
+                created_by_agent_session_id=session_id,
+                action_execution_id=None,
+                session_workspace_project_id=None,
+                source_project_path="/workspace/agent/repo",
+                starting_ref="main",
+                base_commit="abc123",
+                worktree_path="/workspace/agent/.azents/worktrees/session/repo",
+                branch_name="azents/session",
+                branch_created_by=SessionGitWorktreeBranchCreatedBy.AZENTS,
+                status=SessionGitWorktreeStatus.READY,
+                failure_summary=None,
+                cleanup_summary=None,
+                ready_at=now,
+                failed_at=None,
+                cleaned_at=None,
+                created_at=now,
+                updated_at=now,
+            )
+        ]
+
+
+class _ArchiveIntegrityService:
+    """Return the configured archive integrity observation."""
+
+    def __init__(
+        self,
+        failure: GitWorktreeArchiveIntegrityFailure | None,
+    ) -> None:
+        self.failure = failure
+
+    async def validate_archive_integrity(
+        self,
+        *,
+        agent_id: str,
+        root_session_id: str,
+        subtree_session_ids: list[str],
+        allocations: list[SessionGitWorktree],
+    ) -> GitWorktreeArchiveIntegrityFailure | None:
+        """Return the configured failure after observing the locked allocation."""
+        del agent_id, root_session_id, subtree_session_ids
+        assert allocations
+        return self.failure
 
 
 class TestChatSessionTeamSessions:
@@ -907,6 +985,73 @@ class TestChatSessionTeamSessions:
         assert restore_result.value.status == AgentSessionStatus.ACTIVE
         assert restore_result.value.archived_at is None
         assert restore_result.value.purge_after is None
+
+    async def test_archive_worktree_integrity_failure_keeps_session_active(
+        self,
+        rdb_session: AsyncSession,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Archive preflight failure leaves the complete transition unapplied."""
+        workspace_id = await _create_workspace(
+            rdb_session,
+            "team-session-worktree-integrity",
+        )
+        user_id = await _create_user(
+            rdb_session,
+            "team-session-worktree-integrity@example.com",
+        )
+        await _add_workspace_user(
+            rdb_session,
+            workspace_id=workspace_id,
+            user_id=user_id,
+        )
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id,
+            "team-worktree-integrity-agent",
+        )
+        await AgentSessionRepository().ensure_team_primary_for_agent(
+            rdb_session,
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+        )
+        await rdb_session.commit()
+        create_result = await _service(rdb_session_manager).create_team_session(
+            agent_id=agent_id,
+            user_id=user_id,
+            existing_project_paths=[],
+            setup_actions=[],
+        )
+        assert isinstance(create_result, Success)
+        failure = GitWorktreeArchiveIntegrityFailure(
+            allocation_id="01900000000070008000000000000009",
+            reason_code="target_missing",
+            summary="Git worktree contents are no longer available.",
+        )
+
+        archive_result = await _service(
+            rdb_session_manager,
+            session_git_worktree_repository=_ArchiveAllocationRepository(),
+            archive_integrity_failure=failure,
+        ).archive_agent_session(
+            agent_id=agent_id,
+            session_id=create_result.value.id,
+            user_id=user_id,
+        )
+
+        assert isinstance(archive_result, Failure)
+        assert isinstance(archive_result.error, ArchiveWorktreeIntegrityBlocked)
+        assert archive_result.error.allocation_id == failure.allocation_id
+        assert archive_result.error.reason_code == "target_missing"
+        async with rdb_session_manager() as verify_session:
+            active = await AgentSessionRepository().get_by_id(
+                verify_session,
+                create_result.value.id,
+            )
+        assert active is not None
+        assert active.status is AgentSessionStatus.ACTIVE
+        assert active.archived_at is None
+        assert active.purge_after is None
 
     async def test_archive_team_primary_session_is_blocked(
         self,

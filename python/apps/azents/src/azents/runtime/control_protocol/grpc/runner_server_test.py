@@ -592,6 +592,56 @@ async def test_runner_grpc_relays_git_operation_payload() -> None:
         "/workspace/agent/repo"
     )
     assert command.operation_request.git_create_worktree.branch_name == "azents/session"
+
+    await service.dispatch_runner_operation(
+        RuntimeRunnerOperation(
+            runtime_id="runtime-1",
+            runner_generation=accepted.register_accepted.generation,
+            operation_type="inspect_git_worktree",
+            owner_session_id="session-1",
+            payload={
+                "source_project_path": "/workspace/agent/repo",
+                "worktree_path": "/workspace/agent/.azents/worktrees/session/repo",
+                "branch_name": "azents/session",
+            },
+            deadline_at=datetime.now(UTC) + timedelta(seconds=30),
+            body_stream_id=None,
+        ),
+        created_at=_now(),
+    )
+    command = await anext(stream)
+    assert command.operation_request.WhichOneof("payload") == "git_inspect_worktree"
+    assert command.operation_request.owner_session_id == "session-1"
+    assert command.operation_request.git_inspect_worktree.worktree_path == (
+        "/workspace/agent/.azents/worktrees/session/repo"
+    )
+    assert command.operation_request.git_inspect_worktree.branch_name == (
+        "azents/session"
+    )
+
+    await service.dispatch_runner_operation(
+        RuntimeRunnerOperation(
+            runtime_id="runtime-1",
+            runner_generation=accepted.register_accepted.generation,
+            operation_type="remove_git_worktree",
+            owner_session_id="session-1",
+            payload={
+                "source_project_path": "/workspace/agent/repo",
+                "worktree_path": "/workspace/agent/.azents/worktrees/session/repo",
+                "branch_name": "azents/session",
+                "force": True,
+            },
+            deadline_at=datetime.now(UTC) + timedelta(seconds=30),
+            body_stream_id=None,
+        ),
+        created_at=_now(),
+    )
+    command = await anext(stream)
+    assert command.operation_request.WhichOneof("payload") == "git_remove_worktree"
+    assert command.operation_request.git_remove_worktree.force is True
+    assert command.operation_request.git_remove_worktree.branch_name == (
+        "azents/session"
+    )
     await stream.aclose()
 
 
