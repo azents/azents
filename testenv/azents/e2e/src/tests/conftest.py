@@ -46,6 +46,10 @@ _GITHUB_VALIDATION_PROXY = (
     REPOSITORY_ROOT / "testenv/azents/e2e/src/support/github_validation_proxy.py"
 )
 _GITHUB_VALIDATION_INTERNAL_URL = "http://github-validation-proxy:8082"
+_SLACK_PROVIDER_FAKE = (
+    REPOSITORY_ROOT / "testenv/azents/e2e/src/support/slack_provider_fake.py"
+)
+_SLACK_PROVIDER_INTERNAL_API_URL = "http://slack-fake:8083/api"
 _DOCKER_CLIENT_TIMEOUT_SECONDS = 300
 _RUNTIME_PROVIDER_ID = "system-docker"
 _RUNTIME_CONTAINER_NAME_RE = re.compile(r"^azents-runtime-[0-9a-f]{32}$")
@@ -301,6 +305,48 @@ def github_validation_proxy_url(
 
 
 @pytest.fixture(scope="session")
+def slack_provider_fake_container(
+    container_network: Network,
+) -> Generator[DockerContainer, None, None]:
+    """Run the deterministic Slack HTTP and Socket Mode boundary."""
+    python_image = get_docker_hub_image("python:3.14-alpine")
+    with (
+        DockerContainer(
+            python_image,
+            docker_client_kw={"timeout": _DOCKER_CLIENT_TIMEOUT_SECONDS},
+        )
+        .with_volume_mapping(str(_SLACK_PROVIDER_FAKE), "/app/slack_fake.py", "ro")
+        .with_command(["python", "/app/slack_fake.py"])
+        .with_exposed_ports(8083, 8084)
+        .with_network(container_network)
+        .with_network_aliases("slack-fake") as container
+    ):
+        host = container.get_container_host_ip()
+        port = container.get_exposed_port(8083)
+        for _ in range(30):
+            try:
+                response = requests.get(f"http://{host}:{port}/health", timeout=2)
+                if response.status_code == 200:
+                    break
+            except requests.exceptions.RequestException:
+                pass
+            time.sleep(1)
+        else:
+            pytest.fail("Slack provider fake did not start in time")
+        yield container
+
+
+@pytest.fixture(scope="session")
+def slack_provider_fake_url(
+    slack_provider_fake_container: DockerContainer,
+) -> str:
+    """Return the host-visible deterministic Slack control URL."""
+    host = slack_provider_fake_container.get_container_host_ip()
+    port = slack_provider_fake_container.get_exposed_port(8083)
+    return f"http://{host}:{port}"
+
+
+@pytest.fixture(scope="session")
 def rustfs_access_key(s3_credentials: tuple[str, str]) -> str:
     """RustFS access key."""
     return s3_credentials[0]
@@ -518,6 +564,7 @@ def _configure_azents_server_container(
         .with_env("AZ_CREDENTIAL_ENCRYPTION_KEY", credential_encryption_key)
         .with_env("AZ_SYSTEM_BOOTSTRAP_SETUP_TOKEN", system_bootstrap_setup_token)
         .with_env("AZ_REDIS_URL", "redis://valkey:6379")
+        .with_env("AZ_WEB_URL", _MAIN_WEB_BROWSER_URL)
         .with_env("AZ_WORKSPACE_S3_BUCKET", s3_bucket_name)
         .with_env("AZ_WORKSPACE_S3_PREFIX", "v1")
         .with_env("AZ_WORKSPACE_S3_ENDPOINT_URL", "http://rustfs:9000")
@@ -548,6 +595,11 @@ def _configure_azents_server_container(
             "http://openai-proxy:8081/oauth2/device/code",
         )
         .with_env("AZ_XAI_OAUTH_TOKEN_URL", "http://openai-proxy:8081/oauth2/token")
+        .with_env(
+            "AZ_TESTENV_SLACK_API_BASE_URL",
+            _SLACK_PROVIDER_INTERNAL_API_URL,
+        )
+        .with_env("AZ_TESTENV_SLACK_ALLOW_INSECURE_WEBSOCKET", "true")
         .with_env("AZ_TESTENV_RUNTIME_HOOK_QA_ENABLED", "true")
         .with_env("AZ_TOOL_INTERNAL_ERROR_DETAILS", "true")
         .with_env("AZ_AGENT_HOME_IDLE_TIMEOUT_SECS", "60")
@@ -696,9 +748,10 @@ def azents_public_server_container(
     credential_encryption_key: str,
     system_bootstrap_setup_token: str,
     openai_proxy_container: DockerContainer,
+    slack_provider_fake_container: DockerContainer,
 ) -> Generator[DockerContainer, None, None]:
     """azents Public API server container (port 8010)."""
-    del openai_proxy_container
+    del openai_proxy_container, slack_provider_fake_container
     base_container = (
         DockerContainer(
             image=azents_server_image,
@@ -793,9 +846,14 @@ def azents_engine_worker_container(
     credential_encryption_key: str,
     system_bootstrap_setup_token: str,
     openai_proxy_container: DockerContainer,
+    slack_provider_fake_container: DockerContainer,
 ) -> Generator[DockerContainer, None, None]:
     """WebSocket session runt processt azents engine worker container."""
-    del azents_admin_server_container, openai_proxy_container
+    del (
+        azents_admin_server_container,
+        openai_proxy_container,
+        slack_provider_fake_container,
+    )
 
     base_container = (
         DockerContainer(

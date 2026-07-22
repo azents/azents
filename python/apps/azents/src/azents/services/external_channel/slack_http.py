@@ -20,10 +20,10 @@ from azents.services.external_channel.data import (
     ExternalChannelCapabilitySnapshot,
     ExternalChannelProviderIdentity,
 )
+from azents.services.external_channel.slack_endpoint import slack_api_base_url
 
 MAX_SLACK_HTTP_BODY_BYTES = 256 * 1024
 SLACK_SIGNATURE_TOLERANCE_SECONDS = 5 * 60
-_SLACK_AUTH_TEST_URL = "https://slack.com/api/auth.test"
 
 
 class SlackHTTPError(ValueError):
@@ -192,7 +192,7 @@ class SlackWebAPIClient:
         """Validate a bot token and return only sanitized identity state."""
         try:
             response = await self.http_client.post(
-                _SLACK_AUTH_TEST_URL,
+                f"{slack_api_base_url()}/auth.test",
                 headers={"Authorization": f"Bearer {bot_token}"},
             )
         except httpx.RequestError:

@@ -424,9 +424,14 @@ class ExternalChannelEventProcessorService:
                 revocation=normalized,
             )
             return
+        original_url = None
         if normalized.invocation:
             await self._validate_invocation_channel(
                 event=event,
+                message=normalized,
+                bot_token=credentials.bot_token,
+            )
+            original_url = await self._resolve_original_url(
                 message=normalized,
                 bot_token=credentials.bot_token,
             )
@@ -435,6 +440,7 @@ class ExternalChannelEventProcessorService:
             event=event,
             configuration=configuration,
             message=normalized,
+            original_url=original_url,
         )
         if persisted.wake_up is not None:
             await self.session_lifecycle.send_session_wake_up(persisted.wake_up)
@@ -527,12 +533,34 @@ class ExternalChannelEventProcessorService:
                 "The Slack App must be a channel member before tracking."
             )
 
+    async def _resolve_original_url(
+        self,
+        *,
+        message: SlackNormalizedMessage,
+        bot_token: str,
+    ) -> str | None:
+        """Resolve an optional provider permalink without blocking ingestion."""
+        try:
+            return await self.slack_client.get_permalink(
+                bot_token=bot_token,
+                channel_id=message.channel_id,
+                message_ts=message.message_ts,
+            )
+        except (
+            SlackProviderCredentialsInvalid,
+            SlackProviderRateLimited,
+            SlackProviderResourceUnavailable,
+            SlackProviderTemporaryError,
+        ):
+            return None
+
     async def _persist_message_event(
         self,
         *,
         event: ExternalChannelEvent,
         configuration: ExternalChannelConnectionConfiguration,
         message: SlackNormalizedMessage,
+        original_url: str | None,
     ) -> ExternalChannelPersistedMessage:
         now = _now()
         async with self.session_manager() as session:
@@ -630,6 +658,7 @@ class ExternalChannelEventProcessorService:
                 message=message,
                 source_event_id=event.id,
                 now=now,
+                original_url=original_url,
             )
             canonical_message = persisted_revision.message
             trim = persisted_revision.trim
@@ -743,6 +772,7 @@ class ExternalChannelEventProcessorService:
         message: SlackNormalizedMessage,
         source_event_id: str | None,
         now: datetime.datetime,
+        original_url: str | None,
     ) -> ExternalChannelPersistedRevision:
         principal_id = None
         if message.provider_user_id is not None:
@@ -768,7 +798,7 @@ class ExternalChannelEventProcessorService:
                 principal_id=principal_id,
                 author_type=message.author_type,
                 current_revision_id=None,
-                original_url=None,
+                original_url=original_url,
                 lifecycle=message.lifecycle,
                 pending_size=message.normalized_size,
                 provider_created_at=message.provider_created_at,
@@ -799,7 +829,7 @@ class ExternalChannelEventProcessorService:
             pending_size=message.normalized_size,
             provider_created_at=message.provider_created_at,
             provider_updated_at=message.provider_updated_at,
-            original_url=None,
+            original_url=original_url,
         )
         if current is None:
             raise RuntimeError("External Channel message disappeared during update.")
@@ -1135,6 +1165,7 @@ class ExternalChannelEventProcessorService:
                             message=history_message,
                             source_event_id=None,
                             now=_now(),
+                            original_url=None,
                         )
                         trim = persisted_revision.trim
                         binding = await self._record_trim(

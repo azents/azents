@@ -166,11 +166,13 @@ class _TestEventProcessorService(ExternalChannelEventProcessorService):
         event: ExternalChannelEvent,
         configuration: ExternalChannelConnectionConfiguration,
         message: SlackNormalizedMessage,
+        original_url: str | None,
     ) -> ExternalChannelPersistedMessage:
         return await self._persist_message_event(
             event=event,
             configuration=configuration,
             message=message,
+            original_url=original_url,
         )
 
     async def persist_normalized_message_for_test(
@@ -189,6 +191,7 @@ class _TestEventProcessorService(ExternalChannelEventProcessorService):
             message=message,
             source_event_id=None,
             now=now,
+            original_url=None,
         )
 
 
@@ -281,6 +284,7 @@ async def test_unknown_human_mention_creates_request_without_session_or_wake(
         event=admission.event,
         configuration=configuration,
         message=normalized,
+        original_url=("https://example.slack.com/archives/C1/p1721600000000100"),
     )
 
     async with rdb_session_manager() as session:
@@ -299,6 +303,10 @@ async def test_unknown_human_mention_creates_request_without_session_or_wake(
         attempts = list(
             await session.scalars(sa.select(RDBExternalChannelDeliveryAttempt))
         )
+        source_message = await repository.get_message(
+            session,
+            message_id=requests[0].source_message_id,
+        )
 
     assert len(requests) == 1
     assert requests[0].status is ExternalChannelAccessRequestStatus.PENDING
@@ -308,6 +316,10 @@ async def test_unknown_human_mention_creates_request_without_session_or_wake(
     assert len(pending) == 1
     assert len(attempts) == 1
     assert attempts[0].status is ExternalChannelDeliveryStatus.PENDING
+    assert source_message is not None
+    assert source_message.original_url == (
+        "https://example.slack.com/archives/C1/p1721600000000100"
+    )
     assert result.control_delivery_attempt_id == attempts[0].id
     assert result.hydration_required is True
 
@@ -423,6 +435,7 @@ async def test_unknown_human_mention_creates_request_without_session_or_wake(
         event=second_admission.event,
         configuration=configuration,
         message=second_mention,
+        original_url=None,
     )
 
     async with rdb_session_manager() as session:
@@ -494,6 +507,7 @@ async def test_unknown_human_mention_creates_request_without_session_or_wake(
         event=later_admission.event,
         configuration=configuration,
         message=later_context,
+        original_url=None,
     )
 
     second_allowed = await access_service.allow(

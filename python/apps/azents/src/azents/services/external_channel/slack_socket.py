@@ -12,13 +12,16 @@ from websockets.asyncio.client import connect as websocket_connect
 from websockets.exceptions import ConnectionClosed
 
 from azents.repos.external_channel.data import ExternalChannelEventCreate
+from azents.services.external_channel.slack_endpoint import (
+    slack_api_base_url,
+    slack_insecure_websocket_allowed,
+)
 from azents.services.external_channel.slack_http import (
     SlackEventCallback,
     SlackHTTPInvalidPayload,
     parse_slack_callback,
 )
 
-_SLACK_CONNECTIONS_OPEN_URL = "https://slack.com/api/apps.connections.open"
 MAX_SLACK_SOCKET_MESSAGE_BYTES = 256 * 1024
 DEFAULT_SLACK_SOCKET_PING_INTERVAL_SECONDS = 20.0
 DEFAULT_SLACK_SOCKET_PING_TIMEOUT_SECONDS = 20.0
@@ -138,7 +141,7 @@ class SlackSocketWebAPIClient:
         """Request a Socket Mode endpoint without retaining the app token."""
         try:
             response = await self.http_client.post(
-                _SLACK_CONNECTIONS_OPEN_URL,
+                f"{slack_api_base_url()}/apps.connections.open",
                 headers={"Authorization": f"Bearer {app_token}"},
             )
         except httpx.RequestError as error:
@@ -162,10 +165,17 @@ class SlackSocketWebAPIClient:
                     "Slack rejected the Socket Mode credentials."
                 )
             raise SlackSocketUnavailable("Slack rejected the Socket Mode app token.")
-        if not isinstance(url, str) or not url.startswith("wss://"):
+        secure_url = isinstance(url, str) and url.startswith("wss://")
+        testenv_url = (
+            isinstance(url, str)
+            and url.startswith("ws://")
+            and slack_insecure_websocket_allowed()
+        )
+        if not secure_url and not testenv_url:
             raise SlackSocketUnavailable(
                 "Slack Socket Mode endpoint response is invalid."
             )
+        assert isinstance(url, str)
         return SlackSocketConnectionOpen(url=url)
 
     @staticmethod
