@@ -632,11 +632,11 @@ def test_connection_management_web_surface_uses_redacted_operational_state(
     )
     connection_text = connection.text
     assert "Slack" in connection_text
-    assert "Active" in connection_text
+    assert "ACTIVE" in connection_text
     assert "HTTP" in connection_text
     assert _TEAM_ID in connection_text
     assert _APP_ID in connection_text
-    assert "Credentials configured" in connection_text
+    assert "CREDENTIALS CONFIGURED" in connection_text
     assert _BOT_TOKEN not in browser_driver.page_source
     assert _SIGNING_SECRET not in browser_driver.page_source
 
