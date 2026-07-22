@@ -176,6 +176,7 @@ class RuntimeProviderRepository:
         rdb.availability_mode = availability_mode
         rdb.admin_version += 1
         await session.flush()
+        await session.refresh(rdb)
         return self._build_provider(rdb)
 
     async def replace_workspace_availability(

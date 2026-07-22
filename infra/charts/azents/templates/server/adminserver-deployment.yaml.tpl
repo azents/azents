@@ -50,6 +50,10 @@ spec:
             {{- include "azents.platformGitHubAppSecretEnv" . | nindent 12 }}
             {{- include "azents.systemBootstrapSecretEnv" . | nindent 12 }}
             {{- include "azents.externalServiceSecretEnv" . | nindent 12 }}
+          volumeMounts:
+            - name: runtime-provider-bootstrap
+              mountPath: /var/run/azents/runtime-provider-bootstrap
+              readOnly: true
           readinessProbe:
             httpGet:
               path: /health/v1/readiness
@@ -62,4 +66,8 @@ spec:
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
+      volumes:
+        - name: runtime-provider-bootstrap
+          configMap:
+            name: {{ include "azents.runtimeProviderBootstrapConfigMapName" . | quote }}
 {{- end }}

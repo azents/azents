@@ -14,9 +14,12 @@ from azents.core.enums import (
     RuntimeProviderRegistrationMethod,
     RuntimeProviderScope,
 )
+from azents.core.platform_runtime_system_setting import PlatformRuntimeConfig
+from azents.core.system_setting import SystemSettingSection
 from azents.rdb.session import SessionManager
 from azents.repos.runtime_provider.data import RuntimeProviderCreate
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
+from azents.repos.system_setting.repository import SystemSettingRepository
 
 from .data import (
     RuntimeProviderBootstrapDeclarationInput,
@@ -83,6 +86,7 @@ class TestRuntimeProviderBootstrapService:
         service = RuntimeProviderBootstrapService(
             session_manager=_single_session_manager(rdb_session),
             repository=repository,
+            system_setting_repository=SystemSettingRepository(),
         )
 
         first = await service.reconcile(_snapshot())
@@ -109,6 +113,17 @@ class TestRuntimeProviderBootstrapService:
         assert declaration.source_revision == "revision-2"
         assert (
             provider.registration_method == RuntimeProviderRegistrationMethod.BOOTSTRAP
+        )
+        platform_runtime = await SystemSettingRepository().get_current(
+            rdb_session,
+            section=SystemSettingSection.PLATFORM_RUNTIME,
+        )
+        assert platform_runtime is not None
+        assert (
+            PlatformRuntimeConfig.model_validate(
+                platform_runtime.config
+            ).default_provider_id
+            == "system-kubernetes"
         )
 
     async def test_conflicts_without_adopting_admin_provider(
@@ -137,6 +152,7 @@ class TestRuntimeProviderBootstrapService:
         service = RuntimeProviderBootstrapService(
             session_manager=_single_session_manager(rdb_session),
             repository=repository,
+            system_setting_repository=SystemSettingRepository(),
         )
 
         result = await service.reconcile(
@@ -182,6 +198,7 @@ class TestRuntimeProviderBootstrapService:
         service = RuntimeProviderBootstrapService(
             session_manager=_single_session_manager(rdb_session),
             repository=repository,
+            system_setting_repository=SystemSettingRepository(),
         )
         first = await service.reconcile(_snapshot(source_key="helm/one/azents"))
         second = await service.reconcile(_snapshot(source_key="helm/two/azents"))
@@ -208,6 +225,7 @@ class TestRuntimeProviderBootstrapService:
         service = RuntimeProviderBootstrapService(
             session_manager=_single_session_manager(rdb_session),
             repository=repository,
+            system_setting_repository=SystemSettingRepository(),
         )
         initial = await service.reconcile(_snapshot())
 
@@ -242,6 +260,7 @@ class TestRuntimeProviderBootstrapService:
         service = RuntimeProviderBootstrapService(
             session_manager=_single_session_manager(rdb_session),
             repository=repository,
+            system_setting_repository=SystemSettingRepository(),
         )
         initial = await service.reconcile(_snapshot())
         provider_id = initial.created_provider_ids[0]

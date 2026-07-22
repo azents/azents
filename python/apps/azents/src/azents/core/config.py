@@ -6,6 +6,7 @@ Config objects.
 
 import datetime
 import urllib.parse
+from pathlib import Path
 from typing import Literal, Self
 
 from azcommon.logging import RuntimeEnvironment
@@ -60,6 +61,11 @@ class Settings(BaseSettings):
 
     # Initial system administrator bootstrap
     system_bootstrap_setup_token: str | None = None
+
+    # Trusted Runtime Provider bootstrap source
+    runtime_provider_bootstrap_source_key: str | None = None
+    runtime_provider_bootstrap_source_path: Path | None = None
+    runtime_provider_bootstrap_poll_interval_seconds: float = 30.0
 
     # Email; disabled when email_sender is None
     email_sender: str | None = None
@@ -275,6 +281,19 @@ class SystemBootstrapConfig(BaseModel):
     setup_token: str | None
 
 
+class RuntimeProviderBootstrapConfig(BaseModel):
+    """Trusted Runtime Provider bootstrap source settings."""
+
+    source_key: str | None
+    source_path: Path | None
+    poll_interval_seconds: float = Field(gt=0, allow_inf_nan=False)
+
+    @property
+    def enabled(self) -> bool:
+        """Return whether one complete bootstrap source is configured."""
+        return self.source_key is not None and self.source_path is not None
+
+
 class CredentialEncryptionConfig(BaseModel):
     """Credential encryption settings."""
 
@@ -353,6 +372,7 @@ class Config(BaseModel):
     rdb: PostgreSQLConfig
     auth: AuthConfig
     system_bootstrap: SystemBootstrapConfig
+    runtime_provider_bootstrap: RuntimeProviderBootstrapConfig
     email: EmailConfig | None
     credential_encryption: CredentialEncryptionConfig
     redis: RedisConfig
@@ -409,6 +429,13 @@ class Config(BaseModel):
             ),
             system_bootstrap=SystemBootstrapConfig(
                 setup_token=settings.system_bootstrap_setup_token,
+            ),
+            runtime_provider_bootstrap=RuntimeProviderBootstrapConfig(
+                source_key=settings.runtime_provider_bootstrap_source_key,
+                source_path=settings.runtime_provider_bootstrap_source_path,
+                poll_interval_seconds=(
+                    settings.runtime_provider_bootstrap_poll_interval_seconds
+                ),
             ),
             email=EmailConfig(
                 sender=settings.email_sender,
