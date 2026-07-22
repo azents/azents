@@ -17,11 +17,10 @@ from azents.services.external_channel.slack_http import (
 router = APIRouter()
 
 
-@router.post("/slack/events/{selector}", include_in_schema=False)
+@router.post("/slack/events", include_in_schema=False)
 async def receive_slack_event(
     request: Request,
     service: Annotated[SlackHTTPAdmissionService, Depends(SlackHTTPAdmissionService)],
-    selector: str,
     x_slack_request_timestamp: Annotated[
         str | None,
         Header(alias="X-Slack-Request-Timestamp"),
@@ -35,7 +34,6 @@ async def receive_slack_event(
     try:
         raw_body = await _read_bounded_body(request)
         result = await service.handle(
-            selector=selector,
             raw_body=raw_body,
             timestamp_header=x_slack_request_timestamp,
             signature_header=x_slack_signature,

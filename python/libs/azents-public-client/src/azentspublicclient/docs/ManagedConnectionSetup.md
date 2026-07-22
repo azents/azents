@@ -6,7 +6,6 @@
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **connection** | [**ManagedConnection**](ManagedConnection.md) |  | 
-**callback_selector** | **str** |  | 
 
 ## Example
 

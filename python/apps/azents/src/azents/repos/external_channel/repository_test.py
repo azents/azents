@@ -2,7 +2,10 @@
 
 import datetime
 
+import pytest
+import sqlalchemy as sa
 from azcommon.result import Success
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
@@ -12,6 +15,7 @@ from azents.core.enums import (
     ExternalChannelProvider,
     ExternalChannelTransport,
 )
+from azents.rdb.models.external_channel import RDBExternalChannelConnection
 from azents.repos.external_channel.data import (
     ExternalChannelConnectionCreate,
     ExternalChannelEventCreate,
@@ -26,19 +30,22 @@ def _at(minute: int) -> datetime.datetime:
     return datetime.datetime(2026, 7, 21, 0, minute, tzinfo=datetime.UTC)
 
 
-async def _create_workspace(session: AsyncSession) -> str:
+async def _create_workspace(
+    session: AsyncSession,
+    handle: str = "external-channel-repository-test",
+) -> str:
     """Create a Workspace required by an External Channel connection."""
     result = await WorkspaceRepository().create(
         session,
         WorkspaceCreate(
             name="External Channel repository test",
-            handle="external-channel-repository-test",
+            handle=handle,
         ),
     )
     assert isinstance(result, Success)
     workspace_id = await WorkspaceRepository().resolve_id(
         session,
-        "external-channel-repository-test",
+        handle,
     )
     assert workspace_id is not None
     return workspace_id
@@ -50,11 +57,11 @@ def _connection_create(workspace_id: str) -> ExternalChannelConnectionCreate:
         workspace_id=workspace_id,
         provider=ExternalChannelProvider.SLACK,
         transport=ExternalChannelTransport.HTTP,
-        status=ExternalChannelConnectionStatus.CONFIGURING,
-        provider_app_id=None,
-        provider_tenant_id=None,
+        status=ExternalChannelConnectionStatus.ACTIVE,
+        provider_app_id="app-1",
+        provider_tenant_id="tenant-1",
         provider_bot_user_id=None,
-        http_callback_selector_hash="callback-selector-hash",
+        http_callback_selector_hash=None,
         encrypted_credentials="ciphertext-only",
         capabilities=None,
         provider_config=None,
@@ -91,7 +98,7 @@ def _event_create(connection_id: str) -> ExternalChannelEventCreate:
 class TestExternalChannelRepository:
     """External Channel foundation repository tests."""
 
-    async def test_connection_lookup_is_redacted_and_callback_scoped(
+    async def test_connection_lookup_is_redacted_and_provider_scoped(
         self,
         rdb_session: AsyncSession,
     ) -> None:
@@ -103,20 +110,90 @@ class TestExternalChannelRepository:
             rdb_session,
             _connection_create(workspace_id),
         )
-        found = await repo.get_connection_by_http_callback_selector_hash(
+        configuration = await repo.get_slack_http_configuration_by_provider_identity(
             rdb_session,
-            http_callback_selector_hash="callback-selector-hash",
+            provider_app_id="app-1",
+            provider_tenant_id="tenant-1",
         )
 
-        assert found == created
+        assert configuration is not None
+        assert configuration.id == created.id
         assert not hasattr(created, "encrypted_credentials")
         assert created.provider is ExternalChannelProvider.SLACK
-        configuration = await repo.get_connection_configuration(
+        by_id = await repo.get_connection_configuration(
             rdb_session,
             connection_id=created.id,
         )
-        assert configuration is not None
-        assert configuration.encrypted_credentials == "ciphertext-only"
+        assert by_id is not None
+        assert by_id.encrypted_credentials == "ciphertext-only"
+
+    async def test_installation_identity_is_unique_across_workspaces(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """One active Slack App and Team installation has one callback owner."""
+        first_workspace_id = await _create_workspace(
+            rdb_session,
+            "external-channel-installation-first",
+        )
+        second_workspace_id = await _create_workspace(
+            rdb_session,
+            "external-channel-installation-second",
+        )
+        repo = ExternalChannelRepository()
+        await repo.create_connection(
+            rdb_session,
+            _connection_create(first_workspace_id),
+        )
+
+        with pytest.raises(
+            IntegrityError,
+            match="uq_external_channel_connections_installation_identity",
+        ):
+            async with rdb_session.begin_nested():
+                await repo.create_connection(
+                    rdb_session,
+                    _connection_create(second_workspace_id),
+                )
+
+    async def test_released_disconnected_identity_can_be_added_again(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Clearing retained disconnected identity releases the installation."""
+        first_workspace_id = await _create_workspace(
+            rdb_session,
+            "external-channel-released-first",
+        )
+        second_workspace_id = await _create_workspace(
+            rdb_session,
+            "external-channel-released-second",
+        )
+        repo = ExternalChannelRepository()
+        first = await repo.create_connection(
+            rdb_session,
+            _connection_create(first_workspace_id),
+        )
+        await rdb_session.execute(
+            sa.update(RDBExternalChannelConnection)
+            .where(RDBExternalChannelConnection.id == first.id)
+            .values(
+                status=ExternalChannelConnectionStatus.DISCONNECTED,
+                provider_tenant_id=None,
+                provider_bot_user_id=None,
+                capabilities=None,
+            )
+        )
+        await rdb_session.flush()
+
+        second = await repo.create_connection(
+            rdb_session,
+            _connection_create(second_workspace_id),
+        )
+
+        assert second.workspace_id == second_workspace_id
+        assert second.provider_app_id == "app-1"
+        assert second.provider_tenant_id == "tenant-1"
 
     async def test_connection_health_update_returns_refreshed_projection(
         self,

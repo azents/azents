@@ -1,7 +1,6 @@
 """External Channel connection setup and provider health validation."""
 
 import datetime
-import secrets
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Annotated, assert_never
@@ -38,7 +37,6 @@ from azents.services.external_channel.provider import (
 from azents.services.external_channel.slack_http import (
     SlackConnectionValidation,
     SlackWebAPIClient,
-    hash_callback_selector,
 )
 
 
@@ -48,10 +46,9 @@ class ExternalChannelConnectionNotFound(LookupError):
 
 @dataclass(frozen=True)
 class ExternalChannelConnectionSetup:
-    """Created connection and one-time plaintext callback selector."""
+    """Created provider connection."""
 
     connection: ExternalChannelConnection
-    callback_selector: str | None
 
 
 async def get_slack_validation_http_client() -> AsyncIterator[httpx.AsyncClient]:
@@ -106,7 +103,7 @@ class ExternalChannelConnectionService:
         transport: ExternalChannelTransport,
         credentials: SlackConnectionCredentials,
     ) -> ExternalChannelConnectionSetup:
-        """Persist one configuring Slack connection and its opaque HTTP selector."""
+        """Persist one configuring Slack connection."""
         if not app_id.strip():
             raise ValueError("Slack App ID must not be blank.")
         payload = ExternalChannelConnectionCredentialPayload(
@@ -116,14 +113,6 @@ class ExternalChannelConnectionService:
         )
         contract = SlackExternalChannelProviderContract()
         validated = contract.validate_connection_credentials(payload)
-        selector = (
-            secrets.token_urlsafe(32)
-            if transport is ExternalChannelTransport.HTTP
-            else None
-        )
-        selector_hash = (
-            hash_callback_selector(selector) if selector is not None else None
-        )
         create = ExternalChannelConnectionCreate(
             workspace_id=workspace_id,
             provider=ExternalChannelProvider.SLACK,
@@ -132,7 +121,7 @@ class ExternalChannelConnectionService:
             provider_app_id=app_id,
             provider_tenant_id=None,
             provider_bot_user_id=None,
-            http_callback_selector_hash=selector_hash,
+            http_callback_selector_hash=None,
             encrypted_credentials=self.credentials_codec.encrypt(validated),
             capabilities=None,
             provider_config=None,
@@ -148,10 +137,7 @@ class ExternalChannelConnectionService:
         async with self.session_manager() as session:
             connection = await self.repository.create_connection(session, create)
             await session.commit()
-        return ExternalChannelConnectionSetup(
-            connection=connection,
-            callback_selector=selector,
-        )
+        return ExternalChannelConnectionSetup(connection=connection)
 
     async def validate_connection(
         self,

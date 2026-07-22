@@ -35,15 +35,11 @@ export interface ExternalChannelSettingsContainerOutput {
   actionTarget: string | null;
   actionsBusy: boolean;
   onOpenSetup: () => void;
-  onOpenReconnect: (connection: ManagedConnection) => void;
+  onOpenEdit: (connection: ManagedConnection) => void;
   onCloseDialog: () => void;
   onDialogChange: (state: Exclude<ConnectionDialogState, null>) => void;
   onSubmitDialog: () => void;
   onValidate: (connection: ManagedConnection) => void;
-  onSwitchTransport: (
-    connection: ManagedConnection,
-    transport: ExternalChannelTransport,
-  ) => void;
   onDisconnect: (connection: ManagedConnection) => void;
   onRevokeGrant: (grant: ManagedGrant) => void;
   onRemoveBlock: (block: ManagedBlock) => void;
@@ -78,6 +74,7 @@ export function useExternalChannelSettingsContainer({
   const manifestQuery = trpc.externalChannel.getManifestGuidance.useQuery(
     {
       ...queryInput,
+      appName: agent.name,
       transport: manifestTransport,
     },
     {
@@ -143,28 +140,19 @@ export function useExternalChannelSettingsContainer({
     },
     onError: (error) => failAction(error),
   });
-  const switchMutation = trpc.externalChannel.switchTransport.useMutation({
-    onSuccess: async () => {
-      try {
-        await invalidate("switchTransport");
-      } finally {
-        clearAction();
-      }
-    },
-    onError: (error) => failAction(error),
-  });
-  const reconnectMutation =
-    trpc.externalChannel.reconnectConnection.useMutation({
+  const updateMutation = trpc.externalChannel.updateSlackConnection.useMutation(
+    {
       onSuccess: async () => {
         setDialogState(null);
         try {
-          await invalidate("reconnect");
+          await invalidate("update");
         } finally {
           clearAction();
         }
       },
       onError: (error) => failAction(error),
-    });
+    },
+  );
   const disconnectMutation =
     trpc.externalChannel.disconnectConnection.useMutation({
       onSuccess: async () => {
@@ -242,15 +230,16 @@ export function useExternalChannelSettingsContainer({
         credentials: { ...EMPTY_CREDENTIALS },
       });
     },
-    onOpenReconnect: (connection) => {
+    onOpenEdit: (connection) => {
       if (actionLock.current) {
         return;
       }
       setActionError(null);
       setManifestTransport(connection.transport);
       setDialogState({
-        type: "RECONNECT",
+        type: "EDIT",
         connectionId: connection.id,
+        appId: connection.provider_app_id ?? "",
         transport: connection.transport,
         credentials: { ...EMPTY_CREDENTIALS },
       });
@@ -289,9 +278,11 @@ export function useExternalChannelSettingsContainer({
         });
         return;
       }
-      reconnectMutation.mutate({
+      updateMutation.mutate({
         ...queryInput,
         connectionId: dialogState.connectionId,
+        appId: dialogState.appId,
+        transport: dialogState.transport,
         credentials,
       });
     },
@@ -302,16 +293,6 @@ export function useExternalChannelSettingsContainer({
       validateMutation.mutate({
         ...queryInput,
         connectionId: connection.id,
-      });
-    },
-    onSwitchTransport: (connection, transport) => {
-      if (!beginAction(connection.id)) {
-        return;
-      }
-      switchMutation.mutate({
-        ...queryInput,
-        connectionId: connection.id,
-        transport,
       });
     },
     onDisconnect: (connection) => {

@@ -45,7 +45,9 @@ class TestSlackManifestGuidance(unittest.TestCase):
                     ],
                 socket_mode_enabled = True,
                 app_token_scope = '',
-                callback_path_template = ''
+                callback_url = '',
+                manifest = { },
+                manifest_json = ''
             )
         else:
             return SlackManifestGuidance(
@@ -58,7 +60,9 @@ class TestSlackManifestGuidance(unittest.TestCase):
                     ],
                 socket_mode_enabled = True,
                 app_token_scope = '',
-                callback_path_template = '',
+                callback_url = '',
+                manifest = { },
+                manifest_json = '',
         )
         """
 

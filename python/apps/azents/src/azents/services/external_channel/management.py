@@ -1,7 +1,8 @@
 """Authorized provider-neutral External Channel management operations."""
 
 import datetime
-import secrets
+import json
+import re
 from dataclasses import dataclass
 from typing import Annotated, Literal
 
@@ -45,22 +46,16 @@ from azents.services.external_channel.data import (
 from azents.services.external_channel.provider import (
     SlackExternalChannelProviderContract,
 )
-from azents.services.external_channel.slack_http import hash_callback_selector
 
 
 class ExternalChannelManagementNotFound(LookupError):
     """A management resource is unavailable to the caller."""
 
 
-class ExternalChannelManagementConflict(ValueError):
-    """The requested lifecycle operation conflicts with current state."""
-
-
 class ManagedConnectionSetup(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     connection: ManagedConnection
-    callback_selector: str | None
 
 
 class SlackManifestGuidance(BaseModel):
@@ -72,7 +67,9 @@ class SlackManifestGuidance(BaseModel):
     event_subscriptions: tuple[str, ...]
     socket_mode_enabled: bool
     app_token_scope: str | None
-    callback_path_template: str | None
+    callback_url: str | None
+    manifest: dict[str, object]
+    manifest_json: str
 
 
 class ExternalChannelDecisionInput(BaseModel):
@@ -172,6 +169,9 @@ class ExternalChannelManagementService:
                 ),
             )
             await session.commit()
+        await self.connection_service.validate_connection(
+            connection_id=setup.connection.id
+        )
         connections = await self.list_connections(
             workspace_id=workspace_id,
             agent_id=agent_id,
@@ -180,10 +180,7 @@ class ExternalChannelManagementService:
         connection = next(
             item for item in connections if item.id == setup.connection.id
         )
-        return ManagedConnectionSetup(
-            connection=connection,
-            callback_selector=setup.callback_selector,
-        )
+        return ManagedConnectionSetup(connection=connection)
 
     async def validate_connection(
         self,
@@ -203,69 +200,15 @@ class ExternalChannelManagementService:
             connection_id=connection_id
         )
 
-    async def switch_transport(
+    async def update_slack(
         self,
         *,
         workspace_id: str,
         agent_id: str,
         workspace_user_id: str,
         connection_id: str,
+        app_id: str,
         transport: ExternalChannelTransport,
-    ) -> ManagedConnectionSetup:
-        await self._require_owned_connection(
-            workspace_id=workspace_id,
-            agent_id=agent_id,
-            workspace_user_id=workspace_user_id,
-            connection_id=connection_id,
-        )
-        async with self.session_manager() as session:
-            configuration = await self.domain_repository.get_connection_configuration(
-                session,
-                connection_id=connection_id,
-            )
-        if configuration is None or configuration.encrypted_credentials is None:
-            raise ExternalChannelManagementNotFound(connection_id)
-        credentials = self.connection_service.credentials_codec.decrypt(
-            configuration.encrypted_credentials
-        )
-        if (
-            transport is ExternalChannelTransport.SOCKET
-            and credentials.app_token is None
-        ):
-            raise ExternalChannelManagementConflict(
-                "Slack Socket Mode requires an app token."
-            )
-        selector = (
-            secrets.token_urlsafe(32)
-            if transport is ExternalChannelTransport.HTTP
-            else None
-        )
-        async with self.session_manager() as session:
-            connection = await self.repository.switch_transport(
-                session,
-                workspace_id=workspace_id,
-                agent_id=agent_id,
-                connection_id=connection_id,
-                transport=transport,
-                selector_hash=(
-                    None if selector is None else hash_callback_selector(selector)
-                ),
-            )
-            if connection is None:
-                raise ExternalChannelManagementNotFound(connection_id)
-            await session.commit()
-        return ManagedConnectionSetup(
-            connection=connection,
-            callback_selector=selector,
-        )
-
-    async def reconnect(
-        self,
-        *,
-        workspace_id: str,
-        agent_id: str,
-        workspace_user_id: str,
-        connection_id: str,
         credentials: SlackConnectionCredentials,
     ) -> ExternalChannelConnectionStatusSnapshot:
         await self._require_owned_connection(
@@ -274,28 +217,25 @@ class ExternalChannelManagementService:
             workspace_user_id=workspace_user_id,
             connection_id=connection_id,
         )
-        async with self.session_manager() as session:
-            configuration = await self.domain_repository.get_connection_configuration(
-                session,
-                connection_id=connection_id,
-            )
-        if configuration is None:
-            raise ExternalChannelManagementNotFound(connection_id)
+        if not app_id.strip():
+            raise ValueError("Slack App ID must not be blank.")
         contract = SlackExternalChannelProviderContract()
         validated = contract.validate_connection_credentials(
             ExternalChannelConnectionCredentialPayload(
                 provider=credentials.provider,
-                transport=configuration.transport,
+                transport=transport,
                 credentials=credentials,
             ),
         )
         encrypted = self.connection_service.credentials_codec.encrypt(validated)
         async with self.session_manager() as session:
-            connection = await self.repository.replace_credentials(
+            connection = await self.repository.replace_slack_configuration(
                 session,
                 workspace_id=workspace_id,
                 agent_id=agent_id,
                 connection_id=connection_id,
+                provider_app_id=app_id,
+                transport=transport,
                 encrypted_credentials=encrypted,
             )
             if connection is None:
@@ -331,8 +271,6 @@ class ExternalChannelManagementService:
             if cleanup_ids is None:
                 raise ExternalChannelManagementNotFound(connection_id)
             await session.commit()
-        for cleanup_id in cleanup_ids:
-            await self.action_service.attempt_delivery(cleanup_id)
         async with self.session_manager() as session:
             connection = await self.repository.complete_connection_disconnect(
                 session,
@@ -344,7 +282,9 @@ class ExternalChannelManagementService:
             if connection is None:
                 raise ExternalChannelManagementNotFound(connection_id)
             await session.commit()
-            return connection
+        for cleanup_id in cleanup_ids:
+            await self.action_service.attempt_delivery(cleanup_id)
+        return connection
 
     async def list_bindings(
         self,
@@ -617,33 +557,66 @@ class ExternalChannelManagementService:
 
 def slack_manifest_guidance(
     transport: ExternalChannelTransport,
+    *,
+    callback_url: str,
+    app_name: str,
 ) -> SlackManifestGuidance:
-    """Return stable minimum Slack App configuration guidance."""
+    """Return a copy-ready Slack App Manifest and setup metadata."""
+    bot_scopes = (
+        "app_mentions:read",
+        "channels:history",
+        "groups:history",
+        "chat:write",
+        "users:read",
+    )
+    event_subscriptions = (
+        "app_mention",
+        "message.channels",
+        "message.groups",
+        "app_uninstalled",
+        "tokens_revoked",
+    )
+    normalized_name = app_name.strip() or "Azents Agent"
+    bot_name = re.sub(r"[^a-z0-9_-]+", "-", normalized_name.casefold()).strip("-")
+    bot_name = (bot_name or "azents-agent")[:80]
+    event_settings: dict[str, object] = {
+        "bot_events": list(event_subscriptions),
+    }
+    if transport is ExternalChannelTransport.HTTP:
+        event_settings["request_url"] = callback_url
+    settings: dict[str, object] = {
+        "event_subscriptions": event_settings,
+        "org_deploy_enabled": False,
+        "socket_mode_enabled": transport is ExternalChannelTransport.SOCKET,
+        "token_rotation_enabled": False,
+    }
+    manifest: dict[str, object] = {
+        "display_information": {
+            "name": normalized_name[:35],
+            "description": f"{normalized_name[:60]} powered by Azents",
+        },
+        "features": {
+            "bot_user": {
+                "display_name": bot_name,
+                "always_online": False,
+            }
+        },
+        "oauth_config": {"scopes": {"bot": list(bot_scopes)}},
+        "settings": settings,
+    }
     return SlackManifestGuidance(
         transport=transport,
-        bot_scopes=(
-            "app_mentions:read",
-            "channels:history",
-            "groups:history",
-            "chat:write",
-            "users:read",
-        ),
-        event_subscriptions=(
-            "app_mention",
-            "message.channels",
-            "message.groups",
-            "app_uninstalled",
-            "tokens_revoked",
-        ),
+        bot_scopes=bot_scopes,
+        event_subscriptions=event_subscriptions,
         socket_mode_enabled=transport is ExternalChannelTransport.SOCKET,
         app_token_scope=(
             "connections:write"
             if transport is ExternalChannelTransport.SOCKET
             else None
         ),
-        callback_path_template=(
-            "/external-channel/v1/slack/events/{selector}"
-            if transport is ExternalChannelTransport.HTTP
-            else None
+        callback_url=(
+            callback_url if transport is ExternalChannelTransport.HTTP else None
         ),
+        manifest=manifest,
+        manifest_json=json.dumps(manifest, indent=2),
     )

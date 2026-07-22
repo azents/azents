@@ -17,8 +17,8 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, StrictStr
-from typing import Any, ClassVar, Dict, List, Optional
+from pydantic import BaseModel, ConfigDict
+from typing import Any, ClassVar, Dict, List
 from azentspublicclient.models.managed_connection import ManagedConnection
 from typing import Optional, Set
 from typing_extensions import Self
@@ -28,9 +28,8 @@ class ManagedConnectionSetup(BaseModel):
     ManagedConnectionSetup
     """ # noqa: E501
     connection: ManagedConnection
-    callback_selector: Optional[StrictStr]
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["connection", "callback_selector"]
+    __properties: ClassVar[List[str]] = ["connection"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -81,11 +80,6 @@ class ManagedConnectionSetup(BaseModel):
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
 
-        # set to None if callback_selector (nullable) is None
-        # and model_fields_set contains the field
-        if self.callback_selector is None and "callback_selector" in self.model_fields_set:
-            _dict['callback_selector'] = None
-
         return _dict
 
     @classmethod
@@ -98,8 +92,7 @@ class ManagedConnectionSetup(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "connection": ManagedConnection.from_dict(obj["connection"]) if obj.get("connection") is not None else None,
-            "callback_selector": obj.get("callback_selector")
+            "connection": ManagedConnection.from_dict(obj["connection"]) if obj.get("connection") is not None else None
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

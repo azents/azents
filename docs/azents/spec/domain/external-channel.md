@@ -25,11 +25,12 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/manifest
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
+  - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/slack
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/approval-requests/{access_request_id}
 last_verified_at: 2026-07-22
-spec_version: 1
+spec_version: 2
 ---
 
 # External Channel
@@ -76,10 +77,32 @@ Slack is the first provider. Each connection uses a manually configured dedicate
 
 ## Management Surface
 
-Agent administrators can view Slack manifest guidance, create a connection and route, validate or reconnect credentials, switch HTTP/Socket transport, disconnect terminally, and manage grants and blocks. Session Channels shows bindings, work state, truncation, delivery outcomes, grants, and terminal disconnect state. Approval links contain only an opaque access-request ID and require an authenticated Agent administrator; unauthorized and missing requests are returned as not found.
+Agent administrators can retrieve a complete copy-ready Slack App Manifest, follow
+equivalent manual Slack UI instructions, create a connection and route, validate a
+connection, replace its App ID, transport, and complete credential set, disconnect
+it terminally, and manage grants and blocks. Saving setup or replacement values
+immediately validates them together. Secret fields remain blank and required when an
+existing connection is edited.
+
+Slack validation first uses `auth.test` to resolve Team and Bot identity, then uses
+`bots.info` to verify that the Bot Token's actual App ID equals the configured App
+ID. An App ID copied from a different Slack App is rejected as a recoverable
+configuration error rather than being marked active.
+
+Disconnect has no lifecycle-status admission guard. It disables inbound routing,
+clears credentials, terminalizes owned live state, and commits the terminal
+connection before attempting provider cleanup. Repeating disconnect is safe.
+Disconnected rows remain as retained history roots but are omitted from the active
+Agent connection list.
+
+Session Channels shows bindings, work state, truncation, delivery outcomes, grants,
+and terminal disconnect state. Approval links contain only an opaque access-request
+ID and require an authenticated Agent administrator; unauthorized and missing
+requests are returned as not found.
 
 Connection responses expose provider identity, capabilities, health, route, and redacted credential state. They never return ciphertext or decrypted secret values.
 
 ## Changelog
 
+- **2026-07-22** (spec_version 2) — Added copy-ready Slack App setup guidance, App/Token ownership validation, complete connection replacement, unconditional idempotent disconnect, and active-list filtering for disconnected connections.
 - **2026-07-22** (spec_version 1) — Promoted the External Channel ownership model, persistence graph, management API, security boundaries, Slack-first provider scope, and Session binding contract.

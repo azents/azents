@@ -16,7 +16,9 @@ from pydantic import validate_call, Field, StrictFloat, StrictStr, StrictInt
 from typing import Any, Dict, List, Optional, Tuple, Union
 from typing_extensions import Annotated
 
-from pydantic import StrictStr
+from pydantic import Field, StrictStr
+from typing import Optional
+from typing_extensions import Annotated
 from azentspublicclient.models.external_channel_connection_status_snapshot import ExternalChannelConnectionStatusSnapshot
 from azentspublicclient.models.external_channel_decision_input import ExternalChannelDecisionInput
 from azentspublicclient.models.external_channel_transport import ExternalChannelTransport
@@ -28,8 +30,6 @@ from azentspublicclient.models.managed_connection_list_response import ManagedCo
 from azentspublicclient.models.managed_connection_setup import ManagedConnectionSetup
 from azentspublicclient.models.slack_connection_setup_request import SlackConnectionSetupRequest
 from azentspublicclient.models.slack_manifest_guidance import SlackManifestGuidance
-from azentspublicclient.models.slack_reconnect_request import SlackReconnectRequest
-from azentspublicclient.models.transport_switch_request import TransportSwitchRequest
 
 from azentspublicclient.api_client import ApiClient, RequestSerialized
 from azentspublicclient.api_response import ApiResponse
@@ -1214,6 +1214,7 @@ class ExternalChannelV1Api:
         agent_id: StrictStr,
         handle: StrictStr,
         transport: ExternalChannelTransport,
+        app_name: Optional[Annotated[str, Field(min_length=1, strict=True, max_length=80)]] = None,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -1229,7 +1230,7 @@ class ExternalChannelV1Api:
     ) -> SlackManifestGuidance:
         """Get Manifest Guidance
 
-        Return minimum Slack App configuration after Agent access validation.
+        Return copy-ready Slack App configuration after Agent access validation.
 
         :param agent_id: (required)
         :type agent_id: str
@@ -1237,6 +1238,8 @@ class ExternalChannelV1Api:
         :type handle: str
         :param transport: (required)
         :type transport: ExternalChannelTransport
+        :param app_name:
+        :type app_name: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -1263,6 +1266,7 @@ class ExternalChannelV1Api:
             agent_id=agent_id,
             handle=handle,
             transport=transport,
+            app_name=app_name,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -1290,6 +1294,7 @@ class ExternalChannelV1Api:
         agent_id: StrictStr,
         handle: StrictStr,
         transport: ExternalChannelTransport,
+        app_name: Optional[Annotated[str, Field(min_length=1, strict=True, max_length=80)]] = None,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -1305,7 +1310,7 @@ class ExternalChannelV1Api:
     ) -> ApiResponse[SlackManifestGuidance]:
         """Get Manifest Guidance
 
-        Return minimum Slack App configuration after Agent access validation.
+        Return copy-ready Slack App configuration after Agent access validation.
 
         :param agent_id: (required)
         :type agent_id: str
@@ -1313,6 +1318,8 @@ class ExternalChannelV1Api:
         :type handle: str
         :param transport: (required)
         :type transport: ExternalChannelTransport
+        :param app_name:
+        :type app_name: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -1339,6 +1346,7 @@ class ExternalChannelV1Api:
             agent_id=agent_id,
             handle=handle,
             transport=transport,
+            app_name=app_name,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -1366,6 +1374,7 @@ class ExternalChannelV1Api:
         agent_id: StrictStr,
         handle: StrictStr,
         transport: ExternalChannelTransport,
+        app_name: Optional[Annotated[str, Field(min_length=1, strict=True, max_length=80)]] = None,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -1381,7 +1390,7 @@ class ExternalChannelV1Api:
     ) -> RESTResponseType:
         """Get Manifest Guidance
 
-        Return minimum Slack App configuration after Agent access validation.
+        Return copy-ready Slack App configuration after Agent access validation.
 
         :param agent_id: (required)
         :type agent_id: str
@@ -1389,6 +1398,8 @@ class ExternalChannelV1Api:
         :type handle: str
         :param transport: (required)
         :type transport: ExternalChannelTransport
+        :param app_name:
+        :type app_name: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -1415,6 +1426,7 @@ class ExternalChannelV1Api:
             agent_id=agent_id,
             handle=handle,
             transport=transport,
+            app_name=app_name,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -1437,6 +1449,7 @@ class ExternalChannelV1Api:
         agent_id,
         handle,
         transport,
+        app_name,
         _request_auth,
         _content_type,
         _headers,
@@ -1466,6 +1479,10 @@ class ExternalChannelV1Api:
         if transport is not None:
             
             _query_params.append(('transport', transport.value))
+            
+        if app_name is not None:
+            
+            _query_params.append(('app_name', app_name))
             
         # process the header parameters
         # process the form parameters
@@ -2341,328 +2358,6 @@ class ExternalChannelV1Api:
         return self.api_client.param_serialize(
             method='GET',
             resource_path='/external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels',
-            path_params=_path_params,
-            query_params=_query_params,
-            header_params=_header_params,
-            body=_body_params,
-            post_params=_form_params,
-            files=_files,
-            auth_settings=_auth_settings,
-            collection_formats=_collection_formats,
-            _host=_host,
-            _request_auth=_request_auth
-        )
-
-
-
-
-    @validate_call
-    def external_channel_v1_reconnect_connection(
-        self,
-        agent_id: StrictStr,
-        connection_id: StrictStr,
-        handle: StrictStr,
-        slack_reconnect_request: SlackReconnectRequest,
-        _request_timeout: Union[
-            None,
-            Annotated[StrictFloat, Field(gt=0)],
-            Tuple[
-                Annotated[StrictFloat, Field(gt=0)],
-                Annotated[StrictFloat, Field(gt=0)]
-            ]
-        ] = None,
-        _request_auth: Optional[Dict[StrictStr, Any]] = None,
-        _content_type: Optional[StrictStr] = None,
-        _headers: Optional[Dict[StrictStr, Any]] = None,
-        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> ExternalChannelConnectionStatusSnapshot:
-        """Reconnect Connection
-
-        Replace encrypted credentials and immediately validate them.
-
-        :param agent_id: (required)
-        :type agent_id: str
-        :param connection_id: (required)
-        :type connection_id: str
-        :param handle: (required)
-        :type handle: str
-        :param slack_reconnect_request: (required)
-        :type slack_reconnect_request: SlackReconnectRequest
-        :param _request_timeout: timeout setting for this request. If one
-                                 number provided, it will be total request
-                                 timeout. It can also be a pair (tuple) of
-                                 (connection, read) timeouts.
-        :type _request_timeout: int, tuple(int, int), optional
-        :param _request_auth: set to override the auth_settings for an a single
-                              request; this effectively ignores the
-                              authentication in the spec for a single request.
-        :type _request_auth: dict, optional
-        :param _content_type: force content-type for the request.
-        :type _content_type: str, Optional
-        :param _headers: set to override the headers for a single
-                         request; this effectively ignores the headers
-                         in the spec for a single request.
-        :type _headers: dict, optional
-        :param _host_index: set to override the host_index for a single
-                            request; this effectively ignores the host_index
-                            in the spec for a single request.
-        :type _host_index: int, optional
-        :return: Returns the result object.
-        """ # noqa: E501
-
-        _param = self._external_channel_v1_reconnect_connection_serialize(
-            agent_id=agent_id,
-            connection_id=connection_id,
-            handle=handle,
-            slack_reconnect_request=slack_reconnect_request,
-            _request_auth=_request_auth,
-            _content_type=_content_type,
-            _headers=_headers,
-            _host_index=_host_index
-        )
-
-        _response_types_map: Dict[str, Optional[str]] = {
-            '200': "ExternalChannelConnectionStatusSnapshot",
-            '422': "HTTPValidationError",
-        }
-        response_data = self.api_client.call_api(
-            *_param,
-            _request_timeout=_request_timeout
-        )
-        response_data.read()
-        return self.api_client.response_deserialize(
-            response_data=response_data,
-            response_types_map=_response_types_map,
-        ).data
-
-
-    @validate_call
-    def external_channel_v1_reconnect_connection_with_http_info(
-        self,
-        agent_id: StrictStr,
-        connection_id: StrictStr,
-        handle: StrictStr,
-        slack_reconnect_request: SlackReconnectRequest,
-        _request_timeout: Union[
-            None,
-            Annotated[StrictFloat, Field(gt=0)],
-            Tuple[
-                Annotated[StrictFloat, Field(gt=0)],
-                Annotated[StrictFloat, Field(gt=0)]
-            ]
-        ] = None,
-        _request_auth: Optional[Dict[StrictStr, Any]] = None,
-        _content_type: Optional[StrictStr] = None,
-        _headers: Optional[Dict[StrictStr, Any]] = None,
-        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> ApiResponse[ExternalChannelConnectionStatusSnapshot]:
-        """Reconnect Connection
-
-        Replace encrypted credentials and immediately validate them.
-
-        :param agent_id: (required)
-        :type agent_id: str
-        :param connection_id: (required)
-        :type connection_id: str
-        :param handle: (required)
-        :type handle: str
-        :param slack_reconnect_request: (required)
-        :type slack_reconnect_request: SlackReconnectRequest
-        :param _request_timeout: timeout setting for this request. If one
-                                 number provided, it will be total request
-                                 timeout. It can also be a pair (tuple) of
-                                 (connection, read) timeouts.
-        :type _request_timeout: int, tuple(int, int), optional
-        :param _request_auth: set to override the auth_settings for an a single
-                              request; this effectively ignores the
-                              authentication in the spec for a single request.
-        :type _request_auth: dict, optional
-        :param _content_type: force content-type for the request.
-        :type _content_type: str, Optional
-        :param _headers: set to override the headers for a single
-                         request; this effectively ignores the headers
-                         in the spec for a single request.
-        :type _headers: dict, optional
-        :param _host_index: set to override the host_index for a single
-                            request; this effectively ignores the host_index
-                            in the spec for a single request.
-        :type _host_index: int, optional
-        :return: Returns the result object.
-        """ # noqa: E501
-
-        _param = self._external_channel_v1_reconnect_connection_serialize(
-            agent_id=agent_id,
-            connection_id=connection_id,
-            handle=handle,
-            slack_reconnect_request=slack_reconnect_request,
-            _request_auth=_request_auth,
-            _content_type=_content_type,
-            _headers=_headers,
-            _host_index=_host_index
-        )
-
-        _response_types_map: Dict[str, Optional[str]] = {
-            '200': "ExternalChannelConnectionStatusSnapshot",
-            '422': "HTTPValidationError",
-        }
-        response_data = self.api_client.call_api(
-            *_param,
-            _request_timeout=_request_timeout
-        )
-        response_data.read()
-        return self.api_client.response_deserialize(
-            response_data=response_data,
-            response_types_map=_response_types_map,
-        )
-
-
-    @validate_call
-    def external_channel_v1_reconnect_connection_without_preload_content(
-        self,
-        agent_id: StrictStr,
-        connection_id: StrictStr,
-        handle: StrictStr,
-        slack_reconnect_request: SlackReconnectRequest,
-        _request_timeout: Union[
-            None,
-            Annotated[StrictFloat, Field(gt=0)],
-            Tuple[
-                Annotated[StrictFloat, Field(gt=0)],
-                Annotated[StrictFloat, Field(gt=0)]
-            ]
-        ] = None,
-        _request_auth: Optional[Dict[StrictStr, Any]] = None,
-        _content_type: Optional[StrictStr] = None,
-        _headers: Optional[Dict[StrictStr, Any]] = None,
-        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> RESTResponseType:
-        """Reconnect Connection
-
-        Replace encrypted credentials and immediately validate them.
-
-        :param agent_id: (required)
-        :type agent_id: str
-        :param connection_id: (required)
-        :type connection_id: str
-        :param handle: (required)
-        :type handle: str
-        :param slack_reconnect_request: (required)
-        :type slack_reconnect_request: SlackReconnectRequest
-        :param _request_timeout: timeout setting for this request. If one
-                                 number provided, it will be total request
-                                 timeout. It can also be a pair (tuple) of
-                                 (connection, read) timeouts.
-        :type _request_timeout: int, tuple(int, int), optional
-        :param _request_auth: set to override the auth_settings for an a single
-                              request; this effectively ignores the
-                              authentication in the spec for a single request.
-        :type _request_auth: dict, optional
-        :param _content_type: force content-type for the request.
-        :type _content_type: str, Optional
-        :param _headers: set to override the headers for a single
-                         request; this effectively ignores the headers
-                         in the spec for a single request.
-        :type _headers: dict, optional
-        :param _host_index: set to override the host_index for a single
-                            request; this effectively ignores the host_index
-                            in the spec for a single request.
-        :type _host_index: int, optional
-        :return: Returns the result object.
-        """ # noqa: E501
-
-        _param = self._external_channel_v1_reconnect_connection_serialize(
-            agent_id=agent_id,
-            connection_id=connection_id,
-            handle=handle,
-            slack_reconnect_request=slack_reconnect_request,
-            _request_auth=_request_auth,
-            _content_type=_content_type,
-            _headers=_headers,
-            _host_index=_host_index
-        )
-
-        _response_types_map: Dict[str, Optional[str]] = {
-            '200': "ExternalChannelConnectionStatusSnapshot",
-            '422': "HTTPValidationError",
-        }
-        response_data = self.api_client.call_api(
-            *_param,
-            _request_timeout=_request_timeout
-        )
-        return response_data.response
-
-
-    def _external_channel_v1_reconnect_connection_serialize(
-        self,
-        agent_id,
-        connection_id,
-        handle,
-        slack_reconnect_request,
-        _request_auth,
-        _content_type,
-        _headers,
-        _host_index,
-    ) -> RequestSerialized:
-
-        _host = None
-
-        _collection_formats: Dict[str, str] = {
-        }
-
-        _path_params: Dict[str, str] = {}
-        _query_params: List[Tuple[str, str]] = []
-        _header_params: Dict[str, Optional[str]] = _headers or {}
-        _form_params: List[Tuple[str, str]] = []
-        _files: Dict[
-            str, Union[str, bytes, List[str], List[bytes], List[Tuple[str, bytes]]]
-        ] = {}
-        _body_params: Optional[bytes] = None
-
-        # process the path parameters
-        if agent_id is not None:
-            _path_params['agent_id'] = agent_id
-        if connection_id is not None:
-            _path_params['connection_id'] = connection_id
-        if handle is not None:
-            _path_params['handle'] = handle
-        # process the query parameters
-        # process the header parameters
-        # process the form parameters
-        # process the body parameter
-        if slack_reconnect_request is not None:
-            _body_params = slack_reconnect_request
-
-
-        # set the HTTP header `Accept`
-        if 'Accept' not in _header_params:
-            _header_params['Accept'] = self.api_client.select_header_accept(
-                [
-                    'application/json'
-                ]
-            )
-
-        # set the HTTP header `Content-Type`
-        if _content_type:
-            _header_params['Content-Type'] = _content_type
-        else:
-            _default_content_type = (
-                self.api_client.select_header_content_type(
-                    [
-                        'application/json'
-                    ]
-                )
-            )
-            if _default_content_type is not None:
-                _header_params['Content-Type'] = _default_content_type
-
-        # authentication setting
-        _auth_settings: List[str] = [
-            'HTTPBearer'
-        ]
-
-        return self.api_client.param_serialize(
-            method='POST',
-            resource_path='/external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/reconnect',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -3574,12 +3269,12 @@ class ExternalChannelV1Api:
 
 
     @validate_call
-    def external_channel_v1_switch_transport(
+    def external_channel_v1_update_slack_connection(
         self,
         agent_id: StrictStr,
         connection_id: StrictStr,
         handle: StrictStr,
-        transport_switch_request: TransportSwitchRequest,
+        slack_connection_setup_request: SlackConnectionSetupRequest,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -3592,10 +3287,10 @@ class ExternalChannelV1Api:
         _content_type: Optional[StrictStr] = None,
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> ManagedConnectionSetup:
-        """Switch Transport
+    ) -> ExternalChannelConnectionStatusSnapshot:
+        """Update Slack Connection
 
-        Switch inbound transport without silently falling back.
+        Replace the complete Slack setup and immediately validate it.
 
         :param agent_id: (required)
         :type agent_id: str
@@ -3603,8 +3298,8 @@ class ExternalChannelV1Api:
         :type connection_id: str
         :param handle: (required)
         :type handle: str
-        :param transport_switch_request: (required)
-        :type transport_switch_request: TransportSwitchRequest
+        :param slack_connection_setup_request: (required)
+        :type slack_connection_setup_request: SlackConnectionSetupRequest
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -3627,11 +3322,11 @@ class ExternalChannelV1Api:
         :return: Returns the result object.
         """ # noqa: E501
 
-        _param = self._external_channel_v1_switch_transport_serialize(
+        _param = self._external_channel_v1_update_slack_connection_serialize(
             agent_id=agent_id,
             connection_id=connection_id,
             handle=handle,
-            transport_switch_request=transport_switch_request,
+            slack_connection_setup_request=slack_connection_setup_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -3639,7 +3334,7 @@ class ExternalChannelV1Api:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '200': "ManagedConnectionSetup",
+            '200': "ExternalChannelConnectionStatusSnapshot",
             '422': "HTTPValidationError",
         }
         response_data = self.api_client.call_api(
@@ -3654,12 +3349,12 @@ class ExternalChannelV1Api:
 
 
     @validate_call
-    def external_channel_v1_switch_transport_with_http_info(
+    def external_channel_v1_update_slack_connection_with_http_info(
         self,
         agent_id: StrictStr,
         connection_id: StrictStr,
         handle: StrictStr,
-        transport_switch_request: TransportSwitchRequest,
+        slack_connection_setup_request: SlackConnectionSetupRequest,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -3672,10 +3367,10 @@ class ExternalChannelV1Api:
         _content_type: Optional[StrictStr] = None,
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> ApiResponse[ManagedConnectionSetup]:
-        """Switch Transport
+    ) -> ApiResponse[ExternalChannelConnectionStatusSnapshot]:
+        """Update Slack Connection
 
-        Switch inbound transport without silently falling back.
+        Replace the complete Slack setup and immediately validate it.
 
         :param agent_id: (required)
         :type agent_id: str
@@ -3683,8 +3378,8 @@ class ExternalChannelV1Api:
         :type connection_id: str
         :param handle: (required)
         :type handle: str
-        :param transport_switch_request: (required)
-        :type transport_switch_request: TransportSwitchRequest
+        :param slack_connection_setup_request: (required)
+        :type slack_connection_setup_request: SlackConnectionSetupRequest
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -3707,11 +3402,11 @@ class ExternalChannelV1Api:
         :return: Returns the result object.
         """ # noqa: E501
 
-        _param = self._external_channel_v1_switch_transport_serialize(
+        _param = self._external_channel_v1_update_slack_connection_serialize(
             agent_id=agent_id,
             connection_id=connection_id,
             handle=handle,
-            transport_switch_request=transport_switch_request,
+            slack_connection_setup_request=slack_connection_setup_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -3719,7 +3414,7 @@ class ExternalChannelV1Api:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '200': "ManagedConnectionSetup",
+            '200': "ExternalChannelConnectionStatusSnapshot",
             '422': "HTTPValidationError",
         }
         response_data = self.api_client.call_api(
@@ -3734,12 +3429,12 @@ class ExternalChannelV1Api:
 
 
     @validate_call
-    def external_channel_v1_switch_transport_without_preload_content(
+    def external_channel_v1_update_slack_connection_without_preload_content(
         self,
         agent_id: StrictStr,
         connection_id: StrictStr,
         handle: StrictStr,
-        transport_switch_request: TransportSwitchRequest,
+        slack_connection_setup_request: SlackConnectionSetupRequest,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -3753,9 +3448,9 @@ class ExternalChannelV1Api:
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
     ) -> RESTResponseType:
-        """Switch Transport
+        """Update Slack Connection
 
-        Switch inbound transport without silently falling back.
+        Replace the complete Slack setup and immediately validate it.
 
         :param agent_id: (required)
         :type agent_id: str
@@ -3763,8 +3458,8 @@ class ExternalChannelV1Api:
         :type connection_id: str
         :param handle: (required)
         :type handle: str
-        :param transport_switch_request: (required)
-        :type transport_switch_request: TransportSwitchRequest
+        :param slack_connection_setup_request: (required)
+        :type slack_connection_setup_request: SlackConnectionSetupRequest
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -3787,11 +3482,11 @@ class ExternalChannelV1Api:
         :return: Returns the result object.
         """ # noqa: E501
 
-        _param = self._external_channel_v1_switch_transport_serialize(
+        _param = self._external_channel_v1_update_slack_connection_serialize(
             agent_id=agent_id,
             connection_id=connection_id,
             handle=handle,
-            transport_switch_request=transport_switch_request,
+            slack_connection_setup_request=slack_connection_setup_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -3799,7 +3494,7 @@ class ExternalChannelV1Api:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '200': "ManagedConnectionSetup",
+            '200': "ExternalChannelConnectionStatusSnapshot",
             '422': "HTTPValidationError",
         }
         response_data = self.api_client.call_api(
@@ -3809,12 +3504,12 @@ class ExternalChannelV1Api:
         return response_data.response
 
 
-    def _external_channel_v1_switch_transport_serialize(
+    def _external_channel_v1_update_slack_connection_serialize(
         self,
         agent_id,
         connection_id,
         handle,
-        transport_switch_request,
+        slack_connection_setup_request,
         _request_auth,
         _content_type,
         _headers,
@@ -3846,8 +3541,8 @@ class ExternalChannelV1Api:
         # process the header parameters
         # process the form parameters
         # process the body parameter
-        if transport_switch_request is not None:
-            _body_params = transport_switch_request
+        if slack_connection_setup_request is not None:
+            _body_params = slack_connection_setup_request
 
 
         # set the HTTP header `Accept`
@@ -3878,8 +3573,8 @@ class ExternalChannelV1Api:
         ]
 
         return self.api_client.param_serialize(
-            method='PATCH',
-            resource_path='/external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/transport',
+            method='PUT',
+            resource_path='/external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/slack',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,

@@ -317,7 +317,6 @@ __all__ = [
     "SlackConnectionCredentials",
     "SlackConnectionSetupRequest",
     "SlackManifestGuidance",
-    "SlackReconnectRequest",
     "SubagentSettings",
     "SubagentTreeNodeResponse",
     "SubagentTreeResponse",
@@ -341,7 +340,6 @@ __all__ = [
     "ToolkitScopeListResponse",
     "ToolkitScopeResponse",
     "ToolkitScopeType",
-    "TransportSwitchRequest",
     "UnsupportedMediaPolicy",
     "UpdateMyProfileRequest",
     "UpdateMyUserRequest",
@@ -672,7 +670,6 @@ from azentspublicclient.models.skill_action import SkillAction as SkillAction
 from azentspublicclient.models.slack_connection_credentials import SlackConnectionCredentials as SlackConnectionCredentials
 from azentspublicclient.models.slack_connection_setup_request import SlackConnectionSetupRequest as SlackConnectionSetupRequest
 from azentspublicclient.models.slack_manifest_guidance import SlackManifestGuidance as SlackManifestGuidance
-from azentspublicclient.models.slack_reconnect_request import SlackReconnectRequest as SlackReconnectRequest
 from azentspublicclient.models.subagent_settings import SubagentSettings as SubagentSettings
 from azentspublicclient.models.subagent_tree_node_response import SubagentTreeNodeResponse as SubagentTreeNodeResponse
 from azentspublicclient.models.subagent_tree_response import SubagentTreeResponse as SubagentTreeResponse
@@ -696,7 +693,6 @@ from azentspublicclient.models.toolkit_response import ToolkitResponse as Toolki
 from azentspublicclient.models.toolkit_scope_list_response import ToolkitScopeListResponse as ToolkitScopeListResponse
 from azentspublicclient.models.toolkit_scope_response import ToolkitScopeResponse as ToolkitScopeResponse
 from azentspublicclient.models.toolkit_scope_type import ToolkitScopeType as ToolkitScopeType
-from azentspublicclient.models.transport_switch_request import TransportSwitchRequest as TransportSwitchRequest
 from azentspublicclient.models.unsupported_media_policy import UnsupportedMediaPolicy as UnsupportedMediaPolicy
 from azentspublicclient.models.update_my_profile_request import UpdateMyProfileRequest as UpdateMyProfileRequest
 from azentspublicclient.models.update_my_user_request import UpdateMyUserRequest as UpdateMyUserRequest

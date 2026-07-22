@@ -11,6 +11,8 @@ from azents.core.auth.deps import (
     get_current_user,
     get_workspace_member,
 )
+from azents.core.config import Config
+from azents.core.deps import get_config
 from azents.core.enums import ExternalChannelTransport
 from azents.repos.external_channel.management_data import (
     ManagedApprovalRequest,
@@ -29,7 +31,6 @@ from azents.services.external_channel.data import (
 )
 from azents.services.external_channel.management import (
     ExternalChannelDecisionInput,
-    ExternalChannelManagementConflict,
     ExternalChannelManagementNotFound,
     ExternalChannelManagementService,
     ManagedConnectionSetup,
@@ -46,14 +47,6 @@ class SlackConnectionSetupRequest(BaseModel):
     app_id: str = Field(min_length=1, max_length=255)
     transport: ExternalChannelTransport
     credentials: SlackConnectionCredentials
-
-
-class SlackReconnectRequest(BaseModel):
-    credentials: SlackConnectionCredentials
-
-
-class TransportSwitchRequest(BaseModel):
-    transport: ExternalChannelTransport
 
 
 class ManagedConnectionListResponse(BaseModel):
@@ -76,11 +69,13 @@ class ManagedAccessResponse(BaseModel):
 async def get_manifest_guidance(
     member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
     service: Annotated[ExternalChannelManagementService, Depends()],
+    config: Annotated[Config, Depends(get_config)],
     *,
     agent_id: str,
     transport: Annotated[ExternalChannelTransport, Query()],
+    app_name: Annotated[str, Query(min_length=1, max_length=80)] = "Azents Agent",
 ) -> SlackManifestGuidance:
-    """Return minimum Slack App configuration after Agent access validation."""
+    """Return copy-ready Slack App configuration after Agent access validation."""
     try:
         await service.list_connections(
             workspace_id=member.workspace_id,
@@ -89,7 +84,14 @@ async def get_manifest_guidance(
         )
     except ExternalChannelManagementNotFound as error:
         raise _not_found() from error
-    return slack_manifest_guidance(transport)
+    callback_url = config.external_channel_slack_callback_url
+    if not callback_url:
+        callback_url = f"{config.api_url.rstrip('/')}/external-channel/v1/slack/events"
+    return slack_manifest_guidance(
+        transport,
+        callback_url=callback_url,
+        app_name=app_name,
+    )
 
 
 @router.get("/workspaces/{handle}/agents/{agent_id}/external-channels")
@@ -164,50 +166,26 @@ async def validate_connection(
         raise _not_found() from error
 
 
-@router.patch(
-    "/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/transport"
+@router.put(
+    "/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/slack"
 )
-async def switch_transport(
+async def update_slack_connection(
     member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
     service: Annotated[ExternalChannelManagementService, Depends()],
     *,
     agent_id: str,
     connection_id: str,
-    request_body: TransportSwitchRequest,
-) -> ManagedConnectionSetup:
-    """Switch inbound transport without silently falling back."""
-    try:
-        return await service.switch_transport(
-            workspace_id=member.workspace_id,
-            agent_id=agent_id,
-            workspace_user_id=member.workspace_user_id,
-            connection_id=connection_id,
-            transport=request_body.transport,
-        )
-    except ExternalChannelManagementNotFound as error:
-        raise _not_found() from error
-    except ExternalChannelManagementConflict as error:
-        raise HTTPException(status_code=409, detail=str(error)) from error
-
-
-@router.post(
-    "/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/reconnect"
-)
-async def reconnect_connection(
-    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
-    service: Annotated[ExternalChannelManagementService, Depends()],
-    *,
-    agent_id: str,
-    connection_id: str,
-    request_body: SlackReconnectRequest,
+    request_body: SlackConnectionSetupRequest,
 ) -> ExternalChannelConnectionStatusSnapshot:
-    """Replace encrypted credentials and immediately validate them."""
+    """Replace the complete Slack setup and immediately validate it."""
     try:
-        return await service.reconnect(
+        return await service.update_slack(
             workspace_id=member.workspace_id,
             agent_id=agent_id,
             workspace_user_id=member.workspace_user_id,
             connection_id=connection_id,
+            app_id=request_body.app_id,
+            transport=request_body.transport,
             credentials=request_body.credentials,
         )
     except ExternalChannelManagementNotFound as error:

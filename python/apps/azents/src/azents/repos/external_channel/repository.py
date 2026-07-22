@@ -24,6 +24,7 @@ from azents.core.enums import (
     ExternalChannelMessageLifecycle,
     ExternalChannelMessageRevisionKind,
     ExternalChannelPrincipalAuthorType,
+    ExternalChannelProvider,
     ExternalChannelResourceStatus,
     ExternalChannelRouteStatus,
     ExternalChannelTransport,
@@ -118,21 +119,6 @@ class ExternalChannelRepository:
         rdb = await session.get(RDBExternalChannelConnection, connection_id)
         return self._as(ExternalChannelConnection, rdb)
 
-    async def get_connection_by_http_callback_selector_hash(
-        self,
-        session: AsyncSession,
-        *,
-        http_callback_selector_hash: str,
-    ) -> ExternalChannelConnection | None:
-        """Fetch the sole HTTP callback candidate before signature verification."""
-        rdb = await session.scalar(
-            sa.select(RDBExternalChannelConnection).where(
-                RDBExternalChannelConnection.http_callback_selector_hash
-                == http_callback_selector_hash
-            )
-        )
-        return self._as(ExternalChannelConnection, rdb)
-
     async def get_connection_configuration(
         self,
         session: AsyncSession,
@@ -143,20 +129,40 @@ class ExternalChannelRepository:
         rdb = await session.get(RDBExternalChannelConnection, connection_id)
         return self._as(ExternalChannelConnectionConfiguration, rdb)
 
-    async def get_connection_configuration_by_http_callback_selector_hash(
+    async def get_slack_http_configuration_by_provider_identity(
         self,
         session: AsyncSession,
         *,
-        http_callback_selector_hash: str,
+        provider_app_id: str,
+        provider_tenant_id: str,
     ) -> ExternalChannelConnectionConfiguration | None:
-        """Fetch the internal callback configuration selected by an opaque hash."""
-        rdb = await session.scalar(
-            sa.select(RDBExternalChannelConnection).where(
-                RDBExternalChannelConnection.http_callback_selector_hash
-                == http_callback_selector_hash
+        """Fetch one callback candidate selected by untrusted provider identity."""
+        rows = list(
+            (
+                await session.scalars(
+                    sa.select(RDBExternalChannelConnection)
+                    .where(
+                        RDBExternalChannelConnection.provider
+                        == ExternalChannelProvider.SLACK,
+                        RDBExternalChannelConnection.transport
+                        == ExternalChannelTransport.HTTP,
+                        RDBExternalChannelConnection.provider_app_id == provider_app_id,
+                        RDBExternalChannelConnection.provider_tenant_id
+                        == provider_tenant_id,
+                        RDBExternalChannelConnection.status.in_(
+                            (
+                                ExternalChannelConnectionStatus.ACTIVE,
+                                ExternalChannelConnectionStatus.DEGRADED,
+                            )
+                        ),
+                    )
+                    .limit(2)
+                )
             )
         )
-        return self._as(ExternalChannelConnectionConfiguration, rdb)
+        if len(rows) != 1:
+            return None
+        return ExternalChannelConnectionConfiguration.model_validate(rows[0])
 
     async def update_connection_health(
         self,

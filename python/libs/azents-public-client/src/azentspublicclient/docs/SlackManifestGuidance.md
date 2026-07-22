@@ -11,7 +11,9 @@ Name | Type | Description | Notes
 **event_subscriptions** | **List[str]** |  | 
 **socket_mode_enabled** | **bool** |  | 
 **app_token_scope** | **str** |  | 
-**callback_path_template** | **str** |  | 
+**callback_url** | **str** |  | 
+**manifest** | **Dict[str, object]** |  | 
+**manifest_json** | **str** |  | 
 
 ## Example
 

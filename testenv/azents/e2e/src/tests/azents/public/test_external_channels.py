@@ -234,7 +234,6 @@ def test_http_admission_unknown_participant_and_approval_journey(
         ),
         _headers=headers,
     )
-    assert setup.callback_selector
     assert setup.connection.credentials_configured is True
     assert _BOT_TOKEN not in setup.to_json()
     assert _SIGNING_SECRET not in setup.to_json()
@@ -255,10 +254,7 @@ def test_http_admission_unknown_participant_and_approval_journey(
     assert validated.capabilities is not None
     assert validated.capabilities.thread_history is True
 
-    callback_url = (
-        f"{azents_public_server_url}/external-channel/v1/slack/events/"
-        f"{setup.callback_selector}"
-    )
+    callback_url = f"{azents_public_server_url}/external-channel/v1/slack/events"
     challenge_body = json.dumps(
         {
             "type": "url_verification",
@@ -428,24 +424,94 @@ def test_http_admission_unknown_participant_and_approval_journey(
             handle=handle,
             _headers=headers,
         )
-        if (
-            len(connections.items) == 1
-            and connections.items[0].status
-            is ExternalChannelConnectionStatus.DISCONNECTED
-        ):
-            return connections.items[0]
-        return None
+        return True if connections.items == [] else None
 
-    revoked = cast(
-        Any,
-        wait_until(
-            revoked_connection,
-            timeout=10,
-            interval=0.2,
-            message="Slack uninstall did not terminalize the connection",
-        ),
+    wait_until(
+        revoked_connection,
+        timeout=10,
+        interval=0.2,
+        message="Slack uninstall did not remove the connection from active management",
     )
-    assert revoked.route_status == "inactive"
+
+
+def test_connection_update_and_repeated_disconnect(
+    public_api_client: azentspublicclient.ApiClient,
+    admin_api_client: azentsadminclient.ApiClient,
+    azents_public_server_url: str,
+    slack_provider_fake_url: str,
+) -> None:
+    """Correct a wrong App ID, then disconnect safely more than once."""
+    requests.post(
+        f"{slack_provider_fake_url}/__testenv/reset",
+        timeout=5,
+    ).raise_for_status()
+    token, _, handle, agent_id = _create_agent(
+        public_api_client,
+        admin_api_client,
+        azents_public_server_url,
+    )
+    headers = {"Authorization": f"Bearer {token}"}
+    external_api = ExternalChannelV1Api(public_api_client)
+    setup = external_api.external_channel_v1_setup_slack_connection(
+        agent_id=agent_id,
+        handle=handle,
+        slack_connection_setup_request=SlackConnectionSetupRequest(
+            app_id="A-WRONG",
+            transport=ExternalChannelTransport.HTTP,
+            credentials=SlackConnectionCredentials(
+                bot_token=_BOT_TOKEN,
+                signing_secret=_SIGNING_SECRET,
+                app_token=None,
+            ),
+        ),
+        _headers=headers,
+    )
+    assert setup.connection.status is ExternalChannelConnectionStatus.RECONNECT_REQUIRED
+
+    updated = external_api.external_channel_v1_update_slack_connection(
+        agent_id=agent_id,
+        connection_id=setup.connection.id,
+        handle=handle,
+        slack_connection_setup_request=SlackConnectionSetupRequest(
+            app_id=_APP_ID,
+            transport=ExternalChannelTransport.HTTP,
+            credentials=SlackConnectionCredentials(
+                bot_token=_BOT_TOKEN,
+                signing_secret=_SIGNING_SECRET,
+                app_token=None,
+            ),
+        ),
+        _headers=headers,
+    )
+    assert updated.status is ExternalChannelConnectionStatus.ACTIVE
+    assert updated.identity is not None
+    assert updated.identity.app_id == _APP_ID
+
+    first = external_api.external_channel_v1_disconnect_connection(
+        agent_id=agent_id,
+        connection_id=setup.connection.id,
+        handle=handle,
+        _headers=headers,
+    )
+    assert first.status is ExternalChannelConnectionStatus.DISCONNECTED
+    assert first.credentials_configured is False
+    assert (
+        external_api.external_channel_v1_list_connections(
+            agent_id=agent_id,
+            handle=handle,
+            _headers=headers,
+        ).items
+        == []
+    )
+
+    repeated = external_api.external_channel_v1_disconnect_connection(
+        agent_id=agent_id,
+        connection_id=setup.connection.id,
+        handle=handle,
+        _headers=headers,
+    )
+    assert repeated.status is ExternalChannelConnectionStatus.DISCONNECTED
+    assert repeated.credentials_configured is False
 
 
 def test_socket_mode_acknowledges_after_admission_and_terminalizes_disabled_link(
@@ -522,7 +588,6 @@ def test_socket_mode_acknowledges_after_admission_and_terminalizes_disabled_link
         ),
         _headers=headers,
     )
-    assert setup.callback_selector is None
     validated = external_api.external_channel_v1_validate_connection(
         agent_id=agent_id,
         connection_id=setup.connection.id,
@@ -615,13 +680,6 @@ def test_connection_management_web_surface_uses_redacted_operational_state(
         ),
         _headers=headers,
     )
-    external_api.external_channel_v1_validate_connection(
-        agent_id=agent_id,
-        connection_id=setup.connection.id,
-        handle=handle,
-        _headers=headers,
-    )
-
     _login_main_web(
         browser_driver,
         main_web_url=azents_main_web_url,

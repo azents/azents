@@ -3,12 +3,7 @@ import test from "node:test";
 import { externalChannelSettingsInvalidationPlan } from "./invalidation.ts";
 
 void test("connection lifecycle mutations invalidate connection projections", () => {
-  for (const mutation of [
-    "setup",
-    "validate",
-    "switchTransport",
-    "reconnect",
-  ] as const) {
+  for (const mutation of ["setup", "validate", "update"] as const) {
     assert.deepEqual(externalChannelSettingsInvalidationPlan(mutation), [
       "connections",
     ]);

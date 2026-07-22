@@ -52,8 +52,7 @@ class TestManagedConnectionSetup(unittest.TestCase):
                     last_health_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                     socket_gap_detected_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                     socket_gap_reason = '', 
-                    disconnected_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), ),
-                callback_selector = ''
+                    disconnected_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
             )
         else:
             return ManagedConnectionSetup(
@@ -75,7 +74,6 @@ class TestManagedConnectionSetup(unittest.TestCase):
                     socket_gap_detected_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                     socket_gap_reason = '', 
                     disconnected_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), ),
-                callback_selector = '',
         )
         """
 
