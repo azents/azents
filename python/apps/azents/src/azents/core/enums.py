@@ -552,3 +552,176 @@ class MCPOAuthConnectionStatus(enum.StrEnum):
 
     CONNECTED = "connected"
     RECONNECT_REQUIRED = "reconnect_required"
+
+
+class ExternalChannelProvider(enum.StrEnum):
+    """External collaboration provider."""
+
+    SLACK = "slack"
+
+
+class ExternalChannelTransport(enum.StrEnum):
+    """Inbound transport selected for one external connection."""
+
+    HTTP = "http"
+    SOCKET = "socket"
+
+
+class ExternalChannelConnectionStatus(enum.StrEnum):
+    """External connection lifecycle status."""
+
+    CONFIGURING = "configuring"
+    ACTIVE = "active"
+    DEGRADED = "degraded"
+    RECONNECT_REQUIRED = "reconnect_required"
+    DISCONNECTING = "disconnecting"
+    DISCONNECTED = "disconnected"
+
+
+class ExternalChannelRouteStatus(enum.StrEnum):
+    """External connection to Agent route lifecycle status."""
+
+    ACTIVE = "active"
+    INACTIVE = "inactive"
+
+
+class ExternalChannelRouteMode(enum.StrEnum):
+    """External connection routing behavior."""
+
+    DEDICATED = "dedicated"
+    PLATFORM = "platform"
+
+
+class ExternalChannelResourceType(enum.StrEnum):
+    """Provider resource type represented by an external conversation."""
+
+    THREAD = "thread"
+
+
+class ExternalChannelResourceStatus(enum.StrEnum):
+    """External provider resource availability."""
+
+    ACTIVE = "active"
+    UNAVAILABLE = "unavailable"
+    DELETED = "deleted"
+
+
+class ExternalChannelEventEligibilityState(enum.StrEnum):
+    """Classification state for one admitted provider event."""
+
+    UNCLASSIFIED = "unclassified"
+    TRACKED = "tracked"
+    IGNORED = "ignored"
+    PROCESSED = "processed"
+
+
+class ExternalChannelEventStatus(enum.StrEnum):
+    """Asynchronous processing status for one admitted provider event."""
+
+    ACCEPTED = "accepted"
+    IGNORED_UNLINKED = "ignored_unlinked"
+    PROCESSING = "processing"
+    PROCESSED = "processed"
+    FAILED = "failed"
+
+
+class ExternalChannelPrincipalAuthorType(enum.StrEnum):
+    """External principal author category."""
+
+    HUMAN = "human"
+    BOT = "bot"
+    APP = "app"
+    SYSTEM = "system"
+
+
+class ExternalChannelMessageLifecycle(enum.StrEnum):
+    """Current provider lifecycle state for an external message."""
+
+    CURRENT = "current"
+    EDITED = "edited"
+    DELETED = "deleted"
+
+
+class ExternalChannelMessageRevisionKind(enum.StrEnum):
+    """Provider lifecycle change represented by one message revision."""
+
+    ORIGINAL = "original"
+    EDIT = "edit"
+    DELETE = "delete"
+
+
+class ExternalChannelBindingStatus(enum.StrEnum):
+    """Session binding lifecycle status."""
+
+    ACTIVE = "active"
+    DISCONNECTED = "disconnected"
+
+
+class ExternalChannelAccessRequestStatus(enum.StrEnum):
+    """External invocation access-request state."""
+
+    PENDING = "pending"
+    ALLOWED = "allowed"
+    DENIED = "denied"
+    BLOCKED = "blocked"
+    EXPIRED = "expired"
+
+
+class ExternalChannelAccessGrantScope(enum.StrEnum):
+    """Scope of an external principal invocation grant."""
+
+    SESSION = "session"
+    AGENT = "agent"
+
+
+class ExternalChannelWorkStatus(enum.StrEnum):
+    """Binding-scoped Channel Work lifecycle status."""
+
+    ACTIVE = "active"
+    FINISHED = "finished"
+
+
+class ExternalChannelWorkTaskStatus(enum.StrEnum):
+    """Status of one ordered Channel Work task."""
+
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+
+
+class ExternalChannelActionMode(enum.StrEnum):
+    """Atomic Channel Action mode."""
+
+    FINISH = "finish"
+    CONTINUE = "continue"
+
+
+class ExternalChannelDeliveryOriginType(enum.StrEnum):
+    """Domain origin that committed a provider delivery intent."""
+
+    CHANNEL_ACTION = "channel_action"
+    ACCESS_REQUEST = "access_request"
+    BINDING_DISCONNECT = "binding_disconnect"
+    CONNECTION_DISCONNECT = "connection_disconnect"
+    MANAGER_OPERATION = "manager_operation"
+
+
+class ExternalChannelDeliveryOperation(enum.StrEnum):
+    """External provider side effect requested by a delivery intent."""
+
+    REPLY = "reply"
+    PROGRESS_CREATE = "progress_create"
+    PROGRESS_UPDATE = "progress_update"
+    PROGRESS_DELETE = "progress_delete"
+    CONTROL_MESSAGE = "control_message"
+
+
+class ExternalChannelDeliveryStatus(enum.StrEnum):
+    """Outcome state of one external provider delivery attempt."""
+
+    PENDING = "pending"
+    ATTEMPTING = "attempting"
+    DELIVERED = "delivered"
+    FAILED = "failed"
+    UNKNOWN = "unknown"
+    NOT_ATTEMPTED = "not_attempted"
