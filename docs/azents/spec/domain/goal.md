@@ -15,8 +15,8 @@ code_paths:
   - python/apps/azents/src/azents/services/chat/**
   - python/apps/azents/src/azents/api/public/chat/v1/**
   - typescript/apps/azents-web/src/features/chat/**
-last_verified_at: 2026-07-22
-spec_version: 10
+last_verified_at: 2026-07-16
+spec_version: 9
 ---
 
 # Goal Domain Spec
@@ -206,9 +206,6 @@ Goal state:
 
 - `/chat/v1/sessions/{session_id}/live` and REST write snapshots expose the `goal` field.
 - The input preview keeps the existing Todo-tab design.
-- Full Goal objectives in the detail sheet and completed Goal briefing card render Markdown.
-- The input Goal preview converts the objective to normalized plain text before applying its
-  single-line truncation.
 - Active Goals do not show a status badge in preview.
 - `paused` and `blocked` Goals show preview status badges.
 - The detail sheet/card status badge must not truncate.
@@ -248,7 +245,5 @@ Primary checks:
 
 ## Changelog
 
-- **2026-07-22** (spec_version 10) — Render full Goal objectives as Markdown and normalize the
-  compact Goal preview to plain text.
 - **2026-07-16** (spec_version 9) — Clarified that actionable direct Goal control events can start a run without a pending InputBuffer.
 - **2026-07-01** (spec_version 8) — Added unfinished Goal compaction summary enrichment behavior.
