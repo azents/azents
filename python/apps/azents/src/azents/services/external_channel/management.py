@@ -271,6 +271,11 @@ class ExternalChannelManagementService:
             if cleanup_ids is None:
                 raise ExternalChannelManagementNotFound(connection_id)
             await session.commit()
+        cleanup_targets = []
+        for cleanup_id in cleanup_ids:
+            target = await self.action_service.prepare_delivery(cleanup_id)
+            if target is not None:
+                cleanup_targets.append(target)
         async with self.session_manager() as session:
             connection = await self.repository.complete_connection_disconnect(
                 session,
@@ -282,8 +287,8 @@ class ExternalChannelManagementService:
             if connection is None:
                 raise ExternalChannelManagementNotFound(connection_id)
             await session.commit()
-        for cleanup_id in cleanup_ids:
-            await self.action_service.attempt_delivery(cleanup_id)
+        for target in cleanup_targets:
+            await self.action_service.attempt_prepared_delivery(target)
         return connection
 
     async def list_bindings(

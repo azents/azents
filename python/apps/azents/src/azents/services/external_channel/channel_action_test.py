@@ -205,6 +205,37 @@ async def test_delivery_crosses_attempting_commit_before_provider_call() -> None
 
 
 @pytest.mark.asyncio
+async def test_prepared_delivery_survives_connection_secret_purge() -> None:
+    """Disconnect cleanup uses the in-memory target captured before terminalization."""
+    events: list[str] = []
+    repository = _RepositoryDouble(events)
+    slack_client = _SlackClient(
+        events,
+        SlackControlMessageResult(
+            status="delivered",
+            provider_message_key=None,
+            error_kind=None,
+            error_summary=None,
+        ),
+    )
+    service = _service(events, repository, slack_client)
+
+    target = await service.prepare_delivery("delivery-1")
+    assert target is not None
+    repository.target = repository.target.model_copy(
+        update={
+            "encrypted_credentials": None,
+            "provider_tenant_id": None,
+        }
+    )
+
+    await service.attempt_prepared_delivery(target)
+
+    assert events == ["start", "commit", "provider", "finish", "commit"]
+    assert slack_client.bot_tokens == ["xoxb-secret"]
+
+
+@pytest.mark.asyncio
 async def test_failed_delivery_is_terminal_and_not_reported_as_success() -> None:
     """A provider failure remains failed with its safe reason."""
     events: list[str] = []

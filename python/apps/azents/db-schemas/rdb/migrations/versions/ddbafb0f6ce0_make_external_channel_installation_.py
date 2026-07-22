@@ -31,6 +31,27 @@ def upgrade() -> None:
             """
         )
     )
+    duplicate_groups = op.get_bind().scalar(
+        sa.text(
+            """
+            SELECT count(*)
+            FROM (
+                SELECT provider, provider_tenant_id, provider_app_id
+                FROM external_channel_connections
+                WHERE provider_tenant_id IS NOT NULL
+                  AND provider_app_id IS NOT NULL
+                GROUP BY provider, provider_tenant_id, provider_app_id
+                HAVING count(*) > 1
+            ) AS duplicate_installations
+            """
+        )
+    )
+    if duplicate_groups:
+        raise RuntimeError(
+            "Cannot make External Channel installation identity global: "
+            f"{duplicate_groups} duplicate installation group(s) remain. "
+            "Disconnect duplicate installations before retrying the migration."
+        )
     op.drop_index(
         "uq_external_channel_connections_installation_identity",
         table_name="external_channel_connections",

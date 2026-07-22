@@ -97,8 +97,8 @@ async def test_repeated_disconnect_reterminalizes_route_without_status_guard() -
     session.flush.assert_awaited_once()
 
 
-async def test_disconnect_commits_terminal_state_before_provider_cleanup() -> None:
-    """Provider cleanup cannot delay the terminal local disconnect commit."""
+async def test_disconnect_prepares_cleanup_before_terminal_secret_purge() -> None:
+    """Provider cleanup retains its target while terminal state commits first."""
     events: list[str] = []
     session = AsyncMock(spec=AsyncSession)
 
@@ -126,12 +126,19 @@ async def test_disconnect_commits_terminal_state_before_provider_cleanup() -> No
     repository.complete_connection_disconnect.side_effect = complete_disconnect
 
     action_service = AsyncMock()
+    prepared_target = object()
 
-    async def attempt_delivery(delivery_id: str) -> None:
+    async def prepare_delivery(delivery_id: str) -> object:
         assert delivery_id == "cleanup-1"
+        events.append("prepare")
+        return prepared_target
+
+    async def attempt_prepared_delivery(target: object) -> None:
+        assert target is prepared_target
         events.append("delivery")
 
-    action_service.attempt_delivery.side_effect = attempt_delivery
+    action_service.prepare_delivery.side_effect = prepare_delivery
+    action_service.attempt_prepared_delivery.side_effect = attempt_prepared_delivery
     agent_repository = AsyncMock()
     agent_repository.get_by_id.return_value = SimpleNamespace(
         workspace_id="workspace-1"
@@ -159,4 +166,11 @@ async def test_disconnect_commits_terminal_state_before_provider_cleanup() -> No
     )
 
     assert result.status is ExternalChannelConnectionStatus.DISCONNECTED
-    assert events == ["begin", "commit", "complete", "commit", "delivery"]
+    assert events == [
+        "begin",
+        "commit",
+        "prepare",
+        "complete",
+        "commit",
+        "delivery",
+    ]
