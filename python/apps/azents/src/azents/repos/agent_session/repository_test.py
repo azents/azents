@@ -109,11 +109,69 @@ class TestAgentSessionRepository:
         assert refreshed is not None
         assert refreshed.owner_generation == 2
 
-    async def test_fence_archived_owner_generations_invalidates_stale_workers(
+    async def test_claim_owner_generation_rejects_active_child_of_archived_root(
         self,
         rdb_session: AsyncSession,
     ) -> None:
-        """Increment durable ownership only for the locked archived subtree."""
+        """A stale child wake-up cannot reacquire ownership after purge fencing."""
+        workspace_id = await _create_workspace(rdb_session, "owner-root-fence-ws")
+        agent_id = await _create_agent(rdb_session, workspace_id, "owner-root-fence")
+        repo = AgentSessionRepository()
+        root_session = await repo.create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        root_agent = await repo.get_session_agent_by_session_id(
+            rdb_session,
+            root_session.id,
+        )
+        assert root_agent is not None
+        child = await repo.create_child_session_agent(
+            rdb_session,
+            parent_session_agent_id=root_agent.id,
+            name="stale-active-child",
+            agent_type="default",
+            title=None,
+            last_task_message=None,
+        )
+        archived_at = datetime.datetime.now(datetime.UTC)
+        await repo.archive_tree(
+            rdb_session,
+            root_session_id=root_session.id,
+            session_ids=[root_session.id],
+            archived_at=archived_at,
+            purge_after=archived_at,
+            policy_revision=1,
+            retention_days=0,
+        )
+        assert (
+            await repo.fence_purge_owner_generations(
+                rdb_session,
+                session_ids=[root_session.id, child.agent_session_id],
+            )
+            == 2
+        )
+
+        with pytest.raises(ValueError, match="Root AgentSession is not active"):
+            await repo.claim_owner_generation(rdb_session, child.agent_session_id)
+
+        refreshed_child = await repo.get_by_id(
+            rdb_session,
+            child.agent_session_id,
+        )
+        assert refreshed_child is not None
+        assert refreshed_child.status is AgentSessionStatus.ACTIVE
+        assert refreshed_child.owner_generation == 1
+
+    async def test_fence_purge_owner_generations_covers_entire_root_tree(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Root-authoritative purge fences children with stale active status."""
         workspace_id = await _create_workspace(rdb_session, "purge-fence-ws")
         agent_id = await _create_agent(rdb_session, workspace_id, "purge-fence")
         repo = AgentSessionRepository()
@@ -124,6 +182,19 @@ class TestAgentSessionRepository:
                 agent_id=agent_id,
                 title=None,
             ),
+        )
+        root_agent = await repo.get_session_agent_by_session_id(
+            rdb_session,
+            created.id,
+        )
+        assert root_agent is not None
+        child = await repo.create_child_session_agent(
+            rdb_session,
+            parent_session_agent_id=root_agent.id,
+            name="stale-active-child",
+            agent_type="default",
+            title=None,
+            last_task_message=None,
         )
         archived_at = datetime.datetime.now(datetime.UTC)
         await repo.archive_tree(
@@ -136,16 +207,20 @@ class TestAgentSessionRepository:
             retention_days=0,
         )
 
-        fenced_count = await repo.fence_archived_owner_generations(
+        fenced_count = await repo.fence_purge_owner_generations(
             rdb_session,
-            session_ids=[created.id],
+            session_ids=[created.id, child.agent_session_id],
         )
 
-        assert fenced_count == 1
-        refreshed = await repo.get_by_id(rdb_session, created.id)
-        assert refreshed is not None
-        assert refreshed.status is AgentSessionStatus.ARCHIVED
-        assert refreshed.owner_generation == 1
+        assert fenced_count == 2
+        refreshed_root = await repo.get_by_id(rdb_session, created.id)
+        refreshed_child = await repo.get_by_id(rdb_session, child.agent_session_id)
+        assert refreshed_root is not None
+        assert refreshed_root.status is AgentSessionStatus.ARCHIVED
+        assert refreshed_root.owner_generation == 1
+        assert refreshed_child is not None
+        assert refreshed_child.status is AgentSessionStatus.ACTIVE
+        assert refreshed_child.owner_generation == 1
 
     async def test_last_inference_profile_round_trip(
         self,

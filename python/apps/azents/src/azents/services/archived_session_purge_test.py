@@ -309,7 +309,7 @@ class _AgentSessionRepository:
             return list(self.final_sessions)
         return list(self.sessions)
 
-    async def fence_archived_owner_generations(
+    async def fence_purge_owner_generations(
         self,
         session: AsyncSession,
         *,
@@ -318,10 +318,7 @@ class _AgentSessionRepository:
         del session
         fenced = 0
         for item in self.sessions:
-            if (
-                item.id not in session_ids
-                or item.status is not AgentSessionStatus.ARCHIVED
-            ):
+            if item.id not in session_ids:
                 continue
             item.owner_generation += 1
             fenced += 1
@@ -751,6 +748,7 @@ def _build_service(
     *,
     events: list[str],
     active_checks: Sequence[bool],
+    child_status: AgentSessionStatus = AgentSessionStatus.ARCHIVED,
     pinned_model_file: bool = False,
     s3_fail_key: str | None = None,
 ) -> tuple[
@@ -767,7 +765,11 @@ def _build_service(
     agent_session_repository = _AgentSessionRepository(
         [
             _agent_session("root-session", kind=AgentSessionKind.ROOT, now=now),
-            _agent_session("child-session", kind=AgentSessionKind.SUBAGENT, now=now),
+            _agent_session(
+                "child-session",
+                kind=AgentSessionKind.SUBAGENT,
+                now=now,
+            ).model_copy(update={"status": child_status}),
         ],
         events,
     )
@@ -928,6 +930,39 @@ async def test_purge_deletes_external_resources_before_session_tree() -> None:
     assert events.index("delete_blob:artifact-key") < session_delete_index
     assert events.index("delete_blob:exchange-key") < session_delete_index
     assert events.index("complete") > session_delete_index
+
+
+async def test_archived_root_purges_tree_with_active_status_child() -> None:
+    """The archived root owns lifecycle state for every linked child."""
+    events: list[str] = []
+    (
+        service,
+        retention_repository,
+        agent_session_repository,
+        _,
+        worktree_service,
+        broker,
+        _,
+    ) = _build_service(
+        events=events,
+        active_checks=[False, False],
+        child_status=AgentSessionStatus.ACTIVE,
+    )
+
+    summary = await service.purge_once(
+        lease_owner="worker-1",
+        deadline=_deadline(),
+    )
+
+    assert summary.claimed_count == 1
+    assert summary.completed_count == 1
+    assert summary.retry_scheduled_count == 0
+    assert summary.failed_count == 0
+    assert retention_repository.completed is True
+    assert agent_session_repository.deleted is True
+    assert all(item.owner_generation == 2 for item in agent_session_repository.sessions)
+    assert worktree_service.calls == 1
+    assert broker.purged_session_ids == ["root-session", "child-session"]
 
 
 async def test_active_run_schedules_retry_before_external_cleanup() -> None:

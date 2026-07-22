@@ -689,7 +689,32 @@ class AgentSessionRepository:
         session: AsyncSession,
         agent_session_id: str,
     ) -> int:
-        """Increment and return the durable ownership generation."""
+        """Claim ownership only while the authoritative root remains active."""
+        root_session_agent_id = await session.scalar(
+            sa.select(RDBSessionAgent.root_session_agent_id).where(
+                RDBSessionAgent.agent_session_id == agent_session_id
+            )
+        )
+        if root_session_agent_id is None:
+            raise ValueError("AgentSession tree not found")
+        root_agent = await session.scalar(
+            sa.select(RDBSessionAgent)
+            .where(
+                RDBSessionAgent.id == root_session_agent_id,
+                RDBSessionAgent.kind == SessionAgentKind.ROOT,
+            )
+            .with_for_update()
+        )
+        if root_agent is None:
+            raise ValueError("Root SessionAgent not found")
+        root_status = await session.scalar(
+            sa.select(RDBAgentSession.status)
+            .where(RDBAgentSession.id == root_agent.agent_session_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if root_status is not AgentSessionStatus.ACTIVE:
+            raise ValueError("Root AgentSession is not active")
         generation = await session.scalar(
             sa.update(RDBAgentSession)
             .where(
@@ -704,22 +729,19 @@ class AgentSessionRepository:
         await session.flush()
         return generation
 
-    async def fence_archived_owner_generations(
+    async def fence_purge_owner_generations(
         self,
         session: AsyncSession,
         *,
         session_ids: Sequence[str],
     ) -> int:
-        """Invalidate stale worker ownership for a locked archived subtree."""
+        """Invalidate stale worker ownership for a root-authoritative purge tree."""
         if not session_ids:
             return 0
         fenced_ids = (
             await session.scalars(
                 sa.update(RDBAgentSession)
-                .where(
-                    RDBAgentSession.id.in_(session_ids),
-                    RDBAgentSession.status == AgentSessionStatus.ARCHIVED,
-                )
+                .where(RDBAgentSession.id.in_(session_ids))
                 .values(owner_generation=RDBAgentSession.owner_generation + 1)
                 .returning(RDBAgentSession.id)
             )
