@@ -52,7 +52,7 @@ api_routes:
   - /llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/{session_id}
   - /chat/v1
 last_verified_at: 2026-07-22
-spec_version: 52
+spec_version: 53
 ---
 
 # Agent Domain Spec
@@ -79,7 +79,7 @@ Agent is central execution unit of azents. Within Workspace, it bundles an order
 | `system_prompt` | Agent system prompt |
 | `enabled` | when false, runtime resolve blocks run start with `AgentDisabled` |
 | `type` | `public` or `private` |
-| `runtime_provider_id` | Runtime Provider logical id. If null, use server default provider policy |
+| `runtime_provider_id` | Optional explicit Runtime Provider logical ID. If null, resolve the Platform Runtime System Setting when the Runtime is first created; no environment default is applied |
 | `shell_enabled` | whether builtin shell toolkit is exposed |
 | `memory_enabled` | whether memory prompt/tool is exposed |
 | `max_turns` | run turn limit. null means unlimited |

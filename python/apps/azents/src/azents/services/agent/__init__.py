@@ -100,13 +100,6 @@ def _get_avatar_cdn_base_url(
     return config.avatar_cdn_base_url
 
 
-def _get_runtime_default_provider_id(
-    config: Annotated[Config, Depends(get_config)],
-) -> str | None:
-    """Agent Runtime default Provider ID DI (optional)."""
-    return config.runtime.default_provider_id
-
-
 @dataclasses.dataclass
 class AgentService:
     """Agent CRUD service."""
@@ -132,10 +125,6 @@ class AgentService:
     s3_service: Annotated[S3Service, Depends(get_s3_service)]
     workspace_s3_bucket: Annotated[str, Depends(_get_workspace_s3_bucket)]
     avatar_cdn_base_url: Annotated[str | None, Depends(_get_avatar_cdn_base_url)]
-    runtime_default_provider_id: Annotated[
-        str | None,
-        Depends(_get_runtime_default_provider_id),
-    ]
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
     ]
@@ -377,9 +366,7 @@ class AgentService:
             system_prompt=create.system_prompt,
             enabled=create.enabled,
             type=create.type,
-            runtime_provider_id=(
-                create.runtime_provider_id or self.runtime_default_provider_id
-            ),
+            runtime_provider_id=create.runtime_provider_id,
             shell_enabled=create.shell_enabled,
             memory_enabled=create.memory_enabled,
             tool_search_enabled=create.tool_search_enabled,

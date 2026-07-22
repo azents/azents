@@ -92,7 +92,6 @@ def _make_service() -> AgentService:
         s3_service=s3_service,
         workspace_s3_bucket="bucket",
         avatar_cdn_base_url=None,
-        runtime_default_provider_id=None,
         session_manager=session_manager,
     )
 
@@ -156,6 +155,7 @@ class TestAgentServiceModelSelection:
         assert isinstance(result, Success)
         settings_repo.set_default_model_if_empty.assert_awaited_once()
         repository_create = agent_repo.create.await_args.args[1]
+        assert repository_create.runtime_provider_id is None
         assert repository_create.tool_search_enabled is True
 
     async def test_create_preserves_explicit_tool_search_opt_out(self) -> None:

@@ -328,7 +328,7 @@ async def test_provider_grpc_relays_commands_and_records_completion() -> None:
 
 
 @pytest.mark.asyncio
-async def test_provider_grpc_rejects_missing_control_token() -> None:
+async def test_provider_grpc_rejects_missing_provider_credential() -> None:
     store = InMemoryRuntimeCoordinationStore()
     servicer = _servicer(RuntimeControlProtocolService(store), FakeReportSink())
     inbound = QueueIterator()
@@ -341,7 +341,7 @@ async def test_provider_grpc_rejects_missing_control_token() -> None:
 
 
 @pytest.mark.asyncio
-async def test_provider_grpc_rejects_wrong_control_token() -> None:
+async def test_provider_grpc_rejects_shared_control_token_fallback() -> None:
     store = InMemoryRuntimeCoordinationStore()
     servicer = _servicer(RuntimeControlProtocolService(store), FakeReportSink())
     inbound = QueueIterator()
