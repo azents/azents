@@ -15,22 +15,22 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
-| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-07-18 | 50 |
+| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-07-21 | 51 |
 | [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-21 | 125 |
-| [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-16 | 9 |
+| [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-21 | 10 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-17 | 5 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-07-21 | 17 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-20 | 3 |
-| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-07-21 | 67 |
+| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-07-21 | 68 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-07-20 | 8 |
-| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-07-19 | 41 |
+| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-07-21 | 43 |
 
 ## Living Specs — Flow
 
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
-| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-07-21 | 124 |
-| [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-07-20 | 22 |
+| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-07-21 | 125 |
+| [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-07-21 | 23 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-07-03 | 3 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-21 | 40 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-07-21 | 18 |
@@ -39,8 +39,8 @@ Design documents are accumulated records and are not listed individually in this
 | [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-07-19 | 1 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
 | [OpenRouter API Key Provider Flow](spec/flow/openrouter-api-key.md) | @Hardtack | 2026-07-19 | 3 |
-| [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-07-21 | 6 |
-| [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-07-21 | 23 |
+| [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-07-21 | 7 |
+| [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-07-21 | 24 |
 | [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-07-21 | 18 |
 | [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-07-17 | 8 |
 | [xAI API Key Provider Flow](spec/flow/xai-api-key.md) | @Hardtack | 2026-07-18 | 3 |
@@ -165,6 +165,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Goal Pursuing Is Owned at Session Scope Historical Requirements Reconstruction](requirements/goal-260613-goal-pursuing.md) | goal-260613 | 2026-06-13 | - |
 | [Goal Continuation Uses Idle Hook and Input Buffer Historical Requirements Reconstruction](requirements/goal-260615-goal-continuation-idle-hook.md) | goal-260615 | 2026-06-15 | - |
 | [Treat Goal Actions as Model-Producing Preparation Historical Requirements Reconstruction](requirements/goal-260712-goal-actions-as-producing-preparation.md) | goal-260712 | 2026-07-12 | - |
+| [Durable Goal Idle Continuation Requirements](requirements/goal-260721-durable-idle-continuation.md) | goal-260721 | 2026-07-21 | 2026-07-21 |
 | [Add GPT-aligned apply-patch alongside the existing edit tool Historical Requirements Reconstruction](requirements/gpt-260720-gpt-patch-alongside-existing-edit.md) | gpt-260720 | 2026-07-20 | - |
 | [Group Chat Tool Activity in the Frontend Historical Requirements Reconstruction](requirements/group-260720-group-chat-activity-in-the-frontend.md) | group-260720 | 2026-07-20 | 2026-07-20 |
 | [gVisor + BYOC Sandbox Discussion Historical Requirements Reconstruction](requirements/gvisor-260403-gvisor-byoc-sandbox.md) | gvisor-260403 | 2026-04-03 | 2026-04-20 |
@@ -211,6 +212,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Full-stack Local Test Environment — Stage 2 (LLM Pipeline) Historical Requirements Reconstruction](requirements/llm-260408-llm-pipeline.md) | llm-260408 | 2026-04-08 | 2026-04-08 |
 | [Move LLM Model Catalog to External Sources and Local Overrides Historical Requirements Reconstruction](requirements/llm-260513-llm-catalog-source.md) | llm-260513 | 2026-05-13 | - |
 | [Full-Stack Local Test Environment — Discussion Record Historical Requirements Reconstruction](requirements/local-260406-local-fullstack-test-env.md) | local-260406 | 2026-04-06 | 2026-04-06 |
+| [Account Language Preference Requirements](requirements/locale-260721-account-language-preference.md) | locale-260721 | 2026-07-21 | - |
 | [MCP Toolkit Historical Requirements Reconstruction](requirements/mcp-260228-mcp-toolkit.md) | mcp-260228 | 2026-02-28 | 2026-03-12 |
 | [MCP Egress Proxy Historical Requirements Reconstruction](requirements/mcp-260319-mcp-egress-proxy.md) | mcp-260319 | 2026-03-19 | 2026-03-19 |
 | [Agent Home Sidecar Discussion (MCP stdio + File ops) Historical Requirements Reconstruction](requirements/mcp-260325-mcp-stdio-sidecar.md) | mcp-260325 | 2026-03-25 | 2026-03-25 |
@@ -303,6 +305,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Sequential Input Buffer Preparation Historical Requirements Reconstruction](requirements/sequential-260712-sequential-input-buffer-preparation.md) | sequential-260712 | 2026-07-12 | 2026-07-12 |
 | [Server-Side Session ID Generation Historical Requirements Reconstruction](requirements/server-260311-server-side.md) | server-260311 | 2026-03-11 | 2026-03-11 |
 | [Service Toolkit Design Discussion Historical Requirements Reconstruction](requirements/service-260311-service-toolkit.md) | service-260311 | 2026-03-11 | - |
+| [Extensible Session Lifecycle Requirements](requirements/session-260721-lifecycle-extensibility.md) | session-260721 | 2026-07-21 | - |
 | [Agent Settings Pages and Memory UI Historical Requirements Reconstruction](requirements/settings-260702-settings-pages-and-memory-ui.md) | settings-260702 | 2026-07-02 | - |
 | [Model-Scoped Selectable Model Settings Historical Requirements Reconstruction](requirements/settings-260716-selectable-settings.md) | settings-260716 | 2026-07-16 | - |
 | [Model Unread Run Results as Session-Shared State Historical Requirements Reconstruction](requirements/shared-260720-shared-unread-result.md) | shared-260720 | 2026-07-20 | - |
@@ -347,6 +350,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Manage Toolkit Lifecycle by AgentSession Lifecycle Historical Requirements Reconstruction](requirements/toolkit-260529-toolkit-lifecycle.md) | toolkit-260529 | 2026-05-29 | - |
 | [Split TodoToolkit as Always-on Toolkit Historical Requirements Reconstruction](requirements/toolkit-260613-todo-toolkit-always-on.md) | toolkit-260613 | 2026-06-13 | - |
 | [Replace MCP Per-User OAuth with Toolkit-Level OAuth Connections Historical Requirements Reconstruction](requirements/toolkit-260623-toolkit-level-mcp-oauth.md) | toolkit-260623 | 2026-06-23 | - |
+| [Toolkit Wake-Up Snapshot Revision Requirements](requirements/toolkit-260721-wakeup-snapshot-revision.md) | toolkit-260721 | 2026-07-21 | 2026-07-21 |
 | [Continue FIFO Processing After Failed TurnActions Historical Requirements Reconstruction](requirements/turn-260708-turn-action-fifo-continuation.md) | turn-260708 | 2026-07-08 | - |
 | [Expose Typed Actionable Profile Resolution Failures Historical Requirements Reconstruction](requirements/typed-260710-typed-profile-resolution-failures.md) | typed-260710 | 2026-07-10 | - |
 | [Unified OAuth Authentication Flow Historical Requirements Reconstruction](requirements/unified-260327-unified-oauth.md) | unified-260327 | 2026-03-27 | 2026-03-27 |
@@ -475,6 +479,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Goal Pursuing Is Owned at Session Scope](adr/goal-260613-goal-pursuing.md)
 - [Goal Continuation Uses Idle Hook and Input Buffer](adr/goal-260615-goal-continuation-idle-hook.md)
 - [Treat Goal Actions as Model-Producing Preparation](adr/goal-260712-goal-actions-as-producing-preparation.md)
+- [Durable Goal Idle Continuation](adr/goal-260721-durable-idle-continuation.md)
 - [Add GPT-aligned apply-patch alongside the existing edit tool](adr/gpt-260720-gpt-patch-alongside-existing-edit.md)
 - [Group Chat Tool Activity in the Frontend](adr/group-260720-group-chat-activity-in-the-frontend.md)
 - [gVisor + BYOC Sandbox Discussion](adr/gvisor-260403-gvisor-byoc-sandbox.md)
@@ -521,6 +526,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Full-stack Local Test Environment — Stage 2 (LLM Pipeline) Historical Decision Reconstruction](adr/llm-260408-llm-pipeline.md)
 - [Move LLM Model Catalog to External Sources and Local Overrides](adr/llm-260513-llm-catalog-source.md)
 - [Full-Stack Local Test Environment — Discussion Record](adr/local-260406-local-fullstack-test-env.md)
+- [Account Language Preference](adr/locale-260721-account-language-preference.md)
 - [MCP Toolkit Historical Decision Reconstruction](adr/mcp-260228-mcp-toolkit.md)
 - [MCP Egress Proxy Historical Decision Reconstruction](adr/mcp-260319-mcp-egress-proxy.md)
 - [Agent Home Sidecar Discussion (MCP stdio + File ops)](adr/mcp-260325-mcp-stdio-sidecar.md)
@@ -613,6 +619,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Sequential Input Buffer Preparation Historical Decision Reconstruction](adr/sequential-260712-sequential-input-buffer-preparation.md)
 - [Server-Side Session ID Generation Historical Decision Reconstruction](adr/server-260311-server-side.md)
 - [Service Toolkit Design Discussion](adr/service-260311-service-toolkit.md)
+- [Extensible Session Lifecycle](adr/session-260721-lifecycle-extensibility.md)
 - [Agent Settings Pages and Memory UI](adr/settings-260702-settings-pages-and-memory-ui.md)
 - [Model-Scoped Selectable Model Settings Historical Decision Reconstruction](adr/settings-260716-selectable-settings.md)
 - [Model Unread Run Results as Session-Shared State](adr/shared-260720-shared-unread-result.md)
@@ -657,6 +664,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Manage Toolkit Lifecycle by AgentSession Lifecycle](adr/toolkit-260529-toolkit-lifecycle.md)
 - [Split TodoToolkit as Always-on Toolkit](adr/toolkit-260613-todo-toolkit-always-on.md)
 - [Replace MCP Per-User OAuth with Toolkit-Level OAuth Connections](adr/toolkit-260623-toolkit-level-mcp-oauth.md)
+- [Toolkit Wake-Up Snapshot Revision](adr/toolkit-260721-wakeup-snapshot-revision.md)
 - [Continue FIFO Processing After Failed TurnActions](adr/turn-260708-turn-action-fifo-continuation.md)
 - [Expose Typed Actionable Profile Resolution Failures](adr/typed-260710-typed-profile-resolution-failures.md)
 - [Unified OAuth Authentication Flow Historical Decision Reconstruction](adr/unified-260327-unified-oauth.md)

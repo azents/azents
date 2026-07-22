@@ -2114,45 +2114,6 @@
             }
           }
         }
-      },
-      "delete": {
-        "tags": [
-          "Workspace v1"
-        ],
-        "summary": "Delete Workspace",
-        "description": "Delete a Workspace.",
-        "operationId": "workspace_v1_delete_workspace",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "handle",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Handle"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
       }
     },
     "/workspace-user/v1/workspace-users": {
@@ -4779,6 +4740,17 @@
             "title": "Primary Email",
             "description": "Primary email address"
           },
+          "locale": {
+            "type": "string",
+            "enum": [
+              "en-US",
+              "ko-KR",
+              "ja-JP",
+              "fr-FR"
+            ],
+            "title": "Locale",
+            "description": "Account locale (BCP 47)"
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -4797,6 +4769,7 @@
           "id",
           "primary_email_id",
           "primary_email",
+          "locale",
           "created_at",
           "updated_at"
         ],
@@ -4949,12 +4922,6 @@
             "title": "Name",
             "description": "Workspace display name"
           },
-          "locale": {
-            "type": "string",
-            "title": "Locale",
-            "description": "Workspace locale (BCP 47)",
-            "default": "ko-KR"
-          },
           "role": {
             "$ref": "#/components/schemas/WorkspaceUserRole",
             "description": "Role (owner, manager, member)"
@@ -5010,11 +4977,6 @@
             "title": "Name",
             "description": "Workspace display name"
           },
-          "locale": {
-            "type": "string",
-            "title": "Locale",
-            "description": "Workspace locale (BCP 47)"
-          },
           "role": {
             "$ref": "#/components/schemas/WorkspaceUserRole",
             "description": "Role (owner, manager, member)"
@@ -5038,7 +5000,6 @@
           "workspace_id",
           "user_id",
           "name",
-          "locale",
           "role",
           "created_at",
           "updated_at"
@@ -5061,10 +5022,6 @@
           "name": {
             "type": "string",
             "title": "Name"
-          },
-          "locale": {
-            "type": "string",
-            "title": "Locale"
           }
         },
         "type": "object",

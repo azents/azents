@@ -25,7 +25,7 @@ code_paths:
   - python/apps/azents/src/azents/worker/session/**
   - python/apps/azents/src/azents/worker/run/**
 last_verified_at: 2026-07-21
-spec_version: 23
+spec_version: 24
 ---
 
 # Run Resume
@@ -77,13 +77,15 @@ Worker shutdown must not partially process a new message. If shutdown wins befor
 message is left for broker redelivery or ownership takeover.
 
 If shutdown is observed while a foreground run is active, the run boundary is a worker handover
-boundary, not an idle boundary. The current worker closes foreground tool and operation admission,
-then allows already-admitted work up to 30 seconds to finish cleanly. Timeout cancels the supervised
-task and lets its cancellation finalizers persist terminal state before the worker releases the
-ownership lease and heartbeat. Even a clean return during shutdown must skip idle hooks, skip Goal
-continuation creation, and skip `AgentSession.run_state=IDLE`. A new worker resumes from the durable
-transcript, `agent_runs`, pending input buffers, and session wake-up state, while any leftover active
-operation is cancelled rather than resumed.
+boundary until its durable idle outcome commits. The current worker closes foreground tool and
+operation admission, then allows already-admitted work up to 30 seconds to finish cleanly. Timeout
+cancels the supervised task and lets its cancellation finalizers persist terminal state before the
+worker releases the ownership lease and heartbeat. A clean completed Run atomically records
+`AgentSession.pending_idle_continuation_run_id`; shutdown does not run idle hooks in the departing
+Worker, but it releases ownership with a handover wake-up while that pointer remains. A new Worker
+drains ordinary pending work first, re-resolves the idle hooks, and conditionally consumes the pointer
+into either idempotent continuation InputBuffers plus `running` state or `idle` state with no
+continuation. Any leftover active operation is cancelled rather than resumed.
 
 Broker wake-up routing uses the ownership lease:
 
@@ -258,8 +260,8 @@ run to observe `check_stop()` as true.
 - A non-owner worker must not process a session while the owner heartbeat is live.
 - A stale owner heartbeat revokes the sticky owner even if the 30-minute lease key has not expired.
 - In-memory worker state is not required after crash because takeover resumes from durable state.
-- Shutdown/handover run completion is not quiescent idle and must not dispatch idle continuation
-  hooks.
+- Shutdown/handover must preserve a completed Run's pending idle-continuation pointer until a later
+  owner atomically commits its idle outcome.
 - Completed tool results are not duplicated.
 - Tool recovery and cancellation preserve the durable call dialect; cross-dialect result pairing is rejected before handler execution.
 - User stop intent is consumed by stop finalization and must not interrupt the next wake-up.
@@ -269,6 +271,7 @@ run to observe `check_stop()` as true.
 
 ## Changelog
 
+- **2026-07-21** (spec_version 24) — Preserved completed-run idle continuation across Worker shutdown through a durable Session pointer and conditional recovery outcome.
 - **2026-07-21** (spec_version 23) — Made recovery and synthetic client-tool terminal settlement explicitly dialect-preserving.
 - **2026-07-18** (spec_version 21) — Preserved bounded provider failure state and complete retry budgets across handover while giving terminal User Stop precedence over retry finalization.
 - **2026-07-16** (spec_version 20) — Scoped takeover retry recovery to the active model turn and made committed model output plus retry-state removal one durable boundary.

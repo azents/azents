@@ -214,6 +214,7 @@ Class | Method | HTTP request | Description
 *ToolkitV1Api* | [**toolkit_v1_update_toolkit_config**](azentspublicclient/docs/ToolkitV1Api.md#toolkit_v1_update_toolkit_config) | **PATCH** /toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_config_id} | Update Toolkit Config
 *UserV1Api* | [**user_v1_get_my_system_roles**](azentspublicclient/docs/UserV1Api.md#user_v1_get_my_system_roles) | **GET** /user/v1/me/system-roles | Get My System Roles
 *UserV1Api* | [**user_v1_me**](azentspublicclient/docs/UserV1Api.md#user_v1_me) | **GET** /user/v1/me | Me
+*UserV1Api* | [**user_v1_update_me**](azentspublicclient/docs/UserV1Api.md#user_v1_update_me) | **PATCH** /user/v1/me | Update Me
 *WorkspaceUserV1Api* | [**workspaceuser_v1_delete_workspace_user**](azentspublicclient/docs/WorkspaceUserV1Api.md#workspaceuser_v1_delete_workspace_user) | **DELETE** /workspace-user/v1/workspaces/{handle}/workspace-users/{workspace_user_id} | Delete Workspace User
 *WorkspaceUserV1Api* | [**workspaceuser_v1_get_current_member**](azentspublicclient/docs/WorkspaceUserV1Api.md#workspaceuser_v1_get_current_member) | **GET** /workspace-user/v1/workspaces/{handle}/me | Get Current Member
 *WorkspaceUserV1Api* | [**workspaceuser_v1_get_my_profile**](azentspublicclient/docs/WorkspaceUserV1Api.md#workspaceuser_v1_get_my_profile) | **GET** /workspace-user/v1/workspaces/{handle}/me/profile | Get My Profile
@@ -242,6 +243,7 @@ Class | Method | HTTP request | Description
  - [AgentAdminListResponse](azentspublicclient/docs/AgentAdminListResponse.md)
  - [AgentAdminResponse](azentspublicclient/docs/AgentAdminResponse.md)
  - [AgentCreateRequest](azentspublicclient/docs/AgentCreateRequest.md)
+ - [AgentDecommissionResponse](azentspublicclient/docs/AgentDecommissionResponse.md)
  - [AgentListResponse](azentspublicclient/docs/AgentListResponse.md)
  - [AgentModelSelection](azentspublicclient/docs/AgentModelSelection.md)
  - [AgentModelSelectionInput](azentspublicclient/docs/AgentModelSelectionInput.md)
@@ -497,6 +499,7 @@ Class | Method | HTTP request | Description
  - [ToolkitScopeType](azentspublicclient/docs/ToolkitScopeType.md)
  - [UnsupportedMediaPolicy](azentspublicclient/docs/UnsupportedMediaPolicy.md)
  - [UpdateMyProfileRequest](azentspublicclient/docs/UpdateMyProfileRequest.md)
+ - [UpdateMyUserRequest](azentspublicclient/docs/UpdateMyUserRequest.md)
  - [UpdateWorkspaceUserRoleRequest](azentspublicclient/docs/UpdateWorkspaceUserRoleRequest.md)
  - [UploadResponse](azentspublicclient/docs/UploadResponse.md)
  - [UploadedImage](azentspublicclient/docs/UploadedImage.md)

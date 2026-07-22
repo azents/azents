@@ -396,6 +396,7 @@ def _report_message(
         reason=report.reason,
         diagnostic=dict(report.diagnostic),
         reported_at=_timestamp(report.reported_at),
+        terminal_delete_acknowledged=report.terminal_delete_acknowledged,
     )
 
 
@@ -432,6 +433,7 @@ def provider_report_from_message(
         reason=message.reason,
         diagnostic=dict(message.diagnostic),
         reported_at=_datetime(message.reported_at),
+        terminal_delete_acknowledged=message.terminal_delete_acknowledged,
     )
 
 

@@ -18,7 +18,7 @@ import re  # noqa: F401
 import json
 
 from pydantic import BaseModel, ConfigDict, Field, StrictStr
-from typing import Any, ClassVar, Dict, List, Optional
+from typing import Any, ClassVar, Dict, List
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -29,9 +29,8 @@ class CreateWorkspaceRequest(BaseModel):
     workspace_name: StrictStr = Field(description="Workspace name")
     workspace_handle: StrictStr = Field(description="Workspace handle")
     owner_name: StrictStr = Field(description="Owner display name")
-    locale: Optional[StrictStr] = Field(default='ko-KR', description="Locale (BCP 47)")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["workspace_name", "workspace_handle", "owner_name", "locale"]
+    __properties: ClassVar[List[str]] = ["workspace_name", "workspace_handle", "owner_name"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -93,8 +92,7 @@ class CreateWorkspaceRequest(BaseModel):
         _obj = cls.model_validate({
             "workspace_name": obj.get("workspace_name"),
             "workspace_handle": obj.get("workspace_handle"),
-            "owner_name": obj.get("owner_name"),
-            "locale": obj.get("locale") if obj.get("locale") is not None else 'ko-KR'
+            "owner_name": obj.get("owner_name")
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

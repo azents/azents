@@ -4,7 +4,9 @@ import dataclasses
 import datetime
 
 from pydantic import BaseModel, Field
-from typing_extensions import Self
+from typing_extensions import Self, TypedDict
+
+from azents.core.locale import SupportedLocale
 
 
 class User(BaseModel):
@@ -13,6 +15,7 @@ class User(BaseModel):
     id: str = Field(description="User ID (UUID7 hex)")
     primary_email_id: str = Field(description="Primary email ID")
     primary_email: str = Field(description="Primary email address")
+    locale: SupportedLocale = Field(description="Account locale (BCP 47)")
     created_at: datetime.datetime = Field(description="Created time")
     updated_at: datetime.datetime = Field(description="Updated time")
 
@@ -29,6 +32,12 @@ class UserCreate(BaseModel):
     """
 
     email: str = Field(description="Primary email address")
+
+
+class UserUpdate(TypedDict, total=False):
+    """User update schema (partial update)."""
+
+    locale: SupportedLocale
 
 
 class UserList(BaseModel):

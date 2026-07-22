@@ -10,7 +10,7 @@ from sqlalchemy.orm import aliased
 from azents.rdb.models.user import RDBUser
 from azents.rdb.models.user_email import RDBUserEmail
 
-from .data import User, UserCreate, UserList
+from .data import User, UserCreate, UserList, UserUpdate
 
 
 class UserRepository:
@@ -94,6 +94,25 @@ class UserRepository:
         result = await session.execute(sa.select(sa.func.count()).select_from(RDBUser))
         return result.scalar() or 0
 
+    async def update(
+        self,
+        session: AsyncSession,
+        user_id: str,
+        update: UserUpdate,
+    ) -> User | None:
+        """Update User."""
+        if update:
+            result = await session.execute(
+                sa.update(RDBUser)
+                .where(RDBUser.id == user_id)
+                .values(**update)
+                .returning(RDBUser.id)
+            )
+            if result.scalar_one_or_none() is None:
+                return None
+
+        return await self.get(session, user_id)
+
     async def list_all(
         self,
         session: AsyncSession,
@@ -144,7 +163,7 @@ class UserRepository:
         """Create User together with primary UserEmail."""
         # Create User with temporary email ID (resolve circular FK)
         temp_email_id = uuid7().hex
-        rdb_user = RDBUser(primary_email_id=temp_email_id)
+        rdb_user = RDBUser(primary_email_id=temp_email_id, locale="en-US")
         session.add(rdb_user)
         await session.flush()
 
@@ -172,6 +191,7 @@ class UserRepository:
             id=rdb_user.id,
             primary_email_id=rdb_user.primary_email_id,
             primary_email=primary_email,
+            locale=rdb_user.locale,
             created_at=rdb_user.created_at,
             updated_at=rdb_user.updated_at,
         )

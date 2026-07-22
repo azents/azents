@@ -38,6 +38,15 @@ class AgentRuntime(BaseModel):
     reset_final_desired_state: RuntimeDesiredState | None = Field(
         default=None, description="Desired state after reset completion"
     )
+    terminal_delete_requested_generation: int | None = Field(
+        default=None, description="Terminal deletion request generation"
+    )
+    terminal_delete_acknowledged_generation: int | None = Field(
+        default=None, description="Provider-acknowledged terminal deletion generation"
+    )
+    terminal_delete_acknowledged_at: datetime.datetime | None = Field(
+        default=None, description="Terminal deletion acknowledgement time"
+    )
     provider_observed_state: RuntimeProviderObservedState = Field(
         default=RuntimeProviderObservedState.UNKNOWN,
         description="Provider observed state",

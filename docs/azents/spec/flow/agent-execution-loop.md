@@ -66,7 +66,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
 last_verified_at: 2026-07-21
-spec_version: 124
+spec_version: 125
 ---
 
 # Agent Execution Loop
@@ -268,6 +268,13 @@ requesting stop and emitting broker stop signals. Any pending or running `AgentR
 retain the tree and schedule retry; cleanup and database deletion proceed only after the active-run
 check is clear. Restore is permitted only before this purge fence starts. A restored tree returns every
 linked session to active state and may then admit work through the ordinary boundaries.
+
+A due purge job may cross the fence only when its root archive schedule still matches the persisted
+job and every `AgentSession` in the linked root `SessionAgent` tree remains archived. An invalid
+pending or retry-wait job is cancelled only while `fencing_started_at` is still null. If a previously
+fenced job is found with a non-archived tree member, automatic cancellation and reclaim both stop; the
+job remains available for explicit operational repair rather than retrying cleanup or weakening the
+all-tree archive validation.
 
 `agent_runs` replaces SDK `RunState`. Run phase is also the UI activity source.
 
@@ -600,13 +607,15 @@ Subagent collaboration tools communicate through resolved agent input buffers:
   `list_agents` includes the root and the known agent tree, including ancestors of the caller.
 - `send_message` writes an `agent_message` to any resolved agent, including the root, without waking it.
 - `followup_task` writes an `agent_message`, marks the target running, and sends a broker wake-up,
-  but rejects the root as a target.
+  but rejects the root as a target. It holds the root-tree lock while evaluating active capacity.
+  Assigning more work to an already-active target is allowed at capacity; activating an idle target
+  is rejected when the root tree already has `subagent_settings.max_subagents` active children.
 - `wait_agent` accepts only optional `timeout_seconds` and observes any pending mailbox message for
   the current SessionAgent plus activity across its entire descendant subtree. It repairs direct-child
   terminal delivery before each observation, prioritizes mailbox activity over no-descendant/all-idle/
   timeout outcomes, and never consumes buffers or acknowledges terminal results itself.
 - `interrupt_agent` rejects the root and the caller itself, then records stop intent only for the
-  resolved target's current run.
+  resolved target's current run while holding the root-tree and target-session locks.
 
 `agent_message` lowering renders mailbox payloads as explicit source-labeled envelopes for the target
 session. `spawn_agent` and `followup_task` render `Message Type: NEW_TASK`; `send_message` renders
@@ -627,12 +636,17 @@ runner and locked idle transition consider only pending commands, active Runs, i
 mailbox input remains. A later wake-producing input starts one Run and normal FIFO preparation
 promotes the older queue-only rows before or with the triggering input.
 
-When a current subagent Run becomes terminal, `SubagentTerminalResultService` locks the Run, validates
-its direct parent, inserts one idempotent queue-only `agent_result`, and writes the Run delivery marker
-in the same transaction. Normal terminal handling attempts this side effect before idle evaluation.
-Parent `wait_agent` polling repairs eligible results from direct children, and a later Run in the
-source child session repairs older eligible terminal results. Delivery failure is logged but does not
-roll the Run back or keep the child running.
+Mailbox enqueue holds the root `SessionAgent` row lock, then locks the target `AgentSession`. Every
+mailbox target must still be active; `spawn_agent` and `followup_task` additionally reject a target
+whose stop request is already present before they create input or wake side effects.
+
+When a current subagent Run becomes terminal, `SubagentTerminalResultService` locks the root
+`SessionAgent` tree boundary before locking the Run, validates its direct parent, inserts one
+idempotent queue-only `agent_result`, and writes the Run delivery marker in the same transaction.
+Normal terminal handling attempts this side effect before idle evaluation. Parent `wait_agent`
+polling repairs eligible results from direct children, and a later Run in the source child session
+repairs older eligible terminal results. Delivery failure is logged but does not roll the Run back or
+keep the child running.
 
 Input preparation validates every promoted `agent_result` against the actual direct child and terminal
 Run metadata before monotonically advancing that child's parent-observation cursor. Cursor update,
@@ -999,13 +1013,19 @@ must not overwrite them. No database row lock or transaction spans external I/O.
 
 ## Idle continuation
 
-Idle transition is allowed only at a terminal run boundary. `AgentSession.run_state` may become `idle` only
-after the runner has observed a terminal `RunComplete` boundary and has confirmed that there is no
-follow-up work: no pending command, no pending input buffer, and no queued actionable wake-up. User
-interrupt and failed terminal runs also end through `RunComplete`; after that same follow-up check
-they may transition the session to idle. Idle continuation hooks are dispatched only when the latest
-terminal run status is `completed`; failed, stopped, interrupted, cancelled, or retry-active running
-runs must not enqueue Goal continuation.
+Idle transition is allowed only at a terminal run boundary. A `completed` terminal transition records
+that Run's ID in `AgentSession.pending_idle_continuation_run_id` in the same durable transaction.
+The pointer is the session's one supersedable obligation to evaluate idle continuation at true idle;
+failed, stopped, interrupted, and cancelled transitions do not record it. Activating replacement work
+clears an earlier pointer because that earlier terminal boundary did not remain idle.
+
+`AgentSession.run_state` may become `idle` only after the runner has confirmed that no follow-up work
+exists: no pending command, no pending wake-producing input buffer, no active Run, and no queued
+actionable wake-up. For a completed boundary, the runner dispatches idle hooks only after that
+follow-up check. It then locks the Session, rechecks that the same pointer remains and that the
+session is still free of follow-up work, and atomically commits one outcome: continuation InputBuffers
+plus `running`, or pointer removal plus `idle`. Failed, stopped, interrupted, cancelled, or
+retry-active Runs must not enqueue Goal continuation.
 
 Wake-up is a signal, not work by itself. If a wake-up reaches a running session, it is a no-op signal.
 The warm runner polls input buffers at model-call turn boundaries, so accepted TurnActions are not
@@ -1022,31 +1042,38 @@ error observations without a terminal Run event.
 
 The required run-completion order is:
 
-1. Persist the terminal AgentRun state and durable terminal transcript output.
+1. Persist the terminal AgentRun state and durable terminal transcript output. For `completed`, record
+   the matching pending idle-continuation pointer atomically.
 2. Publish or observe the correlated terminal control event (`RunComplete` or `RunStopped`).
 3. For a linked subagent, attempt durable terminal `agent_result` delivery to its direct parent.
 4. Check whether follow-up work already exists as an inbox wake-up, pending command, or pending
    `wake_session` input; queue-only mailbox rows are not follow-up work.
-5. If follow-up work exists, keep or restore `running` and continue with the next run.
-6. If no follow-up work exists, transition `AgentSession.run_state` to `idle`.
-7. Clear session activity state that belongs to the completed run.
-8. Run `on_session_idle` hooks.
-9. Collect returned continuation prompts.
-10. In one locked transaction, enqueue those prompts as `wake_session` input and mark the Session
-    running; then publish pending-buffer live state.
-11. Send a payload-free broker wake-up signal.
+5. If follow-up work exists, keep or restore `running`, retain the pending pointer, and continue with
+   the next run.
+6. For a completed boundary with no follow-up work, resolve current hook providers and run
+   `on_session_idle` outside the database transaction.
+7. In one locked transaction, recheck the matching pointer, command, wake-producing input, and active
+   Run. Consume the pointer while atomically either enqueueing deterministic continuation InputBuffers
+   and marking the Session `running`, or marking it `idle` when no continuation was returned.
+8. For a non-completed terminal boundary with no follow-up work, mark the Session `idle`.
+9. Clear session activity only after the corresponding durable idle outcome commits.
+10. Publish pending-buffer live state and send a payload-free broker wake-up only after a committed
+    continuation outcome.
 
 `on_session_idle` hook providers do not write durable transcript events directly and do not send
-broker wake-ups. They return continuation input only. `IdleContinuationService` owns the atomic
-handoff from idle hook results to recoverable runner work through `InputBufferService` and the Session
-repository.
+broker wake-ups. They return continuation input only. `IdleContinuationService` owns the conditional
+pointer consume and atomic handoff from idle hook results to recoverable runner work through
+`InputBufferService` and the Session repository. Continuation InputBuffers use deterministic identity
+keys derived from the completed Run, provider slug, and provider-local ordinal, so retry or broker
+redelivery cannot duplicate the logical continuation.
 
-A graceful worker shutdown is not an idle transition. If shutdown is observed while a run is active,
-the departing worker preserves `running` state and hands over by wake-up instead of marking the
-session idle or dispatching idle hooks. The supervised foreground task receives a bounded 30-second
-completion window. Tool-call recovery may continue from its durable ownership protocol, but an
-uncertain operation TurnAction is cancelled into durable history and is never resumed by the next
-owner.
+A graceful worker shutdown is not an idle transition. If shutdown is observed while a Run is active or
+a completed Run still has a pending idle-continuation pointer, the departing worker preserves
+recoverable `running` state and hands over by wake-up instead of dispatching idle hooks. A recovering
+owner that receives a no-actionable wake-up re-resolves current hook providers and conditionally
+consumes the durable pointer. The supervised foreground task receives a bounded 30-second completion
+window. Tool-call recovery may continue from its durable ownership protocol, but an uncertain
+operation TurnAction is cancelled into durable history and is never resumed by the next owner.
 
 The first idle hook provider is Goal Toolkit. It emits continuation only for `active` Goal state.
 `paused`, `blocked`, `complete`, or empty Goal state does not enqueue a continuation and does not
@@ -1066,6 +1093,7 @@ updated by the user.
 
 ## Changelog
 
+- **2026-07-21** (spec_version 125) — Made completed-run idle continuation a durable Session boundary that recovery conditionally consumes after true idle.
 - **2026-07-21** (spec_version 124) — Moved the live non-empty Activity indicator into the summary header's completed-check slot and suppressed it for empty groups.
 - **2026-07-21** (spec_version 123) — Generalized prepared client-tool selection across semantic model profiles, adapter profile preferences, and tool-declared wire variants while retaining durable single-dialect execution.
 - **2026-07-21** (spec_version 122) — Kept existing `apply_patch` eligibility and selected plaintext custom only for the native OpenAI Responses adapter; all other eligible transports retain the JSON-function variant.

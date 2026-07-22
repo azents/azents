@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     AgentSessionStatus,
+    ArchivedSessionPurgeParticipantPhase,
     ArchivedSessionPurgeStatus,
     ArchivedSessionRetentionApplicationStatus,
     LLMProvider,
@@ -17,6 +18,7 @@ from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.archived_session_retention import (
     RDBArchivedSessionPurgeJob,
+    RDBArchivedSessionPurgeParticipantExecution,
     RDBArchivedSessionRetentionApplication,
 )
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
@@ -24,6 +26,12 @@ from azents.rdb.session import SessionManager
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
+from azents.repos.archived_session_retention.data import (
+    ArchivedSessionPurgeParticipantSnapshot,
+)
+from azents.repos.session_lifecycle_finalizer import (
+    SessionLifecycleFinalizerRepository,
+)
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
@@ -53,11 +61,10 @@ async def _create_user(session: AsyncSession, suffix: str) -> str:
     return user.id
 
 
-async def _create_archived_root(
+async def _create_root(
     session: AsyncSession,
     *,
     suffix: str,
-    archived_at: datetime.datetime,
 ) -> str:
     workspace_result = await WorkspaceRepository().create(
         session,
@@ -102,9 +109,18 @@ async def _create_archived_root(
             title=None,
         ),
     )
+    return created.id
+
+
+async def _archive_root(
+    session: AsyncSession,
+    *,
+    root_session_id: str,
+    archived_at: datetime.datetime,
+) -> None:
     await session.execute(
         sa.update(RDBAgentSession)
-        .where(RDBAgentSession.id == created.id)
+        .where(RDBAgentSession.id == root_session_id)
         .values(
             status=AgentSessionStatus.ARCHIVED,
             archived_at=archived_at,
@@ -114,7 +130,61 @@ async def _create_archived_root(
             ended_at=archived_at,
         )
     )
-    return created.id
+
+
+async def _create_archived_root(
+    session: AsyncSession,
+    *,
+    suffix: str,
+    archived_at: datetime.datetime,
+) -> str:
+    root_session_id = await _create_root(session, suffix=suffix)
+    await _archive_root(
+        session,
+        root_session_id=root_session_id,
+        archived_at=archived_at,
+    )
+    return root_session_id
+
+
+async def _create_child_session(
+    session: AsyncSession,
+    *,
+    root_session_id: str,
+    name: str,
+) -> str:
+    repository = AgentSessionRepository()
+    root_agent = await repository.get_session_agent_by_session_id(
+        session,
+        root_session_id,
+    )
+    assert root_agent is not None
+    child = await repository.create_child_session_agent(
+        session,
+        parent_session_agent_id=root_agent.id,
+        name=name,
+        agent_type="default",
+        title=None,
+        last_task_message=None,
+    )
+    return child.agent_session_id
+
+
+async def _archive_session(
+    session: AsyncSession,
+    *,
+    session_id: str,
+    archived_at: datetime.datetime,
+) -> None:
+    await session.execute(
+        sa.update(RDBAgentSession)
+        .where(RDBAgentSession.id == session_id)
+        .values(
+            status=AgentSessionStatus.ARCHIVED,
+            archived_at=archived_at,
+            ended_at=archived_at,
+        )
+    )
 
 
 async def test_default_settings_and_future_only_revision_update(
@@ -320,6 +390,179 @@ async def test_invalid_unstarted_purge_jobs_are_cancelled_in_bounded_batches(
     assert jobs_by_root[valid_root_id].status is ArchivedSessionPurgeStatus.PENDING
 
 
+async def test_unstarted_purge_job_with_active_child_is_cancelled(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """A root schedule cannot purge a tree containing an active child Session."""
+    repository = ArchivedSessionRetentionRepository()
+    now = datetime.datetime.now(datetime.UTC)
+    async with rdb_session_manager() as session:
+        root_session_id = await _create_root(
+            session,
+            suffix="active-child-cancel",
+        )
+        active_child_session_id = await _create_child_session(
+            session,
+            root_session_id=root_session_id,
+            name="active-child",
+        )
+        await _archive_root(
+            session,
+            root_session_id=root_session_id,
+            archived_at=now - datetime.timedelta(days=31),
+        )
+        root = await session.get(RDBAgentSession, root_session_id)
+        assert root is not None
+        assert root.purge_after is not None
+        session.add(
+            RDBArchivedSessionPurgeJob(
+                root_session_id=root_session_id,
+                eligible_at=root.purge_after,
+                policy_revision=1,
+            )
+        )
+
+    async with rdb_session_manager() as session:
+        claimed = await repository.claim_due_purge_job(
+            session,
+            now=now,
+            lease_owner="purge-worker",
+            lease_until=now + datetime.timedelta(minutes=1),
+        )
+    assert claimed is None
+
+    async with rdb_session_manager() as session:
+        cancelled_count = await repository.cancel_invalid_unstarted_purge_jobs(
+            session,
+            now=now,
+            limit=100,
+        )
+        child = await session.get(RDBAgentSession, active_child_session_id)
+        job = await session.scalar(
+            sa.select(RDBArchivedSessionPurgeJob).where(
+                RDBArchivedSessionPurgeJob.root_session_id == root_session_id
+            )
+        )
+
+    assert cancelled_count == 1
+    assert child is not None
+    assert child.status is AgentSessionStatus.ACTIVE
+    assert job is not None
+    assert job.status is ArchivedSessionPurgeStatus.CANCELLED
+    assert job.fencing_started_at is None
+    assert job.last_error_kind == "InvalidRootTree"
+
+
+async def test_purge_job_with_fully_archived_child_tree_is_claimable(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """A fully archived root tree remains eligible to cross the purge fence."""
+    repository = ArchivedSessionRetentionRepository()
+    now = datetime.datetime.now(datetime.UTC)
+    async with rdb_session_manager() as session:
+        root_session_id = await _create_root(
+            session,
+            suffix="archived-child-claim",
+        )
+        child_session_id = await _create_child_session(
+            session,
+            root_session_id=root_session_id,
+            name="archived-child",
+        )
+        await _archive_root(
+            session,
+            root_session_id=root_session_id,
+            archived_at=now - datetime.timedelta(days=31),
+        )
+        await _archive_session(
+            session,
+            session_id=child_session_id,
+            archived_at=now - datetime.timedelta(days=31),
+        )
+        root = await session.get(RDBAgentSession, root_session_id)
+        assert root is not None
+        assert root.purge_after is not None
+        session.add(
+            RDBArchivedSessionPurgeJob(
+                root_session_id=root_session_id,
+                eligible_at=root.purge_after,
+                policy_revision=1,
+            )
+        )
+
+    async with rdb_session_manager() as session:
+        claimed = await repository.claim_due_purge_job(
+            session,
+            now=now,
+            lease_owner="purge-worker",
+            lease_until=now + datetime.timedelta(minutes=1),
+        )
+
+    assert claimed is not None
+    assert claimed.status is ArchivedSessionPurgeStatus.FENCING
+    assert claimed.fencing_started_at is not None
+
+
+async def test_fenced_purge_job_with_active_child_is_neither_claimed_nor_cancelled(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """An inconsistent fenced job waits for explicit repair without retry churn."""
+    repository = ArchivedSessionRetentionRepository()
+    now = datetime.datetime.now(datetime.UTC)
+    async with rdb_session_manager() as session:
+        root_session_id = await _create_root(
+            session,
+            suffix="fenced-active-child",
+        )
+        await _create_child_session(
+            session,
+            root_session_id=root_session_id,
+            name="active-child",
+        )
+        await _archive_root(
+            session,
+            root_session_id=root_session_id,
+            archived_at=now - datetime.timedelta(days=31),
+        )
+        root = await session.get(RDBAgentSession, root_session_id)
+        assert root is not None
+        assert root.purge_after is not None
+        job = RDBArchivedSessionPurgeJob(
+            root_session_id=root_session_id,
+            eligible_at=root.purge_after,
+            policy_revision=1,
+        )
+        job.status = ArchivedSessionPurgeStatus.RETRY_WAIT
+        job.fencing_started_at = now - datetime.timedelta(minutes=10)
+        job.next_attempt_at = now - datetime.timedelta(minutes=1)
+        session.add(job)
+
+    async with rdb_session_manager() as session:
+        cancelled_count = await repository.cancel_invalid_unstarted_purge_jobs(
+            session,
+            now=now,
+            limit=100,
+        )
+        claimed = await repository.claim_due_purge_job(
+            session,
+            now=now,
+            lease_owner="purge-worker",
+            lease_until=now + datetime.timedelta(minutes=1),
+        )
+        persisted = await session.scalar(
+            sa.select(RDBArchivedSessionPurgeJob).where(
+                RDBArchivedSessionPurgeJob.root_session_id == root_session_id
+            )
+        )
+
+    assert cancelled_count == 0
+    assert claimed is None
+    assert persisted is not None
+    assert persisted.status is ArchivedSessionPurgeStatus.RETRY_WAIT
+    assert persisted.fencing_started_at is not None
+    assert persisted.cancelled_at is None
+
+
 async def test_purge_job_claim_respects_lease_and_reclaims_after_expiry(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> None:
@@ -419,6 +662,8 @@ async def test_purge_retry_completion_and_tombstone_survive_root_delete(
             next_attempt_at=retry_at,
             error_kind="S3Unavailable",
             error_summary="Object cleanup failed.",
+            error_participant_key=None,
+            error_phase=None,
             now=now,
         )
 
@@ -450,7 +695,11 @@ async def test_purge_retry_completion_and_tombstone_survive_root_delete(
             now=retry_at,
         )
         assert marked is True
-        await AgentSessionRepository().delete_by_id(session, root_session_id)
+        await SessionLifecycleFinalizerRepository().finalize_purged_root_tree(
+            session,
+            root_session_id=root_session_id,
+            session_ids=[root_session_id],
+        )
         completed = await repository.complete_purge_job(
             session,
             job_id=retried.id,
@@ -472,6 +721,143 @@ async def test_purge_retry_completion_and_tombstone_survive_root_delete(
     assert tombstone.worktree_count == 5
     assert tombstone.last_error_kind is None
     assert tombstone.last_error_summary is None
+    assert tombstone.last_error_participant_key is None
+    assert tombstone.last_error_phase is None
+
+
+async def test_purge_participant_snapshot_and_progress_are_durable(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """Fencing materializes immutable participant versions with durable checkpoints."""
+    repository = ArchivedSessionRetentionRepository()
+    now = datetime.datetime.now(datetime.UTC)
+    async with rdb_session_manager() as session:
+        root_session_id = await _create_archived_root(
+            session,
+            suffix="purge-participant-progress",
+            archived_at=now - datetime.timedelta(days=31),
+        )
+        root = await session.get(RDBAgentSession, root_session_id)
+        assert root is not None
+        assert root.purge_after is not None
+        session.add(
+            RDBArchivedSessionPurgeJob(
+                root_session_id=root_session_id,
+                eligible_at=root.purge_after,
+                policy_revision=1,
+            )
+        )
+
+    async with rdb_session_manager() as session:
+        claimed = await repository.claim_due_purge_job(
+            session,
+            now=now,
+            lease_owner="purge-worker-1",
+            lease_until=now + datetime.timedelta(minutes=1),
+        )
+        assert claimed is not None
+        executions = await repository.materialize_purge_participant_executions(
+            session,
+            job_id=claimed.id,
+            lease_owner="purge-worker-1",
+            participants=(
+                ArchivedSessionPurgeParticipantSnapshot(
+                    participant_key="session.execution",
+                    policy_version=1,
+                ),
+                ArchivedSessionPurgeParticipantSnapshot(
+                    participant_key="session.git-worktrees",
+                    policy_version=1,
+                ),
+            ),
+        )
+        assert [execution.participant_key for execution in executions] == [
+            "session.execution",
+            "session.git-worktrees",
+        ]
+        assert all(
+            execution.phase is ArchivedSessionPurgeParticipantPhase.PENDING
+            for execution in executions
+        )
+
+        started = await repository.start_purge_participant_attempt(
+            session,
+            job_id=claimed.id,
+            lease_owner="purge-worker-1",
+            participant_key="session.git-worktrees",
+            now=now,
+        )
+        blocked = await repository.mark_purge_participant_blocked(
+            session,
+            job_id=claimed.id,
+            lease_owner="purge-worker-1",
+            participant_key="session.git-worktrees",
+            blocked_by_participant_key="session.execution",
+            now=now,
+        )
+        checkpointed = await repository.checkpoint_purge_participant(
+            session,
+            job_id=claimed.id,
+            lease_owner="purge-worker-1",
+            participant_key="session.execution",
+            phase=ArchivedSessionPurgeParticipantPhase.PREPARED,
+            operational_summary={"prepared_count": 2},
+            now=now,
+        )
+        failed = await repository.record_purge_participant_failure(
+            session,
+            job_id=claimed.id,
+            lease_owner="purge-worker-1",
+            participant_key="session.git-worktrees",
+            phase=ArchivedSessionPurgeParticipantPhase.PENDING,
+            error_kind="RunnerUnavailable",
+            error_summary="Runner cleanup is temporarily unavailable.",
+            now=now,
+        )
+        assert started is True
+        assert blocked is True
+        assert checkpointed is True
+        assert failed is True
+
+    async with rdb_session_manager() as session:
+        execution_rows = list(
+            (
+                await session.scalars(
+                    sa.select(RDBArchivedSessionPurgeParticipantExecution).where(
+                        RDBArchivedSessionPurgeParticipantExecution.purge_job_id
+                        == claimed.id
+                    )
+                )
+            ).all()
+        )
+        job = await session.get(RDBArchivedSessionPurgeJob, claimed.id)
+        assert job is not None
+        assert job.last_error_participant_key == "session.git-worktrees"
+        assert job.last_error_phase is ArchivedSessionPurgeParticipantPhase.PENDING
+        by_key = {row.participant_key: row for row in execution_rows}
+        assert by_key["session.execution"].phase is (
+            ArchivedSessionPurgeParticipantPhase.PREPARED
+        )
+        assert by_key["session.execution"].operational_summary == {"prepared_count": 2}
+        assert by_key["session.git-worktrees"].attempt_count == 1
+        assert by_key["session.git-worktrees"].blocked_by_participant_key == (
+            "session.execution"
+        )
+        assert by_key["session.git-worktrees"].last_error_kind == "RunnerUnavailable"
+
+    async with rdb_session_manager() as session:
+        with pytest.raises(RuntimeError, match="snapshot is immutable"):
+            await repository.materialize_purge_participant_executions(
+                session,
+                job_id=claimed.id,
+                lease_owner="purge-worker-1",
+                participants=(
+                    ArchivedSessionPurgeParticipantSnapshot(
+                        participant_key="session.execution",
+                        policy_version=2,
+                    ),
+                ),
+            )
 
 
 async def test_revision_and_active_application_conflicts(

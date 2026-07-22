@@ -4,16 +4,18 @@ Endpoint for retrieving the current user information.
 """
 
 from textwrap import dedent
-from typing import Annotated
+from typing import Annotated, assert_never
 
+from azcommon.result import Failure, Success
 from fastapi import APIRouter, Depends, HTTPException
 
 from azents.core.auth.deps import CurrentUser, get_current_user
+from azents.repos.user.data import NotFound, UserUpdate
 from azents.services.system_user_role.service import SystemUserRoleService
 from azents.services.user import UserService
 from azents.utils.fastapi.route import RouteMounter
 
-from .data import MeResponse, MySystemRolesResponse
+from .data import MeResponse, MySystemRolesResponse, UpdateMyUserRequest
 
 router = APIRouter()
 
@@ -30,8 +32,38 @@ async def me(
 
     return MeResponse(
         email=user.primary_email,
+        locale=user.locale,
         created_at=user.created_at,
     )
+
+
+@router.patch("/me")
+async def update_me(
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    user_service: Annotated[UserService, Depends()],
+    *,
+    request_body: UpdateMyUserRequest,
+) -> MeResponse:
+    """Update the currently authenticated user's account settings."""
+    result = await user_service.update(
+        current_user.user_id,
+        UserUpdate(locale=request_body.locale),
+    )
+    match result:
+        case Success(user):
+            return MeResponse(
+                email=user.primary_email,
+                locale=user.locale,
+                created_at=user.created_at,
+            )
+        case Failure(error):
+            match error:
+                case NotFound():
+                    raise HTTPException(status_code=404, detail="User not found.")
+                case _:
+                    assert_never(error)
+        case _:
+            assert_never(result)
 
 
 @router.get("/me/system-roles")

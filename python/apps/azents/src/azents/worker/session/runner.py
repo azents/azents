@@ -132,7 +132,6 @@ class SessionRunner:
         )
         self.run_active = False
         self.handover_wake_up: SessionWakeUp | None = None
-        self.pending_idle_boundary: _PendingIdleBoundary | None = None
 
     @property
     def terminated(self) -> bool:
@@ -317,10 +316,8 @@ class SessionRunner:
     async def _mark_idle_after_boundary(
         self,
         boundary: _PendingIdleBoundary,
-        *,
-        enqueue_idle_continuation: bool = True,
     ) -> bool:
-        """Close a terminal boundary through idle transition and idle hook."""
+        """Close a terminal boundary through its durable idle outcome."""
         logger.info(
             "Session runner marking session idle after terminal run",
             extra={
@@ -328,30 +325,35 @@ class SessionRunner:
                 "run_status": boundary.run_status,
             },
         )
+        if boundary.run_status == AgentRunStatus.COMPLETED:
+            if boundary.run_id is None:
+                raise RuntimeError("Completed run has no idle continuation boundary ID")
+            consumed = await self.idle_continuation_service.consume(
+                boundary.message,
+                toolkits=boundary.toolkits,
+                run_id=boundary.run_id,
+            )
+            if not consumed:
+                return False
+            await self.session_lifecycle.clear_session_activity(
+                boundary.message.session_id
+            )
+            return True
+
         marked_idle = await self.session_lifecycle.mark_session_idle(
             boundary.message.session_id
         )
         if not marked_idle:
             return False
         await self.session_lifecycle.clear_session_activity(boundary.message.session_id)
-        if (
-            boundary.run_status == AgentRunStatus.COMPLETED
-            and enqueue_idle_continuation
-        ):
-            await self.idle_continuation_service.enqueue(
-                boundary.message,
-                toolkits=boundary.toolkits,
-                run_id=boundary.run_id,
-            )
-        elif boundary.run_status != AgentRunStatus.COMPLETED:
-            logger.info(
-                "Skipped idle continuation because terminal run did not complete",
-                extra={
-                    "session_id": boundary.message.session_id,
-                    "run_id": boundary.run_id,
-                    "run_status": boundary.run_status,
-                },
-            )
+        logger.info(
+            "Skipped idle continuation because terminal run did not complete",
+            extra={
+                "session_id": boundary.message.session_id,
+                "run_id": boundary.run_id,
+                "run_status": boundary.run_status,
+            },
+        )
         return True
 
     async def _release_current_session(self) -> None:
@@ -365,9 +367,11 @@ class SessionRunner:
             await self.session_lifecycle.release_session_lock(session_id)
             return
 
-        should_handover = await self.session_lifecycle.has_active_agent_run(
-            session_id,
-        )
+        should_handover = await self.session_lifecycle.has_active_agent_run(session_id)
+        if not should_handover:
+            should_handover = (
+                await self.session_lifecycle.has_pending_idle_continuation(session_id)
+            )
 
         if not should_handover:
             await self.session_lifecycle.release_session_lock(session_id)
@@ -495,34 +499,40 @@ class SessionRunner:
                             run_id=result.run_id,
                             run_status=result.terminal_run_status,
                         )
-                        if await self._has_follow_up_work(message.session_id):
-                            self.pending_idle_boundary = boundary
-                        else:
+                        if not await self._has_follow_up_work(message.session_id):
                             marked_idle = await self._mark_idle_after_boundary(boundary)
-                            self.pending_idle_boundary = None
                 elif result.no_actionable_work and isinstance(message, SessionWakeUp):
-                    boundary = self.pending_idle_boundary
+                    lifecycle = self.session_lifecycle
+                    pending_run_id = (
+                        await lifecycle.get_pending_idle_continuation_run_id(
+                            message.session_id
+                        )
+                    )
                     if (
-                        boundary is not None
-                        and boundary.message.session_id == message.session_id
+                        pending_run_id is not None
                         and not await self._has_follow_up_work(message.session_id)
                     ):
+                        toolkits = (
+                            await self.run_executor.resolve_idle_continuation_toolkits(
+                                message,
+                                run_id=pending_run_id,
+                                prepare_toolkits=self.prepare_toolkits,
+                                dispatch_event=self.event_publisher.dispatch_event,
+                            )
+                        )
+                        boundary = _PendingIdleBoundary(
+                            message=message,
+                            toolkits=toolkits,
+                            run_id=pending_run_id,
+                            run_status=AgentRunStatus.COMPLETED,
+                        )
                         marked_idle = await self._mark_idle_after_boundary(boundary)
-                        if marked_idle:
-                            self.pending_idle_boundary = None
-                    elif boundary is None and not await self._has_follow_up_work(
+                    elif pending_run_id is None and not await self._has_follow_up_work(
                         message.session_id
                     ):
                         marked_idle = await self._mark_idle_after_no_actionable_wake_up(
                             message.session_id
                         )
-                elif (
-                    isinstance(message, SessionWakeUp)
-                    and self.pending_idle_boundary is not None
-                    and self.pending_idle_boundary.message.session_id
-                    == message.session_id
-                ):
-                    self.pending_idle_boundary = None
                 L.info(
                     "Session runner wake-up processed",
                     extra={
@@ -622,8 +632,8 @@ class SessionRunner:
             self.run_active = False
             if (
                 self.stop_controller.handover_stop_requested
-                and not self.stop_controller.user_stop_requested
-            ):
+                or self.shutdown_event.is_set()
+            ) and not self.stop_controller.user_stop_requested:
                 self.handover_wake_up = message
         await self._enqueue_wake_up_after_stop_if_needed(message)
         if self.shutdown_event.is_set():

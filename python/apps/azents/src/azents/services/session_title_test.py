@@ -16,6 +16,7 @@ from azents.core.agent import (
 )
 from azents.core.credentials import ApiKeySecrets
 from azents.core.enums import (
+    AgentLifecycleStatus,
     AgentSessionKind,
     AgentSessionStartReason,
     AgentSessionStatus,
@@ -502,6 +503,7 @@ class _AgentRepository:
             lightweight_model_label=DEFAULT_MAIN_MODEL_OPTION_LABEL,
             tool_search_enabled=False,
             enabled=True,
+            lifecycle_status=AgentLifecycleStatus.ACTIVE,
             type=AgentType.PUBLIC,
             created_at=now,
             updated_at=now,

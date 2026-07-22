@@ -11,7 +11,6 @@ export interface WorkspacesPageContentProps {
   onCreateNew: () => void;
   onCancel: () => void;
   onSaved: (handle: string) => void;
-  onDeleted: () => void;
   onDetailClose: () => void;
 }
 
@@ -55,11 +54,6 @@ export function useWorkspacesPageContainer(): WorkspacesPageContentProps {
     [setSelectedWorkspaceHandle],
   );
 
-  const handleDeleted = useCallback((): void => {
-    setSelectedWorkspaceHandle(null);
-    setIsCreateMode(false);
-  }, [setSelectedWorkspaceHandle]);
-
   const handleDetailClose = useCallback((): void => {
     setSelectedWorkspaceHandle(null);
     setIsCreateMode(false);
@@ -72,7 +66,6 @@ export function useWorkspacesPageContainer(): WorkspacesPageContentProps {
     onCreateNew: handleCreateNew,
     onCancel: handleCancel,
     onSaved: handleSaved,
-    onDeleted: handleDeleted,
     onDetailClose: handleDetailClose,
   };
 }

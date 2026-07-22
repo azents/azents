@@ -8,6 +8,10 @@ from typing import Any, cast
 import azentsadminclient
 import azentspublicclient
 import pytest
+from azentsadminclient.api.system_v1_api import SystemV1Api
+from azentsadminclient.models.file_lifecycle_settings_update_request import (
+    FileLifecycleSettingsUpdateRequest,
+)
 from azentspublicclient.api.agent_v1_api import AgentV1Api
 from azentspublicclient.api.invitation_v1_api import InvitationV1Api
 from azentspublicclient.api.llm_provider_integration_v1_api import (
@@ -174,6 +178,20 @@ def _create_agent(
     return agent.id
 
 
+def _set_retention(system_api: SystemV1Api, retention_days: int | None) -> None:
+    """Set the archived-session retention used by Agent decommission."""
+    current = system_api.system_v1_get_file_lifecycle_settings()
+    if current.archived_session_retention_days == retention_days:
+        return
+    system_api.system_v1_update_file_lifecycle_settings(
+        FileLifecycleSettingsUpdateRequest(
+            expected_revision=current.revision,
+            archived_session_retention_days=retention_days,
+            application_scope="new_archives_only",
+        )
+    )
+
+
 # ---------------------------------------------------------------------------
 # CRUD default
 # ---------------------------------------------------------------------------
@@ -290,35 +308,42 @@ class TestAgentCrud:
         assert updated.name == "Updated"
         assert updated.description == "t description"
 
-    def test_delete_agent(
+    def test_delete_agent_creates_decommission_job(
         self,
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
     ) -> None:
-        """Agent delete t fetch t 404t returnt."""
-        owner_token, handle, integration_id, model_selection = (
-            _setup_workspace_with_integration(public_api_client, admin_api_client)
-        )
-        agent_api = AgentV1Api(public_api_client)
-        headers = {"Authorization": f"Bearer {owner_token}"}
-
-        agent_id = _create_agent(
-            public_api_client,
-            token=owner_token,
-            handle=handle,
-            integration_id=integration_id,
-            model_selection=model_selection,
-        )
-
-        agent_api.agent_v1_delete_agent(
-            agent_id=agent_id, handle=handle, _headers=headers
-        )
-
-        with pytest.raises(ApiException) as exc_info:
-            agent_api.agent_v1_get_agent(
-                agent_id=agent_id, handle=handle, _headers=headers
+        """Agent DELETE creates a durable decommission job under finite retention."""
+        system_api = SystemV1Api(admin_api_client)
+        settings = system_api.system_v1_get_file_lifecycle_settings()
+        prior_retention = settings.archived_session_retention_days
+        _set_retention(system_api, 30)
+        try:
+            owner_token, handle, integration_id, model_selection = (
+                _setup_workspace_with_integration(public_api_client, admin_api_client)
             )
-        assert exc_info.value.status == 404  # pyright: ignore[reportUnknownMemberType] # t create API clientt t t t
+            agent_api = AgentV1Api(public_api_client)
+            headers = {"Authorization": f"Bearer {owner_token}"}
+
+            agent_id = _create_agent(
+                public_api_client,
+                token=owner_token,
+                handle=handle,
+                integration_id=integration_id,
+                model_selection=model_selection,
+            )
+
+            decommission = agent_api.agent_v1_delete_agent(
+                agent_id=agent_id,
+                handle=handle,
+                _headers=headers,
+            )
+
+            assert decommission.job_id
+            assert decommission.status == "pending"
+            assert decommission.created_at is not None
+        finally:
+            _set_retention(system_api, prior_retention)
 
     def test_get_nonexistent_agent_returns_404(
         self,

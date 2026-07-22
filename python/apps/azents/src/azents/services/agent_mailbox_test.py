@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.enums import (
     AgentRunPhase,
     AgentRunStatus,
+    AgentSessionStatus,
     InputBufferKind,
     InputBufferSchedulingMode,
     SessionAgentKind,
@@ -112,20 +113,57 @@ class _InputBufferService:
         )
 
 
+class _LockedAgentSession:
+    def __init__(
+        self,
+        status: AgentSessionStatus,
+        *,
+        stop_requested_at: datetime.datetime | None,
+    ) -> None:
+        self.status = status
+        self.stop_requested_at = stop_requested_at
+
+
 class _AgentSessionRepository:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        target_status: AgentSessionStatus = AgentSessionStatus.ACTIVE,
+        target_stopping: bool = False,
+    ) -> None:
         self.activity_ids: list[str] = []
         self.running_session_ids: list[str] = []
         self.locked_session_ids: list[str] = []
+        self.locked_session_agent_ids: list[str] = []
+        self.target_status = target_status
+        self.target_stopping = target_stopping
+
+    async def lock_session_agent_by_id(
+        self,
+        session: AsyncSession,
+        session_agent_id: str,
+    ) -> SessionAgent:
+        del session
+        self.locked_session_agent_ids.append(session_agent_id)
+        return _session_agent(
+            id="root-agent",
+            session_id="root-session",
+            path="/root",
+            kind=SessionAgentKind.ROOT,
+            parent_id=None,
+        )
 
     async def lock_by_id(
         self,
         session: AsyncSession,
         agent_session_id: str,
-    ) -> object:
+    ) -> _LockedAgentSession:
         del session
         self.locked_session_ids.append(agent_session_id)
-        return object()
+        return _LockedAgentSession(
+            self.target_status,
+            stop_requested_at=_NOW if self.target_stopping else None,
+        )
 
     async def mark_session_agent_message_activity(
         self,
@@ -145,13 +183,20 @@ class _AgentSessionRepository:
         self.running_session_ids.append(session_id)
 
 
-def _service() -> tuple[
+def _service(
+    *,
+    target_status: AgentSessionStatus = AgentSessionStatus.ACTIVE,
+    target_stopping: bool = False,
+) -> tuple[
     AgentMailboxService,
     _InputBufferService,
     _AgentSessionRepository,
 ]:
     input_buffer_service = _InputBufferService()
-    agent_session_repository = _AgentSessionRepository()
+    agent_session_repository = _AgentSessionRepository(
+        target_status=target_status,
+        target_stopping=target_stopping,
+    )
     return (
         AgentMailboxService(
             input_buffer_service=cast(InputBufferService, input_buffer_service),
@@ -304,3 +349,69 @@ async def test_terminal_result_requires_direct_parent() -> None:
 
     assert input_service.inputs == []
     assert session_repository.locked_session_ids == []
+
+
+async def test_mailbox_rejects_archived_target_before_enqueue() -> None:
+    """Archived descendants reject collaboration input and wake side effects."""
+    service, input_service, session_repository = _service(
+        target_status=AgentSessionStatus.ARCHIVED
+    )
+    source = _session_agent(
+        id="root-agent",
+        session_id="root-session",
+        path="/root",
+        kind=SessionAgentKind.ROOT,
+        parent_id=None,
+    )
+    target = _session_agent(
+        id="child-agent",
+        session_id="child-session",
+        path="/root/child",
+        kind=SessionAgentKind.SUBAGENT,
+        parent_id="root-agent",
+    )
+
+    with pytest.raises(ValueError, match="Target AgentSession is not active"):
+        await service.enqueue_followup_task(
+            cast(AsyncSession, object()),
+            source=source,
+            target=target,
+            content="Resume work.",
+            actor_user_id="user-1",
+        )
+
+    assert input_service.inputs == []
+    assert session_repository.activity_ids == []
+    assert session_repository.running_session_ids == []
+
+
+async def test_wake_mailbox_rejects_stopping_target_before_enqueue() -> None:
+    """Wake-producing collaboration cannot escape an existing stop request."""
+    service, input_service, session_repository = _service(target_stopping=True)
+    source = _session_agent(
+        id="root-agent",
+        session_id="root-session",
+        path="/root",
+        kind=SessionAgentKind.ROOT,
+        parent_id=None,
+    )
+    target = _session_agent(
+        id="child-agent",
+        session_id="child-session",
+        path="/root/child",
+        kind=SessionAgentKind.SUBAGENT,
+        parent_id="root-agent",
+    )
+
+    with pytest.raises(ValueError, match="Target AgentSession is stopping"):
+        await service.enqueue_followup_task(
+            cast(AsyncSession, object()),
+            source=source,
+            target=target,
+            content="Resume work.",
+            actor_user_id="user-1",
+        )
+
+    assert input_service.inputs == []
+    assert session_repository.activity_ids == []
+    assert session_repository.running_session_ids == []

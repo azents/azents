@@ -17,7 +17,6 @@ export function WorkspacesPageContent({
   onCreateNew,
   onCancel,
   onSaved,
-  onDeleted,
   onDetailClose,
 }: WorkspacesPageContentProps): React.ReactElement {
   return (
@@ -34,7 +33,6 @@ export function WorkspacesPageContent({
           workspaceHandle={selectedWorkspaceHandle}
           isCreateMode={isCreateMode}
           onSaved={onSaved}
-          onDeleted={onDeleted}
           onCancel={onCancel}
         />
       }

@@ -88,6 +88,7 @@ async def test_provider_running_report_clears_start_timeout_failure(
             reason="ready",
             diagnostic={},
             reported_at=datetime(2026, 5, 25, tzinfo=UTC),
+            terminal_delete_acknowledged=False,
         )
     )
 
@@ -98,6 +99,43 @@ async def test_provider_running_report_clears_start_timeout_failure(
     assert runtime.failure_generation is None
     assert runtime.failure_code is None
     assert runtime.failure_message is None
+
+
+async def test_provider_terminal_delete_acknowledgement_clears_runtime_path(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """A terminal Provider acknowledgement becomes the finalization precondition."""
+    repo = AgentRuntimeRepository()
+    async with rdb_session_manager() as session:
+        runtime_id = await _create_runtime(session, "provider-sink-terminal-delete")
+        requested = await repo.request_terminal_delete(session, runtime_id)
+        assert requested is not None
+    sink = RuntimeProviderReportRepositorySink(repo, rdb_session_manager)
+
+    await sink.record_provider_report(
+        RuntimeProviderReport(
+            runtime_id=runtime_id,
+            provider_id="system-kubernetes",
+            provider_generation=1,
+            observed_state=SharedProviderState.STOPPED,
+            observed_desired_generation=requested.desired_generation,
+            provider_runtime_id=None,
+            workspace_path="",
+            reason="terminal_resources_absent",
+            diagnostic={},
+            reported_at=datetime(2026, 7, 21, tzinfo=UTC),
+            terminal_delete_acknowledged=True,
+        )
+    )
+
+    async with rdb_session_manager() as session:
+        runtime = await repo.get_terminal_delete_acknowledged(session, runtime_id)
+    assert runtime is not None
+    assert runtime.workspace_path is None
+    assert (
+        runtime.terminal_delete_acknowledged_generation == requested.desired_generation
+    )
+    assert runtime.terminal_delete_acknowledged_at is not None
 
 
 async def test_runner_state_sink_rejects_workspace_mismatch(

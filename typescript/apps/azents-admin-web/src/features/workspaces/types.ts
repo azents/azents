@@ -61,5 +61,4 @@ export type WorkspaceDetailState =
   | { type: "LOADING"; handle: string }
   | { type: "ERROR"; handle: string; message: string }
   | { type: "EDITING"; workspace: WorkspaceResponse | null; isNew: boolean }
-  | { type: "SAVING"; workspace: WorkspaceResponse | null; isNew: boolean }
-  | { type: "DELETING"; workspace: WorkspaceResponse };
+  | { type: "SAVING"; workspace: WorkspaceResponse | null; isNew: boolean };

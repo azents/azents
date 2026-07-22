@@ -23,6 +23,9 @@ from azents.core.inference_profile import SessionInferenceState
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
+from azents.repos.session_lifecycle_finalizer import (
+    SessionLifecycleFinalizerRepository,
+)
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
 from azents.testing.model_selection import (
@@ -565,6 +568,309 @@ class TestAgentSessionRepository:
                 last_task_message=None,
             )
 
+    async def test_session_agent_child_creation_rejects_archived_root(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Child creation cannot make an archived root tree inconsistent."""
+        workspace_id = await _create_workspace(
+            rdb_session,
+            "session-agent-archived-root-ws",
+        )
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id,
+            "session-agent-archived-root",
+        )
+        repo = AgentSessionRepository()
+        root_session = await repo.create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        root_agent = await repo.get_session_agent_by_session_id(
+            rdb_session,
+            root_session.id,
+        )
+        assert root_agent is not None
+        archived_at = datetime.datetime.now(datetime.UTC)
+        await repo.archive_tree(
+            rdb_session,
+            root_session_id=root_session.id,
+            session_ids=[root_session.id],
+            archived_at=archived_at,
+            purge_after=archived_at + datetime.timedelta(days=30),
+            policy_revision=1,
+            retention_days=30,
+        )
+
+        with pytest.raises(ValueError, match="Root AgentSession is not active"):
+            await repo.create_child_session_agent(
+                rdb_session,
+                parent_session_agent_id=root_agent.id,
+                name="late-child",
+                agent_type="default",
+                title=None,
+                last_task_message=None,
+            )
+
+    async def test_session_agent_child_creation_rejects_archived_parent(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Nested child creation requires an active direct parent Session."""
+        workspace_id = await _create_workspace(
+            rdb_session,
+            "session-agent-archived-parent-ws",
+        )
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id,
+            "session-agent-archived-parent",
+        )
+        repo = AgentSessionRepository()
+        root_session = await repo.create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        root_agent = await repo.get_session_agent_by_session_id(
+            rdb_session,
+            root_session.id,
+        )
+        assert root_agent is not None
+        child = await repo.create_child_session_agent(
+            rdb_session,
+            parent_session_agent_id=root_agent.id,
+            name="parent",
+            agent_type="default",
+            title=None,
+            last_task_message=None,
+        )
+        await repo.archive(
+            rdb_session,
+            child.agent_session_id,
+            ended_at=datetime.datetime.now(datetime.UTC),
+        )
+
+        with pytest.raises(ValueError, match="Parent AgentSession is not active"):
+            await repo.create_child_session_agent(
+                rdb_session,
+                parent_session_agent_id=child.id,
+                name="late-child",
+                agent_type="default",
+                title=None,
+                last_task_message=None,
+            )
+
+    async def test_session_agent_child_creation_rejects_stopping_parent(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """A stop fence prevents later child work from escaping the subtree stop."""
+        workspace_id = await _create_workspace(
+            rdb_session,
+            "session-agent-stopping-parent-ws",
+        )
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id,
+            "session-agent-stopping-parent",
+        )
+        repo = AgentSessionRepository()
+        root_session = await repo.create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        root_agent = await repo.get_session_agent_by_session_id(
+            rdb_session,
+            root_session.id,
+        )
+        assert root_agent is not None
+        await repo.mark_running(rdb_session, root_session.id)
+        stopped = await repo.request_stop(
+            rdb_session,
+            session_id=root_session.id,
+            stop_request_id="stop-before-spawn",
+            user_id=None,
+        )
+        assert stopped is not None
+
+        with pytest.raises(ValueError, match="Root AgentSession is stopping"):
+            await repo.create_child_session_agent(
+                rdb_session,
+                parent_session_agent_id=root_agent.id,
+                name="late-child",
+                agent_type="default",
+                title=None,
+                last_task_message=None,
+            )
+
+    async def test_subtree_stop_lock_serializes_concurrent_child_creation(
+        self,
+        rdb_engine: AsyncEngine,
+        latest_db_schema: None,
+    ) -> None:
+        """A child cannot commit outside a concurrently captured stop subtree."""
+        del latest_db_schema
+        suffix = uuid4().hex[:8]
+        repo = AgentSessionRepository()
+        async with AsyncSession(rdb_engine, expire_on_commit=False) as setup_session:
+            workspace_id = await _create_workspace(
+                setup_session,
+                f"session-agent-stop-race-{suffix}",
+            )
+            agent_id = await _create_agent(
+                setup_session,
+                workspace_id,
+                f"session-agent-stop-race-{suffix}",
+            )
+            root_session = await repo.create(
+                setup_session,
+                AgentSessionCreate(
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                    title=None,
+                ),
+            )
+            root_agent = await repo.get_session_agent_by_session_id(
+                setup_session,
+                root_session.id,
+            )
+            assert root_agent is not None
+            await setup_session.commit()
+
+        async with AsyncSession(
+            rdb_engine,
+            expire_on_commit=False,
+        ) as stop_session:
+            stopped_session_ids = await repo.list_session_agent_subtree_session_ids(
+                stop_session,
+                agent_session_id=root_session.id,
+            )
+            assert stopped_session_ids == [root_session.id]
+            await repo.mark_running(stop_session, root_session.id)
+            stopped = await repo.request_stop(
+                stop_session,
+                session_id=root_session.id,
+                stop_request_id="concurrent-stop",
+                user_id=None,
+            )
+            assert stopped is not None
+
+            async with AsyncSession(
+                rdb_engine,
+                expire_on_commit=False,
+            ) as spawn_session:
+                spawn_task = asyncio.create_task(
+                    repo.create_child_session_agent(
+                        spawn_session,
+                        parent_session_agent_id=root_agent.id,
+                        name="late-child",
+                        agent_type="default",
+                        title=None,
+                        last_task_message=None,
+                    )
+                )
+                await asyncio.sleep(0.1)
+                assert not spawn_task.done()
+                await stop_session.commit()
+                with pytest.raises(
+                    ValueError,
+                    match="Root AgentSession is stopping",
+                ):
+                    await asyncio.wait_for(spawn_task, timeout=5)
+                await spawn_session.rollback()
+
+    async def test_parent_stop_lock_serializes_concurrent_nested_child_creation(
+        self,
+        rdb_engine: AsyncEngine,
+        latest_db_schema: None,
+    ) -> None:
+        """A nested child cannot commit after its parent stop fence."""
+        del latest_db_schema
+        suffix = uuid4().hex[:8]
+        repo = AgentSessionRepository()
+        async with AsyncSession(rdb_engine, expire_on_commit=False) as setup_session:
+            workspace_id = await _create_workspace(
+                setup_session,
+                f"session-agent-child-stop-race-{suffix}",
+            )
+            agent_id = await _create_agent(
+                setup_session,
+                workspace_id,
+                f"session-agent-child-stop-race-{suffix}",
+            )
+            root_session = await repo.create(
+                setup_session,
+                AgentSessionCreate(
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                    title=None,
+                ),
+            )
+            root_agent = await repo.get_session_agent_by_session_id(
+                setup_session,
+                root_session.id,
+            )
+            assert root_agent is not None
+            parent = await repo.create_child_session_agent(
+                setup_session,
+                parent_session_agent_id=root_agent.id,
+                name="parent",
+                agent_type="default",
+                title=None,
+                last_task_message=None,
+            )
+            await repo.mark_running(setup_session, parent.agent_session_id)
+            await setup_session.commit()
+
+        async with AsyncSession(
+            rdb_engine,
+            expire_on_commit=False,
+        ) as stop_session:
+            stopped = await repo.request_stop(
+                stop_session,
+                session_id=parent.agent_session_id,
+                stop_request_id="concurrent-child-stop",
+                user_id=None,
+            )
+            assert stopped is not None
+
+            async with AsyncSession(
+                rdb_engine,
+                expire_on_commit=False,
+            ) as spawn_session:
+                spawn_task = asyncio.create_task(
+                    repo.create_child_session_agent(
+                        spawn_session,
+                        parent_session_agent_id=parent.id,
+                        name="late-grandchild",
+                        agent_type="default",
+                        title=None,
+                        last_task_message=None,
+                    )
+                )
+                await asyncio.sleep(0.1)
+                assert not spawn_task.done()
+                await stop_session.commit()
+                with pytest.raises(
+                    ValueError,
+                    match="Parent AgentSession is stopping",
+                ):
+                    await asyncio.wait_for(spawn_task, timeout=5)
+                await spawn_session.rollback()
+
     async def test_session_agent_path_lookup_is_root_tree_scoped(
         self, rdb_session: AsyncSession
     ) -> None:
@@ -702,7 +1008,15 @@ class TestAgentSessionRepository:
             last_task_message=None,
         )
 
-        await repo.delete_by_id(rdb_session, root_session.id)
+        await SessionLifecycleFinalizerRepository().finalize_purged_root_tree(
+            rdb_session,
+            root_session_id=root_session.id,
+            session_ids=[
+                root_session.id,
+                child.agent_session_id,
+                nested.agent_session_id,
+            ],
+        )
 
         assert await repo.get_by_id(rdb_session, root_session.id) is None
         assert await repo.get_by_id(rdb_session, child.agent_session_id) is None

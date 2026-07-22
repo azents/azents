@@ -21,7 +21,9 @@ from azents.engine.run.contracts import ToolkitBinding
 from azents.rdb.deps import get_session_manager
 from azents.rdb.models.event import JSONValue
 from azents.rdb.session import SessionManager
+from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.input_buffer import InputBufferRepository
 from azents.services.chat.live_events import input_buffer_to_live_event
 from azents.services.input_buffer import InputBufferEnqueue, InputBufferService
 from azents.worker.deps import get_worker_broker
@@ -37,6 +39,14 @@ class IdleContinuationService:
         AgentSessionRepository,
         Depends(AgentSessionRepository),
     ]
+    agent_run_repository: Annotated[
+        AgentRunRepository,
+        Depends(AgentRunRepository),
+    ]
+    input_buffer_repository: Annotated[
+        InputBufferRepository,
+        Depends(InputBufferRepository),
+    ]
     event_publisher: Annotated[WorkerEventPublisher, Depends(WorkerEventPublisher)]
     broker: Annotated[SessionBroker, Depends(get_worker_broker)]
     session_manager: Annotated[
@@ -44,14 +54,16 @@ class IdleContinuationService:
         Depends(get_session_manager),
     ]
 
-    async def enqueue(
+    async def consume(
         self,
         message: SessionWakeUp,
         *,
         toolkits: Sequence[ToolkitBinding],
-        run_id: str | None,
+        run_id: str,
     ) -> bool:
-        """Store Idle continuation if present and return whether wake-up is needed."""
+        """Commit the idle outcome for one durable completed Run boundary."""
+        if not await self._has_eligible_idle_boundary(message, run_id):
+            return False
         providers = [
             RuntimeHookProviderRef(slug=binding.slug, toolkit=binding.toolkit)
             for binding in toolkits
@@ -62,43 +74,96 @@ class IdleContinuationService:
                 workspace_id=message.workspace_id or "",
                 agent_id=message.agent_id,
                 session_id=message.session_id,
-                run_id=run_id or "",
+                run_id=run_id,
                 reason="completed",
             ),
         )
-        if not result.continuations:
-            return False
-
         continuation_inputs = [
-            self._continuation_input(message, continuation)
+            self._continuation_input(message, run_id, continuation)
             for continuation in result.continuations
         ]
         async with self.session_manager() as session:
-            locked = await self.agent_session_repository.lock_by_id(
+            if not await self._has_eligible_idle_boundary_in_session(
                 session,
-                message.session_id,
-            )
-            if locked is None:
-                raise ValueError("AgentSession not found")
+                message,
+                run_id,
+            ):
+                return False
             enqueue_results = await self.input_buffer_service.enqueue_many(
                 session,
                 continuation_inputs,
             )
-            await self.agent_session_repository.mark_running_for_input_wakeup(
-                session,
-                message.session_id,
+            consumed = (
+                await self.agent_session_repository.consume_pending_idle_continuation(
+                    session,
+                    session_id=message.session_id,
+                    run_id=run_id,
+                    continue_running=bool(continuation_inputs),
+                )
             )
+            if not consumed:
+                return False
         for enqueue_result in enqueue_results:
+            if not enqueue_result.created:
+                continue
             await self.event_publisher.dispatch_event(
                 message.session_id,
                 input_buffer_to_live_event(enqueue_result.input_buffer),
             )
-        await self.broker.send_message(message)
+        if continuation_inputs:
+            await self.broker.send_message(message)
         return True
+
+    async def _has_eligible_idle_boundary(
+        self,
+        message: SessionWakeUp,
+        run_id: str,
+    ) -> bool:
+        """Return whether a completed boundary can enter hook evaluation."""
+        async with self.session_manager() as session:
+            return await self._has_eligible_idle_boundary_in_session(
+                session,
+                message,
+                run_id,
+            )
+
+    async def _has_eligible_idle_boundary_in_session(
+        self,
+        session: AsyncSession,
+        message: SessionWakeUp,
+        run_id: str,
+    ) -> bool:
+        """Recheck the durable true-idle fence under the Session lock."""
+        locked = await self.agent_session_repository.lock_by_id(
+            session,
+            message.session_id,
+        )
+        if locked is None:
+            raise ValueError("AgentSession not found")
+        if locked.pending_idle_continuation_run_id != run_id:
+            return False
+        if locked.pending_command_id is not None:
+            return False
+        input_buffer_repository = self.input_buffer_repository
+        pending_wake_input = (
+            await input_buffer_repository.has_by_session_id_and_scheduling_mode(
+                session,
+                session_id=message.session_id,
+                scheduling_mode=InputBufferSchedulingMode.WAKE_SESSION,
+            )
+        )
+        if pending_wake_input:
+            return False
+        active_run = await self.agent_run_repository.get_active_by_session_id(
+            session,
+            session_id=message.session_id,
+        )
+        return active_run is None
 
     def _continuation_input(
         self,
         message: SessionWakeUp,
+        run_id: str,
         continuation: SessionContinuationInput,
     ) -> InputBufferEnqueue:
         """Convert one hook continuation to pending input."""
@@ -113,9 +178,25 @@ class IdleContinuationService:
             requested_reasoning_effort=None,
             actor_user_id=None,
             content=continuation.content,
-            idempotency_key=None,
+            idempotency_key=_continuation_idempotency_key(
+                run_id,
+                provider_slug=continuation.hook_provider_slug,
+                continuation_index=continuation.hook_continuation_index,
+            ),
             metadata={str(k): str(v) for k, v in metadata.items()},
             action=None,
             attachments=[],
             file_parts=[],
         )
+
+
+def _continuation_idempotency_key(
+    run_id: str,
+    *,
+    provider_slug: str | None,
+    continuation_index: int | None,
+) -> str:
+    """Build a stable identity for one provider continuation outcome."""
+    provider = provider_slug or "unknown"
+    index = 0 if continuation_index is None else continuation_index
+    return f"idle_continuation:{run_id}:{provider}:{index}"

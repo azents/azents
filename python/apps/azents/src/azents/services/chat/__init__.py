@@ -10,6 +10,7 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
+    AgentLifecycleStatus,
     AgentProjectDefaultItemType,
     AgentRunPhase,
     AgentRunStatus,
@@ -23,6 +24,7 @@ from azents.core.enums import (
     InputBufferSchedulingMode,
 )
 from azents.core.inference_profile import AppliedInferenceProfile
+from azents.core.session_lifecycle import SessionLifecycleTransitionContext
 from azents.engine.events.action_messages import CreateGitWorktreeAction
 from azents.engine.events.types import AgentRunState, ClientToolCallPayload, Event
 from azents.engine.tools.goal import GoalState, GoalStateSnapshot, GoalStateStore
@@ -60,6 +62,12 @@ from azents.services.session_git_worktree import (
     ExistingProjectWorkspaceItem,
     GitWorktreeWorkspaceItem,
     NewSessionWorkspaceItem,
+)
+from azents.services.session_lifecycle.orchestrator import (
+    SessionLifecycleOrchestrator,
+)
+from azents.services.session_lifecycle.registry import (
+    get_session_lifecycle_orchestrator,
 )
 from azents.services.session_workspace_project import (
     InvalidProjectPath,
@@ -318,6 +326,10 @@ class ChatSessionService:
         Depends(SessionWorkspaceProjectRepository),
     ]
     input_buffer_service: Annotated[InputBufferService, Depends(InputBufferService)]
+    lifecycle_orchestrator: Annotated[
+        SessionLifecycleOrchestrator,
+        Depends(get_session_lifecycle_orchestrator),
+    ]
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
     ]
@@ -336,7 +348,10 @@ class ChatSessionService:
         """
         async with self.session_manager() as session:
             agent = await self.agent_repository.get_by_id(session, agent_id)
-            if agent is None:
+            if (
+                agent is None
+                or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
+            ):
                 return Failure(AgentNotFound())
             workspace_user = (
                 await self.workspace_user_repository.get_by_workspace_and_user(
@@ -986,14 +1001,26 @@ class ChatSessionService:
                 else archived_at
                 + datetime.timedelta(days=settings.archived_session_retention_days)
             )
-            await self.agent_session_repository.archive_tree(
-                session,
-                root_session_id=session_id,
-                session_ids=session_ids,
-                archived_at=archived_at,
-                purge_after=purge_after,
-                policy_revision=settings.revision,
-                retention_days=settings.archived_session_retention_days,
+
+            async def archive_tree() -> None:
+                """Apply the root-tree archive mutation in the locked transaction."""
+                await self.agent_session_repository.archive_tree(
+                    session,
+                    root_session_id=session_id,
+                    session_ids=session_ids,
+                    archived_at=archived_at,
+                    purge_after=purge_after,
+                    policy_revision=settings.revision,
+                    retention_days=settings.archived_session_retention_days,
+                )
+
+            await self.lifecycle_orchestrator.archive(
+                context=SessionLifecycleTransitionContext(
+                    transition_id=f"{session_id}:archive",
+                    root_session_id=session_id,
+                    subtree_session_ids=tuple(session_ids),
+                ),
+                transition=archive_tree,
             )
             if purge_after is not None:
                 await self.archived_session_retention_repository.schedule_purge_job(
@@ -1055,6 +1082,12 @@ class ChatSessionService:
                 or root.status != AgentSessionStatus.ARCHIVED
             ):
                 return Failure(SessionNotFound())
+            agent = await self.agent_repository.get_by_id(session, agent_id)
+            if (
+                agent is None
+                or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
+            ):
+                return Failure(SessionNotFound())
             workspace_user = (
                 await self.workspace_user_repository.get_by_workspace_and_user(
                     session,
@@ -1083,10 +1116,22 @@ class ChatSessionService:
                 root_session_id=session_id,
                 now=now,
             )
-            await self.agent_session_repository.restore_tree(
-                session,
-                root_session_id=session_id,
-                session_ids=[item.id for item in tree],
+
+            async def restore_tree() -> None:
+                """Apply the root-tree restore mutation in the locked transaction."""
+                await self.agent_session_repository.restore_tree(
+                    session,
+                    root_session_id=session_id,
+                    session_ids=[item.id for item in tree],
+                )
+
+            await self.lifecycle_orchestrator.restore(
+                context=SessionLifecycleTransitionContext(
+                    transition_id=f"{session_id}:restore",
+                    root_session_id=session_id,
+                    subtree_session_ids=tuple(item.id for item in tree),
+                ),
+                transition=restore_tree,
             )
             await session.commit()
             restored = await self.agent_session_repository.get_by_id(

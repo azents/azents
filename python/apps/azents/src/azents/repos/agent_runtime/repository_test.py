@@ -212,6 +212,89 @@ class TestAgentRuntimeRepository:
             command.runtime.last_lifecycle_command == RuntimeLifecycleCommandType.START
         )
 
+    async def test_terminal_delete_acknowledgement_fences_finalization(
+        self, rdb_session: AsyncSession
+    ) -> None:
+        """Terminal deletion fences lifecycle and late Provider state changes."""
+        workspace_id = await _create_workspace(
+            rdb_session, "agent-runtime-terminal-delete-ws"
+        )
+        agent_id = await _create_agent(
+            rdb_session, workspace_id, "agent-runtime-terminal-delete"
+        )
+        repo = AgentRuntimeRepository()
+        runtime = await repo.ensure_for_agent(rdb_session, agent_id)
+        requested = await repo.request_terminal_delete(rdb_session, runtime.id)
+
+        assert requested is not None
+        assert (
+            requested.terminal_delete_requested_generation
+            == requested.desired_generation
+        )
+        assert (
+            await repo.get_terminal_delete_acknowledged(rdb_session, runtime.id) is None
+        )
+
+        repeated_request = await repo.request_terminal_delete(rdb_session, runtime.id)
+        stale_acknowledgement = await repo.record_terminal_delete_acknowledgement(
+            rdb_session,
+            runtime.id,
+            provider_generation=1,
+            acknowledged_generation=requested.desired_generation - 1,
+        )
+        acknowledged = await repo.record_terminal_delete_acknowledgement(
+            rdb_session,
+            runtime.id,
+            provider_generation=1,
+            acknowledged_generation=requested.desired_generation,
+        )
+        finalizable = await repo.get_terminal_delete_acknowledged(
+            rdb_session, runtime.id
+        )
+        late_runner = await repo.record_runner_state(
+            rdb_session,
+            runtime.id,
+            RuntimeRunnerState.READY,
+            runner_generation=1,
+        )
+        late_provider = await repo.record_provider_observed_state(
+            rdb_session,
+            runtime.id,
+            RuntimeProviderObservedState.RUNNING,
+            provider_generation=2,
+            observed_generation=requested.desired_generation,
+            workspace_path="/workspace/agent",
+        )
+        blocked_lifecycle_command = await repo.set_desired_state(
+            rdb_session,
+            runtime.id,
+            RuntimeLifecycleCommandType.START,
+            RuntimeDesiredState.RUNNING,
+        )
+        repeated_acknowledged_request = await repo.request_terminal_delete(
+            rdb_session,
+            runtime.id,
+        )
+
+        assert repeated_request is not None
+        assert repeated_request.desired_generation == requested.desired_generation
+        assert stale_acknowledgement is None
+        assert acknowledged is not None
+        assert finalizable is not None
+        assert finalizable.workspace_path is None
+        assert late_runner is None
+        assert late_provider is None
+        assert blocked_lifecycle_command is None
+        assert repeated_acknowledged_request is not None
+        assert (
+            repeated_acknowledged_request.terminal_delete_requested_generation
+            == requested.desired_generation
+        )
+        assert (
+            repeated_acknowledged_request.terminal_delete_acknowledged_generation
+            == requested.desired_generation
+        )
+
     async def test_record_provider_and_runner_state(
         self, rdb_session: AsyncSession
     ) -> None:

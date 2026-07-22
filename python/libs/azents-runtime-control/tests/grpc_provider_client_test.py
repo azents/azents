@@ -210,6 +210,7 @@ def _report() -> RuntimeProviderReport:
         reason="container_running",
         diagnostic={},
         reported_at=_now(),
+        terminal_delete_acknowledged=False,
     )
 
 

@@ -9,7 +9,6 @@ Name | Type | Description | Notes
 **workspace_handle** | **str** | Owning Workspace handle | 
 **user_id** | **str** | User ID | 
 **name** | **str** | Workspace display name | 
-**locale** | **str** | Workspace locale (BCP 47) | [optional] [default to 'ko-KR']
 **role** | [**WorkspaceUserRole**](WorkspaceUserRole.md) | Role (owner, manager, member) | 
 
 ## Example

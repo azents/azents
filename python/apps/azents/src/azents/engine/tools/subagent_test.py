@@ -13,7 +13,12 @@ from typing import Any, cast
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.broker.types import BrokerMessage, SessionBroker, SessionWakeUp
+from azents.broker.types import (
+    BrokerMessage,
+    SessionBroker,
+    SessionStopSignal,
+    SessionWakeUp,
+)
 from azents.core.agent import SelectableModelOption, SubagentSettings
 from azents.core.enums import (
     AgentRunPhase,
@@ -255,6 +260,7 @@ class _AgentSessionRepository:
         self.last_task_updates: list[tuple[str, str | None]] = []
         self.message_sent_updates: list[str] = []
         self.observation_updates: list[tuple[str, int | None, str | None]] = []
+        self.stop_requests: list[tuple[str, str, str | None]] = []
 
     async def get_session_agent_by_session_id(
         self,
@@ -466,6 +472,19 @@ class _AgentSessionRepository:
     ) -> AgentSession | None:
         """Return one locked AgentSession fixture."""
         return await self.get_by_id(session, agent_session_id)
+
+    async def request_stop(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        stop_request_id: str,
+        user_id: str | None,
+    ) -> AgentSession | None:
+        """Record one target stop request."""
+        del session
+        self.stop_requests.append((session_id, stop_request_id, user_id))
+        return self.sessions.get(session_id)
 
 
 class _AgentRunRepository:
@@ -1067,6 +1086,71 @@ async def test_followup_task_wakes_target_child() -> None:
     assert [event.type for event in published_events] == ["subagent_tree_changed"]
 
 
+async def test_followup_task_rejects_new_activation_over_capacity() -> None:
+    """Follow-up reuse cannot activate an additional child beyond the limit."""
+    toolkit, repo, input_service, broker, _run_repo, _events = await _make_toolkit()
+    toolkit.subagent_settings = SubagentSettings(max_subagents=1, max_depth=1)
+    busy = _session_agent(
+        id="busy-agent",
+        path="/root/busy",
+        agent_session_id="busy-session",
+        name="busy",
+    )
+    repo.tree.append(busy)
+    repo.sessions[busy.agent_session_id] = _agent_session(
+        id=busy.agent_session_id,
+        run_state=AgentSessionRunState.RUNNING,
+    )
+    state = await toolkit.update_context(
+        TurnContext(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id=_PARENT_RUN_ID,
+            publish_event=cast(Any, _noop_publish),
+            session_id="root-session",
+        )
+    )
+    tool = next(tool for tool in state.tools if tool.spec.name == "followup_task")
+
+    with pytest.raises(
+        FunctionToolError,
+        match="Cannot assign follow-up task: max_subagents 1 is already reached",
+    ):
+        await tool.handler(json.dumps({"agent_name": "child", "task": "work"}))
+
+    assert input_service.enqueued == []
+    assert repo.marked_running == []
+    assert broker.messages == []
+
+
+async def test_followup_task_allows_already_active_target_at_capacity() -> None:
+    """Adding work to an active child does not consume another concurrency slot."""
+    toolkit, repo, input_service, broker, _run_repo, _events = await _make_toolkit()
+    toolkit.subagent_settings = SubagentSettings(max_subagents=1, max_depth=1)
+    repo.sessions["child-session"] = repo.sessions["child-session"].model_copy(
+        update={"run_state": AgentSessionRunState.RUNNING}
+    )
+    state = await toolkit.update_context(
+        TurnContext(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id=_PARENT_RUN_ID,
+            publish_event=cast(Any, _noop_publish),
+            session_id="root-session",
+        )
+    )
+    tool = next(tool for tool in state.tools if tool.spec.name == "followup_task")
+
+    result = await tool.handler(json.dumps({"agent_name": "child", "task": "continue"}))
+
+    assert json.loads(cast(str, result))["status"] == "assigned"
+    assert len(input_service.enqueued) == 1
+    assert repo.marked_running == ["child-session"]
+    assert len(broker.messages) == 1
+
+
 async def test_followup_task_from_child_rejects_root() -> None:
     """followup_task matches Codex by rejecting the root agent."""
     toolkit, _repo, input_service, broker, _run_repo, _events = await _make_toolkit()
@@ -1111,6 +1195,34 @@ async def test_interrupt_agent_rejects_root_and_self() -> None:
         await tool.handler(json.dumps({"agent_name": "/root"}))
     with pytest.raises(FunctionToolError, match="an agent cannot interrupt itself"):
         await tool.handler(json.dumps({"agent_name": "."}))
+
+
+async def test_interrupt_agent_locks_root_before_stopping_child() -> None:
+    """Child interruption uses the shared root-tree lifecycle lock."""
+    toolkit, repo, _input_service, broker, _run_repo, _events = await _make_toolkit()
+    repo.sessions["child-session"] = repo.sessions["child-session"].model_copy(
+        update={"run_state": AgentSessionRunState.RUNNING}
+    )
+    state = await toolkit.update_context(
+        TurnContext(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id=_PARENT_RUN_ID,
+            publish_event=cast(Any, _noop_publish),
+            session_id="root-session",
+        )
+    )
+    tool = next(tool for tool in state.tools if tool.spec.name == "interrupt_agent")
+
+    result = await tool.handler(json.dumps({"agent_name": "child"}))
+
+    assert json.loads(cast(str, result)) == {"previous_status": "running"}
+    assert repo.locked_session_agents == ["root-agent"]
+    assert repo.stop_requests == [("child-session", "subagent_interrupt", "user-1")]
+    assert len(broker.messages) == 1
+    assert isinstance(broker.messages[0], SessionStopSignal)
+    assert broker.messages[0].session_id == "child-session"
 
 
 async def test_list_agents_from_child_includes_root_tree() -> None:
@@ -1434,7 +1546,7 @@ async def test_spawn_agent_creates_and_wakes_child_within_limits() -> None:
         "agent_path": "/root/reviewer",
         "status": "spawned",
     }
-    assert repo.locked_session_agents == ["root-agent"]
+    assert repo.locked_session_agents == ["root-agent", "root-agent"]
     assert run_repo.get_by_id_calls == [_PARENT_RUN_ID]
     assert run_repo.pending_creates == [
         {
@@ -1451,7 +1563,7 @@ async def test_spawn_agent_creates_and_wakes_child_within_limits() -> None:
     )
     assert input_service.enqueued[0].metadata["message_kind"] == "spawn_agent"
     assert input_service.enqueued[0].content == "Review it"
-    assert repo.locked_session_agents == ["root-agent"]
+    assert repo.locked_session_agents == ["root-agent", "root-agent"]
     assert repo.marked_running == [child.agent_session_id]
     assert len(broker.messages) == 1
     assert isinstance(broker.messages[0], SessionWakeUp)

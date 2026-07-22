@@ -481,6 +481,77 @@ class RunExecutor:
         )
         return active_run.id
 
+    async def resolve_idle_continuation_toolkits(
+        self,
+        message: SessionWakeUp,
+        *,
+        run_id: str,
+        prepare_toolkits: PrepareToolkits,
+        dispatch_event: Callable[[str, PublishedEvent], Awaitable[None]],
+    ) -> list[ToolkitBinding]:
+        """Rebuild session hook providers after an ownership handover."""
+
+        async def publish_event(event: PublishedEvent) -> None:
+            await dispatch_event(message.session_id, event)
+
+        context = ToolkitContext(
+            session_id=message.session_id,
+            workspace_id=message.workspace_id or "",
+            agent_id=message.agent_id,
+            user_id=message.user_id,
+            run_id=run_id,
+            publish_event=publish_event,
+            session_type=SessionType.USER,
+            interface_type=(
+                message.interface.type if message.interface is not None else None
+            ),
+            interface_channel_id=(
+                getattr(message.interface, "channel_id", None)
+                if message.interface is not None
+                else None
+            ),
+        )
+        async with self.session_manager() as session:
+            agent = await self.agent_repository.get_by_id(session, message.agent_id)
+            agent_session = await self.agent_session_repository.get_by_id(
+                session,
+                message.session_id,
+            )
+        execution_mode = (
+            ToolkitExecutionMode.SUBAGENT
+            if agent_session is not None
+            and agent_session.session_kind == AgentSessionKind.SUBAGENT
+            else ToolkitExecutionMode.ROOT
+        )
+        toolkits = await resolve_agent_tools(
+            message.agent_id,
+            context,
+            execution_mode=execution_mode,
+            toolkit_registry=self.toolkit_registry,
+            agent_toolkit_repository=self.agent_toolkit_repository,
+            toolkit_repository=self.toolkit_repository,
+            session_manager=self.session_manager,
+            web_url=self.worker_config.web_url,
+            oauth_secret_key=self.worker_config.oauth_secret_key,
+            mcp_proxy_url=self.worker_config.mcp_proxy_url,
+            runtime_domain_config=RuntimeDomainConfig(
+                allowed_domains=(),
+                denied_domains=(),
+            ),
+            workspace_handle=message.workspace_handle or "",
+            builtin_toolkit_provider=self.builtin_toolkit_provider,
+            claude_rules_toolkit_provider=self.claude_rules_toolkit_provider,
+            todo_toolkit_provider=self.todo_toolkit_provider,
+            goal_toolkit_provider=self.goal_toolkit_provider,
+            skill_toolkit_provider=self.skill_toolkit_provider,
+            subagent_toolkit_provider=self.subagent_toolkit_provider,
+            memory_enabled=agent.memory_enabled if agent is not None else True,
+            runtime_tools_enabled=agent.shell_enabled if agent is not None else False,
+        )
+        prepared = await prepare_toolkits(toolkits, message.user_id)
+        _refresh_runtime_peer_toolkits(prepared)
+        return prepared
+
     async def execute(
         self,
         message: SessionWakeUp,

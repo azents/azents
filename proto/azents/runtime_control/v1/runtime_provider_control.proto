@@ -88,6 +88,7 @@ message RuntimeProviderReport {
   string reason = 8;
   map<string, string> diagnostic = 9;
   google.protobuf.Timestamp reported_at = 10;
+  bool terminal_delete_acknowledged = 11;
 }
 
 message ProviderCommandCompletion {

@@ -102,12 +102,12 @@ class RDBAgentRuntime(RDBModel):
     )
     workspace_id: Mapped[str] = mapped_column(
         sa.String(32),
-        sa.ForeignKey("workspaces.id", ondelete="CASCADE"),
+        sa.ForeignKey("workspaces.id", ondelete="RESTRICT"),
         nullable=False,
     )
     agent_id: Mapped[str] = mapped_column(
         sa.String(32),
-        sa.ForeignKey("agents.id", ondelete="CASCADE"),
+        sa.ForeignKey("agents.id", ondelete="RESTRICT"),
         nullable=False,
     )
 
@@ -141,6 +141,24 @@ class RDBAgentRuntime(RDBModel):
     )
     reset_final_desired_state: Mapped[RuntimeDesiredState | None] = mapped_column(
         runtime_desired_state_enum,
+        init=False,
+        nullable=True,
+        default=None,
+    )
+    terminal_delete_requested_generation: Mapped[int | None] = mapped_column(
+        sa.Integer,
+        init=False,
+        nullable=True,
+        default=None,
+    )
+    terminal_delete_acknowledged_generation: Mapped[int | None] = mapped_column(
+        sa.Integer,
+        init=False,
+        nullable=True,
+        default=None,
+    )
+    terminal_delete_acknowledged_at: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime,
         init=False,
         nullable=True,
         default=None,

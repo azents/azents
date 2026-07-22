@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent import BuiltinToolConfig, SelectableModelSettings
 from azents.core.credentials import ApiKeySecrets
-from azents.core.enums import AgentType, LLMProvider
+from azents.core.enums import AgentLifecycleStatus, AgentType, LLMProvider
 from azents.core.inference_profile import RequestedInferenceProfile
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.tools import (
@@ -94,6 +94,7 @@ def _make_agent(
         model_parameters=None,
         system_prompt="You are helpful.",
         enabled=True,
+        lifecycle_status=AgentLifecycleStatus.ACTIVE,
         type=AgentType.PUBLIC,
         runtime_provider_id=None,
         shell_enabled=True,
@@ -234,6 +235,7 @@ async def _resolve_failing_registered_toolkit(
         prompt=None,
         credentials=None,
         enabled=True,
+        revision=1,
         created_at=_NOW,
         updated_at=_NOW,
     )

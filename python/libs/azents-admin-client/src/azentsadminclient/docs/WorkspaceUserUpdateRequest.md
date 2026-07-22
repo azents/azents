@@ -7,7 +7,6 @@ WorkspaceUser update request schema.
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **name** | **str** |  | [optional] 
-**locale** | **str** |  | [optional] 
 
 ## Example
 

@@ -11,6 +11,7 @@ code_paths:
   - python/apps/azents/src/azents/services/file_lifecycle_cleanup.py
   - python/apps/azents/src/azents/services/archived_session_retention.py
   - python/apps/azents/src/azents/services/archived_session_purge.py
+  - python/apps/azents/src/azents/services/agent_decommission.py
   - python/apps/azents/src/azents/repos/archived_session_retention/**
   - python/apps/azents/src/azents/repos/scheduled_task_state/__init__.py
   - python/apps/azents/src/azents/repos/scheduled_task_state/data.py
@@ -25,7 +26,7 @@ code_paths:
   - infra/charts/azents/templates/server/scheduler-deployment.yaml.tpl
   - infra/charts/azents/templates/server/scheduler-pdb.yaml.tpl
 last_verified_at: 2026-07-21
-spec_version: 6
+spec_version: 7
 ---
 
 # Periodic Execution Flow Spec
@@ -57,7 +58,7 @@ A definition includes:
 The database does not store task definitions or schedule overrides. It stores current runtime state only.
 
 Registered tasks include `scheduler_heartbeat`, `model_catalog_system_projection`,
-`archived_session_retention_recalculation`, `archived_session_purge`, and
+`archived_session_retention_recalculation`, `archived_session_purge`, `agent_decommission`, and
 `file_lifecycle_cleanup`. `scheduler_heartbeat` is a no-op heartbeat that returns a small execution
 summary and has no external network dependency.
 
@@ -223,6 +224,16 @@ cleanup state, deletes file metadata, and finally deletes the root database subt
 content-free purge job tombstone become completed. External cleanup failure or lost ownership keeps
 metadata and durable retry state instead of allowing a cascade to hide unfinished work.
 
+## Agent decommission task
+
+`agent_decommission` advances content-free durable Agent decommission jobs with per-job leases,
+generation fencing, bounded retry backoff, and failure isolation. It retires eligible Agent root
+sessions through the session lifecycle but never directly deletes an AgentSession or applies a
+request-specific purge deadline. After retention purge removes retired roots, it requests internal
+Provider terminal deletion for each Agent Runtime and waits for the matching durable generation
+acknowledgement. Only then may the finalizer remove remaining Agent-owned resources and the Agent
+row. One job retry does not prevent later due jobs from advancing; completed jobs remain tombstones.
+
 ## CLI operations
 
 The scheduler CLI exposes:
@@ -252,3 +263,4 @@ Model catalog source sync is a later consumer of this scheduler.
 - **2026-07-19** — v4. Added the durable archived-session retention recalculation and purge tasks, including intervals, leases, bounded batching, stale-job reconciliation, fencing, retry, and cleanup ordering.
 - **2026-07-21** — v5. Isolated ordinary scheduler task lifecycle failures so one task cannot terminate the scheduler process; cancellation remains a scheduler shutdown signal.
 - **2026-07-21** — v6. Isolated per-root purge failures so a bounded scheduler pass logs and retries the failed root before continuing with later due roots.
+- **2026-07-21** — v7. Added durable Agent decommission scheduling with retention-purge and Runtime-acknowledgement finalization gates.

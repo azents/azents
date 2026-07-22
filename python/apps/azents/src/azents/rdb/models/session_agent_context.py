@@ -39,7 +39,7 @@ class RDBSessionAgentContext(RDBModel):
 
     agent_id: Mapped[str] = mapped_column(
         sa.String(32),
-        sa.ForeignKey("agents.id", ondelete="CASCADE"),
+        sa.ForeignKey("agents.id", ondelete="RESTRICT"),
         nullable=False,
     )
     workspace_id: Mapped[str] = mapped_column(
@@ -51,7 +51,7 @@ class RDBSessionAgentContext(RDBModel):
         sa.String(32),
         sa.ForeignKey(
             "session_agents.id",
-            ondelete="CASCADE",
+            ondelete="RESTRICT",
             use_alter=True,
             name="fk_session_agent_contexts_root_session_agent_id_session_agents",
         ),
@@ -108,7 +108,7 @@ class RDBSessionAgentContextProject(RDBModel):
 
     session_agent_context_id: Mapped[str] = mapped_column(
         sa.String(32),
-        sa.ForeignKey("session_agent_contexts.id", ondelete="CASCADE"),
+        sa.ForeignKey("session_agent_contexts.id", ondelete="RESTRICT"),
         nullable=False,
     )
     path: Mapped[str] = mapped_column(sa.Text, nullable=False)
@@ -168,7 +168,7 @@ class RDBSessionAgentContextGitWorktree(RDBModel):
 
     session_agent_context_id: Mapped[str] = mapped_column(
         sa.String(32),
-        sa.ForeignKey("session_agent_contexts.id", ondelete="CASCADE"),
+        sa.ForeignKey("session_agent_contexts.id", ondelete="RESTRICT"),
         nullable=False,
     )
     source_project_path: Mapped[str] = mapped_column(sa.Text, nullable=False)

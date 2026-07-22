@@ -64,15 +64,12 @@ def _update_my_profile(
     handle: str,
     *,
     name: str | None = None,
-    locale: str | None = None,
 ) -> dict[str, Any]:
     """member profilet updatet (raw HTTP use)."""
     base_url = f"{public_api_client.configuration.host}"  # pyright: ignore[reportUnknownMemberType] # t create API clientt t t t
     body: dict[str, str] = {}
     if name is not None:
         body["name"] = name
-    if locale is not None:
-        body["locale"] = locale
 
     response = requests.patch(
         f"{base_url}/workspace-user/v1/workspaces/{handle}/me/profile",
@@ -103,7 +100,7 @@ class TestGetMyProfile:
         profile = _get_my_profile(public_api_client, access_token, handle)
 
         assert profile["name"] == owner_name
-        assert profile["locale"] == "ko-KR"
+        assert "locale" not in profile
         assert profile["role"] == "owner"
         assert profile["id"] is not None
         assert profile["created_at"] is not None
@@ -143,40 +140,6 @@ class TestUpdateMyProfile:
         profile = _get_my_profile(public_api_client, access_token, handle)
         assert profile["name"] == "New Name"
 
-    def test_update_locale(
-        self,
-        public_api_client: azentspublicclient.ApiClient,
-        admin_api_client: azentsadminclient.ApiClient,
-    ) -> None:
-        """t t t t."""
-        access_token, handle, _ = _setup_workspace(public_api_client, admin_api_client)
-
-        updated = _update_my_profile(
-            public_api_client, access_token, handle, locale="en-US"
-        )
-        assert updated["locale"] == "en-US"
-
-        profile = _get_my_profile(public_api_client, access_token, handle)
-        assert profile["locale"] == "en-US"
-
-    def test_update_name_and_locale(
-        self,
-        public_api_client: azentspublicclient.ApiClient,
-        admin_api_client: azentsadminclient.ApiClient,
-    ) -> None:
-        """t t t t t t."""
-        access_token, handle, _ = _setup_workspace(public_api_client, admin_api_client)
-
-        updated = _update_my_profile(
-            public_api_client,
-            access_token,
-            handle,
-            name="Updated Name",
-            locale="ja-JP",
-        )
-        assert updated["name"] == "Updated Name"
-        assert updated["locale"] == "ja-JP"
-
     def test_update_without_token_returns_401(
         self,
         public_api_client: azentspublicclient.ApiClient,
@@ -203,7 +166,7 @@ class TestUpdateMyProfile:
 
         updated = _update_my_profile(public_api_client, access_token, handle)
         assert updated["name"] == owner_name
-        assert updated["locale"] == "ko-KR"
+        assert "locale" not in updated
 
     def test_update_preserves_role(
         self,

@@ -13,6 +13,7 @@ from PIL import Image
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
+    AgentLifecycleStatus,
     AgentSessionKind,
     AgentSessionStartReason,
     AgentSessionStatus,
@@ -370,6 +371,7 @@ def _make_agent() -> Agent:
         model_parameters=None,
         system_prompt=None,
         enabled=True,
+        lifecycle_status=AgentLifecycleStatus.ACTIVE,
         type=AgentType.PUBLIC,
         runtime_provider_id=None,
         shell_enabled=True,
@@ -389,7 +391,6 @@ def _make_workspace_user() -> WorkspaceUser:
         workspace_id="workspace-1",
         user_id="user-1",
         name="tester",
-        locale="ko-KR",
         role=WorkspaceUserRole.MEMBER,
         created_at=_NOW,
         updated_at=_NOW,

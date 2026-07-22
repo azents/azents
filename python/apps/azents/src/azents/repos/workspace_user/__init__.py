@@ -38,7 +38,6 @@ class WorkspaceUserRepository:
             workspace_id=create.workspace_id,
             user_id=create.user_id,
             name=create.name,
-            locale=create.locale,
             role=create.role,
         )
         session.add(rdb_workspace_user)
@@ -212,7 +211,6 @@ class WorkspaceUserRepository:
             workspace_id=rdb_workspace_user.workspace_id,
             user_id=rdb_workspace_user.user_id,
             name=rdb_workspace_user.name,
-            locale=rdb_workspace_user.locale,
             role=rdb_workspace_user.role,
             created_at=rdb_workspace_user.created_at,
             updated_at=rdb_workspace_user.updated_at,

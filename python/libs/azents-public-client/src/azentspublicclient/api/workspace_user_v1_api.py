@@ -1132,7 +1132,7 @@ class WorkspaceUserV1Api:
     ) -> WorkspaceUserResponse:
         """Update My Profile
 
-        Update the current user's workspace profile.  Name, locale, and similar fields can be changed.
+        Update the current user's workspace profile.  Name and similar workspace profile fields can be changed.
 
         :param handle: (required)
         :type handle: str
@@ -1204,7 +1204,7 @@ class WorkspaceUserV1Api:
     ) -> ApiResponse[WorkspaceUserResponse]:
         """Update My Profile
 
-        Update the current user's workspace profile.  Name, locale, and similar fields can be changed.
+        Update the current user's workspace profile.  Name and similar workspace profile fields can be changed.
 
         :param handle: (required)
         :type handle: str
@@ -1276,7 +1276,7 @@ class WorkspaceUserV1Api:
     ) -> RESTResponseType:
         """Update My Profile
 
-        Update the current user's workspace profile.  Name, locale, and similar fields can be changed.
+        Update the current user's workspace profile.  Name and similar workspace profile fields can be changed.
 
         :param handle: (required)
         :type handle: str

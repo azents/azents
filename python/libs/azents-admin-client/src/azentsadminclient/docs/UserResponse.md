@@ -9,6 +9,7 @@ Name | Type | Description | Notes
 **id** | **str** | User ID (UUID7 hex) | 
 **primary_email_id** | **str** | Primary email ID | 
 **primary_email** | **str** | Primary email address | 
+**locale** | **str** | Account locale (BCP 47) | 
 **created_at** | **datetime** | Created time | 
 **updated_at** | **datetime** | Updated time | 
 

@@ -9,7 +9,6 @@ Name | Type | Description | Notes
 **workspace_name** | **str** | Workspace name | 
 **workspace_handle** | **str** | Workspace handle | 
 **owner_name** | **str** | Owner display name | 
-**locale** | **str** | Locale (BCP 47) | [optional] [default to 'ko-KR']
 
 ## Example
 

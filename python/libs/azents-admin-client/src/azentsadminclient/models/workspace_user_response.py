@@ -32,12 +32,11 @@ class WorkspaceUserResponse(BaseModel):
     workspace_id: StrictStr = Field(description="Owning Workspace ID")
     user_id: StrictStr = Field(description="User ID")
     name: StrictStr = Field(description="Workspace display name")
-    locale: StrictStr = Field(description="Workspace locale (BCP 47)")
     role: WorkspaceUserRole = Field(description="Role (owner, manager, member)")
     created_at: datetime = Field(description="Created time")
     updated_at: datetime = Field(description="Updated time")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "workspace_id", "user_id", "name", "locale", "role", "created_at", "updated_at"]
+    __properties: ClassVar[List[str]] = ["id", "workspace_id", "user_id", "name", "role", "created_at", "updated_at"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -101,7 +100,6 @@ class WorkspaceUserResponse(BaseModel):
             "workspace_id": obj.get("workspace_id"),
             "user_id": obj.get("user_id"),
             "name": obj.get("name"),
-            "locale": obj.get("locale"),
             "role": obj.get("role"),
             "created_at": obj.get("created_at"),
             "updated_at": obj.get("updated_at")

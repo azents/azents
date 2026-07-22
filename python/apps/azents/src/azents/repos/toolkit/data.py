@@ -25,6 +25,7 @@ class ToolkitConfig(BaseModel):
         default=None, description="Decrypted credentials JSON (MCP, etc.)"
     )
     enabled: bool = Field(description="Enabled flag")
+    revision: int = Field(description="Persisted source revision")
     created_at: datetime.datetime = Field(description="Created time")
     updated_at: datetime.datetime = Field(description="Updated time")
 

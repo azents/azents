@@ -55,6 +55,7 @@ __all__ = [
     "AgentAdminListResponse",
     "AgentAdminResponse",
     "AgentCreateRequest",
+    "AgentDecommissionResponse",
     "AgentListResponse",
     "AgentModelSelection",
     "AgentModelSelectionInput",
@@ -310,6 +311,7 @@ __all__ = [
     "ToolkitScopeType",
     "UnsupportedMediaPolicy",
     "UpdateMyProfileRequest",
+    "UpdateMyUserRequest",
     "UpdateWorkspaceUserRoleRequest",
     "UploadResponse",
     "UploadedImage",
@@ -375,6 +377,7 @@ from azentspublicclient.models.agent_admin_add_request import AgentAdminAddReque
 from azentspublicclient.models.agent_admin_list_response import AgentAdminListResponse as AgentAdminListResponse
 from azentspublicclient.models.agent_admin_response import AgentAdminResponse as AgentAdminResponse
 from azentspublicclient.models.agent_create_request import AgentCreateRequest as AgentCreateRequest
+from azentspublicclient.models.agent_decommission_response import AgentDecommissionResponse as AgentDecommissionResponse
 from azentspublicclient.models.agent_list_response import AgentListResponse as AgentListResponse
 from azentspublicclient.models.agent_model_selection import AgentModelSelection as AgentModelSelection
 from azentspublicclient.models.agent_model_selection_input import AgentModelSelectionInput as AgentModelSelectionInput
@@ -630,6 +633,7 @@ from azentspublicclient.models.toolkit_scope_response import ToolkitScopeRespons
 from azentspublicclient.models.toolkit_scope_type import ToolkitScopeType as ToolkitScopeType
 from azentspublicclient.models.unsupported_media_policy import UnsupportedMediaPolicy as UnsupportedMediaPolicy
 from azentspublicclient.models.update_my_profile_request import UpdateMyProfileRequest as UpdateMyProfileRequest
+from azentspublicclient.models.update_my_user_request import UpdateMyUserRequest as UpdateMyUserRequest
 from azentspublicclient.models.update_workspace_user_role_request import UpdateWorkspaceUserRoleRequest as UpdateWorkspaceUserRoleRequest
 from azentspublicclient.models.upload_response import UploadResponse as UploadResponse
 from azentspublicclient.models.uploaded_image import UploadedImage as UploadedImage

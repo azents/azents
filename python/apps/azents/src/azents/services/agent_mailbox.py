@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     AgentRunStatus,
+    AgentSessionStatus,
     InputBufferKind,
     InputBufferSchedulingMode,
     SessionAgentKind,
@@ -179,12 +180,25 @@ class AgentMailboxService:
         idempotency_key: str | None,
         metadata: dict[str, str],
     ) -> InputBuffer:
+        locked_root = await self.agent_session_repository.lock_session_agent_by_id(
+            session,
+            source.root_session_agent_id,
+        )
+        if locked_root is None:
+            raise ValueError("Root SessionAgent not found")
         locked_target = await self.agent_session_repository.lock_by_id(
             session,
             target.agent_session_id,
         )
         if locked_target is None:
             raise ValueError("Target AgentSession not found")
+        if locked_target.status is not AgentSessionStatus.ACTIVE:
+            raise ValueError("Target AgentSession is not active")
+        if (
+            scheduling_mode is InputBufferSchedulingMode.WAKE_SESSION
+            and locked_target.stop_requested_at is not None
+        ):
+            raise ValueError("Target AgentSession is stopping")
         result = await self.input_buffer_service.enqueue(
             session,
             InputBufferEnqueue(

@@ -138,6 +138,9 @@
     "headline": "Account Settings",
     "email": "Email",
     "createdAt": "Joined",
+    "localeLabel": "Language",
+    "saveLocale": "Save language",
+    "saveLocaleError": "Could not save your language preference. Please try again.",
     "sidebar": {
       "workspaces": "Workspaces",
       "general": "General",

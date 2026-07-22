@@ -73,11 +73,15 @@ export default async function LandingLayout({
   const htmlLang = supportedLocale.split("-")[0];
 
   return (
-    <html lang={htmlLang} suppressHydrationWarning>
+    <html
+      lang={htmlLang}
+      className={`${GeistSans.variable} ${GeistMono.variable}`}
+      suppressHydrationWarning
+    >
       <head>
         <ColorSchemeScript forceColorScheme="dark" />
       </head>
-      <body className={`${GeistSans.variable} ${GeistMono.variable}`}>
+      <body className={GeistSans.className}>
         <NextIntlClientProvider messages={messages}>
           <AppMantineProvider forceColorScheme="dark">
             <LocaleProvider locale={supportedLocale}>{children}</LocaleProvider>

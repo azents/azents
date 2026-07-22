@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent import AgentModelSelection, SelectableModelSettings
 from azents.core.enums import (
+    AgentLifecycleStatus,
     AgentSessionEndReason,
     AgentSessionKind,
     AgentSessionPrimaryKind,
@@ -25,6 +26,7 @@ from azents.core.enums import (
 )
 from azents.core.inference_profile import SessionInferenceState
 from azents.core.session_handle import generate_session_handle
+from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.agent_session_unread_run import RDBAgentSessionUnreadRun
@@ -80,6 +82,11 @@ class AgentSessionRepository:
         create: AgentSessionCreate,
     ) -> AgentSession:
         """Create AgentSession."""
+        lifecycle_status = await session.scalar(
+            sa.select(RDBAgent.lifecycle_status).where(RDBAgent.id == create.agent_id)
+        )
+        if lifecycle_status is not AgentLifecycleStatus.ACTIVE:
+            raise ValueError("Agent is not active for Session creation")
         for _ in range(SESSION_HANDLE_INSERT_ATTEMPTS):
             result = await session.execute(
                 pg_insert(RDBAgentSession)
@@ -305,6 +312,32 @@ class AgentSessionRepository:
     ) -> SessionAgent:
         """Create a child SessionAgent and linked hidden AgentSession."""
         validate_session_agent_child_name(name)
+        root_session_agent_id = await session.scalar(
+            sa.select(RDBSessionAgent.root_session_agent_id).where(
+                RDBSessionAgent.id == parent_session_agent_id
+            )
+        )
+        if root_session_agent_id is None:
+            raise ValueError("Parent SessionAgent not found")
+        root_agent = await session.scalar(
+            sa.select(RDBSessionAgent)
+            .where(
+                RDBSessionAgent.id == root_session_agent_id,
+                RDBSessionAgent.kind == SessionAgentKind.ROOT,
+            )
+            .with_for_update()
+        )
+        if root_agent is None:
+            raise ValueError("Root SessionAgent not found")
+        root_session = await session.get(
+            RDBAgentSession,
+            root_agent.agent_session_id,
+            populate_existing=True,
+        )
+        if root_session is None or root_session.status is not AgentSessionStatus.ACTIVE:
+            raise ValueError("Root AgentSession is not active")
+        if root_session.stop_requested_at is not None:
+            raise ValueError("Root AgentSession is stopping")
         parent_row = await session.execute(
             sa.select(RDBSessionAgent, RDBAgentSession)
             .join(
@@ -312,12 +345,19 @@ class AgentSessionRepository:
                 RDBAgentSession.id == RDBSessionAgent.agent_session_id,
             )
             .where(RDBSessionAgent.id == parent_session_agent_id)
-            .with_for_update(of=RDBSessionAgent)
+            .with_for_update()
+            .execution_options(populate_existing=True)
         )
         parent = parent_row.one_or_none()
         if parent is None:
             raise ValueError("Parent SessionAgent not found")
         parent_agent, parent_agent_session = parent
+        if parent_agent.root_session_agent_id != root_agent.id:
+            raise ValueError("Parent SessionAgent root changed")
+        if parent_agent_session.status is not AgentSessionStatus.ACTIVE:
+            raise ValueError("Parent AgentSession is not active")
+        if parent_agent_session.stop_requested_at is not None:
+            raise ValueError("Parent AgentSession is stopping")
         child_path = _join_session_agent_path(parent_agent.path, name)
 
         existing = await session.scalar(
@@ -492,6 +532,38 @@ class AgentSessionRepository:
             )
         )
         return [self._build(rdb) for rdb in result.scalars()]
+
+    async def list_root_trees_by_agent_id(
+        self,
+        session: AsyncSession,
+        *,
+        agent_id: str,
+    ) -> list[AgentSession]:
+        """List every root tree for Agent decommission reconciliation."""
+        rows = (
+            await session.execute(
+                sa.select(RDBAgentSession)
+                .where(
+                    RDBAgentSession.agent_id == agent_id,
+                    RDBAgentSession.session_kind == AgentSessionKind.ROOT,
+                )
+                .order_by(RDBAgentSession.created_at, RDBAgentSession.id)
+            )
+        ).scalars()
+        return [self._build(row) for row in rows]
+
+    async def has_any_for_agent_id(
+        self,
+        session: AsyncSession,
+        *,
+        agent_id: str,
+    ) -> bool:
+        """Return whether any Session row remains for an Agent."""
+        return bool(
+            await session.scalar(
+                sa.select(sa.exists().where(RDBAgentSession.agent_id == agent_id))
+            )
+        )
 
     async def list_active_unread_by_agent_id(
         self,
@@ -668,35 +740,18 @@ class AgentSessionRepository:
         )
         if linked_agent is None:
             return [agent_session_id]
+        locked_root = await self.lock_session_agent_by_id(
+            session,
+            linked_agent.root_session_agent_id,
+        )
+        if locked_root is None:
+            return [agent_session_id]
         descendants = await self.list_descendant_session_agents(
             session,
             session_agent_id=linked_agent.id,
             include_self=True,
         )
         return [agent.agent_session_id for agent in descendants]
-
-    async def delete_by_id(
-        self,
-        session: AsyncSession,
-        agent_session_id: str,
-    ) -> None:
-        """Delete AgentSession and any linked SessionAgent subtree sessions."""
-        linked_agent = await self.get_session_agent_by_session_id(
-            session,
-            agent_session_id,
-        )
-        session_ids = [agent_session_id]
-        if linked_agent is not None:
-            descendants = await self.list_descendant_session_agents(
-                session,
-                session_agent_id=linked_agent.id,
-                include_self=True,
-            )
-            session_ids = [agent.agent_session_id for agent in descendants]
-        await session.execute(
-            sa.delete(RDBAgentSession).where(RDBAgentSession.id.in_(session_ids))
-        )
-        await session.flush()
 
     async def get_team_primary_by_agent_id(
         self,
@@ -725,6 +780,11 @@ class AgentSessionRepository:
         agent_id: str,
     ) -> AgentSession:
         """Ensure active team primary AgentSession for Agent."""
+        lifecycle_status = await session.scalar(
+            sa.select(RDBAgent.lifecycle_status).where(RDBAgent.id == agent_id)
+        )
+        if lifecycle_status is not AgentLifecycleStatus.ACTIVE:
+            raise ValueError("Agent is not active for team-primary recovery")
         existing_primary = await self.get_team_primary_by_agent_id(session, agent_id)
         if existing_primary is not None:
             return existing_primary
@@ -875,10 +935,12 @@ class AgentSessionRepository:
     ) -> list[AgentSession]:
         """Lock all AgentSessions in one root SessionAgent tree."""
         root_agent = await session.scalar(
-            sa.select(RDBSessionAgent).where(
+            sa.select(RDBSessionAgent)
+            .where(
                 RDBSessionAgent.agent_session_id == root_session_id,
                 RDBSessionAgent.kind == SessionAgentKind.ROOT,
             )
+            .with_for_update()
         )
         if root_agent is None:
             return []
@@ -1189,6 +1251,44 @@ class AgentSessionRepository:
         )
         await session.flush()
 
+    async def consume_pending_idle_continuation(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        run_id: str,
+        continue_running: bool,
+    ) -> bool:
+        """Atomically consume one matching idle continuation boundary."""
+        values: dict[str, object] = {
+            "pending_idle_continuation_run_id": None,
+            "run_state": (
+                AgentSessionRunState.RUNNING
+                if continue_running
+                else AgentSessionRunState.IDLE
+            ),
+        }
+        if continue_running:
+            values["run_heartbeat_at"] = sa.func.now()
+        else:
+            values.update(
+                stop_requested_at=None,
+                stop_requested_by=None,
+                stop_request_id=None,
+            )
+        result = await session.execute(
+            sa.update(RDBAgentSession)
+            .where(
+                RDBAgentSession.id == session_id,
+                RDBAgentSession.status == AgentSessionStatus.ACTIVE,
+                RDBAgentSession.pending_idle_continuation_run_id == run_id,
+            )
+            .values(**values)
+            .returning(RDBAgentSession.id)
+        )
+        await session.flush()
+        return result.scalar_one_or_none() is not None
+
     async def enqueue_pending_command(
         self,
         session: AsyncSession,
@@ -1374,10 +1474,12 @@ class AgentSessionRepository:
         cutoff = sa.func.now() - stale_threshold
         result = await session.execute(
             sa.select(RDBAgentSession)
+            .join(RDBAgent, RDBAgent.id == RDBAgentSession.agent_id)
             .where(
                 RDBAgentSession.status == AgentSessionStatus.ACTIVE,
                 RDBAgentSession.run_state == AgentSessionRunState.RUNNING,
                 RDBAgentSession.run_heartbeat_at < cutoff,
+                RDBAgent.lifecycle_status == AgentLifecycleStatus.ACTIVE,
             )
             .order_by(RDBAgentSession.run_heartbeat_at)
             .limit(limit)
@@ -1536,6 +1638,7 @@ class AgentSessionRepository:
             lifecycle_started_at=rdb.lifecycle_started_at,
             run_state=rdb.run_state,
             run_heartbeat_at=rdb.run_heartbeat_at,
+            pending_idle_continuation_run_id=(rdb.pending_idle_continuation_run_id),
             owner_generation=rdb.owner_generation,
             pending_command_id=rdb.pending_command_id,
             pending_command_name=rdb.pending_command_name,

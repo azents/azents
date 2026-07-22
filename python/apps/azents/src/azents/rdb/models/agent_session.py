@@ -203,12 +203,12 @@ class RDBAgentSession(RDBModel):
     )
     workspace_id: Mapped[str] = mapped_column(
         sa.String(32),
-        sa.ForeignKey("workspaces.id", ondelete="CASCADE"),
+        sa.ForeignKey("workspaces.id", ondelete="RESTRICT"),
         nullable=False,
     )
     agent_id: Mapped[str] = mapped_column(
         sa.String(32),
-        sa.ForeignKey("agents.id", ondelete="CASCADE"),
+        sa.ForeignKey("agents.id", ondelete="RESTRICT"),
         nullable=False,
     )
     handle: Mapped[str] = mapped_column(sa.String(120), nullable=False)
@@ -332,6 +332,13 @@ class RDBAgentSession(RDBModel):
         init=False,
         server_default=sa.func.now(),
         nullable=False,
+    )
+    pending_idle_continuation_run_id: Mapped[str | None] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("agent_runs.id", ondelete="SET NULL"),
+        init=False,
+        nullable=True,
+        default=None,
     )
     owner_generation: Mapped[int] = mapped_column(
         sa.BigInteger,

@@ -67,6 +67,12 @@ class DockerRuntimeControlAdapter(RuntimeProviderLifecycle):
         """Reset a Runtime."""
         return _result(await self._provider.reset(_command(command)))
 
+    async def terminal_delete(
+        self, command: ControlRuntimeLifecycleCommand
+    ) -> ControlRuntimeLifecycleResult:
+        """Permanently delete a Runtime."""
+        return _result(await self._provider.terminal_delete(_command(command)))
+
     async def observe(
         self, command: ControlRuntimeLifecycleCommand
     ) -> ControlRuntimeProviderReport:
@@ -129,4 +135,5 @@ def _report(report: RuntimeProviderReport) -> ControlRuntimeProviderReport:
         reason=report.reason,
         diagnostic=dict(report.diagnostic),
         reported_at=report.reported_at,
+        terminal_delete_acknowledged=report.terminal_delete_acknowledged,
     )

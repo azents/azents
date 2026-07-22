@@ -20,6 +20,7 @@ class RuntimeLifecycleCommandType(enum.StrEnum):
     RESTART = "restart"
     RESET = "reset"
     OBSERVE = "observe"
+    TERMINAL_DELETE = "terminal_delete"
 
 
 class RuntimeProviderObservedState(enum.StrEnum):
@@ -80,6 +81,7 @@ class RuntimeProviderReport:
     reason: str
     diagnostic: dict[str, str]
     reported_at: datetime
+    terminal_delete_acknowledged: bool
 
 
 @dataclasses.dataclass(frozen=True)

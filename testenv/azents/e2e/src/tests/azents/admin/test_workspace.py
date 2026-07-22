@@ -13,11 +13,11 @@ from azentsadminclient.models.workspace_update_request import WorkspaceUpdateReq
 class TestWorkspaceCrud:
     """Workspace CRUD t test."""
 
-    def test_create_get_update_delete_workspace(
+    def test_create_get_update_workspace(
         self,
         admin_api_client: azentsadminclient.ApiClient,
     ) -> None:
-        """Workspace create/fetch/update/deletet t t."""
+        """Workspace create/fetch/update."""
         api = WorkspaceV1Api(admin_api_client)
         unique = uuid.uuid4().hex[:8]
 
@@ -37,12 +37,6 @@ class TestWorkspaceCrud:
         )
         assert updated.name == f"Workspace Updated {unique}"
 
-        api.workspace_v1_delete_workspace(created.handle)
-
-        with pytest.raises(ApiException) as exc_info:
-            api.workspace_v1_get_workspace(created.handle)
-        assert exc_info.value.status == 404  # pyright: ignore[reportUnknownMemberType] # t create API clientt t t t  # pyright: ignore[reportUnknownMemberType] # t create API clientt t t t
-
     def test_create_workspace_with_duplicate_handle_returns_409(
         self,
         admin_api_client: azentsadminclient.ApiClient,
@@ -52,18 +46,15 @@ class TestWorkspaceCrud:
         unique = uuid.uuid4().hex[:8]
         handle = f"duplicate-handle-{unique}"
 
-        first = api.workspace_v1_create_workspace(
+        api.workspace_v1_create_workspace(
             WorkspaceCreateRequest(name="First", handle=handle)
         )
 
-        try:
-            with pytest.raises(ApiException) as exc_info:
-                api.workspace_v1_create_workspace(
-                    WorkspaceCreateRequest(name="Second", handle=handle)
-                )
-            assert exc_info.value.status == 409  # pyright: ignore[reportUnknownMemberType] # t create API clientt t t t
-        finally:
-            api.workspace_v1_delete_workspace(first.handle)
+        with pytest.raises(ApiException) as exc_info:
+            api.workspace_v1_create_workspace(
+                WorkspaceCreateRequest(name="Second", handle=handle)
+            )
+        assert exc_info.value.status == 409  # pyright: ignore[reportUnknownMemberType] # t create API clientt t t t
 
     def test_list_workspaces_includes_created_workspace(
         self,
@@ -80,11 +71,8 @@ class TestWorkspaceCrud:
             )
         )
 
-        try:
-            listed = api.workspace_v1_list_workspaces()
-            assert any(item.handle == created.handle for item in listed.items)
-        finally:
-            api.workspace_v1_delete_workspace(created.handle)
+        listed = api.workspace_v1_list_workspaces()
+        assert any(item.handle == created.handle for item in listed.items)
 
 
 class TestWorkspaceValidation:

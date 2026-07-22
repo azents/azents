@@ -69,6 +69,7 @@ class TestMergeEnvVarCredentials:
             config=old_config,
             credentials='{"values":{"AZENTS_POSTGRES_USER":"user","AZENTS_POSTGRES_HOST":"host"}}',
             enabled=True,
+            revision=1,
             created_at=datetime.datetime.now(datetime.UTC),
             updated_at=datetime.datetime.now(datetime.UTC),
         )

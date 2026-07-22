@@ -35,8 +35,7 @@ class TestWorkspaceUserUpdateRequest(unittest.TestCase):
         model = WorkspaceUserUpdateRequest()
         if include_optional:
             return WorkspaceUserUpdateRequest(
-                name = '',
-                locale = ''
+                name = ''
             )
         else:
             return WorkspaceUserUpdateRequest(

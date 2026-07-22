@@ -48,6 +48,9 @@ class ToolkitBinding(NamedTuple):
         auto-bound toolkits use None.
     :param toolkit_config_id: Stable ToolkitConfig ID for DB-attached toolkit
         source snapshots. Builtin and auto-bound toolkits use None.
+    :param source_revision: Opaque non-secret source revision for this binding.
+        Equal stable identities with unequal revisions replace their
+        session-managed Toolkit instance before the Run starts.
     """
 
     toolkit: Toolkit[Any]
@@ -55,6 +58,7 @@ class ToolkitBinding(NamedTuple):
     use_prefix: bool
     toolkit_type: str | None = None
     toolkit_config_id: str | None = None
+    source_revision: str = ""
 
 
 @dataclasses.dataclass(frozen=True)

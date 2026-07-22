@@ -18,7 +18,7 @@ import re  # noqa: F401
 import json
 
 from pydantic import BaseModel, ConfigDict, Field, StrictStr
-from typing import Any, ClassVar, Dict, List, Optional
+from typing import Any, ClassVar, Dict, List
 from azentsadminclient.models.workspace_user_role import WorkspaceUserRole
 from typing import Optional, Set
 from typing_extensions import Self
@@ -30,10 +30,9 @@ class WorkspaceUserCreateRequest(BaseModel):
     workspace_handle: StrictStr = Field(description="Owning Workspace handle")
     user_id: StrictStr = Field(description="User ID")
     name: StrictStr = Field(description="Workspace display name")
-    locale: Optional[StrictStr] = Field(default='ko-KR', description="Workspace locale (BCP 47)")
     role: WorkspaceUserRole = Field(description="Role (owner, manager, member)")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["workspace_handle", "user_id", "name", "locale", "role"]
+    __properties: ClassVar[List[str]] = ["workspace_handle", "user_id", "name", "role"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -96,7 +95,6 @@ class WorkspaceUserCreateRequest(BaseModel):
             "workspace_handle": obj.get("workspace_handle"),
             "user_id": obj.get("user_id"),
             "name": obj.get("name"),
-            "locale": obj.get("locale") if obj.get("locale") is not None else 'ko-KR',
             "role": obj.get("role")
         })
         # store additional fields in additional_properties

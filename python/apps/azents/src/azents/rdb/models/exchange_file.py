@@ -82,7 +82,7 @@ class RDBExchangeFile(RDBModel):
     )
     agent_id: Mapped[str] = mapped_column(
         sa.String(32),
-        sa.ForeignKey("agents.id", ondelete="CASCADE"),
+        sa.ForeignKey("agents.id", ondelete="RESTRICT"),
         nullable=False,
     )
     origin_type: Mapped[ExchangeFileOrigin] = mapped_column(

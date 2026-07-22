@@ -29,10 +29,12 @@ class _TrackingToolkit(Toolkit[_Config]):
         events: list[str],
         *,
         fail_enter: bool = False,
+        fail_exit: bool = False,
     ) -> None:
         self.name = name
         self.events = events
         self.fail_enter = fail_enter
+        self.fail_exit = fail_exit
         self.update_context_calls = 0
 
     async def update_context(self, context: TurnContext) -> ToolkitState:
@@ -51,6 +53,8 @@ class _TrackingToolkit(Toolkit[_Config]):
     async def __aexit__(self, *exc: object) -> None:
         """Record exit."""
         self.events.append(f"exit:{self.name}")
+        if self.fail_exit:
+            raise RuntimeError(f"exit failed: {self.name}")
 
 
 def _binding(
@@ -60,6 +64,7 @@ def _binding(
     slug: str | None = None,
     use_prefix: bool = False,
     toolkit_type: str | None = None,
+    source_revision: str = "1",
 ) -> SessionToolkitBinding:
     """Create a keyed test binding."""
     return SessionToolkitBinding(
@@ -69,6 +74,7 @@ def _binding(
             slug=slug if slug is not None else key_name,
             use_prefix=use_prefix,
             toolkit_type=toolkit_type,
+            source_revision=source_revision,
         ),
     )
 
@@ -117,6 +123,33 @@ async def test_reconcile_reuses_existing_toolkit_for_same_key() -> None:
         assert second_result[0].use_prefix is True
         assert second_result[0].toolkit_type == "mcp"
         assert events == ["enter:first"]
+    finally:
+        await lifecycle.close()
+
+
+@pytest.mark.asyncio
+async def test_reconcile_replaces_for_changed_source_revision() -> None:
+    """Changed source revision enters a replacement before closing the old instance."""
+    events: list[str] = []
+    lifecycle = SessionToolkitLifecycle()
+    first = _TrackingToolkit("first", events)
+    replacement = _TrackingToolkit("replacement", events)
+
+    first_result = await lifecycle.reconcile(
+        [_binding("same", first, source_revision="1")]
+    )
+    second_result = await lifecycle.reconcile(
+        [_binding("same", replacement, source_revision="2")]
+    )
+
+    try:
+        assert first_result[0].toolkit is first
+        assert second_result[0].toolkit is replacement
+        assert events == [
+            "enter:first",
+            "enter:replacement",
+            "exit:first",
+        ]
     finally:
         await lifecycle.close()
 
@@ -175,6 +208,41 @@ async def test_reconcile_unwinds_new_toolkits_when_later_enter_fails() -> None:
         ]
     finally:
         await lifecycle.close()
+
+
+@pytest.mark.asyncio
+async def test_reconcile_keeps_replacement_when_old_toolkit_exit_fails() -> None:
+    """Failed old-toolkit cleanup does not leak or discard the replacement."""
+    events: list[str] = []
+    lifecycle = SessionToolkitLifecycle()
+    first = _TrackingToolkit("first", events, fail_exit=True)
+    replacement = _TrackingToolkit("replacement", events)
+
+    await lifecycle.reconcile([_binding("same", first, source_revision="1")])
+
+    with pytest.raises(RuntimeError, match="exit failed: first"):
+        await lifecycle.reconcile([_binding("same", replacement, source_revision="2")])
+
+    result = await lifecycle.reconcile(
+        [_binding("same", _TrackingToolkit("ignored", events), source_revision="2")]
+    )
+
+    try:
+        assert result[0].toolkit is replacement
+        assert events == [
+            "enter:first",
+            "enter:replacement",
+            "exit:first",
+        ]
+    finally:
+        await lifecycle.close()
+
+    assert events == [
+        "enter:first",
+        "enter:replacement",
+        "exit:first",
+        "exit:replacement",
+    ]
 
 
 @pytest.mark.asyncio
