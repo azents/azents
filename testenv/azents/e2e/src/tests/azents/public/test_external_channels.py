@@ -20,6 +20,9 @@ from azentspublicclient.models.agent_create_request import AgentCreateRequest
 from azentspublicclient.models.agent_type import AgentType
 from azentspublicclient.models.api_key_secrets import ApiKeySecrets
 from azentspublicclient.models.create_workspace_request import CreateWorkspaceRequest
+from azentspublicclient.models.external_channel_access_grant_scope import (
+    ExternalChannelAccessGrantScope,
+)
 from azentspublicclient.models.external_channel_access_request_status import (
     ExternalChannelAccessRequestStatus,
 )
@@ -365,7 +368,6 @@ def test_http_admission_unknown_participant_and_approval_journey(
             len(projection.items) == 1
             and projection.items[0].activation_status
             is ExternalChannelBindingActivationStatus.ACTIVE
-            and len(projection.grants) == 1
         ):
             return projection
         return None
@@ -380,7 +382,15 @@ def test_http_admission_unknown_participant_and_approval_journey(
         ),
     )
     assert len(bindings.items) == 1
-    assert len(bindings.grants) == 1
+    assert bindings.grants == []
+    agent_access = external_api.external_channel_v1_list_agent_access(
+        agent_id=agent_id,
+        handle=handle,
+        _headers=headers,
+    )
+    assert len(agent_access.grants) == 1
+    assert agent_access.grants[0].scope is ExternalChannelAccessGrantScope.AGENT
+    assert agent_access.grants[0].agent_session_id is None
     provider_state = _provider_state(slack_provider_fake_url)
     request_counts = provider_state.get("request_counts")
     assert isinstance(request_counts, dict)
