@@ -46,7 +46,7 @@ _RUNTIME_PROVIDER_CONFIG_VALIDATION_STATUS = postgresql.ENUM(
     create_type=False,
 )
 _RUNTIME_PROVIDER_BINDING_ORIGIN = postgresql.ENUM(
-    "agent_preference",
+    "agent_explicit",
     "platform_default",
     "migration",
     name="runtime_provider_binding_origin",

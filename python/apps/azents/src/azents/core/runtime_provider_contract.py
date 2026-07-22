@@ -210,6 +210,12 @@ def canonicalize_runtime_provider_contract(
 ) -> CanonicalRuntimeProviderContract:
     """Produce stable semantic JSON and a digest for one validated contract."""
     canonical_json = contract.model_dump(mode="json")
+    canonical_json["core_lifecycle_operations"] = sorted(
+        canonical_json["core_lifecycle_operations"]
+    )
+    canonical_json["optional_capabilities"] = sorted(
+        canonical_json["optional_capabilities"]
+    )
     encoded = json.dumps(
         canonical_json,
         sort_keys=True,

@@ -568,7 +568,7 @@ class RuntimeProviderConfigValidationStatus(enum.StrEnum):
 class RuntimeProviderBindingOrigin(enum.StrEnum):
     """Input that resolved an immutable logical Runtime Provider binding."""
 
-    AGENT_PREFERENCE = "agent_preference"
+    AGENT_EXPLICIT = "agent_explicit"
     PLATFORM_DEFAULT = "platform_default"
     MIGRATION = "migration"
 

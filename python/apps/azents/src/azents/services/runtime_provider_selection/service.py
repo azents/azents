@@ -179,7 +179,17 @@ class RuntimeProviderSelectionService:
                         runtime_id=created.runtime.id,
                         provider_id=provider.id,
                         contract_digest=contract.digest,
+                        config_revision_id=active_config.id if active_config else None,
                         config=active_config.config if active_config else {},
+                        encrypted_secrets=(
+                            active_config.encrypted_secrets if active_config else None
+                        ),
+                        secret_metadata=(
+                            active_config.secret_metadata if active_config else {}
+                        ),
+                        override_provider_id=None,
+                        override_version=None,
+                        target_desired_generation=created.runtime.desired_generation,
                         origin=origin,
                     ),
                     target_desired_generation=created.runtime.desired_generation,
@@ -215,7 +225,7 @@ class RuntimeProviderSelectionService:
         """Resolve explicit preference before the Platform default without fallback."""
         explicit_id = requested_provider_id or agent_runtime_provider_id
         if explicit_id is not None:
-            return explicit_id, RuntimeProviderBindingOrigin.AGENT_PREFERENCE
+            return explicit_id, RuntimeProviderBindingOrigin.AGENT_EXPLICIT
         current = await self.system_setting_repository.get_current(
             session,
             section=SystemSettingSection.PLATFORM_RUNTIME,
@@ -340,7 +350,13 @@ def _snapshot_digest(
     runtime_id: str,
     provider_id: str,
     contract_digest: str,
+    config_revision_id: str | None,
     config: dict[str, object],
+    encrypted_secrets: str | None,
+    secret_metadata: dict[str, object],
+    override_provider_id: str | None,
+    override_version: int | None,
+    target_desired_generation: int,
     origin: RuntimeProviderBindingOrigin,
 ) -> str:
     """Create a stable digest for one immutable Runtime policy snapshot."""
@@ -349,7 +365,13 @@ def _snapshot_digest(
             "runtime_id": runtime_id,
             "provider_id": provider_id,
             "contract_digest": contract_digest,
+            "config_revision_id": config_revision_id,
             "config": config,
+            "encrypted_secrets": encrypted_secrets,
+            "secret_metadata": secret_metadata,
+            "override_provider_id": override_provider_id,
+            "override_version": override_version,
+            "target_desired_generation": target_desired_generation,
             "origin": origin.value,
         },
         sort_keys=True,

@@ -90,6 +90,15 @@ class RuntimeProviderPolicyRepository:
         create: RuntimeProviderContractRevisionCreate,
     ) -> RuntimeProviderContractRevision:
         """Store one immutable Provider contract revision after the Provider lock."""
+        if create.status != RuntimeProviderContractStatus.CANDIDATE:
+            raise ValueError("New Provider contract revisions must be candidates.")
+        provider_exists = await session.scalar(
+            sa.select(RDBRuntimeProvider.id).where(
+                RDBRuntimeProvider.id == create.provider_id
+            )
+        )
+        if provider_exists is None:
+            raise ValueError("Provider does not exist.")
         rdb = RDBRuntimeProviderContractRevision(
             provider_id=create.provider_id,
             digest=create.digest,
@@ -231,6 +240,26 @@ class RuntimeProviderPolicyRepository:
         create: RuntimeProviderConfigRevisionCreate,
     ) -> RuntimeProviderConfigRevision:
         """Append a candidate revision after the Provider aggregate lock is held."""
+        provider = await session.get(RDBRuntimeProvider, create.provider_id)
+        if provider is None:
+            raise ValueError("Provider does not exist.")
+        if provider.accepted_contract_revision_id != create.contract_revision_id:
+            raise ValueError(
+                "Configuration candidate must use the Provider's accepted contract."
+            )
+        contract = await session.get(
+            RDBRuntimeProviderContractRevision,
+            create.contract_revision_id,
+        )
+        if contract is None or contract.provider_id != create.provider_id:
+            raise ValueError("Configuration contract does not belong to the Provider.")
+        if create.base_revision_id is not None:
+            base = await session.get(
+                RDBRuntimeProviderConfigRevision,
+                create.base_revision_id,
+            )
+            if base is None or base.provider_id != create.provider_id:
+                raise ValueError("Configuration base revision is invalid.")
         latest_result = await session.execute(
             sa.select(sa.func.max(RDBRuntimeProviderConfigRevision.revision)).where(
                 RDBRuntimeProviderConfigRevision.provider_id == create.provider_id
@@ -266,6 +295,8 @@ class RuntimeProviderPolicyRepository:
         impact: dict[str, object] | None,
     ) -> RuntimeProviderConfigRevision | None:
         """Record one Provider validation result for the still-pending revision."""
+        if status == RuntimeProviderConfigValidationStatus.PENDING:
+            raise ValueError("Provider validation must resolve to valid or invalid.")
         next_state = (
             RuntimeProviderConfigRevisionState.PROVIDER_ACCEPTED
             if status == RuntimeProviderConfigValidationStatus.VALID
@@ -303,6 +334,15 @@ class RuntimeProviderPolicyRepository:
         activated_at: datetime.datetime,
     ) -> RuntimeProviderConfigRevision | None:
         """Make one validated revision active without replacing any Runtime."""
+        accepted_contract_matches = (
+            sa.select(sa.literal(1))
+            .where(
+                RDBRuntimeProvider.id == provider_id,
+                RDBRuntimeProvider.accepted_contract_revision_id
+                == RDBRuntimeProviderConfigRevision.contract_revision_id,
+            )
+            .exists()
+        )
         result = await session.execute(
             sa.update(RDBRuntimeProviderConfigRevision)
             .where(
@@ -312,6 +352,7 @@ class RuntimeProviderPolicyRepository:
                 == RuntimeProviderConfigRevisionState.PROVIDER_ACCEPTED,
                 RDBRuntimeProviderConfigRevision.validation_status
                 == RuntimeProviderConfigValidationStatus.VALID,
+                accepted_contract_matches,
             )
             .values(
                 state=RuntimeProviderConfigRevisionState.ACTIVE,

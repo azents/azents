@@ -16,6 +16,7 @@ from azents.core.enums import (
 )
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
+from azents.rdb.models.runtime_provider import RDBRuntimeProvider
 
 from .data import (
     AgentRuntime,
@@ -94,6 +95,36 @@ class AgentRuntimeRepository:
         if rdb is None:
             return None
         return self._build(rdb)
+
+    async def provider_report_matches_binding(
+        self,
+        session: AsyncSession,
+        *,
+        runtime_id: str,
+        provider_logical_id: str,
+    ) -> bool:
+        """Validate a Provider report against the Runtime's durable binding."""
+        result = await session.execute(
+            sa.select(
+                RDBAgentRuntime.runtime_provider_id,
+                RDBRuntimeProvider.provider_id,
+            )
+            .outerjoin(
+                RDBRuntimeProvider,
+                RDBRuntimeProvider.id == RDBAgentRuntime.runtime_provider_resource_id,
+            )
+            .where(RDBAgentRuntime.id == runtime_id)
+        )
+        row = result.one_or_none()
+        if row is None:
+            return False
+        logical_id, bound_resource_logical_id = row
+        if bound_resource_logical_id is not None:
+            return bound_resource_logical_id == provider_logical_id and logical_id in (
+                None,
+                bound_resource_logical_id,
+            )
+        return logical_id is None or logical_id == provider_logical_id
 
     async def ensure_with_create(
         self,
