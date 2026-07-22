@@ -950,6 +950,112 @@
         }
       }
     },
+    "/runtime-provider-enrollment/v1/runtime-providers/{provider_id}/enrollment-grants": {
+      "post": {
+        "tags": [
+          "Runtime Provider Enrollment v1"
+        ],
+        "summary": "Issue Enrollment Grant",
+        "description": "Issue one-time Provider enrollment authority for a Deployment Operator.",
+        "operationId": "runtime_provider_enrollment_v1_issue_enrollment_grant",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "provider_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuntimeProviderEnrollmentGrantIssueRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeProviderEnrollmentGrantIssueResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runtime-provider-enrollment/v1/runtime-provider-credentials/{credential_id}": {
+      "delete": {
+        "tags": [
+          "Runtime Provider Enrollment v1"
+        ],
+        "summary": "Revoke Credential",
+        "description": "Revoke one Provider credential without deleting its audit history.",
+        "operationId": "runtime_provider_enrollment_v1_revoke_credential",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "credential_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Credential Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeProviderCredentialRevokeResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/system/v1/me": {
       "get": {
         "tags": [
@@ -3708,6 +3814,65 @@
         "title": "PlatformGitHubAppPatchRequest",
         "description": "Optimistic partial update for the Platform GitHub App Admin base."
       },
+      "RuntimeProviderCredentialRevokeResponse": {
+        "properties": {
+          "revoked": {
+            "type": "boolean",
+            "title": "Revoked"
+          }
+        },
+        "type": "object",
+        "required": [
+          "revoked"
+        ],
+        "title": "RuntimeProviderCredentialRevokeResponse",
+        "description": "Result of revoking one Provider credential."
+      },
+      "RuntimeProviderEnrollmentGrantIssueRequest": {
+        "properties": {
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "expires_at"
+        ],
+        "title": "RuntimeProviderEnrollmentGrantIssueRequest",
+        "description": "System Admin enrollment grant issuance input."
+      },
+      "RuntimeProviderEnrollmentGrantIssueResponse": {
+        "properties": {
+          "grant_id": {
+            "type": "string",
+            "title": "Grant Id"
+          },
+          "provider_id": {
+            "type": "string",
+            "title": "Provider Id"
+          },
+          "secret": {
+            "type": "string",
+            "title": "Secret"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "grant_id",
+          "provider_id",
+          "secret",
+          "expires_at"
+        ],
+        "title": "RuntimeProviderEnrollmentGrantIssueResponse",
+        "description": "One-time enrollment grant returned only to a System Admin."
+      },
       "SentryDiagnostics": {
         "properties": {
           "initialized": {
@@ -5060,6 +5225,10 @@
     {
       "name": "Model Catalog v1",
       "description": "\nModel Catalog API (Admin)\n\nOperational controls for system-owned model catalog refresh.\n"
+    },
+    {
+      "name": "Runtime Provider Enrollment v1",
+      "description": "\nRuntime Provider Enrollment API (Admin)\n\nSystem Admin control-plane operations for Provider enrollment authority.\n"
     },
     {
       "name": "System v1",

@@ -139,6 +139,19 @@ class RuntimeControlProtocolService:
             ttl_seconds=self._connection_ttl_seconds,
         )
 
+    async def revoke_provider(
+        self,
+        *,
+        provider_id: str,
+        generation: int,
+    ) -> bool:
+        """Revoke a Provider connection only when its generation is current."""
+        return await self._store.revoke_connection(
+            kind=RuntimeConnectionKind.PROVIDER,
+            subject_id=provider_id,
+            generation=generation,
+        )
+
     async def heartbeat_runner(
         self,
         *,

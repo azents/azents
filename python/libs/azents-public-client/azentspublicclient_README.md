@@ -197,6 +197,7 @@ Class | Method | HTTP request | Description
 *LLMProviderIntegrationV1Api* | [**llm_provider_integration_v1_list_integrations**](azentspublicclient/docs/LLMProviderIntegrationV1Api.md#llm_provider_integration_v1_list_integrations) | **GET** /llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations | List Integrations
 *LLMProviderIntegrationV1Api* | [**llm_provider_integration_v1_sync_integration_catalog**](azentspublicclient/docs/LLMProviderIntegrationV1Api.md#llm_provider_integration_v1_sync_integration_catalog) | **POST** /llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations/{integration_id}/catalog-sync | Sync Integration Catalog
 *LLMProviderIntegrationV1Api* | [**llm_provider_integration_v1_update_integration**](azentspublicclient/docs/LLMProviderIntegrationV1Api.md#llm_provider_integration_v1_update_integration) | **PATCH** /llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations/{integration_id} | Update Integration
+*RuntimeProviderEnrollmentV1Api* | [**runtime_provider_enrollment_v1_exchange_credential**](azentspublicclient/docs/RuntimeProviderEnrollmentV1Api.md#runtime_provider_enrollment_v1_exchange_credential) | **POST** /runtime-provider-enrollment/v1/credentials/exchange | Exchange Credential
 *SecurityV1Api* | [**security_v1_elevate_with_email**](azentspublicclient/docs/SecurityV1Api.md#security_v1_elevate_with_email) | **POST** /security/v1/elevate/email | Elevate With Email
 *SecurityV1Api* | [**security_v1_elevate_with_password**](azentspublicclient/docs/SecurityV1Api.md#security_v1_elevate_with_password) | **POST** /security/v1/elevate/password | Elevate With Password
 *SecurityV1Api* | [**security_v1_get_auth_methods**](azentspublicclient/docs/SecurityV1Api.md#security_v1_get_auth_methods) | **GET** /security/v1/auth-methods | Get Auth Methods
@@ -491,6 +492,8 @@ Class | Method | HTTP request | Description
  - [RuntimeDesiredState](azentspublicclient/docs/RuntimeDesiredState.md)
  - [RuntimeLifecycleCommandType](azentspublicclient/docs/RuntimeLifecycleCommandType.md)
  - [RuntimeProviderConnectionState](azentspublicclient/docs/RuntimeProviderConnectionState.md)
+ - [RuntimeProviderCredentialExchangeRequest](azentspublicclient/docs/RuntimeProviderCredentialExchangeRequest.md)
+ - [RuntimeProviderCredentialExchangeResponse](azentspublicclient/docs/RuntimeProviderCredentialExchangeResponse.md)
  - [RuntimeProviderObservedState](azentspublicclient/docs/RuntimeProviderObservedState.md)
  - [RuntimeRunnerState](azentspublicclient/docs/RuntimeRunnerState.md)
  - [RuntimeSummary](azentspublicclient/docs/RuntimeSummary.md)

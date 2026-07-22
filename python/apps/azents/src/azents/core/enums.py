@@ -508,6 +508,33 @@ class RuntimeProviderAuditEventType(enum.StrEnum):
     ENABLED = "enabled"
     DISABLED = "disabled"
     AVAILABILITY_CHANGED = "availability_changed"
+    ENROLLMENT_GRANT_ISSUED = "enrollment_grant_issued"
+    CREDENTIAL_ISSUED = "credential_issued"
+    CREDENTIAL_REVOKED = "credential_revoked"
+    CONNECTION_OPENED = "connection_opened"
+    CONNECTION_CLOSED = "connection_closed"
+
+
+class RuntimeProviderEnrollmentGrantState(enum.StrEnum):
+    """One-time Provider enrollment grant lifecycle."""
+
+    ISSUED = "issued"
+    CONSUMED = "consumed"
+    REVOKED = "revoked"
+
+
+class RuntimeProviderCredentialState(enum.StrEnum):
+    """Provider credential lifecycle."""
+
+    ACTIVE = "active"
+    REVOKED = "revoked"
+
+
+class RuntimeProviderConnectionStatus(enum.StrEnum):
+    """Durable Provider Control connection projection state."""
+
+    CONNECTED = "connected"
+    DISCONNECTED = "disconnected"
 
 
 class SnapshotKind(enum.StrEnum):

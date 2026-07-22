@@ -23,6 +23,7 @@ __all__ = [
     "HealthV1Api",
     "InvitationV1Api",
     "ModelCatalogV1Api",
+    "RuntimeProviderEnrollmentV1Api",
     "SystemBootstrapV1Api",
     "SystemSettingsV1Api",
     "SystemV1Api",
@@ -70,6 +71,9 @@ __all__ = [
     "PlatformGitHubAppFieldResponse",
     "PlatformGitHubAppHealthResponse",
     "PlatformGitHubAppPatchRequest",
+    "RuntimeProviderCredentialRevokeResponse",
+    "RuntimeProviderEnrollmentGrantIssueRequest",
+    "RuntimeProviderEnrollmentGrantIssueResponse",
     "SentryDiagnostics",
     "SignupTokenDeliveryMethod",
     "SignupTokenListResponse",
@@ -123,6 +127,7 @@ from azentsadminclient.api.debug_v1_api import DebugV1Api as DebugV1Api
 from azentsadminclient.api.health_v1_api import HealthV1Api as HealthV1Api
 from azentsadminclient.api.invitation_v1_api import InvitationV1Api as InvitationV1Api
 from azentsadminclient.api.model_catalog_v1_api import ModelCatalogV1Api as ModelCatalogV1Api
+from azentsadminclient.api.runtime_provider_enrollment_v1_api import RuntimeProviderEnrollmentV1Api as RuntimeProviderEnrollmentV1Api
 from azentsadminclient.api.system_bootstrap_v1_api import SystemBootstrapV1Api as SystemBootstrapV1Api
 from azentsadminclient.api.system_settings_v1_api import SystemSettingsV1Api as SystemSettingsV1Api
 from azentsadminclient.api.system_v1_api import SystemV1Api as SystemV1Api
@@ -174,6 +179,9 @@ from azentsadminclient.models.platform_git_hub_app_effective_status import Platf
 from azentsadminclient.models.platform_git_hub_app_field_response import PlatformGitHubAppFieldResponse as PlatformGitHubAppFieldResponse
 from azentsadminclient.models.platform_git_hub_app_health_response import PlatformGitHubAppHealthResponse as PlatformGitHubAppHealthResponse
 from azentsadminclient.models.platform_git_hub_app_patch_request import PlatformGitHubAppPatchRequest as PlatformGitHubAppPatchRequest
+from azentsadminclient.models.runtime_provider_credential_revoke_response import RuntimeProviderCredentialRevokeResponse as RuntimeProviderCredentialRevokeResponse
+from azentsadminclient.models.runtime_provider_enrollment_grant_issue_request import RuntimeProviderEnrollmentGrantIssueRequest as RuntimeProviderEnrollmentGrantIssueRequest
+from azentsadminclient.models.runtime_provider_enrollment_grant_issue_response import RuntimeProviderEnrollmentGrantIssueResponse as RuntimeProviderEnrollmentGrantIssueResponse
 from azentsadminclient.models.sentry_diagnostics import SentryDiagnostics as SentryDiagnostics
 from azentsadminclient.models.signup_token_delivery_method import SignupTokenDeliveryMethod as SignupTokenDeliveryMethod
 from azentsadminclient.models.signup_token_list_response import SignupTokenListResponse as SignupTokenListResponse
