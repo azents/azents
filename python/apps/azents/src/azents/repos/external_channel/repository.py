@@ -911,6 +911,8 @@ class ExternalChannelRepository:
             row.error_kind = None
             row.error_summary = None
         await session.flush()
+        for row in rows:
+            await session.refresh(row, attribute_names=["updated_at"])
         return [ExternalChannelEvent.model_validate(row) for row in rows]
 
     async def complete_event(
@@ -1232,6 +1234,7 @@ class ExternalChannelRepository:
         if original_url is not None:
             rdb.original_url = original_url
         await session.flush()
+        await session.refresh(rdb, attribute_names=["updated_at"])
         return ExternalChannelMessage.model_validate(rdb)
 
     async def create_pending_context_idempotent(
