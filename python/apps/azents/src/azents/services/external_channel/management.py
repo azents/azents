@@ -46,6 +46,7 @@ from azents.services.external_channel.data import (
 from azents.services.external_channel.provider import (
     SlackExternalChannelProviderContract,
 )
+from azents.services.external_channel.slack_http import SLACK_REQUIRED_BOT_SCOPES
 
 
 class ExternalChannelManagementNotFound(LookupError):
@@ -567,13 +568,7 @@ def slack_manifest_guidance(
     app_name: str,
 ) -> SlackManifestGuidance:
     """Return a copy-ready Slack App Manifest and setup metadata."""
-    bot_scopes = (
-        "app_mentions:read",
-        "channels:history",
-        "groups:history",
-        "chat:write",
-        "users:read",
-    )
+    bot_scopes = SLACK_REQUIRED_BOT_SCOPES
     event_subscriptions = (
         "app_mention",
         "message.channels",

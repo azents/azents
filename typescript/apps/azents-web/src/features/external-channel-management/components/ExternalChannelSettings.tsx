@@ -153,11 +153,12 @@ function ConnectionRow({
           </Box>
         </SimpleGrid>
 
-        {connection.socket_gap_detected_at && (
-          <Alert color="yellow" title={t("socketGapTitle")}>
-            {connection.socket_gap_reason ?? t("socketGapDescription")}
-          </Alert>
-        )}
+        {connection.transport === "socket" &&
+          connection.socket_gap_detected_at && (
+            <Alert color="yellow" title={t("socketGapTitle")}>
+              {connection.socket_gap_reason ?? t("socketGapDescription")}
+            </Alert>
+          )}
 
         <Group gap="xs">
           {capabilities.length === 0 ? (

@@ -19,7 +19,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-07-22
-spec_version: 3
+spec_version: 4
 ---
 
 # External Channel Lifecycle
@@ -40,7 +40,12 @@ identity, capability, health, lease, and gap projections, reactivates the route,
 immediately validates the replacement configuration. No lifecycle status prevents
 editing a visible connection, and no transport fallback occurs.
 
-Provider revocation and invalid credentials move connection state through the same durable terminal or reconnect-required boundaries without exposing credentials.
+Provider credential and permission failures move only connection health to
+`reconnect_required`; they preserve Agent routes, bindings, and work. Slack App
+uninstall clears provider credentials and terminalizes provider resources while
+preserving the route for later reconfiguration. Explicit manager disconnect remains
+the route-removal boundary. In-flight validation results are generation-fenced so
+they cannot overwrite a newer edit or disconnect.
 
 ## Session Archive and Restore
 
@@ -86,6 +91,7 @@ and delivery outcomes. Restore controls do not imply provider reactivation.
 
 ## Changelog
 
+- **2026-07-22** (spec_version 4) — Kept provider health failures and App uninstall independent from Agent route lifecycle and fenced stale validation results.
 - **2026-07-22** (spec_version 3) — Made connection disconnect unconditional and idempotent, committed terminal state before provider cleanup, omitted disconnected rows from active management, and replaced reconnect/transport actions with complete Slack configuration editing.
 - **2026-07-22** (spec_version 2) — Preserved already-fenced participant snapshots across registry growth while retaining restrictive finalization safety.
 - **2026-07-22** (spec_version 1) — Promoted terminal disconnect, archive/restore policy, restrictive purge ownership, post-commit cleanup, and Agent decommission behavior.

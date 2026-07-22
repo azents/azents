@@ -12,6 +12,7 @@ from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
+    AgentLifecycleStatus,
     ExternalChannelAccessGrantScope,
     ExternalChannelAccessRequestStatus,
     ExternalChannelBindingActivationStatus,
@@ -30,6 +31,7 @@ from azents.core.enums import (
     ExternalChannelTransport,
     ExternalChannelWorkStatus,
 )
+from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.base import RDBModel
 from azents.rdb.models.external_channel import (
     RDBExternalChannelAccessGrant,
@@ -174,15 +176,35 @@ class ExternalChannelRepository:
         provider_bot_user_id: str | None,
         capabilities: dict[str, object] | None,
         checked_at: datetime.datetime,
+        expected_encrypted_credentials: str,
     ) -> ExternalChannelConnection | None:
         """Update redacted provider identity and health after validation."""
         rdb = await session.scalar(
             sa.select(RDBExternalChannelConnection)
-            .where(RDBExternalChannelConnection.id == connection_id)
+            .where(
+                RDBExternalChannelConnection.id == connection_id,
+                RDBExternalChannelConnection.encrypted_credentials
+                == expected_encrypted_credentials,
+                RDBExternalChannelConnection.status.not_in(
+                    (
+                        ExternalChannelConnectionStatus.DISCONNECTING,
+                        ExternalChannelConnectionStatus.DISCONNECTED,
+                    )
+                ),
+            )
             .with_for_update()
         )
         if rdb is None:
             return None
+        recover_legacy_route = (
+            status is ExternalChannelConnectionStatus.ACTIVE
+            and rdb.status
+            in {
+                ExternalChannelConnectionStatus.RECONNECT_REQUIRED,
+                ExternalChannelConnectionStatus.DEGRADED,
+            }
+            and rdb.disconnected_at is not None
+        )
         rdb.status = status
         if provider_tenant_id is not None:
             rdb.provider_tenant_id = provider_tenant_id
@@ -191,8 +213,46 @@ class ExternalChannelRepository:
         if capabilities is not None:
             rdb.capabilities = capabilities
         rdb.last_health_at = checked_at
+        if rdb.transport is ExternalChannelTransport.HTTP:
+            rdb.socket_lease_owner = None
+            rdb.socket_lease_until = None
+            rdb.socket_heartbeat_at = None
+            rdb.socket_gap_detected_at = None
+            rdb.socket_gap_reason = None
         if status is ExternalChannelConnectionStatus.ACTIVE:
             rdb.last_verified_at = checked_at
+            rdb.disconnected_at = None
+            if recover_legacy_route:
+                active_route_id = await session.scalar(
+                    sa.select(RDBExternalChannelAgentRoute.id).where(
+                        RDBExternalChannelAgentRoute.connection_id == connection_id,
+                        RDBExternalChannelAgentRoute.status
+                        == ExternalChannelRouteStatus.ACTIVE,
+                    )
+                )
+                if active_route_id is None:
+                    recoverable_route = await session.scalar(
+                        sa.select(RDBExternalChannelAgentRoute)
+                        .join(
+                            RDBAgent,
+                            RDBAgent.id == RDBExternalChannelAgentRoute.agent_id,
+                        )
+                        .where(
+                            RDBExternalChannelAgentRoute.connection_id == connection_id,
+                            RDBExternalChannelAgentRoute.status
+                            == ExternalChannelRouteStatus.INACTIVE,
+                            RDBAgent.lifecycle_status == AgentLifecycleStatus.ACTIVE,
+                        )
+                        .order_by(
+                            RDBExternalChannelAgentRoute.updated_at.desc(),
+                            RDBExternalChannelAgentRoute.id.desc(),
+                        )
+                        .limit(1)
+                        .with_for_update()
+                    )
+                    if recoverable_route is not None:
+                        recoverable_route.status = ExternalChannelRouteStatus.ACTIVE
+                        recoverable_route.deactivated_at = None
         await session.flush()
         await session.refresh(rdb, attribute_names=["updated_at"])
         return ExternalChannelConnection.model_validate(rdb)
@@ -452,14 +512,9 @@ class ExternalChannelRepository:
         now: datetime.datetime,
         required_socket_lease_owner: str | None,
     ) -> bool:
-        """Fence routes and bindings after uninstall or credential revocation."""
-        if status not in {
-            ExternalChannelConnectionStatus.RECONNECT_REQUIRED,
-            ExternalChannelConnectionStatus.DISCONNECTED,
-        }:
-            raise ValueError(
-                "Provider termination requires a terminal connection state."
-            )
+        """Fence provider resources after an explicit App uninstall."""
+        if status is not ExternalChannelConnectionStatus.DISCONNECTED:
+            raise ValueError("Provider termination requires disconnection.")
         statement = sa.select(RDBExternalChannelConnection).where(
             RDBExternalChannelConnection.id == connection_id
         )
@@ -515,18 +570,6 @@ class ExternalChannelRepository:
             )
         )
         await session.execute(
-            sa.update(RDBExternalChannelAgentRoute)
-            .where(
-                RDBExternalChannelAgentRoute.connection_id == connection_id,
-                RDBExternalChannelAgentRoute.status
-                == ExternalChannelRouteStatus.ACTIVE,
-            )
-            .values(
-                status=ExternalChannelRouteStatus.INACTIVE,
-                deactivated_at=now,
-            )
-        )
-        await session.execute(
             sa.update(RDBExternalChannelResource)
             .where(
                 RDBExternalChannelResource.connection_id == connection_id,
@@ -547,9 +590,65 @@ class ExternalChannelRepository:
         connection.disconnected_at = now
         connection.socket_lease_owner = None
         connection.socket_lease_until = None
-        connection.socket_heartbeat_at = now
-        connection.socket_gap_detected_at = now
-        connection.socket_gap_reason = reason
+        if connection.transport is ExternalChannelTransport.SOCKET:
+            connection.socket_heartbeat_at = now
+            connection.socket_gap_detected_at = now
+            connection.socket_gap_reason = reason
+        else:
+            connection.socket_heartbeat_at = None
+            connection.socket_gap_detected_at = None
+            connection.socket_gap_reason = None
+        await session.flush()
+        return True
+
+    async def mark_connection_reconnect_required(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+        reason: str,
+        now: datetime.datetime,
+        required_socket_lease_owner: str | None,
+    ) -> bool:
+        """Record provider credential health without mutating Agent routing."""
+        eligible_statuses = (
+            (
+                ExternalChannelConnectionStatus.ACTIVE,
+                ExternalChannelConnectionStatus.DEGRADED,
+            )
+            if required_socket_lease_owner is not None
+            else (
+                ExternalChannelConnectionStatus.ACTIVE,
+                ExternalChannelConnectionStatus.DEGRADED,
+                ExternalChannelConnectionStatus.RECONNECT_REQUIRED,
+            )
+        )
+        statement = sa.select(RDBExternalChannelConnection).where(
+            RDBExternalChannelConnection.id == connection_id,
+            RDBExternalChannelConnection.status.in_(eligible_statuses),
+        )
+        if required_socket_lease_owner is not None:
+            statement = statement.where(
+                RDBExternalChannelConnection.transport
+                == ExternalChannelTransport.SOCKET,
+                RDBExternalChannelConnection.socket_lease_owner
+                == required_socket_lease_owner,
+                RDBExternalChannelConnection.socket_lease_until >= now,
+            )
+        connection = await session.scalar(statement.with_for_update())
+        if connection is None:
+            return False
+        connection.status = ExternalChannelConnectionStatus.RECONNECT_REQUIRED
+        connection.socket_lease_owner = None
+        connection.socket_lease_until = None
+        if connection.transport is ExternalChannelTransport.SOCKET:
+            connection.socket_heartbeat_at = now
+            connection.socket_gap_detected_at = now
+            connection.socket_gap_reason = reason
+        else:
+            connection.socket_heartbeat_at = None
+            connection.socket_gap_detected_at = None
+            connection.socket_gap_reason = None
         await session.flush()
         return True
 

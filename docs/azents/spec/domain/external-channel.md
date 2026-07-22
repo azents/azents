@@ -30,7 +30,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/approval-requests/{access_request_id}
 last_verified_at: 2026-07-22
-spec_version: 2
+spec_version: 3
 ---
 
 # External Channel
@@ -69,6 +69,7 @@ Slack is the first provider. Each connection uses a manually configured dedicate
 ## State Invariants
 
 - Active connections may be `configuring`, `active`, `degraded`, or `reconnect_required`; disconnect is terminal and does not silently fall back to another transport.
+- Provider health transitions do not deactivate Agent routes. Explicit manager disconnect and Agent decommission remain the route lifecycle boundaries.
 - A resource is `active`, `unavailable`, or `deleted`; hydration is `pending`, `running`, `complete`, `bounded`, or `incomplete`.
 - A binding is either active or disconnected. Activation moves from `waiting_hydration` to `active` only after the admitted-event reconciliation boundary is clear.
 - Message revisions never rewrite an already projected revision. Later edits or deletes remain distinct corrections.
@@ -87,7 +88,10 @@ existing connection is edited.
 Slack validation first uses `auth.test` to resolve Team and Bot identity, then uses
 `bots.info` to verify that the Bot Token's actual App ID equals the configured App
 ID. An App ID copied from a different Slack App is rejected as a recoverable
-configuration error rather than being marked active.
+configuration error rather than being marked active. Validation also checks the
+provider-reported OAuth scope header when present and requires the message,
+conversation-history, conversation-metadata, posting, and user identity scopes used
+by the adapter.
 
 Disconnect has no lifecycle-status admission guard. It disables inbound routing,
 clears credentials, terminalizes owned live state, and commits the terminal
@@ -104,5 +108,6 @@ Connection responses expose provider identity, capabilities, health, route, and 
 
 ## Changelog
 
+- **2026-07-22** (spec_version 3) — Separated provider health from Agent route lifecycle, fenced stale validation results, and required Slack conversation metadata scopes.
 - **2026-07-22** (spec_version 2) — Added copy-ready Slack App setup guidance, App/Token ownership validation, complete connection replacement, unconditional idempotent disconnect, and active-list filtering for disconnected connections.
 - **2026-07-22** (spec_version 1) — Promoted the External Channel ownership model, persistence graph, management API, security boundaries, Slack-first provider scope, and Session binding contract.

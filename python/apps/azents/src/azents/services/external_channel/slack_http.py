@@ -25,6 +25,15 @@ from azents.services.external_channel.slack_endpoint import slack_api_base_url
 MAX_SLACK_HTTP_BODY_BYTES = 256 * 1024
 MAX_SLACK_URL_VERIFICATION_CHALLENGE_BYTES = 4 * 1024
 SLACK_SIGNATURE_TOLERANCE_SECONDS = 5 * 60
+SLACK_REQUIRED_BOT_SCOPES = (
+    "app_mentions:read",
+    "channels:history",
+    "channels:read",
+    "groups:history",
+    "groups:read",
+    "chat:write",
+    "users:read",
+)
 
 
 class SlackHTTPError(ValueError):
@@ -246,6 +255,35 @@ class SlackWebAPIClient:
                     capabilities=None,
                 )
             return self._unavailable(code="slack_auth_test_unavailable")
+
+        granted_scopes_header = response.headers.get("x-oauth-scopes")
+        if granted_scopes_header:
+            granted_scopes = {
+                scope.strip()
+                for scope in granted_scopes_header.split(",")
+                if scope.strip()
+            }
+            missing_scopes = [
+                scope
+                for scope in SLACK_REQUIRED_BOT_SCOPES
+                if scope not in granted_scopes
+            ]
+            if missing_scopes:
+                return SlackConnectionValidation(
+                    status="invalid",
+                    code="slack_bot_scopes_missing",
+                    message=(
+                        "Slack Bot Token Scopes are missing: "
+                        + ", ".join(missing_scopes)
+                        + "."
+                    ),
+                    action_hint=(
+                        "Update the App manifest, reinstall the App, and validate "
+                        "the connection again."
+                    ),
+                    identity=None,
+                    capabilities=None,
+                )
 
         team_id = payload.get("team_id")
         user_id = payload.get("user_id")

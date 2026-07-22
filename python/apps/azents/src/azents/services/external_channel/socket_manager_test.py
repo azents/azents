@@ -33,28 +33,26 @@ class _SessionDouble:
 
 
 class _RepositoryDouble:
-    """Record terminal connection fencing and recoverable lease release."""
+    """Record connection health changes and recoverable lease release."""
 
     def __init__(self) -> None:
-        self.terminal_calls: list[dict[str, object]] = []
+        self.reconnect_required_calls: list[dict[str, object]] = []
         self.release_calls: list[dict[str, object]] = []
 
-    async def terminate_connection_for_provider_event(
+    async def mark_connection_reconnect_required(
         self,
         session: AsyncSession,
         *,
         connection_id: str,
-        status: ExternalChannelConnectionStatus,
         reason: str,
         now: datetime.datetime,
         required_socket_lease_owner: str | None,
     ) -> bool:
-        """Record one terminal connection lifecycle."""
+        """Record one reconnect-required health transition."""
         del session
-        self.terminal_calls.append(
+        self.reconnect_required_calls.append(
             {
                 "connection_id": connection_id,
-                "status": status,
                 "reason": reason,
                 "now": now,
                 "required_socket_lease_owner": required_socket_lease_owner,
@@ -107,8 +105,8 @@ def _service(
 
 
 @pytest.mark.asyncio
-async def test_reconnect_required_terminally_fences_owned_connection() -> None:
-    """A non-reconnectable Socket closure terminates dependent route state."""
+async def test_reconnect_required_preserves_owned_route() -> None:
+    """A credential failure changes health without terminating Agent routing."""
     session = _SessionDouble()
     repository = _RepositoryDouble()
 
@@ -121,12 +119,11 @@ async def test_reconnect_required_terminally_fences_owned_connection() -> None:
     assert released is True
     assert session.committed is True
     assert repository.release_calls == []
-    assert len(repository.terminal_calls) == 1
-    terminal_call = repository.terminal_calls[0]
-    assert terminal_call["connection_id"] == "connection-1"
-    assert terminal_call["status"] is ExternalChannelConnectionStatus.RECONNECT_REQUIRED
-    assert terminal_call["reason"] == "link_disabled"
-    assert terminal_call["required_socket_lease_owner"] == "manager-1"
+    assert len(repository.reconnect_required_calls) == 1
+    health_call = repository.reconnect_required_calls[0]
+    assert health_call["connection_id"] == "connection-1"
+    assert health_call["reason"] == "link_disabled"
+    assert health_call["required_socket_lease_owner"] == "manager-1"
 
 
 @pytest.mark.asyncio
@@ -143,7 +140,7 @@ async def test_degraded_socket_release_preserves_connection_lifecycle() -> None:
 
     assert released is True
     assert session.committed is True
-    assert repository.terminal_calls == []
+    assert repository.reconnect_required_calls == []
     assert len(repository.release_calls) == 1
     release_call = repository.release_calls[0]
     assert release_call["connection_id"] == "connection-1"
