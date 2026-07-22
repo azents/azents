@@ -3,7 +3,6 @@
 import datetime
 
 import pytest
-import sqlalchemy as sa
 from azcommon.result import Success
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,7 +14,6 @@ from azents.core.enums import (
     ExternalChannelProvider,
     ExternalChannelTransport,
 )
-from azents.rdb.models.external_channel import RDBExternalChannelConnection
 from azents.repos.external_channel.data import (
     ExternalChannelConnectionCreate,
     ExternalChannelEventCreate,
@@ -174,23 +172,29 @@ class TestExternalChannelRepository:
             rdb_session,
             _connection_create(first_workspace_id),
         )
-        await rdb_session.execute(
-            sa.update(RDBExternalChannelConnection)
-            .where(RDBExternalChannelConnection.id == first.id)
-            .values(
-                status=ExternalChannelConnectionStatus.DISCONNECTED,
-                provider_tenant_id=None,
-                provider_bot_user_id=None,
-                capabilities=None,
-            )
+        terminated = await repo.terminate_connection_for_provider_event(
+            rdb_session,
+            connection_id=first.id,
+            status=ExternalChannelConnectionStatus.DISCONNECTED,
+            reason="app_uninstalled",
+            now=_at(4),
+            required_socket_lease_owner=None,
         )
-        await rdb_session.flush()
+        released = await repo.get_connection_configuration(
+            rdb_session,
+            connection_id=first.id,
+        )
 
         second = await repo.create_connection(
             rdb_session,
             _connection_create(second_workspace_id),
         )
 
+        assert terminated is True
+        assert released is not None
+        assert released.status is ExternalChannelConnectionStatus.DISCONNECTED
+        assert released.encrypted_credentials is None
+        assert released.provider_tenant_id is None
         assert second.workspace_id == second_workspace_id
         assert second.provider_app_id == "app-1"
         assert second.provider_tenant_id == "tenant-1"

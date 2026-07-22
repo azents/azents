@@ -539,6 +539,11 @@ class ExternalChannelRepository:
             )
         )
         connection.status = status
+        if status is ExternalChannelConnectionStatus.DISCONNECTED:
+            connection.encrypted_credentials = None
+            connection.provider_tenant_id = None
+            connection.provider_bot_user_id = None
+            connection.capabilities = None
         connection.disconnected_at = now
         connection.socket_lease_owner = None
         connection.socket_lease_until = None
