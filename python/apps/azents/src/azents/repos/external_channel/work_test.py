@@ -30,6 +30,8 @@ from azents.core.enums import (
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
+from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.external_channel.data import (
     ExternalChannelAgentRouteCreate,
     ExternalChannelBindingCreate,
@@ -78,20 +80,14 @@ async def _setup_binding(session: AsyncSession) -> tuple[str, str]:
     )
     session.add(agent)
     await session.flush()
-    agent_session = RDBAgentSession(
-        workspace_id=workspace_id,
-        agent_id=agent.id,
-        handle="channel-work-session",
-        current_model_target_label=None,
-        current_model_selection=None,
-        current_model_settings=None,
-        current_reasoning_effort=None,
-        current_effective_context_window_tokens=None,
-        current_effective_auto_compaction_threshold_tokens=None,
-        current_inference_resolved_at=None,
+    agent_session = await AgentSessionRepository().create(
+        session,
+        AgentSessionCreate(
+            workspace_id=workspace_id,
+            agent_id=agent.id,
+            title=None,
+        ),
     )
-    session.add(agent_session)
-    await session.flush()
     repository = ExternalChannelRepository()
     connection = await repository.create_connection(
         session,
