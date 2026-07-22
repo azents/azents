@@ -334,14 +334,27 @@ class SlackSocketManagerService:
         status: ExternalChannelConnectionStatus,
     ) -> bool:
         async with self.session_manager() as session:
-            released = await self.repository.release_socket_connection_lease(
-                session,
-                connection_id=connection_id,
-                lease_owner=self.manager_id,
-                now=_utc_now(),
-                gap_reason=reason,
-                gap_status=status,
-            )
+            now = _utc_now()
+            if status is ExternalChannelConnectionStatus.RECONNECT_REQUIRED:
+                released = (
+                    await self.repository.terminate_connection_for_provider_event(
+                        session,
+                        connection_id=connection_id,
+                        status=status,
+                        reason=reason,
+                        now=now,
+                        required_socket_lease_owner=self.manager_id,
+                    )
+                )
+            else:
+                released = await self.repository.release_socket_connection_lease(
+                    session,
+                    connection_id=connection_id,
+                    lease_owner=self.manager_id,
+                    now=now,
+                    gap_reason=reason,
+                    gap_status=status,
+                )
             await session.commit()
             return released
 

@@ -1022,6 +1022,7 @@ class ExternalChannelEventProcessorService:
                     status=ExternalChannelConnectionStatus.RECONNECT_REQUIRED,
                     reason="credentials_invalid",
                     now=_now(),
+                    required_socket_lease_owner=None,
                 )
             await session.commit()
 
@@ -1274,6 +1275,7 @@ class ExternalChannelEventProcessorService:
                 status=status,
                 reason=revocation.kind,
                 now=_now(),
+                required_socket_lease_owner=None,
             )
             await session.commit()
         raise _ConnectionTerminated(revocation.kind)
@@ -1286,6 +1288,7 @@ class ExternalChannelEventProcessorService:
                 status=ExternalChannelConnectionStatus.RECONNECT_REQUIRED,
                 reason="credentials_invalid",
                 now=_now(),
+                required_socket_lease_owner=None,
             )
             await session.commit()
 

@@ -442,6 +442,7 @@ class ExternalChannelRepository:
         status: ExternalChannelConnectionStatus,
         reason: str,
         now: datetime.datetime,
+        required_socket_lease_owner: str | None,
     ) -> bool:
         """Fence routes and bindings after uninstall or credential revocation."""
         if status not in {
@@ -451,11 +452,24 @@ class ExternalChannelRepository:
             raise ValueError(
                 "Provider termination requires a terminal connection state."
             )
-        connection = await session.scalar(
-            sa.select(RDBExternalChannelConnection)
-            .where(RDBExternalChannelConnection.id == connection_id)
-            .with_for_update()
+        statement = sa.select(RDBExternalChannelConnection).where(
+            RDBExternalChannelConnection.id == connection_id
         )
+        if required_socket_lease_owner is not None:
+            statement = statement.where(
+                RDBExternalChannelConnection.transport
+                == ExternalChannelTransport.SOCKET,
+                RDBExternalChannelConnection.status.in_(
+                    (
+                        ExternalChannelConnectionStatus.ACTIVE,
+                        ExternalChannelConnectionStatus.DEGRADED,
+                    )
+                ),
+                RDBExternalChannelConnection.socket_lease_owner
+                == required_socket_lease_owner,
+                RDBExternalChannelConnection.socket_lease_until >= now,
+            )
+        connection = await session.scalar(statement.with_for_update())
         if connection is None:
             return False
         route_ids = sa.select(RDBExternalChannelAgentRoute.id).where(
