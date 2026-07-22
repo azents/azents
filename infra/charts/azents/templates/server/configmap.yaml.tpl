@@ -30,7 +30,6 @@ data:
   AZ_WORKSPACE_S3_BUCKET: {{ $objectStorageBucket | quote }}
   {{- end }}
   {{- if .Values.runtimeProviderKubernetes.enabled }}
-  AZ_RUNTIME_DEFAULT_PROVIDER_ID: {{ .Values.runtimeProviderKubernetes.providerId | quote }}
   AZ_RUNTIME_RUNNER_IMAGE: {{ include "azents.runtimeRunnerImage" . | quote }}
   AZ_RUNTIME_RUNNER_CONTROL_ENDPOINT: {{ include "azents.runtimeControlEndpoint" . | quote }}
   {{- end }}

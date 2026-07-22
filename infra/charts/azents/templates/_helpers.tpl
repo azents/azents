@@ -94,6 +94,13 @@ server-env
 {{- end -}}
 
 {{/*
+Return the Runtime Provider bootstrap source ConfigMap name.
+*/}}
+{{- define "azents.runtimeProviderBootstrapConfigMapName" -}}
+{{- printf "%s-runtime-provider-bootstrap" (include "azents.fullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{/*
 Return the web ConfigMap name.
 */}}
 {{- define "azents.webConfigMapName" -}}

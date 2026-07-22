@@ -9,7 +9,13 @@ from azcommon.uuid import uuid7
 from sqlalchemy.dialects.postgresql import ENUM, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from azents.core.enums import RuntimeProviderKind, RuntimeProviderScope
+from azents.core.enums import (
+    RuntimeProviderAvailabilityMode,
+    RuntimeProviderKind,
+    RuntimeProviderLifecycleState,
+    RuntimeProviderRegistrationMethod,
+    RuntimeProviderScope,
+)
 from azents.rdb.models.base import RDBModel
 from azents.rdb.types.datetime import TimeZoneDateTime
 
@@ -28,6 +34,24 @@ runtime_provider_scope_enum = ENUM(
 runtime_provider_kind_enum = ENUM(
     RuntimeProviderKind,
     name="runtime_provider_kind",
+    create_type=False,
+    values_callable=_enum_values,
+)
+runtime_provider_registration_method_enum = ENUM(
+    RuntimeProviderRegistrationMethod,
+    name="runtime_provider_registration_method",
+    create_type=False,
+    values_callable=_enum_values,
+)
+runtime_provider_lifecycle_state_enum = ENUM(
+    RuntimeProviderLifecycleState,
+    name="runtime_provider_lifecycle_state",
+    create_type=False,
+    values_callable=_enum_values,
+)
+runtime_provider_availability_mode_enum = ENUM(
+    RuntimeProviderAvailabilityMode,
+    name="runtime_provider_availability_mode",
     create_type=False,
     values_callable=_enum_values,
 )
@@ -51,6 +75,11 @@ class RDBRuntimeProvider(RDBModel):
     )
     IX_WORKSPACE_ID = sa.Index("ix_runtime_providers_workspace_id", "workspace_id")
     IX_KIND = sa.Index("ix_runtime_providers_kind", "kind")
+    IX_LIFECYCLE_ENABLED = sa.Index(
+        "ix_runtime_providers_lifecycle_enabled",
+        "lifecycle_state",
+        "enabled",
+    )
 
     id: Mapped[str] = mapped_column(
         sa.String(32), primary_key=True, init=False, default_factory=lambda: uuid7().hex
@@ -63,8 +92,32 @@ class RDBRuntimeProvider(RDBModel):
         runtime_provider_kind_enum, nullable=False
     )
     display_name: Mapped[str] = mapped_column(sa.String(120), nullable=False)
+    registration_method: Mapped[RuntimeProviderRegistrationMethod] = mapped_column(
+        runtime_provider_registration_method_enum,
+        init=False,
+        nullable=False,
+        server_default=RuntimeProviderRegistrationMethod.ADMIN.value,
+    )
     enabled: Mapped[bool] = mapped_column(
         sa.Boolean, server_default=sa.true(), nullable=False
+    )
+    lifecycle_state: Mapped[RuntimeProviderLifecycleState] = mapped_column(
+        runtime_provider_lifecycle_state_enum,
+        init=False,
+        nullable=False,
+        server_default=RuntimeProviderLifecycleState.ACTIVE.value,
+    )
+    availability_mode: Mapped[RuntimeProviderAvailabilityMode] = mapped_column(
+        runtime_provider_availability_mode_enum,
+        init=False,
+        nullable=False,
+        server_default=RuntimeProviderAvailabilityMode.PLATFORM_WIDE.value,
+    )
+    admin_version: Mapped[int] = mapped_column(
+        sa.Integer,
+        init=False,
+        nullable=False,
+        server_default="0",
     )
     capabilities: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     config_schema: Mapped[dict[str, Any] | None] = mapped_column(
@@ -96,4 +149,5 @@ class RDBRuntimeProvider(RDBModel):
         IX_ENABLED_SCOPE,
         IX_WORKSPACE_ID,
         IX_KIND,
+        IX_LIFECYCLE_ENABLED,
     )
