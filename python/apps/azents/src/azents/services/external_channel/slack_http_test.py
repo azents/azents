@@ -247,6 +247,43 @@ async def test_app_id_must_own_the_configured_bot_token() -> None:
 
 
 @pytest.mark.asyncio
+async def test_auth_test_rejects_missing_required_bot_scopes() -> None:
+    """Validation catches incomplete App permissions before event processing."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/auth.test")
+        return httpx.Response(
+            200,
+            headers={
+                "x-oauth-scopes": (
+                    "app_mentions:read,channels:history,groups:history,"
+                    "chat:write,users:read"
+                )
+            },
+            json={
+                "ok": True,
+                "team_id": "T-1",
+                "user_id": "U-BOT",
+                "bot_id": "B-1",
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await SlackWebAPIClient(client).validate_connection(
+            bot_token="xoxb-secret",
+            app_id="A-1",
+            transport=ExternalChannelTransport.HTTP,
+        )
+
+    assert result.status == "invalid"
+    assert result.code == "slack_bot_scopes_missing"
+    assert result.message is not None
+    assert "channels:read" in result.message
+    assert "groups:read" in result.message
+    assert result.identity is None
+
+
+@pytest.mark.asyncio
 async def test_auth_test_distinguishes_invalid_and_unavailable() -> None:
     """Map rejected credentials separately from transient provider failure."""
 

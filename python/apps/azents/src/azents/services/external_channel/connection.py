@@ -44,6 +44,10 @@ class ExternalChannelConnectionNotFound(LookupError):
     """The requested External Channel connection does not exist."""
 
 
+class ExternalChannelConnectionStateChanged(RuntimeError):
+    """The connection changed while provider validation was in flight."""
+
+
 @dataclass(frozen=True)
 class ExternalChannelConnectionSetup:
     """Created provider connection."""
@@ -187,9 +191,18 @@ class ExternalChannelConnectionService:
                 ),
                 capabilities=capabilities,
                 checked_at=checked_at,
+                expected_encrypted_credentials=configuration.encrypted_credentials,
             )
             if connection is None:
-                raise ExternalChannelConnectionNotFound(connection_id)
+                current = await self.repository.get_connection(
+                    session,
+                    connection_id=connection_id,
+                )
+                if current is None:
+                    raise ExternalChannelConnectionNotFound(connection_id)
+                raise ExternalChannelConnectionStateChanged(
+                    "The connection changed during validation. Retry the operation."
+                )
             await session.commit()
         return ExternalChannelConnectionStatusSnapshot(
             status=connection.status,

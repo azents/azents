@@ -75,6 +75,7 @@ from azents.services.external_channel.slack_events import (
     SlackEventNormalizationError,
     SlackNormalizedMessage,
     SlackProviderCredentialsInvalid,
+    SlackProviderPermissionDenied,
     SlackProviderRateLimited,
     SlackProviderResourceUnavailable,
     SlackProviderTemporaryError,
@@ -148,8 +149,8 @@ class _DeferredEvent(Exception):
 
 
 @dataclasses.dataclass(frozen=True)
-class _ConnectionTerminated(Exception):
-    """Provider processing terminated the current connection."""
+class _ConnectionUnavailable(Exception):
+    """Provider processing cannot continue until connection health recovers."""
 
     reason: str
 
@@ -372,7 +373,7 @@ class ExternalChannelEventProcessorService:
                     error_summary=error.error_summary,
                 )
                 await session.commit()
-        except _ConnectionTerminated:
+        except _ConnectionUnavailable:
             await self._complete_event(
                 event,
                 eligibility_state=ExternalChannelEventEligibilityState.PROCESSED,
@@ -473,11 +474,18 @@ class ExternalChannelEventProcessorService:
                     error_kind="slack_temporarily_unavailable",
                     error_summary="Slack thread hydration is temporarily unavailable.",
                 ) from error
-            except SlackProviderCredentialsInvalid as error:
-                await self._terminate_invalid_credentials(
+            except SlackProviderPermissionDenied as error:
+                await self._mark_connection_reconnect_required(
                     connection_id=event.connection_id,
+                    reason="missing_scope",
                 )
-                raise _ConnectionTerminated("credentials_invalid") from error
+                raise _ConnectionUnavailable("missing_scope") from error
+            except SlackProviderCredentialsInvalid as error:
+                await self._mark_connection_reconnect_required(
+                    connection_id=event.connection_id,
+                    reason="credentials_invalid",
+                )
+                raise _ConnectionUnavailable("credentials_invalid") from error
 
         await self._complete_event(
             event,
@@ -513,11 +521,18 @@ class ExternalChannelEventProcessorService:
                 error_kind="slack_temporarily_unavailable",
                 error_summary="Slack conversation validation is unavailable.",
             ) from error
-        except SlackProviderCredentialsInvalid as error:
-            await self._terminate_invalid_credentials(
+        except SlackProviderPermissionDenied as error:
+            await self._mark_connection_reconnect_required(
                 connection_id=event.connection_id,
+                reason="missing_scope",
             )
-            raise _ConnectionTerminated("credentials_invalid") from error
+            raise _ConnectionUnavailable("missing_scope") from error
+        except SlackProviderCredentialsInvalid as error:
+            await self._mark_connection_reconnect_required(
+                connection_id=event.connection_id,
+                reason="credentials_invalid",
+            )
+            raise _ConnectionUnavailable("credentials_invalid") from error
         except SlackProviderResourceUnavailable as error:
             raise SlackEventExcluded(
                 "The Slack conversation is unavailable to the App."
@@ -548,6 +563,7 @@ class ExternalChannelEventProcessorService:
             )
         except (
             SlackProviderCredentialsInvalid,
+            SlackProviderPermissionDenied,
             SlackProviderRateLimited,
             SlackProviderResourceUnavailable,
             SlackProviderTemporaryError,
@@ -1092,12 +1108,11 @@ class ExternalChannelEventProcessorService:
                 error_summary=error_summary,
                 completed_at=_now(),
             )
-            if error_kind == "credentials_invalid":
-                await self.repository.terminate_connection_for_provider_event(
+            if error_kind in {"credentials_invalid", "missing_scope"}:
+                await self.repository.mark_connection_reconnect_required(
                     session,
                     connection_id=configuration.id,
-                    status=ExternalChannelConnectionStatus.RECONNECT_REQUIRED,
-                    reason="credentials_invalid",
+                    reason=error_kind,
                     now=_now(),
                     required_socket_lease_owner=None,
                 )
@@ -1403,30 +1418,38 @@ class ExternalChannelEventProcessorService:
         event: ExternalChannelEvent,
         revocation: SlackConnectionRevocation,
     ) -> None:
-        status = (
-            ExternalChannelConnectionStatus.DISCONNECTED
-            if revocation.kind == "app_uninstalled"
-            else ExternalChannelConnectionStatus.RECONNECT_REQUIRED
-        )
         async with self.session_manager() as session:
-            await self.repository.terminate_connection_for_provider_event(
-                session,
-                connection_id=event.connection_id,
-                status=status,
-                reason=revocation.kind,
-                now=_now(),
-                required_socket_lease_owner=None,
-            )
+            if revocation.kind == "app_uninstalled":
+                await self.repository.terminate_connection_for_provider_event(
+                    session,
+                    connection_id=event.connection_id,
+                    status=ExternalChannelConnectionStatus.DISCONNECTED,
+                    reason=revocation.kind,
+                    now=_now(),
+                    required_socket_lease_owner=None,
+                )
+            else:
+                await self.repository.mark_connection_reconnect_required(
+                    session,
+                    connection_id=event.connection_id,
+                    reason=revocation.kind,
+                    now=_now(),
+                    required_socket_lease_owner=None,
+                )
             await session.commit()
-        raise _ConnectionTerminated(revocation.kind)
+        raise _ConnectionUnavailable(revocation.kind)
 
-    async def _terminate_invalid_credentials(self, *, connection_id: str) -> None:
+    async def _mark_connection_reconnect_required(
+        self,
+        *,
+        connection_id: str,
+        reason: str,
+    ) -> None:
         async with self.session_manager() as session:
-            await self.repository.terminate_connection_for_provider_event(
+            await self.repository.mark_connection_reconnect_required(
                 session,
                 connection_id=connection_id,
-                status=ExternalChannelConnectionStatus.RECONNECT_REQUIRED,
-                reason="credentials_invalid",
+                reason=reason,
                 now=_now(),
                 required_socket_lease_owner=None,
             )

@@ -14,6 +14,7 @@ from azents.services.external_channel.slack_events import (
     SlackEventExcluded,
     SlackNormalizedMessage,
     SlackProviderCredentialsInvalid,
+    SlackProviderPermissionDenied,
     SlackProviderRateLimited,
     normalize_slack_event,
     slack_provider_position,
@@ -330,13 +331,13 @@ async def test_thread_page_maps_revoked_token_to_connection_failure() -> None:
 
 
 async def test_thread_page_maps_missing_scope_to_connection_failure() -> None:
-    """Permanent Slack scope gaps never enter an infinite hydration retry."""
+    """Missing Slack scopes remain distinct from invalid credentials."""
 
     def handler(_: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"ok": False, "error": "missing_scope"})
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
-        with pytest.raises(SlackProviderCredentialsInvalid):
+        with pytest.raises(SlackProviderPermissionDenied):
             await SlackConversationClient(http).fetch_thread_page(
                 bot_token="xoxb-secret",
                 tenant_id="T1",

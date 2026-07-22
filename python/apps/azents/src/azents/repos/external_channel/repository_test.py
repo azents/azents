@@ -210,6 +210,12 @@ class TestExternalChannelRepository:
             rdb_session,
             _connection_create(workspace_id),
         )
+        configuration = await repo.get_connection_configuration(
+            rdb_session,
+            connection_id=created.id,
+        )
+        assert configuration is not None
+        assert configuration.encrypted_credentials is not None
 
         updated = await repo.update_connection_health(
             rdb_session,
@@ -219,6 +225,7 @@ class TestExternalChannelRepository:
             provider_bot_user_id="bot-1",
             capabilities={"supports_reply": True},
             checked_at=_at(3),
+            expected_encrypted_credentials=configuration.encrypted_credentials,
         )
 
         assert updated is not None

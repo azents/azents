@@ -25,6 +25,9 @@ from azents.services.external_channel.access import (
     ExternalChannelAccessDecisionError,
     ExternalChannelAccessRequestNotFound,
 )
+from azents.services.external_channel.connection import (
+    ExternalChannelConnectionStateChanged,
+)
 from azents.services.external_channel.data import (
     ExternalChannelConnectionStatusSnapshot,
     SlackConnectionCredentials,
@@ -164,6 +167,11 @@ async def validate_connection(
         )
     except ExternalChannelManagementNotFound as error:
         raise _not_found() from error
+    except ExternalChannelConnectionStateChanged as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(error),
+        ) from error
 
 
 @router.put(
@@ -190,6 +198,11 @@ async def update_slack_connection(
         )
     except ExternalChannelManagementNotFound as error:
         raise _not_found() from error
+    except ExternalChannelConnectionStateChanged as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(error),
+        ) from error
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
 

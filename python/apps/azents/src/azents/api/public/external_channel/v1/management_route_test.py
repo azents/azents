@@ -23,6 +23,9 @@ from azents.core.enums import (
     WorkspaceUserRole,
 )
 from azents.repos.external_channel.management_data import ManagedConnection
+from azents.services.external_channel.connection import (
+    ExternalChannelConnectionStateChanged,
+)
 from azents.services.external_channel.management import (
     ExternalChannelManagementNotFound,
     ExternalChannelManagementService,
@@ -119,6 +122,24 @@ def test_manifest_guidance_returns_fixed_callback_and_copy_ready_json() -> None:
     assert manifest["settings"]["event_subscriptions"]["request_url"] == callback_url
     assert "{selector}" not in response.text
     assert "signing_secret" not in response.text
+
+
+def test_validate_returns_conflict_when_connection_changes_in_flight() -> None:
+    """A stale provider validation result cannot overwrite newer local state."""
+    service = AsyncMock(spec=ExternalChannelManagementService)
+    service.validate_connection.side_effect = ExternalChannelConnectionStateChanged(
+        "The connection changed during validation. Retry the operation."
+    )
+
+    response = _client(service).post(
+        "/external-channel/v1/workspaces/ws/agents/agent-1/"
+        "external-channels/connection-1/validate"
+    )
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": "The connection changed during validation. Retry the operation."
+    }
 
 
 def test_opaque_approval_request_is_404_safe() -> None:

@@ -24,6 +24,7 @@ from azents.repos.external_channel.data import (
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_channel.connection import (
     ExternalChannelConnectionService,
+    ExternalChannelConnectionStateChanged,
 )
 from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
 from azents.services.external_channel.data import (
@@ -59,6 +60,8 @@ class _RepositoryDouble:
         self.health_tenant_id: str | None = None
         self.health_bot_user_id: str | None = None
         self.health_capabilities: dict[str, object] | None = None
+        self.health_expected_encrypted_credentials: str | None = None
+        self.apply_health_update = True
 
     async def create_connection(
         self,
@@ -88,9 +91,13 @@ class _RepositoryDouble:
         provider_bot_user_id: str | None,
         capabilities: dict[str, object] | None,
         checked_at: datetime.datetime,
+        expected_encrypted_credentials: str,
     ) -> ExternalChannelConnection | None:
         del session, connection_id
         assert self.configuration is not None
+        self.health_expected_encrypted_credentials = expected_encrypted_credentials
+        if not self.apply_health_update:
+            return None
         self.health_status = status
         self.health_tenant_id = provider_tenant_id
         self.health_bot_user_id = provider_bot_user_id
@@ -126,6 +133,17 @@ class _RepositoryDouble:
             created_at=self.configuration.created_at,
             updated_at=checked_at,
         )
+
+    async def get_connection(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+    ) -> ExternalChannelConnection | None:
+        del session, connection_id
+        if self.configuration is None:
+            return None
+        return ExternalChannelConnection.model_validate(self.configuration)
 
 
 class _SlackClientDouble:
@@ -328,6 +346,53 @@ async def test_valid_connection_activation_persists_identity_and_redacts_secrets
     assert repository.health_status is ExternalChannelConnectionStatus.ACTIVE
     assert repository.health_tenant_id == "T-1"
     assert repository.health_bot_user_id == "B-1"
+    assert repository.configuration is not None
+    assert repository.health_expected_encrypted_credentials == (
+        repository.configuration.encrypted_credentials
+    )
     assert slack_client.bot_tokens == ["xoxb-secret"]
     assert "xoxb-secret" not in repr(snapshot)
     assert session.commits == 1
+
+
+@pytest.mark.asyncio
+async def test_stale_validation_cannot_overwrite_newer_connection_state(
+    codec: ExternalChannelCredentialsCodec,
+) -> None:
+    """Reject a provider result when the connection changed during validation."""
+    repository = _RepositoryDouble()
+    repository.configuration = _configuration(codec)
+    repository.apply_health_update = False
+    session = _SessionDouble()
+    service = _service(
+        repository=repository,
+        codec=codec,
+        slack_client=_SlackClientDouble(
+            SlackConnectionValidation(
+                status="valid",
+                code=None,
+                message=None,
+                action_hint=None,
+                identity=ExternalChannelProviderIdentity(
+                    provider=ExternalChannelProvider.SLACK,
+                    app_id="A-1",
+                    tenant_id="T-1",
+                    bot_user_id="B-1",
+                ),
+                capabilities=None,
+            )
+        ),
+        session=session,
+    )
+
+    with pytest.raises(
+        ExternalChannelConnectionStateChanged,
+        match="changed during validation",
+    ):
+        await service.validate_connection(connection_id="connection-1")
+
+    assert repository.configuration is not None
+    assert repository.health_expected_encrypted_credentials == (
+        repository.configuration.encrypted_credentials
+    )
+    assert session.commits == 0

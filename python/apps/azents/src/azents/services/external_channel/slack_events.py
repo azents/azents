@@ -47,6 +47,10 @@ class SlackProviderCredentialsInvalid(SlackProviderError):
     """Slack rejected the configured connection credential."""
 
 
+class SlackProviderPermissionDenied(SlackProviderError):
+    """Slack rejected an operation because required scopes are missing."""
+
+
 class SlackProviderResourceUnavailable(SlackProviderError):
     """Slack cannot expose the requested channel or thread to the App."""
 
@@ -395,6 +399,13 @@ class SlackConversationClient:
                 },
             )
             payload = self._success_payload(response)
+        except SlackProviderPermissionDenied:
+            return SlackControlMessageResult(
+                status="failed",
+                provider_message_key=None,
+                error_kind="missing_scope",
+                error_summary="Slack App permissions are incomplete.",
+            )
         except SlackProviderCredentialsInvalid:
             return SlackControlMessageResult(
                 status="failed",
@@ -519,6 +530,13 @@ class SlackConversationClient:
                 json_body=json_body,
             )
             payload = self._success_payload(response)
+        except SlackProviderPermissionDenied:
+            return SlackControlMessageResult(
+                status="failed",
+                provider_message_key=None,
+                error_kind="missing_scope",
+                error_summary="Slack App permissions are incomplete.",
+            )
         except SlackProviderCredentialsInvalid:
             return SlackControlMessageResult(
                 status="failed",
@@ -609,10 +627,11 @@ class SlackConversationClient:
         if response.status_code < 400 and payload.get("ok") is True:
             return payload
         error_code = payload.get("error")
+        if error_code == "missing_scope":
+            raise SlackProviderPermissionDenied("Slack App permissions are incomplete.")
         if error_code in {
             "account_inactive",
             "invalid_auth",
-            "missing_scope",
             "not_authed",
             "not_allowed_token_type",
             "token_revoked",

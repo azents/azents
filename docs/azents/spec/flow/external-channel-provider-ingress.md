@@ -22,7 +22,7 @@ code_paths:
 api_routes:
   - /external-channel/v1/slack/events
 last_verified_at: 2026-07-22
-spec_version: 2
+spec_version: 3
 ---
 
 # External Channel Provider Ingress
@@ -59,7 +59,11 @@ Duplicate `(connection_id, provider_event_id)` callbacks reuse the admitted even
 
 A connection-selected Socket worker acquires a fenced lease before opening `apps.connections.open` with the app-level token. The WebSocket client admits Events API envelopes through the same durable admission service and sends the exact envelope acknowledgement only after admission returns. Failed admission remains unacknowledged.
 
-Socket refresh/reconnect reasons are normalized. Invalid authentication and terminal provider disconnect reasons move the connection to `reconnect_required`; gap reasons are persisted for operators. Lease owner and expiry fence heartbeat, renew, release, gap, and active-state writes. Shutdown and cancellation close the socket and release ownership without exposing tokens.
+Socket refresh/reconnect reasons are normalized. Invalid authentication moves the
+connection to `reconnect_required` without changing its Agent route. Socket-only gap
+reasons are persisted for operators. Lease owner and expiry fence heartbeat, renew,
+release, gap, and active-state writes. Shutdown and cancellation close the socket and
+release ownership without exposing tokens.
 
 Production permits only secure Slack endpoints. Test-only HTTP and insecure WebSocket overrides require explicit `AZ_TESTENV_SLACK_*` configuration.
 
@@ -67,13 +71,21 @@ Production permits only secure Slack endpoints. Test-only HTTP and insecure WebS
 
 The worker claims admitted events in bounded batches with a claim owner and expiry. Processing is at-least-once and every canonical insert/update is idempotent.
 
-- Revocation events terminalize the connection and route.
+- Provider health failures and token revocation update connection health without
+  changing the configured Agent route, bindings, or work.
+- App uninstall terminalizes provider resources and credentials while preserving the
+  Agent route for later reconfiguration. Only an explicit Azents disconnect removes
+  the route relationship.
 - Eligible invocation messages validate channel membership and Slack Connect/DM exclusion before creating a tracked resource.
 - Unlinked ordinary messages wait briefly for an out-of-order correlated mention, then become ignored rather than creating a resource.
 - Canonical principals, messages, revisions, and pending context are stored before access decisions.
 - Provider permalink resolution is optional and occurs outside the persistence transaction. Controlled provider failures leave `original_url` null and do not hide the message.
 - First invocation starts bounded `conversations.replies` hydration. Pages reconcile provider history into the same canonical message identities and update the high-watermark and event boundary.
-- Rate limits and temporary read failures defer the event with bounded retry timing. Invalid credentials require reconnect. Lost resource access marks hydration incomplete and terminalizes the resource.
+- Rate limits and temporary read failures defer the event with bounded retry timing.
+  Invalid credentials and missing Slack scopes require reconnect but preserve routing.
+  A successful validation restores an older route incorrectly deactivated by the
+  legacy failure path. Lost resource access marks hydration incomplete and terminalizes
+  the resource.
 
 Activation waits until hydration is terminal and every correlated event through the persisted boundary is terminal. This prevents out-of-order or post-trigger/pre-activation message loss.
 
@@ -83,5 +95,6 @@ Deterministic E2E uses signed raw callbacks and a fake HTTP/WebSocket provider t
 
 ## Changelog
 
+- **2026-07-22** (spec_version 3) — Separated provider connection health from Agent routing, preserved routes across credential and permission failures, and required channel metadata scopes in generated Slack manifests.
 - **2026-07-22** (spec_version 2) — Replaced per-connection selector callbacks with one fixed endpoint routed by Slack App/Team identity and authenticated by the selected connection's HMAC secret.
 - **2026-07-22** (spec_version 1) — Promoted signed HTTP and fenced Socket Mode admission, asynchronous normalization/hydration, provider scope, retry behavior, and credential-free deterministic validation.
