@@ -269,10 +269,12 @@ class TestEventExecutionRepositories:
                 payload=payload.model_dump(mode="json"),
             ),
         )
-        await rdb_session.refresh(event_session)
+        stored_session = await rdb_session.get(RDBAgentSession, event_session.id)
+        assert stored_session is not None
+        await rdb_session.refresh(stored_session)
 
-        assert event_session.last_user_input_at == appended.created_at
-        assert event_session.last_user_input_at != previous_last_user_input_at
+        assert stored_session.last_user_input_at == appended.created_at
+        assert stored_session.last_user_input_at != previous_last_user_input_at
 
     async def test_turn_marker_default_effort_round_trip(
         self,
