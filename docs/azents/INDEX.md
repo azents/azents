@@ -16,7 +16,7 @@ Design documents are accumulated records and are not listed individually in this
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
 | [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-07-22 | 52 |
-| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-22 | 126 |
+| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-22 | 127 |
 | [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-07-22 | 1 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-21 | 10 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-17 | 5 |
@@ -38,13 +38,13 @@ Design documents are accumulated records and are not listed individually in this
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-07-22 | 31 |
 | [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-07-22 | 1 |
 | [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-07-22 | 1 |
-| [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-07-22 | 1 |
+| [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-07-22 | 2 |
 | [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-07-22 | 1 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-07-21 | 24 |
 | [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-07-19 | 1 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
 | [OpenRouter API Key Provider Flow](spec/flow/openrouter-api-key.md) | @Hardtack | 2026-07-19 | 3 |
-| [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-07-21 | 7 |
+| [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-07-22 | 8 |
 | [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-07-21 | 24 |
 | [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-07-21 | 18 |
 | [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-07-17 | 8 |

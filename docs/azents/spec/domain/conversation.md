@@ -102,7 +102,7 @@ api_routes:
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-07-22
-spec_version: 126
+spec_version: 127
 ---
 
 # Conversation & Events
@@ -297,6 +297,11 @@ path whose branch differs from the allocation, or another ambiguous ownership st
 The worktree participant records a bounded durable classification, retains allocation ownership and
 retry state on failure, and resumes only its incomplete checkpoint through the ordinary retry
 workflow. Final Session deletion still requires every allocation to be cleaned.
+Irreversible purge fencing also snapshots the required participant keys and policy versions. A fenced
+job executes only that immutable snapshot across retries and deployments; later registry additions
+apply only to newly fenced jobs. Persisted keys, policy versions, and dependencies must remain
+supported, and an unsupported snapshot remains retryable rather than silently changing its required
+work.
 
 Direct session writes are session-scoped. When a route contains `session_id`, input buffers, live
 projections, broker wake-up, and the REST response use that same session id. Runtime current/active

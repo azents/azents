@@ -25,8 +25,8 @@ code_paths:
   - infra/argocd/azents-server/base/scheduler-pdb.yaml
   - infra/charts/azents/templates/server/scheduler-deployment.yaml.tpl
   - infra/charts/azents/templates/server/scheduler-pdb.yaml.tpl
-last_verified_at: 2026-07-21
-spec_version: 7
+last_verified_at: 2026-07-22
+spec_version: 8
 ---
 
 # Periodic Execution Flow Spec
@@ -215,6 +215,13 @@ One root purge failure records the durable job retry and a structured exception 
 scheduler pass continues with the next due root. Active runs likewise schedule that root for retry
 without blocking later roots. Cancellation, failure to persist durable retry state, or other
 batch-level infrastructure failure still fails the scheduler task.
+The claim transaction materializes a participant snapshot only when the job has no
+existing snapshot. It validates stored keys, policy versions, and dependency
+closure before lifecycle fencing or cleanup begins. An application-level snapshot
+validation failure commits the job lease, records a durable per-job retry, and
+preserves later-job isolation. The retry records the affected participant when
+known and the pre-execution participant stage. Database transaction or commit
+failures remain batch-level infrastructure failures.
 
 The handler locks the complete root tree, increments owner generations, records stop intent, emits
 broker stop signals, and waits for active runs through durable retry rather than deleting around them.
@@ -264,3 +271,4 @@ Model catalog source sync is a later consumer of this scheduler.
 - **2026-07-21** — v5. Isolated ordinary scheduler task lifecycle failures so one task cannot terminate the scheduler process; cancellation remains a scheduler shutdown signal.
 - **2026-07-21** — v6. Isolated per-root purge failures so a bounded scheduler pass logs and retries the failed root before continuing with later due roots.
 - **2026-07-21** — v7. Added durable Agent decommission scheduling with retention-purge and Runtime-acknowledgement finalization gates.
+- **2026-07-22** — v8. Kept participant snapshot validation failures inside per-root retry isolation while leaving database transaction failures at the scheduler boundary.

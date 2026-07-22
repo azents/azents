@@ -47,6 +47,7 @@ from azents.services.session_git_worktree import SessionGitWorktreeService
 from azents.services.session_lifecycle.orchestrator import (
     SessionLifecycleOrchestrator,
     SessionLifecyclePurgeParticipantFailure,
+    SessionLifecyclePurgeSnapshotValidationFailure,
 )
 from azents.services.session_lifecycle.registry import (
     get_session_lifecycle_orchestrator,
@@ -173,6 +174,12 @@ class ArchivedSessionPurgeService:
             if now + _DEADLINE_SAFETY_MARGIN >= deadline:
                 deadline_reached = True
                 break
+            materialization_error: (
+                SessionLifecyclePurgeSnapshotValidationFailure
+                | RuntimeError
+                | ValueError
+                | None
+            ) = None
             async with self.session_manager() as session:
                 job = await self.retention_repository.claim_due_purge_job(
                     session,
@@ -182,23 +189,57 @@ class ArchivedSessionPurgeService:
                 )
                 if job is not None:
                     lifecycle_orchestrator = self.lifecycle_orchestrator
-                    await lifecycle_orchestrator.materialize_claimed_purge_participants(
-                        session,
-                        retention_repository=self.retention_repository,
-                        purge_job_id=job.id,
-                        lease_owner=lease_owner,
+                    materialize_participants = (
+                        lifecycle_orchestrator.materialize_claimed_purge_participants
                     )
+                    try:
+                        await materialize_participants(
+                            session,
+                            retention_repository=self.retention_repository,
+                            purge_job_id=job.id,
+                            lease_owner=lease_owner,
+                        )
+                    except asyncio.CancelledError:
+                        raise
+                    except (RuntimeError, ValueError) as exc:
+                        materialization_error = exc
             if job is None:
                 break
             claimed_count += 1
 
             try:
+                if materialization_error is not None:
+                    raise materialization_error
                 job_summary = await self._purge_claimed(
                     job=job,
                     lease_owner=lease_owner,
                 )
             except asyncio.CancelledError:
                 raise
+            except SessionLifecyclePurgeSnapshotValidationFailure as exc:
+                await self._retry(
+                    job_id=job.id,
+                    lease_owner=lease_owner,
+                    attempt_count=job.attempt_count,
+                    error_kind=exc.error_kind,
+                    error_summary=exc.error_summary,
+                    error_participant_key=exc.participant_key,
+                    error_phase=exc.phase,
+                )
+                failed_count += 1
+                retry_scheduled_count += 1
+                logger.exception(
+                    "Archived-session purge participant snapshot is invalid; "
+                    "retry scheduled",
+                    extra={
+                        "purge_job_id": job.id,
+                        "root_session_id": job.root_session_id,
+                        "participant_key": exc.participant_key,
+                        "phase": exc.phase,
+                        "attempt_count": job.attempt_count,
+                    },
+                )
+                continue
             except SessionLifecyclePurgeParticipantFailure as exc:
                 await self._retry(
                     job_id=job.id,
@@ -616,14 +657,34 @@ class ArchivedSessionPurgeService:
                 session_ids=session_ids,
             ):
                 raise RuntimeError("AgentRun became active during purge cleanup")
-            external_channel_participant = self.lifecycle_orchestrator.registry.get(
-                "session.external-channel"
+            participant_executions = (
+                await self.retention_repository.list_purge_participant_executions(
+                    session,
+                    job_id=job.id,
+                )
             )
-            await self.external_channel_lifecycle_service.finalize_purge_participant(
-                session,
-                external_channel_participant,
-                context,
+            external_channel_execution = next(
+                (
+                    execution
+                    for execution in participant_executions
+                    if execution.participant_key == "session.external-channel"
+                ),
+                None,
             )
+            if external_channel_execution is not None:
+                external_channel_participant = (
+                    self.lifecycle_orchestrator.registry.require_policy_version(
+                        key=external_channel_execution.participant_key,
+                        policy_version=external_channel_execution.policy_version,
+                    )
+                )
+                await (
+                    self.external_channel_lifecycle_service.finalize_purge_participant(
+                        session,
+                        external_channel_participant,
+                        context,
+                    )
+                )
             await self.model_file_repository.delete_purged_for_session_ids(
                 session,
                 session_ids=session_ids,

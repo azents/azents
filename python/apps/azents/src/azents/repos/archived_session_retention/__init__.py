@@ -39,6 +39,15 @@ _ACTIVE_APPLICATION_STATUSES = (
 )
 
 
+class ArchivedSessionPurgeParticipantSnapshotInvalid(RuntimeError):
+    """An immutable purge participant snapshot cannot be safely executed."""
+
+    def __init__(self, *, participant_key: str | None, message: str) -> None:
+        """Initialize one snapshot validation failure."""
+        self.participant_key = participant_key
+        super().__init__(message)
+
+
 class ArchivedSessionRetentionRepository:
     """Persistence operations for archive retention settings and work."""
 
@@ -808,13 +817,26 @@ class ArchivedSessionRetentionRepository:
         lease_owner: str,
         participants: tuple[ArchivedSessionPurgeParticipantSnapshot, ...],
     ) -> list[ArchivedSessionPurgeParticipantExecution]:
-        """Persist an immutable participant set for an owned fenced purge job."""
-        expected = {
+        """Persist once, then validate that immutable entries remain supported."""
+        supported = {
             (participant.participant_key, participant.policy_version)
             for participant in participants
         }
-        if len(expected) != len(participants):
-            raise ValueError("Purge participant snapshot contains duplicate keys.")
+        participant_keys = {participant.participant_key for participant in participants}
+        if len(participant_keys) != len(participants):
+            duplicate_key = next(
+                participant.participant_key
+                for participant in participants
+                if sum(
+                    candidate.participant_key == participant.participant_key
+                    for candidate in participants
+                )
+                > 1
+            )
+            raise ArchivedSessionPurgeParticipantSnapshotInvalid(
+                participant_key=duplicate_key,
+                message="Purge participant snapshot contains duplicate keys.",
+            )
 
         job = await session.scalar(
             sa.select(RDBArchivedSessionPurgeJob)
@@ -845,10 +867,15 @@ class ArchivedSessionRetentionRepository:
         )
         if rows:
             actual = {(row.participant_key, row.policy_version) for row in rows}
-            if actual != expected:
-                raise RuntimeError(
-                    "Purge participant snapshot is immutable and does not match "
-                    "the supplied registry."
+            unsupported = actual - supported
+            if unsupported:
+                participant_key, policy_version = min(unsupported)
+                raise ArchivedSessionPurgeParticipantSnapshotInvalid(
+                    participant_key=participant_key,
+                    message=(
+                        "Purge participant snapshot contains an unavailable key or "
+                        f"policy version: {participant_key}@{policy_version}."
+                    ),
                 )
             return [self._build_participant_execution(row) for row in rows]
 

@@ -13,7 +13,7 @@ Details of all living specs. Synchronized from frontmatter.
 | Domain | Title | Owner | Last Verified | Version |
 |---|---|---|---|---|
 | agent | [Agent Domain Spec](domain/agent.md) | @Hardtack | 2026-07-22 | 52 |
-| conversation | [Conversation & Events](domain/conversation.md) | @Hardtack | 2026-07-22 | 126 |
+| conversation | [Conversation & Events](domain/conversation.md) | @Hardtack | 2026-07-22 | 127 |
 | external-channel | [External Channel](domain/external-channel.md) | @Hardtack | 2026-07-22 | 1 |
 | goal | [Goal Domain Spec](domain/goal.md) | - | 2026-07-21 | 10 |
 | memory | [Memory](domain/memory.md) | @Hardtack | 2026-07-17 | 5 |
@@ -35,13 +35,13 @@ Details of all living specs. Synchronized from frontmatter.
 | [Context Compaction](flow/context-compaction.md) | @Hardtack | 2026-07-22 | 31 |
 | [External Channel Authorization](flow/external-channel-authorization.md) | @Hardtack | 2026-07-22 | 1 |
 | [External Channel Delivery and Channel Work](flow/external-channel-delivery.md) | @Hardtack | 2026-07-22 | 1 |
-| [External Channel Lifecycle](flow/external-channel-lifecycle.md) | @Hardtack | 2026-07-22 | 1 |
+| [External Channel Lifecycle](flow/external-channel-lifecycle.md) | @Hardtack | 2026-07-22 | 2 |
 | [External Channel Provider Ingress](flow/external-channel-provider-ingress.md) | @Hardtack | 2026-07-22 | 1 |
 | [File Exchange Storage](flow/file-exchange-storage.md) | @Hardtack | 2026-07-21 | 24 |
 | [Kimi OAuth Flow](flow/kimi-oauth.md) | @Hardtack | 2026-07-19 | 1 |
 | [MCP OAuth Flow](flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
 | [OpenRouter API Key Provider Flow](flow/openrouter-api-key.md) | @Hardtack | 2026-07-19 | 3 |
-| [Periodic Execution Flow Spec](flow/periodic-execution.md) | - | 2026-07-21 | 7 |
+| [Periodic Execution Flow Spec](flow/periodic-execution.md) | - | 2026-07-22 | 8 |
 | [Run Resume](flow/run-resume.md) | @Hardtack | 2026-07-21 | 24 |
 | [Session Context Inspector](flow/session-context-inspector.md) | @Hardtack | 2026-07-21 | 18 |
 | [E2E Primary Test Strategy](flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-07-17 | 8 |
