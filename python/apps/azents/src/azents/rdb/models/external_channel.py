@@ -13,6 +13,7 @@ from azents.core.enums import (
     ExternalChannelAccessGrantScope,
     ExternalChannelAccessRequestStatus,
     ExternalChannelActionMode,
+    ExternalChannelBindingActivationStatus,
     ExternalChannelBindingStatus,
     ExternalChannelConnectionStatus,
     ExternalChannelDeliveryOperation,
@@ -20,6 +21,7 @@ from azents.core.enums import (
     ExternalChannelDeliveryStatus,
     ExternalChannelEventEligibilityState,
     ExternalChannelEventStatus,
+    ExternalChannelHydrationStatus,
     ExternalChannelMessageLifecycle,
     ExternalChannelMessageRevisionKind,
     ExternalChannelPrincipalAuthorType,
@@ -82,6 +84,12 @@ external_channel_resource_status_enum = ENUM(
     create_type=False,
     values_callable=_enum_values,
 )
+external_channel_hydration_status_enum = ENUM(
+    ExternalChannelHydrationStatus,
+    name="external_channel_hydration_status",
+    create_type=False,
+    values_callable=_enum_values,
+)
 external_channel_event_eligibility_state_enum = ENUM(
     ExternalChannelEventEligibilityState,
     name="external_channel_event_eligibility_state",
@@ -115,6 +123,12 @@ external_channel_message_revision_kind_enum = ENUM(
 external_channel_binding_status_enum = ENUM(
     ExternalChannelBindingStatus,
     name="external_channel_binding_status",
+    create_type=False,
+    values_callable=_enum_values,
+)
+external_channel_binding_activation_status_enum = ENUM(
+    ExternalChannelBindingActivationStatus,
+    name="external_channel_binding_activation_status",
     create_type=False,
     values_callable=_enum_values,
 )
@@ -431,6 +445,53 @@ class RDBExternalChannelResource(RDBModel):
         nullable=False,
         server_default=ExternalChannelResourceStatus.ACTIVE.value,
     )
+    hydration_status: Mapped[ExternalChannelHydrationStatus] = mapped_column(
+        external_channel_hydration_status_enum,
+        nullable=False,
+        server_default=ExternalChannelHydrationStatus.PENDING.value,
+    )
+    hydration_cursor: Mapped[str | None] = mapped_column(
+        sa.Text,
+        nullable=True,
+        default=None,
+    )
+    hydration_high_watermark_position: Mapped[str | None] = mapped_column(
+        sa.String(255),
+        nullable=True,
+        default=None,
+    )
+    reconciliation_boundary_received_at: Mapped[datetime.datetime | None] = (
+        mapped_column(
+            TimeZoneDateTime,
+            nullable=True,
+            default=None,
+        )
+    )
+    reconciliation_boundary_event_id: Mapped[str | None] = mapped_column(
+        sa.String(32),
+        nullable=True,
+        default=None,
+    )
+    hydration_error_kind: Mapped[str | None] = mapped_column(
+        sa.String(120),
+        nullable=True,
+        default=None,
+    )
+    hydration_error_summary: Mapped[str | None] = mapped_column(
+        sa.Text,
+        nullable=True,
+        default=None,
+    )
+    hydration_started_at: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime,
+        nullable=True,
+        default=None,
+    )
+    hydration_completed_at: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime,
+        nullable=True,
+        default=None,
+    )
     labels: Mapped[dict[str, Any] | None] = mapped_column(
         JSONB,
         nullable=True,
@@ -492,6 +553,13 @@ class RDBExternalChannelEvent(RDBModel):
         "ix_external_channel_events_connection_id_provider_timestamp",
         "connection_id",
         "provider_occurred_at",
+    )
+    IX_CONNECTION_CORRELATION_STATUS = sa.Index(
+        "ix_external_channel_events_connection_correlation_status",
+        "connection_id",
+        "resource_correlation_key",
+        "status",
+        "received_at",
     )
     UQ_CONNECTION_PROVIDER_EVENT = sa.UniqueConstraint(
         "connection_id",
@@ -612,6 +680,7 @@ class RDBExternalChannelEvent(RDBModel):
     __table_args__ = (
         IX_STATUS_RECEIVED_AT,
         IX_CONNECTION_ID_PROVIDER_TIMESTAMP,
+        IX_CONNECTION_CORRELATION_STATUS,
         UQ_CONNECTION_PROVIDER_EVENT,
     )
 
@@ -992,6 +1061,22 @@ class RDBExternalChannelBinding(RDBModel):
         external_channel_binding_status_enum,
         nullable=False,
         server_default=ExternalChannelBindingStatus.ACTIVE.value,
+    )
+    activation_status: Mapped[ExternalChannelBindingActivationStatus] = mapped_column(
+        external_channel_binding_activation_status_enum,
+        nullable=False,
+        server_default=(ExternalChannelBindingActivationStatus.WAITING_HYDRATION.value),
+    )
+    activation_trigger_message_id: Mapped[str | None] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("external_channel_messages.id", ondelete="RESTRICT"),
+        nullable=True,
+        default=None,
+    )
+    activated_at: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime,
+        nullable=True,
+        default=None,
     )
     projected_through_position: Mapped[str | None] = mapped_column(
         sa.String(255),

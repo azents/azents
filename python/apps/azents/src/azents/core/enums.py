@@ -343,6 +343,7 @@ class AgentSessionStartReason(enum.StrEnum):
     """AgentSession start reason."""
 
     INITIAL = "initial"
+    EXTERNAL_CHANNEL = "external_channel"
     SYSTEM_RECOVERY = "system_recovery"
 
 
@@ -606,6 +607,16 @@ class ExternalChannelResourceStatus(enum.StrEnum):
     DELETED = "deleted"
 
 
+class ExternalChannelHydrationStatus(enum.StrEnum):
+    """Initial provider-history hydration state for one external resource."""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETE = "complete"
+    BOUNDED = "bounded"
+    INCOMPLETE = "incomplete"
+
+
 class ExternalChannelEventEligibilityState(enum.StrEnum):
     """Classification state for one admitted provider event."""
 
@@ -655,6 +666,13 @@ class ExternalChannelBindingStatus(enum.StrEnum):
 
     ACTIVE = "active"
     DISCONNECTED = "disconnected"
+
+
+class ExternalChannelBindingActivationStatus(enum.StrEnum):
+    """Initial invocation activation state for one active binding."""
+
+    WAITING_HYDRATION = "waiting_hydration"
+    ACTIVE = "active"
 
 
 class ExternalChannelAccessRequestStatus(enum.StrEnum):

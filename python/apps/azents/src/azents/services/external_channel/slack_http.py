@@ -297,7 +297,20 @@ def _provider_occurred_at(value: object) -> datetime.datetime | None:
 
 def _resource_correlation_key(event: dict[str, object]) -> str | None:
     channel = event.get("channel")
+    message = event.get("message")
+    previous_message = event.get("previous_message")
+    nested = (
+        message
+        if isinstance(message, dict)
+        else previous_message
+        if isinstance(previous_message, dict)
+        else None
+    )
     timestamp = event.get("thread_ts") or event.get("ts")
+    if timestamp is None and nested is not None:
+        timestamp = nested.get("thread_ts") or nested.get("ts")
+    if timestamp is None:
+        timestamp = event.get("deleted_ts")
     if not isinstance(channel, str) or not channel:
         return None
     if not isinstance(timestamp, str) or not timestamp:
@@ -324,26 +337,66 @@ def _project_envelope(
         "subtype",
         "channel",
         "channel_type",
+        "context_team_id",
+        "is_ext_shared_channel",
         "user",
         "bot_id",
+        "app_id",
         "ts",
         "thread_ts",
         "event_ts",
         "client_msg_id",
         "text",
-        "blocks",
-        "message",
-        "previous_message",
         "deleted_ts",
         "hidden",
     )
     projected: dict[str, object] = {
         key: payload[key] for key in top_level_keys if key in payload
     }
-    projected["event"] = {key: event[key] for key in event_keys if key in event}
+    projected_event = {key: event[key] for key in event_keys if key in event}
+    if "blocks" in event:
+        projected_event["blocks"] = _project_slack_blocks(event["blocks"])
+    for key in ("message", "previous_message"):
+        value = event.get(key)
+        if isinstance(value, dict):
+            projected_event[key] = _project_slack_message(value)
+    projected["event"] = projected_event
     serialized = json.dumps(projected, separators=(",", ":")).encode()
     if len(serialized) > MAX_SLACK_HTTP_BODY_BYTES:
         raise SlackHTTPPayloadTooLarge(
             "Slack callback projection exceeds the size limit."
         )
+    return projected
+
+
+def _project_slack_message(message: dict[str, object]) -> dict[str, object]:
+    """Retain only bounded fields required for lifecycle normalization."""
+    keys = (
+        "type",
+        "subtype",
+        "user",
+        "bot_id",
+        "app_id",
+        "ts",
+        "thread_ts",
+        "text",
+        "edited",
+    )
+    projected = {key: message[key] for key in keys if key in message}
+    if "blocks" in message:
+        projected["blocks"] = _project_slack_blocks(message["blocks"])
+    return projected
+
+
+def _project_slack_blocks(value: object) -> list[dict[str, str]]:
+    """Reduce Slack blocks to bounded attachment-type metadata."""
+    if not isinstance(value, list):
+        return []
+    projected: list[dict[str, str]] = []
+    for block in value[:32]:
+        if not isinstance(block, dict):
+            continue
+        block_type = block.get("type")
+        if isinstance(block_type, str) and block_type:
+            projected.append({"type": block_type})
     return projected
