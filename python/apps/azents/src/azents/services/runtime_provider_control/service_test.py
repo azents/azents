@@ -146,6 +146,8 @@ class TestRuntimeProviderEnrollmentService:
             provider_repository=provider_repository,
             verifier=RuntimeProviderCredentialVerifier(Fernet.generate_key().decode()),
             binding_repository=binding_repository,
+            kubernetes_token_reviewer=None,
+            auth_registry=None,
         )
 
         with pytest.raises(
@@ -217,6 +219,8 @@ class TestRuntimeProviderEnrollmentService:
             provider_repository=provider_repository,
             verifier=RuntimeProviderCredentialVerifier(Fernet.generate_key().decode()),
             binding_repository=binding_repository,
+            kubernetes_token_reviewer=None,
+            auth_registry=None,
         )
         now = tznow()
 

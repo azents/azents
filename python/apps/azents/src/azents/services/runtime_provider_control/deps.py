@@ -46,6 +46,8 @@ def get_runtime_provider_enrollment_service(
         provider_repository=RuntimeProviderRepository(),
         binding_repository=RuntimeProviderAuthBindingRepository(),
         verifier=RuntimeProviderCredentialVerifier(credential_encryption.key),
+        kubernetes_token_reviewer=None,
+        auth_registry=None,
     )
 
 

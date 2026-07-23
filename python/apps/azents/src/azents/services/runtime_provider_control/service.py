@@ -38,6 +38,13 @@ from .data import (
     RuntimeProviderEnrollmentGrantIssued,
     RuntimeProviderEnrollmentUnavailable,
 )
+from .provider_auth import (
+    IssuedTokenProviderAuthVerifier,
+    KubernetesServiceAccountProviderAuthVerifier,
+    KubernetesServiceAccountTokenReviewer,
+    ProviderAuthRegistry,
+    ProviderAuthVerifier,
+)
 
 _TERMINAL = frozenset(
     {
@@ -56,6 +63,8 @@ class RuntimeProviderEnrollmentService:
     provider_repository: RuntimeProviderRepository
     binding_repository: RuntimeProviderAuthBindingRepository
     verifier: RuntimeProviderCredentialVerifier
+    kubernetes_token_reviewer: KubernetesServiceAccountTokenReviewer | None
+    auth_registry: ProviderAuthRegistry | None
 
     async def issue_grant(
         self,
@@ -231,61 +240,53 @@ class RuntimeProviderEnrollmentService:
         *,
         secret: str,
     ) -> RuntimeProviderCredentialAuthentication:
-        """Resolve active issued evidence through its durable binding."""
-        now = tznow()
-        async with self.session_manager() as session:
-            credential = await self.repository.get_active_credential_by_verifier(
-                session,
-                verifier=self.verifier.verifier_for(secret),
-                now=now,
+        """Resolve issued evidence through the explicit verifier registry."""
+        return await self.authenticate_provider(
+            method=RuntimeProviderAuthMethod.AZENTS_ISSUED_TOKEN,
+            secret=secret,
+        )
+
+    def _build_auth_registry(self) -> ProviderAuthRegistry:
+        """Build the explicit Provider verifier registry."""
+        verifiers: list[ProviderAuthVerifier] = [
+            IssuedTokenProviderAuthVerifier(
+                session_manager=self.session_manager,
+                repository=self.repository,
+                provider_repository=self.provider_repository,
+                binding_repository=self.binding_repository,
+                credential_verifier=self.verifier,
             )
-            if credential is None or not self.verifier.matches(
-                secret,
-                credential.verifier,
-            ):
-                raise RuntimeProviderCredentialUnavailable("credential_unavailable")
-            binding = await self.binding_repository.get_by_id(
-                session,
-                binding_id=credential.binding_id,
-                for_update=False,
+        ]
+        if self.kubernetes_token_reviewer is not None:
+            verifiers.append(
+                KubernetesServiceAccountProviderAuthVerifier(
+                    session_manager=self.session_manager,
+                    provider_repository=self.provider_repository,
+                    binding_repository=self.binding_repository,
+                    token_reviewer=self.kubernetes_token_reviewer,
+                )
             )
-            if (
-                binding is None
-                or binding.provider_id != credential.provider_id
-                or binding.auth_method
-                is not RuntimeProviderAuthMethod.AZENTS_ISSUED_TOKEN
-                or binding.state is not RuntimeProviderBindingState.ACTIVE
-            ):
-                raise RuntimeProviderCredentialUnavailable("binding_unavailable")
-            provider = await self.provider_repository.get_by_id(
-                session,
-                provider_id=binding.provider_id,
-                for_update=False,
-            )
-            if provider is None or provider.lifecycle_state in _TERMINAL:
-                raise RuntimeProviderCredentialUnavailable("provider_unavailable")
-            if not await self.repository.mark_credential_used(
-                session,
-                credential_id=credential.id,
-                used_at=now,
-            ):
-                raise RuntimeProviderCredentialUnavailable("credential_unavailable")
-            if not await self.binding_repository.mark_authenticated(
-                session,
-                binding_id=binding.id,
-                authenticated_at=now,
-            ):
-                raise RuntimeProviderCredentialUnavailable("binding_unavailable")
-        return RuntimeProviderCredentialAuthentication(
-            binding_id=binding.id,
-            credential_id=credential.id,
-            provider_id=provider.id,
-            provider_kind=provider.kind,
-            provider_scope=provider.scope,
-            provider_workspace_id=provider.workspace_id,
-            auth_method=RuntimeProviderAuthMethod.AZENTS_ISSUED_TOKEN,
-            auth_subject=binding.subject,
-            evidence_expires_at=credential.expires_at,
+        return ProviderAuthRegistry(tuple(verifiers))
+
+    async def authenticate_provider(
+        self,
+        *,
+        method: RuntimeProviderAuthMethod,
+        secret: str,
+    ) -> RuntimeProviderCredentialAuthentication:
+        """Authenticate exactly one selected Provider auth method."""
+        registry = self.auth_registry or self._build_auth_registry()
+        return await registry.verify(method=method, secret=secret)
+
+    async def authenticate_kubernetes_service_account(
+        self,
+        *,
+        secret: str,
+    ) -> RuntimeProviderCredentialAuthentication:
+        """Authenticate a trusted Kubernetes Provider workload identity."""
+        return await self.authenticate_provider(
+            method=RuntimeProviderAuthMethod.KUBERNETES_SERVICE_ACCOUNT,
+            secret=secret,
         )
 
     async def revoke_credential(

@@ -82,6 +82,17 @@ class FakeProviderCredentialBridge:
             raise RuntimeProviderCredentialUnavailable("credential_unavailable")
         return self.authentication
 
+    async def authenticate_provider(
+        self,
+        *,
+        method: RuntimeProviderAuthMethod,
+        secret: str,
+    ) -> RuntimeProviderCredentialAuthentication:
+        """Resolve the explicitly selected test Provider auth method."""
+        if method is not RuntimeProviderAuthMethod.AZENTS_ISSUED_TOKEN:
+            raise RuntimeProviderCredentialUnavailable("auth_method_unavailable")
+        return await self.authenticate_credential(secret=secret)
+
     async def create_connection(self, **_: object) -> object:
         """Accept a test Provider stream."""
         return object()
@@ -131,15 +142,20 @@ class FakeGrpcContext:
 
     def __init__(
         self,
-        metadata: tuple[tuple[str, str], ...] | None = None,
+        metadata: grpc.aio.Metadata | tuple[tuple[str, str], ...] | None = None,
     ) -> None:
         self._metadata = (
             metadata
             if metadata is not None
-            else (("authorization", "Bearer provider-secret"),)
+            else (
+                ("authorization", "Bearer provider-secret"),
+                ("x-azents-runtime-provider-auth-method", "azents_issued_token"),
+            )
         )
 
-    def invocation_metadata(self) -> tuple[tuple[str, str], ...]:
+    def invocation_metadata(
+        self,
+    ) -> grpc.aio.Metadata | tuple[tuple[str, str], ...]:
         """Return fake request metadata."""
         return self._metadata
 
@@ -349,6 +365,41 @@ async def test_provider_grpc_rejects_missing_provider_credential() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "metadata",
+    (
+        (("authorization", "Bearer provider-secret"),),
+        (
+            ("authorization", "Bearer provider-secret"),
+            ("authorization", "Bearer provider-secret"),
+            ("x-azents-runtime-provider-auth-method", "azents_issued_token"),
+        ),
+        (
+            ("authorization", "Bearer provider-secret"),
+            ("x-azents-runtime-provider-auth-method", "azents_issued_token"),
+            ("x-azents-runtime-provider-auth-method", "azents_issued_token"),
+        ),
+        (
+            ("authorization", "Bearer provider-secret"),
+            ("x-azents-runtime-provider-auth-method", "unknown"),
+        ),
+    ),
+)
+async def test_provider_grpc_rejects_ambiguous_or_unknown_auth_metadata(
+    metadata: tuple[tuple[str, str], ...],
+) -> None:
+    store = InMemoryRuntimeCoordinationStore()
+    servicer = _servicer(RuntimeControlProtocolService(store), FakeReportSink())
+    inbound = QueueIterator()
+    await inbound.put(_register_message())
+
+    stream = servicer.ConnectProvider(inbound, FakeGrpcContext(metadata))
+
+    with pytest.raises(RuntimeError, match="UNAUTHENTICATED"):
+        await anext(stream)
+
+
+@pytest.mark.asyncio
 async def test_provider_grpc_rejects_shared_control_token_fallback() -> None:
     store = InMemoryRuntimeCoordinationStore()
     servicer = _servicer(RuntimeControlProtocolService(store), FakeReportSink())
@@ -415,7 +466,12 @@ async def test_provider_grpc_accepts_provider_credential_metadata() -> None:
 
     stream = servicer.ConnectProvider(
         inbound,
-        FakeGrpcContext((("authorization", "Bearer provider-secret"),)),
+        FakeGrpcContext(
+            grpc.aio.Metadata(
+                ("authorization", "Bearer provider-secret"),
+                ("x-azents-runtime-provider-auth-method", "azents_issued_token"),
+            )
+        ),
     )
     accepted = await anext(stream)
     await stream.aclose()

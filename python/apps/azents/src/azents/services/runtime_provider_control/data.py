@@ -44,6 +44,33 @@ class RuntimeProviderCredentialAuthentication:
     auth_subject: str
     evidence_expires_at: datetime.datetime | None
 
+    def __post_init__(self) -> None:
+        """Enforce method-specific evidence persistence invariants."""
+        if (
+            self.auth_method is RuntimeProviderAuthMethod.AZENTS_ISSUED_TOKEN
+            and self.credential_id is None
+        ):
+            raise ValueError("issued-token authentication requires credential_id")
+        if self.auth_method is RuntimeProviderAuthMethod.KUBERNETES_SERVICE_ACCOUNT:
+            if self.credential_id is not None:
+                raise ValueError(
+                    "Kubernetes ServiceAccount authentication cannot use credential_id"
+                )
+            if self.evidence_expires_at is None:
+                raise ValueError(
+                    "Kubernetes ServiceAccount authentication requires evidence expiry"
+                )
+
+
+@dataclass(frozen=True)
+class KubernetesServiceAccountTokenReview:
+    """Verified Kubernetes ServiceAccount identity returned by TokenReview."""
+
+    authenticated: bool
+    username: str | None
+    audiences: frozenset[str]
+    evidence_expires_at: datetime.datetime | None
+
 
 @dataclass
 class RuntimeProviderEnrollmentUnavailable(Exception):

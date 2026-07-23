@@ -12,6 +12,7 @@ from pathlib import Path
 
 import grpc
 from azents_runtime_control.grpc_provider_client import (
+    PROVIDER_AUTH_METHOD_KUBERNETES_SERVICE_ACCOUNT,
     GrpcProviderControlClient,
     RuntimeProviderControlStreamClosed,
 )
@@ -135,14 +136,12 @@ async def _run_control_loop(
     )
     while not stop.is_set():
         _set_readiness(settings.readiness_file, ready=False)
-        provider_credential = read_provider_credential(
-            settings.provider_credential_file
+        provider_credential = read_service_account_token(
+            settings.service_account_token_file
         )
-        control_client = GrpcProviderControlClient.from_endpoint(
-            settings.control_endpoint,
+        control_client = create_provider_control_client(
+            settings,
             provider_credential=provider_credential,
-            tls=settings.control_tls,
-            allow_insecure=settings.allow_insecure_control,
         )
         control_connection_id = _control_connection_id(settings.connection_id)
         _LOGGER.info(
@@ -180,7 +179,7 @@ async def _run_control_loop(
             )
             credential_task = asyncio.create_task(
                 wait_for_provider_credential_change(
-                    settings.provider_credential_file,
+                    settings.service_account_token_file,
                     current=provider_credential,
                     stop=stop,
                 ),
@@ -217,6 +216,21 @@ async def _run_control_loop(
         finally:
             _set_readiness(settings.readiness_file, ready=False)
             await control_client.close()
+
+
+def create_provider_control_client(
+    settings: "ProviderSettings",
+    *,
+    provider_credential: str,
+) -> GrpcProviderControlClient:
+    """Create the Kubernetes Provider's explicit workload-identity client."""
+    return GrpcProviderControlClient.from_endpoint(
+        settings.control_endpoint,
+        provider_credential=provider_credential,
+        provider_auth_method=PROVIDER_AUTH_METHOD_KUBERNETES_SERVICE_ACCOUNT,
+        tls=settings.control_tls,
+        allow_insecure=settings.allow_insecure_control,
+    )
 
 
 async def _report_pod_watch_events(
@@ -284,7 +298,11 @@ async def wait_for_provider_credential_change(
 ) -> None:
     """Return when the projected Provider credential changes."""
     while not stop.is_set():
-        if read_provider_credential(path) != current:
+        try:
+            candidate = read_provider_credential(path)
+        except RuntimeError:
+            candidate = None
+        if candidate is not None and candidate != current:
             _LOGGER.info("Runtime Provider credential changed; reconnecting")
             return
         try:
@@ -396,6 +414,9 @@ class ProviderSettings:
             "AZ_RUNTIME_CONTROL_ALLOW_INSECURE"
         )
         self.readiness_file = Path(_required_env("AZ_RUNTIME_PROVIDER_READINESS_FILE"))
+        self.service_account_token_file = Path(
+            _required_env("AZ_RUNTIME_PROVIDER_SERVICE_ACCOUNT_TOKEN_FILE")
+        )
         self.provider_id: str = _required_env("AZ_RUNTIME_PROVIDER_ID")
         self.namespace: str = _required_env("AZ_RUNTIME_PROVIDER_LEASE_NAMESPACE")
         self.workload_namespace: str = _required_env(
@@ -432,9 +453,6 @@ class ProviderSettings:
             "AZ_RUNTIME_PROVIDER_CONNECTION_ID",
             f"{self.provider_id}:{uuid.uuid4().hex}",
         )
-        self.provider_credential_file = Path(
-            _required_env("AZ_RUNTIME_PROVIDER_CREDENTIAL_FILE")
-        )
 
 
 def _settings_from_env() -> ProviderSettings:
@@ -467,6 +485,11 @@ def read_provider_credential(path: Path) -> str:
     if not credential:
         raise RuntimeError("Runtime Provider credential file is empty")
     return credential
+
+
+def read_service_account_token(path: Path) -> str:
+    """Read the projected Kubernetes ServiceAccount token."""
+    return read_provider_credential(path)
 
 
 def _control_tls_from_env() -> GrpcClientTlsConfig | None:

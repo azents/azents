@@ -5,11 +5,16 @@ import datetime
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import RuntimeProviderAuthMethod, RuntimeProviderBindingState
+from azents.core.enums import (
+    RuntimeProviderAuthMethod,
+    RuntimeProviderBindingState,
+    RuntimeProviderConnectionStatus,
+)
 from azents.rdb.models.runtime_provider_binding import (
     RDBRuntimeProviderAuthBinding,
     RDBRuntimeProviderAuthBindingAuditEvent,
 )
+from azents.rdb.models.runtime_provider_control import RDBRuntimeProviderConnection
 
 from .data import (
     RuntimeProviderAuthBinding,
@@ -196,6 +201,19 @@ class RuntimeProviderAuthBindingRepository:
             .returning(RDBRuntimeProviderAuthBinding)
         )
         binding = result.scalar_one_or_none()
+        if binding is not None:
+            await session.execute(
+                sa.update(RDBRuntimeProviderConnection)
+                .where(
+                    RDBRuntimeProviderConnection.binding_id == binding.id,
+                    RDBRuntimeProviderConnection.status
+                    == RuntimeProviderConnectionStatus.CONNECTED,
+                )
+                .values(
+                    status=RuntimeProviderConnectionStatus.DISCONNECTED,
+                    disconnected_at=revoke.revoked_at,
+                )
+            )
         return self._build(binding) if binding is not None else None
 
     async def append_audit_event(

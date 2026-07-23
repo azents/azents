@@ -22,6 +22,7 @@ from azents.repos.runtime_provider.data import (
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
 from azents.repos.runtime_provider_binding.data import (
     RuntimeProviderAuthBindingCreate,
+    RuntimeProviderAuthBindingRevoke,
 )
 from azents.repos.runtime_provider_binding.repository import (
     RuntimeProviderAuthBindingRepository,
@@ -245,4 +246,114 @@ class TestRuntimeProviderControlRepository:
             disconnected_at=now + datetime.timedelta(seconds=4),
             auth_method=RuntimeProviderAuthMethod.AZENTS_ISSUED_TOKEN,
             auth_subject=auth_subject,
+        )
+
+    async def test_revoked_binding_disconnects_kubernetes_connection(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Binding revocation immediately removes workload connection authority."""
+        repository = RuntimeProviderControlRepository()
+        provider_id, _, _ = await _provider_source_and_binding(rdb_session)
+        binding_repository = RuntimeProviderAuthBindingRepository()
+        subject = "system:serviceaccount:azents-runtime:provider"
+        binding = await binding_repository.create(
+            rdb_session,
+            create=RuntimeProviderAuthBindingCreate(
+                provider_id=provider_id,
+                auth_method=RuntimeProviderAuthMethod.KUBERNETES_SERVICE_ACCOUNT,
+                subject=subject,
+                owner=RuntimeProviderBindingOwner.BOOTSTRAP,
+                bootstrap_declaration_id=None,
+                config={
+                    "namespace": "azents-runtime",
+                    "service_account_name": "provider",
+                    "audience": "azents-runtime-control",
+                },
+            ),
+        )
+        now = tznow()
+        connection = await repository.create_connection(
+            rdb_session,
+            create=RuntimeProviderConnectionCreate(
+                provider_id=provider_id,
+                binding_id=binding.id,
+                credential_id=None,
+                auth_method=RuntimeProviderAuthMethod.KUBERNETES_SERVICE_ACCOUNT,
+                auth_subject=subject,
+                evidence_expires_at=now + datetime.timedelta(seconds=2),
+                connection_id="provider-control-kubernetes-connection",
+                generation=1,
+                reported_provider_type="kubernetes",
+                reported_protocol_version="test-v1",
+                connected_at=now,
+            ),
+        )
+
+        assert await repository.heartbeat_connection(
+            rdb_session,
+            provider_id=provider_id,
+            binding_id=binding.id,
+            credential_id=None,
+            generation=connection.generation,
+            heartbeat_at=now + datetime.timedelta(seconds=1),
+            auth_method=RuntimeProviderAuthMethod.KUBERNETES_SERVICE_ACCOUNT,
+            auth_subject=subject,
+        )
+        assert await repository.connection_active(
+            rdb_session,
+            provider_id=provider_id,
+            binding_id=binding.id,
+            credential_id=None,
+            generation=connection.generation,
+            now=now + datetime.timedelta(seconds=1),
+            auth_method=RuntimeProviderAuthMethod.KUBERNETES_SERVICE_ACCOUNT,
+            auth_subject=subject,
+        )
+        assert await repository.has_connected_connection(
+            rdb_session,
+            provider_id=provider_id,
+            now=now + datetime.timedelta(seconds=1),
+        )
+        assert not await repository.has_connected_connection(
+            rdb_session,
+            provider_id=provider_id,
+            now=now + datetime.timedelta(seconds=3),
+        )
+        revoked = await binding_repository.revoke(
+            rdb_session,
+            revoke=RuntimeProviderAuthBindingRevoke(
+                binding_id=binding.id,
+                expected_admin_version=binding.admin_version,
+                revoked_at=now + datetime.timedelta(seconds=4),
+                revoked_by_user_id=None,
+                reason="test",
+            ),
+        )
+
+        assert revoked is not None
+        assert not await repository.heartbeat_connection(
+            rdb_session,
+            provider_id=provider_id,
+            binding_id=binding.id,
+            credential_id=None,
+            generation=connection.generation,
+            heartbeat_at=now + datetime.timedelta(seconds=5),
+            auth_method=RuntimeProviderAuthMethod.KUBERNETES_SERVICE_ACCOUNT,
+            auth_subject=subject,
+        )
+        assert not await repository.connection_active(
+            rdb_session,
+            provider_id=provider_id,
+            binding_id=binding.id,
+            credential_id=None,
+            generation=connection.generation,
+            now=now + datetime.timedelta(seconds=5),
+            auth_method=RuntimeProviderAuthMethod.KUBERNETES_SERVICE_ACCOUNT,
+            auth_subject=subject,
+        )
+        assert not await repository.has_connected_connection(
+            rdb_session,
+            provider_id=provider_id,
+            now=now + datetime.timedelta(seconds=5),
         )
