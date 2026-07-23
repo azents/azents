@@ -338,12 +338,7 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
         if self._common_failure(scenario):
             return
         timestamp = _optional_string(body, "ts") or self.state.next_message_timestamp()
-        text = _optional_string(body, "text")
-        approval_request_id = None
-        if text is not None:
-            match = _APPROVAL_PATH.search(text)
-            if match is not None:
-                approval_request_id = match.group(1)
+        approval_request_id = _approval_request_id(body)
         delivery: dict[str, object] = {
             "operation": operation,
             "channel": _optional_string(body, "channel"),
@@ -492,6 +487,14 @@ def _object_list(value: object) -> list[dict[str, object]]:
     return result
 
 
+def _object_list_or_empty(value: object) -> list[dict[str, object]]:
+    """Return structured objects when a provider payload has the expected shape."""
+    try:
+        return _object_list(value)
+    except ValueError:
+        return []
+
+
 def _object_pages(value: object) -> list[list[dict[str, object]]]:
     if not isinstance(value, list):
         raise ValueError("history_pages must be a list.")
@@ -501,6 +504,23 @@ def _object_pages(value: object) -> list[list[dict[str, object]]]:
 def _optional_string(payload: dict[str, object], key: str) -> str | None:
     value = payload.get(key)
     return value if isinstance(value, str) and value else None
+
+
+def _approval_request_id(payload: dict[str, object]) -> str | None:
+    """Return the access-request ID from visible fallback text or Block Kit URLs."""
+    values = [_optional_string(payload, "text")]
+    for block in _object_list_or_empty(payload.get("blocks")):
+        for element in _object_list_or_empty(block.get("elements")):
+            url = element.get("url")
+            if isinstance(url, str):
+                values.append(url)
+    for value in values:
+        if value is None:
+            continue
+        match = _APPROVAL_PATH.search(value)
+        if match is not None:
+            return match.group(1)
+    return None
 
 
 def _query_metadata(query: dict[str, list[str]]) -> dict[str, object]:
