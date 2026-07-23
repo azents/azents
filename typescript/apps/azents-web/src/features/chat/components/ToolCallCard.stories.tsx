@@ -376,12 +376,26 @@ export const KnownPatch = {
             added_lines: 12,
             removed_lines: 4,
           },
+          {
+            action: "add",
+            path: "/workspace/agent/azents/src/features/chat/PatchPreview.tsx",
+            added_lines: 1,
+            removed_lines: 0,
+          },
+          {
+            action: "delete",
+            path: "/workspace/agent/azents/src/features/chat/LegacyPatchPreview.tsx",
+            added_lines: 0,
+            removed_lines: 20,
+          },
         ],
       },
     },
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
+    await expect(canvas.getByText("ToolCallCard.tsx +2")).toBeVisible();
+    await expect(canvas.queryByText(/file\(s\) changed/)).toBeNull();
     await userEvent.click(
       canvas.getByRole("button", { name: /Applied patch/ }),
     );

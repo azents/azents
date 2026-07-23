@@ -233,11 +233,10 @@ function presentationQualifier(
   switch (presentation.action) {
     case "read":
       return t("fromCharacter", { offset: presentation.qualifier });
-    case "patch":
-      return t("filesChanged", { count: presentation.qualifier });
     case "command":
     case "process":
       return t("exitCode", { code: presentation.qualifier });
+    case "patch":
     case "grep":
     case "glob":
     case "write":

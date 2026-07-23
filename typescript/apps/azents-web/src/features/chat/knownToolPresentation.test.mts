@@ -90,8 +90,8 @@ void test("specializes structured patch metadata without parsing output text", (
     type: "specialized",
     presentation: {
       action: "patch",
-      subject: "agent",
-      qualifier: "1",
+      subject: "example.ts",
+      qualifier: null,
       detail: {
         type: "patch",
         files: [
@@ -113,6 +113,102 @@ void test("specializes structured patch metadata without parsing output text", (
       },
     },
   });
+});
+
+void test("summarizes multiple patch files with the first filename", () => {
+  const paths = [
+    "/workspace/agent/src/bar.py",
+    "/workspace/agent/src/one.py",
+    "/workspace/agent/src/two.py",
+    "/workspace/agent/src/three.py",
+  ];
+  const result = knownToolPresentation(
+    toolCall({
+      name: "apply_patch",
+      arguments: JSON.stringify({
+        base_path: "/workspace/agent",
+        patch:
+          "*** Begin Patch\n" +
+          paths
+            .map(
+              (path, index) =>
+                `*** Add File: ${path.replace("/workspace/agent/", "")}\n+value = ${index}`,
+            )
+            .join("\n") +
+          "\n*** End Patch",
+      }),
+      resultMetadata: {
+        kind: "apply_patch_result",
+        changes: paths.toReversed().map((path) => ({
+          action: "add",
+          path,
+          added_lines: 1,
+          removed_lines: 0,
+        })),
+      },
+    }),
+  );
+  assert.equal(result.type, "specialized");
+  assert.equal(result.presentation.subject, "bar.py +3");
+  assert.equal(result.presentation.qualifier, null);
+});
+
+void test("keeps patch summaries stable across terminal outcomes", () => {
+  const argumentsText = JSON.stringify({
+    base_path: "/workspace/agent",
+    patch:
+      "*** Begin Patch\n" +
+      "*** Delete File: src/foo.py\n" +
+      "*** Add File: src/bar.py\n" +
+      "+value = 1\n" +
+      "*** End Patch",
+  });
+  const cases: ActiveToolCall[] = [
+    toolCall({
+      name: "apply_patch",
+      arguments: argumentsText,
+      status: "running",
+    }),
+    toolCall({
+      name: "apply_patch",
+      arguments: argumentsText,
+      resultMetadata: {
+        kind: "apply_patch_result",
+        changes: [],
+      },
+    }),
+    toolCall({
+      name: "apply_patch",
+      arguments: argumentsText,
+      status: "failed",
+      resultMetadata: {
+        kind: "apply_patch_failure",
+        applied: [
+          {
+            action: "add",
+            path: "/workspace/agent/src/bar.py",
+            added_lines: 1,
+            removed_lines: 0,
+          },
+        ],
+      },
+    }),
+    toolCall({
+      name: "apply_patch",
+      arguments: argumentsText,
+      status: "failed",
+      resultMetadata: {
+        kind: "apply_patch_failure",
+        applied: [],
+      },
+    }),
+  ];
+  for (const item of cases) {
+    const result = knownToolPresentation(item);
+    assert.equal(result.type, "specialized");
+    assert.equal(result.presentation.subject, "foo.py +1");
+    assert.equal(result.presentation.qualifier, null);
+  }
 });
 
 void test("specializes a plaintext custom apply_patch envelope", () => {
@@ -137,7 +233,7 @@ void test("specializes a plaintext custom apply_patch envelope", () => {
   );
   assert.equal(result.type, "specialized");
   assert.equal(result.presentation.action, "patch");
-  assert.equal(result.presentation.subject, "agent");
+  assert.equal(result.presentation.subject, "placeholder");
 });
 
 void test("rejects malformed plaintext custom apply_patch envelopes", () => {
