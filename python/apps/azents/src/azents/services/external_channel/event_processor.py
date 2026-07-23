@@ -70,6 +70,7 @@ from azents.services.external_channel.connection import (
 from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
 from azents.services.external_channel.slack_events import (
     SlackConnectionRevocation,
+    SlackConversationAccess,
     SlackConversationClient,
     SlackEventExcluded,
     SlackEventNormalizationError,
@@ -80,6 +81,7 @@ from azents.services.external_channel.slack_events import (
     SlackProviderResourceUnavailable,
     SlackProviderTemporaryError,
     normalize_slack_event,
+    slack_message_reference_ids,
 )
 from azents.services.input_buffer import (
     EXTERNAL_CHANNEL_INVOCATION_BATCH_ID_METADATA_KEY,
@@ -431,9 +433,10 @@ class ExternalChannelEventProcessorService:
                 revocation=normalized,
             )
             return
+        access: SlackConversationAccess | None = None
         original_url = None
         if normalized.invocation:
-            await self._validate_invocation_channel(
+            access = await self._validate_invocation_channel(
                 event=event,
                 message=normalized,
                 bot_token=credentials.bot_token,
@@ -442,12 +445,20 @@ class ExternalChannelEventProcessorService:
                 message=normalized,
                 bot_token=credentials.bot_token,
             )
+        reference_mappings = await self._resolve_reference_mappings(
+            message=normalized,
+            bot_token=credentials.bot_token,
+            channel_display_name=None if access is None else access.display_name,
+            cache={"users": {}, "channels": {}},
+        )
 
         persisted = await self._persist_message_event(
             event=event,
             configuration=configuration,
             message=normalized,
             original_url=original_url,
+            channel_display_name=None if access is None else access.display_name,
+            reference_mappings=reference_mappings,
         )
         if persisted.wake_up is not None:
             await self.session_lifecycle.send_session_wake_up(persisted.wake_up)
@@ -506,7 +517,7 @@ class ExternalChannelEventProcessorService:
         event: ExternalChannelEvent,
         message: SlackNormalizedMessage,
         bot_token: str,
-    ) -> None:
+    ) -> SlackConversationAccess:
         """Require an App-member non-Connect public or private channel."""
         try:
             access = await self.slack_client.fetch_conversation_access(
@@ -553,6 +564,7 @@ class ExternalChannelEventProcessorService:
             raise SlackEventExcluded(
                 "The Slack App must be a channel member before tracking."
             )
+        return access
 
     async def _resolve_original_url(
         self,
@@ -576,6 +588,64 @@ class ExternalChannelEventProcessorService:
         ):
             return None
 
+    async def _resolve_reference_mappings(
+        self,
+        *,
+        message: SlackNormalizedMessage,
+        bot_token: str,
+        channel_display_name: str | None,
+        cache: dict[str, dict[str, str]],
+    ) -> dict[str, dict[str, str]]:
+        """Resolve bounded Slack IDs without making message ingestion depend on it."""
+        user_ids, channel_ids = slack_message_reference_ids(message.normalized_body)
+        if message.provider_user_id is not None:
+            user_ids.add(message.provider_user_id)
+        channel_ids.add(message.channel_id)
+        mappings: dict[str, dict[str, str]] = {"users": {}, "channels": {}}
+        if channel_display_name is not None:
+            cache["channels"][message.channel_id] = channel_display_name
+        for user_id in sorted(user_ids):
+            display_name = cache["users"].get(user_id)
+            if display_name is None:
+                try:
+                    display_name = await self.slack_client.fetch_user_display_name(
+                        bot_token=bot_token,
+                        provider_user_id=user_id,
+                    )
+                except (
+                    SlackProviderCredentialsInvalid,
+                    SlackProviderPermissionDenied,
+                    SlackProviderRateLimited,
+                    SlackProviderResourceUnavailable,
+                    SlackProviderTemporaryError,
+                ):
+                    continue
+                if display_name is not None:
+                    cache["users"][user_id] = display_name
+            if display_name is not None:
+                mappings["users"][user_id] = display_name
+        for channel_id in sorted(channel_ids):
+            display_name = cache["channels"].get(channel_id)
+            if display_name is None:
+                try:
+                    display_name = await self.slack_client.fetch_channel_display_name(
+                        bot_token=bot_token,
+                        channel_id=channel_id,
+                    )
+                except (
+                    SlackProviderCredentialsInvalid,
+                    SlackProviderPermissionDenied,
+                    SlackProviderRateLimited,
+                    SlackProviderResourceUnavailable,
+                    SlackProviderTemporaryError,
+                ):
+                    continue
+                if display_name is not None:
+                    cache["channels"][channel_id] = display_name
+            if display_name is not None:
+                mappings["channels"][channel_id] = display_name
+        return {category: entries for category, entries in mappings.items() if entries}
+
     async def _persist_message_event(
         self,
         *,
@@ -583,6 +653,8 @@ class ExternalChannelEventProcessorService:
         configuration: ExternalChannelConnectionConfiguration,
         message: SlackNormalizedMessage,
         original_url: str | None,
+        channel_display_name: str | None,
+        reference_mappings: dict[str, dict[str, str]],
     ) -> ExternalChannelPersistedMessage:
         now = _now()
         async with self.session_manager() as session:
@@ -628,6 +700,11 @@ class ExternalChannelEventProcessorService:
                             "tenant_id": message.tenant_id,
                             "channel_id": message.channel_id,
                             "thread_ts": message.root_thread_ts,
+                            **(
+                                {"channel_name": channel_display_name}
+                                if channel_display_name is not None
+                                else {}
+                            ),
                         },
                         status=ExternalChannelResourceStatus.ACTIVE,
                         hydration_status=ExternalChannelHydrationStatus.PENDING,
@@ -646,14 +723,9 @@ class ExternalChannelEventProcessorService:
                 )
             if resource.status is not ExternalChannelResourceStatus.ACTIVE:
                 raise SlackEventExcluded("The external conversation is unavailable.")
-            if _connection_authored(configuration, message) and not (
-                await self.repository.delivery_provider_message_exists(
-                    session,
-                    provider_message_key=message.provider_message_key,
-                )
-            ):
+            if connection_authored(configuration, message):
                 raise SlackEventExcluded(
-                    "Unrecognized connection-authored Slack message was ignored."
+                    "Connection-authored Slack message was ignored."
                 )
             binding = await self.repository.lock_active_binding_by_route_resource(
                 session,
@@ -679,6 +751,10 @@ class ExternalChannelEventProcessorService:
                 source_event_id=event.id,
                 now=now,
                 original_url=original_url,
+                reference_mappings=_resource_reference_mappings(
+                    reference_mappings,
+                    resource.labels,
+                ),
             )
             canonical_message = persisted_revision.message
             trim = persisted_revision.trim
@@ -793,6 +869,7 @@ class ExternalChannelEventProcessorService:
         source_event_id: str | None,
         now: datetime.datetime,
         original_url: str | None,
+        reference_mappings: dict[str, dict[str, str]],
     ) -> ExternalChannelPersistedRevision:
         principal_id = None
         if message.provider_user_id is not None:
@@ -803,7 +880,9 @@ class ExternalChannelEventProcessorService:
                     provider_tenant_id=message.tenant_id,
                     provider_user_id=message.provider_user_id,
                     author_type=message.author_type,
-                    display_name=None,
+                    display_name=reference_mappings.get("users", {}).get(
+                        message.provider_user_id
+                    ),
                     avatar_url=None,
                     profile=None,
                 ),
@@ -833,6 +912,7 @@ class ExternalChannelEventProcessorService:
                 revision_kind=message.revision_kind,
                 normalized_body=message.normalized_body,
                 attachment_metadata=message.attachment_metadata,
+                reference_mappings=reference_mappings or None,
                 source_event_id=source_event_id,
                 provider_occurred_at=(
                     message.provider_updated_at or message.provider_created_at
@@ -1172,6 +1252,17 @@ class ExternalChannelEventProcessorService:
         thread_ts = labels.get("thread_ts")
         if not isinstance(channel_id, str) or not isinstance(thread_ts, str):
             raise RuntimeError("External Channel Slack resource labels are invalid.")
+        channel_display_name = labels.get("channel_name")
+        if not isinstance(channel_display_name, str) or not channel_display_name:
+            channel_display_name = None
+        reference_cache: dict[str, dict[str, str]] = {
+            "users": {},
+            "channels": (
+                {channel_id: channel_display_name}
+                if channel_display_name is not None
+                else {}
+            ),
+        }
         cursor = resource.hydration_cursor
         bounded = False
         high_watermark = resource.hydration_high_watermark_position
@@ -1207,6 +1298,14 @@ class ExternalChannelEventProcessorService:
                     if current_resource is None:
                         raise RuntimeError("External Channel resource disappeared.")
                     for history_message in page.messages:
+                        if connection_authored(configuration, history_message):
+                            continue
+                        reference_mappings = await self._resolve_reference_mappings(
+                            message=history_message,
+                            bot_token=bot_token,
+                            channel_display_name=channel_display_name,
+                            cache=reference_cache,
+                        )
                         persisted_revision = await self._persist_normalized_message(
                             session,
                             route=route,
@@ -1215,6 +1314,10 @@ class ExternalChannelEventProcessorService:
                             source_event_id=None,
                             now=_now(),
                             original_url=None,
+                            reference_mappings=_resource_reference_mappings(
+                                reference_mappings,
+                                current_resource.labels,
+                            ),
                         )
                         trim = persisted_revision.trim
                         binding = await self._record_trim(
@@ -1570,6 +1673,26 @@ def _resource_correlation_key(resource: ExternalChannelResource) -> str:
     return f"{channel_id}:{thread_ts}"
 
 
+def _resource_reference_mappings(
+    mappings: dict[str, dict[str, str]],
+    labels: dict[str, object] | None,
+) -> dict[str, dict[str, str]]:
+    """Add the tracked resource's retained channel label to one mapping."""
+    merged = {category: dict(entries) for category, entries in mappings.items()}
+    if not isinstance(labels, dict):
+        return merged
+    channel_id = labels.get("channel_id")
+    channel_name = labels.get("channel_name")
+    if (
+        isinstance(channel_id, str)
+        and channel_id
+        and isinstance(channel_name, str)
+        and channel_name
+    ):
+        merged.setdefault("channels", {})[channel_id] = channel_name
+    return merged
+
+
 def _resource_boundary(
     resource: ExternalChannelResource,
 ) -> ExternalChannelEventBoundary | None:
@@ -1584,7 +1707,7 @@ def _resource_boundary(
     )
 
 
-def _connection_authored(
+def connection_authored(
     configuration: ExternalChannelConnectionConfiguration,
     message: SlackNormalizedMessage,
 ) -> bool:

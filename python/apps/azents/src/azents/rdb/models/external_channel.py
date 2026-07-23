@@ -893,6 +893,11 @@ class RDBExternalChannelMessageRevision(RDBModel):
         nullable=True,
         default=None,
     )
+    reference_mappings: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB,
+        nullable=True,
+        default=None,
+    )
     source_event_id: Mapped[str | None] = mapped_column(
         sa.String(32),
         sa.ForeignKey("external_channel_events.id", ondelete="SET NULL"),

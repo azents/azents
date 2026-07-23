@@ -1964,6 +1964,8 @@
       "openOriginal": "원본 메시지 열기",
       "openOriginalAccessible": "{resource}의 원본 메시지 열기",
       "originalUnavailable": "원본 메시지를 열 수 없습니다.",
+      "details": "상세정보",
+      "detailsTitle": "외부 메시지 상세정보",
       "status": {
         "invoked": "호출",
         "context": "컨텍스트",

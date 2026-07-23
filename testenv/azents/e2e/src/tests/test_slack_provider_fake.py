@@ -35,10 +35,10 @@ def slack_fake_url() -> Generator[str, None, None]:
         thread.join(timeout=5)
 
 
-def test_slack_fake_records_only_sanitized_provider_evidence(
+def test_slack_fake_records_block_kit_approval_links_as_sanitized_evidence(
     slack_fake_url: str,
 ) -> None:
-    """Exclude credentials and message bodies from inspectable fake traces."""
+    """Recognize Block Kit approval buttons without retaining message content."""
     requests.post(
         f"{slack_fake_url}/api/auth.test",
         headers={"Authorization": "Bearer xoxb-private-token"},
@@ -51,9 +51,26 @@ def test_slack_fake_records_only_sanitized_provider_evidence(
             "channel": "C-E2E",
             "thread_ts": "1721600000.000100",
             "text": (
-                "Approval is required: "
-                "https://azents.example/external-channel/access/request-1"
+                "Approval is required before this participant can invoke the Agent."
             ),
+            "blocks": [
+                {
+                    "type": "actions",
+                    "elements": [
+                        {
+                            "type": "button",
+                            "text": {
+                                "type": "plain_text",
+                                "text": "Review access",
+                            },
+                            "url": (
+                                "https://azents.example/external-channel/access/"
+                                "request-1"
+                            ),
+                        }
+                    ],
+                }
+            ],
         },
         timeout=5,
     ).raise_for_status()
@@ -107,6 +124,7 @@ def test_slack_fake_controls_membership_history_and_delivery_failure(
     ).json()
 
     assert membership["channel"]["is_ext_shared"] is True
+    assert membership["channel"]["name"] == "e2e"
     assert history.status_code == 429
     assert history.headers["Retry-After"] == "1"
     assert update == {"ok": False, "error": "token_revoked"}

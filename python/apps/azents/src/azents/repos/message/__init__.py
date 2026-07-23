@@ -1,5 +1,7 @@
 """Message repository based on Event transcript."""
 
+import json
+
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -218,6 +220,17 @@ def _to_chat_message(row: RDBEvent) -> ChatMessage | None:
                     **(
                         {"sender_display_name": payload.sender_display_name}
                         if payload.sender_display_name is not None
+                        else {}
+                    ),
+                    **(
+                        {
+                            "reference_mappings": json.dumps(
+                                payload.reference_mappings,
+                                ensure_ascii=False,
+                                sort_keys=True,
+                            )
+                        }
+                        if payload.reference_mappings
                         else {}
                     ),
                     **(

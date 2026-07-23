@@ -1,5 +1,7 @@
 """Slack External Channel event normalization and API adapter tests."""
 
+import json
+
 import httpx
 import pytest
 
@@ -17,6 +19,7 @@ from azents.services.external_channel.slack_events import (
     SlackProviderPermissionDenied,
     SlackProviderRateLimited,
     normalize_slack_event,
+    slack_message_reference_ids,
     slack_provider_position,
 )
 
@@ -186,6 +189,16 @@ def test_provider_position_orders_variable_width_slack_timestamps() -> None:
     assert slack_provider_position("10.1") == "00000000000000000010.100000"
 
 
+def test_extracts_bounded_user_and_channel_reference_ids() -> None:
+    """Provider reference mapping preserves actionable IDs for the Agent."""
+    users, channels = slack_message_reference_ids(
+        "<@U1> asks @W2 to check <#C1|incidents> and #G2."
+    )
+
+    assert users == {"U1", "W2"}
+    assert channels == {"C1", "G2"}
+
+
 async def test_conversation_access_requires_membership_and_exposes_connect() -> None:
     """First-mention validation distinguishes membership and Slack Connect."""
 
@@ -195,6 +208,7 @@ async def test_conversation_access_requires_membership_and_exposes_connect() -> 
             json={
                 "ok": True,
                 "channel": {
+                    "name": "incidents",
                     "is_member": False,
                     "is_channel": True,
                     "is_group": False,
@@ -214,6 +228,45 @@ async def test_conversation_access_requires_membership_and_exposes_connect() -> 
     assert access.app_member is False
     assert access.external_shared is True
     assert access.public_or_private_channel is True
+    assert access.display_name == "#incidents"
+
+
+async def test_resolves_slack_user_and_channel_display_names() -> None:
+    """Identity enrichment prefers the provider's human-readable labels."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/users.info":
+            assert request.url.params["user"] == "U1"
+            return httpx.Response(
+                200,
+                json={
+                    "ok": True,
+                    "user": {
+                        "profile": {"display_name": "Alice"},
+                        "real_name": "Alice Example",
+                    },
+                },
+            )
+        assert request.url.path == "/api/conversations.info"
+        assert request.url.params["channel"] == "C1"
+        return httpx.Response(
+            200,
+            json={"ok": True, "channel": {"name": "incidents"}},
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        client = SlackConversationClient(http)
+        user = await client.fetch_user_display_name(
+            bot_token="xoxb-secret",
+            provider_user_id="U1",
+        )
+        channel = await client.fetch_channel_display_name(
+            bot_token="xoxb-secret",
+            channel_id="C1",
+        )
+
+    assert user == "Alice"
+    assert channel == "#incidents"
 
 
 async def test_thread_page_uses_cursor_and_normalizes_messages() -> None:
@@ -397,7 +450,7 @@ async def test_channel_action_message_mutations_are_single_provider_requests(
                 tenant_id="T1",
                 channel_id="C1",
                 thread_ts="1721600000.000100",
-                text="Reply",
+                markdown_text="Reply",
             )
         elif operation == "update":
             result = await client.update_message(
@@ -420,6 +473,77 @@ async def test_channel_action_message_mutations_are_single_provider_requests(
     assert len(requests) == 1
     assert requests[0].url.path == expected_path
     assert requests[0].headers["Authorization"] == "Bearer xoxb-secret"
+    payload = json.loads(requests[0].content)
+    if operation == "post":
+        assert payload["markdown_text"] == "Reply"
+        assert "text" not in payload
+        assert "blocks" not in payload
+
+
+async def test_operational_blocks_include_accessible_fallback_text() -> None:
+    """Operational Slack messages use Block Kit without losing notification text."""
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"ok": True, "ts": "1721600001.000100"})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        result = await SlackConversationClient(http).post_blocks(
+            bot_token="xoxb-secret",
+            tenant_id="T1",
+            channel_id="C1",
+            thread_ts="1721600000.000100",
+            text="Agent work is in progress.",
+            blocks=[
+                {
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": "*Working*"},
+                }
+            ],
+        )
+
+    assert result.status == "delivered"
+    assert json.loads(requests[0].content) == {
+        "channel": "C1",
+        "thread_ts": "1721600000.000100",
+        "text": "Agent work is in progress.",
+        "blocks": [
+            {
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": "*Working*"},
+            }
+        ],
+        "unfurl_links": False,
+        "unfurl_media": False,
+    }
+
+
+async def test_approval_control_message_uses_block_kit_button() -> None:
+    """Approval delivery renders a Slack button rather than a raw URL."""
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"ok": True, "ts": "1721600001.000100"})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        result = await SlackConversationClient(http).post_approval_control_message(
+            bot_token="xoxb-secret",
+            tenant_id="T1",
+            channel_id="C1",
+            thread_ts="1721600000.000100",
+            approval_url="https://azents.example/access/request-1",
+        )
+
+    assert result.status == "delivered"
+    payload = json.loads(requests[0].content)
+    assert payload["text"] == (
+        "Approval is required before this participant can invoke the Agent."
+    )
+    button = payload["blocks"][1]["elements"][0]
+    assert button["type"] == "button"
+    assert button["url"] == "https://azents.example/access/request-1"
 
 
 async def test_channel_action_rate_limit_is_terminal_failed_without_retry() -> None:
@@ -437,9 +561,32 @@ async def test_channel_action_rate_limit_is_terminal_failed_without_retry() -> N
             tenant_id="T1",
             channel_id="C1",
             thread_ts="1721600000.000100",
-            text="Reply",
+            markdown_text="Reply",
         )
 
     assert calls == 1
     assert result.status == "failed"
     assert result.error_kind == "rate_limited"
+
+
+async def test_channel_action_rejects_over_limit_markdown_without_request() -> None:
+    """The delivery boundary rejects invalid provider text before mutation."""
+    calls = 0
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(200, json={"ok": True, "ts": "1721600001.000100"})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        result = await SlackConversationClient(http).post_message(
+            bot_token="xoxb-secret",
+            tenant_id="T1",
+            channel_id="C1",
+            thread_ts="1721600000.000100",
+            markdown_text="x" * 12_001,
+        )
+
+    assert calls == 0
+    assert result.status == "failed"
+    assert result.error_kind == "provider_payload_invalid"

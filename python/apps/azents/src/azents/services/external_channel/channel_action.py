@@ -275,11 +275,7 @@ class ExternalChannelActionService:
                 error_summary="Slack delivery target is incomplete.",
             )
         match target.operation:
-            case (
-                ExternalChannelDeliveryOperation.REPLY
-                | ExternalChannelDeliveryOperation.PROGRESS_CREATE
-                | ExternalChannelDeliveryOperation.CONTROL_MESSAGE
-            ):
+            case ExternalChannelDeliveryOperation.REPLY:
                 text = payload.get("text")
                 if not isinstance(text, str):
                     return _invalid_payload()
@@ -288,12 +284,26 @@ class ExternalChannelActionService:
                     tenant_id=tenant_id,
                     channel_id=channel_id,
                     thread_ts=thread_ts,
+                    markdown_text=text,
+                )
+            case ExternalChannelDeliveryOperation.PROGRESS_CREATE:
+                text = payload.get("text")
+                blocks = _blocks(payload.get("blocks"))
+                if not isinstance(text, str) or blocks is None:
+                    return _invalid_payload()
+                return await self.slack_client.post_blocks(
+                    bot_token=bot_token,
+                    tenant_id=tenant_id,
+                    channel_id=channel_id,
+                    thread_ts=thread_ts,
                     text=text,
+                    blocks=blocks,
                 )
             case ExternalChannelDeliveryOperation.PROGRESS_UPDATE:
                 text = payload.get("text")
+                blocks = _blocks(payload.get("blocks"))
                 message_ts = _provider_message_ts(payload.get("provider_message_key"))
-                if not isinstance(text, str) or message_ts is None:
+                if not isinstance(text, str) or blocks is None or message_ts is None:
                     return _invalid_payload()
                 return await self.slack_client.update_message(
                     bot_token=bot_token,
@@ -301,6 +311,7 @@ class ExternalChannelActionService:
                     channel_id=channel_id,
                     message_ts=message_ts,
                     text=text,
+                    blocks=blocks,
                 )
             case ExternalChannelDeliveryOperation.PROGRESS_DELETE:
                 message_ts = _provider_message_ts(payload.get("provider_message_key"))
@@ -312,6 +323,8 @@ class ExternalChannelActionService:
                     channel_id=channel_id,
                     message_ts=message_ts,
                 )
+            case ExternalChannelDeliveryOperation.CONTROL_MESSAGE:
+                return _invalid_payload()
             case _ as unreachable:
                 assert_never(unreachable)
 
@@ -330,3 +343,12 @@ def _invalid_payload() -> SlackControlMessageResult:
         error_kind="provider_payload_invalid",
         error_summary="The committed provider request is incomplete.",
     )
+
+
+def _blocks(value: object) -> list[dict[str, object]] | None:
+    """Validate one persisted Slack Block Kit list."""
+    if not isinstance(value, list) or not all(
+        isinstance(block, dict) for block in value
+    ):
+        return None
+    return [block for block in value if isinstance(block, dict)]

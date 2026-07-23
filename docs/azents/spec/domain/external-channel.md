@@ -20,6 +20,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/external-channel-approval/**
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/session-channels/**
+  - typescript/apps/azents-web/src/features/chat/components/ExternalChannelMessage.tsx
+  - typescript/apps/azents-web/src/features/chat/externalChannelMessage.ts
   - typescript/apps/azents-web/src/trpc/routers/externalChannel.ts
 api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels
@@ -59,7 +61,7 @@ Slack is the first provider. Each connection uses a manually configured dedicate
 | Resource | One Slack thread with provider labels, availability, hydration cursor/high-watermark, reconciliation boundary, and latest activity. |
 | Event | Durable provider envelope admission keyed by connection and provider event identity. Processing is at-least-once and domain writes are idempotent. |
 | Principal | Provider tenant/user identity and author category. It is not an Azents User or WorkspaceUser. |
-| Message and revision | Canonical provider message plus immutable original/edit/delete revisions. `original_url` is nullable and is set only from a successful provider permalink lookup. |
+| Message and revision | Canonical provider message plus immutable original/edit/delete revisions. Revisions retain optional bounded Slack user/channel ID-to-display-name mappings for model and UI presentation. `original_url` is nullable and is set only from a successful provider permalink lookup. |
 | Pending context | Unprojected same-route/resource revisions retained for at most 7 days, 100 messages, and 256 KiB. Oldest content is expired or trimmed first. |
 | Binding | Active or disconnected link from one route/resource to one AgentSession. Initial activation waits for hydration reconciliation. |
 | Invocation batch | Immutable ordered revision membership released through one authorized trigger and referenced by a batch InputBuffer. |
@@ -108,6 +110,7 @@ Connection responses expose provider identity, capabilities, health, route relat
 
 ## Changelog
 
+- **2026-07-23** (spec_version 5) — Added immutable bounded Slack reference mappings, readable external-message presentation, and connected-app self-message exclusion while retaining canonical provider IDs and bodies.
 - **2026-07-23** (spec_version 4) — Removed route lifecycle state from persistence, routing, management responses, and UI. Connection health, Agent lifecycle, and binding/work/resource state now own their respective admission and termination decisions.
 - **2026-07-22** (spec_version 3) — Separated provider health from Agent route lifecycle, fenced stale validation results, and required Slack conversation metadata scopes.
 - **2026-07-22** (spec_version 2) — Added copy-ready Slack App setup guidance, App/Token ownership validation, complete connection replacement, unconditional idempotent disconnect, and active-list filtering for disconnected connections.

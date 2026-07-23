@@ -16,7 +16,7 @@ Design documents are accumulated records and are not listed individually in this
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
 | [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-07-22 | 52 |
-| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-23 | 128 |
+| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-23 | 129 |
 | [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-07-23 | 4 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-21 | 10 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-17 | 5 |
@@ -30,16 +30,16 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
-| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-07-23 | 127 |
+| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-07-23 | 128 |
 | [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-07-22 | 24 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-07-03 | 3 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-22 | 41 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-07-21 | 18 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-07-22 | 31 |
-| [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-07-23 | 2 |
-| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-07-22 | 1 |
+| [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-07-23 | 3 |
+| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-07-23 | 2 |
 | [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-07-23 | 5 |
-| [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-07-23 | 4 |
+| [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-07-23 | 5 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-07-23 | 25 |
 | [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-07-19 | 1 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
@@ -323,6 +323,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Slack BYOA Discussion — Discussion Points and Decisions Historical Requirements Reconstruction](requirements/slack-260414-slack-byoa.md) | slack-260414 | 2026-04-14 | 2026-04-12 |
 | [External Channel Agent Conversation Requirements](requirements/slack-260721-external-channel-conversation.md) | slack-260721 | 2026-07-21 | - |
 | [Slack Connection Setup and Management Requirements](requirements/slack-260722-connection-management.md) | slack-260722 | 2026-07-22 | - |
+| [Readable Slack Channel Messages Requirements](requirements/slack-260723-readable-channel-messages.md) | slack-260723 | 2026-07-23 | 2026-07-23 |
 | [Stage 4 (browser/web QA) Historical Requirements Reconstruction](requirements/stage4-260410-stage4-web.md) | stage4-260410 | 2026-04-10 | 2026-04-10 |
 | [Use Standard Responses for ChatGPT OAuth Historical Requirements Reconstruction](requirements/standard-260716-standard-responses-for-chatgpt-oauth.md) | standard-260716 | 2026-07-16 | - |
 | [stdio MCP Infrastructure + Google Analytics Toolkit Integration Historical Requirements Reconstruction](requirements/stdio-260326-stdio-mcp-ga4-integration.md) | stdio-260326 | 2026-03-26 | 2026-03-26 |
@@ -640,6 +641,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Slack BYOA Discussion — Discussion Points and Decisions](adr/slack-260414-slack-byoa.md)
 - [External Channel Agent Conversation](adr/slack-260721-external-channel-conversation.md)
 - [Slack Connection Setup and Management](adr/slack-260722-connection-management.md)
+- [Readable Slack Channel Messages](adr/slack-260723-readable-channel-messages.md)
 - [Stage 4 (browser/web QA) Historical Decision Reconstruction](adr/stage4-260410-stage4-web.md)
 - [Use Standard Responses for ChatGPT OAuth](adr/standard-260716-standard-responses-for-chatgpt-oauth.md)
 - [stdio MCP Infrastructure + Google Analytics Toolkit Integration Historical Decision Reconstruction](adr/stdio-260326-stdio-mcp-ga4-integration.md)

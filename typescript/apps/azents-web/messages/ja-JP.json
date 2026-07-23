@@ -1964,6 +1964,8 @@
       "openOriginal": "元のメッセージを開く",
       "openOriginalAccessible": "{resource} の元のメッセージを開く",
       "originalUnavailable": "元のメッセージは利用できません。",
+      "details": "詳細情報",
+      "detailsTitle": "外部メッセージの詳細",
       "status": {
         "invoked": "呼び出し",
         "context": "コンテキスト",

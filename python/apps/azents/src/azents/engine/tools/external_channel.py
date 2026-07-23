@@ -39,6 +39,9 @@ from azents.repos.external_channel.work_data import (
 from azents.services.external_channel.channel_action import (
     ExternalChannelActionService,
 )
+from azents.services.external_channel.slack_events import (
+    SLACK_MARKDOWN_TEXT_MAX_LENGTH,
+)
 
 EXTERNAL_CHANNEL_TOOLKIT_SLUG = "external_channel"
 _COMPACTION_HEADING = "## Channel Work Snapshot"
@@ -61,7 +64,11 @@ class FinishChannelActionInput(BaseModel):
 
     mode: Literal["finish"]
     binding: str = Field(min_length=1, max_length=80)
-    message: str | None = Field(default=None, min_length=1, max_length=8000)
+    message: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=SLACK_MARKDOWN_TEXT_MAX_LENGTH,
+    )
 
 
 class ContinueChannelActionInput(BaseModel):
@@ -71,7 +78,11 @@ class ContinueChannelActionInput(BaseModel):
 
     mode: Literal["continue"]
     binding: str = Field(min_length=1, max_length=80)
-    message: str | None = Field(default=None, min_length=1, max_length=8000)
+    message: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=SLACK_MARKDOWN_TEXT_MAX_LENGTH,
+    )
     todo_update: list[ChannelActionTaskInput] | None = Field(
         default=None,
         max_length=50,

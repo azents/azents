@@ -1964,6 +1964,8 @@
       "openOriginal": "Ouvrir le message original",
       "openOriginalAccessible": "Ouvrir le message original dans {resource}",
       "originalUnavailable": "Le message original n’est pas disponible.",
+      "details": "Détails",
+      "detailsTitle": "Détails du message externe",
       "status": {
         "invoked": "Invocation",
         "context": "Contexte",

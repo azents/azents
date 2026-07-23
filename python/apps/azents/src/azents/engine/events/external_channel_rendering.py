@@ -123,6 +123,17 @@ def render_external_channel_turn(
                 f"   Correction of revision: {payload.correction_of_revision_id}"
             )
         lines.append(f"   Body: {_body(payload)}")
+    mappings = _reference_mappings(payloads)
+    if mappings:
+        lines.extend(["", "Identity Mappings"])
+        for category, heading in (("users", "Users"), ("channels", "Channels")):
+            entries = mappings.get(category)
+            if entries:
+                lines.append(heading)
+                lines.extend(
+                    f"- {identifier}: {display_name}"
+                    for identifier, display_name in sorted(entries.items())
+                )
     return "\n".join(lines)
 
 
@@ -133,3 +144,16 @@ def _body(payload: ExternalChannelMessagePayload) -> str:
     if payload.body is None or not payload.body.strip():
         return "[Message has no text content.]"
     return payload.body
+
+
+def _reference_mappings(
+    payloads: Sequence[ExternalChannelMessagePayload],
+) -> dict[str, dict[str, str]]:
+    """Merge one turn's immutable provider ID-to-name mappings."""
+    merged: dict[str, dict[str, str]] = {}
+    for payload in payloads:
+        for category, entries in payload.reference_mappings.items():
+            if category not in {"users", "channels"}:
+                continue
+            merged.setdefault(category, {}).update(entries)
+    return merged

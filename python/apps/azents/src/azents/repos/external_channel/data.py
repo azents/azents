@@ -307,6 +307,7 @@ class ExternalChannelMessageRevision(_Record):
     revision_kind: ExternalChannelMessageRevisionKind
     normalized_body: str | None
     attachment_metadata: dict[str, Any] | None
+    reference_mappings: dict[str, Any] | None
     source_event_id: str | None
     provider_occurred_at: datetime.datetime | None
     observed_at: datetime.datetime
@@ -321,6 +322,7 @@ class ExternalChannelMessageRevisionCreate(_Record):
     revision_kind: ExternalChannelMessageRevisionKind
     normalized_body: str | None
     attachment_metadata: dict[str, Any] | None
+    reference_mappings: dict[str, Any] | None
     source_event_id: str | None
     provider_occurred_at: datetime.datetime | None
 
@@ -463,6 +465,7 @@ class ExternalChannelInvocationProjectionItem(_Record):
     revision_kind: ExternalChannelMessageRevisionKind
     revision_body: str | None
     attachment_metadata: dict[str, Any] | None
+    reference_mappings: dict[str, Any] | None
     provider_occurred_at: datetime.datetime | None
     resource_id: str
     provider_resource_key: str

@@ -3,6 +3,7 @@
 import datetime
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from typing import Literal
 
@@ -17,6 +18,12 @@ from azents.services.external_channel.slack_endpoint import slack_api_base_url
 
 _MAX_NORMALIZED_TEXT_BYTES = 64 * 1024
 _MAX_ATTACHMENT_TYPES = 32
+SLACK_MARKDOWN_TEXT_MAX_LENGTH = 12_000
+_MAX_REFERENCE_IDS = 20
+_SLACK_USER_REFERENCE = re.compile(r"<@([A-Z0-9]+)(?:\|[^>]+)?>|@([UW][A-Z0-9]+)")
+_SLACK_CHANNEL_REFERENCE = re.compile(
+    r"<#([CG][A-Z0-9]+)(?:\|[^>]+)?>|#([CG][A-Z0-9]+)"
+)
 
 
 class SlackEventNormalizationError(ValueError):
@@ -103,6 +110,7 @@ class SlackConversationAccess:
     app_member: bool
     external_shared: bool
     public_or_private_channel: bool
+    display_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -298,7 +306,73 @@ class SlackConversationClient:
             )
             and channel.get("is_im") is not True
             and channel.get("is_mpim") is not True,
+            display_name=_channel_display_name(channel),
         )
+
+    async def fetch_channel_display_name(
+        self,
+        *,
+        bot_token: str,
+        channel_id: str,
+    ) -> str | None:
+        """Resolve one Slack channel ID to a display label."""
+        response = await self._request(
+            "GET",
+            "/conversations.info",
+            bot_token=bot_token,
+            params={"channel": channel_id, "include_num_members": "false"},
+        )
+        payload = self._success_payload(response)
+        channel = payload.get("channel")
+        if not isinstance(channel, dict):
+            raise SlackProviderTemporaryError(
+                "Slack conversation response is malformed."
+            )
+        return _channel_display_name(channel)
+
+    async def fetch_user_display_name(
+        self,
+        *,
+        bot_token: str,
+        provider_user_id: str,
+    ) -> str | None:
+        """Resolve one Slack user or bot identity to a human-readable name."""
+        if provider_user_id.startswith("bot:"):
+            response = await self._request(
+                "GET",
+                "/bots.info",
+                bot_token=bot_token,
+                params={"bot": provider_user_id.removeprefix("bot:")},
+            )
+            payload = self._success_payload(response)
+            bot = payload.get("bot")
+            if not isinstance(bot, dict):
+                raise SlackProviderTemporaryError("Slack bot response is malformed.")
+            name = bot.get("name")
+            return name if isinstance(name, str) and name else None
+        if provider_user_id.startswith("app:"):
+            return None
+        response = await self._request(
+            "GET",
+            "/users.info",
+            bot_token=bot_token,
+            params={"user": provider_user_id},
+        )
+        payload = self._success_payload(response)
+        user = payload.get("user")
+        if not isinstance(user, dict):
+            raise SlackProviderTemporaryError("Slack user response is malformed.")
+        profile = user.get("profile")
+        profile_values = profile if isinstance(profile, dict) else {}
+        for value in (
+            profile_values.get("display_name"),
+            user.get("real_name"),
+            profile_values.get("real_name"),
+            user.get("name"),
+        ):
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return None
 
     async def fetch_thread_page(
         self,
@@ -390,10 +464,7 @@ class SlackConversationClient:
                 json_body={
                     "channel": channel_id,
                     "thread_ts": thread_ts,
-                    "text": (
-                        "Approval is required before this participant can invoke "
-                        f"the Agent: {approval_url}"
-                    ),
+                    **_approval_message_payload(approval_url),
                     "unfurl_links": False,
                     "unfurl_media": False,
                 },
@@ -456,9 +527,16 @@ class SlackConversationClient:
         tenant_id: str,
         channel_id: str,
         thread_ts: str,
-        text: str,
+        markdown_text: str,
     ) -> SlackControlMessageResult:
         """Attempt one ordinary thread message without retry."""
+        if len(markdown_text) > SLACK_MARKDOWN_TEXT_MAX_LENGTH:
+            return SlackControlMessageResult(
+                status="failed",
+                provider_message_key=None,
+                error_kind="provider_payload_invalid",
+                error_summary="Slack Markdown text exceeds the supported limit.",
+            )
         return await self._attempt_message_operation(
             bot_token=bot_token,
             tenant_id=tenant_id,
@@ -467,7 +545,7 @@ class SlackConversationClient:
             json_body={
                 "channel": channel_id,
                 "thread_ts": thread_ts,
-                "text": text,
+                "markdown_text": markdown_text,
                 "unfurl_links": False,
                 "unfurl_media": False,
             },
@@ -482,6 +560,7 @@ class SlackConversationClient:
         channel_id: str,
         message_ts: str,
         text: str,
+        blocks: list[dict[str, object]] | None = None,
     ) -> SlackControlMessageResult:
         """Attempt one message update without retry."""
         return await self._attempt_message_operation(
@@ -489,8 +568,40 @@ class SlackConversationClient:
             tenant_id=tenant_id,
             channel_id=channel_id,
             path="/chat.update",
-            json_body={"channel": channel_id, "ts": message_ts, "text": text},
+            json_body={
+                "channel": channel_id,
+                "ts": message_ts,
+                "text": text,
+                **({"blocks": blocks} if blocks is not None else {}),
+            },
             expected_message_ts=message_ts,
+        )
+
+    async def post_blocks(
+        self,
+        *,
+        bot_token: str,
+        tenant_id: str,
+        channel_id: str,
+        thread_ts: str,
+        text: str,
+        blocks: list[dict[str, object]],
+    ) -> SlackControlMessageResult:
+        """Post one operational Block Kit message without retry."""
+        return await self._attempt_message_operation(
+            bot_token=bot_token,
+            tenant_id=tenant_id,
+            channel_id=channel_id,
+            path="/chat.postMessage",
+            json_body={
+                "channel": channel_id,
+                "thread_ts": thread_ts,
+                "text": text,
+                "blocks": blocks,
+                "unfurl_links": False,
+                "unfurl_media": False,
+            },
+            expected_message_ts=None,
         )
 
     async def delete_message(
@@ -684,6 +795,64 @@ def _author(
     if user_id is not None:
         return ExternalChannelPrincipalAuthorType.HUMAN, user_id
     return ExternalChannelPrincipalAuthorType.SYSTEM, None
+
+
+def slack_message_reference_ids(body: str | None) -> tuple[set[str], set[str]]:
+    """Extract bounded Slack user and channel IDs from message text."""
+    if body is None:
+        return set(), set()
+    user_ids = {
+        match.group(1) or match.group(2)
+        for match in _SLACK_USER_REFERENCE.finditer(body)
+        if match.group(1) or match.group(2)
+    }
+    channel_ids = {
+        match.group(1) or match.group(2)
+        for match in _SLACK_CHANNEL_REFERENCE.finditer(body)
+        if match.group(1) or match.group(2)
+    }
+    return (
+        set(sorted(user_ids)[:_MAX_REFERENCE_IDS]),
+        set(sorted(channel_ids)[:_MAX_REFERENCE_IDS]),
+    )
+
+
+def _channel_display_name(channel: dict[str, object]) -> str | None:
+    """Return one display-ready Slack channel label."""
+    name = channel.get("name")
+    if isinstance(name, str) and name.strip():
+        return f"#{name.strip()}"
+    return None
+
+
+def _approval_message_payload(approval_url: str) -> dict[str, object]:
+    """Render one accessible Block Kit access-approval message."""
+    return {
+        "text": "Approval is required before this participant can invoke the Agent.",
+        "blocks": [
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": (
+                        "*Approval required*\n"
+                        "Approve this participant before the Agent can respond."
+                    ),
+                },
+            },
+            {
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "Review access"},
+                        "url": approval_url,
+                        "action_id": "azents_external_channel_access_review",
+                    }
+                ],
+            },
+        ],
+    }
 
 
 def _bounded_text(value: object) -> str:

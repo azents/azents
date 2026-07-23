@@ -22,7 +22,7 @@ code_paths:
 api_routes:
   - /external-channel/v1/slack/events
 last_verified_at: 2026-07-23
-spec_version: 4
+spec_version: 5
 ---
 
 # External Channel Provider Ingress
@@ -82,7 +82,9 @@ The worker claims admitted events in bounded batches with a claim owner and expi
   connection-to-Agent relationship for later reconfiguration.
 - Eligible invocation messages validate channel membership and Slack Connect/DM exclusion before creating a tracked resource.
 - Unlinked ordinary messages wait briefly for an out-of-order correlated mention, then become ignored rather than creating a resource.
+- Messages authored by the configured Slack App or bot are ignored during ordinary event processing and history hydration, preventing provider output from re-entering Agent context.
 - Canonical principals, messages, revisions, and pending context are stored before access decisions.
+- Ingestion enriches revisions with bounded sender/current-channel/in-body Slack reference mappings when provider lookup succeeds. Lookup failure leaves canonical provider IDs and messages intact.
 - Provider permalink resolution is optional and occurs outside the persistence transaction. Controlled provider failures leave `original_url` null and do not hide the message.
 - First invocation starts bounded `conversations.replies` hydration. Pages reconcile provider history into the same canonical message identities and update the high-watermark and event boundary.
 - If routing becomes unavailable after hydration starts, hydration completes as
@@ -99,6 +101,7 @@ Deterministic E2E uses signed raw callbacks and a fake HTTP/WebSocket provider t
 
 ## Changelog
 
+- **2026-07-23** (spec_version 5) — Excluded connected-App authored messages from ingress and hydration, and added best-effort bounded Slack identity-reference enrichment.
 - **2026-07-23** (spec_version 4) — Removed route lifecycle state from ingress selection; active connection admission and active Agent lifecycle now determine routability.
 - **2026-07-22** (spec_version 3) — Separated provider connection health from Agent routing, preserved routes across credential and permission failures, and required channel metadata scopes in generated Slack manifests.
 - **2026-07-22** (spec_version 2) — Replaced per-connection selector callbacks with one fixed endpoint routed by Slack App/Team identity and authenticated by the selected connection's HMAC secret.

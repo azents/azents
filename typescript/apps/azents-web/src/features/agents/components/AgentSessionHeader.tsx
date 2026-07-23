@@ -331,22 +331,38 @@ export function AgentSessionHeader({
           variant="default"
           px="sm"
         >
-          <Tabs.List>
+          <Tabs.List
+            style={{
+              flexWrap: "nowrap",
+              overflowX: "auto",
+              overflowY: "hidden",
+            }}
+          >
             <Tabs.Tab
               value="chat"
               leftSection={<IconMessageCircle size={14} />}
+              style={{ flexShrink: 0 }}
             >
               {t("tabs.chat")}
             </Tabs.Tab>
-            <Tabs.Tab value="context" leftSection={<IconChartBar size={14} />}>
+            <Tabs.Tab
+              value="context"
+              leftSection={<IconChartBar size={14} />}
+              style={{ flexShrink: 0 }}
+            >
               {t("tabs.context")}
             </Tabs.Tab>
-            <Tabs.Tab value="subagents" leftSection={<IconRobot size={14} />}>
+            <Tabs.Tab
+              value="subagents"
+              leftSection={<IconRobot size={14} />}
+              style={{ flexShrink: 0 }}
+            >
               {t("subagents.title")}
             </Tabs.Tab>
             <Tabs.Tab
               value="channels"
               leftSection={<IconPlugConnected size={rem(14)} />}
+              style={{ flexShrink: 0 }}
             >
               {t("tabs.channels")}
             </Tabs.Tab>

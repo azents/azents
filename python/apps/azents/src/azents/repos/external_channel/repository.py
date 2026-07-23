@@ -1824,6 +1824,7 @@ class ExternalChannelRepository:
                     "revision_body"
                 ),
                 RDBExternalChannelMessageRevision.attachment_metadata,
+                RDBExternalChannelMessageRevision.reference_mappings,
                 RDBExternalChannelMessageRevision.provider_occurred_at,
                 RDBExternalChannelMessage.resource_id,
                 RDBExternalChannelResource.provider_resource_key,
@@ -2349,23 +2350,6 @@ class ExternalChannelRepository:
             ),
         )
         return ExternalChannelDeliveryAttempt.model_validate(rdb)
-
-    async def delivery_provider_message_exists(
-        self,
-        session: AsyncSession,
-        *,
-        provider_message_key: str,
-    ) -> bool:
-        """Return whether a known provider operation owns the message identity."""
-        exists = await session.scalar(
-            sa.select(
-                sa.exists().where(
-                    RDBExternalChannelDeliveryAttempt.provider_message_key
-                    == provider_message_key
-                )
-            )
-        )
-        return bool(exists)
 
     async def lock_delivery_attempt(
         self,

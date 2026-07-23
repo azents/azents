@@ -29,6 +29,7 @@ def _payload(
     batch_id: str = "batch-1",
     external_message_id: str = "message-1",
     revision_id: str = "revision-1",
+    reference_mappings: dict[str, dict[str, str]] | None = None,
 ) -> ExternalChannelMessagePayload:
     return ExternalChannelMessagePayload(
         provider=ExternalChannelProvider.SLACK,
@@ -52,6 +53,7 @@ def _payload(
         lifecycle=lifecycle,
         body=body,
         attachment_metadata={},
+        reference_mappings=reference_mappings or {},
         provider_created_at=datetime.datetime(2026, 7, 22, 12, 0, tzinfo=datetime.UTC),
         provider_updated_at=None,
         original_url="https://slack.example/permalink",
@@ -126,3 +128,23 @@ def test_turn_renderer_labels_corrections() -> None:
 
     assert "Revision: edit" in rendered
     assert "Correction of revision: revision-original" in rendered
+
+
+def test_turn_renderer_keeps_reference_ids_and_display_names_together() -> None:
+    """The Agent receives provider-safe identity references with readable labels."""
+    rendered = render_external_channel_turn(
+        [
+            _payload(
+                body="<@U1> asked #C1 to investigate.",
+                reference_mappings={
+                    "users": {"U1": "Alice"},
+                    "channels": {"C1": "#incidents"},
+                },
+            )
+        ]
+    )
+
+    assert "Body: <@U1> asked #C1 to investigate." in rendered
+    assert "Identity Mappings" in rendered
+    assert "- U1: Alice" in rendered
+    assert "- C1: #incidents" in rendered
