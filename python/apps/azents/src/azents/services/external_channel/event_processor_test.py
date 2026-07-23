@@ -1076,6 +1076,7 @@ async def test_initial_binding_release_creates_one_session_link_and_tracker(
     assert activity.request_payload["blocks"] == [
         {
             "type": "task_card",
+            "block_id": f"work_{activity.request_payload['work_id']}_1",
             "task_id": "activity-status",
             "title": "Agent is checking your message",
             "status": "in_progress",

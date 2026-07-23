@@ -384,12 +384,17 @@ async def test_recreated_tracker_catches_up_to_latest_desired_revision(
     work.progress_provider_message_key = None
     work.desired_progress_revision = 2
     work.desired_progress_payload = {
+        "schema_version": 2,
         "state": "working",
+        "title": "Investigating…",
         "tasks": [
             {
                 "id": "investigate",
                 "title": "Investigate",
                 "status": "in_progress",
+                "details": None,
+                "output": None,
+                "sources": [],
             }
         ],
     }
@@ -441,15 +446,15 @@ async def test_recreated_tracker_catches_up_to_latest_desired_revision(
     assert followup.request_payload["provider_message_key"] == ("slack:T1:C1:3.000001")
     assert followup.request_payload["desired_progress_revision"] == 2
     assert followup.request_payload["text"] == (
-        "Agent is working\nIn progress: Investigate"
+        "Investigating…\nIn progress: Investigate"
     )
     assert followup.request_payload["blocks"] == [
         {
             "type": "plan",
-            "title": "Agent is working",
+            "block_id": f"work_{work.id}_2",
+            "title": "Investigating…",
             "tasks": [
                 {
-                    "type": "task_card",
                     "task_id": "investigate",
                     "title": "Investigate",
                     "status": "in_progress",
@@ -522,15 +527,15 @@ async def test_continue_after_finish_creates_a_new_activity_tracker(
     assert create_attempt.provider_message_key is None
     assert create_attempt.request_payload["desired_progress_revision"] == 1
     assert create_attempt.request_payload["text"] == (
-        "Agent is working\nIn progress: Start the next task"
+        "Starting the next task…\nIn progress: Start the next task"
     )
     assert create_attempt.request_payload["blocks"] == [
         {
             "type": "plan",
-            "title": "Agent is working",
+            "block_id": f"work_{continued.work_id}_1",
+            "title": "Starting the next task…",
             "tasks": [
                 {
-                    "type": "task_card",
                     "task_id": "next-task",
                     "title": "Start the next task",
                     "status": "in_progress",
@@ -546,12 +551,17 @@ async def test_continue_after_finish_creates_a_new_activity_tracker(
     assert active_work is not None
     assert active_work.progress_provider_message_key is None
     assert active_work.desired_progress_payload == {
+        "schema_version": 2,
         "state": "working",
+        "title": "Starting the next task…",
         "tasks": [
             {
                 "id": "next-task",
                 "title": "Start the next task",
                 "status": "in_progress",
+                "details": None,
+                "output": None,
+                "sources": [],
             }
         ],
     }

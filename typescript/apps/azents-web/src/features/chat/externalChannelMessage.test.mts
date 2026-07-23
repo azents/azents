@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { externalChannelMessagePresentation } from "./externalChannelMessage.ts";
+import {
+  externalChannelMessagePresentation,
+  externalChannelReferenceMappingsMetadata,
+} from "./externalChannelMessage.ts";
 import type { ChatMessage } from "./types";
 
 function message(
@@ -91,6 +94,23 @@ void test("renders mapped Slack references without changing provider IDs", () =>
     projected.body,
     "@Alice asked @Bob to review #incidents and #private.",
   );
+});
+
+void test("normalizes live event reference mappings for presentation", () => {
+  const referenceMappings = externalChannelReferenceMappingsMetadata({
+    users: { U1: "Alice", U2: "azents", ignored: 42 },
+    channels: { C1: "#incidents" },
+  });
+
+  assert.ok(referenceMappings);
+  const projected = externalChannelMessagePresentation(
+    message(
+      { content: "<@U2> please review <#C1>." },
+      { reference_mappings: referenceMappings },
+    ),
+  );
+
+  assert.equal(projected?.body, "@azents please review #incidents.");
 });
 
 void test("ignores malformed reference mappings", () => {
