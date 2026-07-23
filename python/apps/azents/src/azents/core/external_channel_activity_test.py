@@ -58,9 +58,9 @@ def test_working_tracker_marks_only_active_todo_with_circle_indicator() -> None:
 
     assert presentation.text == (
         "Agent is working\n"
-        "◐ Inspect <@U1> and *literal markup*\n"
-        "○ Publish result\n"
-        "● Old step"
+        "In progress: Inspect <@U1> and *literal markup*\n"
+        "Pending: Publish result\n"
+        "Completed: Old step"
     )
     assert presentation.blocks == [
         {
@@ -137,7 +137,7 @@ def test_persisted_tracker_projection_is_validated_before_rendering() -> None:
         ),
     )
 
-    assert presentation.text == "Agent is working\n○ Investigate"
+    assert presentation.text == "Agent is working\nPending: Investigate"
     assert payload == {
         "state": "working",
         "tasks": [

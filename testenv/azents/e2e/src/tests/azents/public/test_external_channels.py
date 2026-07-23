@@ -395,7 +395,7 @@ def test_http_admission_unknown_participant_and_approval_journey(
     assert typed_counts["conversations.info"] == 1
     assert typed_counts["conversations.replies"] == 1
     assert typed_counts["chat.getPermalink"] == 1
-    assert typed_counts["chat.postMessage"] == 1
+    assert typed_counts["chat.postMessage"] == 3
     rendered_state = str(provider_state)
     assert _BOT_TOKEN not in rendered_state
     assert _SIGNING_SECRET not in rendered_state

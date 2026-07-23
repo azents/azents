@@ -34,6 +34,8 @@ Rendering produces accessible fallback text and Slack-native blocks:
 - every canonical Todo becomes a separate `task_card` in order;
 - pending cards omit status, in-progress cards use `in_progress`, and completed cards
   use `complete`;
+- accessible fallback text uses explicit state labels rather than circle glyphs, so
+  only Slack's native `in_progress` chrome presents a circular progress indicator;
 - title fields remain literal strings and are not interpreted as mrkdwn;
 - completed Tracker presentation is not provider-delivered because normal completion
   deletes the Tracker.
