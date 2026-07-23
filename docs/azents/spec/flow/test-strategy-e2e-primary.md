@@ -24,8 +24,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-07-17
-spec_version: 8
+last_verified_at: 2026-07-23
+spec_version: 9
 ---
 
 # E2E Primary Test Strategy
@@ -97,9 +97,10 @@ Always-on required CI does not depend on external credentials.
 
 - Python lint/type/unit and other deterministic checks.
 - Deterministic E2E runs `uv run pytest -vv -m "not live_external and not runtime_provider and not web_surface" ./src` in `testenv/azents/e2e`.
+- Focused Runtime Provider E2E uses a locally bootstrapped and API-enrolled Docker Provider to run selected `runtime_provider` journeys, including Tool Search Runtime Hooks and provider-native External Channel progress.
 - Web Surface E2E runs in a separate parallel lane with `uv run pytest -vv -m "web_surface and not live_external and not runtime_provider" ./src`.
 - Web Surface journeys use a pinned remote Chromium container. Web images are built from the tested worktree, and TLS gateways reproduce production secure-cookie and path-routing behavior without external credentials.
-- The stable `ci-python-e2e` required gate aggregates the deterministic and Web Surface lane results for the scopes selected by path filtering.
+- The stable `ci-python-e2e` required gate aggregates the deterministic, focused Runtime Provider, and Web Surface lane results for the scopes selected by path filtering.
 - Web Surface path filtering includes backend/E2E dependencies, both web Dockerfiles, and the TypeScript workspace.
 - testenv fixture/prerequisite unit, contract lint.
 
@@ -111,7 +112,7 @@ Live/external verification runs only conditionally.
 
 Live workflow runs `live_external` E2E marker. If credential is missing in live verification requested by maintainer, treat as fail; in nightly optional verification, report prerequisite not-ready as skip summary and do not fail deterministic CI.
 
-Agent Runtime Provider E2E follows same policy. In required live Runtime Provider run, missing/stale Runtime provider prerequisite is treated as fail. Optional/nightly run can report prerequisite-not-ready as skip summary, but deterministic CI continues to run provider helper/auth negative unit path and prerequisite contract lint with `-m "not live_external"`.
+Agent Runtime Provider E2E follows the same policy. The focused required lane creates its System Docker Provider declaration through the trusted bootstrap source, enrolls it through the Admin and Public HTTP APIs, and passes only the issued credential to the Provider process. In required live Runtime Provider runs, missing or stale external provider prerequisites are treated as failures. Optional or nightly runs can report prerequisite-not-ready as a skip summary.
 
 ## Feature and Ship Workflow Requirements
 
@@ -128,6 +129,7 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
+- **2026-07-23** — v9. Added the credential-free focused Runtime Provider lane and its bootstrap/enrollment boundary to required E2E CI.
 - **2026-07-17** — v8. Split real-browser journeys into the parallel Web Surface E2E lane while preserving the stable required E2E gate.
 - **2026-07-13** — v7. Added deterministic containerized Chromium journeys and worktree-built web images to the always-on E2E policy.
 - **2026-07-08** — v6. Added the no-direct-DB-write E2E scenario boundary used by subagent validation.

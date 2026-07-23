@@ -1,6 +1,7 @@
 """E2E test fixtures."""
 
 import base64
+import datetime
 import os
 import re
 import secrets
@@ -23,6 +24,7 @@ import requests
 from azcommon.testing.images import get_docker_hub_image
 from docker.errors import APIError, NotFound
 from docker.models.containers import Container
+from pydantic import TypeAdapter
 from python_on_whales import docker as pow_docker
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options as ChromeOptions
@@ -52,6 +54,10 @@ _SLACK_PROVIDER_FAKE = (
 _SLACK_PROVIDER_INTERNAL_API_URL = "http://slack-fake:8083/api"
 _DOCKER_CLIENT_TIMEOUT_SECONDS = 300
 _RUNTIME_PROVIDER_ID = "system-docker"
+_RUNTIME_PROVIDER_BOOTSTRAP_SOURCE_KEY = "e2e/system-docker"
+_RUNTIME_PROVIDER_BOOTSTRAP_SOURCE_CONTAINER_PATH = (
+    "/var/run/azents/runtime-provider-bootstrap/providers.yaml"
+)
 _RUNTIME_CONTAINER_NAME_RE = re.compile(r"^azents-runtime-[0-9a-f]{32}$")
 _DOCKER_BUILDER_ENV = "AZENTS_E2E_DOCKER_BUILDER"
 _LOCAL_DOCKER_CACHE_ROOT_ENV = "AZENTS_E2E_DOCKER_CACHE_ROOT"
@@ -62,6 +68,8 @@ _ADMIN_WEB_UPSTREAM_URL = "http://azents-admin-web:3000"
 _MAIN_WEB_BROWSER_URL = "https://azents-web-gateway:8443"
 _ADMIN_WEB_GATEWAY_URL = "https://azents-web-gateway:8444/console"
 _ADMIN_WEB_BROWSER_URL = "https://azents-web-gateway:8445"
+_JSON_OBJECT_ADAPTER = TypeAdapter(dict[str, object])
+_JSON_OBJECT_LIST_ADAPTER = TypeAdapter(list[dict[str, object]])
 
 
 class _RedactedSecret(str):
@@ -91,6 +99,35 @@ def auth_jwt_secret_key() -> str:
 def system_bootstrap_setup_token() -> str:
     """Return a configured bootstrap token that is never written to test output."""
     return _RedactedSecret(secrets.token_urlsafe(32))
+
+
+@pytest.fixture(scope="session")
+def runtime_provider_bootstrap_source_path(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> Path:
+    """Return one trusted bootstrap declaration for the E2E Docker Provider."""
+    source_path = (
+        tmp_path_factory.mktemp("runtime-provider-bootstrap") / "providers.yaml"
+    )
+    source_path.write_text(
+        f"""apiVersion: azents.io/v1
+source:
+  key: {_RUNTIME_PROVIDER_BOOTSTRAP_SOURCE_KEY}
+  revision: e2e-system-docker-v1
+  digest: {"e" * 64}
+providers:
+  - declarationKey: system-docker
+    providerId: {_RUNTIME_PROVIDER_ID}
+    kind: docker
+    initial:
+      displayName: System Docker
+      enabled: true
+      availabilityMode: platform_wide
+      setAsPlatformDefaultWhenUnset: true
+""",
+        encoding="utf-8",
+    )
+    return source_path
 
 
 # =============================================================================
@@ -703,6 +740,23 @@ def _log_server_output(container: DockerContainer, server_name: str) -> None:
         pass  # containert t t t t
 
 
+def _log_sanitized_server_output(
+    container: DockerContainer,
+    server_name: str,
+    *,
+    secret_values: tuple[str, ...],
+) -> None:
+    """Log server output after redacting supplied secret values."""
+    try:
+        logs = _read_sanitized_container_logs(
+            container,
+            secret_values=secret_values,
+        )
+        sys.stdout.write(f"\n\n=== {server_name} logs ===\n{logs}\n")
+    except Exception:
+        pass
+
+
 def _remove_agent_runtime_containers(network_name: str) -> None:
     """E2E t engine worker t t agent-runtime containert cleanupt."""
     client = docker_py.from_env()
@@ -790,6 +844,7 @@ def azents_admin_server_container(
     system_bootstrap_setup_token: str,
     openai_proxy_container: DockerContainer,
     github_validation_proxy_container: DockerContainer,
+    runtime_provider_bootstrap_source_path: Path,
 ) -> Generator[DockerContainer, None, None]:
     """azents Admin API server container (port 8011)."""
     del openai_proxy_container, github_validation_proxy_container
@@ -804,19 +859,35 @@ def azents_admin_server_container(
         .with_exposed_ports(8011)
     )
 
-    container = _configure_azents_server_container(
-        base_container,
-        container_network,
-        postgres_container,
-        rustfs_access_key,
-        rustfs_secret_key,
-        s3_bucket_name,
-        auth_jwt_secret_key,
-        credential_encryption_key,
-        system_bootstrap_setup_token,
-    ).with_env(
-        "AZ_TESTENV_GITHUB_PLATFORM_VALIDATION_BASE_URL",
-        _GITHUB_VALIDATION_INTERNAL_URL,
+    container = (
+        _configure_azents_server_container(
+            base_container,
+            container_network,
+            postgres_container,
+            rustfs_access_key,
+            rustfs_secret_key,
+            s3_bucket_name,
+            auth_jwt_secret_key,
+            credential_encryption_key,
+            system_bootstrap_setup_token,
+        )
+        .with_env(
+            "AZ_TESTENV_GITHUB_PLATFORM_VALIDATION_BASE_URL",
+            _GITHUB_VALIDATION_INTERNAL_URL,
+        )
+        .with_env(
+            "AZ_RUNTIME_PROVIDER_BOOTSTRAP_SOURCE_KEY",
+            _RUNTIME_PROVIDER_BOOTSTRAP_SOURCE_KEY,
+        )
+        .with_env(
+            "AZ_RUNTIME_PROVIDER_BOOTSTRAP_SOURCE_PATH",
+            _RUNTIME_PROVIDER_BOOTSTRAP_SOURCE_CONTAINER_PATH,
+        )
+        .with_volume_mapping(
+            str(runtime_provider_bootstrap_source_path),
+            _RUNTIME_PROVIDER_BOOTSTRAP_SOURCE_CONTAINER_PATH,
+            "ro",
+        )
     )
 
     with container:
@@ -969,6 +1040,8 @@ def azents_runtime_provider_docker_container(
     container_network: Network,
     azents_runtime_control_container: DockerContainer,
     azents_runtime_provider_docker_image: str,
+    runtime_provider_resource_id: str,
+    runtime_provider_credential: str,
 ) -> Generator[DockerContainer, None, None]:
     """Docker Runtime Provider container."""
     del azents_runtime_control_container
@@ -987,38 +1060,52 @@ def azents_runtime_provider_docker_container(
             .with_volume_mapping(data_root, data_root, "rw")
             .with_env("AZ_RUNTIME_CONTROL_ENDPOINT", "runtime-control:8030")
             .with_env("AZ_RUNTIME_CONTROL_ALLOW_INSECURE", "true")
-            .with_env("AZ_RUNTIME_PROVIDER_ID", _RUNTIME_PROVIDER_ID)
+            .with_env("AZ_RUNTIME_PROVIDER_ID", runtime_provider_resource_id)
             .with_env("AZ_RUNTIME_PROVIDER_DOCKER_NETWORK", container_network.name)
             .with_env("AZ_RUNTIME_PROVIDER_HOST_DATA_ROOT", data_root)
+            .with_env(
+                "AZ_RUNTIME_PROVIDER_CREDENTIAL",
+                runtime_provider_credential,
+            )
             .with_env("AZ_LOG_LEVEL", "INFO")
             .with_kwargs(user="root")
         )
         with container:
             _wait_for_runtime_provider_registered(
                 container,
-                provider_id=_RUNTIME_PROVIDER_ID,
+                provider_id=runtime_provider_resource_id,
+                secret_values=(runtime_provider_credential,),
             )
             yield container
-            _log_server_output(container, "azents-runtime-provider-docker")
+            _log_sanitized_server_output(
+                container,
+                "azents-runtime-provider-docker",
+                secret_values=(runtime_provider_credential,),
+            )
 
 
 def _wait_for_runtime_provider_registered(
     container: DockerContainer,
     *,
     provider_id: str,
+    secret_values: tuple[str, ...],
 ) -> None:
     """Runtime Provider register t t t pendingt."""
     deadline = time.monotonic() + 60
     last_logs = ""
     while time.monotonic() < deadline:
         if container.get_wrapped_container().status == "exited":
-            stdout, stderr = container.get_logs()
-            pytest.fail(
-                "azents-runtime-provider-docker exited\n\n"
-                f"stdout: {stdout.decode()}\n\nstderr: {stderr.decode()}"
+            logs = _read_sanitized_container_logs(
+                container,
+                secret_values=secret_values,
             )
-        stdout, stderr = container.get_logs()
-        last_logs = stdout.decode(errors="replace") + stderr.decode(errors="replace")
+            pytest.fail(
+                f"azents-runtime-provider-docker exited\n\nsanitized logs:\n{logs}"
+            )
+        last_logs = _read_sanitized_container_logs(
+            container,
+            secret_values=secret_values,
+        )
         if "Runtime Provider registered" in last_logs:
             return
         time.sleep(1)
@@ -1151,6 +1238,100 @@ def system_bootstrap_evidence(
         concurrent_attempt_statuses=(statuses[0], statuses[1]),
         final_available=final_available,
     )
+
+
+@pytest.fixture(scope="session")
+def runtime_provider_resource_id(
+    azents_admin_server_url: str,
+    system_bootstrap_evidence: SystemBootstrapEvidence,
+) -> str:
+    """Return the durable ID of the bootstrapped E2E Docker Provider."""
+    authorization = {
+        "Authorization": f"Bearer {system_bootstrap_evidence.access_token}"
+    }
+    providers_response = requests.get(
+        f"{azents_admin_server_url}/runtime-provider/v1/providers",
+        headers=authorization,
+        timeout=10,
+    )
+    if providers_response.status_code != 200:
+        pytest.fail(
+            "Runtime Provider inventory request failed with HTTP "
+            f"{providers_response.status_code}"
+        )
+    providers_payload = _JSON_OBJECT_ADAPTER.validate_python(providers_response.json())
+    provider_items = _JSON_OBJECT_LIST_ADAPTER.validate_python(
+        providers_payload.get("items")
+    )
+    matching_providers = [
+        item
+        for item in provider_items
+        if item.get("provider_id") == _RUNTIME_PROVIDER_ID
+    ]
+    if len(matching_providers) != 1:
+        pytest.fail(
+            "Runtime Provider bootstrap did not create exactly one "
+            f"{_RUNTIME_PROVIDER_ID} Provider"
+        )
+    provider_id = matching_providers[0].get("id")
+    if not isinstance(provider_id, str):
+        pytest.fail("Runtime Provider inventory item did not contain an ID")
+    return provider_id
+
+
+@pytest.fixture(scope="session")
+def runtime_provider_credential(
+    azents_public_server_url: str,
+    azents_admin_server_url: str,
+    system_bootstrap_evidence: SystemBootstrapEvidence,
+    runtime_provider_resource_id: str,
+) -> str:
+    """Enroll the E2E Docker Provider through the supported HTTP APIs."""
+    authorization = {
+        "Authorization": f"Bearer {system_bootstrap_evidence.access_token}"
+    }
+
+    expires_at = datetime.datetime.now(datetime.UTC) + datetime.timedelta(minutes=5)
+    grant_response = requests.post(
+        (
+            f"{azents_admin_server_url}/runtime-provider-enrollment/v1/"
+            f"runtime-providers/{runtime_provider_resource_id}/enrollment-grants"
+        ),
+        headers=authorization,
+        json={"expires_at": expires_at.isoformat()},
+        timeout=10,
+    )
+    if grant_response.status_code != 201:
+        pytest.fail(
+            "Runtime Provider enrollment grant request failed with HTTP "
+            f"{grant_response.status_code}"
+        )
+    grant_payload = _JSON_OBJECT_ADAPTER.validate_python(grant_response.json())
+    grant_id = grant_payload.get("grant_id")
+    grant_secret = grant_payload.get("secret")
+    if not isinstance(grant_id, str) or not isinstance(grant_secret, str):
+        pytest.fail("Runtime Provider enrollment grant response was incomplete")
+
+    credential_response = requests.post(
+        (
+            f"{azents_public_server_url}/runtime-provider-enrollment/v1/"
+            "credentials/exchange"
+        ),
+        json={"grant_id": grant_id, "secret": grant_secret},
+        timeout=10,
+    )
+    if credential_response.status_code != 200:
+        pytest.fail(
+            "Runtime Provider credential exchange failed with HTTP "
+            f"{credential_response.status_code}"
+        )
+    credential_payload = _JSON_OBJECT_ADAPTER.validate_python(
+        credential_response.json()
+    )
+    credential = credential_payload.get("credential")
+    if not isinstance(credential, str):
+        pytest.fail("Runtime Provider credential exchange response was incomplete")
+    return _RedactedSecret(credential)
 
 
 # =============================================================================
