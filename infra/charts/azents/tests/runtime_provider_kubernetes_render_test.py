@@ -160,7 +160,10 @@ def test_runtime_provider_kubernetes_rejects_removed_credential_values() -> None
             "runtimeProviderKubernetes.credential.existingSecret=legacy-credential",
         )
 
-    assert "Additional property credential is not allowed" in raised.value.stderr
+    error = raised.value.stderr.lower()
+    assert "schema" in error
+    assert "credential" in error
+    assert "not allowed" in error
 
 
 def test_runtime_provider_kubernetes_network_policy_allows_runtime_control() -> None:

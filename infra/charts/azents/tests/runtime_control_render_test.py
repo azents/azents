@@ -115,4 +115,7 @@ def test_runtime_control_rejects_removed_shared_auth_values() -> None:
             "server.runtimeControl.runnerImage.tag=sha",
         )
 
-    assert "Additional property auth is not allowed" in raised.value.stderr
+    error = raised.value.stderr.lower()
+    assert "schema" in error
+    assert "auth" in error
+    assert "not allowed" in error
