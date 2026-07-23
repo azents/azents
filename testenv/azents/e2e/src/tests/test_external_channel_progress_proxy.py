@@ -80,6 +80,30 @@ def test_progress_proxy_distinguishes_continue_and_finish_tool_outputs() -> None
     assert proxy.request_has_tool_output(request, "call_missing") is False
 
 
+def test_progress_proxy_ignores_non_string_nested_type_values() -> None:
+    """Nested schema objects cannot be mistaken for tool-output item types."""
+    request = _request()
+    request["tools"] = [
+        {
+            "type": "function",
+            "name": "channel_action",
+            "parameters": {
+                "type": {
+                    "unexpected": "object",
+                }
+            },
+        }
+    ]
+
+    assert (
+        proxy.request_has_tool_output(
+            request,
+            "call_external_channel_progress",
+        )
+        is False
+    )
+
+
 def test_progress_proxy_records_unresolved_provider_references() -> None:
     """Raw provider IDs remain visible as precise projection evidence."""
     request = _request()

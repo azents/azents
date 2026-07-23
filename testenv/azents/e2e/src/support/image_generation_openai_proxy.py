@@ -158,7 +158,8 @@ def request_has_tool_output(value: object, call_id: str) -> bool:
         item = cast(dict[str, object], value)
         item_type = item.get("type")
         if (
-            item_type in {"function_call_output", "custom_tool_call_output"}
+            isinstance(item_type, str)
+            and item_type in {"function_call_output", "custom_tool_call_output"}
             and item.get("call_id") == call_id
         ):
             return True

@@ -52,12 +52,12 @@ from azentspublicclient.models.slack_connection_credentials import (
 from azentspublicclient.models.slack_connection_setup_request import (
     SlackConnectionSetupRequest,
 )
+from docker.models.containers import Container
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.support import expected_conditions as ec
 from selenium.webdriver.support.ui import WebDriverWait
-from testcontainers.core.container import DockerContainer
 
 from support.utils import (
     authenticate_user,
@@ -264,185 +264,11 @@ def _channel_action_tool_evidence(
     return evidence
 
 
-def _session_execution_evidence(
-    public_server_url: str,
-    token: str,
-    session_id: str,
-) -> dict[str, object]:
-    """Return sanitized durable and live Session execution evidence."""
-    headers = {"Authorization": f"Bearer {token}"}
-    history_response = requests.get(
-        f"{public_server_url}/chat/v1/sessions/{session_id}/history?limit=100",
-        headers=headers,
-        timeout=10,
-    )
-    history_response.raise_for_status()
-    live_response = requests.get(
-        f"{public_server_url}/chat/v1/sessions/{session_id}/live",
-        headers=headers,
-        timeout=10,
-    )
-    live_response.raise_for_status()
-    history_payload = history_response.json()
-    live_payload = live_response.json()
-
-    def event_evidence(raw_event: object) -> dict[str, object] | None:
-        if not isinstance(raw_event, dict):
-            return None
-        event = cast(dict[str, object], raw_event)
-        item: dict[str, object] = {"kind": event.get("kind")}
-        payload = event.get("payload")
-        if isinstance(payload, dict):
-            typed_payload = cast(dict[str, object], payload)
-            for key in ("status", "phase", "call_id", "name", "error_kind"):
-                value = typed_payload.get(key)
-                if isinstance(value, str):
-                    item[key] = value
-        return item
-
-    history_items = (
-        cast(dict[str, object], history_payload).get("items")
-        if isinstance(history_payload, dict)
-        else None
-    )
-    live = (
-        cast(dict[str, object], live_payload) if isinstance(live_payload, dict) else {}
-    )
-    partial_history = live.get("partial_history")
-    partial_items = (
-        cast(dict[str, object], partial_history).get("items")
-        if isinstance(partial_history, dict)
-        else None
-    )
-    input_buffers = live.get("input_buffers")
-    summarized_buffers: list[dict[str, object]] = []
-    if isinstance(input_buffers, list):
-        for raw_buffer in cast(list[object], input_buffers):
-            if not isinstance(raw_buffer, dict):
-                continue
-            buffer = cast(dict[str, object], raw_buffer)
-            item = {
-                "id": buffer.get("id"),
-                "kind": buffer.get("kind"),
-            }
-            payload = buffer.get("payload")
-            if isinstance(payload, dict):
-                metadata = cast(dict[str, object], payload).get("metadata")
-                if isinstance(metadata, dict):
-                    item["metadata_keys"] = sorted(
-                        str(key) for key in cast(dict[object, object], metadata)
-                    )
-            summarized_buffers.append(item)
-    return {
-        "history": [
-            item
-            for raw_event in (
-                cast(list[object], history_items)
-                if isinstance(history_items, list)
-                else []
-            )
-            if (item := event_evidence(raw_event)) is not None
-        ],
-        "partial_history": [
-            item
-            for raw_event in (
-                cast(list[object], partial_items)
-                if isinstance(partial_items, list)
-                else []
-            )
-            if (item := event_evidence(raw_event)) is not None
-        ],
-        "input_buffers": summarized_buffers,
-    }
-
-
-def _provider_delivery_evidence(
-    slack_provider_fake_url: str,
-) -> dict[str, object]:
-    """Return sanitized Slack request counts and delivery outcomes."""
-    state = _provider_state(slack_provider_fake_url)
-    deliveries = state.get("deliveries")
-    return {
-        "request_counts": state.get("request_counts"),
-        "deliveries": [
-            {
-                "operation": delivery.get("operation"),
-                "status": delivery.get("status"),
-                "error_kind": delivery.get("error_kind"),
-                "has_plan": (
-                    isinstance(delivery.get("blocks"), list)
-                    and bool(cast(list[object], delivery.get("blocks")))
-                    and isinstance(cast(list[object], delivery.get("blocks"))[0], dict)
-                    and cast(
-                        dict[str, object],
-                        cast(list[object], delivery.get("blocks"))[0],
-                    ).get("type")
-                    == "plan"
-                ),
-            }
-            for raw_delivery in (
-                cast(list[object], deliveries) if isinstance(deliveries, list) else []
-            )
-            if isinstance(raw_delivery, dict)
-            for delivery in [cast(dict[str, object], raw_delivery)]
-        ],
-    }
-
-
-def _worker_log_evidence(
-    container: DockerContainer,
-    *,
-    identifiers: list[str],
-    secrets: list[str],
-) -> str:
-    """Return bounded worker log lines relevant to one failed Session."""
-    stdout, stderr = container.get_logs()
-    logs = stdout.decode(errors="replace") + stderr.decode(errors="replace")
-    for secret in secrets:
-        if secret:
-            logs = logs.replace(secret, "<redacted>")
-    general_terms = (
-        "error",
-        "exception",
-        "traceback",
-        "wake",
-        "input buffer",
-        "input_buffer",
-        "external channel",
-        "external_channel",
-    )
-    relevant = [
-        line
-        for line in logs.splitlines()
-        if any(identifier in line for identifier in identifiers)
-        or any(term in line.lower() for term in general_terms)
-    ]
-    return "\n".join(relevant[-120:])[-12_000:]
-
-
-def _proxy_log_evidence(container: DockerContainer) -> str:
-    """Return bounded deterministic proxy access and handler logs."""
-    stdout, stderr = container.get_logs()
-    logs = stdout.decode(errors="replace") + stderr.decode(errors="replace")
-    for secret in (_BOT_TOKEN, _SIGNING_SECRET):
-        logs = logs.replace(secret, "<redacted>")
-    return logs[-12_000:]
-
-
-def _wait_for_progress_request(
-    *,
+def _matching_progress_request_evidence(
     openai_proxy_url: str,
-    openai_proxy_container: DockerContainer,
-    public_server_url: str,
-    slack_provider_fake_url: str,
-    worker_container: DockerContainer,
-    token: str,
-    agent_id: str,
-    session_id: str,
     binding_id: str,
-    timeout: float,
 ) -> list[dict[str, object]]:
-    """Wait for the exact progress request and report stage-specific evidence."""
+    """Return request evidence after the exact progress stage is observed."""
     expected = {
         "binding": binding_id,
         "marker_present": True,
@@ -453,50 +279,12 @@ def _wait_for_progress_request(
         "matched": True,
         "stage": "initial",
     }
-    deadline = time.monotonic() + timeout
-    last_request_evidence: list[dict[str, object]] = []
-    last_session_evidence: dict[str, object] = {}
-    next_session_check = 0.0
-    while time.monotonic() < deadline:
-        last_request_evidence = _progress_request_evidence(openai_proxy_url)
-        if any(
-            all(item.get(key) == value for key, value in expected.items())
-            for item in last_request_evidence
-        ):
-            return last_request_evidence
-        now = time.monotonic()
-        if now >= next_session_check:
-            last_session_evidence = _session_execution_evidence(
-                public_server_url,
-                token,
-                session_id,
-            )
-            history = last_session_evidence.get("history")
-            if isinstance(history, list) and any(
-                isinstance(item, dict)
-                and cast(dict[str, object], item).get("kind") == "run_marker"
-                and cast(dict[str, object], item).get("status") == "failed"
-                for item in cast(list[object], history)
-            ):
-                break
-            next_session_check = now + 1
-        time.sleep(0.2)
-    diagnostics = {
-        "expected_request": expected,
-        "observed_requests": last_request_evidence,
-        "session": last_session_evidence,
-        "provider": _provider_delivery_evidence(slack_provider_fake_url),
-        "proxy_logs": _proxy_log_evidence(openai_proxy_container),
-        "worker_logs": _worker_log_evidence(
-            worker_container,
-            identifiers=[agent_id, session_id, binding_id],
-            secrets=[token, _BOT_TOKEN, _SIGNING_SECRET],
-        ),
-    }
-    raise AssertionError(
-        "Channel Work model request did not reach the expected proxy stage: "
-        f"{json.dumps(diagnostics, ensure_ascii=True, sort_keys=True)}"
-    )
+    evidence = _progress_request_evidence(openai_proxy_url)
+    assert any(
+        all(item.get(key) == value for key, value in expected.items())
+        for item in evidence
+    ), evidence
+    return evidence
 
 
 def _login_main_web(
@@ -521,7 +309,7 @@ def test_http_admission_unknown_participant_and_approval_journey(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
     azents_public_server_url: str,
-    azents_engine_worker_container: DockerContainer,
+    azents_engine_worker_container: Container,
     slack_provider_fake_url: str,
 ) -> None:
     """Exercise connection setup, signed admission, dedupe, and idempotent approval."""
@@ -853,12 +641,12 @@ def test_provider_native_channel_work_progress_journey(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
     azents_public_server_url: str,
-    azents_engine_worker_container: DockerContainer,
+    azents_engine_worker_container: Container,
     slack_provider_fake_url: str,
     openai_proxy_url: str,
-    openai_proxy_container: DockerContainer,
 ) -> None:
     """Render one rich canonical work snapshot through Slack's native Plan."""
+    del azents_engine_worker_container
     requests.post(
         f"{slack_provider_fake_url}/__testenv/reset",
         timeout=5,
@@ -997,17 +785,14 @@ def test_provider_native_channel_work_progress_journey(
     )
     binding_id = active_projection.items[0].id
 
-    _wait_for_progress_request(
-        openai_proxy_url=openai_proxy_url,
-        openai_proxy_container=openai_proxy_container,
-        public_server_url=azents_public_server_url,
-        slack_provider_fake_url=slack_provider_fake_url,
-        worker_container=azents_engine_worker_container,
-        token=token,
-        agent_id=agent_id,
-        session_id=session_id,
-        binding_id=binding_id,
+    wait_until(
+        lambda: _matching_progress_request_evidence(
+            openai_proxy_url,
+            binding_id,
+        ),
         timeout=90,
+        interval=0.2,
+        message="Channel Work model request did not reach the expected proxy stage",
     )
 
     def completed_channel_action() -> list[dict[str, object]]:
@@ -1164,7 +949,7 @@ def test_socket_mode_acknowledges_and_preserves_route_for_disabled_link(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
     azents_public_server_url: str,
-    azents_engine_worker_container: DockerContainer,
+    azents_engine_worker_container: Container,
     slack_provider_fake_url: str,
 ) -> None:
     """Exercise durable ACK and reconnect health without removing Agent routing."""
