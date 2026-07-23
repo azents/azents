@@ -30,6 +30,8 @@ from azents.core.enums import (
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.external_channel import (
+    RDBExternalChannelBinding,
+    RDBExternalChannelConnection,
     RDBExternalChannelDeliveryAttempt,
     RDBExternalChannelWork,
 )
@@ -846,4 +848,68 @@ async def test_active_work_snapshot_fences_session_and_agent_lifecycle(
             agent_id=agent_id,
         )
         == []
+    )
+
+
+async def test_file_access_target_requires_complete_active_binding_chain(
+    rdb_session: AsyncSession,
+) -> None:
+    """File access resolves credentials only through the owned active binding."""
+    agent_id, binding_id = await _setup_binding(rdb_session)
+    agent_session = await rdb_session.scalar(
+        sa.select(RDBAgentSession).where(RDBAgentSession.agent_id == agent_id)
+    )
+    connection = await rdb_session.scalar(sa.select(RDBExternalChannelConnection))
+    binding = await rdb_session.get(RDBExternalChannelBinding, binding_id)
+    assert agent_session is not None
+    assert connection is not None
+    assert binding is not None
+    connection.capabilities = {
+        "provider": "slack",
+        "transport": "http",
+        "inbound_events": True,
+        "thread_history": True,
+        "post_messages": True,
+        "update_messages": True,
+        "delete_messages": True,
+        "download_files": True,
+        "upload_files": False,
+    }
+    await rdb_session.flush()
+    repository = ExternalChannelWorkRepository()
+
+    target = await repository.get_active_file_access_target(
+        rdb_session,
+        session_id=agent_session.id,
+        agent_id=agent_id,
+        binding_id=binding_id,
+    )
+
+    assert target is not None
+    assert target.binding_id == binding_id
+    assert target.connection_id == connection.id
+    assert target.encrypted_credentials == "ciphertext"
+    assert target.capabilities is not None
+    assert target.capabilities["download_files"] is True
+    assert (
+        await repository.get_active_file_access_target(
+            rdb_session,
+            session_id="unrelated-session",
+            agent_id=agent_id,
+            binding_id=binding_id,
+        )
+        is None
+    )
+
+    binding.activation_status = ExternalChannelBindingActivationStatus.WAITING_HYDRATION
+    await rdb_session.flush()
+
+    assert (
+        await repository.get_active_file_access_target(
+            rdb_session,
+            session_id=agent_session.id,
+            agent_id=agent_id,
+            binding_id=binding_id,
+        )
+        is None
     )

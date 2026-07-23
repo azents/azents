@@ -75,3 +75,13 @@ class ChannelDeliveryTarget(_Record):
     encrypted_credentials: str | None
     provider_tenant_id: str | None
     request_payload: dict[str, Any]
+
+
+class ExternalChannelFileAccessTarget(_Record):
+    """Active provider connection selected by one binding-scoped file locator."""
+
+    binding_id: str
+    connection_id: str
+    provider: ExternalChannelProvider
+    encrypted_credentials: str | None
+    capabilities: dict[str, Any] | None

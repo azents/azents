@@ -1225,6 +1225,8 @@ async def resolve_agent_tools(
             )
         )
 
+    instruction_context_store: RuntimeInstructionContextStore | None = None
+
     # Auto-bound Toolkit: configure memory and runtime capabilities as separate
     # Toolkit bindings so future execution modes can filter capabilities without
     # changing model-visible tool names.
@@ -1558,6 +1560,10 @@ async def resolve_agent_tools(
         )
         if isinstance(external_channel_resolved, ExternalChannelToolkit):
             external_channel_resolved.run_id = context.run_id
+            if instruction_context_store is not None:
+                external_channel_resolved.set_runtime_context_store(
+                    instruction_context_store
+                )
         pending.append(
             (
                 external_channel_toolkit_provider,

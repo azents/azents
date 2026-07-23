@@ -33,6 +33,9 @@ from azents.services.artifact import ArtifactService
 from azents.services.external_channel.channel_action import (
     ExternalChannelActionService,
 )
+from azents.services.external_channel.file_transfer import (
+    ExternalChannelFileTransferService,
+)
 from azents.services.github_platform_system_setting.runtime import (
     PlatformGitHubAppRuntimeService,
 )
@@ -148,9 +151,16 @@ def get_goal_toolkit_provider(
 
 def get_external_channel_toolkit_provider(
     service: Annotated[ExternalChannelActionService, Depends()],
+    file_transfer_service: Annotated[
+        ExternalChannelFileTransferService,
+        Depends(),
+    ],
 ) -> ExternalChannelToolkitProvider:
     """External Channel root Toolkit dependency."""
-    return ExternalChannelToolkitProvider(service=service)
+    return ExternalChannelToolkitProvider(
+        service=service,
+        file_transfer_service=file_transfer_service,
+    )
 
 
 def get_skill_state_store(
