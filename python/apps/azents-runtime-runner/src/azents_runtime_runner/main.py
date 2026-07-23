@@ -13,6 +13,7 @@ from azents_runtime_control.grpc_runner_client import (
     GrpcRunnerControlClient,
     RuntimeRunnerControlStreamClosed,
 )
+from azents_runtime_control.grpc_tls import GrpcClientTlsConfig
 from azents_runtime_control.runner import (
     RunnerConnectionRejected,
     RunnerRegistration,
@@ -108,6 +109,8 @@ async def run_runtime_runner() -> None:
     runner_id = os.environ.get("AZ_RUNTIME_RUNNER_ID") or f"runner-{uuid.uuid4()}"
     credential_id = _required_env("AZ_RUNTIME_RUNNER_AUTH_CREDENTIAL_ID")
     control_auth_token = os.environ.get("AZ_RUNTIME_CONTROL_AUTH_TOKEN")
+    control_tls = _control_tls_from_env()
+    allow_insecure_control = _required_bool_env("AZ_RUNTIME_CONTROL_ALLOW_INSECURE")
     base_connection_id = (
         os.environ.get("AZ_RUNTIME_RUNNER_CONNECTION_ID") or uuid.uuid4().hex
     )
@@ -150,6 +153,8 @@ async def run_runtime_runner() -> None:
         client = GrpcRunnerControlClient.from_endpoint(
             endpoint,
             control_auth_token=control_auth_token,
+            tls=control_tls,
+            allow_insecure=allow_insecure_control,
         )
         connection_id = _control_connection_id(base_connection_id)
         operations = RunnerOperations(client=client, workspace=workspace)
@@ -295,6 +300,22 @@ def _required_env(name: str) -> str:
     if not value:
         raise SystemExit(f"{name} is required")
     return value
+
+
+def _required_bool_env(name: str) -> bool:
+    value = _required_env(name).lower()
+    if value == "true":
+        return True
+    if value == "false":
+        return False
+    raise SystemExit(f"{name} must be true or false")
+
+
+def _control_tls_from_env() -> GrpcClientTlsConfig | None:
+    value = os.environ.get("AZ_RUNTIME_CONTROL_TLS_CA_PEM")
+    if value is None:
+        return None
+    return GrpcClientTlsConfig(root_certificates=value.encode())
 
 
 if __name__ == "__main__":

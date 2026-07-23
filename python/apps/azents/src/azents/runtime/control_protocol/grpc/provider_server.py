@@ -115,6 +115,16 @@ class RuntimeProviderConnectionTracker(Protocol):
         """Record Provider stream closure."""
         ...
 
+    async def connection_active(
+        self,
+        *,
+        authentication: RuntimeProviderCredentialAuthentication,
+        generation: int,
+        now: datetime,
+    ) -> bool:
+        """Check whether the stream retains command-delivery authority."""
+        ...
+
 
 class RuntimeProviderControlGrpcServicer(
     runtime_provider_control_pb2_grpc.RuntimeProviderControlServicer
@@ -214,6 +224,7 @@ class RuntimeProviderControlGrpcServicer(
                 outbound,
                 provider_id=accepted.provider_id,
                 generation=accepted.generation,
+                authentication=authentication,
             )
         )
         yield runtime_provider_control_pb2.ControlMessage(
@@ -394,8 +405,15 @@ class RuntimeProviderControlGrpcServicer(
         *,
         provider_id: str,
         generation: int,
+        authentication: RuntimeProviderCredentialAuthentication,
     ) -> None:
         while True:
+            if not await self._connection_tracker.connection_active(
+                authentication=authentication,
+                generation=generation,
+                now=datetime.now(UTC),
+            ):
+                return
             envelope = await self._control_protocol.claim_next_provider_request(
                 provider_id=provider_id,
                 generation=generation,
@@ -405,6 +423,12 @@ class RuntimeProviderControlGrpcServicer(
             if envelope is None:
                 await asyncio.sleep(max(self._command_block_ms, 1) / 1000)
                 continue
+            if not await self._connection_tracker.connection_active(
+                authentication=authentication,
+                generation=generation,
+                now=datetime.now(UTC),
+            ):
+                return
             if _deadline_expired(envelope, datetime.now(UTC)):
                 await self._expire_provider_command(
                     envelope,
@@ -678,8 +702,6 @@ def _registration_identity_error(
     """Return the first registration claim that conflicts with credential binding."""
     if registration.provider_id != authentication.provider_id:
         return "Provider ID does not match authenticated credential binding"
-    if registration.auth_credential_id != authentication.credential_id:
-        return "Provider credential ID does not match authenticated credential binding"
     if registration.provider_type != authentication.provider_kind.value:
         return "Provider implementation does not match authenticated Provider"
     if registration.scope != authentication.provider_scope.value:

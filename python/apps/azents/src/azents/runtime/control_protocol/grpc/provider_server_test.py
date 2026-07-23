@@ -82,6 +82,10 @@ class FakeProviderCredentialBridge:
         """Accept a test Provider stream heartbeat."""
         return True
 
+    async def connection_active(self, **_: object) -> bool:
+        """Keep test Provider command delivery authorized."""
+        return True
+
     async def disconnect_connection(self, **_: object) -> bool:
         """Accept a test Provider stream closure."""
         return True

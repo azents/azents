@@ -32,6 +32,8 @@ class RuntimeProviderBootstrapCredential:
 
     secret: str
     changed: bool
+    credential_id: str | None
+    revoke_after_write: tuple[str, ...]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -106,8 +108,16 @@ class RuntimeProviderBootstrapEnrollmentService:
                     return RuntimeProviderBootstrapCredential(
                         secret=existing_secret,
                         changed=False,
+                        credential_id=authentication.credential_id,
+                        revoke_after_write=(),
                     )
 
+        prior_credential_ids = (
+            await self.enrollment_service.list_active_bootstrap_credential_ids(
+                provider_id=provider_id,
+                source_id=source_id,
+            )
+        )
         grant = await self.enrollment_service.issue_grant(
             provider_id=provider_id,
             expires_at=tznow() + datetime.timedelta(minutes=5),
@@ -118,8 +128,25 @@ class RuntimeProviderBootstrapEnrollmentService:
             grant_id=grant.grant_id,
             secret=grant.secret,
             credential_expires_at=None,
+            source_address=None,
         )
         return RuntimeProviderBootstrapCredential(
             secret=credential.secret,
             changed=True,
+            credential_id=credential.credential_id,
+            revoke_after_write=tuple(
+                credential_id
+                for credential_id in prior_credential_ids
+                if credential_id != credential.credential_id
+            ),
+        )
+
+    async def revoke_superseded(
+        self,
+        credential_ids: tuple[str, ...],
+    ) -> None:
+        """Revoke source-owned credentials after the new Secret is durable."""
+        await self.enrollment_service.revoke_credentials(
+            credential_ids=credential_ids,
+            revoked_by_user_id=None,
         )

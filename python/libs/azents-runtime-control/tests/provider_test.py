@@ -309,7 +309,6 @@ def _loop(
             capabilities=("lifecycle", "observe"),
             config_schema_version="v1",
             metadata={"workspace_path_source": "provider"},
-            auth_credential_id="credential-1",
         ),
         connection_id="connection-1",
         consumer_id="consumer-1",
@@ -333,6 +332,8 @@ def _command(command_type: RuntimeLifecycleCommandType) -> RuntimeLifecycleComma
             control_endpoint="runtime-control:8020",
             runner_auth_token="runner-token",
             control_token="control-token",
+            control_tls_ca_pem=None,
+            allow_insecure_control=True,
         ),
         reset_final_desired_state=RuntimeDesiredState.RUNNING,
     )

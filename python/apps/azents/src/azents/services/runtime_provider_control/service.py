@@ -131,6 +131,7 @@ class RuntimeProviderEnrollmentService:
         grant_id: str,
         secret: str,
         credential_expires_at: datetime.datetime | None,
+        source_address: str | None,
     ) -> RuntimeProviderCredentialIssued:
         """Consume one valid grant and return its Provider credential once."""
         now = tznow()
@@ -176,6 +177,7 @@ class RuntimeProviderEnrollmentService:
                     metadata={
                         "credential_id": credential.id,
                         "grant_id": grant.id,
+                        "source_address": source_address,
                     },
                     created_at=now,
                 ),
@@ -226,6 +228,21 @@ class RuntimeProviderEnrollmentService:
             provider_workspace_id=provider.workspace_id,
         )
 
+    async def list_active_bootstrap_credential_ids(
+        self,
+        *,
+        provider_id: str,
+        source_id: str,
+    ) -> tuple[str, ...]:
+        """List active credentials owned by one Provider bootstrap source."""
+        async with self.session_manager() as session:
+            credentials = await self.repository.list_active_bootstrap_credentials(
+                session,
+                provider_id=provider_id,
+                source_id=source_id,
+            )
+        return tuple(credential.id for credential in credentials)
+
     async def revoke_credential(
         self,
         *,
@@ -254,6 +271,19 @@ class RuntimeProviderEnrollmentService:
                 ),
             )
             return True
+
+    async def revoke_credentials(
+        self,
+        *,
+        credential_ids: tuple[str, ...],
+        revoked_by_user_id: str | None,
+    ) -> None:
+        """Revoke a known set of superseded credentials."""
+        for credential_id in credential_ids:
+            await self.revoke_credential(
+                credential_id=credential_id,
+                revoked_by_user_id=revoked_by_user_id,
+            )
 
     async def create_connection(
         self,
@@ -323,6 +353,23 @@ class RuntimeProviderEnrollmentService:
                 credential_id=authentication.credential_id,
                 generation=generation,
                 heartbeat_at=heartbeat_at,
+            )
+
+    async def connection_active(
+        self,
+        *,
+        authentication: RuntimeProviderCredentialAuthentication,
+        generation: int,
+        now: datetime.datetime,
+    ) -> bool:
+        """Check command-delivery authority for an authenticated stream."""
+        async with self.session_manager() as session:
+            return await self.repository.connection_active(
+                session,
+                provider_id=authentication.provider_id,
+                credential_id=authentication.credential_id,
+                generation=generation,
+                now=now,
             )
 
     async def disconnect_connection(

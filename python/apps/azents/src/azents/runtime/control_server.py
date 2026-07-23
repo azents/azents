@@ -1,11 +1,13 @@
 """Agent Runtime Control gRPC server configuration and execution loop."""
 
 import asyncio
+import dataclasses
 import logging
 import signal
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import timedelta
+from pathlib import Path
 
 import boto3
 import grpc
@@ -79,6 +81,10 @@ class RuntimeControlSettings(BaseSettings):
     runtime_control_start_timeout_seconds: float = _DEFAULT_START_TIMEOUT_SECONDS
     runtime_control_auth_enabled: bool = False
     runtime_control_auth_token: str | None = None
+    runtime_control_allow_insecure: bool
+    runtime_control_tls_certificate_file: str | None = None
+    runtime_control_tls_private_key_file: str | None = None
+    runtime_control_tls_ca_file: str | None = None
     runtime_runner_image: str
     runtime_runner_control_endpoint: str
     credential_encryption_key: str
@@ -93,6 +99,15 @@ class RuntimeControlSettings(BaseSettings):
     rdb_verbose: bool = False
 
 
+@dataclasses.dataclass(frozen=True)
+class _RuntimeControlTransport:
+    """Runtime Control server and client trust configuration."""
+
+    server_credentials: grpc.ServerCredentials | None
+    ca_pem: str | None
+    allow_insecure: bool
+
+
 @asynccontextmanager
 async def runtime_control_server_lifespan(
     settings: RuntimeControlSettings,
@@ -102,6 +117,7 @@ async def runtime_control_server_lifespan(
     coordination_store = RedisRuntimeCoordinationStore(redis)
     control_protocol = RuntimeControlProtocolService(coordination_store)
     control_token = runtime_control_auth_token(settings)
+    transport = runtime_control_transport(settings)
     engine = _create_engine(settings)
     session_manager = _session_manager(engine)
     runtime_repository = AgentRuntimeRepository()
@@ -128,6 +144,8 @@ async def runtime_control_server_lifespan(
             runner_image=settings.runtime_runner_image,
             runner_control_endpoint=settings.runtime_runner_control_endpoint,
             runner_control_auth_token=control_token,
+            runner_control_tls_ca_pem=transport.ca_pem,
+            allow_insecure_runner_control=transport.allow_insecure,
             start_timeout=timedelta(
                 seconds=settings.runtime_control_start_timeout_seconds
             ),
@@ -164,7 +182,11 @@ async def runtime_control_server_lifespan(
         consumer_id=f"{settings.runtime_control_instance_id}:runner",
         control_auth_token=control_token,
     )
-    server.add_insecure_port(f"0.0.0.0:{settings.runtime_control_port}")
+    listen_address = f"0.0.0.0:{settings.runtime_control_port}"
+    if transport.server_credentials is None:
+        server.add_insecure_port(listen_address)
+    else:
+        server.add_secure_port(listen_address, transport.server_credentials)
     await server.start()
     _LOGGER.info(
         "Runtime Control gRPC server started",
@@ -179,6 +201,7 @@ async def runtime_control_server_lifespan(
                 settings.runtime_control_lifecycle_retry_delay_seconds
             ),
             "auth_enabled": settings.runtime_control_auth_enabled,
+            "tls_enabled": transport.server_credentials is not None,
         },
     )
     try:
@@ -233,6 +256,48 @@ def runtime_control_auth_token(settings: RuntimeControlSettings) -> str | None:
             "AZ_RUNTIME_CONTROL_AUTH_ENABLED is true"
         )
     return normalized
+
+
+def runtime_control_transport(
+    settings: RuntimeControlSettings,
+) -> _RuntimeControlTransport:
+    """Build server credentials and Runner trust material."""
+    if settings.runtime_control_allow_insecure:
+        return _RuntimeControlTransport(
+            server_credentials=None,
+            ca_pem=None,
+            allow_insecure=True,
+        )
+    certificate_path = _required_tls_path(
+        settings.runtime_control_tls_certificate_file,
+        "AZ_RUNTIME_CONTROL_TLS_CERTIFICATE_FILE",
+    )
+    private_key_path = _required_tls_path(
+        settings.runtime_control_tls_private_key_file,
+        "AZ_RUNTIME_CONTROL_TLS_PRIVATE_KEY_FILE",
+    )
+    ca_path = _required_tls_path(
+        settings.runtime_control_tls_ca_file,
+        "AZ_RUNTIME_CONTROL_TLS_CA_FILE",
+    )
+    certificate = certificate_path.read_bytes()
+    private_key = private_key_path.read_bytes()
+    ca_pem = ca_path.read_text()
+    if not certificate.strip() or not private_key.strip() or not ca_pem.strip():
+        raise RuntimeError("Runtime Control TLS files must not be empty")
+    return _RuntimeControlTransport(
+        server_credentials=grpc.ssl_server_credentials([(private_key, certificate)]),
+        ca_pem=ca_pem,
+        allow_insecure=False,
+    )
+
+
+def _required_tls_path(value: str | None, env_name: str) -> Path:
+    if value is None or not value.strip():
+        raise RuntimeError(
+            f"{env_name} is required when AZ_RUNTIME_CONTROL_ALLOW_INSECURE is false"
+        )
+    return Path(value)
 
 
 def _postgres_config(settings: RuntimeControlSettings) -> PostgreSQLConfig:

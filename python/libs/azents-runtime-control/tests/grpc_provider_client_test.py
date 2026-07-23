@@ -194,7 +194,6 @@ def _registration() -> ProviderRegistration:
         capabilities=("lifecycle", "observe"),
         config_schema_version="v1",
         metadata={"workspace_path_source": "provider"},
-        auth_credential_id="credential-1",
     )
 
 

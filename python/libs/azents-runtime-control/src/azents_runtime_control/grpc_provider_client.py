@@ -12,6 +12,10 @@ from typing import Protocol, cast
 import grpc
 from google.protobuf import json_format, struct_pb2, timestamp_pb2
 
+from azents_runtime_control.grpc_tls import (
+    GrpcClientTlsConfig,
+    create_grpc_aio_channel,
+)
 from azents_runtime_control.proto import (
     runtime_provider_control_pb2,
     runtime_provider_control_pb2_grpc,
@@ -85,9 +89,15 @@ class GrpcProviderControlClient(ProviderControlClient):
         *,
         heartbeat_ack_timeout_seconds: float = 10.0,
         provider_credential: str,
+        tls: GrpcClientTlsConfig | None,
+        allow_insecure: bool,
     ) -> "GrpcProviderControlClient":
-        """Create a client using an insecure gRPC channel."""
-        channel = grpc.aio.insecure_channel(endpoint)
+        """Create a client using authenticated TLS or explicit insecure mode."""
+        channel = create_grpc_aio_channel(
+            endpoint,
+            tls=tls,
+            allow_insecure=allow_insecure,
+        )
         stub = runtime_provider_control_pb2_grpc.RuntimeProviderControlStub(channel)
         return cls(
             stub.ConnectProvider,
@@ -325,7 +335,6 @@ def _register_message(
             capabilities=list(registration.capabilities),
             config_schema_version=registration.config_schema_version,
             metadata=_struct(registration.metadata),
-            auth_credential_id=registration.auth_credential_id,
         ),
     )
 
@@ -359,6 +368,8 @@ def _command(
             control_endpoint=message.control_endpoint,
             runner_auth_token=message.runner_auth_token,
             control_token=_optional_control_token(payload),
+            control_tls_ca_pem=_optional_control_tls_ca_pem(payload),
+            allow_insecure_control=_allow_insecure_control(payload),
         ),
         reset_final_desired_state=_optional_desired_state(
             message.reset_final_desired_state
@@ -381,6 +392,25 @@ def _optional_control_token(payload: dict[str, JsonValue]) -> str | None:
         return None
     normalized = token.strip()
     return normalized or None
+
+
+def _optional_control_tls_ca_pem(payload: dict[str, JsonValue]) -> str | None:
+    auth = payload.get("auth")
+    if not isinstance(auth, dict):
+        return None
+    value = auth.get("control_tls_ca_pem")
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    return normalized or None
+
+
+def _allow_insecure_control(payload: dict[str, JsonValue]) -> bool:
+    auth = payload.get("auth")
+    if not isinstance(auth, dict):
+        return False
+    value = auth.get("allow_insecure_control")
+    return value if isinstance(value, bool) else False
 
 
 def _report_message(

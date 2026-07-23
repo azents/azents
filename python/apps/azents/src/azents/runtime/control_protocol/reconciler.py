@@ -43,6 +43,8 @@ class RuntimeLifecycleDispatchConfig:
     runner_image: str
     runner_control_endpoint: str
     runner_control_auth_token: str | None
+    runner_control_tls_ca_pem: str | None
+    allow_insecure_runner_control: bool
     start_timeout: timedelta = _DEFAULT_START_TIMEOUT
     provider_command_deadline: timedelta = _DEFAULT_PROVIDER_COMMAND_DEADLINE
     observe_interval: timedelta = _DEFAULT_OBSERVE_INTERVAL
@@ -216,6 +218,10 @@ class RuntimeLifecycleReconciler:
                         "control_endpoint": self._config.runner_control_endpoint,
                         "runner_auth_token": _runner_auth_credential_id(runtime),
                         "control_token": self._config.runner_control_auth_token,
+                        "control_tls_ca_pem": (self._config.runner_control_tls_ca_pem),
+                        "allow_insecure_control": (
+                            self._config.allow_insecure_runner_control
+                        ),
                     },
                 },
                 deadline_at=created_at + self._config.provider_command_deadline,
