@@ -23,7 +23,7 @@ code_paths:
   - infra/argocd/azents-runtime-provider-kubernetes/**
   - infra/argocd/azents-server/**
 last_verified_at: 2026-07-22
-spec_version: 24
+spec_version: 25
 ---
 
 # Agent Runtime Control
@@ -106,11 +106,15 @@ The store is not a source of product truth. Losing store data may interrupt in-f
 
 ## Control Stream Authentication
 
-Runtime Control gRPC streams support a shared-token authentication gate for Provider and Runner connections. When `AZ_RUNTIME_CONTROL_AUTH_ENABLED` is true, Control requires a non-empty `AZ_RUNTIME_CONTROL_AUTH_TOKEN` at startup and rejects Provider or Runner streams that do not provide the matching token before stream registration is processed. Clients may present the token with `authorization: Bearer ...` metadata or `x-azents-runtime-control-token` metadata.
+Provider and Runner streams use separate credentials.
 
-The Helm chart wires Runtime Control auth from an existing Kubernetes Secret only. It must not place token literals in default values or rendered manifests. Runtime Control auth is disabled by default in chart values so consumers can opt into the Runtime Control component without committing a placeholder Secret reference. When Runtime Control auth is enabled for the chart, `server.runtimeControl.auth.existingSecret` and `server.runtimeControl.auth.tokenKey` identify the Secret key used by the Control server and Kubernetes Provider deployment. Providers propagate the same token to Runtime Runner containers through `AZ_RUNTIME_CONTROL_AUTH_TOKEN` so Runner streams authenticate back to Control.
+Every Provider stream presents a Provider-bound credential as bearer metadata. Control resolves that credential to one known durable Provider before reading registration, rejects a client-supplied Provider ID or credential ID that does not match the resolved identity, and records the authenticated credential on the durable connection. A Runtime Control shared token cannot authenticate a Provider, and a Provider connection cannot create or discover its Provider resource.
 
-Auth token values are secret material. Logs, test evidence, and user-visible diagnostics may mention auth being enabled, disabled, missing, or invalid, but must not include raw token values.
+Runner streams use the optional Runtime Control transport-token gate. When `AZ_RUNTIME_CONTROL_AUTH_ENABLED` is true, Control requires a non-empty `AZ_RUNTIME_CONTROL_AUTH_TOKEN` at startup and rejects Runner streams that do not provide the matching token. Runners may present the token with `authorization: Bearer ...` metadata or `x-azents-runtime-control-token` metadata.
+
+The Helm chart reads the Runner transport token and Provider credential from separate existing Secret references. It must not place token or credential literals in default values or rendered manifests. Runtime Control auth is disabled by default in chart values. When enabled, `server.runtimeControl.auth.existingSecret` and `server.runtimeControl.auth.tokenKey` identify the transport token used by the Control server. The Kubernetes Provider receives the same transport token only so it can inject it into Runtime Runner containers; the Provider's own Control stream continues to use its Provider-bound credential.
+
+Credential values are secret material. Logs, test evidence, and user-visible diagnostics may mention authentication being enabled, disabled, missing, or invalid, but must not include raw values.
 
 ## Provider Contract
 

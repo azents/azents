@@ -31,7 +31,7 @@ class RuntimeProviderCredentialAuthenticator(Protocol):
 
 
 class RuntimeControlGrpcAuth:
-    """Validate Runtime Control shared-token metadata for gRPC streams."""
+    """Validate shared transport-token metadata for Runtime Runner streams."""
 
     def __init__(self, expected_token: str | None) -> None:
         """Initialize metadata auth with an optional expected token."""
@@ -43,7 +43,7 @@ class RuntimeControlGrpcAuth:
         *,
         subject: str,
     ) -> None:
-        """Abort the RPC when metadata does not contain the expected token."""
+        """Abort the Runner RPC when metadata does not contain the expected token."""
         if self._expected_token is None:
             return
         token = _metadata_token(context.invocation_metadata())

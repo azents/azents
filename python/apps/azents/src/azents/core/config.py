@@ -88,8 +88,6 @@ class Settings(BaseSettings):
     # Redis
     redis_url: str = "redis://localhost:6379"
 
-    runtime_default_provider_id: str | None = None
-
     # Streaming model transport and watchdog
     openai_responses_websocket_enabled: bool = True
     model_stream_connect_timeout_seconds: float = 15.0
@@ -306,12 +304,6 @@ class RedisConfig(BaseModel):
     url: str
 
 
-class RuntimeConfig(BaseModel):
-    """Agent Runtime settings."""
-
-    default_provider_id: str | None = None
-
-
 class ModelStreamTimeoutConfig(BaseModel):
     """Validated process-wide streaming model watchdog settings."""
 
@@ -376,7 +368,6 @@ class Config(BaseModel):
     email: EmailConfig | None
     credential_encryption: CredentialEncryptionConfig
     redis: RedisConfig
-    runtime: RuntimeConfig
     model_stream_timeout: ModelStreamTimeoutConfig
     openai_responses_websocket_enabled: bool
     web_url: str = ""
@@ -452,9 +443,6 @@ class Config(BaseModel):
             ),
             redis=RedisConfig(
                 url=settings.redis_url,
-            ),
-            runtime=RuntimeConfig(
-                default_provider_id=settings.runtime_default_provider_id,
             ),
             model_stream_timeout=ModelStreamTimeoutConfig(
                 connect_timeout_seconds=(settings.model_stream_connect_timeout_seconds),
