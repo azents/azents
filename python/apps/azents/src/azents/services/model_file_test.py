@@ -46,6 +46,7 @@ class _ModelFileRepository:
 
     def __init__(self, boundary: _SessionBoundary) -> None:
         self.boundary = boundary
+        self.discarded_ids: list[str] = []
 
     async def create(
         self,
@@ -76,6 +77,19 @@ class _ModelFileRepository:
             metadata=create.metadata,
             created_at=datetime.datetime.now(datetime.UTC),
         )
+
+    async def mark_deleted_if_unpinned(
+        self,
+        session: AsyncSession,
+        *,
+        model_file_ids: list[str],
+        deleted_at: datetime.datetime,
+    ) -> list[ModelFile]:
+        """Record pending ModelFiles marked for scheduled blob cleanup."""
+        del session, deleted_at
+        assert self.boundary.active == 1
+        self.discarded_ids.extend(model_file_ids)
+        return [cast(ModelFile, object()) for _ in model_file_ids]
 
 
 class _S3Service:
@@ -194,4 +208,31 @@ async def test_model_file_upload_closes_db_session_before_s3_io() -> None:
 
     assert isinstance(result, Success)
     assert s3.objects[result.value.storage_key] == b"hello"
+    assert boundary.active == 0
+
+
+@pytest.mark.asyncio
+async def test_discard_pending_input_marks_files_for_lifecycle_cleanup() -> None:
+    """Failed input promotion marks created ModelFiles deleted in one DB scope."""
+    boundary = _SessionBoundary()
+    repository = _ModelFileRepository(boundary)
+    service = ModelFileService(
+        model_file_repository=cast(Any, repository),
+        agent_session_repository=AsyncMock(),
+        agent_run_repository=AsyncMock(),
+        workspace_user_repository=AsyncMock(),
+        session_manager=boundary.session_manager,
+        s3_service=cast(Any, _S3Service(boundary)),
+        config=cast(
+            Any,
+            SimpleNamespace(workspace_s3=SimpleNamespace(bucket="test-bucket")),
+        ),
+    )
+
+    discarded = await service.discard_pending_input(
+        model_file_ids=["model-file-1", "model-file-2"],
+    )
+
+    assert discarded == 2
+    assert repository.discarded_ids == ["model-file-1", "model-file-2"]
     assert boundary.active == 0

@@ -1,8 +1,10 @@
 """ModelFile service."""
 
 import dataclasses
+import datetime
 import hashlib
 import re
+from collections.abc import Sequence
 from io import BytesIO
 from typing import Annotated, Literal
 
@@ -332,6 +334,22 @@ class ModelFileService:
         finally:
             if not succeeded:
                 await self._cleanup_uploaded_object(uploaded_object_key)
+
+    async def discard_pending_input(
+        self,
+        *,
+        model_file_ids: Sequence[str],
+    ) -> int:
+        """Mark uncommitted input ModelFiles for lifecycle cleanup."""
+        if not model_file_ids:
+            return 0
+        async with self.session_manager() as session:
+            deleted = await self.model_file_repository.mark_deleted_if_unpinned(
+                session,
+                model_file_ids=model_file_ids,
+                deleted_at=datetime.datetime.now(datetime.UTC),
+            )
+        return len(deleted)
 
     async def download(
         self,

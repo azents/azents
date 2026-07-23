@@ -48,6 +48,7 @@ from azents.services.chat.data import (
 )
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.input_buffer import InputBufferService
+from azents.services.model_file import ModelFileService
 from azents.services.session_git_worktree import (
     GitWorktreeArchiveIntegrityFailure,
     SessionGitWorktreeService,
@@ -157,6 +158,7 @@ def _service(
             session_manager=rdb_session_manager,
             input_buffer_repository=InputBufferRepository(),
             exchange_file_service=_ExchangeFileService(),
+            model_file_service=cast(ModelFileService, object()),
             agent_session_repository=AgentSessionRepository(),
             event_transcript_repository=EventTranscriptRepository(),
             agent_run_repository=AgentRunRepository(),
