@@ -1018,10 +1018,20 @@
         "channelWork": "Channel Work",
         "noWork": "No Channel Work is associated with this binding.",
         "taskCount": "{count, plural, =1 {1 task} other {# tasks}}",
-        "progressDrift": "Progress drift",
-        "progressProjected": "Progress projected",
-        "revisionProgress": "Channel Work revision projection",
         "revisionDetail": "State revision {current} · desired progress revision {desired}",
+        "taskStatus": {
+          "pending": "Pending",
+          "in_progress": "In progress",
+          "completed": "Completed"
+        },
+        "projectionState": {
+          "synchronized": "Synchronized",
+          "missing": "Progress message missing",
+          "stale": "Progress message stale",
+          "delete_failed": "Progress deletion failed",
+          "unknown": "Provider outcome unknown",
+          "none": "No active projection"
+        },
         "deliveries": "Delivery outcomes",
         "noDeliveries": "No provider delivery has been attempted.",
         "grantsTitle": "Session access",

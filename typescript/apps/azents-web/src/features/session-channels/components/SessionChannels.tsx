@@ -10,16 +10,16 @@ import {
   Group,
   Loader,
   Paper,
-  Progress,
   rem,
   SimpleGrid,
   Stack,
   Text,
 } from "@mantine/core";
 import {
-  IconAlertTriangle,
   IconArchive,
   IconCheck,
+  IconClock,
+  IconLoader2,
   IconPlugConnectedX,
   IconShieldCheck,
 } from "@tabler/icons-react";
@@ -30,7 +30,15 @@ import type {
   ManagedBinding,
   ManagedDelivery,
   ManagedGrant,
+  ManagedWork,
 } from "@azents/public-client";
+
+type WorkTaskStatus = "pending" | "in_progress" | "completed";
+
+interface WorkTask {
+  title: string;
+  status: WorkTaskStatus;
+}
 
 function formatDate(value: string | null): string {
   return value === null ? "—" : new Date(value).toLocaleString();
@@ -48,6 +56,34 @@ function deliveryColor(status: ExternalChannelDeliveryStatus): string {
       return "blue";
     case "pending":
     case "not_attempted":
+      return "gray";
+  }
+}
+
+function workTask(value: Record<string, unknown>): WorkTask | null {
+  const title = value.title;
+  const status = value.status;
+  if (
+    typeof title !== "string" ||
+    (status !== "pending" && status !== "in_progress" && status !== "completed")
+  ) {
+    return null;
+  }
+  return { title, status };
+}
+
+function projectionColor(state: ManagedWork["projection_state"]): string {
+  switch (state) {
+    case "synchronized":
+      return "green";
+    case "missing":
+    case "stale":
+      return "yellow";
+    case "delete_failed":
+      return "red";
+    case "unknown":
+      return "orange";
+    case "none":
       return "gray";
   }
 }
@@ -95,18 +131,9 @@ function WorkSection({
       </Text>
     );
   }
-  const drift =
-    !binding.work.progress_projected ||
-    binding.work.desired_progress_revision !== binding.work.state_revision;
-  const revisionMax = Math.max(
-    binding.work.desired_progress_revision,
-    binding.work.state_revision,
-    1,
-  );
-  const revisionValue = Math.min(
-    100,
-    (binding.work.state_revision / revisionMax) * 100,
-  );
+  const tasks = binding.work.tasks
+    .map(workTask)
+    .filter((task): task is WorkTask => task !== null);
 
   return (
     <Stack gap="xs">
@@ -122,29 +149,50 @@ function WorkSection({
             {t("taskCount", { count: binding.work.tasks.length })}
           </Text>
         </Group>
-        {drift ? (
-          <Badge
-            color="yellow"
-            variant="light"
-            leftSection={<IconAlertTriangle size={rem(12)} />}
-          >
-            {t("progressDrift")}
-          </Badge>
-        ) : (
-          <Badge
-            color="green"
-            variant="light"
-            leftSection={<IconCheck size={rem(12)} />}
-          >
-            {t("progressProjected")}
-          </Badge>
-        )}
+        <Badge
+          color={projectionColor(binding.work.projection_state)}
+          variant="light"
+        >
+          {t(`projectionState.${binding.work.projection_state}`)}
+        </Badge>
       </Group>
-      <Progress
-        value={revisionValue}
-        color={drift ? "yellow" : "green"}
-        aria-label={t("revisionProgress")}
-      />
+      {tasks.length > 0 && (
+        <Stack gap="xs">
+          {tasks.map((task, index) => (
+            <Group key={`${index}-${task.title}`} gap="xs" wrap="nowrap">
+              {task.status === "completed" ? (
+                <IconCheck
+                  size={rem(14)}
+                  color="var(--mantine-color-green-6)"
+                />
+              ) : task.status === "in_progress" ? (
+                <IconLoader2
+                  size={rem(14)}
+                  color="var(--mantine-color-blue-6)"
+                />
+              ) : (
+                <IconClock size={rem(14)} color="var(--mantine-color-gray-6)" />
+              )}
+              <Text size="sm" style={{ flex: 1, overflowWrap: "anywhere" }}>
+                {task.title}
+              </Text>
+              <Badge
+                size="xs"
+                variant="outline"
+                color={
+                  task.status === "completed"
+                    ? "green"
+                    : task.status === "in_progress"
+                      ? "blue"
+                      : "gray"
+                }
+              >
+                {t(`taskStatus.${task.status}`)}
+              </Badge>
+            </Group>
+          ))}
+        </Stack>
+      )}
       <Text size="xs" c="dimmed">
         {t("revisionDetail", {
           current: binding.work.state_revision,

@@ -11,6 +11,7 @@ Name | Type | Description | Notes
 **state_revision** | **int** |  | 
 **desired_progress_revision** | **int** |  | 
 **progress_projected** | **bool** |  | 
+**projection_state** | **str** |  | 
 **finished_at** | **datetime** |  | 
 
 ## Example

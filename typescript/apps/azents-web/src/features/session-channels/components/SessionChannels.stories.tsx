@@ -74,6 +74,7 @@ const binding: ManagedBinding = {
     state_revision: 6,
     desired_progress_revision: 8,
     progress_projected: false,
+    projection_state: "stale",
     finished_at: null,
   },
   deliveries: [

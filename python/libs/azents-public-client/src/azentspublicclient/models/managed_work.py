@@ -18,7 +18,7 @@ import re  # noqa: F401
 import json
 
 from datetime import datetime
-from pydantic import BaseModel, ConfigDict, StrictBool, StrictInt, StrictStr
+from pydantic import BaseModel, ConfigDict, StrictBool, StrictInt, StrictStr, field_validator
 from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.external_channel_work_status import ExternalChannelWorkStatus
 from typing import Optional, Set
@@ -34,9 +34,17 @@ class ManagedWork(BaseModel):
     state_revision: StrictInt
     desired_progress_revision: StrictInt
     progress_projected: StrictBool
+    projection_state: StrictStr
     finished_at: Optional[datetime]
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "status", "tasks", "state_revision", "desired_progress_revision", "progress_projected", "finished_at"]
+    __properties: ClassVar[List[str]] = ["id", "status", "tasks", "state_revision", "desired_progress_revision", "progress_projected", "projection_state", "finished_at"]
+
+    @field_validator('projection_state')
+    def projection_state_validate_enum(cls, value):
+        """Validates the enum"""
+        if value not in set(['synchronized', 'missing', 'stale', 'delete_failed', 'unknown', 'none']):
+            raise ValueError("must be one of enum values ('synchronized', 'missing', 'stale', 'delete_failed', 'unknown', 'none')")
+        return value
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -107,6 +115,7 @@ class ManagedWork(BaseModel):
             "state_revision": obj.get("state_revision"),
             "desired_progress_revision": obj.get("desired_progress_revision"),
             "progress_projected": obj.get("progress_projected"),
+            "projection_state": obj.get("projection_state"),
             "finished_at": obj.get("finished_at")
         })
         # store additional fields in additional_properties

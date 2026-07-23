@@ -15986,6 +15986,18 @@
             "type": "boolean",
             "title": "Progress Projected"
           },
+          "projection_state": {
+            "type": "string",
+            "enum": [
+              "synchronized",
+              "missing",
+              "stale",
+              "delete_failed",
+              "unknown",
+              "none"
+            ],
+            "title": "Projection State"
+          },
           "finished_at": {
             "anyOf": [
               {
@@ -16007,6 +16019,7 @@
           "state_revision",
           "desired_progress_revision",
           "progress_projected",
+          "projection_state",
           "finished_at"
         ],
         "title": "ManagedWork"

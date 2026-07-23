@@ -1018,10 +1018,20 @@
         "channelWork": "Channel Work",
         "noWork": "この binding に関連する Channel Work はありません。",
         "taskCount": "タスク {count}件",
-        "progressDrift": "Progress drift",
-        "progressProjected": "Progress 反映済み",
-        "revisionProgress": "Channel Work revision の反映",
         "revisionDetail": "State revision {current} · desired progress revision {desired}",
+        "taskStatus": {
+          "pending": "保留中",
+          "in_progress": "進行中",
+          "completed": "完了"
+        },
+        "projectionState": {
+          "synchronized": "同期済み",
+          "missing": "Progress メッセージなし",
+          "stale": "Progress メッセージが古い",
+          "delete_failed": "Progress の削除に失敗",
+          "unknown": "プロバイダー結果不明",
+          "none": "有効な projection なし"
+        },
         "deliveries": "Delivery 結果",
         "noDeliveries": "Provider delivery はまだ試行されていません。",
         "grantsTitle": "セッションアクセス",
