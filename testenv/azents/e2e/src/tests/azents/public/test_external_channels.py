@@ -515,14 +515,14 @@ def test_connection_update_and_repeated_disconnect(
     assert repeated.credentials_configured is False
 
 
-def test_socket_mode_acknowledges_after_admission_and_terminalizes_disabled_link(
+def test_socket_mode_acknowledges_and_preserves_route_for_disabled_link(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
     azents_public_server_url: str,
     azents_engine_worker_container: Container,
     slack_provider_fake_url: str,
 ) -> None:
-    """Exercise the worker-owned Socket Mode lease, durable ACK, and link fence."""
+    """Exercise durable ACK and reconnect health without removing Agent routing."""
     del azents_engine_worker_container
     envelope_id = f"Env-{unique()}"
     root_timestamp = f"{int(time.time()) - 60}.000200"
@@ -619,7 +619,7 @@ def test_socket_mode_acknowledges_after_admission_and_terminalizes_disabled_link
         message="Socket Mode envelope was not acknowledged after admission",
     )
 
-    def terminal_connection() -> object | None:
+    def reconnect_required_connection() -> object | None:
         connections = external_api.external_channel_v1_list_connections(
             agent_id=agent_id,
             handle=handle,
@@ -633,15 +633,15 @@ def test_socket_mode_acknowledges_after_admission_and_terminalizes_disabled_link
             return connections.items[0]
         return None
 
-    terminal = wait_until(
-        terminal_connection,
+    reconnect_required = wait_until(
+        reconnect_required_connection,
         timeout=15,
         interval=0.2,
-        message="Socket link_disabled did not fence the connection",
+        message="Socket link_disabled did not require reconnection",
     )
-    terminal_payload = cast(Any, terminal)
-    assert terminal_payload.socket_gap_reason == "link_disabled"
-    assert terminal_payload.route_status == "inactive"
+    reconnect_payload = cast(Any, reconnect_required)
+    assert reconnect_payload.socket_gap_reason == "link_disabled"
+    assert reconnect_payload.route_status == "active"
     provider_state = _provider_state(slack_provider_fake_url)
     assert "xapp-e2e-private" not in str(provider_state)
 
