@@ -68,8 +68,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ChatView.tsx
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
-last_verified_at: 2026-07-22
-spec_version: 126
+last_verified_at: 2026-07-23
+spec_version: 127
 ---
 
 # Agent Execution Loop
@@ -104,8 +104,9 @@ Main steps:
    provider-tool activity snapshots when observed.
 10. Before a normalized client-tool call is appended or admitted for execution, the immutable prepared Tool Catalog snapshots its DB-attached Toolkit source (`toolkit_config_id`, `toolkit_type`, `toolkit_name`, and `toolkit_slug`) onto the call. The same snapshot is retained by `active_tool_calls` and their live projections; built-in and auto-bound calls remain source-less.
 11. Foreground client tools execute in parallel and results are appended as event `client_tool_result`.
-12. When no foreground client tool call or pending follow-up remains, the runner observes the
-    terminal `RunComplete` boundary and then transitions `AgentSession.run_state` to idle.
+12. The adapter computes normalized `needs_follow_up` from provider-neutral client-tool semantics and
+    best-effort provider-dialect signals. When it is false, the runner observes the terminal
+    `RunComplete` boundary and then transitions `AgentSession.run_state` to idle.
 
 ### Run-scoped managed-file projection
 
@@ -141,15 +142,16 @@ normalized into a credential-safe `UnclassifiedModelProviderError` and follows t
 error traceback path, bypassing provider retry state and user-visible provider failure presentation;
 the internal-error boundary enriches its single traceback log with the same safe provider fields. A
 typed terminal event with an unknown provider code follows the same internal-error contract.
-Completed output items may reconstruct a successfully completed response but
-do not independently prove response completion. When the
-completed response includes the optional provider extension `end_turn` with the exact boolean value
-`false`, normalization marks the successful model step as needing follow-up. The execution loop
-appends that step's durable output and turn marker, then starts the next model step without treating it
-as a failed-attempt retry. `end_turn` set to `true`, omitted, or malformed does not independently
-request follow-up. Foreground client tool calls continue to require follow-up regardless of
-`end_turn`. Incomplete tool calls are never admitted. A user stop remains a separate interruption path
-and may durably preserve assistant text received before completion without requesting follow-up.
+Completed output items may reconstruct a successfully completed response but do not independently
+prove response completion. Once the adapter has observed the provider-native successful completion
+boundary, it may normalize a dialect continuation signal such as exact `end_turn = false` into
+`needs_follow_up`. The adapter also sets the same normalized field when canonical foreground client
+tool calls require execution and another model step. This field is the execution loop's sole lifecycle
+source of truth: when true, the loop executes any client calls and continues, or continues directly
+when none exist; when false, the Run completes. Durable assistant text, reasoning, provider-tool
+events, and other model output do not independently control termination. Incomplete tool calls are
+never admitted. A user stop remains a separate interruption path and may durably preserve assistant
+text received before completion.
 
 ### OpenAI Responses physical transport and incremental continuation
 
@@ -1116,6 +1118,7 @@ another binding in the same root Session.
 
 ## Changelog
 
+- **2026-07-23** (spec_version 127) — Made adapter-computed `needs_follow_up` the normalized lifecycle source of truth by combining client-tool semantics with best-effort dialect signals; empty terminal output now completes the Run.
 - **2026-07-22** (spec_version 126) — Added External Channel batch preparation, explicit source lowering, conditional `channel_action`, and binding-aware idle continuation.
 
 - **2026-07-21** (spec_version 125) — Made completed-run idle continuation a durable Session boundary that recovery conditionally consumes after true idle.

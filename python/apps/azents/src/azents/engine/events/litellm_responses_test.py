@@ -3823,6 +3823,7 @@ class TestLiteLLMResponsesOutputNormalizer:
 
         output = normalizer.normalize("session-1", native_events)
 
+        assert output.needs_follow_up is True
         assert [event.kind for event in output.events] == [
             EventKind.ASSISTANT_MESSAGE,
             EventKind.REASONING,

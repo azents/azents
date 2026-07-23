@@ -41,18 +41,14 @@ from azents.engine.events.types import (
     ClientToolResultPayload,
     Event,
     OutputTextPart,
-    ProviderToolCallPayload,
-    ReasoningPayload,
     RunMarkerPayload,
     SystemPromptAnalysisPayload,
     TokenUsagePayload,
     TurnMarkerPayload,
-    UnknownAdapterOutputPayload,
 )
 from azents.engine.model_stream import ModelStreamCallContext, ModelStreamWatchdog
 from azents.engine.run.contracts import ToolAdmissionBarrier
 from azents.engine.run.errors import (
-    ModelCallError,
     UserVisibleRuntimeError,
 )
 from azents.engine.run.types import USER_STOP_CANCEL_MESSAGE
@@ -552,10 +548,6 @@ class AgentRunExecution[
                             request.run_id,
                             AgentRunPhase.APPENDING_EVENTS,
                         )
-                        if not _has_durable_model_output(normalized.events):
-                            raise ModelCallError(
-                                "Model completed without assistant output."
-                            )
                     except asyncio.CancelledError:
                         if prepared_provider_output is not None:
                             await prepared_provider_output.cleanup()
@@ -571,7 +563,7 @@ class AgentRunExecution[
                     ]
                     appended: list[Event] = []
                     turn_marker: Event | None = None
-                    model_needs_follow_up = normalized.needs_follow_up
+                    needs_follow_up = normalized.needs_follow_up
 
                     async def append_model_output(
                         normalized_output: NormalizedAdapterOutput,
@@ -671,7 +663,9 @@ class AgentRunExecution[
                         for event in appended
                         if isinstance(event.payload, ClientToolCallPayload)
                     ]
-                    if not client_tool_calls and not model_needs_follow_up:
+                    # The adapter combines provider-neutral client-tool semantics
+                    # with best-effort dialect hints into one lifecycle decision.
+                    if not needs_follow_up:
                         async with self.session_manager() as session:
                             run_marker = await self._append_run_marker(
                                 session,
@@ -1560,27 +1554,6 @@ def _enrich_client_tool_calls(
         for event in normalized.events
     ]
     return normalized.model_copy(update={"events": events})
-
-
-def _has_durable_model_output(events: Sequence[Event]) -> bool:
-    """Check whether model turn contains at least one durable output."""
-    for event in events:
-        match event.payload:
-            case AssistantMessagePayload(content=content):
-                if _assistant_content_is_non_empty(content):
-                    return True
-            case ReasoningPayload(text=text, summary=summary):
-                if text or summary:
-                    return True
-            case (
-                ClientToolCallPayload()
-                | ProviderToolCallPayload()
-                | UnknownAdapterOutputPayload()
-            ):
-                return True
-            case _:
-                pass
-    return False
 
 
 def _assistant_content_is_non_empty(content: object) -> bool:

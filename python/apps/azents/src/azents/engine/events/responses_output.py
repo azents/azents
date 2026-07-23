@@ -301,6 +301,16 @@ class ResponsesOutputNormalizer:
         )
 
 
+def responses_need_follow_up(
+    response: dict[str, object],
+    events: Sequence[Event],
+) -> bool:
+    """Combine standard client-tool and best-effort dialect continuation signals."""
+    return response.get("end_turn") is False or any(
+        isinstance(event.payload, ClientToolCallPayload) for event in events
+    )
+
+
 class _ResponsesOutputStream:
     """Minimal normalization state for one provider-native Responses stream."""
 
@@ -458,7 +468,10 @@ class _ResponsesOutputStream:
             self._completed_output_items,
         )
         return NormalizedAdapterOutput(
-            needs_follow_up=(self._completed_response or {}).get("end_turn") is False,
+            needs_follow_up=responses_need_follow_up(
+                self._completed_response or {},
+                completed.events,
+            ),
             events=completed.events,
             usage=self._usage,
             pending_provider_files=completed.pending_provider_files,
