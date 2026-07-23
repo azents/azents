@@ -1,4 +1,5 @@
 import { rem } from "@mantine/core";
+import { expect, fn, userEvent, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { ExternalChannelSettings } from "./ExternalChannelSettings";
 import type {
@@ -227,5 +228,43 @@ export const Busy = {
   args: {
     actionTarget: connection.id,
     actionsBusy: true,
+  },
+} satisfies Story;
+
+export const ConfirmDisconnect = {
+  args: {
+    onDisconnect: fn(),
+  },
+  play: async ({ args, canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(
+      canvas.getByRole("button", { name: /^disconnect$/i }),
+    );
+    await expect(args.onDisconnect).not.toHaveBeenCalled();
+    const dialog = await within(canvasElement.ownerDocument.body).findByRole(
+      "dialog",
+    );
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: /^disconnect$/i }),
+    );
+    await expect(args.onDisconnect).toHaveBeenCalledWith(connection);
+  },
+} satisfies Story;
+
+export const ConfirmRevokeGrant = {
+  args: {
+    onRevokeGrant: fn(),
+  },
+  play: async ({ args, canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(canvas.getByRole("button", { name: /^revoke$/i }));
+    await expect(args.onRevokeGrant).not.toHaveBeenCalled();
+    const dialog = await within(canvasElement.ownerDocument.body).findByRole(
+      "dialog",
+    );
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: /^revoke$/i }),
+    );
+    await expect(args.onRevokeGrant).toHaveBeenCalledWith(grant);
   },
 } satisfies Story;

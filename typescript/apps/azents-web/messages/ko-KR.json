@@ -1010,6 +1010,7 @@
         "emptyDescription": "지원되는 외부 채널에서 이 세션을 호출한 적이 없습니다.",
         "disconnect": "연결 해제",
         "disconnectConfirm": "이 세션 채널을 영구적으로 해제하시겠습니까? 기록은 유지됩니다.",
+        "cancel": "취소",
         "connectedAt": "연결 시각",
         "latestActivity": "최근 활동",
         "retainedContext": "Pending context 잘림",
