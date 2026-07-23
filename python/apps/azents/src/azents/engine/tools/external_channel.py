@@ -10,6 +10,7 @@ from azents.core.enums import (
     ExternalChannelActionMode,
     ExternalChannelWorkTaskStatus,
 )
+from azents.core.external_channel_activity import MAX_ACTIVITY_TRACKER_TASKS
 from azents.core.tools import (
     ResolveContext,
     Toolkit,
@@ -84,7 +85,7 @@ class ContinueChannelActionInput(BaseModel):
     )
     todo_update: list[ChannelActionTaskInput] | None = Field(
         default=None,
-        max_length=50,
+        max_length=MAX_ACTIVITY_TRACKER_TASKS,
     )
 
     @model_validator(mode="after")
