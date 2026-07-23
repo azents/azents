@@ -10,8 +10,8 @@ snapshot_id: indicator-260723
 # Todo-Owned Slack Activity Indicator Design
 
 - Snapshot: `indicator-260723`
-- Requirements: [`indicator-260723/REQ`](../requirements/indicator-260723-todo-owned-indicator.md)
-- ADR: [`indicator-260723/ADR`](../adr/indicator-260723-todo-owned-indicator.md)
+- Requirements: [`indicator-260723/REQ`](../requirements/indicator-260723-todo-owned-progress.md)
+- ADR: [`indicator-260723/ADR`](../adr/indicator-260723-todo-owned-progress.md)
 
 ## Scope and Traceability
 

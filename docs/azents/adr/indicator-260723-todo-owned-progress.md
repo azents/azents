@@ -10,7 +10,7 @@ snapshot_id: indicator-260723
 # Todo-Owned Slack Activity Indicator
 
 - Snapshot: `indicator-260723`
-- Requirements: [`indicator-260723/REQ`](../requirements/indicator-260723-todo-owned-indicator.md)
+- Requirements: [`indicator-260723/REQ`](../requirements/indicator-260723-todo-owned-progress.md)
 
 ## Context
 
